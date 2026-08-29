@@ -1,0 +1,22 @@
+{
+  "name": "tuxbooks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first ebook library manager (bookshelf style) built with Tauri 2 + React.",
+  "scripts": {
+    "dev": "pnpm --filter frontend dev",
+    "build": "pnpm --filter frontend build",
+    "tauri": "tauri",
+    "test": "pnpm --filter frontend test",
+    "test:ci": "pnpm --filter frontend test:ci",
+    "lint": "pnpm --filter frontend lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm --filter frontend typecheck"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6",
+    "prettier": "^3.6.2"
+  },
+  "packageManager": "pnpm@10.34.5"
+}

@@ -1,0 +1,27 @@
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Rust
+src-tauri/target/
+target/
+
+# Databases / generated artifacts
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Test & E2E scratch space
+e2e/.tmp/
+.e2e-tmp/
+
+# Coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
