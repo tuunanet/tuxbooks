@@ -98,10 +98,14 @@ task complete, and run `just format` if you touched formatting-sensitive code.
 ## Dependencies
 
 - No new dependency (Rust crate or npm package) without a clear, stated reason.
+- UI primitives come from shadcn/ui (`pnpm dlx shadcn add <component>`;
+  config in `frontend/components.json`, radix-nova style); icons from
+  `lucide-react`. Do not hand-roll SVG icons or primitive replacements.
 - No network services, Docker, PostgreSQL, Redis, or backend server — this is a
   local-first desktop app. SQLite only.
 - Do not suppress lints globally. A targeted `eslint-disable` needs a reason
-  comment (see `components/ui/button.tsx` for the one existing case).
+  comment (the shadcn `*Variants` exports in `components/ui/` are the known
+  cases).
 - TypeScript is strict; `any` is banned via lint rule.
 
 ## Commits
@@ -119,6 +123,7 @@ reading progress command`, `fix: keep FTS index in sync on book update`,
   `thiserror` enums (`AppError` at the boundary, `EpubError`/`ScanError` in
   layers); IPC DTOs serialize `camelCase`.
 - Frontend: components grouped by feature under `src/components/`; the only
-  file allowed to call Tauri's `invoke` is `src/lib/tauri.ts`.
+  file allowed to call Tauri's `invoke` is `src/lib/tauri.ts`; use the `@/`
+  path alias for cross-directory imports.
 - Docs in `docs/` describe the architecture contract — update them when you
   change module boundaries, schema, or the EPUB layer.

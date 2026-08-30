@@ -10,6 +10,9 @@ yet).
 - `invoke` only in `frontend/src/lib/tauri.ts`; commands explicit and typed.
 - No state-management library, no router dependency. The three application
   states (`library` / `detail` / `reader`) live in React context.
+- UI primitives come from shadcn/ui (`frontend/components.json`, radix-nova
+  style, `@/` alias); icons come from `lucide-react`. Do not hand-roll
+  equivalents of either.
 - No fake persistence (task §28): actions without backend backing get clearly
   structured placeholders, never pretend-success.
 - Every stage ends with `just check`.
@@ -19,23 +22,32 @@ yet).
 - Commands: `list_books`, `get_library_stats`, `scan_library(path)`,
   `get_book_toc(bookId)`. No `get_book`, collections, or reading-progress
   commands yet (Rust repository support for collections/progress exists).
-- Frontend: flat sidebar (Library/Collections/Reader placeholder), basic
-  `LibraryView` + `BookCard`, shadcn `button`/`card` only, no keyboard
-  infrastructure, no detail/reader/search/import UX.
+- Frontend: three-state shell (`library`/`detail`/`reader`) with reducer-backed
+  context, sidebar with LIBRARY/COLLECTIONS/Settings groups, client-side smart
+  section filtering, centralized shortcut registry (`ShortcutProvider` /
+  `useShortcut`), and typed domain types incl. format-specific
+  `ReadingProgress`.
+- shadcn/ui is initialized (`components.json`, radix-nova, Tailwind v4 tokens
+  incl. dark mode) with these primitives installed: button, card, input,
+  badge, separator, progress, dialog, dropdown-menu, context-menu, popover,
+  select, slider, tabs, toggle-group, tooltip, scroll-area. Icons:
+  `lucide-react`.
 
 ## Stages
 
-### Stage 0 — Foundations
+### Stage 0 — Foundations (complete)
 
 - `src/types/domain.ts`: TS types mirroring Rust domain, incl. discriminated
   `ReadingProgress` (EPUB = `{ cfi, percentage }`, PDF = `{ page, percentage }`).
-- `Book.format: "epub" | "pdf"` — small Rust change: expose format on the Book
-  DTO (derived from the file extension in Rust) instead of parsing `path` in UI.
+- `Book.format: "epub" | "pdf"` — done: exposed on the Book IPC payload via a
+  manual `Serialize` impl deriving it from the file extension in Rust.
 - `src/lib/fixtures.ts`: realistic mock books (EPUB + PDF, with/without
   progress) for visual evaluation and unit tests.
-- shadcn primitives added as stages need them (`dropdown-menu`, `dialog`,
-  `input`, `progress`, `slider`, `tabs`, `tooltip`, `scroll-area`,
-  `separator`, `badge`).
+- shadcn/ui footing (done): `shadcn init` (radix-nova), `@/` alias in
+  tsconfig + vite, primitive batch listed under Current state, Geist font and
+  dark-mode tokens from the init, `lucide-react` for icons. The stock shadcn
+  `sidebar` block was evaluated and declined — the custom Sidebar is lighter
+  and already matches the aesthetic; revisit only if it outgrows itself.
 
 ### Stage 1 — Shell, navigation, shortcuts
 
@@ -57,9 +69,11 @@ yet).
 
 - Header: section title, book count, search field, `+ Import` menu (Import
   Files… / Import Folder…), Grid/List view toggle (default Grid, UI state).
-- Sort control (Recently Added default).
-- `BookCard`: cover, title, author, progress bar, hover/selected states,
-  context menu — Open / Continue Reading enabled; Add to Collection, Mark as
+- Sort control using shadcn `select` (Recently Added default); Grid/List view
+  toggle using `toggle-group`.
+- `BookCard`: cover, title, author, progress bar (`progress`), format badge
+  (`badge`, PDF only), hover/selected states, right-click menu via
+  `context-menu` — Open / Continue Reading enabled; Add to Collection, Mark as
   Finished, Edit Metadata, Show in File Manager, Remove from Library as
   structured disabled/placeholder actions.
 - Interaction model: single click selects, double click / Enter opens detail;
@@ -92,10 +106,13 @@ yet).
 - `EpubReader` / `PdfReader` component boundaries with realistic placeholder
   documents. No rendering engines in this task.
 - `ReaderNavigation` drawer: EPUB = Contents (from existing `get_book_toc`) +
-  Bookmarks; PDF = Pages / Outline / Bookmarks.
-- `ReaderAppearance` popover: font size, line spacing, theme
-  (Light/Paper/Dark), layout (Paginated/Scrolling) — typed
+  Bookmarks; PDF = Pages / Outline / Bookmarks. Built on `tabs` +
+  `scroll-area`.
+- `ReaderAppearance` popover (`popover` + `slider`): font size, line spacing,
+  theme (Light/Paper/Dark), layout (Paginated/Scrolling) — typed
   `ReaderPreferences`, presentational but stateful in React context.
+  Reader toolbar items get `tooltip`s (wire `TooltipProvider` in the shell
+  when first used).
 - Reader keyboard navigation via the shortcut registry.
 
 ### Stage 6 — Collections & settings
@@ -128,7 +145,7 @@ yet).
 - **D1 — Rust surface**: frontend-first with the existing four commands;
   client-side derivation/fixtures where a command is missing. Deferred:
   `get_book(id)`, `get_collections`, reading-progress commands, `search_books`.
-  Exception made for `Book.format` (Stage 0).
+  Exception made for `Book.format` (Stage 0, done).
 - **D2 — Covers**: real covers via the Tauri asset protocol
   (`convertFileSrc` + `assetProtocol` scope in `tauri.conf.json`; config
   change, no new dependency). Fixture/placeholder art until then.
@@ -136,6 +153,13 @@ yet).
   `@tauri-apps/plugin-dialog` (new dependency + capability). Alternatives: a
   dev-only path input, or deferring live import. Recommendation: add the
   plugin — a native picker is core desktop UX.
+- **D4 — UI primitives (decided)**: shadcn/ui is the component source of
+  truth (`shadcn` CLI + `components.json`, radix-nova style, `@/` alias);
+  `lucide-react` is the icon library. New deps from this decision, all with
+  the same stated reason (shadcn standard runtime): `radix-ui`,
+  `lucide-react`, `tw-animate-css`, `class-variance-authority`, `clsx`,
+  `tailwind-merge`, `@fontsource-variable/geist`; `shadcn` as a devDep
+  (referenced by `index.css` via `shadcn/tailwind.css`).
 
 ## Interaction model (binding)
 

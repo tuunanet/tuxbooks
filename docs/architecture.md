@@ -66,18 +66,25 @@ value. It is Tauri- and database-independent and unit-tested against
 
 ```
 frontend/src/
+    types/domain.ts       TS mirrors of the Rust domain models (wire format)
+    state/                app shell state (library/detail/reader) + providers
     lib/tauri.ts          typed invoke wrappers (the only Tauri import site)
+    lib/shortcuts.ts      centralized keyboard shortcut registry
+    lib/fixtures.ts       realistic sample books for tests/previews
     hooks/useLibrary.ts   data loading for the library view
     components/
         layout/           AppShell, Sidebar
-        library/          LibraryView, EmptyLibraryState
-        books/            BookCard, icons
+        library/          LibraryView, EmptyLibraryState, section helpers
+        books/            BookCard
         reader/           placeholder
-        ui/               shadcn/ui primitives (Button, Card)
+        ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
 
-Business logic lives in Rust. React components render state and call the
-typed wrappers in `lib/tauri.ts`; no component invokes raw commands.
+UI primitives come from shadcn/ui (`pnpm dlx shadcn add ...`; icons from
+`lucide-react`) — do not hand-roll equivalents. The `@/` alias maps to
+`frontend/src/`. Business logic lives in Rust. React components render state
+and call the typed wrappers in `lib/tauri.ts`; no component invokes raw
+commands.
 
 ## Testing layers
 
