@@ -25,3 +25,7 @@ coverage/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Web Search outputs
+.tavily/
+
