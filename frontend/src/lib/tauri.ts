@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { Book, BookToc, ImportReport, LibraryStats } from "@/types/domain";
 
 export type { Book, BookFormat, BookToc, ImportReport, LibraryStats } from "@/types/domain";
@@ -17,4 +18,9 @@ export function scanLibrary(path: string): Promise<ImportReport> {
 
 export function getBookToc(bookId: number): Promise<BookToc> {
   return invoke("get_book_toc", { bookId });
+}
+
+/** Native folder picker; resolves to null when the user cancels. */
+export function pickDirectory(): Promise<string | null> {
+  return open({ directory: true, multiple: false, title: "Choose a folder to import" });
 }

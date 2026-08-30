@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { pickDirectory } from "@/lib/tauri";
+import { useImport } from "@/state/importState";
 import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./sections";
 
 interface LibraryHeaderProps {
@@ -38,6 +40,13 @@ export function LibraryHeader({
   view,
   onViewChange,
 }: LibraryHeaderProps) {
+  const { importPaths } = useImport();
+
+  const importFolder = async () => {
+    const dir = await pickDirectory();
+    if (dir) await importPaths([dir]);
+  };
+
   return (
     <header
       data-testid="library-header"
@@ -95,14 +104,11 @@ export function LibraryHeader({
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               disabled
-              title="Import is not connected to the backend yet (needs the native file picker)"
+              title="Single-file import needs a backend command that does not exist yet"
             >
               Import Files…
             </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled
-              title="Import is not connected to the backend yet (needs the native file picker)"
-            >
+            <DropdownMenuItem data-testid="import-folder" onSelect={() => void importFolder()}>
               Import Folder…
             </DropdownMenuItem>
           </DropdownMenuContent>

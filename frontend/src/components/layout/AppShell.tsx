@@ -1,8 +1,12 @@
 import { LibraryView } from "@/components/library/LibraryView";
+import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
+import { ImportStatus } from "@/components/library/ImportStatus";
 import { Button } from "@/components/ui/button";
 import { useShortcut } from "@/lib/shortcuts";
 import { useAppDispatch, useAppState, type AppState } from "@/state/appState";
 import { AppStateProvider } from "@/state/AppStateProvider";
+import { ImportProvider } from "@/state/ImportProvider";
+import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { Sidebar } from "./Sidebar";
 
@@ -84,7 +88,8 @@ function Shell() {
         active={app.section}
         onSectionChange={(section) => dispatch({ type: "select-section", section })}
       />
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="relative flex-1 overflow-y-auto p-8">
+        <ImportStatus />
         {app.view === "detail" ? (
           <BookDetailPlaceholder />
         ) : app.section.kind === "settings" ? (
@@ -95,6 +100,7 @@ function Shell() {
           <LibraryView section={app.section} />
         )}
       </main>
+      <DropZoneOverlay />
     </div>
   );
 }
@@ -109,7 +115,11 @@ export function AppShell({ initialState }: AppShellProps) {
     <AppStateProvider initialState={initialState}>
       <ShortcutProvider>
         <GlobalSearchShortcut />
-        <Shell />
+        <LibraryDataProvider>
+          <ImportProvider>
+            <Shell />
+          </ImportProvider>
+        </LibraryDataProvider>
       </ShortcutProvider>
     </AppStateProvider>
   );

@@ -68,14 +68,15 @@ value. It is Tauri- and database-independent and unit-tested against
 frontend/src/
     types/domain.ts       TS mirrors of the Rust domain models (wire format)
     state/                app shell state (library/detail/reader) + providers
-    lib/tauri.ts          typed invoke wrappers (the only Tauri import site)
+    lib/tauri.ts          typed invoke wrappers + plugin APIs (the only Tauri import site)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/fixtures.ts       realistic sample books for tests/previews
-    hooks/useLibrary.ts   data loading for the library view
+    hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`)
     components/
         layout/           AppShell, Sidebar
-        library/          LibraryView, EmptyLibraryState, section helpers
-        books/            BookCard
+        library/          LibraryView, header, empty states, import UX, section helpers
+        books/            BookCard, BookListItem, book context menu
+        search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
         reader/           placeholder
         ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
@@ -84,7 +85,9 @@ UI primitives come from shadcn/ui (`pnpm dlx shadcn add ...`; icons from
 `lucide-react`) — do not hand-roll equivalents. The `@/` alias maps to
 `frontend/src/`. Business logic lives in Rust. React components render state
 and call the typed wrappers in `lib/tauri.ts`; no component invokes raw
-commands.
+commands. `LibraryDataProvider` owns the fetched library data so the library
+view, global search, and import flows share one copy; `ImportProvider` runs
+`scan_library` for picked folders and drag-dropped paths.
 
 ## Testing layers
 

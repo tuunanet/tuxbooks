@@ -3,10 +3,15 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
+}));
 
 import { LibraryView } from "@/components/library/LibraryView";
 import { AppShell } from "@/components/layout/AppShell";
 import { AppStateProvider } from "@/state/AppStateProvider";
+import { ImportProvider } from "@/state/ImportProvider";
+import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
 import { mockInvoke } from "./mocks/tauri";
@@ -14,7 +19,11 @@ import { mockInvoke } from "./mocks/tauri";
 function renderLibrary(section: LibrarySection = { kind: "smart", id: "all-books" }) {
   return render(
     <AppStateProvider>
-      <LibraryView section={section} />
+      <LibraryDataProvider>
+        <ImportProvider>
+          <LibraryView section={section} />
+        </ImportProvider>
+      </LibraryDataProvider>
     </AppStateProvider>,
   );
 }

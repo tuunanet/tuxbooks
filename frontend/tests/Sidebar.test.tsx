@@ -2,11 +2,26 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
 import { Sidebar } from "@/components/layout/Sidebar";
+import { AppStateProvider } from "@/state/AppStateProvider";
+import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { initialAppState, type LibrarySection } from "@/state/appState";
+import { mockInvoke } from "./mocks/tauri";
 
 function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
-  return render(<Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />);
+  mockInvoke({
+    get_library_stats: { bookCount: 0, collectionCount: 0 },
+    list_books: [],
+  });
+  return render(
+    <AppStateProvider>
+      <LibraryDataProvider>
+        <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+      </LibraryDataProvider>
+    </AppStateProvider>,
+  );
 }
 
 describe("Sidebar", () => {

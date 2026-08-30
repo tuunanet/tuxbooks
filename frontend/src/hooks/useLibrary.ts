@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getLibraryStats, listBooks, type Book, type LibraryStats } from "@/lib/tauri";
 
 export interface LibraryState {
@@ -20,7 +20,12 @@ function fetchLibrary(): Promise<{ stats: LibraryStats; books: Book[] }> {
   }));
 }
 
-export function useLibrary(): LibraryState {
+/**
+ * Fetches the library. Used by `LibraryDataProvider` so every consumer
+ * (library view, global search, import status) shares one copy of the data
+ * and sees refreshes after imports.
+ */
+export function useLibraryData(): LibraryState {
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,4 +66,14 @@ export function useLibrary(): LibraryState {
   }, []);
 
   return { stats, books, loading, error, refresh };
+}
+
+export const LibraryDataContext = createContext<LibraryState | null>(null);
+
+export function useLibrary(): LibraryState {
+  const library = useContext(LibraryDataContext);
+  if (!library) {
+    throw new Error("useLibrary must be used within LibraryDataProvider");
+  }
+  return library;
 }

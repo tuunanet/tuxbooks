@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
 
 interface SidebarProps {
@@ -56,9 +57,13 @@ function ItemButton({ active, onClick, children, disabled, title }: ItemButtonPr
 export function Sidebar({ active, onSectionChange }: SidebarProps) {
   return (
     <aside data-testid="sidebar" className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4">
-      <div className="mb-6 px-3">
+      <div className="mb-5 px-3">
         <h1 className="text-lg font-semibold">tuxbooks</h1>
         <p className="text-xs text-muted-foreground">Local ebook library</p>
+      </div>
+
+      <div className="mb-5">
+        <GlobalSearch />
       </div>
 
       <nav

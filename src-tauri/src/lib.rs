@@ -41,6 +41,7 @@ fn resolve_db_path(handle: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::er
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db_path = resolve_db_path(app.handle())?;
             let pool = tauri::async_runtime::block_on(init_pool(&db_path)).map_err(|e| {
