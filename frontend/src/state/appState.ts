@@ -18,6 +18,12 @@ export interface AppState {
   view: AppView;
   section: LibrarySection;
   selectedBookId: number | null;
+  /**
+   * Search text for the library header. Scoped to the active section and
+   * cleared whenever the section changes, so it lives beside `section`
+   * instead of in view-local state.
+   */
+  libraryQuery: string;
 }
 
 export type AppAction =
@@ -25,19 +31,22 @@ export type AppAction =
   | { type: "select-book"; bookId: number | null }
   | { type: "open-book-detail"; bookId: number }
   | { type: "open-reader"; bookId: number }
-  | { type: "return-to-library" };
+  | { type: "return-to-library" }
+  | { type: "set-library-query"; query: string };
 
 export const initialAppState: AppState = {
   view: "library",
   section: { kind: "smart", id: "all-books" },
   selectedBookId: null,
+  libraryQuery: "",
 };
 
 export function appStateReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "select-section":
-      // Choosing a sidebar section always returns to the library view.
-      return { ...state, view: "library", section: action.section };
+      // Choosing a sidebar section always returns to the library view and
+      // starts with an unfiltered list.
+      return { ...state, view: "library", section: action.section, libraryQuery: "" };
     case "select-book":
       return { ...state, selectedBookId: action.bookId };
     case "open-book-detail":
@@ -46,6 +55,8 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       return { ...state, view: "reader", selectedBookId: action.bookId };
     case "return-to-library":
       return { ...state, view: "library" };
+    case "set-library-query":
+      return state.libraryQuery === action.query ? state : { ...state, libraryQuery: action.query };
   }
 }
 

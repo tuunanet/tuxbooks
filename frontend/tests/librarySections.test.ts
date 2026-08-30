@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOOK_SORT_OPTIONS,
+  filterBooksByQuery,
   filterBooksBySection,
   sectionNeedsProgressData,
   sectionTitle,
+  sortBooks,
 } from "@/components/library/sections";
 import type { LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
@@ -72,5 +75,91 @@ describe("filterBooksBySection", () => {
   it("returns nothing for progress-backed sections (callers show a placeholder)", () => {
     expect(filterBooksBySection(books, { kind: "smart", id: "in-progress" })).toEqual([]);
     expect(filterBooksBySection(books, { kind: "smart", id: "finished" })).toEqual([]);
+  });
+});
+
+describe("BOOK_SORT_OPTIONS", () => {
+  it("offers recently added as the first (default) option", () => {
+    expect(BOOK_SORT_OPTIONS[0]).toEqual({ id: "recently-added", label: "Recently Added" });
+  });
+});
+
+describe("sortBooks", () => {
+  const titled = [
+    makeBook({
+      id: 1,
+      title: "Magnetism",
+      author: "Nadia Cole",
+      addedAt: "2026-01-01T00:00:00.000Z",
+    }),
+    makeBook({
+      id: 2,
+      title: "Archipelago",
+      author: "Bo Lindqvist",
+      addedAt: "2026-03-01T00:00:00.000Z",
+    }),
+    makeBook({
+      id: 3,
+      title: "Cartography",
+      author: null,
+      addedAt: "2026-02-01T00:00:00.000Z",
+      lastOpenedAt: "2026-05-01T00:00:00.000Z",
+    }),
+  ];
+
+  it("sorts recently added newest first without mutating the input", () => {
+    const input = [...titled];
+    const result = sortBooks(input, "recently-added");
+    expect(result.map((b) => b.id)).toEqual([2, 3, 1]);
+    expect(input.map((b) => b.id)).toEqual([1, 2, 3]);
+  });
+
+  it("sorts recently read with never-opened books last", () => {
+    const result = sortBooks(titled, "recently-read");
+    expect(result.map((b) => b.id)).toEqual([3, 1, 2]);
+  });
+
+  it("sorts by title", () => {
+    expect(sortBooks(titled, "title").map((b) => b.title)).toEqual([
+      "Archipelago",
+      "Cartography",
+      "Magnetism",
+    ]);
+  });
+
+  it("sorts by author with missing authors last", () => {
+    expect(sortBooks(titled, "author").map((b) => b.id)).toEqual([2, 1, 3]);
+  });
+});
+
+describe("filterBooksByQuery", () => {
+  const books = [
+    makeBook({
+      id: 1,
+      title: "The Quiet Meridian",
+      author: "Elena Vasquez",
+      publisher: "Harborlight",
+    }),
+    makeBook({
+      id: 2,
+      title: "Systems of Arrangement",
+      author: "Tomas Lindqvist",
+      publisher: "Northlight",
+    }),
+  ];
+
+  it("matches title, author, and publisher case-insensitively", () => {
+    expect(filterBooksByQuery(books, "meridian").map((b) => b.id)).toEqual([1]);
+    expect(filterBooksByQuery(books, "vasquez").map((b) => b.id)).toEqual([1]);
+    expect(filterBooksByQuery(books, "northlight").map((b) => b.id)).toEqual([2]);
+  });
+
+  it("ignores empty and whitespace-only queries", () => {
+    expect(filterBooksByQuery(books, "")).toHaveLength(2);
+    expect(filterBooksByQuery(books, "   ")).toHaveLength(2);
+  });
+
+  it("returns nothing when no field matches", () => {
+    expect(filterBooksByQuery(books, "zzz")).toEqual([]);
   });
 });

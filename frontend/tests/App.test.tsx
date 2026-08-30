@@ -85,6 +85,7 @@ describe("App", () => {
           view: "reader",
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
+          libraryQuery: "",
         }}
       />,
     );

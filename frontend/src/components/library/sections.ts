@@ -56,3 +56,51 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
       return [];
   }
 }
+
+/** Sort orders offered by the library header select. */
+export type BookSortId = "recently-added" | "recently-read" | "title" | "author";
+
+export const BOOK_SORT_OPTIONS: { id: BookSortId; label: string }[] = [
+  { id: "recently-added", label: "Recently Added" },
+  { id: "recently-read", label: "Recently Read" },
+  { id: "title", label: "Title" },
+  { id: "author", label: "Author" },
+];
+
+export type BookViewMode = "grid" | "list";
+
+/** Sorts above every real author, pushing missing authors to the end. */
+const MISSING_AUTHOR_SORT_KEY = "\uffff";
+
+export function sortBooks(books: Book[], sort: BookSortId): Book[] {
+  const sorted = [...books];
+  switch (sort) {
+    case "recently-added":
+      sorted.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+      break;
+    case "recently-read":
+      // Books never opened sort behind everything with a timestamp.
+      sorted.sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+      break;
+    case "title":
+      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+    case "author":
+      sorted.sort((a, b) =>
+        (a.author ?? MISSING_AUTHOR_SORT_KEY).localeCompare(b.author ?? MISSING_AUTHOR_SORT_KEY),
+      );
+      break;
+  }
+  return sorted;
+}
+
+/** Case-insensitive client-side search over title, author, and publisher. */
+export function filterBooksByQuery(books: Book[], query: string): Book[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return books;
+  return books.filter((book) =>
+    [book.title, book.author, book.publisher].some(
+      (field) => field !== null && field.toLowerCase().includes(needle),
+    ),
+  );
+}

@@ -4,13 +4,19 @@ import { appStateReducer, initialAppState, sameSection } from "@/state/appState"
 describe("appStateReducer", () => {
   it("selecting a section returns to the library view", () => {
     const state = appStateReducer(
-      { view: "detail", section: { kind: "smart", id: "all-books" }, selectedBookId: 7 },
+      {
+        view: "detail",
+        section: { kind: "smart", id: "all-books" },
+        selectedBookId: 7,
+        libraryQuery: "meridian",
+      },
       { type: "select-section", section: { kind: "smart", id: "pdfs" } },
     );
     expect(state).toEqual({
       view: "library",
       section: { kind: "smart", id: "pdfs" },
       selectedBookId: 7,
+      libraryQuery: "",
     });
   });
 
@@ -29,6 +35,7 @@ describe("appStateReducer", () => {
       view: "detail",
       section: { kind: "smart", id: "all-books" },
       selectedBookId: 3,
+      libraryQuery: "",
     });
   });
 
@@ -40,14 +47,33 @@ describe("appStateReducer", () => {
 
   it("returning to the library keeps section and selection", () => {
     const state = appStateReducer(
-      { view: "reader", section: { kind: "collection", id: 2 }, selectedBookId: 9 },
+      {
+        view: "reader",
+        section: { kind: "collection", id: 2 },
+        selectedBookId: 9,
+        libraryQuery: "",
+      },
       { type: "return-to-library" },
     );
     expect(state).toEqual({
       view: "library",
       section: { kind: "collection", id: 2 },
       selectedBookId: 9,
+      libraryQuery: "",
     });
+  });
+
+  it("set-library-query stores the search text", () => {
+    const state = appStateReducer(initialAppState, {
+      type: "set-library-query",
+      query: "meridian",
+    });
+    expect(state.libraryQuery).toBe("meridian");
+  });
+
+  it("set-library-query is a no-op for an unchanged query", () => {
+    const state = { ...initialAppState, libraryQuery: "meridian" };
+    expect(appStateReducer(state, { type: "set-library-query", query: "meridian" })).toBe(state);
   });
 });
 

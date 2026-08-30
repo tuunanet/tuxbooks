@@ -1,29 +1,86 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Book } from "@/lib/tauri";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import type { Book, ReadingProgress } from "@/types/domain";
+import { BookContextMenu } from "./BookContextMenu";
+import { BookCover } from "./BookCover";
 
-interface BookCardProps {
+/**
+ * Interaction surface shared by the grid card and the list row: single click
+ * selects, double click opens the detail view, right click opens the action
+ * menu. `tabIndex` is the roving-tabindex value handed out by the grid/list
+ * container.
+ */
+export interface InteractiveBookProps {
+  selected?: boolean;
+  progress?: ReadingProgress;
+  tabIndex?: number;
+  onSelect?: (bookId: number) => void;
+  onOpen?: (bookId: number) => void;
+  onRead?: (bookId: number) => void;
+}
+
+interface BookCardProps extends InteractiveBookProps {
   book: Book;
 }
 
-export function BookCard({ book }: BookCardProps) {
+function readingProgressLabel(progress: ReadingProgress): string {
+  return `Reading progress: ${progress.percentage}%`;
+}
+
+export function BookCard({
+  book,
+  selected = false,
+  progress,
+  tabIndex = 0,
+  onSelect,
+  onOpen,
+  onRead,
+}: BookCardProps) {
   return (
-    <Card data-testid="book-card" className="overflow-hidden">
-      <div className="flex h-40 items-center justify-center bg-muted text-muted-foreground">
-        {book.coverPath ? (
-          <span className="text-xs">cover</span>
-        ) : (
-          <span className="text-3xl font-semibold opacity-30">
-            {book.title.charAt(0).toUpperCase()}
-          </span>
+    <BookContextMenu book={book} onOpen={onOpen} onRead={onRead}>
+      <button
+        type="button"
+        data-testid="book-card"
+        data-book-card=""
+        data-book-id={book.id}
+        aria-pressed={selected}
+        tabIndex={tabIndex}
+        onClick={(event) => {
+          // WebKit does not focus buttons on click; keep keyboard roving consistent.
+          event.currentTarget.focus();
+          onSelect?.(book.id);
+        }}
+        onDoubleClick={() => onOpen?.(book.id)}
+        onContextMenu={() => onSelect?.(book.id)}
+        className={cn(
+          "group flex flex-col rounded-xl p-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+          selected ? "bg-accent/60 ring-2 ring-primary" : "hover:bg-accent/40",
         )}
-      </div>
-      <CardHeader className="p-4">
-        <CardTitle className="text-base">{book.title}</CardTitle>
-      </CardHeader>
-      <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-        <p>{book.author ?? "Unknown author"}</p>
-        {book.language && <p className="mt-1 text-xs uppercase">{book.language}</p>}
-      </CardContent>
-    </Card>
+      >
+        <div className="relative">
+          <BookCover book={book} className="aspect-[2/3] w-full text-4xl" />
+          {book.format === "pdf" && (
+            <Badge variant="secondary" className="absolute top-1.5 right-1.5">
+              PDF
+            </Badge>
+          )}
+        </div>
+        <div className="px-0.5 pt-2 pb-1">
+          <p className="line-clamp-2 min-h-10 text-sm leading-snug font-medium">{book.title}</p>
+          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+            {book.author ?? "Unknown author"}
+          </p>
+          {progress && (
+            <Progress
+              value={progress.percentage}
+              aria-label={readingProgressLabel(progress)}
+              title={`${progress.percentage}% read`}
+              className="mt-2"
+            />
+          )}
+        </div>
+      </button>
+    </BookContextMenu>
   );
 }
