@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-import { BookCard } from "../src/components/books/BookCard";
-import { EmptyLibraryState } from "../src/components/library/EmptyLibraryState";
+import { BookCard } from "@/components/books/BookCard";
+import { EmptyLibraryState } from "@/components/library/EmptyLibraryState";
 import { makeBook } from "./factories";
 
 describe("BookCard", () => {

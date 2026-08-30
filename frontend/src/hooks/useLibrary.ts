@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getLibraryStats, listBooks, type Book, type LibraryStats } from "../lib/tauri";
+import { getLibraryStats, listBooks, type Book, type LibraryStats } from "@/lib/tauri";
 
 export interface LibraryState {
   stats: LibraryStats | null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appStateReducer, initialAppState, sameSection } from "../src/state/appState";
+import { appStateReducer, initialAppState, sameSection } from "@/state/appState";
 
 describe("appStateReducer", () => {
   it("selecting a section returns to the library view", () => {

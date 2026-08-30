@@ -1,5 +1,5 @@
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import type { Book } from "../../lib/tauri";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { Book } from "@/lib/tauri";
 
 interface BookCardProps {
   book: Book;

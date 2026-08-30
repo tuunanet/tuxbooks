@@ -1,4 +1,4 @@
-import type { Book, ReadingProgress } from "../types/domain";
+import type { Book, ReadingProgress } from "@/types/domain";
 
 /**
  * A book fixture plus optional reading progress. Progress has no backend

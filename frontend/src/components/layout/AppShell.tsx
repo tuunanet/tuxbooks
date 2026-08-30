@@ -1,9 +1,9 @@
-import { LibraryView } from "../library/LibraryView";
-import { Button } from "../ui/button";
-import { useShortcut } from "../../lib/shortcuts";
-import { useAppDispatch, useAppState, type AppState } from "../../state/appState";
-import { AppStateProvider } from "../../state/AppStateProvider";
-import { ShortcutProvider } from "../../state/ShortcutProvider";
+import { LibraryView } from "@/components/library/LibraryView";
+import { Button } from "@/components/ui/button";
+import { useShortcut } from "@/lib/shortcuts";
+import { useAppDispatch, useAppState, type AppState } from "@/state/appState";
+import { AppStateProvider } from "@/state/AppStateProvider";
+import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { Sidebar } from "./Sidebar";
 
 /** Focuses the global search field once it exists (wired up in the search stage). */

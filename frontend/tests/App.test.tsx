@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-import App from "../src/App";
-import { AppShell } from "../src/components/layout/AppShell";
+import App from "@/App";
+import { AppShell } from "@/components/layout/AppShell";
 import { makeBook } from "./factories";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 

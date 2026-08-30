@@ -1,4 +1,4 @@
-import type { Book } from "../src/types/domain";
+import type { Book } from "@/types/domain";
 
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {

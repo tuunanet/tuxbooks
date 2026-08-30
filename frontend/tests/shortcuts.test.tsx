@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-import { comboFromEvent, useShortcut } from "../src/lib/shortcuts";
-import { ShortcutProvider } from "../src/state/ShortcutProvider";
+import { comboFromEvent, useShortcut } from "@/lib/shortcuts";
+import { ShortcutProvider } from "@/state/ShortcutProvider";
 
 function fireKey(init: KeyboardEventInit, target: EventTarget = window): boolean {
   const event = new KeyboardEvent("keydown", { cancelable: true, ...init });

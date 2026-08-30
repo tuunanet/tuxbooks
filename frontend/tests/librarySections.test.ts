@@ -3,8 +3,8 @@ import {
   filterBooksBySection,
   sectionNeedsProgressData,
   sectionTitle,
-} from "../src/components/library/sections";
-import type { LibrarySection } from "../src/state/appState";
+} from "@/components/library/sections";
+import type { LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
 
 const epub = () =>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { ShortcutContext, comboFromEvent, type ShortcutHandler } from "../lib/shortcuts";
+import { ShortcutContext, comboFromEvent, type ShortcutHandler } from "@/lib/shortcuts";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

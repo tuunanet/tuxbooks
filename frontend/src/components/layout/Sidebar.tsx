@@ -1,5 +1,5 @@
-import { cn } from "../../lib/utils";
-import { sameSection, type LibrarySection, type SmartSectionId } from "../../state/appState";
+import { cn } from "@/lib/utils";
+import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
 
 interface SidebarProps {
   active: LibrarySection;

@@ -1,9 +1,9 @@
-import { useLibrary } from "../../hooks/useLibrary";
-import { Button } from "../ui/button";
-import { BookCard } from "../books/BookCard";
+import { useLibrary } from "@/hooks/useLibrary";
+import { Button } from "@/components/ui/button";
+import { BookCard } from "@/components/books/BookCard";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { filterBooksBySection, sectionNeedsProgressData, sectionTitle } from "./sections";
-import type { LibrarySection } from "../../state/appState";
+import type { LibrarySection } from "@/state/appState";
 
 interface LibraryViewProps {
   section: LibrarySection;

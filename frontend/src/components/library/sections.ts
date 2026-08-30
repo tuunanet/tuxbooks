@@ -1,5 +1,5 @@
-import type { LibrarySection, SmartSectionId } from "../../state/appState";
-import type { Book } from "../../types/domain";
+import type { LibrarySection, SmartSectionId } from "@/state/appState";
+import type { Book } from "@/types/domain";
 
 export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
   "all-books": "All Books",

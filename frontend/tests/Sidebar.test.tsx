@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { Sidebar } from "../src/components/layout/Sidebar";
-import { initialAppState, type LibrarySection } from "../src/state/appState";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { initialAppState, type LibrarySection } from "@/state/appState";
 
 function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
   return render(<Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />);
