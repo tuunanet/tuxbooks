@@ -34,6 +34,7 @@ Single layers:
 just test-rust                      # cargo test
 cargo test --manifest-path src-tauri/Cargo.toml <test_name>   # one test
 just test-frontend                  # vitest run (CI mode)
+pnpm --filter frontend exec vitest run <file-or-pattern>      # one frontend test
 pnpm --filter frontend dev          # vite only, no Tauri
 ```
 
@@ -102,6 +103,15 @@ task complete, and run `just format` if you touched formatting-sensitive code.
 - Do not suppress lints globally. A targeted `eslint-disable` needs a reason
   comment (see `components/ui/button.tsx` for the one existing case).
 - TypeScript is strict; `any` is banned via lint rule.
+
+## Commits
+
+- Conventional Commits, required: `type: imperative subject` (e.g. `feat: add
+  reading progress command`, `fix: keep FTS index in sync on book update`,
+  `test:`, `docs:`, `refactor:`, `chore:`). Scope optional; use the layer as
+  scope when helpful (`feat(rust):`, `fix(frontend):`).
+- Nothing enforces this (no commitlint/husky) — do not commit until the message
+  conforms.
 
 ## Conventions
 
