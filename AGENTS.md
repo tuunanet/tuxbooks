@@ -107,7 +107,7 @@ task complete, and run `just format` if you touched formatting-sensitive code.
 ## Commits
 
 - Conventional Commits, required: `type: imperative subject` (e.g. `feat: add
-  reading progress command`, `fix: keep FTS index in sync on book update`,
+reading progress command`, `fix: keep FTS index in sync on book update`,
   `test:`, `docs:`, `refactor:`, `chore:`). Scope optional; use the layer as
   scope when helpful (`feat(rust):`, `fix(frontend):`).
 - Nothing enforces this (no commitlint/husky) — do not commit until the message
