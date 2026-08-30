@@ -1,9 +1,10 @@
-import type { Book } from "../src/lib/tauri";
+import type { Book } from "../src/types/domain";
 
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {
     id: 1,
     path: "/tmp/library/minimal.epub",
+    format: "epub",
     title: "A Minimal Book",
     subtitle: null,
     author: "Ada Lovelace",

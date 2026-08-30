@@ -1,37 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Book, BookToc, ImportReport, LibraryStats } from "../types/domain";
 
-export interface LibraryStats {
-  bookCount: number;
-  collectionCount: number;
-}
-
-export interface Book {
-  id: number;
-  path: string;
-  title: string;
-  subtitle: string | null;
-  author: string | null;
-  publisher: string | null;
-  language: string | null;
-  isbn: string | null;
-  description: string | null;
-  coverPath: string | null;
-  addedAt: string;
-  modifiedAt: string;
-  lastOpenedAt: string | null;
-}
-
-export interface ImportReport {
-  imported: number;
-  updated: number;
-  failed: { path: string; error: string }[];
-}
-
-export interface BookToc {
-  bookId: number;
-  title: string;
-  chapters: string[];
-}
+export type { Book, BookFormat, BookToc, ImportReport, LibraryStats } from "../types/domain";
 
 export function getLibraryStats(): Promise<LibraryStats> {
   return invoke("get_library_stats");
