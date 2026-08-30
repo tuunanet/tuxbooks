@@ -36,7 +36,9 @@ case "$mode" in
     fi
     ;;
   path)
-    if [ -x "$local_bin/WebKitWebDriver" ]; then
+    # Only inject the user-local bin dir when the system cannot already resolve
+    # WebKitWebDriver, so /usr/bin/WebKitWebDriver keeps precedence when present.
+    if [ -x "$local_bin/WebKitWebDriver" ] && ! command -v WebKitWebDriver >/dev/null 2>&1; then
       append "$local_bin" "${PATH:-}"
     else
       printf '%s\n' "${PATH:-}"

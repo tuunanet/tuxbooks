@@ -1,0 +1,74 @@
+# tuxbooks
+
+A local-first, bookshelf-style desktop ebook library for Linux (Windows and other
+targets supported by Tauri). Point it at a folder of EPUB files; it indexes
+metadata and covers into a local SQLite database, keeps collections and reading
+progress, and (soon) provides an EPUB reading experience. No accounts, no cloud,
+no network services.
+
+**Status:** project foundation + minimal vertical slice
+(fixture EPUB → parser → scanner → SQLite → Tauri command → React UI → E2E test).
+
+## Stack
+
+- **Desktop:** Tauri 2 + Rust (tokio, serde, sqlx/SQLite, thiserror, proptest)
+- **Frontend:** React 19, TypeScript (strict), Vite, Tailwind CSS 4, shadcn/ui
+- **Testing:** Vitest + React Testing Library, WebdriverIO + Tauri WebDriver, cargo test
+- **Tooling:** pnpm, just, rustfmt, clippy, ESLint, Prettier, GitHub Actions
+
+## Getting started
+
+Prerequisites: Node ≥ 22, pnpm 10, Rust (stable), Linux Tauri deps
+(`libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`).
+
+```sh
+pnpm install
+just dev        # native window with hot reload
+just build      # release bundle
+```
+
+## Commands
+
+| Command              | Does                                                   |
+| -------------------- | ------------------------------------------------------ |
+| `just dev`           | Run the app in dev mode (Vite + Tauri, hot reload)     |
+| `just build`         | Release build + bundle                                 |
+| `just test`          | All unit tests (Rust + frontend)                       |
+| `just test-rust`     | `cargo test` (unit + integration + property tests)     |
+| `just test-frontend` | Vitest in CI mode                                      |
+| `just test-e2e`      | WebdriverIO E2E (empty + seeded library, isolated env) |
+| `just lint`          | clippy (`-D warnings`) + ESLint                        |
+| `just format`        | rustfmt + Prettier                                     |
+| `just check`         | format-check → lint → typecheck → tests (daily driver) |
+| `just ci`            | `check` + E2E + release build (what CI runs)           |
+
+Individual pieces: `pnpm dev`, `pnpm tauri dev`, `pnpm --filter frontend test`,
+`cargo test --manifest-path src-tauri/Cargo.toml`.
+
+## Layout
+
+```
+frontend/          React app (presentation only)
+src-tauri/         Rust: commands/ domain/ services/ repository/ db/ epub/
+src-tauri/migrations/  SQLx migrations (embedded, run automatically)
+e2e/               WebdriverIO suites + isolated launch config
+tests/fixtures/    committed test data (books/minimal.epub)
+docs/              architecture, database, epub, testing
+scripts/           fixture/icon generators, env helper
+```
+
+## Documentation
+
+Start with [docs/architecture.md](docs/architecture.md), then
+[docs/database.md](docs/database.md), [docs/epub.md](docs/epub.md), and
+[docs/testing.md](docs/testing.md). Agents: read `AGENTS.md` first.
+
+## Test data policy
+
+Fixtures are tiny, deterministic, and generated from original content
+(`scripts/make-fixture.py`). Tests never touch your real library: they use
+temporary directories via `TEST_LIBRARY_PATH` / `TEST_DATABASE_PATH`.
+
+## License
+
+TBD.

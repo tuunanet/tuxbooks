@@ -11,6 +11,11 @@ rust-version = "1.82"
 name = "tuxbooks_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# `custom-protocol` embeds `frontendDist` assets into the binary (what `tauri build`
+# passes). Without it, debug binaries load `build.devUrl` (the Vite dev server).
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

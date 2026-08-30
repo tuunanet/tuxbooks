@@ -8,9 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 export const invokeMock = vi.mocked(invoke);
 
 /** Route mocked `invoke` calls by command name. Passing an `Error` makes it reject. */
-export function mockInvoke(
-  responses: Record<string, unknown | Promise<unknown>>,
-): void {
+export function mockInvoke(responses: Record<string, unknown | Promise<unknown>>): void {
   invokeMock.mockImplementation((command: string) => {
     const response = responses[command];
     if (response === undefined) {

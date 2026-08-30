@@ -48,9 +48,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByTestId("error-banner")).toHaveTextContent(
-      "backend exploded",
-    );
+    expect(await screen.findByTestId("error-banner")).toHaveTextContent("backend exploded");
 
     mockInvoke({
       get_library_stats: { bookCount: 0, collectionCount: 0 },

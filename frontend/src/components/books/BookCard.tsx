@@ -18,10 +18,10 @@ export function BookCard({ book }: BookCardProps) {
         )}
       </div>
       <CardHeader className="p-4">
-        <CardTitle className="line-clamp-1 text-base">{book.title}</CardTitle>
+        <CardTitle className="text-base">{book.title}</CardTitle>
       </CardHeader>
       <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-        <p className="line-clamp-1">{book.author ?? "Unknown author"}</p>
+        <p>{book.author ?? "Unknown author"}</p>
         {book.language && <p className="mt-1 text-xs uppercase">{book.language}</p>}
       </CardContent>
     </Card>

@@ -15,10 +15,7 @@ const NAV_ITEMS: { view: View; label: string; disabled?: boolean }[] = [
 
 export function Sidebar({ active, onNavigate }: SidebarProps) {
   return (
-    <aside
-      data-testid="sidebar"
-      className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4"
-    >
+    <aside data-testid="sidebar" className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4">
       <div className="mb-6 px-2">
         <h1 className="text-lg font-semibold">tuxbooks</h1>
         <p className="text-xs text-muted-foreground">Local ebook library</p>
