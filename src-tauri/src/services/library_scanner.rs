@@ -3,13 +3,30 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::epub::{parse_epub, EpubBook, EpubError};
+use crate::pdf::{parse_pdf, PdfBook, PdfError};
 
-/// One discovered `.epub` file together with its parse outcome.
+/// One discovered book file together with its parse outcome.
 /// Files that fail to parse are reported, not skipped silently.
 #[derive(Debug)]
 pub struct ScannedEntry {
     pub path: PathBuf,
-    pub book: Result<EpubBook, EpubError>,
+    pub book: Result<ScannedBook, BookParseError>,
+}
+
+/// A parsed book of either supported format.
+#[derive(Debug)]
+pub enum ScannedBook {
+    Epub(EpubBook),
+    Pdf(PdfBook),
+}
+
+/// Per-file parse failures, reported per entry by the importer.
+#[derive(Debug, thiserror::Error)]
+pub enum BookParseError {
+    #[error(transparent)]
+    Epub(#[from] EpubError),
+    #[error(transparent)]
+    Pdf(#[from] PdfError),
 }
 
 /// Errors that make the whole scan meaningless (as opposed to a single bad file).
@@ -27,9 +44,14 @@ pub enum ScanError {
     },
 }
 
-/// Recursively scan `root` for `.epub` files (case-insensitive extension) and
-/// parse each one. Results are sorted by path for determinism. The filesystem
-/// is only read, never modified.
+fn has_book_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("pdf"))
+}
+
+/// Recursively scan `root` for `.epub` and `.pdf` files (case-insensitive
+/// extension) and parse each one. Results are sorted by path for determinism.
+/// The filesystem is only read, never modified.
 pub fn scan_directory(root: &Path) -> Result<Vec<ScannedEntry>, ScanError> {
     let metadata = std::fs::metadata(root).map_err(|source| ScanError::Io {
         path: root.to_path_buf(),
@@ -45,15 +67,15 @@ pub fn scan_directory(root: &Path) -> Result<Vec<ScannedEntry>, ScanError> {
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("epub"))
-        })
+        .filter(|entry| has_book_extension(entry.path()))
         .map(|entry| {
             let path = entry.into_path();
-            let book = parse_epub(&path);
+            let extension = path.extension().unwrap_or_default();
+            let book = if extension.eq_ignore_ascii_case("pdf") {
+                parse_pdf(&path).map(ScannedBook::Pdf).map_err(Into::into)
+            } else {
+                parse_epub(&path).map(ScannedBook::Epub).map_err(Into::into)
+            };
             ScannedEntry { path, book }
         })
         .collect();
@@ -112,6 +134,43 @@ mod tests {
     }
 
     #[test]
+    fn pdf_files_are_discovered_and_parsed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let real_pdf = crate::pdf::parser::tests_support::build_pdf(&[
+            ("Title", "Field Notes on Silence"),
+            ("Author", "Petter Moen"),
+        ]);
+        write_file(&root.join("doc.pdf"), &real_pdf);
+        write_file(&root.join("broken.pdf"), b"not a pdf");
+
+        let entries = scan_directory(root).unwrap();
+        assert_eq!(entries.len(), 2, "both PDF files are scanned");
+
+        let ok = entries
+            .iter()
+            .find(|entry| entry.path.ends_with("doc.pdf"))
+            .unwrap();
+        match ok.book.as_ref().unwrap() {
+            ScannedBook::Pdf(book) => {
+                assert_eq!(book.metadata.title, "Field Notes on Silence");
+                assert_eq!(book.metadata.author.as_deref(), Some("Petter Moen"));
+            }
+            other => panic!("expected a pdf book, got {other:?}"),
+        }
+
+        let broken = entries
+            .iter()
+            .find(|entry| entry.path.ends_with("broken.pdf"))
+            .unwrap();
+        assert!(
+            matches!(broken.book, Err(BookParseError::Pdf(_))),
+            "garbage pdf fails to parse: {:?}",
+            broken.book
+        );
+    }
+
+    #[test]
     fn extension_match_is_case_insensitive() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -159,14 +218,17 @@ mod tests {
         let entries = scan_directory(root).unwrap();
         assert_eq!(entries.len(), 1);
         let err = entries[0].book.as_ref().unwrap_err();
-        assert!(matches!(err, EpubError::Zip(_)), "got: {err:?}");
+        assert!(
+            matches!(err, BookParseError::Epub(EpubError::Zip(_))),
+            "got: {err:?}"
+        );
     }
 
     proptest::proptest! {
         #[test]
-        fn scan_only_reports_files_with_epub_extension(
+        fn scan_only_reports_files_with_book_extensions(
             names in proptest::collection::vec(
-                "[a-z]{1,8}(/[a-z0-9_]{1,8}){0,2}\\.(epub|EPUB|txt|pdf)",
+                "[a-z]{1,8}(/[a-z0-9_]{1,8}){0,2}\\.(epub|EPUB|pdf|PDF|txt)",
                 0..10
             ),
             data in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..64),
@@ -182,12 +244,15 @@ mod tests {
             }
 
             let entries = scan_directory(root).unwrap();
-            let epub_count = unique.iter().filter(|n| n.to_lowercase().ends_with(".epub")).count();
-            assert_eq!(entries.len(), epub_count);
+            let book_count = unique.iter().filter(|n| {
+                let lower = n.to_lowercase();
+                lower.ends_with(".epub") || lower.ends_with(".pdf")
+            }).count();
+            assert_eq!(entries.len(), book_count);
             for entry in &entries {
                 assert!(
-                    entry.path.extension().unwrap().eq_ignore_ascii_case("epub"),
-                    "scanned non-epub: {:?}",
+                    has_book_extension(&entry.path),
+                    "scanned non-book: {:?}",
                     entry.path
                 );
             }

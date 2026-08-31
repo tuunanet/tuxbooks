@@ -15,6 +15,7 @@ Rust process owns the database and the filesystem; the webview renders.
 │  typed Promise result  ◄──────────  services/ (application ops)   │
 │                                     ├─ repository/ (SQL)          │
 │                                     ├─ epub/ (parsing)            │
+│                                     ├─ pdf/ (parsing)             │
 │                                     └─ db/ (SQLite + migrations)  │
 └───────────────────────────────────────────────────────────────────┘
 ```
@@ -29,9 +30,10 @@ Rust process owns the database and the filesystem; the webview renders.
 | ------------- | ------------------------------------------- | ----------------- |
 | `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri             |
 | `epub/`       | std, zip, quick-xml                         | tauri, sqlx       |
+| `pdf/`        | std, lopdf                                  | tauri, sqlx       |
 | `db/`         | sqlx, migrations                            | tauri             |
-| `repository/` | sqlx, domain                                | tauri, epub       |
-| `services/`   | domain, repository, epub, db                | tauri             |
+| `repository/` | sqlx, domain                                | tauri, epub, pdf  |
+| `services/`   | domain, repository, epub, pdf, db           | tauri             |
 | `commands/`   | services, domain, `State<AppState>`         | sqlx details      |
 
 `lib.rs` owns wiring: it resolves the database path (see
@@ -55,11 +57,18 @@ require a live database. See [database.md](database.md).
 value. It is Tauri- and database-independent and unit-tested against
 `tests/fixtures/books/minimal.epub`. See [epub.md](epub.md).
 
+## PDF layer
+
+`pdf/` extracts bibliographic metadata (title/author/subject) from PDF
+files via `lopdf`; no rendering. PDFs import without covers. See
+[pdf.md](pdf.md).
+
 ## Services
 
-- `library_scanner`: pure filesystem read; recursive, typed per-file errors.
+- `library_scanner`: pure filesystem read; recursive, typed per-file errors;
+  discovers `.epub` and `.pdf` files.
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
-  covers next to the database. Idempotent on re-scan.
+  covers next to the database (EPUBs only). Idempotent on re-scan.
 - `search`: FTS5 MATCH queries against `books_fts`.
 
 ## Frontend structure

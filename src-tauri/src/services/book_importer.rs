@@ -8,7 +8,7 @@ use crate::domain::NewBook;
 use crate::epub::EpubBook;
 use crate::error::AppError;
 use crate::repository::books;
-use crate::services::library_scanner::{scan_directory, ScanError};
+use crate::services::library_scanner::{scan_directory, ScanError, ScannedBook};
 
 /// Summary of an import run over a library directory.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -26,9 +26,10 @@ pub struct FailedImport {
     pub error: String,
 }
 
-/// Scan `library_root` for EPUBs and persist them (upsert keyed by path).
-/// Cover images are extracted to `covers_dir`. Files that fail to parse are
-/// reported in [`ImportReport::failed`] and do not abort the run.
+/// Scan `library_root` for EPUBs and PDFs and persist them (upsert keyed by
+/// path). EPUB covers are extracted to `covers_dir`; PDFs carry no extractable
+/// cover, so they index without one. Files that fail to parse are reported in
+/// [`ImportReport::failed`] and do not abort the run.
 pub async fn import_directory(
     pool: &SqlitePool,
     library_root: &Path,
@@ -48,19 +49,28 @@ pub async fn import_directory(
                 path: entry.path.to_string_lossy().into_owned(),
                 error: error.to_string(),
             }),
-            Ok(parsed) => {
+            Ok(ScannedBook::Epub(parsed)) => {
                 let cover_path = write_cover(&parsed, covers_dir, &entry.path)?;
                 let new_book = to_new_book(&entry.path, &parsed, cover_path);
                 let (_id, inserted) = books::upsert_book(pool, &new_book).await?;
-                if inserted {
-                    report.imported += 1;
-                } else {
-                    report.updated += 1;
-                }
+                bump(&mut report, inserted);
+            }
+            Ok(ScannedBook::Pdf(parsed)) => {
+                let new_book = pdf_to_new_book(&entry.path, &parsed);
+                let (_id, inserted) = books::upsert_book(pool, &new_book).await?;
+                bump(&mut report, inserted);
             }
         }
     }
     Ok(report)
+}
+
+fn bump(report: &mut ImportReport, inserted: bool) {
+    if inserted {
+        report.imported += 1;
+    } else {
+        report.updated += 1;
+    }
 }
 
 fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewBook {
@@ -74,6 +84,20 @@ fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewB
         isbn: book.metadata.isbn.clone(),
         description: book.metadata.description.clone(),
         cover_path,
+    }
+}
+
+fn pdf_to_new_book(path: &Path, book: &crate::pdf::PdfBook) -> NewBook {
+    NewBook {
+        path: path.to_string_lossy().into_owned(),
+        title: book.metadata.title.clone(),
+        subtitle: None,
+        author: book.metadata.author.clone(),
+        publisher: None,
+        language: None,
+        isbn: None,
+        description: book.metadata.description.clone(),
+        cover_path: None,
     }
 }
 

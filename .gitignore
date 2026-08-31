@@ -29,3 +29,7 @@ coverage/
 # Web Search outputs
 .tavily/
 
+
+# Realistic user-created test library (real copyrighted books; never commit).
+# Tests that use it skip automatically when the path is absent.
+tests/fixtures/books/EBooks/

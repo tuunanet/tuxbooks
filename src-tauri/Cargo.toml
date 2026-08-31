@@ -32,6 +32,9 @@ anyhow = "1"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
+# PDF support is metadata-only (title/author/subject for library indexing);
+# lopdf is a pure-Rust object reader with no rendering engine.
+lopdf = "0.44"
 
 [dev-dependencies]
 proptest = "1"
