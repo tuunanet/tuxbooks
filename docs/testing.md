@@ -42,22 +42,29 @@ the feature embeds the frontend assets; without it a debug binary would
 try to load the Vite dev server):
 
 1. `test:empty` — fresh scratch dir; asserts app shell, window title,
-   and the empty-library state.
+   the empty-library state, and navigation to Settings and back.
 2. `test:seeded` (`E2E_SEED_LIBRARY=1`) — copies
    `tests/fixtures/books/minimal.epub` into the scratch library before
    launch; the app imports it on startup; asserts the book card and the
-   "1 book" stats line.
+   "1 book" stats line, then walks the smoke flow Library → Detail
+   (double click) → Reader (Continue Reading, sidebar hidden) → back to
+   the library.
 
 Isolation mechanics (`e2e/wdio.conf.ts`):
 
-- `onPrepare` wipes `e2e/.tmp/run`, seeds the library if requested, and
-  sets `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` in `process.env`
-  **before** spawning `tauri-driver` (the app inherits the driver's
-  environment). Production paths are never used.
+- `onPrepare` kills stale app instances from previous runs (the app can
+  outlive `tauri-driver`, and a leftover instance would grab the new
+  automation session), wipes `e2e/.tmp/run`, seeds the library if
+  requested, and sets `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` in
+  `process.env` **before** spawning `tauri-driver` (the app inherits the
+  driver's environment). Production paths are never used.
 - Ports: 4444 = WebDriver endpoint WebdriverIO connects to; 4445 =
   tauri-driver ↔ WebKitWebDriver relay. `wdio:enforceWebDriverClassic`
   is set because WebKitWebDriver has no BiDi support.
 - User libraries are never scanned; E2E only sees the scratch dir.
+- WebKitGTK quirk: WebDriver `getText` walks the accessibility tree and
+  omits text inside `line-clamp`/`truncate` boxes, so specs assert on
+  DOM `textContent` for book and reader titles.
 
 ## Test data rules
 

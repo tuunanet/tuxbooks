@@ -13,13 +13,13 @@ describe("tuxbooks app shell", () => {
     await expect($("[data-testid=library-view]")).not.toExist();
   });
 
-  it("navigates between sidebar views", async () => {
-    const collectionsButton = await $("button=Collections");
-    await collectionsButton.click();
-    await expect($("[data-testid=collections-view]")).toBeDisplayed();
+  it("navigates to settings and back to the library", async () => {
+    const settingsButton = await $("button=Settings");
+    await settingsButton.click();
+    await expect($("[data-testid=settings-view]")).toBeDisplayed();
 
-    const libraryButton = await $("button=Library");
-    await libraryButton.click();
+    const allBooksButton = await $("button=All Books");
+    await allBooksButton.click();
     await expect($("[data-testid=empty-library]")).toBeDisplayed();
   });
 });

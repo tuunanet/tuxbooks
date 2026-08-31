@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,6 +44,15 @@ export const config: Options.Testrunner = {
     } as never,
   ],
   onPrepare() {
+    // The app outlives tauri-driver (WebKit automation connects outbound), so
+    // a stale instance from a previous run would grab this session and show
+    // its own stale state. Clear the field before spawning.
+    try {
+      execFileSync("pkill", ["-f", appBinary]);
+    } catch {
+      // pkill exits non-zero when nothing matched — that is the good case.
+    }
+
     rmSync(scratch, { recursive: true, force: true });
     mkdirSync(libraryDir, { recursive: true });
     if (seeded) {
