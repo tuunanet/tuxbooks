@@ -95,7 +95,7 @@ describe("LibraryView selection and opening", () => {
     expect(card).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.doubleClick(card);
-    expect(await screen.findByTestId("book-detail-placeholder")).toBeInTheDocument();
+    expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
   });
 
   it("opens the detail view with Enter on a focused card", async () => {
@@ -109,7 +109,7 @@ describe("LibraryView selection and opening", () => {
     fireEvent.click(firstCard);
 
     fireEvent.keyDown(firstCard, { key: "Enter" });
-    expect(await screen.findByTestId("book-detail-placeholder")).toBeInTheDocument();
+    expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
   });
 
   it("roves focus through the cards with arrow keys", async () => {

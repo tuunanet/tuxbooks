@@ -1,3 +1,4 @@
+import { BookDetail } from "@/components/books/BookDetail";
 import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
@@ -16,24 +17,6 @@ function GlobalSearchShortcut() {
     document.querySelector<HTMLElement>('[data-shortcut="global-search"]')?.focus();
   });
   return null;
-}
-
-function BookDetailPlaceholder() {
-  const dispatch = useAppDispatch();
-  return (
-    <section data-testid="book-detail-placeholder">
-      <h2 className="text-2xl font-semibold">Book detail</h2>
-      <p className="mt-2 text-muted-foreground">The detail view is not implemented yet.</p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-4"
-        onClick={() => dispatch({ type: "return-to-library" })}
-      >
-        Back to Library
-      </Button>
-    </section>
-  );
 }
 
 function SettingsPlaceholder() {
@@ -91,7 +74,7 @@ function Shell() {
       <main className="relative flex-1 overflow-y-auto p-8">
         <ImportStatus />
         {app.view === "detail" ? (
-          <BookDetailPlaceholder />
+          <BookDetail />
         ) : app.section.kind === "settings" ? (
           <SettingsPlaceholder />
         ) : app.section.kind === "collection" ? (

@@ -72,7 +72,7 @@ describe("GlobalSearch", () => {
     const option = await screen.findByRole("option", { name: /Deep Waters/ });
     await userEvent.click(option);
 
-    expect(await screen.findByTestId("book-detail-placeholder")).toBeInTheDocument();
+    expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
     expect(input).toHaveValue("");
     expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
@@ -92,7 +92,7 @@ describe("GlobalSearch", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(await screen.findByTestId("book-detail-placeholder")).toBeInTheDocument();
+    expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
   });
 });
 

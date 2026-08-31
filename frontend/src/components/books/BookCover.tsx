@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { coverFileUrl } from "@/lib/tauri";
 import type { Book } from "@/types/domain";
 
 interface BookCoverProps {
@@ -8,11 +10,16 @@ interface BookCoverProps {
 }
 
 /**
- * Placeholder cover art until real covers load through the Tauri asset
- * protocol (decision D2). Deliberately not an <img> — there is no cover file
- * to show yet, and pretending otherwise would fake persistence.
+ * Cover art: the real extracted cover through the Tauri asset protocol
+ * (decision D2) when the book has one, otherwise gradient placeholder art.
+ * A failed load (e.g. missing file, plain Vite preview) falls back to the
+ * placeholder instead of showing a broken image.
  */
 export function BookCover({ book, className, initialClassName }: BookCoverProps) {
+  const [loadFailed, setLoadFailed] = useState(false);
+  const coverPath = book.coverPath;
+  const showImage = coverPath !== null && !loadFailed;
+
   return (
     <div
       aria-hidden="true"
@@ -21,9 +28,19 @@ export function BookCover({ book, className, initialClassName }: BookCoverProps)
         className,
       )}
     >
-      <span className={cn("font-semibold text-primary/50 select-none", initialClassName)}>
-        {book.title.charAt(0).toUpperCase()}
-      </span>
+      {showImage && coverPath !== null ? (
+        <img
+          src={coverFileUrl(coverPath)}
+          alt=""
+          onError={() => setLoadFailed(true)}
+          className="size-full object-cover"
+          draggable={false}
+        />
+      ) : (
+        <span className={cn("font-semibold text-primary/50 select-none", initialClassName)}>
+          {book.title.charAt(0).toUpperCase()}
+        </span>
+      )}
     </div>
   );
 }
