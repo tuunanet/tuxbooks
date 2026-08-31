@@ -94,8 +94,11 @@ function SettingsNavigation({
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
   return (
-    <nav aria-label="Settings sections" className="w-48 shrink-0">
-      <div className="flex flex-col gap-0.5">
+    <nav
+      aria-label="Settings sections"
+      className="flex flex-row flex-wrap gap-1 lg:w-48 lg:shrink-0 lg:flex-col"
+    >
+      <div className="flex flex-row flex-wrap gap-1 lg:flex-col lg:gap-0.5">
         {SECTIONS.map((section) => (
           <button
             key={section.id}
@@ -103,7 +106,7 @@ function SettingsNavigation({
             aria-current={active === section.id ? "true" : undefined}
             onClick={() => onSectionChange(section.id)}
             className={cn(
-              "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+              "rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
               active === section.id
                 ? "bg-accent font-medium text-accent-foreground"
                 : "text-foreground hover:bg-accent/60",
@@ -126,7 +129,7 @@ export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
 
   return (
-    <section data-testid="settings-view" className="flex gap-10">
+    <section data-testid="settings-view" className="flex flex-col gap-6 lg:flex-row lg:gap-10">
       <SettingsNavigation active={active} onSectionChange={setActive} />
       <div className="min-w-0 max-w-xl flex-1">
         <h2 className="text-2xl font-semibold">

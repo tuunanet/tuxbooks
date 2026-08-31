@@ -105,7 +105,7 @@ export function GlobalSearch() {
                 event.preventDefault();
                 openBook(book.id);
               }}
-              className="w-full rounded-md px-2 py-1.5 text-left aria-selected:bg-accent hover:bg-accent/60"
+              className="w-full rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-selected:bg-accent hover:bg-accent/60"
             >
               <p className="truncate text-sm font-medium">{book.title}</p>
               <p className="truncate text-xs text-muted-foreground">

@@ -44,7 +44,7 @@ function ItemButton({ active, onClick, children, disabled, title }: ItemButtonPr
       title={title}
       aria-current={active ? "true" : undefined}
       className={cn(
-        "w-full rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+        "w-full rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
         active
           ? "bg-accent font-medium text-accent-foreground"
           : "text-foreground hover:bg-accent/60",
@@ -60,7 +60,11 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <aside data-testid="sidebar" className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4">
+    <aside
+      data-testid="sidebar"
+      aria-label="Library sidebar"
+      className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4"
+    >
       <div className="mb-5 px-3">
         <h1 className="text-lg font-semibold">tuxbooks</h1>
         <p className="text-xs text-muted-foreground">Local ebook library</p>

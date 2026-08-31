@@ -138,7 +138,7 @@ export function ReaderNavigation({
                     type="button"
                     data-testid={`toc-item-${index}`}
                     onClick={() => jump(Math.round((index / Math.max(toc.length, 1)) * 100))}
-                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
                   >
                     {chapterLabel(href)}
                   </button>
@@ -163,10 +163,11 @@ export function ReaderNavigation({
                         key={page}
                         type="button"
                         data-testid={`nav-page-${page}`}
+                        aria-label={`Go to page ${page}`}
                         onClick={() =>
                           jump(Math.round(((page - 1) / Math.max(pageCount - 1, 1)) * 100))
                         }
-                        className="rounded-md border py-2 text-sm tabular-nums hover:bg-accent/60"
+                        className="rounded-md border py-2 text-sm tabular-nums outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
                       >
                         {page}
                       </button>
@@ -199,7 +200,7 @@ export function ReaderNavigation({
                     type="button"
                     data-testid={`nav-bookmark-${bookmark.percentage}`}
                     onClick={() => jump(bookmark.percentage)}
-                    className="block w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+                    className="block w-full rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
                   >
                     {bookmark.label}
                   </button>

@@ -44,6 +44,7 @@ export function BookCard({
         data-testid="book-card"
         data-book-card=""
         data-book-id={book.id}
+        aria-label={`${book.title} (${book.format.toUpperCase()})`}
         aria-pressed={selected}
         tabIndex={tabIndex}
         onClick={(event) => {

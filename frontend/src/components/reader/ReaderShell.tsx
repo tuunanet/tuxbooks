@@ -142,7 +142,11 @@ export function ReaderShell() {
         </Tooltip>
       </header>
 
-      <main data-testid="reader-content" className="min-h-0 flex-1 overflow-y-auto">
+      <main
+        data-testid="reader-content"
+        aria-label="Reading view"
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {book.format === "epub" ? <EpubReader book={book} /> : <PdfReader book={book} />}
       </main>
 
