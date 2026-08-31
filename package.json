@@ -2,6 +2,7 @@
   "name": "tuxbooks",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "description": "Local-first ebook library manager (bookshelf style) built with Tauri 2 + React.",
   "scripts": {
     "dev": "pnpm --filter frontend dev",

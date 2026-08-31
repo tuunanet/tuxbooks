@@ -72,4 +72,4 @@ temporary directories via `TEST_LIBRARY_PATH` / `TEST_DATABASE_PATH`.
 
 ## License
 
-TBD.
+GPL-3.0-or-later — see [LICENSE.md](LICENSE.md).

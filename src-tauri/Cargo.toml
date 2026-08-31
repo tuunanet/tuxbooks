@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-first ebook library manager"
 authors = ["tuxbooks"]
 edition = "2021"
+license = "GPL-3.0-or-later"
 rust-version = "1.82"
 
 # See docs/architecture.md for the module layout contract.
