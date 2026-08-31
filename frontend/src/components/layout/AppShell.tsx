@@ -2,12 +2,14 @@ import { BookDetail } from "@/components/books/BookDetail";
 import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
-import { Button } from "@/components/ui/button";
+import { ReaderShell } from "@/components/reader/ReaderShell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
 import { useAppDispatch, useAppState, type AppState } from "@/state/appState";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
+import { ReaderProvider } from "@/state/ReaderProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { Sidebar } from "./Sidebar";
 
@@ -38,22 +40,16 @@ function CollectionsPlaceholder() {
 }
 
 /**
- * Reader placeholder: the full window, no library sidebar. The ReaderShell
- * replaces this in the reader stage.
+ * Reader: the full window, no library sidebar. Own providers — reader state
+ * is session-scoped and the toolbar introduces the app's first tooltips.
  */
-function ReaderPlaceholder() {
-  const dispatch = useAppDispatch();
+function Reader() {
   return (
-    <div
-      data-testid="reader-view"
-      className="flex h-screen flex-col items-center justify-center gap-3"
-    >
-      <h2 className="text-2xl font-semibold">Reader</h2>
-      <p className="text-muted-foreground">The reading experience is not implemented yet.</p>
-      <Button variant="outline" size="sm" onClick={() => dispatch({ type: "return-to-library" })}>
-        Back to Library
-      </Button>
-    </div>
+    <ReaderProvider>
+      <TooltipProvider delayDuration={200}>
+        <ReaderShell />
+      </TooltipProvider>
+    </ReaderProvider>
   );
 }
 
@@ -62,7 +58,7 @@ function Shell() {
   const dispatch = useAppDispatch();
 
   if (app.view === "reader") {
-    return <ReaderPlaceholder />;
+    return <Reader />;
   }
 
   return (

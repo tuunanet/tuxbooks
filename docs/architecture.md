@@ -84,9 +84,9 @@ frontend/src/
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers
-        books/            BookCard, BookListItem, book context menu
+        books/            BookCard, BookListItem, BookDetail, book context menu
         search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
-        reader/           placeholder
+        reader/           ReaderShell, EPUB/PDF placeholder surfaces, navigation, appearance
         ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
 
