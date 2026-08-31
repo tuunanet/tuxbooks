@@ -6,9 +6,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
 }));
+vi.mock("@/lib/pdf/pdfEngine", () => ({
+  openPdfDocument: vi.fn(),
+  closePdfDocument: vi.fn(async () => {}),
+  RenderingCancelledException: class RenderingCancelledException extends Error {},
+}));
 
 import { AppShell } from "@/components/layout/AppShell";
+import { openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { makeBook } from "./factories";
+import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 
 const EPUB_CHAPTERS = ["text/chapter-one.xhtml", "text/Part_Two.xhtml"];
@@ -23,11 +30,17 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
           path: "/tmp/library/minimal.pdf",
           title: "A Minimal PDF",
         });
+  if (bookFormat === "pdf") {
+    vi.mocked(openPdfDocument).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocument>>,
+    );
+  }
   invokeMock.mockClear();
   mockInvoke({
     get_library_stats: { bookCount: 1, collectionCount: 0 },
     list_books: [book],
     get_book_toc: { bookId: 1, title: book.title, chapters: EPUB_CHAPTERS },
+    get_book_bytes: new ArrayBuffer(16),
   });
   return render(
     <AppShell
@@ -171,28 +184,29 @@ describe("ReaderNavigation", () => {
 
   it("gives PDFs Pages and an honest Outline instead of EPUB contents", async () => {
     renderReader("pdf");
-    await screen.findByTestId("pdf-reader");
+    await screen.findByTestId("pdf-canvas");
 
     await openNavigation();
     expect(await screen.findByTestId("nav-pages")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-page-24")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-page-3")).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 1 });
     expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
 
-    await userEvent.click(screen.getByTestId("nav-page-12"));
-    expect(await screen.findByTestId("reader-position")).toHaveTextContent("48%");
+    await userEvent.click(screen.getByTestId("nav-page-2"));
+    expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
 
     // Re-open for the Outline tab (Radix unmounts inactive tab content).
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-outline"));
-    expect(await screen.findByTestId("nav-outline")).toHaveTextContent(/real PDF renderer/i);
+    expect(await screen.findByTestId("nav-outline")).toHaveTextContent(/not supported yet/i);
   });
 
   it("shows the pdf page counter following the reading position", async () => {
     renderReader("pdf");
-    await screen.findByTestId("pdf-reader");
+    await screen.findByTestId("pdf-canvas");
 
     fireEvent.keyDown(window, { key: "End" });
-    expect(screen.getByTestId("pdf-reader")).toHaveTextContent("Page 24 of 24");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3");
   });
 });
 

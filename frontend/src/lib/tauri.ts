@@ -20,6 +20,14 @@ export function getBookToc(bookId: number): Promise<BookToc> {
   return invoke("get_book_toc", { bookId });
 }
 
+/**
+ * Raw bytes of a stored book's source file. The command answers with an IPC
+ * raw byte response, so `invoke` resolves to an ArrayBuffer.
+ */
+export function getBookBytes(bookId: number): Promise<ArrayBuffer> {
+  return invoke("get_book_bytes", { bookId });
+}
+
 /** Native folder picker; resolves to null when the user cancels. */
 export function pickDirectory(): Promise<string | null> {
   return open({ directory: true, multiple: false, title: "Choose a folder to import" });

@@ -4,7 +4,8 @@
 Rust, no rendering engine). Like `epub/`, it has no Tauri or SQLx imports
 and returns owned data. The stated reason for the dependency: the scanner
 must index real-world PDF libraries (title/author/subject) without pulling
-in a renderer — page rendering stays out of scope until the PDF reader.
+in a renderer — page rendering belongs to the frontend engine (see
+"Rendering" below).
 
 ## Public API
 
@@ -48,3 +49,17 @@ pub struct PdfMetadata {
 
 Per-file failures never abort an import run: the importer collects them in
 `ImportReport.failed` exactly like EPUB parse failures.
+
+## Rendering
+
+Rendering is the frontend's job: `pdfjs-dist` (PDF.js) rasterizes pages to a
+canvas in the webview, with parsing off the UI thread in a bundled worker
+(`frontend/src/lib/pdf/pdfEngine.ts` is the only module that touches
+PDF.js). Rust controls byte access: the `get_book_bytes` command resolves a
+book id to its stored path through the database (`services::reader`) and
+answers with an IPC raw byte response, so paths never cross the boundary and
+multi-megabyte files avoid JSON encoding.
+
+Slice status: single-page rendering, page navigation, and zoomed re-render
+exist; thumbnails, annotations, text search, and outlines do not. The page
+count comes from the loaded PDF.js document — Rust never parses page trees.

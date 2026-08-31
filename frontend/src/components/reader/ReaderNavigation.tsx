@@ -38,9 +38,9 @@ function chapterLabel(href: string): string {
 
 /**
  * Reading navigation drawer. EPUB contents come from the real
- * `get_book_toc` command; PDF pages are derived from the placeholder
- * document; outlines and bookmark persistence are honest placeholders
- * until their engines/backend exist.
+ * `get_book_toc` command; PDF pages come from the loaded PDF.js document;
+ * outlines and bookmark persistence remain honest placeholders until their
+ * engines/backend exist.
  */
 export function ReaderNavigation({
   open,
@@ -157,28 +157,34 @@ export function ReaderNavigation({
             <>
               <TabsContent value="pages" className="min-h-0 flex-1 px-4 py-3">
                 <ScrollArea className="h-full">
-                  <div data-testid="nav-pages" className="grid grid-cols-4 gap-2">
-                    {Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => (
-                      <button
-                        key={page}
-                        type="button"
-                        data-testid={`nav-page-${page}`}
-                        aria-label={`Go to page ${page}`}
-                        onClick={() =>
-                          jump(Math.round(((page - 1) / Math.max(pageCount - 1, 1)) * 100))
-                        }
-                        className="rounded-md border py-2 text-sm tabular-nums outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
-                      >
-                        {page}
-                      </button>
-                    ))}
-                  </div>
+                  {pageCount === 0 ? (
+                    <p data-testid="nav-pages-loading" className="text-sm text-muted-foreground">
+                      Loading pages…
+                    </p>
+                  ) : (
+                    <div data-testid="nav-pages" className="grid grid-cols-4 gap-2">
+                      {Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => (
+                        <button
+                          key={page}
+                          type="button"
+                          data-testid={`nav-page-${page}`}
+                          aria-label={`Go to page ${page}`}
+                          onClick={() =>
+                            jump(Math.round(((page - 1) / Math.max(pageCount - 1, 1)) * 100))
+                          }
+                          className="rounded-md border py-2 text-sm tabular-nums outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <ScrollBar />
                 </ScrollArea>
               </TabsContent>
               <TabsContent value="outline" className="min-h-0 flex-1 px-4 py-3">
                 <p data-testid="nav-outline" className="text-sm text-muted-foreground">
-                  Outlines arrive with the real PDF renderer — there is nothing to show yet.
+                  PDF outlines are not supported yet — there is nothing to show here.
                 </p>
               </TabsContent>
             </>

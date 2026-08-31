@@ -77,6 +77,7 @@ pub fn run() {
             commands::books::get_library_stats,
             commands::books::list_books,
             commands::library::scan_library,
+            commands::reader::get_book_bytes,
             commands::reader::get_book_toc,
         ])
         .run(tauri::generate_context!())

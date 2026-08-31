@@ -31,10 +31,16 @@ export function ReaderShell() {
   const dispatch = useAppDispatch();
   const { preferences, position, setPosition, bookmarks, toggleBookmark } = useReader();
   const [navOpen, setNavOpen] = useState(false);
+  // Real PDF page count, reported by PdfReader once the document loads.
+  const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
-  const pageCount =
-    book?.format === "pdf" ? PDF_PLACEHOLDER_PAGE_COUNT : EPUB_PLACEHOLDER_PAGE_COUNT;
+  const isPdf = book?.format === "pdf";
+  const pageCount = isPdf
+    ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT)
+    : EPUB_PLACEHOLDER_PAGE_COUNT;
+  // The pages drawer lists real pages only; 0 keeps it in its loading state.
+  const knownPageCount = isPdf ? (pdfPageCount ?? 0) : EPUB_PLACEHOLDER_PAGE_COUNT;
   const step = 100 / pageCount;
 
   useShortcut("arrowright", () => setPosition(position + step));
@@ -147,7 +153,11 @@ export function ReaderShell() {
         aria-label="Reading view"
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        {book.format === "epub" ? <EpubReader book={book} /> : <PdfReader book={book} />}
+        {book.format === "epub" ? (
+          <EpubReader book={book} />
+        ) : (
+          <PdfReader key={book.id} book={book} onDocumentLoad={setPdfPageCount} />
+        )}
       </main>
 
       <footer className="shrink-0 border-t px-4 py-2">
@@ -171,7 +181,7 @@ export function ReaderShell() {
         open={navOpen}
         onOpenChange={setNavOpen}
         book={book}
-        pageCount={pageCount}
+        pageCount={knownPageCount}
         onJump={setPosition}
       />
     </div>

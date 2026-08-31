@@ -112,18 +112,47 @@ def tiny_png() -> bytes:
     )
 
 def build_pdf() -> bytes:
-    """Minimal but structurally valid PDF: catalog, one page, and an Info
-    dictionary with the metadata the library indexes. Byte-identical on
-    every run (no timestamps), so the imported book id stays stable."""
+    """Deterministic three-page PDF for the reader slice: catalog, page tree,
+    Info dictionary, one page object + one content stream per page, and a
+    standard Helvetica font. Each page draws a filled rectangle and two text
+    lines ("Tuxbooks PDF Fixture" / "Page N of 3") so a rendered canvas is
+    visibly non-blank. Byte-identical on every run (no timestamps), so the
+    imported book id stays stable."""
+
+    PDF_PAGE_COUNT = 3
+
+    def pdf_string(value: str) -> str:
+        escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+        return f"({escaped})"
 
     def info_entry(key: str, value: str) -> str:
-        escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
-        return f"/{key} ({escaped})"
+        return f"/{key} {pdf_string(value)}"
 
-    objects = [
+    def page_stream(number: int) -> bytes:
+        content = "\n".join(
+            [
+                "0.20 0.47 0.79 rg",
+                "72 600 216 144 re f",
+                "0 0 0 rg",
+                f"BT /F1 40 Tf 72 520 Td {pdf_string('Tuxbooks PDF Fixture')} Tj ET",
+                f"BT /F1 28 Tf 72 460 Td {pdf_string(f'Page {number} of {PDF_PAGE_COUNT}')} Tj ET",
+            ]
+        )
+        return content.encode("ascii")
+
+    first_page, last_page = 4, 4 + PDF_PAGE_COUNT - 1
+    first_stream, last_stream = last_page + 1, last_page + PDF_PAGE_COUNT
+    font_object = last_stream + 1
+
+    objects: list[bytes | str] = [
         "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+        " ".join(
+            [
+                "<< /Type /Pages",
+                f"/Kids [{' '.join(f'{page} 0 R' for page in range(first_page, last_page + 1))}]",
+                f"/Count {PDF_PAGE_COUNT} >>",
+            ]
+        ),
         " ".join(
             [
                 "<<",
@@ -134,20 +163,46 @@ def build_pdf() -> bytes:
             ]
         ),
     ]
+    for number in range(1, PDF_PAGE_COUNT + 1):
+        objects.append(
+            " ".join(
+                [
+                    "<< /Type /Page /Parent 2 0 R",
+                    "/MediaBox [0 0 612 792]",
+                    f"/Resources << /Font << /F1 {font_object} 0 R >> >>",
+                    f"/Contents {first_stream + number - 1} 0 R >>",
+                ]
+            )
+        )
+    for number in range(1, PDF_PAGE_COUNT + 1):
+        stream = page_stream(number)
+        objects.append((f"<< /Length {len(stream)} >>", stream))
+    objects.append(
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+    )
 
-    pdf = "%PDF-1.4\n"
+    pdf = bytearray(b"%PDF-1.4\n")
     offsets = []
     for index, body in enumerate(objects, start=1):
         offsets.append(len(pdf))
-        pdf += f"{index} 0 obj\n{body}\nendobj\n"
+        pdf += f"{index} 0 obj\n".encode("ascii")
+        if isinstance(body, tuple):
+            stream_dict, stream = body
+            pdf += f"{stream_dict}\nstream\n".encode("ascii")
+            pdf += stream
+            pdf += b"\nendstream\nendobj\n"
+        else:
+            pdf += f"{body}\nendobj\n".encode("ascii")
 
     xref_offset = len(pdf)
-    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii")
     for offset in offsets:
-        pdf += f"{offset:010} 00000 n \n"
-    pdf += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info 4 0 R >>\n"
-    pdf += f"startxref\n{xref_offset}\n%%EOF\n"
-    return pdf.encode("ascii")
+        pdf += f"{offset:010} 00000 n \n".encode("ascii")
+    pdf += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info 3 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n"
+    ).encode("ascii")
+    return bytes(pdf)
 
 
 def write_epub() -> None:

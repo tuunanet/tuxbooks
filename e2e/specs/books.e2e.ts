@@ -66,7 +66,7 @@ describe("tuxbooks library navigation", () => {
   });
 
   // Test D — the PDF fixture opens the reader shell: toolbar visible,
-  // library sidebar gone. Rendering itself stays a placeholder.
+  // library sidebar gone, and the real PDF.js canvas rendered.
   it("opens the PDF in the reader shell with the sidebar hidden", async () => {
     await openBookFromLibrary("A Minimal Manual (PDF)");
 
@@ -75,12 +75,77 @@ describe("tuxbooks library navigation", () => {
 
     await $("[data-testid=reader-view]").waitForDisplayed({ timeout: 30000 });
     await expect(await textOf("reader-title")).toContain("A Minimal Manual");
-    await expect($("[data-testid=pdf-reader]")).toBeDisplayed();
+    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
     await expect($("[data-testid=reader-back]")).toBeDisplayed();
     await expect($("[data-testid=sidebar]")).not.toExist();
 
     await $("[data-testid=reader-back]").click();
     await expect($("[data-testid=app-shell]")).toBeDisplayed();
     await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
+  });
+
+  // Test E — the PDF rendering slice: page 1 of the fixture is drawn onto the
+  // canvas, prev/next navigate pages, zoom re-renders at a new scale.
+  it("renders PDF pages with navigation and zoom", async () => {
+    await openBookFromLibrary("A Minimal Manual (PDF)");
+
+    await $("[data-testid=book-detail]").waitForDisplayed({ timeout: 30000 });
+    await $("[data-testid=detail-continue]").click();
+    await $("[data-testid=reader-view]").waitForDisplayed({ timeout: 30000 });
+
+    const canvas = await $("[data-testid=pdf-canvas]");
+    await canvas.waitForExist({ timeout: 30000 });
+
+    // The real page count arrives with the loaded document.
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+      timeout: 30000,
+      timeoutMsg: "pdf document never reported its page count",
+    });
+
+    // Deterministic geometry: fixture pages are 612x792 pt, so at 100% zoom
+    // the canvas backing store is 612 px wide times the device pixel ratio.
+    const dpr = await browser.execute(() => window.devicePixelRatio);
+    await browser.waitUntil(
+      async () => Number(await canvas.getAttribute("width")) === Math.floor(612 * dpr),
+      { timeout: 30000, timeoutMsg: "page 1 never rendered at 100% zoom" },
+    );
+
+    // The canvas carries fixture artwork: a blank canvas has no non-white
+    // pixels, the drawn page (blue rectangle + black text) does.
+    const nonBlank = await browser.execute(() => {
+      const el = document.querySelector("[data-testid=pdf-canvas]");
+      if (!(el instanceof HTMLCanvasElement)) return false;
+      const ctx = el.getContext("2d");
+      if (!ctx) return false;
+      const { data } = ctx.getImageData(0, 0, el.width, el.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 200 || data[i + 1] < 200 || data[i + 2] < 200) return true;
+      }
+      return false;
+    });
+    expect(nonBlank).toBe(true);
+
+    // Navigation moves between pages and back.
+    await $("[data-testid=pdf-next]").click();
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 2 of 3", {
+      timeout: 30000,
+      timeoutMsg: "next never reached page 2",
+    });
+    await $("[data-testid=pdf-prev]").click();
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+      timeout: 30000,
+      timeoutMsg: "prev never returned to page 1",
+    });
+
+    // Zoom in: 100% -> 150% re-renders with a larger backing store.
+    await $("[data-testid=pdf-zoom-in]").click();
+    await browser.waitUntil(
+      async () => Number(await canvas.getAttribute("width")) === Math.floor(612 * 1.5 * dpr),
+      { timeout: 30000, timeoutMsg: "zoom-in never re-rendered at 150%" },
+    );
+    expect(await textOf("pdf-zoom-level")).toContain("150%");
+
+    await $("[data-testid=reader-back]").click();
+    await expect($("[data-testid=app-shell]")).toBeDisplayed();
   });
 });

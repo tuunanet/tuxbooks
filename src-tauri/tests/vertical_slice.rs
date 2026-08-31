@@ -8,10 +8,15 @@ use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::LibraryStats;
 use tuxbooks_lib::repository::{books, collections};
 use tuxbooks_lib::services::book_importer::import_directory;
+use tuxbooks_lib::services::reader::load_book_file;
 use tuxbooks_lib::services::search::search_books;
 
 fn fixture_epub() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books/minimal.epub")
+}
+
+fn fixture_pdf() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books/minimal.pdf")
 }
 
 #[tokio::test]
@@ -87,5 +92,31 @@ async fn malformed_epub_is_reported_and_does_not_break_the_library() -> anyhow::
     assert_eq!(report.failed.len(), 1);
     assert!(report.failed[0].path.ends_with("corrupt.epub"));
     assert_eq!(books::count_books(&pool).await?, 0);
+    Ok(())
+}
+
+/// Reader slice: the fixture PDF imports through the same stack the app uses
+/// and its bytes are served back verbatim for the frontend PDF.js engine.
+#[tokio::test]
+async fn fixture_pdf_imports_and_serves_its_bytes() -> anyhow::Result<()> {
+    let tmp = tempfile::tempdir()?;
+    let library = tmp.path().join("library");
+    std::fs::create_dir_all(&library)?;
+    std::fs::copy(fixture_pdf(), library.join("minimal.pdf"))?;
+
+    let pool = init_pool(&tmp.path().join("t.db")).await?;
+    let report = import_directory(&pool, &library, &tmp.path().join("covers")).await?;
+    assert_eq!(report.imported, 1, "fixture should import: {report:?}");
+    assert!(
+        report.failed.is_empty(),
+        "lopdf must parse the committed fixture"
+    );
+
+    let book = &books::list_books(&pool).await?[0];
+    assert_eq!(book.title, "A Minimal Manual");
+
+    let expected = std::fs::read(fixture_pdf())?;
+    let served = load_book_file(&pool, book.id).await?;
+    assert_eq!(served, expected);
     Ok(())
 }

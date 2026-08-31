@@ -60,7 +60,10 @@ value. It is Tauri- and database-independent and unit-tested against
 ## PDF layer
 
 `pdf/` extracts bibliographic metadata (title/author/subject) from PDF
-files via `lopdf`; no rendering. PDFs import without covers. See
+files via `lopdf`; no rendering. PDFs import without covers. Rendering
+happens in the frontend: the `get_book_bytes` command serves a book's file
+bytes (`services/reader.rs`) and PDF.js rasterizes pages to a canvas
+(`frontend/src/lib/pdf/pdfEngine.ts` is the only PDF.js import site). See
 [pdf.md](pdf.md).
 
 ## Services
@@ -69,6 +72,9 @@ files via `lopdf`; no rendering. PDFs import without covers. See
   discovers `.epub` and `.pdf` files.
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
   covers next to the database (EPUBs only). Idempotent on re-scan.
+- `reader`: controlled file-byte access for the reading engines — resolves a
+  book id to its stored path via the repository and reads it; paths never
+  cross the IPC boundary.
 - `search`: FTS5 MATCH queries against `books_fts`.
 
 ## Frontend structure
@@ -80,13 +86,15 @@ frontend/src/
     lib/tauri.ts          typed invoke wrappers + plugin APIs (the only Tauri import site)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/fixtures.ts       realistic sample books for tests/previews
+    lib/pdf/pdfEngine.ts  the only PDF.js import site (worker setup + open/close)
     hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`)
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers
         books/            BookCard, BookListItem, BookDetail, book context menu
         search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
-        reader/           ReaderShell, EPUB/PDF placeholder surfaces, navigation, appearance
+        reader/           ReaderShell, PdfReader (PDF.js canvas), EpubReader placeholder,
+                          navigation, appearance
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

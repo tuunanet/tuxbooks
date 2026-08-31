@@ -19,6 +19,12 @@ beforeAll(() => {
       disconnect() {}
     } as unknown as typeof ResizeObserver;
   }
+
+  // jsdom defines getContext but always returns null (no canvas package);
+  // the PDF reader only needs a context object to hand to the (mocked)
+  // PDF.js render call in unit tests.
+  HTMLCanvasElement.prototype.getContext =
+    (() => ({})) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 });
 
 afterEach(() => {
