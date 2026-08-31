@@ -1,7 +1,8 @@
 # tuxbooks
 
-A local-first, bookshelf-style desktop ebook library for Linux (Windows and other
-targets supported by Tauri). Point it at a folder of EPUB files; it indexes
+A local-first, bookshelf-style desktop ebook library for Linux and Windows
+(additional desktop targets supported by Tauri). Point it at a folder of EPUB
+files; it indexes
 metadata and covers into a local SQLite database, keeps collections and reading
 progress, and (soon) provides an EPUB reading experience. No accounts, no cloud,
 no network services.

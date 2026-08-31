@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useRef } from "react";
  * Centralized keyboard shortcut mechanism (task §19). Components register
  * combos via `useShortcut`; nothing hardcodes keys inside leaf components.
  * A combo is a normalized string, e.g. "mod+k", "escape", "enter", "space",
- * "arrowleft", "home". "mod" matches Ctrl on Linux/Windows and Cmd on other platforms.
+ * "arrowleft", "home". "mod" matches Ctrl on Linux/Windows and Cmd elsewhere.
  */
 export type ShortcutHandler = (event: KeyboardEvent) => void;
 
