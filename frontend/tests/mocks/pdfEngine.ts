@@ -12,7 +12,15 @@ export interface FakePdfDocument {
   scales: number[];
 }
 
-export function makeFakePdfDocument(pageCount = 3): FakePdfDocument {
+export interface PageSizeSpec {
+  width: number;
+  height: number;
+}
+
+export function makeFakePdfDocument(
+  pageCount = 3,
+  sizeFor: (pageNumber: number) => PageSizeSpec = () => ({ width: 612, height: 792 }),
+): FakePdfDocument {
   const scales: number[] = [];
   const doc: FakePdfDocument = {
     numPages: pageCount,
@@ -22,10 +30,11 @@ export function makeFakePdfDocument(pageCount = 3): FakePdfDocument {
   const pages = new Map();
   doc.getPage.mockImplementation(async (number: number) => {
     if (!pages.has(number)) {
+      const size = sizeFor(number);
       pages.set(number, {
         getViewport: vi.fn(({ scale }: { scale: number }) => {
           scales.push(scale);
-          return { width: Math.floor(612 * scale), height: Math.floor(792 * scale) };
+          return { width: size.width * scale, height: size.height * scale };
         }),
         render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
       });

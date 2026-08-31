@@ -10,7 +10,7 @@ import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
 import { EPUB_PLACEHOLDER_PAGE_COUNT, PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
 import { EpubReader } from "./EpubReader";
-import { PdfReader } from "./PdfReader";
+import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation } from "./ReaderNavigation";
 import { ReaderAppearance } from "./ReaderAppearance";
 
