@@ -153,4 +153,6 @@ not launch a second E2E run while one is still going.
 
 ## Working documents
 
+Read the one that fits the task; each is short.
+
 - `docs/STANDARDS.md` describes coding standards.
