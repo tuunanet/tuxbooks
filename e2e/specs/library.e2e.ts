@@ -1,9 +1,12 @@
 describe("tuxbooks app shell", () => {
+  // Test A — the real desktop window launches headlessly and shows the
+  // application shell.
   it("launches the native window and shows the application shell", async () => {
     const shell = await $("[data-testid=app-shell]");
     await shell.waitForDisplayed({ timeout: 30000 });
 
-    await expect($("[data-testid=sidebar]")).toBeDisplayed();
+    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
+    await expect($('[aria-label="Library navigation"]')).toBeDisplayed();
     const title = await browser.getTitle();
     expect(title.toLowerCase()).toContain("tuxbooks");
   });

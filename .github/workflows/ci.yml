@@ -85,7 +85,7 @@ jobs:
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev xvfb webkit2gtk-driver
 
       - uses: pnpm/action-setup@v4
 
@@ -93,6 +93,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Install just
+        uses: extractions/setup-just@v2
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -109,11 +112,18 @@ jobs:
           pnpm install --frozen-lockfile
           just build-debug
 
-      - name: E2E empty library
-        run: xvfb-run --auto-servernum pnpm --filter e2e test:empty
+      # Headless by design: `just test-e2e` wraps each phase in
+      # `xvfb-run --auto-servernum` on Linux (no desktop session needed).
+      - name: E2E (headless)
+        run: just test-e2e
 
-      - name: E2E seeded library
-        run: xvfb-run --auto-servernum pnpm --filter e2e test:seeded
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: artifacts/e2e
+          if-no-files-found: ignore
 
   build:
     name: Release build (Tauri bundle)

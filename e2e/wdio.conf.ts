@@ -1,78 +1,94 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Options } from "@wdio/types";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const appBinary =
-  process.env.E2E_APP_BIN ?? path.resolve(here, "../src-tauri/target/debug/tuxbooks");
-const fixtureEpub = path.resolve(here, "../tests/fixtures/books/minimal.epub");
+import { appBinary } from "./setup/fixtures.js";
+import {
+  artifactsDir,
+  armTeardownWatchdog,
+  prepareEnvironment,
+  runId,
+  teardownEnvironment,
+} from "./setup/environment.js";
 
-// Each invocation gets a fresh scratch dir. E2E_SEED_LIBRARY=1 copies the fixture
-// into the test library before the app launches; the app then imports it on startup.
-const seeded = process.env.E2E_SEED_LIBRARY === "1";
-const scratch = path.resolve(here, ".tmp/run");
-const libraryDir = path.join(scratch, "library");
-
-// Port arrangement:
-//   4444 - WebDriver protocol endpoint (tauri-driver); WebdriverIO connects here.
-//   4445 - tauri-driver <-> native driver (WebKitWebDriver) relay port.
-const DRIVER_PORT = 4444;
-const NATIVE_PORT = 4445;
-
-let driver: ChildProcess | undefined;
-
+/**
+ * Desktop E2E against the real Tauri binary. The driver lifecycle (external
+ * `tauri-driver` + WebKitWebDriver) is owned by @wdio/tauri-service; this
+ * config only owns the isolated environment (setup/environment.ts) and the
+ * failure artifacts.
+ *
+ * Headless: on Linux `just test-e2e` wraps the whole invocation in
+ * `xvfb-run --auto-servernum`, so tauri-driver and the app inherit a virtual
+ * display. (`autoXvfb` alone is not enough here: with maxInstances 1 the
+ * service spawns the driver from the launcher process, which wdio's
+ * per-worker Xvfb wrapping does not cover.)
+ */
 export const config: Options.Testrunner = {
   runner: "local",
   specs: ["./specs/**/*.e2e.ts"],
   maxInstances: 1,
-  hostname: "127.0.0.1",
-  port: DRIVER_PORT,
+  // wdio worker/driver logs (always) + failure screenshots (afterTest).
+  outputDir: artifactsDir,
+
   connectionRetryCount: 15,
   connectionRetryTimeout: 45000,
   waitforTimeout: 10000,
-  specFileRetries: 1,
+
+  services: [
+    [
+      "@wdio/tauri-service",
+      {
+        // External provider = the cargo-installed tauri-driver relaying to
+        // WebKitWebDriver (Linux/Windows). The embedded provider would need a
+        // WebDriver server compiled into the app itself.
+        driverProvider: "external",
+        // `cargo install tauri-driver` on first use when missing from PATH.
+        autoInstallTauriDriver: true,
+        // App stdout -> wdio log; console -> wdio log via the frontend plugin.
+        captureBackendLogs: true,
+        captureFrontendLogs: true,
+        backendLogLevel: "debug",
+        frontendLogLevel: "debug",
+      },
+    ],
+  ],
+
   capabilities: [
     {
-      // Force WebDriver Classic: WebKitWebDriver has no BiDi support, and WebdriverIO
-      // 9 otherwise requests `webSocketUrl` for every non-Safari session.
+      // Force WebDriver Classic: WebKitWebDriver has no BiDi support, and
+      // WebdriverIO 9 otherwise requests `webSocketUrl` for every non-Safari
+      // session.
       "wdio:enforceWebDriverClassic": true,
+      browserName: "tauri",
       "tauri:options": {
         application: appBinary,
       },
     } as never,
   ],
+
   onPrepare() {
-    // The app outlives tauri-driver (WebKit automation connects outbound), so
-    // a stale instance from a previous run would grab this session and show
-    // its own stale state. Clear the field before spawning.
-    try {
-      execFileSync("pkill", ["-f", appBinary]);
-    } catch {
-      // pkill exits non-zero when nothing matched — that is the good case.
-    }
-
-    rmSync(scratch, { recursive: true, force: true });
-    mkdirSync(libraryDir, { recursive: true });
-    if (seeded) {
-      copyFileSync(fixtureEpub, path.join(libraryDir, "minimal.epub"));
-    }
-    // The app (spawned by tauri-driver) inherits these; production paths are unaffected.
-    process.env.TEST_DATABASE_PATH = path.join(scratch, "tuxbooks.db");
-    process.env.TEST_LIBRARY_PATH = libraryDir;
-
-    driver = spawn(
-      "tauri-driver",
-      ["--port", String(DRIVER_PORT), "--native-port", String(NATIVE_PORT)],
-      { stdio: "inherit", env: process.env },
-    );
-    driver.on("error", (err) => {
-      throw new Error(`failed to start tauri-driver: ${err.message}`);
-    });
+    // Unique scratch dir per run; stale processes cleared first. Runs before
+    // the service spawns tauri-driver, so the env below reaches the app.
+    prepareEnvironment(appBinary, process.env.E2E_SEED_LIBRARY === "1");
   },
+
+  afterTest(test, _context, result) {
+    if (result.passed) return;
+    // Screenshot-only-on-failure debugging aid; no visual baselines. Best
+    // effort: the screenshot itself fails when the app died.
+    const sanitized = test.title.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 80);
+    try {
+      browser.saveScreenshot(path.join(artifactsDir, `${runId}-${sanitized}.png`));
+    } catch (err) {
+      console.warn(`[e2e] failure screenshot unavailable: ${err}`);
+    }
+  },
+
   onComplete() {
-    driver?.kill();
-    rmSync(scratch, { recursive: true, force: true });
+    teardownEnvironment();
+    // User onComplete hooks run before the service's, so the watchdog is
+    // armed regardless of how service teardown goes. It reaps the app or
+    // driver if either outlives the run (they hold the stdout pipe) and
+    // SIGKILLs this process if teardown wedges past 45s.
+    armTeardownWatchdog(appBinary);
   },
 };

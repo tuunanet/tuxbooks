@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate tests/fixtures/books/minimal.epub — a tiny valid EPUB 3 fixture.
+"""Generate tests/fixtures/books/minimal.epub and minimal.pdf — tiny valid
+book fixtures.
 
 Deterministic: fixed timestamps and ordering, safe to commit to Git.
 The book content is original placeholder text (no copyrighted material).
@@ -10,7 +11,9 @@ import zlib
 import struct
 from pathlib import Path
 
-FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "books" / "minimal.epub"
+FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "books"
+EPUB_FIXTURE = FIXTURES / "minimal.epub"
+PDF_FIXTURE = FIXTURES / "minimal.pdf"
 
 MIMETYPE = "application/epub+zip"
 
@@ -108,11 +111,49 @@ def tiny_png() -> bytes:
         + chunk(b"IEND", b"")
     )
 
-def main() -> None:
-    FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+def build_pdf() -> bytes:
+    """Minimal but structurally valid PDF: catalog, one page, and an Info
+    dictionary with the metadata the library indexes. Byte-identical on
+    every run (no timestamps), so the imported book id stays stable."""
+
+    def info_entry(key: str, value: str) -> str:
+        escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+        return f"/{key} ({escaped})"
+
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+        " ".join(
+            [
+                "<<",
+                info_entry("Title", "A Minimal Manual"),
+                info_entry("Author", "Grace Hopper"),
+                info_entry("Subject", "A tiny PDF used as a test fixture."),
+                ">>",
+            ]
+        ),
+    ]
+
+    pdf = "%PDF-1.4\n"
+    offsets = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += f"{index} 0 obj\n{body}\nendobj\n"
+
+    xref_offset = len(pdf)
+    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    for offset in offsets:
+        pdf += f"{offset:010} 00000 n \n"
+    pdf += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info 4 0 R >>\n"
+    pdf += f"startxref\n{xref_offset}\n%%EOF\n"
+    return pdf.encode("ascii")
+
+
+def write_epub() -> None:
     stamp = (2024, 1, 1, 0, 0, 0)
 
-    with zipfile.ZipFile(FIXTURE, "w") as zf:
+    with zipfile.ZipFile(EPUB_FIXTURE, "w") as zf:
         info = zipfile.ZipInfo("mimetype", date_time=stamp)
         info.compress_type = zipfile.ZIP_STORED
         zf.writestr(info, MIMETYPE)
@@ -133,7 +174,18 @@ def main() -> None:
         info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(info, tiny_png())
 
-    print(f"wrote {FIXTURE} ({FIXTURE.stat().st_size} bytes)")
+    print(f"wrote {EPUB_FIXTURE} ({EPUB_FIXTURE.stat().st_size} bytes)")
+
+
+def write_pdf() -> None:
+    PDF_FIXTURE.write_bytes(build_pdf())
+    print(f"wrote {PDF_FIXTURE} ({PDF_FIXTURE.stat().st_size} bytes)")
+
+
+def main() -> None:
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    write_epub()
+    write_pdf()
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-describe("tuxbooks library import", () => {
+describe("tuxbooks library navigation", () => {
   // WebKitGTK's WebDriver getText walks the accessibility tree, which omits
   // text inside line-clamp/truncate boxes (book titles, reader title). Where
   // those classes apply, assert on DOM textContent instead of toHaveText.
@@ -10,57 +10,77 @@ describe("tuxbooks library import", () => {
     }, testId);
   }
 
-  it("imports the test library on startup and displays the book", async () => {
+  async function waitForLibraryView(): Promise<void> {
     // Re-query on every poll: a reference captured during startup can go
     // stale on WebKit when the library mounts, and isDisplayed would then
-    // report false forever even though the card is on screen.
+    // report false forever even though the view is on screen.
     await browser.waitUntil(
       async () => {
-        const card = await $("[data-testid=book-card]");
-        return (await card.isExisting()) && (await card.isDisplayed());
+        const view = await $("[data-testid=library-view]");
+        return (await view.isExisting()) && (await view.isDisplayed());
       },
-      { timeout: 30000, timeoutMsg: "book card never became visible" },
+      { timeout: 30000, timeoutMsg: "library view never became visible" },
     );
+  }
 
-    const cardText = await textOf("book-card");
-    await expect(cardText).toContain("A Minimal Book");
-    await expect(cardText).toContain("Ada Lovelace");
-  });
-
-  it("shows the library stats reported by the backend", async () => {
-    const stats = await $("[data-testid=library-stats]");
-    await stats.waitForDisplayed({ timeout: 30000 });
-    await expect(stats).toHaveText(expect.stringContaining("1 book"));
-  });
-
-  it("opens the book detail from the library and returns", async () => {
-    const card = await $("[data-testid=book-card]");
+  /** Book cards expose `aria-label="{title} ({FORMAT})"` — open by name. */
+  async function openBookFromLibrary(ariaLabel: string): Promise<void> {
+    await waitForLibraryView();
+    const card = await $(`[aria-label="${ariaLabel}"]`);
     await card.waitForDisplayed({ timeout: 30000 });
-
     await card.doubleClick();
-    const detail = await $("[data-testid=book-detail]");
-    await detail.waitForDisplayed({ timeout: 30000 });
-    await expect(detail).toHaveText(expect.stringContaining("A Minimal Book"));
+  }
+
+  // Test B — the library shows both fixture formats with the sidebar up.
+  it("shows All Books with the fixture EPUB and the fixture PDF", async () => {
+    await waitForLibraryView();
+
+    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
+    await expect($("button=All Books")).toBeDisplayed();
+
+    const cards = await $$("[data-testid=book-card]");
+    expect(cards.length).toBe(2);
+
+    const cardTexts = await browser.execute(() => {
+      return Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]")).map(
+        (card) => card.textContent ?? "",
+      );
+    });
+    const allText = cardTexts.join("\n");
+    expect(allText).toContain("A Minimal Book");
+    expect(allText).toContain("A Minimal Manual");
+
+    await expect(await textOf("library-stats")).toContain("2 books");
+  });
+
+  // Test C — detail view with title and format for the EPUB fixture.
+  it("opens the EPUB detail view showing title and format", async () => {
+    await openBookFromLibrary("A Minimal Book (EPUB)");
+
+    await $("[data-testid=book-detail]").waitForDisplayed({ timeout: 30000 });
+    await expect(await textOf("detail-title")).toContain("A Minimal Book");
+    await expect(await textOf("detail-facts")).toContain("EPUB");
 
     await $("[data-testid=detail-back]").click();
-    await expect($("[data-testid=library-view]")).toBeDisplayed();
+    await waitForLibraryView();
   });
 
-  it("enters the reader from the detail view with the sidebar hidden", async () => {
-    const card = await $("[data-testid=book-card]");
-    await card.waitForDisplayed({ timeout: 30000 });
+  // Test D — the PDF fixture opens the reader shell: toolbar visible,
+  // library sidebar gone. Rendering itself stays a placeholder.
+  it("opens the PDF in the reader shell with the sidebar hidden", async () => {
+    await openBookFromLibrary("A Minimal Manual (PDF)");
 
-    await card.doubleClick();
     await $("[data-testid=book-detail]").waitForDisplayed({ timeout: 30000 });
     await $("[data-testid=detail-continue]").click();
 
-    const reader = await $("[data-testid=reader-view]");
-    await reader.waitForDisplayed({ timeout: 30000 });
-    await expect(await textOf("reader-title")).toContain("A Minimal Book");
+    await $("[data-testid=reader-view]").waitForDisplayed({ timeout: 30000 });
+    await expect(await textOf("reader-title")).toContain("A Minimal Manual");
+    await expect($("[data-testid=pdf-reader]")).toBeDisplayed();
+    await expect($("[data-testid=reader-back]")).toBeDisplayed();
     await expect($("[data-testid=sidebar]")).not.toExist();
 
     await $("[data-testid=reader-back]").click();
     await expect($("[data-testid=app-shell]")).toBeDisplayed();
-    await expect($("[data-testid=sidebar]")).toBeDisplayed();
+    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
   });
 });

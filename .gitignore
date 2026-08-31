@@ -17,6 +17,9 @@ target/
 e2e/.tmp/
 .e2e-tmp/
 
+# E2E failure artifacts (screenshots, logs)
+artifacts/
+
 # Coverage
 coverage/
 

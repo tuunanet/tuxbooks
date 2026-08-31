@@ -25,8 +25,10 @@ build:
     pnpm tauri build
 
 # Build an un-bundled debug binary with embedded assets (used by E2E).
+# VITE_WDIO=1 bundles the @wdio/tauri-plugin frontend bridge; every other
+# build tree-shakes it out.
 build-debug:
-    pnpm --filter frontend build
+    VITE_WDIO=1 pnpm --filter frontend build
     cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
 test: test-rust test-frontend
@@ -37,16 +39,36 @@ test-rust: frontend-dist
 test-frontend:
     pnpm --filter frontend test:ci
 
-# E2E needs a built binary; both phases run isolated scratch environments.
+# E2E runs the real desktop app against WebdriverIO. Headless by default:
+# on Linux each phase runs under a private Xvfb. `env -u WAYLAND_DISPLAY` is
+# essential: xvfb-run only overrides DISPLAY, and a GTK3 app launched from a
+# Wayland session otherwise prefers the (inherited) WAYLAND_DISPLAY and pops
+# up on the real desktop instead of the virtual framebuffer. GDK_BACKEND=x11
+# pins the choice. timeout is the last-resort guard so an agent invocation
+# always terminates (healthy phases finish in well under a minute).
+_headless := if os() == "linux" { "env -u WAYLAND_DISPLAY GDK_BACKEND=x11 xvfb-run --auto-servernum" } else { "" }
+_e2e_timeout := "timeout --kill-after=15 600"
+
 test-e2e: build-debug
     just test-e2e-empty
     just test-e2e-seeded
 
 test-e2e-empty:
-    E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
 
 test-e2e-seeded:
-    E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# Same suites on the developer's real display, for visual debugging.
+test-e2e-headed: build-debug
+    just test-e2e-headed-empty
+    just test-e2e-headed-seeded
+
+test-e2e-headed-empty:
+    env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
+
+test-e2e-headed-seeded:
+    env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
 lint:
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings

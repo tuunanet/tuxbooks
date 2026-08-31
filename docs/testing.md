@@ -34,43 +34,99 @@ Four layers, all runnable locally via `just`:
   Tests never require a running Tauri app.
 - `tests/factories.ts::makeBook` builds canonical `Book` fixtures.
 
-## E2E (WebdriverIO + tauri-driver)
+## E2E (WebdriverIO + @wdio/tauri-service)
 
-`just test-e2e` runs two isolated invocations against the debug binary
-built by `just build-debug` (`cargo build --features custom-protocol` —
-the feature embeds the frontend assets; without it a debug binary would
-try to load the Vite dev server):
+`just test-e2e` runs the **real desktop app** headlessly — no display, no
+desktop session, safe from SSH/CI/agent environments. `just test-e2e-headed`
+runs the same suites on your visible display for debugging.
 
-1. `test:empty` — fresh scratch dir; asserts app shell, window title,
-   the empty-library state, and navigation to Settings and back.
-2. `test:seeded` (`E2E_SEED_LIBRARY=1`) — copies
-   `tests/fixtures/books/minimal.epub` into the scratch library before
-   launch; the app imports it on startup; asserts the book card and the
-   "1 book" stats line, then walks the smoke flow Library → Detail
-   (double click) → Reader (Continue Reading, sidebar hidden) → back to
-   the library.
+Stack: `@wdio/tauri-service` → external `tauri-driver` → WebKitWebDriver →
+the debug binary built by `just build-debug` (`cargo build --features
+custom-protocol` + `VITE_WDIO=1` frontend build; without the feature a
+debug binary would load the Vite dev server instead of embedded assets).
 
-Isolation mechanics (`e2e/wdio.conf.ts`):
+Two isolated invocations per run:
 
-- `onPrepare` kills stale app instances from previous runs (the app can
-  outlive `tauri-driver`, and a leftover instance would grab the new
-  automation session), wipes `e2e/.tmp/run`, seeds the library if
-  requested, and sets `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` in
-  `process.env` **before** spawning `tauri-driver` (the app inherits the
-  driver's environment). Production paths are never used.
-- Ports: 4444 = WebDriver endpoint WebdriverIO connects to; 4445 =
-  tauri-driver ↔ WebKitWebDriver relay. `wdio:enforceWebDriverClassic`
-  is set because WebKitWebDriver has no BiDi support.
-- User libraries are never scanned; E2E only sees the scratch dir.
+1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
+   sidebar, window title, the empty-library state, and Settings navigation.
+2. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies
+   `minimal.epub` + `minimal.pdf` into the scratch library; the app imports
+   both on startup; asserts both cards, the "2 books" stats line, the EPUB
+   detail view (title + format), and the PDF reader shell (toolbar visible,
+   sidebar hidden).
+
+### Headless on Linux (Xvfb)
+
+On Linux the justfile wraps every phase in
+`env -u WAYLAND_DISPLAY GDK_BACKEND=x11 xvfb-run --auto-servernum`, which
+provisions a private virtual display for the whole invocation chain
+(driver + app inherit it). Nothing needs `DISPLAY`, a window manager, or a
+logged-in session. The equivalent manual invocation is:
+
+```sh
+env -u WAYLAND_DISPLAY GDK_BACKEND=x11 xvfb-run --auto-servernum \
+  env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+```
+
+The `env -u WAYLAND_DISPLAY` part is **not optional on Wayland desktops**:
+`xvfb-run` only overrides `DISPLAY`, but a GTK3 app launched with
+`WAYLAND_DISPLAY` still in its environment prefers the Wayland compositor —
+the test window then pops up on the real screen while Xvfb sits unused
+(tests still pass, since WebDriver automation is display-independent).
+`GDK_BACKEND=x11` pins the choice.
+
+Why not WebdriverIO's built-in `autoXvfb`: it only wraps wdio _worker_
+processes, but with `maxInstances: 1` the tauri-service spawns tauri-driver
+from the _launcher_ process, which would never see the virtual display.
+Wrapping the whole invocation is the explicit, reliable mechanism.
+Alternatives considered: the `embedded` driver provider (WebDriver server
+compiled into the app via `tauri-plugin-wdio-webdriver`) removes tauri-driver
+and WebKitWebDriver entirely but swaps the battle-tested WebKitWebDriver for
+a newer in-app implementation; the external provider keeps the proven path.
+
+Linux prerequisites (Debian/Ubuntu):
+
+```sh
+sudo apt install xvfb webkit2gtk-driver   # Xvfb + WebKitWebDriver
+cargo install tauri-driver                # WebDriver relay (~/.cargo/bin)
+```
+
+### Isolation, cleanup, termination
+
+Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
+`fixtures.ts` paths, `watchdog.mjs` termination guard):
+
+- Each invocation gets a unique scratch dir under `$TMPDIR`
+  (`/tmp/tuxbooks-e2e-<runId>/`): its own SQLite database, library dir, and
+  seeded fixtures. Nothing ever reads a real user library; production
+  app-data paths are only used when `TEST_DATABASE_PATH`/`TEST_LIBRARY_PATH`
+  are unset.
+- `onPrepare` (before the service spawns anything) kills stale app and
+  `tauri-driver` processes left by crashed runs — a leftover app would grab
+  the new automation session. Driver ports are probed and picked free by the
+  service, so stale listeners cannot collide.
+- The Tauri app can outlive `tauri-driver`; a detached watchdog
+  (`watchdog.mjs`, armed in `onComplete`) reaps leftover app/driver
+  processes once the run finishes and SIGKILLs a wedged launcher after 45s.
+  Each phase is additionally bounded by `timeout --kill-after=15 600` in the
+  justfile, so `just test-e2e` always terminates and always returns a
+  meaningful exit code.
+- Failed tests capture a screenshot into `artifacts/e2e/<runId>/`
+  (gitignored, pruned after 7 days) next to the per-run wdio/driver logs;
+  backend and frontend console logs are forwarded into those logs by
+  `tauri-plugin-wdio` (debug builds only — the plugin is registered under
+  `#[cfg(debug_assertions)]` and tree-shaken from release bundles).
 - WebKitGTK quirk: WebDriver `getText` walks the accessibility tree and
-  omits text inside `line-clamp`/`truncate` boxes, so specs assert on
-  DOM `textContent` for book and reader titles.
+  omits text inside `line-clamp`/`truncate` boxes, so specs assert on DOM
+  `textContent` for book and reader titles.
+- Do not run two E2E invocations concurrently on the same machine: the
+  stale-process sweep intentionally kills matching app/driver processes.
 
 ## Test data rules
 
 - Fixtures are committed under `tests/fixtures/books/` and generated by
-  `scripts/make-fixture.py` (original content only — no copyrighted
-  books, ever).
+  `scripts/make-fixture.py` (`minimal.epub` and `minimal.pdf`; original
+  content only — no copyrighted books, ever).
 - Exception: `tests/fixtures/books/EBooks/` holds a real user-created
   library (real copyrighted files). It is gitignored and must never be
   committed. `src-tauri/tests/realistic_library.rs` runs against it and
