@@ -91,7 +91,7 @@ describe("BookCard", () => {
     await screen.findByRole("menuitem", { name: "Open" });
 
     for (const name of [
-      "Add to Collection",
+      "Remove from Collection",
       "Mark as Finished",
       "Edit Metadata",
       "Show in File Manager",
@@ -104,5 +104,17 @@ describe("BookCard", () => {
     expect(open).not.toHaveAttribute("aria-disabled");
     const continueReading = screen.getByRole("menuitem", { name: "Continue Reading" });
     expect(continueReading).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("shows the add-to-collection submenu as an honest shell", async () => {
+    render(<BookCard book={makeBook()} />);
+
+    fireEvent.contextMenu(screen.getByTestId("book-card"));
+    const trigger = await screen.findByRole("menuitem", { name: "Add to Collection" });
+    expect(trigger).not.toHaveAttribute("aria-disabled");
+
+    await userEvent.click(trigger);
+    const noCollections = await screen.findByRole("menuitem", { name: "No collections yet" });
+    expect(noCollections).toHaveAttribute("aria-disabled", "true");
   });
 });

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { CollectionDialog } from "@/components/collections/CollectionDialog";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
 
@@ -55,6 +57,8 @@ function ItemButton({ active, onClick, children, disabled, title }: ItemButtonPr
 }
 
 export function Sidebar({ active, onSectionChange }: SidebarProps) {
+  const [createOpen, setCreateOpen] = useState(false);
+
   return (
     <aside data-testid="sidebar" className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4">
       <div className="mb-5 px-3">
@@ -91,14 +95,7 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
         <div>
           <GroupLabel>Collections</GroupLabel>
           <div className="flex flex-col gap-0.5">
-            <ItemButton
-              active={false}
-              disabled
-              title="Collections will be connected to the Rust backend"
-              onClick={() => undefined}
-            >
-              + New Collection
-            </ItemButton>
+            <CollectionDialog open={createOpen} onOpenChange={setCreateOpen} />
           </div>
           <p className="mt-2 px-3 text-xs text-muted-foreground">No collections yet</p>
         </div>

@@ -3,6 +3,7 @@ import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
 import { ReaderShell } from "@/components/reader/ReaderShell";
+import { SettingsShell } from "@/components/settings/SettingsShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
 import { useAppDispatch, useAppState, type AppState } from "@/state/appState";
@@ -21,20 +22,14 @@ function GlobalSearchShortcut() {
   return null;
 }
 
-function SettingsPlaceholder() {
-  return (
-    <section data-testid="settings-view">
-      <h2 className="text-2xl font-semibold">Settings</h2>
-      <p className="mt-2 text-muted-foreground">Settings are not implemented yet.</p>
-    </section>
-  );
-}
-
 function CollectionsPlaceholder() {
   return (
     <section data-testid="collections-view">
       <h2 className="text-2xl font-semibold">Collections</h2>
-      <p className="mt-2 text-muted-foreground">Collections are not implemented yet.</p>
+      <p className="mt-2 text-muted-foreground">
+        Collections are not connected to the backend yet — create one from the sidebar once import
+        support lands.
+      </p>
     </section>
   );
 }
@@ -72,7 +67,7 @@ function Shell() {
         {app.view === "detail" ? (
           <BookDetail />
         ) : app.section.kind === "settings" ? (
-          <SettingsPlaceholder />
+          <SettingsShell />
         ) : app.section.kind === "collection" ? (
           <CollectionsPlaceholder />
         ) : (

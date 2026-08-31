@@ -64,11 +64,15 @@ describe("Sidebar", () => {
     expect(onSectionChange).toHaveBeenCalledWith({ kind: "settings" });
   });
 
-  it("shows the new-collection action as an honest disabled placeholder", () => {
+  it("opens the create-collection dialog as an honest shell", async () => {
     renderSidebar(vi.fn());
 
-    const button = screen.getByRole("button", { name: "+ New Collection" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(/rust backend/i);
+    await userEvent.click(screen.getByTestId("new-collection-button"));
+
+    const dialog = await screen.findByTestId("collection-dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByTestId("collection-name")).toBeInTheDocument();
+    expect(screen.getByTestId("collection-create")).toBeDisabled();
+    expect(screen.getByTestId("collection-create")).toHaveAccessibleDescription(/rust backend/i);
   });
 });

@@ -87,6 +87,8 @@ frontend/src/
         books/            BookCard, BookListItem, BookDetail, book context menu
         search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
         reader/           ReaderShell, EPUB/PDF placeholder surfaces, navigation, appearance
+        collections/      CollectionDialog (creation shell, not backend-wired yet)
+        settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
 

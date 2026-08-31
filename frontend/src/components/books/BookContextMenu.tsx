@@ -4,6 +4,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import type { Book } from "@/types/domain";
@@ -17,8 +20,9 @@ interface BookContextMenuProps {
 
 /**
  * Right-click actions for a book. Only Open (book detail) and Continue
- * Reading (reader) have a real flow behind them; the rest stay disabled
- * until their backend commands exist — no pretend-success actions.
+ * Reading (reader) have a real flow behind them. The collection entries are
+ * submenu shells: the structure is real, the persistence is not, and the
+ * disabled entries say so instead of pretending.
  */
 export function BookContextMenu({ book, onOpen, onRead, children }: BookContextMenuProps) {
   return (
@@ -32,8 +36,26 @@ export function BookContextMenu({ book, onOpen, onRead, children }: BookContextM
           Continue Reading
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled title="Collections are not connected to the backend yet">
-          Add to Collection
+        <ContextMenuSub>
+          <ContextMenuSubTrigger data-testid="context-add-to-collection">
+            Add to Collection
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            <ContextMenuItem
+              disabled
+              title="Collections are not connected to the backend yet"
+              data-testid="context-no-collections"
+            >
+              No collections yet
+            </ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuItem
+          disabled
+          title="Collections are not connected to the backend yet"
+          data-testid="context-remove-from-collection"
+        >
+          Remove from Collection
         </ContextMenuItem>
         <ContextMenuItem disabled title="Reading-progress persistence is not wired up yet">
           Mark as Finished
