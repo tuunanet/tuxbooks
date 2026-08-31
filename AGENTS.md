@@ -140,15 +140,6 @@ not launch a second E2E run while one is still going.
   cases).
 - TypeScript is strict; `any` is banned via lint rule.
 
-## Commits
-
-- Conventional Commits, required: `type: imperative subject` (e.g. `feat: add
-reading progress command`, `fix: keep FTS index in sync on book update`,
-  `test:`, `docs:`, `refactor:`, `chore:`). Scope optional; use the layer as
-  scope when helpful (`feat(rust):`, `fix(frontend):`).
-- Nothing enforces this (no commitlint/husky) — do not commit until the message
-  conforms.
-
 ## Conventions
 
 - Rust: modules per the table in `docs/architecture.md`; errors via
@@ -159,3 +150,7 @@ reading progress command`, `fix: keep FTS index in sync on book update`,
   path alias for cross-directory imports.
 - Docs in `docs/` describe the architecture contract — update them when you
   change module boundaries, schema, or the EPUB layer.
+
+## Working documents
+
+- `docs/STANDARDS.md` describes coding standards.
