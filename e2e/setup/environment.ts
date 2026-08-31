@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import { epubFixture, pdfFixture, repoRoot } from "./fixtures.js";
+import { epubFixture, largePdfFixture, mixedPdfFixture, pdfFixture, repoRoot } from "./fixtures.js";
 
 /** Unique per invocation; the launcher sets it and workers inherit it. */
 process.env.E2E_RUN_ID ??= `${process.env.E2E_PHASE ?? "run"}-${new Date()
@@ -75,6 +75,8 @@ export function prepareEnvironment(appBinary: string, seeded: boolean): void {
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
+    copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
+    copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
   }
 
   // The app (spawned by tauri-driver) inherits these; production paths are

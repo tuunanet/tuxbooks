@@ -111,15 +111,14 @@ def tiny_png() -> bytes:
         + chunk(b"IEND", b"")
     )
 
-def build_pdf() -> bytes:
-    """Deterministic three-page PDF for the reader slice: catalog, page tree,
-    Info dictionary, one page object + one content stream per page, and a
-    standard Helvetica font. Each page draws a filled rectangle and two text
-    lines ("Tuxbooks PDF Fixture" / "Page N of 3") so a rendered canvas is
-    visibly non-blank. Byte-identical on every run (no timestamps), so the
-    imported book id stays stable."""
-
-    PDF_PAGE_COUNT = 3
+def build_pdf(pages: list[dict], title: str, subject: str) -> bytes:
+    """Deterministic multi-page PDF: catalog, page tree, Info dictionary, one
+    page object + one content stream per page, and a standard Helvetica font.
+    Each entry of `pages` is {"mediabox": (x0, y0, w, h), "label": str}; every
+    page draws a filled rectangle and two text lines ("Tuxbooks PDF Fixture"
+    and the label) so a rendered canvas is visibly non-blank on any page size.
+    Byte-identical on every run (no timestamps), so imported book ids stay
+    stable."""
 
     def pdf_string(value: str) -> str:
         escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
@@ -128,20 +127,21 @@ def build_pdf() -> bytes:
     def info_entry(key: str, value: str) -> str:
         return f"/{key} {pdf_string(value)}"
 
-    def page_stream(number: int) -> bytes:
+    def page_stream(label: str, height: float) -> bytes:
         content = "\n".join(
             [
                 "0.20 0.47 0.79 rg",
-                "72 600 216 144 re f",
+                f"72 {height - 192:.0f} 216 144 re f",
                 "0 0 0 rg",
-                f"BT /F1 40 Tf 72 520 Td {pdf_string('Tuxbooks PDF Fixture')} Tj ET",
-                f"BT /F1 28 Tf 72 460 Td {pdf_string(f'Page {number} of {PDF_PAGE_COUNT}')} Tj ET",
+                f"BT /F1 40 Tf 72 {height - 272:.0f} Td {pdf_string('Tuxbooks PDF Fixture')} Tj ET",
+                f"BT /F1 28 Tf 72 {height - 332:.0f} Td {pdf_string(label)} Tj ET",
             ]
         )
         return content.encode("ascii")
 
-    first_page, last_page = 4, 4 + PDF_PAGE_COUNT - 1
-    first_stream, last_stream = last_page + 1, last_page + PDF_PAGE_COUNT
+    page_count = len(pages)
+    first_page, last_page = 4, 4 + page_count - 1
+    first_stream, last_stream = last_page + 1, last_page + page_count
     font_object = last_stream + 1
 
     objects: list[bytes | str] = [
@@ -150,32 +150,34 @@ def build_pdf() -> bytes:
             [
                 "<< /Type /Pages",
                 f"/Kids [{' '.join(f'{page} 0 R' for page in range(first_page, last_page + 1))}]",
-                f"/Count {PDF_PAGE_COUNT} >>",
+                f"/Count {page_count} >>",
             ]
         ),
         " ".join(
             [
                 "<<",
-                info_entry("Title", "A Minimal Manual"),
+                info_entry("Title", title),
                 info_entry("Author", "Grace Hopper"),
-                info_entry("Subject", "A tiny PDF used as a test fixture."),
+                info_entry("Subject", subject),
                 ">>",
             ]
         ),
     ]
-    for number in range(1, PDF_PAGE_COUNT + 1):
+    for index, page in enumerate(pages, start=1):
+        _, _, width, height = page["mediabox"]
         objects.append(
             " ".join(
                 [
                     "<< /Type /Page /Parent 2 0 R",
-                    "/MediaBox [0 0 612 792]",
+                    f"/MediaBox [{' '.join(str(coord) for coord in page['mediabox'])}]",
                     f"/Resources << /Font << /F1 {font_object} 0 R >> >>",
-                    f"/Contents {first_stream + number - 1} 0 R >>",
+                    f"/Contents {first_stream + index - 1} 0 R >>",
                 ]
             )
         )
-    for number in range(1, PDF_PAGE_COUNT + 1):
-        stream = page_stream(number)
+    for page in pages:
+        _, _, _, height = page["mediabox"]
+        stream = page_stream(page["label"], height)
         objects.append((f"<< /Length {len(stream)} >>", stream))
     objects.append(
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
@@ -232,15 +234,38 @@ def write_epub() -> None:
     print(f"wrote {EPUB_FIXTURE} ({EPUB_FIXTURE.stat().st_size} bytes)")
 
 
-def write_pdf() -> None:
-    PDF_FIXTURE.write_bytes(build_pdf())
-    print(f"wrote {PDF_FIXTURE} ({PDF_FIXTURE.stat().st_size} bytes)")
+def uniform_pages(count: int, width: float = 612, height: float = 792) -> list[dict]:
+    return [
+        {"mediabox": (0, 0, width, height), "label": f"Page {number} of {count}"}
+        for number in range(1, count + 1)
+    ]
+
+
+# Mixed page sizes exercise per-page geometry: portrait, landscape, tall,
+# square, A4, and a small page. Widths stay within the reader viewport at
+# 100% zoom so no horizontal scrolling is needed to see them fully.
+MIXED_PAGE_SIZES = [(612, 792), (792, 612), (420, 1008), (500, 500), (595, 842), (360, 504)]
+
+
+def write_pdf(path: Path, pages: list[dict], title: str, subject: str) -> None:
+    path.write_bytes(build_pdf(pages, title, subject))
+    print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 
 def main() -> None:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     write_epub()
-    write_pdf()
+    write_pdf(PDF_FIXTURE, uniform_pages(3), "A Minimal Manual", "A tiny PDF used as a test fixture.")
+    write_pdf(FIXTURES / "large.pdf", uniform_pages(100), "A Large Fixture", "A 100-page PDF used to verify virtualized rendering.")
+    write_pdf(
+        FIXTURES / "mixed.pdf",
+        [
+            {"mediabox": (0, 0, width, height), "label": f"Page {number} of {len(MIXED_PAGE_SIZES)}"}
+            for number, (width, height) in enumerate(MIXED_PAGE_SIZES, start=1)
+        ],
+        "Odd Sizes",
+        "A PDF with varying page dimensions.",
+    )
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,7 @@ import { useReader } from "@/state/readerState";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
+import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfToolbar } from "./PdfToolbar";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
@@ -11,6 +12,9 @@ import type { Book } from "@/types/domain";
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2] as const;
 const DEFAULT_ZOOM_INDEX = 2;
+
+/** Upper bound on simultaneously active page canvases (the render budget). */
+const MAX_ACTIVE_CANVASES = 8;
 
 interface PdfReaderProps {
   book: Book;
@@ -36,6 +40,7 @@ export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
     error,
   } = usePdfDocument(book.id, onDocumentLoad);
   const { sizes, measurePages } = usePdfGeometry(pdfDocument, pageCount);
+  const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
 
   const [zoomIndex, setZoomIndex] = useState<number>(DEFAULT_ZOOM_INDEX);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
@@ -51,13 +56,25 @@ export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
     [sizes, zoom],
   );
 
-  // Measure the pages around the reading position so slot estimates become
-  // real dimensions before the reader reaches them (lazy geometry
-  // correction). Visibility-driven measurement extends this in Phase 2.
+  // The bounded render set: the current page first (it must always render,
+  // even far from any scroll event), then visible pages, then preloading
+  // pages — closest to the reading position first, capped at the budget.
+  // Distant pages keep only their geometry slots; their canvases are gone.
+  const renderPages = useMemo(() => {
+    const candidates = new Set<number>([currentPage]);
+    for (const page of visiblePages) candidates.add(page);
+    for (const page of preloadPages) candidates.add(page);
+    return [...candidates]
+      .sort((a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage))
+      .slice(0, MAX_ACTIVE_CANVASES);
+  }, [currentPage, visiblePages, preloadPages]);
+
+  // Measure pages as they approach visibility so slot estimates become real
+  // dimensions before their canvases render (lazy geometry correction).
   useEffect(() => {
-    if (!layoutReady) return;
-    measurePages([currentPage - 1, currentPage, currentPage + 1]);
-  }, [layoutReady, measurePages, currentPage]);
+    if (!layoutReady || (visiblePages.size === 0 && preloadPages.size === 0)) return;
+    measurePages([...visiblePages, ...preloadPages]);
+  }, [layoutReady, measurePages, visiblePages, preloadPages]);
 
   // Keep the named page visible when the position changes from outside the
   // document (keyboard navigation, drawer jumps) — and re-anchor after zoom
@@ -152,13 +169,15 @@ export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
       <PdfDocumentView
         document={pdfDocument}
         slots={slots}
-        activePage={currentPage}
+        renderPages={renderPages}
+        anchorPage={currentPage}
         scale={zoom}
         renderedPages={renderedPages}
         failedPages={failedPages}
         onPageRendered={handlePageRendered}
         onPageError={handlePageError}
-        registerActiveSlot={registerActiveSlot}
+        registerSlot={registerSlot}
+        registerAnchorSlot={registerActiveSlot}
       />
     </div>
   );

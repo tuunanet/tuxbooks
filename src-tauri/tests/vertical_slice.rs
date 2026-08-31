@@ -11,12 +11,16 @@ use tuxbooks_lib::services::book_importer::import_directory;
 use tuxbooks_lib::services::reader::load_book_file;
 use tuxbooks_lib::services::search::search_books;
 
-fn fixture_epub() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books/minimal.epub")
+fn fixture_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books")
 }
 
-fn fixture_pdf() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books/minimal.pdf")
+fn fixture_epub() -> PathBuf {
+    fixture_dir().join("minimal.epub")
+}
+
+fn fixture_pdf(name: &str) -> PathBuf {
+    fixture_dir().join(name)
 }
 
 #[tokio::test]
@@ -95,28 +99,26 @@ async fn malformed_epub_is_reported_and_does_not_break_the_library() -> anyhow::
     Ok(())
 }
 
-/// Reader slice: the fixture PDF imports through the same stack the app uses
-/// and its bytes are served back verbatim for the frontend PDF.js engine.
+/// Reader slice: every committed fixture PDF imports through the same stack
+/// the app uses and its bytes are served back verbatim for the frontend
+/// PDF.js engine (lopdf must parse them all).
 #[tokio::test]
-async fn fixture_pdf_imports_and_serves_its_bytes() -> anyhow::Result<()> {
-    let tmp = tempfile::tempdir()?;
-    let library = tmp.path().join("library");
-    std::fs::create_dir_all(&library)?;
-    std::fs::copy(fixture_pdf(), library.join("minimal.pdf"))?;
+async fn fixture_pdfs_import_and_serve_their_bytes() -> anyhow::Result<()> {
+    for name in ["minimal.pdf", "large.pdf", "mixed.pdf"] {
+        let tmp = tempfile::tempdir()?;
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library)?;
+        std::fs::copy(fixture_pdf(name), library.join(name))?;
 
-    let pool = init_pool(&tmp.path().join("t.db")).await?;
-    let report = import_directory(&pool, &library, &tmp.path().join("covers")).await?;
-    assert_eq!(report.imported, 1, "fixture should import: {report:?}");
-    assert!(
-        report.failed.is_empty(),
-        "lopdf must parse the committed fixture"
-    );
+        let pool = init_pool(&tmp.path().join("t.db")).await?;
+        let report = import_directory(&pool, &library, &tmp.path().join("covers")).await?;
+        assert_eq!(report.imported, 1, "{name} should import: {report:?}");
+        assert!(report.failed.is_empty(), "lopdf must parse {name}");
 
-    let book = &books::list_books(&pool).await?[0];
-    assert_eq!(book.title, "A Minimal Manual");
-
-    let expected = std::fs::read(fixture_pdf())?;
-    let served = load_book_file(&pool, book.id).await?;
-    assert_eq!(served, expected);
+        let book = &books::list_books(&pool).await?[0];
+        let expected = std::fs::read(fixture_pdf(name))?;
+        let served = load_book_file(&pool, book.id).await?;
+        assert_eq!(served, expected);
+    }
     Ok(())
 }

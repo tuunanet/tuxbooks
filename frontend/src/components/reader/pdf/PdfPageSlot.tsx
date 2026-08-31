@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { PAGE_GAP_PX, type LayoutSlot } from "./pdfLayout";
 
 /**
@@ -15,7 +15,7 @@ interface PdfPageSlotProps {
   state: PdfPageLifecycle;
   /** Slot content: the page canvas when active, nothing while unloaded. */
   children?: ReactNode;
-  /** Registers the slot element for scroll targeting (callback ref). */
+  /** Registers the slot element for visibility tracking and scroll targeting. */
   registerRef?: (element: HTMLDivElement | null) => void;
 }
 
@@ -26,9 +26,27 @@ interface PdfPageSlotProps {
  * scroll targets clear of the sticky toolbar.
  */
 export function PdfPageSlot({ slot, gapAbove, state, children, registerRef }: PdfPageSlotProps) {
+  // Callers pass fresh closures per render; forwarding them directly would
+  // re-run React's ref swap (null + element) on every render. The wrapper
+  // keeps React ref churn to actual mount/unmount events, and re-invokes
+  // the latest closure whenever it changes so consumers that depend on
+  // identity (e.g. the anchor slot handed to scroll targeting) stay current.
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const registerRefRef = useRef(registerRef);
+  useEffect(() => {
+    if (registerRefRef.current !== registerRef) {
+      registerRefRef.current = registerRef;
+      registerRefRef.current?.(elementRef.current);
+    }
+  });
+  const forwardRef = useCallback((element: HTMLDivElement | null) => {
+    elementRef.current = element;
+    registerRefRef.current?.(element);
+  }, []);
+
   return (
     <div
-      ref={registerRef}
+      ref={forwardRef}
       data-pdf-slot={slot.pageNumber}
       data-render-state={state}
       style={{

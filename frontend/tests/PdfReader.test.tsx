@@ -13,6 +13,7 @@ import { PdfReader } from "@/components/reader/pdf/PdfReader";
 import { closePdfDocument, openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
+import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 
@@ -20,6 +21,20 @@ const openDocumentMock = vi.mocked(openPdfDocument);
 const closeDocumentMock = vi.mocked(closePdfDocument);
 
 type EngineDocument = Awaited<ReturnType<typeof openPdfDocument>>;
+
+/** Fire a visibility change on the hook's visible-viewport observer. */
+function fireVisible(element: Element, isIntersecting: boolean): void {
+  const [visibleObserver] = intersectionObservers();
+  if (!visibleObserver) throw new Error("visible observer not created yet");
+  fireIntersection(visibleObserver, element, isIntersecting);
+}
+
+/** Fire a visibility change on the hook's preload observer. */
+function firePreload(element: Element, isIntersecting: boolean): void {
+  const [, preloadObserver] = intersectionObservers();
+  if (!preloadObserver) throw new Error("preload observer not created yet");
+  fireIntersection(preloadObserver, element, isIntersecting);
+}
 
 const pdfBook = makeBook({
   id: 7,
@@ -44,6 +59,14 @@ async function renderLoadedReader(props: { onDocumentLoad?: (count: number) => v
 
 function slot(pageNumber: number): HTMLElement | null {
   return document.querySelector(`[data-pdf-slot="${pageNumber}"]`);
+}
+
+/** Page numbers of the currently mounted canvases, sorted as strings. */
+function canvasPages(): string[] {
+  return screen
+    .getAllByTestId("pdf-canvas")
+    .map((canvas) => canvas.getAttribute("data-pdf-page") ?? "")
+    .sort();
 }
 
 beforeEach(() => {
@@ -76,9 +99,10 @@ describe("PdfReader loading", () => {
     expect(canvas).toHaveAttribute("height", "792");
     expect(canvas).toHaveAttribute("data-pdf-page", "1");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
-    // Scale-1 viewport calls, in order: geometry reference (page 1), page-1
-    // render, then the measurement window around the active page (page 2).
-    expect(doc.scales).toEqual([1, 1, 1]);
+    // Scale-1 viewport calls, in order: geometry reference (page 1), then
+    // the page-1 canvas render. Further pages measure when they approach
+    // visibility (see the virtualization suite).
+    expect(doc.scales).toEqual([1, 1]);
   });
 
   it("shows the loading state until the document and layout are ready", async () => {
@@ -122,14 +146,15 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    // The measurement window around the active page corrects page 2's
-    // estimate (612x792) to its real size; siblings keep theirs. The
-    // transient estimate state is a render race under jsdom and is covered
-    // by pdfLayout.test.ts instead of asserted here.
+    // Page 2 approaches visibility: the preload set measures it and mounts
+    // its canvas, and the slot corrects from the 612x792 estimate to the
+    // real landscape size while its siblings keep theirs.
+    firePreload(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveStyle({ width: "792px", height: "612px" }));
     expect(slot(1)).toHaveStyle({ width: "612px", height: "792px" });
     expect(slot(3)).toHaveStyle({ width: "612px", height: "792px" });
     expect(slot(2)?.style.marginTop).toBe("8px");
+    expect(canvasPages()).toEqual(["1", "2"]);
   });
 
   it("reports the loaded page count to the shell", async () => {
@@ -162,6 +187,63 @@ describe("PdfReader loading", () => {
     view.unmount();
 
     expect(closeDocumentMock).toHaveBeenCalledWith(doc);
+  });
+});
+
+describe("PdfReader virtualization", () => {
+  it("renders pages as they become visible and preloads the surroundings", async () => {
+    const doc = makeFakePdfDocument(100);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+
+    await renderLoadedReader();
+    // Before any intersection events, only the current page has a canvas.
+    expect(canvasPages()).toEqual(["1"]);
+
+    fireVisible(slot(2) as Element, true);
+    fireVisible(slot(3) as Element, true);
+    firePreload(slot(4) as Element, true);
+    firePreload(slot(5) as Element, true);
+
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3", "4", "5"]));
+    await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
+    expect(slot(50)).toHaveAttribute("data-render-state", "unloaded");
+    // Approaching pages are measured so their geometry is real before use.
+    expect(doc.getPage).toHaveBeenCalledWith(4);
+  });
+
+  it("evicts canvases once pages leave the preload window", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+
+    await renderLoadedReader();
+    fireVisible(slot(2) as Element, true);
+    firePreload(slot(3) as Element, true);
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3"]));
+
+    fireVisible(slot(2) as Element, false);
+    firePreload(slot(2) as Element, false);
+    fireVisible(slot(3) as Element, false);
+    firePreload(slot(3) as Element, false);
+
+    await waitFor(() => expect(canvasPages()).toEqual(["1"]));
+    // Evicted pages keep their reserved geometry as honest unloaded slots.
+    expect(slot(2)).toHaveAttribute("data-render-state", "unloaded");
+    expect(slot(2)).toHaveStyle({ height: "792px" });
+  });
+
+  it("caps active canvases at the render budget, closest pages first", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+
+    await renderLoadedReader();
+    for (let page = 1; page <= 20; page++) {
+      fireVisible(slot(page) as Element, true);
+    }
+
+    await waitFor(() => expect(canvasPages()).toHaveLength(8));
+    expect(canvasPages()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
+    expect(slot(20)).toHaveAttribute("data-render-state", "unloaded");
   });
 });
 

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useMemo } from "react";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
@@ -7,50 +7,45 @@ import type { LayoutSlot } from "./pdfLayout";
 interface PdfDocumentViewProps {
   document: PdfDocument;
   slots: LayoutSlot[];
-  /** The page the reading position currently names; it owns the canvas. */
-  activePage: number;
-  /** PDF.js render scale for the active page's canvas. */
+  /**
+   * Pages that should own a canvas right now, ordered by render priority
+   * (bounded by the reader's render budget). Every other page stays a
+   * geometry-only slot.
+   */
+  renderPages: number[];
+  /** The page the reading position names; its slot is the scroll target. */
+  anchorPage: number;
+  /** PDF.js render scale for the canvases. */
   scale: number;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
   onPageRendered: (pageNumber: number) => void;
   onPageError: (pageNumber: number, error: unknown) => void;
-  /** Registers the active page's slot element for scroll targeting. */
-  registerActiveSlot: (element: HTMLDivElement | null) => void;
+  registerSlot: (pageNumber: number, element: HTMLDivElement | null) => void;
+  /** Registers the anchor page's slot element for scroll targeting. */
+  registerAnchorSlot: (element: HTMLDivElement | null) => void;
 }
 
 /**
- * The continuous document surface: one lightweight slot per page (the whole
- * document reserves its space up front), with a canvas only on the active
- * page. Slot geometry comes from the layout layer; DOM flow reproduces it
- * exactly, so computed offsets and real offsets never disagree.
+ * The virtualized continuous document surface: one lightweight slot per page
+ * (the whole document reserves its space up front) with canvases only on the
+ * bounded render set. Slot geometry comes from the layout layer; DOM flow
+ * reproduces it exactly, so computed offsets and real offsets never disagree.
  */
 export function PdfDocumentView({
   document,
   slots,
-  activePage,
+  renderPages,
+  anchorPage,
   scale,
   renderedPages,
   failedPages,
   onPageRendered,
   onPageError,
-  registerActiveSlot,
+  registerSlot,
+  registerAnchorSlot,
 }: PdfDocumentViewProps) {
-  const canvasFor = useCallback(
-    (slot: LayoutSlot) => (
-      <PdfPageCanvas
-        document={document}
-        pageNumber={slot.pageNumber}
-        width={slot.width}
-        height={slot.height}
-        scale={scale}
-        onPageRendered={onPageRendered}
-        onPageError={onPageError}
-      />
-    ),
-    [document, scale, onPageRendered, onPageError],
-  );
-
+  const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
 
   return (
@@ -61,10 +56,11 @@ export function PdfDocumentView({
         className="flex flex-col items-center"
       >
         {slots.map((slot, index) => {
-          // The canvas lives only on the active page, so lifecycle states
-          // beyond it stay honest: an inactive page is always unloaded.
+          // Canvases live only on the render set, so lifecycle states stay
+          // honest: a page outside the set is always unloaded, no matter
+          // what it rendered before being evicted.
           let state: PdfPageLifecycle = "unloaded";
-          if (slot.pageNumber === activePage) {
+          if (canvasPages.has(slot.pageNumber)) {
             state = failedPages.has(slot.pageNumber)
               ? "error"
               : renderedPages.has(slot.pageNumber)
@@ -78,9 +74,26 @@ export function PdfDocumentView({
               slot={slot}
               gapAbove={index > 0}
               state={state}
-              registerRef={slot.pageNumber === activePage ? registerActiveSlot : undefined}
+              registerRef={
+                slot.pageNumber === anchorPage
+                  ? (element) => {
+                      registerSlot(slot.pageNumber, element);
+                      registerAnchorSlot(element);
+                    }
+                  : (element) => registerSlot(slot.pageNumber, element)
+              }
             >
-              {slot.pageNumber === activePage ? canvasFor(slot) : null}
+              {canvasPages.has(slot.pageNumber) ? (
+                <PdfPageCanvas
+                  document={document}
+                  pageNumber={slot.pageNumber}
+                  width={slot.width}
+                  height={slot.height}
+                  scale={scale}
+                  onPageRendered={onPageRendered}
+                  onPageError={onPageError}
+                />
+              ) : null}
             </PdfPageSlot>
           );
         })}
