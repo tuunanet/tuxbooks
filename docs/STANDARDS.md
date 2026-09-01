@@ -30,7 +30,6 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
 ## User interface
 
 - Preserve accessibility and use meaningful controls and labels.
-- Use project design rules from `{{VISUAL_DESIGN_GUIDE}}`.
 - Review the whole affected layout when changing spacing, color, typography, or responsive behavior.
 
 ## Commits
