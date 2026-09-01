@@ -19,9 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.SITE_PUBLISH_APP_ID }}
+          private-key: ${{ secrets.SITE_PUBLISH_APP_KEY }}
+          owner: tuxbooks
+          repositories: tuxbooks.github.io
+
       - name: Publish site/ to tuxbooks/tuxbooks.github.io
         env:
-          TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/tuxbooks/tuxbooks.github.io.git" publish
           git -C publish rm -rq . || true
