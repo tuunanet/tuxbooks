@@ -61,10 +61,12 @@ value. It is Tauri- and database-independent and unit-tested against
 
 `pdf/` extracts bibliographic metadata (title/author/subject) from PDF
 files via `lopdf`; no rendering. PDFs import without covers. Rendering
-happens in the frontend: the `get_book_bytes` command serves a book's file
-bytes (`services/reader.rs`) and PDF.js rasterizes pages to a canvas
-(`frontend/src/lib/pdf/pdfEngine.ts` is the only PDF.js import site). See
-[pdf.md](pdf.md).
+happens in the frontend as a continuous, virtualized reader: the
+`get_book_bytes` command serves a book's file bytes (`services/reader.rs`)
+and PDF.js rasterizes pages to canvases (`frontend/src/lib/pdf/pdfEngine.ts`
+is the only PDF.js import site; the `components/reader/pdf/` modules own
+layout, virtualization, the render queue, and persistence — see
+[pdf.md](pdf.md)).
 
 ## Services
 
@@ -93,8 +95,9 @@ frontend/src/
         library/          LibraryView, header, empty states, import UX, section helpers
         books/            BookCard, BookListItem, BookDetail, book context menu
         search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
-        reader/           ReaderShell, PdfReader (PDF.js canvas), EpubReader placeholder,
-                          navigation, appearance
+        reader/           ReaderShell, EPUB placeholder, pdf/ continuous PDF
+                          reader (layout math, virtualization, render queue,
+                          scroll tracking, persistence — see pdf.md)
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

@@ -108,6 +108,23 @@ not launch a second E2E run while one is still going.
     `WAYLAND_DISPLAY` and pops up on the real screen. The headless E2E
     prefix therefore also does `env -u WAYLAND_DISPLAY GDK_BACKEND=x11` —
     keep that when touching the justfile or running phases manually.
+14. **`cargo test` invalidates the E2E binary.** `just check` /
+    `just test-rust` rebuild `target/debug/tuxbooks` WITHOUT the
+    `custom-protocol` feature (cargo feature unification), and the
+    `test-e2e-empty` / `test-e2e-seeded` sub-recipes do not depend on
+    `build-debug`. Running them right after `just check` launches a binary
+    that loads the (absent) Vite dev server — every test fails with
+    "Could not connect to localhost". Run `just build-debug` first, or use
+    `just test-e2e`, which depends on it.
+15. **PDF reader invariants** (see `docs/pdf.md` for the full contract):
+    `frontend/src/lib/pdf/pdfEngine.ts` is the only module that imports
+    `pdfjs-dist`; rendering is serialized (one page at a time, reading
+    anchor first — the worker is single-threaded, so concurrent renders are
+    FIFO starvation); the visible canvas is written only by the final blit
+    of an offscreen-buffer render (never paint into it directly); reading
+    position writes are debounced and page-number-based. Behavior is pinned
+    by stable DOM attributes (`data-pdf-slot`, `data-render-state`,
+    `data-pdf-worker-src`) — keep them when refactoring.
 
 ## Testing rules
 
