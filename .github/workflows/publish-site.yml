@@ -1,0 +1,32 @@
+name: Publish site to tuxbooks.github.io
+
+on:
+  push:
+    branches: [main]
+    paths: [site/**]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-site
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish site/ to tuxbooks/tuxbooks.github.io
+        env:
+          TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/tuxbooks/tuxbooks.github.io.git" publish
+          git -C publish rm -rq . || true
+          cp -R site/. publish/
+          git -C publish add -A
+          git -C publish -c user.name="tuxbooks-site-bot" -c user.email="actions@users.noreply.github.com" \
+            commit -m "Publish from tuunanet/tuxbooks@${GITHUB_SHA::7}" || echo "No site changes"
+          git -C publish push
