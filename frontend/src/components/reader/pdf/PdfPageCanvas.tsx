@@ -19,9 +19,16 @@ interface PdfPageCanvasProps {
 
 /**
  * Imperative page renderer: draws one page into one canvas at a fixed size.
- * Renders on the same canvas are serialized — a superseded task is cancelled
- * and given time to unwind before the next starts (PDF.js refuses concurrent
- * renders per canvas). Cancellation is expected control flow, never an error.
+ *
+ * Every render paints into a private offscreen buffer; the visible canvas is
+ * only ever touched by the final one-shot blit of a completed render. This
+ * makes the visible canvas single-writer: a superseded or cancelled render
+ * task unwinds into its own discarded buffer and can never interleave its
+ * paint loop with the current one on shared canvas state — without this,
+ * rapid supersession (fast scrollbar drags, zoom, geometry corrections)
+ * produced mirrored/offset page fragments on WebKitGTK. Superseded
+ * instances never even start (cancellation checkpoints) and never blit.
+ * Cancellation is expected control flow, never an error.
  */
 export function PdfPageCanvas({
   document,
@@ -51,34 +58,44 @@ export function PdfPageCanvas({
     let cancelled = false;
 
     (async () => {
-      const previous = taskRef.current;
-      if (previous) {
-        previous.cancel();
-        await previous.promise.catch(() => {});
-      }
+      // Stop the previous generation's work early; it renders into its own
+      // buffer, so there is no shared state to wait for.
+      taskRef.current?.cancel();
 
       const page = await document.getPage(pageNumber);
+      // Checkpoint 1: this instance may have been superseded while getPage
+      // was in flight; do not start work at all.
+      if (cancelled) return;
+
       const viewport = page.getViewport({ scale });
       const ratio = window.devicePixelRatio || 1;
 
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      const buffer = canvas.ownerDocument.createElement("canvas");
+      buffer.width = Math.floor(viewport.width * ratio);
+      buffer.height = Math.floor(viewport.height * ratio);
+      const bufferContext = buffer.getContext("2d");
+      if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Canvas 2D context is unavailable");
-
-      // `canvas` is the v6 render parameter; PDF.js acquires the 2D context
-      // from it. The transform maps viewport units onto device pixels.
+      // PDF.js acquires the context from `canvas`; the transform maps
+      // viewport units onto device pixels.
       const task = page.render({
-        canvas,
+        canvas: buffer,
         viewport,
         transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : undefined,
       });
       taskRef.current = task;
       await task.promise;
-      if (!cancelled) renderedRef.current?.(pageNumber);
+
+      // Checkpoint 2: only the current generation may touch the canvas.
+      if (cancelled) return;
+      canvas.width = buffer.width;
+      canvas.height = buffer.height;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const context = canvas.getContext("2d");
+      context?.drawImage(buffer, 0, 0);
+
+      renderedRef.current?.(pageNumber);
     })().catch((err: unknown) => {
       if (cancelled || err instanceof RenderingCancelledException) return;
       errorRef.current?.(pageNumber, err);

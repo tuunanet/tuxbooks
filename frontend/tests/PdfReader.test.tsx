@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RefObject } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -13,6 +14,7 @@ import { PdfReader } from "@/components/reader/pdf/PdfReader";
 import { closePdfDocument, openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
+import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
@@ -43,10 +45,19 @@ const pdfBook = makeBook({
   title: "A Minimal PDF",
 });
 
-function renderPdfReader(props: { onDocumentLoad?: (count: number) => void } = {}) {
+function renderPdfReader(
+  props: {
+    onDocumentLoad?: (count: number) => void;
+    scrollContainerRef?: RefObject<HTMLElement | null>;
+  } = {},
+) {
   return render(
     <ReaderProvider>
-      <PdfReader book={pdfBook} onDocumentLoad={props.onDocumentLoad} />
+      <PdfReader
+        book={pdfBook}
+        onDocumentLoad={props.onDocumentLoad}
+        scrollContainerRef={props.scrollContainerRef}
+      />
     </ReaderProvider>,
   );
 }
@@ -247,6 +258,75 @@ describe("PdfReader virtualization", () => {
   });
 });
 
+describe("PdfReader scroll tracking", () => {
+  /** Loaded reader with a fake scroll container (720px viewport). */
+  async function renderScrollableReader() {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    const container = document.createElement("div");
+    const view = renderPdfReader({ scrollContainerRef: { current: container } });
+    await screen.findByTestId("pdf-canvas");
+    stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    return { view, container };
+  }
+
+  it("reports the anchor page to the shell without re-anchoring", async () => {
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const { container } = await renderScrollableReader();
+      expect(await screen.findByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+      scrollIntoViewSpy.mockClear();
+
+      // Anchor = scrollTop + 25% of the 720px viewport; 810 + 180 lands in
+      // page 2, 1620 + 180 in page 3, and back to 0 in page 1.
+      scrollTo(container, 810);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+      );
+      scrollTo(container, 1620);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+      );
+      scrollTo(container, 0);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
+      );
+
+      // The scroll itself is the navigation: the reader must not scroll back.
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  it("re-anchors on external navigation after scroll-driven changes", async () => {
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const { container } = await renderScrollableReader();
+      await screen.findByTestId("pdf-page-indicator");
+      scrollTo(container, 810);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+      );
+      scrollIntoViewSpy.mockClear();
+
+      // Toolbar navigation is external: the reader scrolls to page 3's top.
+      await userEvent.click(screen.getByTestId("pdf-next"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+      );
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
+      expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(3));
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+});
+
 describe("PdfReader navigation", () => {
   it("navigates with prev/next and disables at both bounds", async () => {
     const doc = makeFakePdfDocument(3);
@@ -318,6 +398,55 @@ describe("PdfReader zoom", () => {
     } finally {
       scrollIntoViewSpy.mockRestore();
     }
+  });
+
+  it("never paints a superseded render over the current one (scroll artifact race)", async () => {
+    // getPage calls are gated so we control resolution order across effect
+    // generations: geometry init, the first canvas render, then the render
+    // re-triggered by a zoom change.
+    const gatedPage = {
+      getViewport: vi.fn(({ scale }: { scale: number }) => ({
+        width: 612 * scale,
+        height: 792 * scale,
+      })),
+      render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
+    };
+    const pending: Array<(page: unknown) => void> = [];
+    const gatedDoc = {
+      numPages: 3,
+      getPage: vi.fn(() => new Promise((resolve) => pending.push(resolve))),
+    };
+
+    openDocumentMock.mockResolvedValue(gatedDoc as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+
+    renderPdfReader();
+    await waitFor(() => expect(pending).toHaveLength(1));
+    (pending.shift() as (page: unknown) => void)(gatedPage); // geometry init → layout ready
+
+    await screen.findByTestId("pdf-canvas"); // canvas mounted, render gated
+    expect(pending).toHaveLength(1);
+    const [staleRender] = pending.splice(0) as [(page: unknown) => void];
+
+    // Zoom supersedes the in-flight render: cleanup runs for the first
+    // effect, and the second effect requests the page again.
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    expect(pending).toHaveLength(1);
+    const [freshRender] = pending.splice(0) as [(page: unknown) => void];
+
+    // The NEWER render resolves first and paints at 150%…
+    freshRender(gatedPage);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5)),
+    );
+    expect(gatedPage.render).toHaveBeenCalledTimes(1);
+
+    // …then the STALE one resolves. It must not cancel the fresh render or
+    // paint old-scale content over the resized canvas (real-world symptom:
+    // mirrored page fragments blitted over pages while scrolling).
+    staleRender(gatedPage);
+    await waitFor(() => expect(gatedPage.render).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5));
   });
 
   it("steps through fixed zoom levels and re-renders the viewport", async () => {

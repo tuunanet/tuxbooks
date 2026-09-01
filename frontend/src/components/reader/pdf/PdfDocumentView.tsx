@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type Ref } from "react";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
@@ -24,6 +24,8 @@ interface PdfDocumentViewProps {
   registerSlot: (pageNumber: number, element: HTMLDivElement | null) => void;
   /** Registers the anchor page's slot element for scroll targeting. */
   registerAnchorSlot: (element: HTMLDivElement | null) => void;
+  /** Receives the document element for scroll-position math. */
+  documentRef?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -44,6 +46,7 @@ export function PdfDocumentView({
   onPageError,
   registerSlot,
   registerAnchorSlot,
+  documentRef,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -51,6 +54,7 @@ export function PdfDocumentView({
   return (
     <div className="flex min-h-0 w-full justify-center overflow-x-auto">
       <div
+        ref={documentRef}
         data-testid="pdf-document"
         style={{ width: `${documentWidth}px` }}
         className="flex flex-col items-center"

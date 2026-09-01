@@ -55,6 +55,36 @@ describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary();
   });
 
+  it("tracks the current page while scrolling continuously", async () => {
+    await openInReader("A Minimal Manual (PDF)");
+    const canvas = await $("[data-testid=pdf-canvas]");
+    await canvas.waitForExist({ timeout: 30000 });
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+      timeout: 30000,
+      timeoutMsg: "minimal fixture never reported its page count",
+    });
+
+    // Scrolling is the navigation: the anchor rule moves the current page
+    // forward through the document and back without any button presses.
+    await scrollToSlot(2);
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 2 of 3", {
+      timeout: 30000,
+      timeoutMsg: "scrolling never reached page 2",
+    });
+    await scrollToSlot(3);
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 3 of 3", {
+      timeout: 30000,
+      timeoutMsg: "scrolling never reached page 3",
+    });
+    await scrollToSlot(1);
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+      timeout: 30000,
+      timeoutMsg: "reverse scrolling never returned to page 1",
+    });
+
+    await returnToLibrary();
+  });
+
   it("keeps the active canvas set bounded in a 100-page document", async () => {
     await openLargeFixture();
 
@@ -80,6 +110,17 @@ describe("tuxbooks continuous PDF reader", () => {
         )) === "unloaded",
       { timeout: 30000, timeoutMsg: "distant page 2 was never evicted" },
     );
+
+    // Rapid long-distance jumps (scrollbar-drag churn): superseded renders
+    // must unwind cleanly, and the final revisit ends with a fully painted
+    // canvas — no interleaved-paint fragments.
+    await scrollToSlot(87);
+    await scrollToSlot(30);
+    await scrollToSlot(74);
+    await scrollToSlot(60);
+    await waitForRendered(60);
+    expect(await canvasIsNonBlank(60)).toBe(true);
+
     await returnToLibrary();
   });
 

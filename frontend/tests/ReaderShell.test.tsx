@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -15,6 +15,7 @@ vi.mock("@/lib/pdf/pdfEngine", () => ({
 import { AppShell } from "@/components/layout/AppShell";
 import { openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { makeBook } from "./factories";
+import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 
@@ -207,6 +208,48 @@ describe("ReaderNavigation", () => {
 
     fireEvent.keyDown(window, { key: "End" });
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3");
+  });
+
+  it("tracks the current page from scrolling the reading surface", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const container = screen.getByTestId("reader-content");
+    const documentEl = document.querySelector("[data-testid=pdf-document]");
+    expect(documentEl).not.toBeNull();
+    stubScrollGeometry(container as HTMLElement, documentEl as HTMLElement);
+
+    scrollTo(container as HTMLElement, 810);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    scrollTo(container as HTMLElement, 1620);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+
+    // The reader must not scroll back over its own scroll-driven update.
+    scrollTo(container as HTMLElement, 0);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
+    );
+  });
+
+  it("scrolls the reading surface with PageUp and PageDown", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const container = screen.getByTestId("reader-content") as HTMLElement;
+    Object.defineProperty(container, "clientHeight", { value: 720, configurable: true });
+
+    fireEvent.keyDown(window, { key: "PageDown" });
+    expect(container.scrollTop).toBe(648);
+    fireEvent.keyDown(window, { key: "PageDown" });
+    expect(container.scrollTop).toBe(1296);
+
+    fireEvent.keyDown(window, { key: "PageUp" });
+    expect(container.scrollTop).toBe(648);
   });
 });
 

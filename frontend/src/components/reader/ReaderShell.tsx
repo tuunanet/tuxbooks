@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, Bookmark, BookmarkCheck, Search, TableOfContents } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -33,6 +33,8 @@ export function ReaderShell() {
   const [navOpen, setNavOpen] = useState(false);
   // Real PDF page count, reported by PdfReader once the document loads.
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
+  // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
+  const readerContentRef = useRef<HTMLElement | null>(null);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
@@ -49,6 +51,17 @@ export function ReaderShell() {
   useShortcut("home", () => setPosition(0));
   useShortcut("end", () => setPosition(100));
   useShortcut("mod+b", () => toggleBookmark());
+  // PageUp/PageDown scroll the reading surface; the scroll tracker turns the
+  // movement into position changes. scrollTop assignment (not scrollBy)
+  // keeps the behavior identical in jsdom tests.
+  useShortcut("pagedown", () => {
+    const container = readerContentRef.current;
+    if (container) container.scrollTop += container.clientHeight * 0.9;
+  });
+  useShortcut("pageup", () => {
+    const container = readerContentRef.current;
+    if (container) container.scrollTop -= container.clientHeight * 0.9;
+  });
 
   const bookmarked = bookmarks.some(
     (bookmark) => Math.round(bookmark.percentage) === Math.round(position),
@@ -149,6 +162,7 @@ export function ReaderShell() {
       </header>
 
       <main
+        ref={readerContentRef}
         data-testid="reader-content"
         aria-label="Reading view"
         className="min-h-0 flex-1 overflow-y-auto"
@@ -156,7 +170,12 @@ export function ReaderShell() {
         {book.format === "epub" ? (
           <EpubReader book={book} />
         ) : (
-          <PdfReader key={book.id} book={book} onDocumentLoad={setPdfPageCount} />
+          <PdfReader
+            key={book.id}
+            book={book}
+            onDocumentLoad={setPdfPageCount}
+            scrollContainerRef={readerContentRef}
+          />
         )}
       </main>
 

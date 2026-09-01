@@ -31,10 +31,12 @@ beforeAll(() => {
   }
 
   // jsdom defines getContext but always returns null (no canvas package);
-  // the PDF reader only needs a context object to hand to the (mocked)
-  // PDF.js render call in unit tests.
-  HTMLCanvasElement.prototype.getContext =
-    (() => ({})) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+  // the PDF reader needs a context object for its render/blit calls in
+  // unit tests (PDF.js itself is mocked).
+  HTMLCanvasElement.prototype.getContext = (() =>
+    ({
+      drawImage() {},
+    }) as unknown as CanvasRenderingContext2D) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 });
 
 afterEach(() => {

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useReader } from "@/state/readerState";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
+import { usePdfScrollTracking } from "./hooks/usePdfScrollTracking";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfToolbar } from "./PdfToolbar";
@@ -20,6 +21,8 @@ interface PdfReaderProps {
   book: Book;
   /** Reports the real page count once the document has loaded. */
   onDocumentLoad?: (pageCount: number) => void;
+  /** The reader's scroll container, owned by ReaderShell. */
+  scrollContainerRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -31,7 +34,7 @@ interface PdfReaderProps {
  * slot rendering (PdfDocumentView/PdfPageSlot/PdfPageCanvas), and toolbar
  * state (PdfToolbar). Outlines, annotations, and search stay out of scope.
  */
-export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
+export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReaderProps) {
   const { position, setPosition } = useReader();
   const {
     status,
@@ -82,16 +85,51 @@ export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
   // viewport would sit at a stale pixel offset showing a different, unloaded
   // slot while the page indicator still names the old page. The active
   // page's top edge is the preserved logical position (§ zoom preserves the
-  // reading page); Phase 5 refines this to a viewport-fraction anchor.
+  // reading page); a viewport-fraction anchor can refine this later.
+  //
+  // The loop guard: a page change that *originated from scrolling* must not
+  // scroll back. The scroll tracker stamps every page it reports; if the
+  // observed change matches the last scroll report, it is the user's own
+  // scroll and re-anchoring is skipped. Zoom-only changes always re-anchor.
   const activeSlotRef = useRef<HTMLDivElement | null>(null);
+  const documentRef = useRef<HTMLDivElement | null>(null);
+  const scrollReportedPageRef = useRef<number | null>(null);
+  const previousPageRef = useRef(currentPage);
+  const previousZoomRef = useRef(zoom);
   const mountedRef = useRef(false);
   useEffect(() => {
+    const pageChanged = previousPageRef.current !== currentPage;
+    const zoomChanged = previousZoomRef.current !== zoom;
+    previousPageRef.current = currentPage;
+    previousZoomRef.current = zoom;
+
     if (!mountedRef.current) {
       mountedRef.current = true;
       return;
     }
+    if (pageChanged && !zoomChanged && scrollReportedPageRef.current === currentPage) {
+      return;
+    }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
   }, [currentPage, zoom]);
+
+  // Scroll-driven position reporting: the anchor rule decides the page, the
+  // position is written back to ReaderProvider so the shell (footer, keyboard
+  // stepping, pages drawer) stays consistent with what the user sees.
+  const handleScrollPageChange = useCallback(
+    (page: number) => {
+      scrollReportedPageRef.current = page;
+      setPosition(pageToPosition(page, effectivePageCount));
+    },
+    [effectivePageCount, setPosition],
+  );
+  usePdfScrollTracking({
+    containerRef: scrollContainerRef ?? { current: null },
+    documentRef,
+    slots,
+    enabled: layoutReady,
+    onPageChange: handleScrollPageChange,
+  });
 
   const registerActiveSlot = useCallback((element: HTMLDivElement | null) => {
     activeSlotRef.current = element;
@@ -178,6 +216,7 @@ export function PdfReader({ book, onDocumentLoad }: PdfReaderProps) {
         onPageError={handlePageError}
         registerSlot={registerSlot}
         registerAnchorSlot={registerActiveSlot}
+        documentRef={documentRef}
       />
     </div>
   );
