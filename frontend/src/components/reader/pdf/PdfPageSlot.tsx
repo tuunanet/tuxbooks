@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 import { PAGE_GAP_PX, type LayoutSlot } from "./pdfLayout";
 
 /**
@@ -17,6 +18,8 @@ interface PdfPageSlotProps {
   children?: ReactNode;
   /** Registers the slot element for visibility tracking and scroll targeting. */
   registerRef?: (element: HTMLDivElement | null) => void;
+  /** Called when the user asks a failed page to render again. */
+  onRetry?: () => void;
 }
 
 /**
@@ -25,7 +28,14 @@ interface PdfPageSlotProps {
  * disappear from memory without collapsing the document. `scroll-mt` keeps
  * scroll targets clear of the sticky toolbar.
  */
-export function PdfPageSlot({ slot, gapAbove, state, children, registerRef }: PdfPageSlotProps) {
+export function PdfPageSlot({
+  slot,
+  gapAbove,
+  state,
+  children,
+  registerRef,
+  onRetry,
+}: PdfPageSlotProps) {
   // Callers pass fresh closures per render; forwarding them directly would
   // re-run React's ref swap (null + element) on every render. The wrapper
   // keeps React ref churn to actual mount/unmount events, and re-invokes
@@ -56,7 +66,23 @@ export function PdfPageSlot({ slot, gapAbove, state, children, registerRef }: Pd
       }}
       className="shrink-0 scroll-mt-12"
     >
-      {children}
+      {state === "error" ? (
+        <div className="flex h-full flex-col items-center justify-center gap-3 rounded-sm border border-destructive/30 bg-destructive/5 px-4 text-center text-sm">
+          <p>Unable to render page {slot.pageNumber}</p>
+          {onRetry && (
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid={`pdf-retry-${slot.pageNumber}`}
+              onClick={onRetry}
+            >
+              Retry
+            </Button>
+          )}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }

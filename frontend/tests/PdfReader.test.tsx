@@ -602,6 +602,72 @@ describe("PdfReader fit width and zoom anchoring", () => {
   });
 });
 
+describe("PdfReader hardening", () => {
+  it("shows a retryable page-level error without breaking the document", async () => {
+    const doc = makeFakePdfDocument(3, undefined, { failOnceFor: [2] });
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+
+    // Page 2 fails: its own slot reports the failure with a retry action…
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    expect(await screen.findByTestId("pdf-retry-2")).toBeInTheDocument();
+    expect(slot(2)).toHaveAttribute("data-render-state", "error");
+
+    // …while the rest of the document keeps working.
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
+    );
+
+    // Retry re-renders the failed page (the fake fails once, then succeeds).
+    await userEvent.click(screen.getByTestId("pdf-prev"));
+    await userEvent.click(await screen.findByTestId("pdf-retry-2"));
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2");
+  });
+
+  it("cancels an in-flight render when the reader unmounts", async () => {
+    const doc = makeFakePdfDocument(3, undefined, { holdRenderFor: [1] });
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const view = await renderLoadedReader();
+    expect(doc.cancelledPages).not.toContain(1);
+
+    view.unmount();
+    expect(doc.cancelledPages).toContain(1);
+  });
+
+  it("clamps keyboard zoom at both bounds under rapid input", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    for (let i = 0; i < 6; i++) fireEvent.keyDown(window, { key: "-" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("50%");
+    expect(screen.getByTestId("pdf-zoom-out")).toBeDisabled();
+
+    for (let i = 0; i < 10; i++) fireEvent.keyDown(window, { key: "+" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("200%");
+    expect(screen.getByTestId("pdf-zoom-in")).toBeDisabled();
+  });
+});
+
 describe("PdfReader navigation", () => {
   it("navigates with prev/next and disables at both bounds", async () => {
     const doc = makeFakePdfDocument(3);

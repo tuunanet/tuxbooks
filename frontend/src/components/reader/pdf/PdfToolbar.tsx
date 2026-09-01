@@ -42,6 +42,7 @@ export function PdfToolbar({
       </Button>
       <span
         data-testid="pdf-page-indicator"
+        aria-live="polite"
         className="px-2 text-xs text-muted-foreground tabular-nums"
       >
         Page {pageNumber} of {pageCount}

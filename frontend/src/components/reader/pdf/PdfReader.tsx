@@ -250,6 +250,18 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     console.error(`Failed to render PDF page ${pageNumber}`, renderError);
   }, []);
 
+  // § page errors: a failed page shows a retryable error in its own slot;
+  // the document itself stays usable. Clearing the failure makes the page
+  // eligible for rendering again (highest priority first).
+  const retryPage = useCallback((pageNumber: number) => {
+    setFailedPages((current) => {
+      if (!current.has(pageNumber)) return current;
+      const next = new Set(current);
+      next.delete(pageNumber);
+      return next;
+    });
+  }, []);
+
   const goToPage = (page: number) => {
     const clamped = Math.max(1, Math.min(effectivePageCount, page));
     setPosition(pageToPosition(clamped, effectivePageCount));
@@ -328,6 +340,7 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
         registerAnchorSlot={registerActiveSlot}
         documentRef={documentRef}
         contentAreaRef={contentAreaRef}
+        onRetryPage={retryPage}
       />
     </div>
   );

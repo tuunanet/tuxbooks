@@ -28,6 +28,8 @@ interface PdfDocumentViewProps {
   documentRef?: Ref<HTMLDivElement>;
   /** Receives the content area element that defines the fit width. */
   contentAreaRef?: Ref<HTMLDivElement>;
+  /** Called when the user asks a failed page to render again. */
+  onRetryPage?: (pageNumber: number) => void;
 }
 
 /**
@@ -50,6 +52,7 @@ export function PdfDocumentView({
   registerAnchorSlot,
   documentRef,
   contentAreaRef,
+  onRetryPage,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -68,15 +71,13 @@ export function PdfDocumentView({
       >
         {slots.map((slot, index) => {
           // Canvases live only on the render set, so lifecycle states stay
-          // honest: a page outside the set is always unloaded, no matter
-          // what it rendered before being evicted.
+          // honest: a page outside the set is unloaded unless it failed —
+          // failures keep their slot flagged (with retry) until retried.
           let state: PdfPageLifecycle = "unloaded";
-          if (canvasPages.has(slot.pageNumber)) {
-            state = failedPages.has(slot.pageNumber)
-              ? "error"
-              : renderedPages.has(slot.pageNumber)
-                ? "rendered"
-                : "rendering";
+          if (failedPages.has(slot.pageNumber)) {
+            state = "error";
+          } else if (canvasPages.has(slot.pageNumber)) {
+            state = renderedPages.has(slot.pageNumber) ? "rendered" : "rendering";
           }
 
           return (
@@ -93,6 +94,7 @@ export function PdfDocumentView({
                     }
                   : (element) => registerSlot(slot.pageNumber, element)
               }
+              onRetry={onRetryPage ? () => onRetryPage(slot.pageNumber) : undefined}
             >
               {canvasPages.has(slot.pageNumber) ? (
                 <PdfPageCanvas

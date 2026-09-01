@@ -12,6 +12,8 @@ export interface FakePdfDocument {
   scales: number[];
   /** Resolves a render held open via `holdRenderFor`. */
   releaseRender: (pageNumber: number) => void;
+  /** Page numbers whose held render task was cancelled. */
+  cancelledPages: number[];
 }
 
 export interface PageSizeSpec {
@@ -22,16 +24,20 @@ export interface PageSizeSpec {
 export function makeFakePdfDocument(
   pageCount = 3,
   sizeFor: (pageNumber: number) => PageSizeSpec = () => ({ width: 612, height: 792 }),
-  options: { holdRenderFor?: number[] } = {},
+  options: { holdRenderFor?: number[]; failOnceFor?: number[] } = {},
 ): FakePdfDocument {
   const scales: number[] = [];
   const held = new Set(options.holdRenderFor ?? []);
+  const failOnce = new Set(options.failOnceFor ?? []);
+  const attempts = new Map<number, number>();
   const releaseFns = new Map<number, () => void>();
+  const cancelledPages: number[] = [];
   const doc: FakePdfDocument = {
     numPages: pageCount,
     getPage: vi.fn(),
     scales,
     releaseRender: (pageNumber) => releaseFns.get(pageNumber)?.(),
+    cancelledPages,
   };
   const pages = new Map();
   doc.getPage.mockImplementation(async (number: number) => {
@@ -43,13 +49,20 @@ export function makeFakePdfDocument(
           return { width: size.width * scale, height: size.height * scale };
         }),
         render: vi.fn(() => {
-          if (!held.has(number)) {
-            return { promise: Promise.resolve(), cancel: vi.fn() };
+          attempts.set(number, (attempts.get(number) ?? 0) + 1);
+          if (failOnce.has(number) && (attempts.get(number) ?? 0) === 1) {
+            return {
+              promise: Promise.reject(new Error(`render boom ${number}`)),
+              cancel: vi.fn(),
+            };
           }
-          return {
-            promise: new Promise<void>((resolve) => releaseFns.set(number, resolve)),
-            cancel: vi.fn(),
-          };
+          if (held.has(number)) {
+            return {
+              promise: new Promise<void>((resolve) => releaseFns.set(number, resolve)),
+              cancel: vi.fn(() => cancelledPages.push(number)),
+            };
+          }
+          return { promise: Promise.resolve(), cancel: vi.fn() };
         }),
       });
     }
