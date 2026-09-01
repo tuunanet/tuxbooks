@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
-import { pageAtOffset, type LayoutSlot } from "../pdfLayout";
+import { offsetForPage, pageAtOffset, type LayoutSlot } from "../pdfLayout";
 
 /**
  * Where the reading anchor sits in the viewport: 25% of the viewport height
@@ -9,6 +9,21 @@ import { pageAtOffset, type LayoutSlot } from "../pdfLayout";
  */
 export const READING_ANCHOR_RATIO = 0.25;
 
+/**
+ * Imperative scroll write used by re-anchoring. Kept in one helper because
+ * the element arrives via a prop-ref and direct assignment from component
+ * scope trips the react-hooks immutability rule.
+ */
+export function setScrollTop(container: HTMLElement, value: number): void {
+  container.scrollTop = value;
+}
+
+/** Where the reading anchor currently is: page plus fraction within it. */
+export interface PdfAnchorInfo {
+  page: number;
+  fraction: number;
+}
+
 interface PdfScrollTrackingOptions {
   /** The scrollable reader container (owned by ReaderShell). */
   containerRef: RefObject<HTMLElement | null>;
@@ -17,6 +32,12 @@ interface PdfScrollTrackingOptions {
   slots: LayoutSlot[];
   enabled: boolean;
   onPageChange: (pageNumber: number) => void;
+  /**
+   * Receives the anchor's page + in-page fraction on every sample; the
+   * reader uses this to preserve the exact reading spot across zoom and
+   * resize reflows.
+   */
+  anchorInfoRef?: RefObject<PdfAnchorInfo | null>;
 }
 
 /**
@@ -31,6 +52,7 @@ export function usePdfScrollTracking({
   slots,
   enabled,
   onPageChange,
+  anchorInfoRef,
 }: PdfScrollTrackingOptions): void {
   const slotsRef = useRef(slots);
   useEffect(() => {
@@ -61,7 +83,17 @@ export function usePdfScrollTracking({
       const anchor =
         container.scrollTop + container.clientHeight * READING_ANCHOR_RATIO - documentTop;
       const page = pageAtOffset(anchor, slotsRef.current);
-      if (page !== null) onPageChangeRef.current(page);
+      if (page === null) return;
+      if (anchorInfoRef) {
+        const slotTop = offsetForPage(page, slotsRef.current);
+        const slot = slotsRef.current.find((candidate) => candidate.pageNumber === page);
+        const fraction =
+          slot && slotTop !== null && slot.height > 0
+            ? Math.max(0, Math.min(1, (anchor - slotTop) / slot.height))
+            : 0;
+        anchorInfoRef.current = { page, fraction };
+      }
+      onPageChangeRef.current(page);
     };
 
     const requestSample = () => {
@@ -83,5 +115,5 @@ export function usePdfScrollTracking({
       window.removeEventListener("resize", requestSample);
       cancelSample();
     };
-  }, [containerRef, documentRef, enabled]);
+  }, [anchorInfoRef, containerRef, documentRef, enabled]);
 }

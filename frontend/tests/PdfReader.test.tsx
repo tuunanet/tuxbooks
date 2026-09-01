@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RefObject } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -13,6 +13,7 @@ vi.mock("@/lib/pdf/pdfEngine", () => ({
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
 import { closePdfDocument, openPdfDocument } from "@/lib/pdf/pdfEngine";
+import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
@@ -53,13 +54,15 @@ function renderPdfReader(
   } = {},
 ) {
   return render(
-    <ReaderProvider>
-      <PdfReader
-        book={pdfBook}
-        onDocumentLoad={props.onDocumentLoad}
-        scrollContainerRef={props.scrollContainerRef}
-      />
-    </ReaderProvider>,
+    <ShortcutProvider>
+      <ReaderProvider>
+        <PdfReader
+          book={pdfBook}
+          onDocumentLoad={props.onDocumentLoad}
+          scrollContainerRef={props.scrollContainerRef}
+        />
+      </ReaderProvider>
+    </ShortcutProvider>,
   );
 }
 
@@ -505,6 +508,97 @@ describe("PdfReader persistence", () => {
       bookId: 7,
       progress: { pageNumber: 2, progressPercent: 50 },
     });
+  });
+});
+
+describe("PdfReader fit width and zoom anchoring", () => {
+  it("renders at the fit-width scale of the content area", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+
+    // A 1224px-wide content area fits the 612pt reference page at 2×.
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "1224"));
+    expect(slot(1)).toHaveStyle({ width: "1224px" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("100%");
+  });
+
+  it("recomputes the fit scale when the window resizes", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "1224"));
+
+    Object.defineProperty(area, "clientWidth", { value: 918, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "918"));
+  });
+
+  it("preserves the reading spot within the page across zoom changes", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    const container = document.createElement("div");
+    const view = renderPdfReader({ scrollContainerRef: { current: container } });
+    await screen.findByTestId("pdf-canvas");
+    stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+
+    // Anchor sits 35% into page 2 (anchor = 900 + 180 = 1080; page 2 spans
+    // 800..1592 → fraction 280/792).
+    scrollTo(container, 900);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    // Zoom to 150%: page 2 moves to top 1196 (scaled height 1188 + the
+    // unscaled 8px gap); the anchor must land at 1196 + 0.3535…*1188 = 1616
+    // → scrollTop = 1616 - 180 = 1436. The in-page fraction is preserved
+    // exactly.
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    await waitFor(() => expect(container.scrollTop).toBe(1436));
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("150%");
+    view.unmount();
+  });
+
+  it("zooms from the keyboard with + and -", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    fireEvent.keyDown(window, { key: "+" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("150%");
+    fireEvent.keyDown(window, { key: "-" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("100%");
+    fireEvent.keyDown(window, { key: "-" });
+    expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("75%");
   });
 });
 

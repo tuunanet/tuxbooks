@@ -107,6 +107,16 @@ export async function scrollToSlot(pageNumber: number): Promise<void> {
   }, pageNumber);
 }
 
+/**
+ * Fit-width factor: the reader fits the 612pt reference page into the
+ * content area, so rendered geometry scales by clientWidth/612.
+ */
+export async function fitFactor(): Promise<number> {
+  return browser.execute(
+    () => (document.querySelector("[data-testid=pdf-content-area]")?.clientWidth ?? 0) / 612,
+  );
+}
+
 /** Canvas-pixel probe shared by rendering assertions (mirrors books.e2e). */
 export async function canvasIsNonBlank(pageNumber: number): Promise<boolean> {
   return browser.execute((page) => {

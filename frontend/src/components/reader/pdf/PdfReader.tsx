@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { useReader } from "@/state/readerState";
+import { useShortcut } from "@/lib/shortcuts";
 import { pdfWorkerSrc } from "@/lib/pdf/pdfEngine";
+import { useReader } from "@/state/readerState";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
+import { useFitWidthScale } from "./hooks/useFitWidthScale";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
 import { usePdfPersistence } from "./hooks/usePdfPersistence";
-import { usePdfScrollTracking } from "./hooks/usePdfScrollTracking";
+import {
+  READING_ANCHOR_RATIO,
+  setScrollTop,
+  usePdfScrollTracking,
+  type PdfAnchorInfo,
+} from "./hooks/usePdfScrollTracking";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfToolbar } from "./PdfToolbar";
@@ -33,8 +40,10 @@ interface PdfReaderProps {
  * this component renders the document according to that position and
  * reports page changes back. Responsibilities live in the pdf/ modules:
  * document loading (usePdfDocument), geometry (usePdfGeometry + pdfLayout),
- * slot rendering (PdfDocumentView/PdfPageSlot/PdfPageCanvas), and toolbar
- * state (PdfToolbar). Outlines, annotations, and search stay out of scope.
+ * fit-width layout scale (useFitWidthScale), slot rendering
+ * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), toolbar state (PdfToolbar),
+ * and persistence (usePdfPersistence). Outlines, annotations, and search
+ * stay out of scope.
  */
 export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReaderProps) {
   const { position, setPosition } = useReader();
@@ -55,6 +64,13 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
   const effectivePageCount = pageCount > 0 ? pageCount : PDF_PLACEHOLDER_PAGE_COUNT;
   const currentPage = positionToPage(position, effectivePageCount);
   const layoutReady = status === "ready" && sizes !== null;
+
+  // Layout scale = fit-width base × user zoom multiplier (§ fit width).
+  // The reference page is page 1; wider pages in mixed documents overflow
+  // horizontally instead of shrinking the fit reference.
+  const referencePageWidth = sizes?.[0]?.width ?? 0;
+  const { scale: fitScale, contentAreaRef } = useFitWidthScale(referencePageWidth);
+  const scale = fitScale * zoom;
 
   // Initialization sequence (§ lifecycle): DOCUMENT_READY → LAYOUT_READY →
   // POSITION_RESTORED → INTERACTIVE. The document surface renders only once
@@ -80,8 +96,8 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
   const interactive = layoutReady && restored;
 
   const slots = useMemo(
-    () => (sizes ? layoutSlots(displayedSizes(sizes, zoom)) : []),
-    [sizes, zoom],
+    () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),
+    [sizes, scale],
   );
 
   // Rendering policy, modeled on the official PDF.js viewer's
@@ -126,39 +142,71 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     measurePages([...visiblePages, ...preloadPages]);
   }, [layoutReady, measurePages, visiblePages, preloadPages]);
 
-  // Keep the named page visible when the position changes from outside the
-  // document (keyboard navigation, drawer jumps) — and re-anchor after zoom
-  // changes: slot heights rescale with zoom, so without re-anchoring the
-  // viewport would sit at a stale pixel offset showing a different, unloaded
-  // slot while the page indicator still names the old page. The active
-  // page's top edge is the preserved logical position (§ zoom preserves the
-  // reading page); a viewport-fraction anchor can refine this later.
-  //
+  // Re-anchor after layout-scale changes (zoom multiplier, window resize,
+  // fit-width recalculation): the anchor's page + in-page fraction — kept
+  // current by the scroll tracker — is mapped onto the rescaled layout, so
+  // the user keeps reading at the exact same spot (§ zoom preserves the
+  // reading position) instead of falling back to the page's top edge.
+  const activeSlotRef = useRef<HTMLDivElement | null>(null);
+  const documentRef = useRef<HTMLDivElement | null>(null);
+  const anchorInfoRef = useRef<PdfAnchorInfo | null>(null);
+  const scrollReportedPageRef = useRef<number | null>(null);
+  const previousPageRef = useRef(currentPage);
+  const previousScaleRef = useRef(scale);
+  const mountedRef = useRef(false);
+
+  const reanchorByFraction = useCallback(() => {
+    const container = scrollContainerRef?.current ?? null;
+    const documentEl = documentRef.current;
+    const info = anchorInfoRef.current;
+    if (!container || !documentEl || !info || slots.length === 0) {
+      activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
+      return;
+    }
+    const slot = slots.find((candidate) => candidate.pageNumber === info.page) ?? slots[0];
+    if (!slot) return;
+    const targetAnchor = slot.top + info.fraction * slot.height;
+    const documentTop =
+      documentEl.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop;
+    setScrollTop(
+      container,
+      targetAnchor + documentTop - container.clientHeight * READING_ANCHOR_RATIO,
+    );
+  }, [scrollContainerRef, slots]);
+
+  // Keep the latest re-anchoring logic reachable from the effect below
+  // without re-running that effect on every slots change (geometry
+  // corrections must never yank the viewport).
+  const reanchorRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    reanchorRef.current = reanchorByFraction;
+  });
+
   // The loop guard: a page change that *originated from scrolling* must not
   // scroll back. The scroll tracker stamps every page it reports; if the
   // observed change matches the last scroll report, it is the user's own
-  // scroll and re-anchoring is skipped. Zoom-only changes always re-anchor.
-  const activeSlotRef = useRef<HTMLDivElement | null>(null);
-  const documentRef = useRef<HTMLDivElement | null>(null);
-  const scrollReportedPageRef = useRef<number | null>(null);
-  const previousPageRef = useRef(currentPage);
-  const previousZoomRef = useRef(zoom);
-  const mountedRef = useRef(false);
+  // scroll and re-anchoring is skipped. Scale changes re-anchor by fraction.
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
-    const zoomChanged = previousZoomRef.current !== zoom;
+    const scaleChanged = previousScaleRef.current !== scale;
     previousPageRef.current = currentPage;
-    previousZoomRef.current = zoom;
+    previousScaleRef.current = scale;
 
     if (!mountedRef.current) {
       mountedRef.current = true;
       return;
     }
-    if (pageChanged && !zoomChanged && scrollReportedPageRef.current === currentPage) {
+    if (pageChanged && !scaleChanged && scrollReportedPageRef.current === currentPage) {
+      return;
+    }
+    if (scaleChanged) {
+      reanchorRef.current();
       return;
     }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
-  }, [currentPage, zoom]);
+  }, [currentPage, scale]);
 
   // Scroll-driven position reporting: the anchor rule decides the page, the
   // position is written back to ReaderProvider so the shell (footer, keyboard
@@ -176,6 +224,7 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     slots,
     enabled: layoutReady,
     onPageChange: handleScrollPageChange,
+    anchorInfoRef,
   });
 
   const registerActiveSlot = useCallback((element: HTMLDivElement | null) => {
@@ -207,12 +256,22 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
   };
 
   // A zoom change invalidates rendered canvases; the new scale re-renders
-  // the active page while evicted slots simply resize their reservations.
-  const changeZoom = (nextIndex: number) => {
-    setZoomIndex(nextIndex);
+  // the visible pages while evicted slots simply resize their reservations.
+  const changeZoom = (steps: number) => {
+    setZoomIndex((index) => Math.max(0, Math.min(ZOOM_LEVELS.length - 1, index + steps)));
     setRenderedPages(new Set());
     setFailedPages(new Set());
   };
+
+  // Keyboard zoom (§ reader keyboard): +/= in, - out. The shell does not
+  // bind these, so there is no conflict with global reader shortcuts.
+  const keyboardZoomRef = useRef<(steps: number) => void>(null);
+  useEffect(() => {
+    keyboardZoomRef.current = changeZoom;
+  });
+  useShortcut("+", () => keyboardZoomRef.current?.(1));
+  useShortcut("=", () => keyboardZoomRef.current?.(1));
+  useShortcut("-", () => keyboardZoomRef.current?.(-1));
 
   if (status === "error") {
     return (
@@ -252,15 +311,15 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
         canZoomOut={zoomIndex > 0}
         onPrev={() => goToPage(currentPage - 1)}
         onNext={() => goToPage(currentPage + 1)}
-        onZoomIn={() => changeZoom(zoomIndex + 1)}
-        onZoomOut={() => changeZoom(zoomIndex - 1)}
+        onZoomIn={() => changeZoom(1)}
+        onZoomOut={() => changeZoom(-1)}
       />
       <PdfDocumentView
         document={pdfDocument}
         slots={slots}
         renderPages={canvasPages}
         anchorPage={currentPage}
-        scale={zoom}
+        scale={scale}
         renderedPages={renderedPages}
         failedPages={failedPages}
         onPageRendered={handlePageRendered}
@@ -268,6 +327,7 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
         registerSlot={registerSlot}
         registerAnchorSlot={registerActiveSlot}
         documentRef={documentRef}
+        contentAreaRef={contentAreaRef}
       />
     </div>
   );

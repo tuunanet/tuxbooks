@@ -1,5 +1,6 @@
 import {
   canvasIsNonBlank,
+  fitFactor,
   openInReader,
   renderedCount,
   returnToLibrary,
@@ -35,11 +36,13 @@ describe("tuxbooks continuous PDF reader", () => {
       timeoutMsg: "minimal fixture never reported its page count",
     });
 
-    // Deterministic geometry: 612x792 pt pages at 100% zoom, dpr = 1.
+    // Deterministic geometry: pages render fit-to-width times the zoom
+    // multiplier, times the device pixel ratio for the backing store.
     const dpr = await browser.execute(() => window.devicePixelRatio);
+    const fit = await fitFactor();
     await browser.waitUntil(
-      async () => Number(await canvas.getAttribute("width")) === Math.floor(612 * dpr),
-      { timeout: 30000, timeoutMsg: "page 1 never rendered at 100% zoom" },
+      async () => Number(await canvas.getAttribute("width")) === Math.floor(612 * fit * dpr),
+      { timeout: 30000, timeoutMsg: "page 1 never rendered at fit width" },
     );
     expect(await canvasIsNonBlank(1)).toBe(true);
 
@@ -216,24 +219,30 @@ describe("tuxbooks continuous PDF reader", () => {
 
     // Geometry corrects lazily as pages approach the viewport, so walk the
     // document and wait for each slot to take its real displayed height
-    // (100% zoom, dpr = 1 under Xvfb, mirroring the fixture MediaBoxes).
-    const expectedHeights = [792, 612, 1008, 500, 842, 504];
+    // (100% zoom = fit width; dpr = 1 under Xvfb; heights scale from the
+    // fixture MediaBoxes by the fit factor).
+    const fit = await fitFactor();
+    const expectedHeights = [792, 612, 1008, 500, 842, 504].map((height) =>
+      Math.floor(height * fit),
+    );
     for (const [index, height] of expectedHeights.entries()) {
       const pageNumber = index + 1;
       await scrollToSlot(pageNumber);
       await browser.waitUntil(
         async () =>
-          (await browser.execute(
-            (page) => document.querySelector(`[data-pdf-slot="${page}"]`)?.offsetHeight ?? 0,
-            pageNumber,
-          )) === height,
+          Math.abs(
+            (await browser.execute(
+              (page) => document.querySelector(`[data-pdf-slot="${page}"]`)?.offsetHeight ?? 0,
+              pageNumber,
+            )) - height,
+          ) <= 1,
         { timeout: 30000, timeoutMsg: `slot ${pageNumber} never reached height ${height}` },
       );
     }
 
     // From the top, the document now shows real mixed geometry and stacks
     // strictly: each top equals the previous bottom plus the 8px page gap —
-    // no overlap, no collapse.
+    // no overlap, no collapse (±1px for offsetHeight rounding).
     await scrollToSlot(1);
     const layout = await browser.execute(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-pdf-slot]")).map((slot) => ({
@@ -244,12 +253,17 @@ describe("tuxbooks continuous PDF reader", () => {
       })),
     );
     expect(layout.map((slot) => slot.page)).toEqual(["1", "2", "3", "4", "5", "6"]);
-    expect(layout.map((slot) => slot.height)).toEqual(expectedHeights);
+    for (let i = 0; i < layout.length; i++) {
+      expect(Math.abs(layout[i].height - expectedHeights[i])).toBeLessThanOrEqual(1);
+    }
 
     // Slots stack strictly: each top equals the previous bottom plus the
-    // 8px page gap — no overlap, no collapse.
+    // 8px page gap — no overlap, no collapse (±1px: offsetTop/offsetHeight
+    // round independently at fractional fit scales).
     for (let i = 1; i < layout.length; i++) {
-      expect(layout[i].top - layout[i - 1].top).toBe(layout[i - 1].height + 8);
+      expect(
+        Math.abs(layout[i].top - layout[i - 1].top - (layout[i - 1].height + 8)),
+      ).toBeLessThanOrEqual(1);
     }
 
     // The bounded render budget holds on a mixed-size document too.

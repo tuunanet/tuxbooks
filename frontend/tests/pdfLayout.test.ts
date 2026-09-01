@@ -5,6 +5,7 @@ import {
   documentHeight,
   displayedSizes,
   estimatePageSizes,
+  fitWidthScale,
   layoutSlots,
   offsetForPage,
   pageAtOffset,
@@ -18,6 +19,18 @@ const LETTER = { width: 612, height: 792 };
 function sizes(entries: [number, number, number][]): PageSize[] {
   return entries.map(([pageNumber, width, height]) => ({ pageNumber, width, height }));
 }
+
+describe("fitWidthScale", () => {
+  it("maps the reference page width onto the available width", () => {
+    expect(fitWidthScale(1224, 612)).toBe(2);
+    expect(fitWidthScale(306, 612)).toBe(0.5);
+  });
+
+  it("falls back to 1 for unmeasurable dimensions", () => {
+    expect(fitWidthScale(0, 612)).toBe(1);
+    expect(fitWidthScale(1224, 0)).toBe(1);
+  });
+});
 
 describe("estimatePageSizes", () => {
   it("fills the document with the reference size", () => {

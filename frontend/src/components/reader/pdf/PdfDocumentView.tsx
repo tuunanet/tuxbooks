@@ -26,6 +26,8 @@ interface PdfDocumentViewProps {
   registerAnchorSlot: (element: HTMLDivElement | null) => void;
   /** Receives the document element for scroll-position math. */
   documentRef?: Ref<HTMLDivElement>;
+  /** Receives the content area element that defines the fit width. */
+  contentAreaRef?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -47,12 +49,17 @@ export function PdfDocumentView({
   registerSlot,
   registerAnchorSlot,
   documentRef,
+  contentAreaRef,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
 
   return (
-    <div className="flex min-h-0 w-full justify-center overflow-x-auto">
+    <div
+      ref={contentAreaRef}
+      data-testid="pdf-content-area"
+      className="flex min-h-0 w-full justify-center overflow-x-auto"
+    >
       <div
         ref={documentRef}
         data-testid="pdf-document"

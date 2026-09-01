@@ -27,6 +27,16 @@ export interface LayoutSlot {
 /** Vertical space between consecutive page slots, in CSS pixels. */
 export const PAGE_GAP_PX = 8;
 
+/**
+ * Scale that fits a page of `referencePageWidth` page units into
+ * `availableWidth` CSS pixels. Falls back to 1 when either dimension is not
+ * measurable (tests, hidden containers) so callers never scale to zero.
+ */
+export function fitWidthScale(availableWidth: number, referencePageWidth: number): number {
+  if (availableWidth <= 0 || referencePageWidth <= 0) return 1;
+  return availableWidth / referencePageWidth;
+}
+
 /** Fill the whole document with an estimate derived from one known page. */
 export function estimatePageSizes(
   pageCount: number,
