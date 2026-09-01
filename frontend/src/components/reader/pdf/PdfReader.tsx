@@ -4,6 +4,7 @@ import { pdfWorkerSrc } from "@/lib/pdf/pdfEngine";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
+import { usePdfPersistence } from "./hooks/usePdfPersistence";
 import { usePdfScrollTracking } from "./hooks/usePdfScrollTracking";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
@@ -54,6 +55,29 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
   const effectivePageCount = pageCount > 0 ? pageCount : PDF_PLACEHOLDER_PAGE_COUNT;
   const currentPage = positionToPage(position, effectivePageCount);
   const layoutReady = status === "ready" && sizes !== null;
+
+  // Initialization sequence (§ lifecycle): DOCUMENT_READY → LAYOUT_READY →
+  // POSITION_RESTORED → INTERACTIVE. The document surface renders only once
+  // the saved position has been applied, so a reader never flashes page 1
+  // before jumping to the restored location.
+  const [restored, setRestored] = useState(false);
+  usePdfPersistence({
+    bookId: book.id,
+    enabled: layoutReady,
+    currentPage,
+    position,
+    pageCount: effectivePageCount,
+    onRestored: useCallback(
+      (savedPage: number | null) => {
+        if (savedPage !== null) {
+          setPosition(pageToPosition(savedPage, effectivePageCount));
+        }
+        setRestored(true);
+      },
+      [effectivePageCount, setPosition],
+    ),
+  });
+  const interactive = layoutReady && restored;
 
   const slots = useMemo(
     () => (sizes ? layoutSlots(displayedSizes(sizes, zoom)) : []),
@@ -204,7 +228,7 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     );
   }
 
-  if (!layoutReady || !pdfDocument) {
+  if (!interactive || !pdfDocument) {
     return (
       <div data-testid="pdf-reader" className="mx-auto max-w-3xl px-6 py-8">
         <p data-testid="pdf-loading" className="text-center text-sm text-muted-foreground">

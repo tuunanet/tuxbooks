@@ -2,12 +2,18 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 /// Where the user stopped reading a given book. Mirrors the `reading_progress` table.
+///
+/// Progress stays format-specific: EPUB locates a chapter spine href (with an
+/// optional character offset), PDF locates a page number. `progress_percent`
+/// is the coarse shell-level position either way.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadingProgress {
     pub book_id: i64,
     pub chapter_href: Option<String>,
     pub character_offset: Option<i64>,
+    pub page_number: Option<i64>,
+    pub scroll_offset: Option<f64>,
     pub progress_percent: Option<f64>,
     pub updated_at: DateTime<Utc>,
 }
@@ -17,5 +23,7 @@ pub struct ReadingProgress {
 pub struct ProgressUpdate {
     pub chapter_href: Option<String>,
     pub character_offset: Option<i64>,
+    pub page_number: Option<i64>,
+    pub scroll_offset: Option<f64>,
     pub progress_percent: Option<f64>,
 }

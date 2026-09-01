@@ -43,6 +43,8 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
     list_books: [book],
     get_book_toc: { bookId: 1, title: book.title, chapters: EPUB_CHAPTERS },
     get_book_bytes: new ArrayBuffer(16),
+    get_reading_progress: null,
+    save_reading_progress: null,
   });
   return render(
     <AppShell

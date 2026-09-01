@@ -18,10 +18,12 @@ describe("tuxbooks continuous PDF reader", () => {
   async function openLargeFixture(): Promise<void> {
     await openInReader("A Large Fixture (PDF)");
     await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 100", {
-      timeout: 30000,
-      timeoutMsg: "large fixture never reported its page count",
-    });
+    // The document may restore to a previously read page (persistence), so
+    // only the page count itself is a stable expectation here.
+    await browser.waitUntil(
+      async () => /Page \d+ of 100/.test(await textOf("pdf-page-indicator")),
+      { timeout: 30000, timeoutMsg: "large fixture never reported its page count" },
+    );
   }
 
   it("renders the minimal fixture with working page navigation", async () => {
@@ -138,6 +140,37 @@ describe("tuxbooks continuous PDF reader", () => {
     await scrollToSlot(60);
     await waitForRendered(60);
     expect(await canvasIsNonBlank(60)).toBe(true);
+
+    await returnToLibrary();
+  });
+
+  // Critical acceptance test (§ persistence): the reader resumes where the
+  // user stopped, across close/reopen.
+  it("restores the reading position when a PDF is reopened", async () => {
+    await openInReader("A Minimal Manual (PDF)");
+    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+      timeout: 30000,
+      timeoutMsg: "minimal fixture never reported its page count",
+    });
+
+    // Scroll to page 2 and let the debounced save land before leaving.
+    await scrollToSlot(2);
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 2 of 3", {
+      timeout: 30000,
+      timeoutMsg: "scrolling never reached page 2",
+    });
+    await browser.pause(1500);
+    await returnToLibrary();
+
+    // Reopen: page 2 is restored (indicator, canvas, geometry).
+    await openInReader("A Minimal Manual (PDF)");
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 2 of 3", {
+      timeout: 30000,
+      timeoutMsg: "reading position was not restored on reopen",
+    });
+    await waitForRendered(2);
+    expect(await canvasIsNonBlank(2)).toBe(true);
 
     await returnToLibrary();
   });

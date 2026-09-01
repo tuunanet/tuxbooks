@@ -77,6 +77,8 @@ pub fn run() {
             commands::books::get_library_stats,
             commands::books::list_books,
             commands::library::scan_library,
+            commands::progress::get_reading_progress,
+            commands::progress::save_reading_progress,
             commands::reader::get_book_bytes,
             commands::reader::get_book_toc,
         ])

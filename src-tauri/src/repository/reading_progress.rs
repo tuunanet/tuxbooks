@@ -17,11 +17,13 @@ pub async fn upsert_progress(
     }
     sqlx::query(
         r#"
-        INSERT INTO reading_progress (book_id, chapter_href, character_offset, progress_percent)
-        VALUES (?1, ?2, ?3, ?4)
+        INSERT INTO reading_progress (book_id, chapter_href, character_offset, page_number, scroll_offset, progress_percent)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         ON CONFLICT(book_id) DO UPDATE SET
             chapter_href = excluded.chapter_href,
             character_offset = excluded.character_offset,
+            page_number = excluded.page_number,
+            scroll_offset = excluded.scroll_offset,
             progress_percent = excluded.progress_percent,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         "#,
@@ -29,6 +31,8 @@ pub async fn upsert_progress(
     .bind(book_id)
     .bind(&update.chapter_href)
     .bind(update.character_offset)
+    .bind(update.page_number)
+    .bind(update.scroll_offset)
     .bind(update.progress_percent)
     .execute(pool)
     .await?;
@@ -40,7 +44,7 @@ pub async fn get_progress(
     book_id: i64,
 ) -> Result<Option<ReadingProgress>, AppError> {
     let progress = sqlx::query_as::<_, ReadingProgress>(
-        "SELECT book_id, chapter_href, character_offset, progress_percent, updated_at \
+        "SELECT book_id, chapter_href, character_offset, page_number, scroll_offset, progress_percent, updated_at \
          FROM reading_progress WHERE book_id = ?1",
     )
     .bind(book_id)
@@ -89,6 +93,8 @@ mod tests {
             &ProgressUpdate {
                 chapter_href: Some("chapter2.xhtml".into()),
                 character_offset: Some(1024),
+                page_number: Some(87),
+                scroll_offset: Some(412.5),
                 progress_percent: Some(42.5),
             },
         )
@@ -99,6 +105,8 @@ mod tests {
         assert_eq!(progress.book_id, book_id);
         assert_eq!(progress.chapter_href.as_deref(), Some("chapter2.xhtml"));
         assert_eq!(progress.character_offset, Some(1024));
+        assert_eq!(progress.page_number, Some(87));
+        assert_eq!(progress.scroll_offset, Some(412.5));
         assert_eq!(progress.progress_percent, Some(42.5));
     }
 
@@ -112,6 +120,8 @@ mod tests {
             &ProgressUpdate {
                 chapter_href: Some("c1.xhtml".into()),
                 character_offset: None,
+                page_number: None,
+                scroll_offset: None,
                 progress_percent: Some(10.0),
             },
         )
@@ -123,6 +133,8 @@ mod tests {
             &ProgressUpdate {
                 chapter_href: Some("c2.xhtml".into()),
                 character_offset: Some(9),
+                page_number: Some(3),
+                scroll_offset: None,
                 progress_percent: Some(90.0),
             },
         )
@@ -143,6 +155,8 @@ mod tests {
             &ProgressUpdate {
                 chapter_href: None,
                 character_offset: None,
+                page_number: None,
+                scroll_offset: None,
                 progress_percent: Some(150.0),
             },
         )

@@ -221,6 +221,8 @@ mod tests {
             &crate::domain::ProgressUpdate {
                 chapter_href: Some("c1.xhtml".into()),
                 character_offset: Some(120),
+                page_number: None,
+                scroll_offset: None,
                 progress_percent: Some(12.5),
             },
         )

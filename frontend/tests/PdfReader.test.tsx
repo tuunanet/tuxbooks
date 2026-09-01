@@ -95,7 +95,11 @@ describe("PdfReader loading", () => {
   it("fetches the book bytes and renders page one at 100%", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
 
@@ -106,8 +110,10 @@ describe("PdfReader loading", () => {
     expect(doc.getPage).toHaveBeenCalledWith(1);
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
 
-    const canvas = screen.getByTestId("pdf-canvas");
-    expect(canvas).toHaveAttribute("width", "612");
+    const canvas = await screen.findByTestId("pdf-canvas");
+    // Backing-store attributes are set when the first render blits, a beat
+    // after the canvas element mounts.
+    await waitFor(() => expect(canvas).toHaveAttribute("width", "612"));
     expect(canvas).toHaveAttribute("height", "792");
     expect(canvas).toHaveAttribute("data-pdf-page", "1");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
@@ -124,7 +130,11 @@ describe("PdfReader loading", () => {
         resolveDocument = resolve as (value: EngineDocument) => void;
       }) as never,
     );
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     renderPdfReader();
     expect(await screen.findByTestId("pdf-loading")).toHaveTextContent("Loading A Minimal PDF…");
@@ -137,7 +147,11 @@ describe("PdfReader loading", () => {
   it("renders one slot per page with the loading slot marked", async () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
 
@@ -154,7 +168,11 @@ describe("PdfReader loading", () => {
       pageNumber === 2 ? { width: 792, height: 612 } : { width: 612, height: 792 },
     );
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
 
@@ -171,7 +189,11 @@ describe("PdfReader loading", () => {
 
   it("reports the loaded page count to the shell", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     const onDocumentLoad = vi.fn();
     await renderLoadedReader({ onDocumentLoad });
@@ -193,7 +215,11 @@ describe("PdfReader loading", () => {
   it("destroys the document when the reader unmounts", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     const view = await renderLoadedReader();
     view.unmount();
@@ -206,7 +232,11 @@ describe("PdfReader virtualization", () => {
   it("renders pages as they become visible and preloads the surroundings", async () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     // Before any intersection events, only the current page has a canvas.
@@ -230,7 +260,11 @@ describe("PdfReader virtualization", () => {
   it("renders one page at a time, reading anchor first", async () => {
     const doc = makeFakePdfDocument(100, undefined, { holdRenderFor: [1] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     expect(canvasPages()).toEqual(["1"]);
@@ -251,7 +285,11 @@ describe("PdfReader virtualization", () => {
 
   it("evicts canvases once pages leave the preload window", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     fireVisible(slot(2) as Element, true);
@@ -271,7 +309,11 @@ describe("PdfReader virtualization", () => {
 
   it("caps active canvases at the render budget, closest pages first", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     for (let page = 1; page <= 20; page++) {
@@ -288,7 +330,11 @@ describe("PdfReader scroll tracking", () => {
   /** Loaded reader with a fake scroll container (720px viewport). */
   async function renderScrollableReader() {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
     const container = document.createElement("div");
     const view = renderPdfReader({ scrollContainerRef: { current: container } });
     await screen.findByTestId("pdf-canvas");
@@ -353,11 +399,124 @@ describe("PdfReader scroll tracking", () => {
   });
 });
 
+describe("PdfReader persistence", () => {
+  function progressRoutes(savedPage: number | null) {
+    return {
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress:
+        savedPage === null
+          ? null
+          : {
+              bookId: 7,
+              chapterHref: null,
+              characterOffset: null,
+              pageNumber: savedPage,
+              scrollOffset: null,
+              progressPercent: null,
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+      save_reading_progress: null,
+    };
+  }
+
+  it("restores the saved page straight into the interactive view", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke(progressRoutes(3));
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+
+    try {
+      renderPdfReader();
+
+      // The restored page renders directly — no page-one flash first.
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
+      );
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3");
+      expect(doc.getPage).toHaveBeenCalledWith(3);
+      expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(3));
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  it("starts at page one when no progress exists", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke(progressRoutes(null));
+
+    renderPdfReader();
+
+    await screen.findByTestId("pdf-canvas");
+    expect(await screen.findByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("ignores out-of-range saved pages instead of restoring them", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke(progressRoutes(99));
+
+    renderPdfReader();
+
+    await screen.findByTestId("pdf-canvas");
+    expect(await screen.findByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("saves position changes debounced, not on every scroll", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke(progressRoutes(null));
+
+    await renderLoadedReader();
+    invokeMock.mockClear();
+
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    // The write is debounced (1s): it must not appear immediately.
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "save_reading_progress",
+      expect.objectContaining({ bookId: 7 }),
+    );
+    await waitFor(
+      () =>
+        expect(invokeMock).toHaveBeenCalledWith("save_reading_progress", {
+          bookId: 7,
+          progress: { pageNumber: 2, progressPercent: 50 },
+        }),
+      { timeout: 3000 },
+    );
+  });
+
+  it("flushes the final position when the reader closes mid-debounce", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke(progressRoutes(null));
+
+    const view = await renderLoadedReader();
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    invokeMock.mockClear();
+    view.unmount();
+
+    expect(invokeMock).toHaveBeenCalledWith("save_reading_progress", {
+      bookId: 7,
+      progress: { pageNumber: 2, progressPercent: 50 },
+    });
+  });
+});
+
 describe("PdfReader navigation", () => {
   it("navigates with prev/next and disables at both bounds", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     const prev = screen.getByTestId("pdf-prev");
@@ -391,7 +550,11 @@ describe("PdfReader zoom", () => {
   it("re-anchors the active page slot when the zoom changes", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
     const scrollIntoViewSpy = vi
       .spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => {});
@@ -444,7 +607,11 @@ describe("PdfReader zoom", () => {
     };
 
     openDocumentMock.mockResolvedValue(gatedDoc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     renderPdfReader();
     await waitFor(() => expect(pending).toHaveLength(1));
@@ -478,7 +645,11 @@ describe("PdfReader zoom", () => {
   it("steps through fixed zoom levels and re-renders the viewport", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
-    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
 
     await renderLoadedReader();
     expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("100%");

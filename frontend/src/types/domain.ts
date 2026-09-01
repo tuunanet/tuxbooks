@@ -41,9 +41,32 @@ export interface BookToc {
 }
 
 /**
+ * Wire shape of a stored reading position (mirrors `domain::ReadingProgress`).
+ * Fields are format-specific: EPUB locates a chapter href, PDF a page number.
+ */
+export interface ReadingProgressRecord {
+  bookId: number;
+  chapterHref: string | null;
+  characterOffset: number | null;
+  pageNumber: number | null;
+  scrollOffset: number | null;
+  progressPercent: number | null;
+  updatedAt: string;
+}
+
+/** Payload for saving a reading position; each format writes what it tracks. */
+export interface ReadingProgressInput {
+  chapterHref?: string | null;
+  characterOffset?: number | null;
+  pageNumber?: number | null;
+  scrollOffset?: number | null;
+  progressPercent?: number | null;
+}
+
+/**
  * Reading progress must stay format-specific so the backend can resume the
  * reader at the exact location (task §15). EPUB uses a CFI string, PDF a page
- * number. Persistence via a future `save_reading_progress` command.
+ * number.
  */
 export interface EpubReadingProgress {
   kind: "epub";

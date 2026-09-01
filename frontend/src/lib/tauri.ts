@@ -1,6 +1,13 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Book, BookToc, ImportReport, LibraryStats } from "@/types/domain";
+import type {
+  Book,
+  BookToc,
+  ImportReport,
+  LibraryStats,
+  ReadingProgressInput,
+  ReadingProgressRecord,
+} from "@/types/domain";
 
 export type { Book, BookFormat, BookToc, ImportReport, LibraryStats } from "@/types/domain";
 
@@ -26,6 +33,16 @@ export function getBookToc(bookId: number): Promise<BookToc> {
  */
 export function getBookBytes(bookId: number): Promise<ArrayBuffer> {
   return invoke("get_book_bytes", { bookId });
+}
+
+/** Load the stored reading position for a book, if any. */
+export function getReadingProgress(bookId: number): Promise<ReadingProgressRecord | null> {
+  return invoke("get_reading_progress", { bookId });
+}
+
+/** Persist (upsert) where the user stopped reading a book. */
+export function saveReadingProgress(bookId: number, progress: ReadingProgressInput): Promise<null> {
+  return invoke("save_reading_progress", { bookId, progress });
 }
 
 /** Native folder picker; resolves to null when the user cancels. */
