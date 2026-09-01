@@ -10,6 +10,8 @@ export interface FakePdfDocument {
   getPage: ReturnType<typeof vi.fn>;
   /** Every scale passed to getViewport, in call order. */
   scales: number[];
+  /** Resolves a render held open via `holdRenderFor`. */
+  releaseRender: (pageNumber: number) => void;
 }
 
 export interface PageSizeSpec {
@@ -20,12 +22,16 @@ export interface PageSizeSpec {
 export function makeFakePdfDocument(
   pageCount = 3,
   sizeFor: (pageNumber: number) => PageSizeSpec = () => ({ width: 612, height: 792 }),
+  options: { holdRenderFor?: number[] } = {},
 ): FakePdfDocument {
   const scales: number[] = [];
+  const held = new Set(options.holdRenderFor ?? []);
+  const releaseFns = new Map<number, () => void>();
   const doc: FakePdfDocument = {
     numPages: pageCount,
     getPage: vi.fn(),
     scales,
+    releaseRender: (pageNumber) => releaseFns.get(pageNumber)?.(),
   };
   const pages = new Map();
   doc.getPage.mockImplementation(async (number: number) => {
@@ -36,7 +42,15 @@ export function makeFakePdfDocument(
           scales.push(scale);
           return { width: size.width * scale, height: size.height * scale };
         }),
-        render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
+        render: vi.fn(() => {
+          if (!held.has(number)) {
+            return { promise: Promise.resolve(), cancel: vi.fn() };
+          }
+          return {
+            promise: new Promise<void>((resolve) => releaseFns.set(number, resolve)),
+            cancel: vi.fn(),
+          };
+        }),
       });
     }
     return pages.get(number);

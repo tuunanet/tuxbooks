@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
 vi.mock("@/lib/pdf/pdfEngine", () => ({
   openPdfDocument: vi.fn(),
   closePdfDocument: vi.fn(async () => {}),
+  pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
   RenderingCancelledException: class RenderingCancelledException extends Error {},
 }));
 

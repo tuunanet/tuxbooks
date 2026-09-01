@@ -18,6 +18,11 @@ export type PdfPage = PDFPageProxy;
 export type PdfRenderTask = RenderTask;
 export { RenderingCancelledException };
 
+/** Configured worker URL; diagnostics for fake-worker fallback detection. */
+export function pdfWorkerSrc(): string {
+  return GlobalWorkerOptions.workerSrc;
+}
+
 /**
  * Open a PDF from in-memory bytes. Note: PDF.js transfers the underlying
  * buffer to its worker, so callers must not reuse the array afterwards.

@@ -97,6 +97,24 @@ describe("tuxbooks continuous PDF reader", () => {
     expect(await textOf("pdf-page-indicator")).toContain("Page");
     expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);
 
+    // The PDF.js worker must actually load. A silent fake-worker fallback
+    // (main-thread rendering) is a classic cause of seconds-long, highly
+    // variable page render times.
+    const workerSrc = await browser.execute(() =>
+      document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-worker-src"),
+    );
+    expect(workerSrc).toBeTruthy();
+    const workerReachable = await browser.execute(async (src) => {
+      try {
+        if (typeof src !== "string") return false;
+        const response = await fetch(src);
+        return response.ok;
+      } catch {
+        return false;
+      }
+    }, workerSrc);
+    expect(workerReachable).toBe(true);
+
     await scrollToSlot(100);
     await waitForRendered(100);
     expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);

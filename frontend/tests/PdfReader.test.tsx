@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/pdf/pdfEngine", () => ({
   openPdfDocument: vi.fn(),
   closePdfDocument: vi.fn(async () => {}),
+  pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
   RenderingCancelledException: class RenderingCancelledException extends Error {},
 }));
 
@@ -216,11 +217,36 @@ describe("PdfReader virtualization", () => {
     firePreload(slot(4) as Element, true);
     firePreload(slot(5) as Element, true);
 
-    await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3", "4", "5"]));
+    // Completed canvases stay mounted; only ONE prerender page beyond the
+    // visible range is attempted (the closest, page 4 — like the official
+    // viewer's single pre-render slot).
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3", "4"]));
     await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
-    expect(slot(50)).toHaveAttribute("data-render-state", "unloaded");
+    expect(slot(5)).toHaveAttribute("data-render-state", "unloaded");
     // Approaching pages are measured so their geometry is real before use.
     expect(doc.getPage).toHaveBeenCalledWith(4);
+  });
+
+  it("renders one page at a time, reading anchor first", async () => {
+    const doc = makeFakePdfDocument(100, undefined, { holdRenderFor: [1] });
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({ get_book_bytes: new ArrayBuffer(16) });
+
+    await renderLoadedReader();
+    expect(canvasPages()).toEqual(["1"]);
+
+    // While the anchor page's render is in flight, newly visible pages must
+    // not start their own renders (the worker is serial — queueing behind
+    // invisible work is what made image-heavy pages take seconds).
+    fireVisible(slot(3) as Element, true);
+    expect(canvasPages()).toEqual(["1"]);
+
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "3"]));
+
+    // With nothing visible pending, a single prerender page is allowed.
+    firePreload(slot(7) as Element, true);
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "7"]));
   });
 
   it("evicts canvases once pages leave the preload window", async () => {

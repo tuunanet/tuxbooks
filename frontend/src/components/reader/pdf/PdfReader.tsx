@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useReader } from "@/state/readerState";
+import { pdfWorkerSrc } from "@/lib/pdf/pdfEngine";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
@@ -59,18 +60,40 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     [sizes, zoom],
   );
 
-  // The bounded render set: the current page first (it must always render,
-  // even far from any scroll event), then visible pages, then preloading
-  // pages — closest to the reading position first, capped at the budget.
-  // Distant pages keep only their geometry slots; their canvases are gone.
-  const renderPages = useMemo(() => {
-    const candidates = new Set<number>([currentPage]);
-    for (const page of visiblePages) candidates.add(page);
-    for (const page of preloadPages) candidates.add(page);
-    return [...candidates]
+  // Rendering policy, modeled on the official PDF.js viewer's
+  // PDFRenderingQueue (pdfjs-dist web/pdf_viewer.mjs): the worker
+  // rasterizes serially, so N concurrent render() calls are an illusion —
+  // they just queue FIFO and the page the user is looking at can wait
+  // behind up to N-1 others (worst case behind several multi-second image
+  // decodes). Instead:
+  //
+  //   1. one render runs at a time (serialized at the call sites);
+  //   2. the reading anchor page has absolute priority, then visible pages
+  //      (closest first);
+  //   3. exactly ONE prerender page beyond the viewport is attempted, and
+  //      only while nothing visible needs rendering;
+  //   4. a superseded in-flight render is simply unmounted (cancelled).
+  //
+  // Completed canvases stay mounted while their page remains inside the
+  // virtualization window (anchor ∪ visible ∪ preload), bounded by
+  // MAX_ACTIVE_CANVASES; distant pages keep only their geometry slots.
+  const renderOrder = useMemo(() => {
+    const active = [...new Set([currentPage, ...visiblePages])].sort(
+      (a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage),
+    );
+    const preloaded = [...preloadPages]
       .sort((a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage))
-      .slice(0, MAX_ACTIVE_CANVASES);
+      .find((page) => !active.includes(page));
+    if (preloaded !== undefined) active.push(preloaded);
+    return active.slice(0, MAX_ACTIVE_CANVASES);
   }, [currentPage, visiblePages, preloadPages]);
+
+  const canvasPages = useMemo(() => {
+    const window = new Set(renderOrder);
+    const completed = [...renderedPages].filter((page) => window.has(page));
+    const next = renderOrder.find((page) => !renderedPages.has(page) && !failedPages.has(page));
+    return next === undefined ? completed : [...completed, next];
+  }, [renderOrder, renderedPages, failedPages]);
 
   // Measure pages as they approach visibility so slot estimates become real
   // dimensions before their canvases render (lazy geometry correction).
@@ -192,7 +215,11 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
   }
 
   return (
-    <div data-testid="pdf-reader" className="flex flex-col items-stretch px-6 py-4">
+    <div
+      data-testid="pdf-reader"
+      data-pdf-worker-src={pdfWorkerSrc()}
+      className="flex flex-col items-stretch px-6 py-4"
+    >
       <PdfToolbar
         pageNumber={currentPage}
         pageCount={effectivePageCount}
@@ -207,7 +234,7 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
       <PdfDocumentView
         document={pdfDocument}
         slots={slots}
-        renderPages={renderPages}
+        renderPages={canvasPages}
         anchorPage={currentPage}
         scale={zoom}
         renderedPages={renderedPages}
