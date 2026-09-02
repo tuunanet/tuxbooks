@@ -3,7 +3,8 @@
 SQLite (bundled, via SQLx) at a single file path. Migrations live in
 `src-tauri/migrations/` and are embedded at compile time with
 `sqlx::migrate!`; they run automatically in `db::connection::init_pool`,
-so a clean database always converges to the current schema.
+so a clean database always converges to the current schema. Add numbered
+`.sql` files; never create schema procedurally at runtime.
 
 Location: OS app-data dir (`tuxbooks.db`) unless `TEST_DATABASE_PATH` is
 set. Timestamps are RFC 3339 TEXT (`strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
@@ -49,7 +50,9 @@ PK `book_id` (FK, cascade) — one progress row per book.
 `books_fts` is an FTS5 **external-content** table over
 `books(title, subtitle, author, description)` kept in sync by three
 triggers (`books_fts_ai/ad/au`). Search code joins `books_fts.rowid =
-books.id` and uses `snippet()`; the index never needs a backfill.
+books.id` and uses `snippet()`; the index never needs a backfill. If you
+change `books` columns covered by the index, update those triggers — the
+test `updating_book_keeps_fts_index_in_sync` must keep passing.
 
 ## Conventions
 

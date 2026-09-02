@@ -53,111 +53,24 @@ on failure, and leaves failure artifacts (screenshots, wdio/driver logs) in
 configure Xvfb/DISPLAY, click anything, or clean up stale processes — but do
 not launch a second E2E run while one is still going.
 
-## Non-obvious gotchas (each one has bitten before)
+## Non-obvious gotchas
 
-1. **Debug binaries load the dev server, not your code.** A plain
-   `cargo build` binary opens `http://localhost:1420` (empty page if Vite isn't
-   running). Binaries that embed `frontend/dist` need the feature:
-   `cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol`.
-   `just build-debug` does this; `tauri build` does it automatically.
-2. **`frontend/dist` must exist before `cargo build/test/clippy`.** The Tauri
-   context macro embeds it at compile time. `just frontend-dist` builds it on
-   demand. A fresh clone: `pnpm install && just frontend-dist` before Rust work.
-3. **SQLx is runtime-query only.** Do not introduce `sqlx::query!` macros —
-   they require a live `DATABASE_URL` and `sqlx prepare`. Use `sqlx::query` /
-   `query_as` with `FromRow` types.
-4. **Migrations are embedded** via `sqlx::migrate!()` (crate-relative
-   `src-tauri/migrations/`). Add numbered `.sql` files; never create schema
-   procedurally at runtime.
-5. **FTS5 is trigger-synced.** `books_fts` is an external-content table kept in
-   sync by triggers in `0002_books_fts.sql`. If you change `books` columns
-   covered by the index, update those triggers and the search test
-   `updating_book_keeps_fts_index_in_sync` must still pass.
-6. **Vitest mock hoisting:** `vi.mock("@tauri-apps/api/core", ...)` must be
-   called in each test file (vitest hoists it above imports). Mocking it only
-   in a helper module does not work — app code will import the real module.
-7. **React lint rule `react-hooks/set-state-in-effect`**: no synchronous
-   `setState` inside effects. Do state updates after an `await` (see
-   `frontend/src/hooks/useLibrary.ts` for the pattern).
-8. **E2E driver chain and protocol:** `@wdio/tauri-service` (external
-   provider) spawns `tauri-driver`, which relays to WebKitWebDriver and the
-   app. Ports are probed and auto-allocated — never hardcode 4444/4445 in
-   specs. Capability sets `"wdio:enforceWebDriverClassic": true` —
-   WebKitWebDriver has no BiDi support.
-9. **E2E env must be set before the driver spawns.** The app inherits the
-   driver's environment, so `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` are
-   set in config `onPrepare` (which runs before the service's `onPrepare`).
-   Keep it that way.
-10. **This dev machine may lack sudo.** If webkit2gtk-4.1 was extracted to
-    `~/.local` from .deb files, `scripts/dev-env.sh` (used by the justfile)
-    appends the right `PKG_CONFIG_PATH`/`LD_LIBRARY_PATH` and only puts
-    `~/.local/usr/bin` on `PATH` when the system `WebKitWebDriver` is missing.
-    On normal machines it is a pass-through. Don't hardcode these paths.
-11. **The Tauri app can outlive `tauri-driver` at teardown.** E2E arms a
-    detached watchdog (`e2e/setup/watchdog.mjs`) that reaps leftover
-    app/driver processes and SIGKILLs a wedged launcher; the justfile adds an
-    outer `timeout` guard. If you touch E2E teardown, keep both layers — a
-    leftover app holding the stdout pipe wedges the whole invocation.
-12. **`tauri-plugin-wdio` is debug-only test infrastructure.** Registered
-    under `#[cfg(debug_assertions)]` in `lib.rs`; the frontend bridge is only
-    bundled when `VITE_WDIO=1` (set by `just build-debug`). Release builds
-    must never include it, but the crate stays a non-optional dependency so
-    the `wdio:default` capability permission resolves in every build.
-13. **`xvfb-run` alone is not headless on a Wayland desktop.** It only
-    overrides `DISPLAY`; a GTK3 app still prefers an inherited
-    `WAYLAND_DISPLAY` and pops up on the real screen. The headless E2E
-    prefix therefore also does `env -u WAYLAND_DISPLAY GDK_BACKEND=x11` —
-    keep that when touching the justfile or running phases manually.
-14. **`cargo test` invalidates the E2E binary.** `just check` /
-    `just test-rust` rebuild `target/debug/tuxbooks` WITHOUT the
-    `custom-protocol` feature (cargo feature unification), and the
-    `test-e2e-empty` / `test-e2e-seeded` sub-recipes do not depend on
-    `build-debug`. Running them right after `just check` launches a binary
-    that loads the (absent) Vite dev server — every test fails with
-    "Could not connect to localhost". Run `just build-debug` first, or use
-    `just test-e2e`, which depends on it.
-15. **PDF reader invariants** (see `docs/pdf.md` for the full contract):
-    `frontend/src/lib/pdf/pdfEngine.ts` is the only module that imports
-    `pdfjs-dist`; rendering is serialized (one page at a time, reading
-    anchor first — the worker is single-threaded, so concurrent renders are
-    FIFO starvation); the visible canvas is written only by the final blit
-    of an offscreen-buffer render (never paint into it directly); reading
-    position writes are debounced and page-number-based. Behavior is pinned
-    by stable DOM attributes (`data-pdf-slot`, `data-render-state`,
-    `data-pdf-worker-src`) — keep them when refactoring.
-16. **foliate-js is a vendored git submodule** (the EPUB engine), pinned at
-    `frontend/src/lib/epub/foliate-js` — upstream `johnfactotum/foliate-js`.
-    (The Readest fork was evaluated and rejected: its multi-view rework
-    hangs or mis-paginates real-world books, e.g. Manning EPUB 2 titles;
-    upstream paginates them correctly.) WebKit resolves `fonts.ready` early
-    while section fonts are still settling, so the paginator's deferred
-    re-expand can measure a zero-size document and collapse a section to
-    zero width (blank reader); `EpubReader` therefore schedules one
-    `EpubViewHandle.relayout()` per section once fonts settle. A fresh
-    clone needs `git submodule update --init` (pnpm install does not fetch
-    it). Never edit files inside the submodule; it is excluded from lint
-    and typechecked only through the stub in
-    `frontend/src/lib/epub/foliate-js.d.ts`.
-    `frontend/src/lib/epub/epubEngine.ts` is the only module that may import
-    it (same seam rule as pdfEngine), and `frontend/vite.config.ts` stubs
-    out `foliate-js/pdf.js` (Vite-incompatible; PDFs belong to pdfEngine).
-    EPUB invariants: reading position is a CFI (`reading_progress.cfi` +
-    `chapter_href`), restore/skip-first-save lifecycle mirrors
-    `usePdfPersistence`; the app CSP must keep `script-src 'self'` (blocks
-    scripted EPUB content in the engine's blob: iframes) while `blob:` stays
-    allowed for frames and book images/styles/fonts/media; external links
-    are intercepted, never opened. Arrow/space/PageUp/PageDown are owned
-    exclusively by the EPUB engine while an EPUB is open: the shell must not
-    register its percentage-stepping/scrolling handlers for EPUB (null-combo
-    gating in ReaderShell) — with no page count a shell step is 100/0 and
-    the provider clamp sends the position straight to an end of the document.
-    The engine does not report byte sizes, so
-    shell progress is derived from spine position (`section` + in-section
-    page fraction) and outside percent-jumps map onto spine indexes — the
-    CFI stays the exact locator. E2E pins behavior on the engine host's data
-    attributes (`data-epub-state`, `data-epub-section`,
-    `data-epub-doc-math-count`) because the engine's iframes are opaque to
-    WebDriver.
+Each of these has bitten before. The details live with the layer they bite —
+read the relevant doc before touching that layer:
+
+- Builds: debug binaries need `--features custom-protocol`; `frontend/dist`
+  must exist before any cargo command; the dev environment may lack sudo —
+  `docs/build.md`.
+- Database: runtime-query SQLx only (no `query!` macros), embedded numbered
+  migrations, FTS5 triggers must move with `books` columns —
+  `docs/database.md`.
+- Frontend: no synchronous `setState` inside effects — `docs/STANDARDS.md`.
+- Testing: `vi.mock` declared per test file, E2E env set in config
+  `onPrepare` before the driver spawns, `just check` invalidates the E2E
+  binary — `docs/testing.md`.
+- Readers: single-module engine seams, position/persistence invariants,
+  pinned DOM attributes, vendored foliate-js — `docs/epub.md`,
+  `docs/pdf.md`.
 
 ## Testing rules
 
@@ -206,3 +119,8 @@ not launch a second E2E run while one is still going.
 Read the one that fits the task; each is short.
 
 - `docs/STANDARDS.md` describes coding standards.
+- `docs/architecture.md` — module boundaries, frontend structure.
+- `docs/build.md` — build flavors, `frontend/dist`, dev environment.
+- `docs/database.md` — schema, migrations, FTS5.
+- `docs/epub.md` / `docs/pdf.md` — reader layer contracts.
+- `docs/testing.md` — test layers and E2E infrastructure.

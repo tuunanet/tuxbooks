@@ -27,6 +27,12 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
 - Do not add decorative emoji, generic summaries, marketing language, or ceremonial comment banners.
 - Do not rename or reformat unrelated code.
 
+## Frontend
+
+- No synchronous `setState` inside effects (lint rule
+  `react-hooks/set-state-in-effect`): do state updates after an `await`
+  (see `frontend/src/hooks/useLibrary.ts` for the pattern).
+
 ## User interface
 
 - Preserve accessibility and use meaningful controls and labels.

@@ -81,6 +81,14 @@ to zero width (blank reader). `EpubReader` therefore schedules one
 the paginator layout with real geometry. It is consumed only through the
 engine seam.
 
+### Vendored submodule
+
+A fresh clone needs `git submodule update --init` (pnpm install does not
+fetch the submodule). Never edit files inside it: it is excluded from lint
+and typechecked only through the stub `frontend/src/lib/epub/foliate-js.d.ts`.
+`frontend/vite.config.ts` stubs out `foliate-js/pdf.js` (Vite-incompatible;
+PDF rendering belongs to pdfEngine).
+
 ### Engine seam
 
 `frontend/src/lib/epub/epubEngine.ts` is the single module that imports the
@@ -112,6 +120,17 @@ EPUB persists `cfi` (canonical EPUB CFI — resource + location together),
 (coarse shell position used for bookmarks/progress UI). Restore validates
 the stored CFI (`epubcfi(` prefix) and degrades to the book start when
 missing or malformed.
+
+### Shell integration invariants
+
+- Arrow/space/PageUp/PageDown are owned exclusively by the EPUB engine
+  while an EPUB is open: the shell must not register its
+  percentage-stepping/scrolling handlers for EPUB (null-combo gating in
+  ReaderShell) — with no page count a shell step is 100/0 and the provider
+  clamp sends the position straight to an end of the document.
+- The engine does not report byte sizes, so shell progress is derived from
+  spine position (`section` + in-section page fraction); outside
+  percent-jumps map onto spine indexes — the CFI stays the exact locator.
 
 ### Security
 

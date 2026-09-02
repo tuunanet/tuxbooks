@@ -31,7 +31,10 @@ Four layers, all runnable locally via `just`:
 - The Tauri API is mocked at the boundary: each test file hoists
   `vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }))` and
   routes responses with `tests/mocks/tauri.ts::mockInvoke`.
-  Tests never require a running Tauri app.
+  Tests never require a running Tauri app. The mock must be declared in
+  each test file — vitest hoists `vi.mock` above imports, so declaring it
+  only in a helper module does not work (app code would import the real
+  module).
 - `tests/factories.ts::makeBook` builds canonical `Book` fixtures.
 - PDF reader tests use additional fakes (all in `tests/mocks/`):
   - `pdfEngine.ts` — fake PDF.js documents with per-page sizes, held
@@ -56,6 +59,15 @@ Stack: `@wdio/tauri-service` → external `tauri-driver` → WebKitWebDriver →
 the debug binary built by `just build-debug` (`cargo build --features
 custom-protocol` + `VITE_WDIO=1` frontend build; without the feature a
 debug binary would load the Vite dev server instead of embedded assets).
+Capability sets `"wdio:enforceWebDriverClassic": true` — WebKitWebDriver
+has no BiDi support. Driver ports are probed and auto-allocated — never
+hardcode 4444/4445 in specs. `just check` / `just test-rust` rebuild the
+binary without the `custom-protocol` feature (cargo feature unification),
+so run `just build-debug` first — see [build.md](build.md).
+
+The app inherits the driver's environment, so `TEST_DATABASE_PATH` /
+`TEST_LIBRARY_PATH` must be set in the wdio config `onPrepare`, which runs
+before the service's `onPrepare` spawns the driver — keep that ordering.
 
 Two isolated invocations per run:
 
@@ -132,10 +144,14 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
   justfile, so `just test-e2e` always terminates and always returns a
   meaningful exit code.
 - Failed tests capture a screenshot into `artifacts/e2e/<runId>/`
-  (gitignored, pruned after 7 days) next to the per-run wdio/driver logs;
-  backend and frontend console logs are forwarded into those logs by
-  `tauri-plugin-wdio` (debug builds only — the plugin is registered under
-  `#[cfg(debug_assertions)]` and tree-shaken from release bundles).
+   (gitignored, pruned after 7 days) next to the per-run wdio/driver logs;
+   backend and frontend console logs are forwarded into those logs by
+   `tauri-plugin-wdio` (debug-only test infrastructure: the plugin is
+   registered under `#[cfg(debug_assertions)]` in `lib.rs` and the frontend
+   bridge is only bundled when `VITE_WDIO=1`, set by `just build-debug` —
+   release builds must never include it. The crate stays a non-optional
+   dependency so the `wdio:default` capability permission resolves in every
+   build).
 - WebKitGTK quirk: WebDriver `getText` walks the accessibility tree and
   omits text inside `line-clamp`/`truncate` boxes, so specs assert on DOM
   `textContent` for book and reader titles.
