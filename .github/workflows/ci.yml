@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: pnpm/action-setup@v4
 
@@ -48,6 +50,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Tauri system dependencies
         run: |
@@ -86,6 +90,8 @@ jobs:
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Tauri system dependencies
         run: |
@@ -137,6 +143,8 @@ jobs:
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Tauri system dependencies
         run: |
