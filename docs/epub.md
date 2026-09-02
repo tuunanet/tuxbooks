@@ -151,12 +151,17 @@ them because the engine's shadow root and iframes are closed to WebDriver.
 MathML (EPUB 3) renders natively through WebKit's MathML Core; the fixture
 book carries a `mathml`-properties chapter to pin that end to end.
 
-## Fixture
+## Fixtures
 
-All parser behavior is pinned by `tests/fixtures/books/minimal.epub`
+Parser behavior is pinned by `tests/fixtures/books/minimal.epub`
 (regenerate with `python3 scripts/make-fixture.py`; content is original,
-license-free). Tests live in `epub/mod.rs`, `epub/metadata.rs`, and
-`epub/parser.rs`.
+license-free) and by the dedicated corpus in `tests/fixtures/epub/core/` —
+30 tiny EPUB 2 + EPUB 3 fixtures (minimal, navigation, content, styling,
+links, images, i18n, malformed) regenerated with `just make-epub-fixtures`
+and validated by `just check-epub-fixtures`. See
+[the corpus README](../tests/fixtures/epub/README.md). Tests live in
+`epub/mod.rs`, `epub/metadata.rs`, `epub/parser.rs`, and
+`src-tauri/tests/epub_corpus.rs`.
 
 ## Planned evolution
 

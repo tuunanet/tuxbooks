@@ -16,6 +16,16 @@ frontend-dist:
     cd "{{root}}"
     test -f frontend/dist/index.html || pnpm --filter frontend build
 
+# Regenerate the committed EPUB fixture corpus (tests/fixtures/epub/):
+# deterministic source trees + artifacts + manifest. Byte-identical per run.
+make-epub-fixtures:
+    python3 scripts/make-epub-fixtures.py
+
+# Validate the EPUB fixture corpus: determinism, manifest checksums, EPUB
+# version identity, malformed markers, and the committed size budget.
+check-epub-fixtures:
+    python3 scripts/make-epub-fixtures.py --check
+
 # Launch the app in development mode (Vite dev server + Tauri window, hot reload).
 dev:
     pnpm tauri dev
@@ -85,6 +95,24 @@ test-e2e-headed-empty:
 test-e2e-headed-seeded:
     env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
+# Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
+# `just check`, or normal CI: the default suite is fully self-contained.
+
+# Fetch extended/conformance EPUB datasets declared in
+# tests/fixtures/epub/fixtures.toml into .build/fixtures/epub/ (cached,
+# checksum-verified). Downloads once, never per test run.
+fetch-epub-extended:
+    python3 scripts/fetch-epub-extended.py
+
+# Tier B: run the real-world corpus through the parser. Requires a prior
+# `just fetch-epub-extended`; skips with a notice when nothing is fetched.
+test-epub-extended: frontend-dist
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol --test extended_epub extended::
+
+# Tier C: run the external W3C conformance corpus. Same opt-in contract.
+test-epub-conformance: frontend-dist
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol --test extended_epub conformance::
+
 lint: lint-rust lint-frontend
 
 lint-rust:
@@ -118,7 +146,8 @@ check:
         'frontend-test: just test-frontend' \
         'frontend-lint: just lint-frontend' \
         'frontend-types: just typecheck' \
-        'format: just format-check-frontend'
+        'format: just format-check-frontend' \
+        'fixtures: just check-epub-fixtures'
     @echo "check: OK"
 
 # Complete CI-equivalent validation, including E2E and the release build.

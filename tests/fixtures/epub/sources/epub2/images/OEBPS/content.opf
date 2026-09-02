@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="2.0">
+  <metadata>
+    <dc:identifier id="pub-id">urn:uuid:f0000000-0000-4000-8000-000000000006</dc:identifier>
+    <dc:title>EPUB 2 Images</dc:title>
+    <dc:creator opf:role="aut">Tuxbooks Fixtures</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:publisher>Tuxbooks Press</dc:publisher>
+    <dc:description>Raster images and the EPUB 2 cover convention.</dc:description>
+    <meta name="cover" content="img-blue"/>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="img-blue" href="images/blue.png" media-type="image/png"/>
+    <item id="img-green" href="images/green.png" media-type="image/png"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="chapter1"/>
+  </spine>
+</package>

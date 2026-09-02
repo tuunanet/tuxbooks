@@ -53,6 +53,11 @@ jobs:
         with:
           submodules: recursive
 
+      # Fails fast when a large or non-deterministic fixture sneaked into the
+      # committed corpus (docs/testing.md). No network access needed.
+      - name: EPUB fixture guardrails
+        run: python3 scripts/make-epub-fixtures.py --check
+
       - name: Install Tauri system dependencies
         run: |
           sudo apt-get update

@@ -13,6 +13,10 @@ target/
 *.db-wal
 *.db-shm
 
+# Opt-in downloaded extended/conformance EPUB datasets (fixtures.toml-driven;
+# never part of a checkout — tests/fixtures/epub/core/ stays tiny)
+.build/
+
 # Test & E2E scratch space
 e2e/.tmp/
 .e2e-tmp/

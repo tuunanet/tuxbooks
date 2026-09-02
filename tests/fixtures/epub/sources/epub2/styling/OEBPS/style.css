@@ -1,0 +1,5 @@
+body { font-family: serif; margin: 1em; }
+h1 { font-size: 1.4em; color: #0f172a; }
+h2 { font-size: 1.2em; }
+p.indented { text-indent: 1.5em; }
+.callout { border-left: 3px solid #64748b; padding-left: 0.5em; font-style: italic; }

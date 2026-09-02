@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" unique-identifier="pub-id" version="3.0">
+  <metadata>
+    <dc:identifier id="pub-id">urn:uuid:f0000000-0000-4000-8000-000000000021</dc:identifier>
+    <dc:title>EPUB 3 Minimal</dc:title>
+    <dc:creator>Tuxbooks Fixtures</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:publisher>Tuxbooks Press</dc:publisher>
+    <dc:description>Smallest valid EPUB 3 publication.</dc:description>
+    <meta property="dcterms:modified">2024-01-01T00:00:00Z</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter1"/>
+  </spine>
+</package>

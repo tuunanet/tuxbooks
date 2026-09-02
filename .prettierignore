@@ -11,3 +11,7 @@ LICENSE.md
 
 # vendored third-party code (pinned foliate-js submodule) — never reformat
 frontend/src/lib/epub/foliate-js
+
+# EPUB fixture corpus: source trees + READMEs are generated/script-owned and
+# must stay byte-stable for the determinism check (just make-epub-fixtures)
+tests/fixtures/epub
