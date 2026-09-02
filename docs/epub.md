@@ -1,5 +1,11 @@
 # EPUB layer
 
+The EPUB subsystem has two halves: a small Rust parser used at import time
+(`src-tauri/src/epub/`) and a browser-side rendering engine used by the
+reader (`frontend/src/lib/epub/`).
+
+## Rust import parser
+
 `src-tauri/src/epub/` is a small, dependency-light EPUB reader: `zip`
 
 - `quick-xml` only. It has no Tauri or SQLx imports and returns owned
@@ -46,10 +52,85 @@ panic on malformed input — a property test feeds arbitrary bytes through
 
 ## Known limitations (intentional, for now)
 
-- No page list, encryption.xml (DRM), or media-overlay support.
-- Chapter contents are not extracted yet — only the spine hrefs.
-- Cover bytes are held in memory during import (fine for typical
-  covers; revisit if libraries grow very large).
+- Rust parser: no page list, encryption.xml (DRM), or media-overlay
+  support; contents extraction is metadata/spine/cover only (the reader
+  engine parses document structure itself from the file bytes).
+- Fixed-layout EPUBs use the engine's fixed-layout renderer, the least
+  mature part of foliate-js; reflowable books are the product priority.
+- Reader: no in-book search, annotations, or media overlays yet (later
+  milestones; the engine already exposes the needed modules).
+
+## Reader rendering (frontend, foliate-js)
+
+The reader renders EPUBs with **foliate-js** (MIT), vendored as a git
+submodule pinned at `frontend/src/lib/epub/foliate-js`. It was chosen over
+epub.js (npm-frozen since 2022-02) and the Readium TS toolkit (heavier,
+manifest-oriented) because it is proven on this exact stack — Foliate uses
+it on WebKitGTK and Readest ships it inside Tauri v2 — and it has zero hard
+dependencies.
+
+The submodule pins **upstream** `johnfactotum/foliate-js`. The Readest
+fork was evaluated and rejected: its multi-view paginator rework hangs or
+mis-paginates real-world EPUB 2 books (e.g. Manning titles with large
+`.html` sections), while upstream paginates them correctly. One WebKit
+quirk is handled at the seam instead: WebKit resolves `fonts.ready` early
+while section fonts are still settling, so the paginator's deferred
+re-expand can measure a zero-size document and collapse the section iframe
+to zero width (blank reader). `EpubReader` therefore schedules one
+`EpubViewHandle.relayout()` per section once fonts settle, which re-runs
+the paginator layout with real geometry. It is consumed only through the
+engine seam.
+
+### Engine seam
+
+`frontend/src/lib/epub/epubEngine.ts` is the single module that imports the
+vendored sources (mirroring `lib/pdf/pdfEngine.ts` for PDF.js). Everything
+else depends on its types and on `EpubViewHandle`:
+
+- `open(bytes)` parses the EPUB from raw IPC bytes (`get_book_bytes`) in a
+  Blob; zip access happens inside the engine via its vendored zip.js.
+- `init(lastLocation)` restores a CFI or starts at the book's beginning.
+- `onRelocate` delivers `{ cfi, fraction, section, tocItem }`;
+  `onLoad` delivers each mounted section document; `onExternalLink`
+  intercepts (and blocks) outbound links.
+- `setFlow("paginated" | "scrolled")` maps the reader layout preference
+  onto the renderer's `flow` attribute.
+- `setAppearance(css)` injects the user stylesheet (`epubAppearanceCss`:
+  font size, optional serif/sans override, line spacing, theme colors) into
+  every section document, user-`!important` over publisher styles.
+
+Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
+POSITION_RESTORED → INTERACTIVE), `epub/hooks/useEpubDocument` owns the
+engine lifetime, `epub/hooks/useEpubPersistence` owns position save/restore
+(same debounced contract as the PDF reader).
+
+### Position locator
+
+Progress is format-specific (see migration `0004_reading_progress_cfi`):
+EPUB persists `cfi` (canonical EPUB CFI — resource + location together),
+`chapter_href` (spine href of the current section), and `progress_percent`
+(coarse shell position used for bookmarks/progress UI). Restore validates
+the stored CFI (`epubcfi(` prefix) and degrades to the book start when
+missing or malformed.
+
+### Security
+
+EPUB content may contain scripts; foliate-js renders sections in
+same-origin `blob:` iframe documents, and WebKit's iframe `sandbox` is
+useless (bug 218086) — so scripting is blocked by the application CSP in
+`tauri.conf.json`: `script-src 'self'` (blob: documents inherit it),
+`frame-src 'self' blob:` so the section iframes may load at all, and
+`blob:` allowed for `img-src`/`style-src`/`font-src`/`media-src` so book
+resources load. External links are intercepted, never navigated.
+
+### Testability contract
+
+Stable DOM attributes on the engine host (`data-epub-state`,
+`data-epub-section`, `data-epub-section-total`, `data-epub-fraction`,
+`data-epub-doc-math-count`) — keep them when refactoring; E2E asserts on
+them because the engine's shadow root and iframes are closed to WebDriver.
+MathML (EPUB 3) renders natively through WebKit's MathML Core; the fixture
+book carries a `mathml`-properties chapter to pin that end to end.
 
 ## Fixture
 
@@ -60,6 +141,8 @@ license-free). Tests live in `epub/mod.rs`, `epub/metadata.rs`, and
 
 ## Planned evolution
 
-`epub/` will grow `spine::document(href) -> Vec<u8>`-style content
-access and pagination metadata for the reader; metadata extraction
-stays exactly where it is.
+The engine seam is the swap point: if foliate-js ever blocks a product
+need, `@readium/navigator` (ts-toolkit) is the evaluated fallback, and only
+`epubEngine.ts` + `EpubReader` would change. Search (`search.js`),
+annotations (`overlayer.js`), and TTS modules exist in the vendored engine
+for later milestones.

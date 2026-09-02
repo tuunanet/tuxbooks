@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
-import { EPUB_PLACEHOLDER_PAGE_COUNT, PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
+import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
+import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation } from "./ReaderNavigation";
@@ -23,7 +24,7 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
 /**
  * Full-window reading mode: no sidebar, its own visual language, and a
  * distinct visual language from the library. Position and appearance are
- * session state; persistence waits for the backend progress commands.
+ * session state; persistence goes through the backend progress commands.
  */
 export function ReaderShell() {
   const { selectedBookId } = useAppState();
@@ -33,32 +34,46 @@ export function ReaderShell() {
   const [navOpen, setNavOpen] = useState(false);
   // Real PDF page count, reported by PdfReader once the document loads.
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
+  // Real EPUB table of contents, reported by EpubReader once the engine
+  // opens the book; EPUB navigation goes through the engine's destinations.
+  // Kept with its owning book id so a stale book's TOC is never shown —
+  // the derived value resets without a setState-in-effect.
+  const [epubTocState, setEpubTocState] = useState<{
+    bookId: number;
+    toc: EpubTocItem[];
+  } | null>(null);
+  const epubJumpRef = useRef<((href: string) => void) | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
-  const pageCount = isPdf
-    ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT)
-    : EPUB_PLACEHOLDER_PAGE_COUNT;
+  const isEpub = book?.format === "epub";
+  const epubToc =
+    epubTocState !== null && epubTocState.bookId === book?.id ? epubTocState.toc : null;
+  const pageCount = isPdf ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT) : 0;
   // The pages drawer lists real pages only; 0 keeps it in its loading state.
-  const knownPageCount = isPdf ? (pdfPageCount ?? 0) : EPUB_PLACEHOLDER_PAGE_COUNT;
-  const step = 100 / pageCount;
+  const knownPageCount = isPdf ? (pdfPageCount ?? 0) : 0;
+  // Percentage stepping is only meaningful with a known page count; the
+  // EPUB surface owns these keys instead (engine page turns).
+  const step = pageCount > 0 ? 100 / pageCount : 0;
 
-  useShortcut("arrowright", () => setPosition(position + step));
-  useShortcut("space", () => setPosition(position + step));
-  useShortcut("arrowleft", () => setPosition(position - step));
   useShortcut("home", () => setPosition(0));
   useShortcut("end", () => setPosition(100));
   useShortcut("mod+b", () => toggleBookmark());
-  // PageUp/PageDown scroll the reading surface; the scroll tracker turns the
-  // movement into position changes. scrollTop assignment (not scrollBy)
-  // keeps the behavior identical in jsdom tests.
-  useShortcut("pagedown", () => {
+  // Arrow/space stepping and PageUp/PageDown scrolling are PDF behaviors:
+  // they are not registered while an EPUB is open, where EpubReader owns
+  // those combos outright (engine page turns) regardless of registration
+  // order — a shell percentage step with no page count would clamp straight
+  // to the beginning or end of the document.
+  useShortcut(isEpub ? null : "arrowright", () => setPosition(position + step));
+  useShortcut(isEpub ? null : "space", () => setPosition(position + step));
+  useShortcut(isEpub ? null : "arrowleft", () => setPosition(position - step));
+  useShortcut(isEpub ? null : "pagedown", () => {
     const container = readerContentRef.current;
     if (container) container.scrollTop += container.clientHeight * 0.9;
   });
-  useShortcut("pageup", () => {
+  useShortcut(isEpub ? null : "pageup", () => {
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
@@ -167,8 +182,13 @@ export function ReaderShell() {
         aria-label="Reading view"
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        {book.format === "epub" ? (
-          <EpubReader book={book} />
+        {isEpub ? (
+          <EpubReader
+            key={book.id}
+            book={book}
+            onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
+            jumpTargetRef={epubJumpRef}
+          />
         ) : (
           <PdfReader
             key={book.id}
@@ -202,6 +222,8 @@ export function ReaderShell() {
         book={book}
         pageCount={knownPageCount}
         onJump={setPosition}
+        epubToc={isEpub ? epubToc : null}
+        onEpubJump={(href) => epubJumpRef.current?.(href)}
       />
     </div>
   );

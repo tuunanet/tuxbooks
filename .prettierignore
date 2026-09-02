@@ -8,3 +8,6 @@ e2e/.tmp
 *.ico
 *.icns
 LICENSE.md
+
+# vendored third-party code (pinned foliate-js submodule) — never reformat
+frontend/src/lib/epub/foliate-js

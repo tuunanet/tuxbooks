@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -12,15 +12,22 @@ vi.mock("@/lib/pdf/pdfEngine", () => ({
   pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
   RenderingCancelledException: class RenderingCancelledException extends Error {},
 }));
+vi.mock("@/lib/epub/epubEngine", async () => {
+  const { makeFakeEpubModule } = await import("./mocks/epubEngine");
+  return makeFakeEpubModule();
+});
 
 import { AppShell } from "@/components/layout/AppShell";
 import { openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
+import { lastFakeHandle, fakeEpubHandles } from "./mocks/epubEngine";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 
-const EPUB_CHAPTERS = ["text/chapter-one.xhtml", "text/Part_Two.xhtml"];
+beforeEach(() => {
+  fakeEpubHandles.length = 0;
+});
 
 function renderReader(bookFormat: "epub" | "pdf" = "epub") {
   const book =
@@ -41,7 +48,6 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
   mockInvoke({
     get_library_stats: { bookCount: 1, collectionCount: 0 },
     list_books: [book],
-    get_book_toc: { bookId: 1, title: book.title, chapters: EPUB_CHAPTERS },
     get_book_bytes: new ArrayBuffer(16),
     get_reading_progress: null,
     save_reading_progress: null,
@@ -74,7 +80,9 @@ describe("ReaderShell chrome", () => {
     expect(screen.queryByTestId("sidebar")).toBeNull();
     expect(screen.getByTestId("reader-title")).toHaveTextContent("A Minimal Book");
     expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
-    expect(screen.getByTestId("epub-reader")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
   });
 
   it("returns to the library from the toolbar back button", async () => {
@@ -96,32 +104,77 @@ describe("ReaderShell chrome", () => {
 });
 
 describe("Reader keyboard navigation", () => {
-  it("moves position with arrows, space, home, and end", async () => {
+  it("turns EPUB pages with arrows and space through the engine", async () => {
     renderReader();
     await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(screen.getByTestId("reader-position")).toHaveTextContent("25%");
-
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    // The shell must not percentage-step an EPUB: with no page count that
+    // would clamp the position straight to the end of the document.
+    expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
     fireEvent.keyDown(window, { key: " " });
-    expect(screen.getByTestId("reader-position")).toHaveTextContent("38%");
-
-    fireEvent.keyDown(window, { key: "End" });
-    expect(screen.getByTestId("reader-position")).toHaveTextContent("100%");
-
-    fireEvent.keyDown(window, { key: "Home" });
+    expect(handle.next).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
-
     fireEvent.keyDown(window, { key: "ArrowLeft" });
-    expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
+    expect(handle.prev).toHaveBeenCalledTimes(1);
+
+    // The engine-driven position report keeps the footer in sync. Paginated
+    // progress moves in chapter steps: section 0 of 2 sits at 0%.
+    handle.emitRelocate({ fraction: 0.5, section: { current: 0, total: 2 } });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("0%"));
+
+    // In scrolling flow the engine's in-section fraction refines the bar.
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling"),
+    );
+    // Let the relocate re-subscription effect flush before driving events.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    handle.emitRelocate({ fraction: 0.5, section: { current: 0, total: 2 } });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("25%"));
   });
 
-  it("keeps position clamped to 0-100", async () => {
+  it("steps PDF pages with arrows through the shell", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
+    );
+  });
+
+  it("jumps EPUB positions with home and end through the engine", async () => {
     renderReader();
     await screen.findByTestId("reader-view");
+    const handle = await waitFor(lastFakeHandle);
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
 
-    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    // Jumping needs the engine's section count, reported via relocate.
+    handle.emitRelocate({ fraction: 0, section: { current: 0, total: 2 } });
+
+    // End maps onto the last spine section (the fake reports 2 sections).
+    fireEvent.keyDown(window, { key: "End" });
+    await waitFor(() => expect(handle.goTo).toHaveBeenCalledWith(1));
+    // The engine reports its landing position; section 1 of 2 starts at 50%.
+    handle.emitRelocate({ fraction: 0, section: { current: 1, total: 2 } });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("50%"));
+
+    fireEvent.keyDown(window, { key: "Home" });
+    await waitFor(() => expect(handle.goTo).toHaveBeenCalledWith(0));
     expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
   });
 });
@@ -131,13 +184,14 @@ describe("Reader bookmarks", () => {
     renderReader();
 
     await screen.findByTestId("reader-view");
-    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "End" });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("100%"));
     fireEvent.click(screen.getByTestId("reader-bookmark"));
     expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true");
 
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
-    expect(await screen.findByTestId("nav-bookmark-13")).toBeInTheDocument();
+    expect(await screen.findByTestId("nav-bookmark-100")).toBeInTheDocument();
     expect(screen.getByText(/session only/i)).toBeInTheDocument();
 
     // Close the drawer before interacting with the toolbar underneath it.
@@ -146,44 +200,50 @@ describe("Reader bookmarks", () => {
     expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false");
 
     await openNavigation();
-    await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
+    await userEvent.click(screen.getByTestId("nav-tab-bookmarks"));
     expect(await screen.findByTestId("nav-bookmarks-empty")).toBeInTheDocument();
   });
 });
 
 describe("ReaderNavigation", () => {
-  it("lists EPUB contents from get_book_toc and jumps on selection", async () => {
+  it("lists the engine's EPUB contents and jumps through the engine", async () => {
     renderReader();
 
     await openNavigation();
-    expect(await screen.findByTestId("toc-item-0")).toHaveTextContent("chapter one");
-    expect(screen.getByTestId("toc-item-1")).toHaveTextContent("Part Two");
-    expect(invokeMock).toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
+    expect(await screen.findByTestId("toc-item-0")).toHaveTextContent("Chapter One");
+    expect(screen.getByTestId("toc-item-1")).toHaveTextContent("Chapter Two");
 
     await userEvent.click(screen.getByTestId("toc-item-1"));
-    expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
+    expect(lastFakeHandle().goTo).toHaveBeenCalledWith("chapter2.xhtml");
     expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument();
+    // Contents come from the rendering engine, not a backend command.
+    expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
   });
 
-  it("reports an honest error when contents fail to load", async () => {
-    renderReader();
+  it("shows a loading state while the EPUB document is still opening", async () => {
+    const book = makeBook();
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [book],
+      get_book_bytes: new Promise(() => {}),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      />,
+    );
     await screen.findByTestId("reader-view");
 
-    // Override after renderReader, which installs the happy-path routes.
-    invokeMock.mockImplementation((command: string) => {
-      if (command === "get_book_toc") {
-        return Promise.reject(new Error("file went away"));
-      }
-      return command === "get_library_stats"
-        ? Promise.resolve({ bookCount: 1, collectionCount: 0 })
-        : Promise.resolve([makeBook()]);
-    });
-
     await openNavigation();
-
-    expect(await screen.findByTestId("toc-error")).toHaveTextContent(
-      "Contents could not be loaded: file went away",
-    );
+    expect(await screen.findByText("Loading contents…")).toBeInTheDocument();
   });
 
   it("gives PDFs Pages and an honest Outline instead of EPUB contents", async () => {
@@ -194,7 +254,6 @@ describe("ReaderNavigation", () => {
     expect(await screen.findByTestId("nav-pages")).toBeInTheDocument();
     expect(screen.getByTestId("nav-page-3")).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 1 });
-    expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
 
     await userEvent.click(screen.getByTestId("nav-page-2"));
     expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
@@ -257,7 +316,7 @@ describe("ReaderNavigation", () => {
 });
 
 describe("ReaderAppearance", () => {
-  it("changes the reader theme and layout", async () => {
+  it("changes the reader theme, layout, and font family", async () => {
     renderReader();
 
     await screen.findByTestId("reader-view");
@@ -271,8 +330,11 @@ describe("ReaderAppearance", () => {
 
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
-    // Scrolling mode shows every placeholder page at once.
-    expect(screen.getAllByTestId("epub-page")).toHaveLength(8);
+    const handle = lastFakeHandle();
+    await waitFor(() => expect(handle.setFlow).toHaveBeenCalledWith("scrolled"));
+
+    await userEvent.click(screen.getByRole("radio", { name: "Serif" }));
+    await waitFor(() => expect(handle.setAppearance).toHaveBeenCalledWith("css:paper:17:1.6"));
   });
 
   it("exposes font size and line spacing sliders", async () => {

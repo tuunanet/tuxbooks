@@ -6,6 +6,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
 }));
+vi.mock("@/lib/epub/epubEngine", async () => {
+  const { makeFakeEpubModule } = await import("./mocks/epubEngine");
+  return makeFakeEpubModule();
+});
 
 import App from "@/App";
 import { AppShell } from "@/components/layout/AppShell";

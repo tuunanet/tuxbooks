@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test:empty": "wdio run wdio.conf.ts --spec ./specs/library.e2e.ts",
-    "test:seeded": "wdio run wdio.conf.ts --spec ./specs/books.e2e.ts --spec ./specs/pdf-reader.e2e.ts"
+    "test:seeded": "wdio run wdio.conf.ts --spec ./specs/books.e2e.ts --spec ./specs/pdf-reader.e2e.ts --spec ./specs/epub-reader.e2e.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

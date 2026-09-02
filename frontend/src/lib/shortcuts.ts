@@ -19,9 +19,11 @@ export const ShortcutContext = createContext<ShortcutRegistry | null>(null);
  * Register `combo` for as long as the calling component is mounted. Handlers
  * registered later win over earlier ones for the same combo (last-registered
  * overlay gets Escape first) and are removed again on unmount, so a
- * component's registration lifetime is its effective scope.
+ * component's registration lifetime is its effective scope. Passing `null`
+ * skips registration — use it to gate a combo on component state (e.g. a
+ * surface that owns the combo only for certain document formats).
  */
-export function useShortcut(combo: string, handler: ShortcutHandler): void {
+export function useShortcut(combo: string | null, handler: ShortcutHandler): void {
   const registry = useContext(ShortcutContext);
   const handlerRef = useRef(handler);
 
@@ -30,6 +32,7 @@ export function useShortcut(combo: string, handler: ShortcutHandler): void {
   });
 
   useEffect(() => {
+    if (!combo) return;
     if (!registry) {
       throw new Error("useShortcut must be used within ShortcutProvider");
     }

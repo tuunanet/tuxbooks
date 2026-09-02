@@ -24,6 +24,7 @@ Prerequisites: Node ≥ 22, pnpm 10, Rust (stable), Linux Tauri deps
 
 ```sh
 pnpm install
+git submodule update --init   # fetches the vendored foliate-js EPUB engine
 just dev        # native window with hot reload
 just build      # release bundle
 ```

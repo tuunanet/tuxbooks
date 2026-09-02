@@ -34,19 +34,15 @@ export interface ImportReport {
   failed: { path: string; error: string }[];
 }
 
-export interface BookToc {
-  bookId: number;
-  title: string;
-  chapters: string[];
-}
-
 /**
  * Wire shape of a stored reading position (mirrors `domain::ReadingProgress`).
- * Fields are format-specific: EPUB locates a chapter href, PDF a page number.
+ * Fields are format-specific: EPUB locates a chapter href plus a CFI, PDF a
+ * page number.
  */
 export interface ReadingProgressRecord {
   bookId: number;
   chapterHref: string | null;
+  cfi: string | null;
   characterOffset: number | null;
   pageNumber: number | null;
   scrollOffset: number | null;
@@ -57,6 +53,7 @@ export interface ReadingProgressRecord {
 /** Payload for saving a reading position; each format writes what it tracks. */
 export interface ReadingProgressInput {
   chapterHref?: string | null;
+  cfi?: string | null;
   characterOffset?: number | null;
   pageNumber?: number | null;
   scrollOffset?: number | null;

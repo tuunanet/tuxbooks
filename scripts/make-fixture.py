@@ -26,7 +26,7 @@ CONTAINER = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 OPF = """<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="en">
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:opf="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="en">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="pub-id">urn:uuid:6e8bc430-9c3a-11ef-8f2c-000000000001</dc:identifier>
     <dc:title>A Minimal Book</dc:title>
@@ -41,12 +41,14 @@ OPF = """<?xml version="1.0" encoding="UTF-8"?>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
     <item id="chapter2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter3" href="chapter3.xhtml" media-type="application/xhtml+xml" properties="mathml"/>
     <item id="css" href="style.css" media-type="text/css"/>
     <item id="cover-image" href="cover.png" media-type="image/png" properties="cover-image"/>
   </manifest>
   <spine>
     <itemref idref="chapter1"/>
     <itemref idref="chapter2"/>
+    <itemref idref="chapter3"/>
   </spine>
 </package>
 """
@@ -60,6 +62,7 @@ NAV = """<?xml version="1.0" encoding="UTF-8"?>
     <ol>
       <li><a href="chapter1.xhtml">Chapter One</a></li>
       <li><a href="chapter2.xhtml">Chapter Two</a></li>
+      <li><a href="chapter3.xhtml">Chapter Three</a></li>
     </ol>
   </nav>
 </body>
@@ -87,6 +90,28 @@ CHAPTER2 = chapter(2, "Chapter Two", [
     "The second chapter completes the reading order.",
     "Two chapters are enough to verify that the spine is preserved.",
 ])
+
+# EPUB 3 MathML: a native <math> element, rendered by the browser engine
+# itself (WebKitGTK MathML Core), used to verify MathML support end to end.
+MATHML_NS = "http://www.w3.org/1998/Math/MathML"
+CHAPTER3 = f"""<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="{MATHML_NS}">
+<head><title>Chapter Three</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+  <h1>Chapter Three</h1>
+    <p>This chapter carries a native MathML formula so readers can be verified
+    against the browser's own math rendering.</p>
+    <math id="pythagoras" display="block">
+      <msup><mi>a</mi><mn>2</mn></msup>
+      <mo>+</mo>
+      <msup><mi>b</mi><mn>2</mn></msup>
+      <mo>=</mo>
+      <msup><mi>c</mi><mn>2</mn></msup>
+    </math>
+    <p>The formula above is the Pythagorean theorem expressed in content markup.</p>
+</body>
+</html>
+"""
 
 CSS = """body { font-family: serif; margin: 1em; }
 h1 { font-size: 1.4em; }
@@ -221,6 +246,7 @@ def write_epub() -> None:
             ("OEBPS/nav.xhtml", NAV),
             ("OEBPS/chapter1.xhtml", CHAPTER1),
             ("OEBPS/chapter2.xhtml", CHAPTER2),
+            ("OEBPS/chapter3.xhtml", CHAPTER3),
             ("OEBPS/style.css", CSS),
         ]:
             info = zipfile.ZipInfo(name, date_time=stamp)

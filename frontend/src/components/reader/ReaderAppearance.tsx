@@ -4,7 +4,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useReader, type ReaderLayout, type ReaderTheme } from "@/state/readerState";
+import {
+  useReader,
+  type ReaderFontFamily,
+  type ReaderLayout,
+  type ReaderTheme,
+} from "@/state/readerState";
 
 const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
   { value: "light", label: "Light" },
@@ -15,6 +20,11 @@ const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
 const LAYOUT_OPTIONS: { value: ReaderLayout; label: string }[] = [
   { value: "paginated", label: "Paginated" },
   { value: "scrolling", label: "Scrolling" },
+];
+
+const FONT_FAMILY_OPTIONS: { value: ReaderFontFamily; label: string }[] = [
+  { value: "serif", label: "Serif" },
+  { value: "sans", label: "Sans" },
 ];
 
 /**
@@ -80,6 +90,32 @@ export function ReaderAppearance() {
             value={[preferences.lineHeight]}
             onValueChange={(values) => setPreferences({ lineHeight: values[0] })}
           />
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm">Font</p>
+          <ToggleGroup
+            data-testid="pref-font-family"
+            type="single"
+            size="sm"
+            variant="outline"
+            spacing={0}
+            value={preferences.fontFamily ?? "default"}
+            onValueChange={(value) =>
+              setPreferences({
+                fontFamily:
+                  value === "serif" || value === "sans" ? (value as ReaderFontFamily) : null,
+              })
+            }
+            aria-label="Font family"
+          >
+            {FONT_FAMILY_OPTIONS.map((option) => (
+              <ToggleGroupItem key={option.value} value={option.value}>
+                {option.label}
+              </ToggleGroupItem>
+            ))}
+            <ToggleGroupItem value="default">Default</ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         <div>

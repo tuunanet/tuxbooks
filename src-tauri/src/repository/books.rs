@@ -220,6 +220,7 @@ mod tests {
             id,
             &crate::domain::ProgressUpdate {
                 chapter_href: Some("c1.xhtml".into()),
+                cfi: None,
                 character_offset: Some(120),
                 page_number: None,
                 scroll_offset: None,

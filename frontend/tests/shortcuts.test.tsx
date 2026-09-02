@@ -15,7 +15,7 @@ function Harness({
   onFire,
   editableTarget,
 }: {
-  combo: string;
+  combo: string | null;
   onFire: () => void;
   editableTarget?: boolean;
 }) {
@@ -97,5 +97,35 @@ describe("ShortcutProvider", () => {
     unmount();
     expect(fireKey({ key: "Escape" })).toBe(false);
     expect(onFire).not.toHaveBeenCalled();
+  });
+
+  it("skips registration for a null combo", () => {
+    const onFire = vi.fn();
+    render(
+      <ShortcutProvider>
+        <Harness combo={null} onFire={onFire} />
+      </ShortcutProvider>,
+    );
+
+    expect(fireKey({ key: "Escape" })).toBe(false);
+    expect(onFire).not.toHaveBeenCalled();
+  });
+
+  it("registers a combo that becomes non-null", () => {
+    const onFire = vi.fn();
+    const { rerender } = render(
+      <ShortcutProvider>
+        <Harness combo={null} onFire={onFire} />
+      </ShortcutProvider>,
+    );
+    expect(fireKey({ key: "End" })).toBe(false);
+
+    rerender(
+      <ShortcutProvider>
+        <Harness combo="end" onFire={onFire} />
+      </ShortcutProvider>,
+    );
+    expect(fireKey({ key: "End" })).toBe(true);
+    expect(onFire).toHaveBeenCalledTimes(1);
   });
 });

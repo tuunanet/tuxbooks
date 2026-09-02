@@ -6,13 +6,17 @@ export type ReaderTheme = "light" | "paper" | "dark";
 /** Paginated shows one placeholder page at a time; scrolling shows all. */
 export type ReaderLayout = "paginated" | "scrolling";
 
+/** Font family override for reflowable content; null keeps publisher styles. */
+export type ReaderFontFamily = "serif" | "sans";
+
 /**
- * Reader appearance preferences. UI-only state (no Rust mirror yet) — the
- * real rendering engines will consume these once they exist.
+ * Reader appearance preferences. UI-only state (no Rust mirror yet) —
+ * consumed by the rendering engines (EPUB reflow styles, PDF zoom).
  */
 export interface ReaderPreferences {
   fontSize: number;
   lineHeight: number;
+  fontFamily: ReaderFontFamily | null;
   theme: ReaderTheme;
   layout: ReaderLayout;
 }
@@ -20,6 +24,7 @@ export interface ReaderPreferences {
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   fontSize: 17,
   lineHeight: 1.6,
+  fontFamily: null,
   theme: "light",
   layout: "paginated",
 };

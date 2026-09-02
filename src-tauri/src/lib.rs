@@ -80,7 +80,6 @@ pub fn run() {
             commands::progress::get_reading_progress,
             commands::progress::save_reading_progress,
             commands::reader::get_book_bytes,
-            commands::reader::get_book_toc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tuxbooks");

@@ -251,7 +251,11 @@ mod tests {
         let book = parse_epub(&fixture_epub()).unwrap();
         assert_eq!(
             book.spine,
-            vec!["chapter1.xhtml".to_string(), "chapter2.xhtml".to_string()]
+            vec![
+                "chapter1.xhtml".to_string(),
+                "chapter2.xhtml".to_string(),
+                "chapter3.xhtml".to_string(),
+            ]
         );
     }
 

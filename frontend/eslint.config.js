@@ -5,7 +5,9 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  // Vendored third-party code (pinned foliate-js submodule) is not linted —
+  // it is upstream JavaScript consumed as-is through the engine seam.
+  { ignores: ["dist", "node_modules", "src/lib/epub/foliate-js/**"] },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [

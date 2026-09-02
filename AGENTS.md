@@ -125,6 +125,39 @@ not launch a second E2E run while one is still going.
     position writes are debounced and page-number-based. Behavior is pinned
     by stable DOM attributes (`data-pdf-slot`, `data-render-state`,
     `data-pdf-worker-src`) — keep them when refactoring.
+16. **foliate-js is a vendored git submodule** (the EPUB engine), pinned at
+    `frontend/src/lib/epub/foliate-js` — upstream `johnfactotum/foliate-js`.
+    (The Readest fork was evaluated and rejected: its multi-view rework
+    hangs or mis-paginates real-world books, e.g. Manning EPUB 2 titles;
+    upstream paginates them correctly.) WebKit resolves `fonts.ready` early
+    while section fonts are still settling, so the paginator's deferred
+    re-expand can measure a zero-size document and collapse a section to
+    zero width (blank reader); `EpubReader` therefore schedules one
+    `EpubViewHandle.relayout()` per section once fonts settle. A fresh
+    clone needs `git submodule update --init` (pnpm install does not fetch
+    it). Never edit files inside the submodule; it is excluded from lint
+    and typechecked only through the stub in
+    `frontend/src/lib/epub/foliate-js.d.ts`.
+    `frontend/src/lib/epub/epubEngine.ts` is the only module that may import
+    it (same seam rule as pdfEngine), and `frontend/vite.config.ts` stubs
+    out `foliate-js/pdf.js` (Vite-incompatible; PDFs belong to pdfEngine).
+    EPUB invariants: reading position is a CFI (`reading_progress.cfi` +
+    `chapter_href`), restore/skip-first-save lifecycle mirrors
+    `usePdfPersistence`; the app CSP must keep `script-src 'self'` (blocks
+    scripted EPUB content in the engine's blob: iframes) while `blob:` stays
+    allowed for frames and book images/styles/fonts/media; external links
+    are intercepted, never opened. Arrow/space/PageUp/PageDown are owned
+    exclusively by the EPUB engine while an EPUB is open: the shell must not
+    register its percentage-stepping/scrolling handlers for EPUB (null-combo
+    gating in ReaderShell) — with no page count a shell step is 100/0 and
+    the provider clamp sends the position straight to an end of the document.
+    The engine does not report byte sizes, so
+    shell progress is derived from spine position (`section` + in-section
+    page fraction) and outside percent-jumps map onto spine indexes — the
+    CFI stays the exact locator. E2E pins behavior on the engine host's data
+    attributes (`data-epub-state`, `data-epub-section`,
+    `data-epub-doc-math-count`) because the engine's iframes are opaque to
+    WebDriver.
 
 ## Testing rules
 

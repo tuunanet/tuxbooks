@@ -17,10 +17,11 @@ pub async fn upsert_progress(
     }
     sqlx::query(
         r#"
-        INSERT INTO reading_progress (book_id, chapter_href, character_offset, page_number, scroll_offset, progress_percent)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO reading_progress (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         ON CONFLICT(book_id) DO UPDATE SET
             chapter_href = excluded.chapter_href,
+            cfi = excluded.cfi,
             character_offset = excluded.character_offset,
             page_number = excluded.page_number,
             scroll_offset = excluded.scroll_offset,
@@ -30,6 +31,7 @@ pub async fn upsert_progress(
     )
     .bind(book_id)
     .bind(&update.chapter_href)
+    .bind(&update.cfi)
     .bind(update.character_offset)
     .bind(update.page_number)
     .bind(update.scroll_offset)
@@ -44,7 +46,7 @@ pub async fn get_progress(
     book_id: i64,
 ) -> Result<Option<ReadingProgress>, AppError> {
     let progress = sqlx::query_as::<_, ReadingProgress>(
-        "SELECT book_id, chapter_href, character_offset, page_number, scroll_offset, progress_percent, updated_at \
+        "SELECT book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent, updated_at \
          FROM reading_progress WHERE book_id = ?1",
     )
     .bind(book_id)
@@ -92,6 +94,7 @@ mod tests {
             book_id,
             &ProgressUpdate {
                 chapter_href: Some("chapter2.xhtml".into()),
+                cfi: Some("epubcfi(/6/4!/4/2,/1:0,/1:42)".into()),
                 character_offset: Some(1024),
                 page_number: Some(87),
                 scroll_offset: Some(412.5),
@@ -104,6 +107,10 @@ mod tests {
         let progress = get_progress(&pool, book_id).await.unwrap().unwrap();
         assert_eq!(progress.book_id, book_id);
         assert_eq!(progress.chapter_href.as_deref(), Some("chapter2.xhtml"));
+        assert_eq!(
+            progress.cfi.as_deref(),
+            Some("epubcfi(/6/4!/4/2,/1:0,/1:42)")
+        );
         assert_eq!(progress.character_offset, Some(1024));
         assert_eq!(progress.page_number, Some(87));
         assert_eq!(progress.scroll_offset, Some(412.5));
@@ -119,6 +126,7 @@ mod tests {
             book_id,
             &ProgressUpdate {
                 chapter_href: Some("c1.xhtml".into()),
+                cfi: Some("epubcfi(/6/2!/4/2,/1:0,/1:10)".into()),
                 character_offset: None,
                 page_number: None,
                 scroll_offset: None,
@@ -132,6 +140,7 @@ mod tests {
             book_id,
             &ProgressUpdate {
                 chapter_href: Some("c2.xhtml".into()),
+                cfi: Some("epubcfi(/6/4!/4/2,/1:0,/1:20)".into()),
                 character_offset: Some(9),
                 page_number: Some(3),
                 scroll_offset: None,
@@ -143,6 +152,10 @@ mod tests {
 
         let progress = get_progress(&pool, book_id).await.unwrap().unwrap();
         assert_eq!(progress.chapter_href.as_deref(), Some("c2.xhtml"));
+        assert_eq!(
+            progress.cfi.as_deref(),
+            Some("epubcfi(/6/4!/4/2,/1:0,/1:20)")
+        );
         assert_eq!(progress.progress_percent, Some(90.0));
     }
 
@@ -154,6 +167,7 @@ mod tests {
             book_id,
             &ProgressUpdate {
                 chapter_href: None,
+                cfi: None,
                 character_offset: None,
                 page_number: None,
                 scroll_offset: None,

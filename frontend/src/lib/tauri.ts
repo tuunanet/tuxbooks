@@ -2,14 +2,13 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Book,
-  BookToc,
   ImportReport,
   LibraryStats,
   ReadingProgressInput,
   ReadingProgressRecord,
 } from "@/types/domain";
 
-export type { Book, BookFormat, BookToc, ImportReport, LibraryStats } from "@/types/domain";
+export type { Book, BookFormat, ImportReport, LibraryStats } from "@/types/domain";
 
 export function getLibraryStats(): Promise<LibraryStats> {
   return invoke("get_library_stats");
@@ -23,15 +22,14 @@ export function scanLibrary(path: string): Promise<ImportReport> {
   return invoke("scan_library", { path });
 }
 
-export function getBookToc(bookId: number): Promise<BookToc> {
-  return invoke("get_book_toc", { bookId });
-}
-
 /**
  * Raw bytes of a stored book's source file. The command answers with an IPC
- * raw byte response, so `invoke` resolves to an ArrayBuffer.
+ * raw byte response, so `invoke` normally resolves to an ArrayBuffer — but
+ * when the custom protocol is unavailable Tauri falls back to postMessage
+ * transport, which JSON-serializes the bytes into a plain number array.
+ * Consumers must accept both.
  */
-export function getBookBytes(bookId: number): Promise<ArrayBuffer> {
+export function getBookBytes(bookId: number): Promise<ArrayBuffer | number[]> {
   return invoke("get_book_bytes", { bookId });
 }
 

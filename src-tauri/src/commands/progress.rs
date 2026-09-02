@@ -7,12 +7,13 @@ use crate::repository::reading_progress::{get_progress, upsert_progress};
 use crate::AppState;
 
 /// Wire shape of a reading-progress update. Fields are optional so each
-/// format writes only what it tracks (EPUB: chapter href + offset; PDF:
-/// page number); `progress_percent` is the coarse shell position.
+/// format writes only what it tracks (EPUB: chapter href + CFI; PDF: page
+/// number); `progress_percent` is the coarse shell position.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressInput {
     pub chapter_href: Option<String>,
+    pub cfi: Option<String>,
     pub character_offset: Option<i64>,
     pub page_number: Option<i64>,
     pub scroll_offset: Option<f64>,
@@ -23,6 +24,7 @@ impl From<ProgressInput> for ProgressUpdate {
     fn from(input: ProgressInput) -> Self {
         ProgressUpdate {
             chapter_href: input.chapter_href,
+            cfi: input.cfi,
             character_offset: input.character_offset,
             page_number: input.page_number,
             scroll_offset: input.scroll_offset,
