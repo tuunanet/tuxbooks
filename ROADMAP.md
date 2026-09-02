@@ -30,29 +30,29 @@ Avoid implementing many features superficially. Complete one coherent subsystem 
 
 TuxBooks currently has:
 
-* Tauri 2 desktop application
-* Rust backend
-* React + TypeScript + Vite frontend
-* SQLite persistence
-* Rust domain/service/repository separation
-* Tauri IPC boundaries
-* local library indexing/import
-* deterministic test fixtures
-* Vitest frontend tests
-* Rust unit/integration tests
-* real Tauri/WebKitGTK E2E tests
-* headless Linux E2E execution
-* PDF.js integration
-* secure Rust-controlled PDF byte access
-* production-oriented continuous PDF reader
-* PDF page virtualization
-* PDF page geometry management
-* PDF zoom
-* PDF reading-position persistence
-* PDF position restoration
-* mixed-page-size PDF support
-* page-level rendering error handling
-* E2E rendering and scrolling verification
+- Tauri 2 desktop application
+- Rust backend
+- React + TypeScript + Vite frontend
+- SQLite persistence
+- Rust domain/service/repository separation
+- Tauri IPC boundaries
+- local library indexing/import
+- deterministic test fixtures
+- Vitest frontend tests
+- Rust unit/integration tests
+- real Tauri/WebKitGTK E2E tests
+- headless Linux E2E execution
+- PDF.js integration
+- secure Rust-controlled PDF byte access
+- production-oriented continuous PDF reader
+- PDF page virtualization
+- PDF page geometry management
+- PDF zoom
+- PDF reading-position persistence
+- PDF position restoration
+- mixed-page-size PDF support
+- page-level rendering error handling
+- E2E rendering and scrolling verification
 
 The PDF subsystem should now be treated as the architectural reference for robust document-reader engineering.
 
@@ -92,9 +92,9 @@ Evaluate and select an appropriate browser-side EPUB rendering solution.
 
 Candidates may include:
 
-* epub.js
-* Readium-based technology
-* another mature EPUB rendering implementation
+- epub.js
+- Readium-based technology
+- another mature EPUB rendering implementation
 
 Do not build a custom EPUB rendering engine unless there is a compelling technical reason.
 
@@ -104,18 +104,18 @@ Keep the EPUB engine behind a dedicated abstraction.
 
 Implement:
 
-* actual EPUB loading
-* chapter rendering
-* table of contents
-* previous/next navigation
-* continuous scrolling and/or pagination
-* reading progress
-* position persistence
-* position restoration
-* configurable font size
-* font family where supported
-* line spacing
-* reading themes
+- actual EPUB loading
+- chapter rendering
+- table of contents
+- previous/next navigation
+- continuous scrolling and/or pagination
+- reading progress
+- position persistence
+- position restoration
+- configurable font size
+- font family where supported
+- line spacing
+- reading themes
 
 ### EPUB locator
 
@@ -137,12 +137,12 @@ The user should return to approximately the same logical text location after reo
 
 Provide:
 
-* EPUB unit/integration tests
-* deterministic EPUB fixtures
-* frontend reader tests
-* real Tauri E2E tests
-* position persistence E2E
-* appearance-control tests where practical
+- EPUB unit/integration tests
+- deterministic EPUB fixtures
+- frontend reader tests
+- real Tauri E2E tests
+- position persistence E2E
+- appearance-control tests where practical
 
 ## Exit criteria
 
@@ -164,12 +164,12 @@ Add a PDF sidebar with virtualized thumbnails.
 
 Requirements:
 
-* low-resolution rendering
-* bounded thumbnail memory
-* current-page indication
-* click thumbnail → navigate to page
-* efficient scrolling
-* no full-document thumbnail rendering
+- low-resolution rendering
+- bounded thumbnail memory
+- current-page indication
+- click thumbnail → navigate to page
+- efficient scrolling
+- no full-document thumbnail rendering
 
 ### PDF outline
 
@@ -183,9 +183,9 @@ Clicking an entry should navigate to its PDF destination.
 
 Support:
 
-* Pages
-* Outline
-* future Bookmarks placeholder if necessary
+- Pages
+- Outline
+- future Bookmarks placeholder if necessary
 
 Do not implement annotations or text search yet.
 
@@ -193,12 +193,12 @@ Do not implement annotations or text search yet.
 
 Test:
 
-* thumbnail navigation
-* current-page synchronization
-* outline navigation
-* large documents
-* virtualized thumbnail rendering
-* headless Tauri E2E
+- thumbnail navigation
+- current-page synchronization
+- outline navigation
+- large documents
+- virtualized thumbnail rendering
+- headless Tauri E2E
 
 ## Exit criteria
 
@@ -216,11 +216,11 @@ Evolve the library from a one-time importer into a continuously synchronized loc
 
 Detect:
 
-* newly added books
-* deleted files
-* renamed files
-* moved files
-* modified files
+- newly added books
+- deleted files
+- renamed files
+- moved files
+- modified files
 
 Use a Rust filesystem watcher.
 
@@ -260,23 +260,23 @@ Do not automatically discard metadata, collections, or reading progress.
 
 Allow a missing book to be reconnected to a new path while preserving:
 
-* book identity
-* metadata
-* collections
-* reading progress
-* future bookmarks/highlights
+- book identity
+- metadata
+- collections
+- reading progress
+- future bookmarks/highlights
 
 ### Testing
 
 Include filesystem integration tests for:
 
-* creation
-* deletion
-* rename
-* move
-* modification
-* duplicate events
-* rapid event sequences
+- creation
+- deletion
+- rename
+- move
+- modification
+- duplicate events
+- rapid event sequences
 
 ## Exit criteria
 
@@ -316,23 +316,23 @@ Do not render covers repeatedly whenever the library opens.
 
 ## Requirements
 
-* stable cache keys
-* invalidation when source changes
-* safe handling of missing covers
-* placeholder artwork when extraction fails
-* asynchronous generation
-* no UI blocking during cover extraction
+- stable cache keys
+- invalidation when source changes
+- safe handling of missing covers
+- placeholder artwork when extraction fails
+- asynchronous generation
+- no UI blocking during cover extraction
 
 ## Testing
 
 Test:
 
-* EPUB cover extraction
-* PDF cover generation
-* missing cover
-* corrupt cover
-* cache hit
-* cache invalidation
+- EPUB cover extraction
+- PDF cover generation
+- missing cover
+- corrupt cover
+- cache hit
+- cache invalidation
 
 ## Exit criteria
 
@@ -352,13 +352,13 @@ Do not conflate them.
 
 Search:
 
-* title
-* author
-* publisher
-* ISBN
-* description
-* filename
-* future tags/subjects
+- title
+- author
+- publisher
+- ISBN
+- description
+- filename
+- future tags/subjects
 
 Use SQLite FTS5 where appropriate.
 
@@ -477,17 +477,17 @@ Make the library manageable even when source files have inconsistent metadata.
 
 Support:
 
-* title
-* subtitle
-* author
-* publisher
-* language
-* ISBN
-* description
-* subjects/categories
-* series
-* publication date
-* cover
+- title
+- subtitle
+- author
+- publisher
+- language
+- ISBN
+- description
+- subjects/categories
+- series
+- publication date
+- cover
 
 ## Architecture
 
@@ -519,10 +519,10 @@ only as a later feature.
 
 Prepare the data model for:
 
-* multiple authors
-* multiple subjects
-* series
-* collection membership
+- multiple authors
+- multiple subjects
+- series
+- collection membership
 
 Avoid storing every relationship as an opaque string.
 
@@ -542,13 +542,13 @@ Make EPUB and PDF share the appropriate application-level reader concepts withou
 
 The `ReaderShell` should own concepts such as:
 
-* current book
-* reading position
-* progress
-* navigation
-* appearance state
-* persistence
-* reader lifecycle
+- current book
+- reading position
+- progress
+- navigation
+- appearance state
+- persistence
+- reader lifecycle
 
 ## Document-specific position
 
@@ -599,27 +599,27 @@ Bring the reading experience to release quality.
 
 Verify combinations of:
 
-* open
-* scroll quickly
-* reverse scroll
-* zoom
-* resize window
-* switch book
-* close while rendering
-* reopen
-* change document type
-* repeated open/close
-* rapid navigation
+- open
+- scroll quickly
+- reverse scroll
+- zoom
+- resize window
+- switch book
+- close while rendering
+- reopen
+- change document type
+- repeated open/close
+- rapid navigation
 
 ## Memory
 
 Measure:
 
-* PDF canvas memory
-* rendered-page count
-* thumbnail memory
-* EPUB document lifecycle
-* cache growth
+- PDF canvas memory
+- rendered-page count
+- thumbnail memory
+- EPUB document lifecycle
+- cache growth
 
 Avoid unbounded caches.
 
@@ -627,11 +627,11 @@ Avoid unbounded caches.
 
 Ensure:
 
-* stale render tasks cannot update current UI
-* old documents are destroyed
-* unmounted components cannot update state
-* cancellation is distinguishable from genuine failure
-* rapid document switching is safe
+- stale render tasks cannot update current UI
+- old documents are destroyed
+- unmounted components cannot update state
+- cancellation is distinguishable from genuine failure
+- rapid document switching is safe
 
 ## Exit criteria
 
@@ -649,52 +649,52 @@ Make TuxBooks feel like a finished desktop product.
 
 Polish:
 
-* grid
-* list view
-* sorting
-* filtering
-* selection
-* context menus
-* drag and drop
-* empty states
-* loading states
-* error states
+- grid
+- list view
+- sorting
+- filtering
+- selection
+- context menus
+- drag and drop
+- empty states
+- loading states
+- error states
 
 ## Reader
 
 Polish:
 
-* toolbar
-* page indicator
-* transition behavior
-* sidebars
-* keyboard shortcuts
-* focus handling
-* appearance controls
-* reader loading states
+- toolbar
+- page indicator
+- transition behavior
+- sidebars
+- keyboard shortcuts
+- focus handling
+- appearance controls
+- reader loading states
 
 ## Desktop behavior
 
 Support:
 
-* window resizing
-* sensible minimum window size
-* restoring window state
-* keyboard-first workflows
-* native file dialogs
+- window resizing
+- sensible minimum window size
+- restoring window state
+- keyboard-first workflows
+- native file dialogs
 
 ## Accessibility
 
 Audit:
 
-* keyboard navigation
-* accessible names
-* focus states
-* menus
-* dialogs
-* reader controls
-* semantic structure
-* color contrast
+- keyboard navigation
+- accessible names
+- focus states
+- menus
+- dialogs
+- reader controls
+- semantic structure
+- color contrast
 
 ## Exit criteria
 
@@ -712,15 +712,15 @@ Make TuxBooks installable by real users.
 
 Investigate and implement:
 
-* Linux packaging
-* AppImage where appropriate
-* Debian/Ubuntu package where appropriate
-* application icon
-* desktop entry
-* versioning
-* release automation
-* signed artifacts if appropriate
-* update strategy if later required
+- Linux packaging
+- AppImage where appropriate
+- Debian/Ubuntu package where appropriate
+- application icon
+- desktop entry
+- versioning
+- release automation
+- signed artifacts if appropriate
+- update strategy if later required
 
 Given the project's Ubuntu/Linux focus, prioritize the formats most useful for Ubuntu users.
 
@@ -728,10 +728,10 @@ Given the project's Ubuntu/Linux focus, prioritize the formats most useful for U
 
 Release pipeline should:
 
-* build release binaries
-* run unit/integration tests
-* run headless E2E
-* produce distributable artifacts
+- build release binaries
+- run unit/integration tests
+- run headless E2E
+- produce distributable artifacts
 
 ## Exit criteria
 
@@ -747,10 +747,10 @@ Do not implement several large milestones simultaneously.
 
 Each milestone should produce:
 
-* code
-* tests
-* documentation
-* working application state
+- code
+- tests
+- documentation
+- working application state
 
 ## Preserve working architecture
 
@@ -784,9 +784,9 @@ The latter must continue running headlessly on Linux.
 
 Do not introduce:
 
-* cloud services
-* external databases
-* network dependencies
+- cloud services
+- external databases
+- network dependencies
 
 unless a feature genuinely requires them.
 
@@ -836,13 +836,13 @@ The ordering is deliberate.
 
 In particular:
 
-* EPUB should be completed before adding many annotation features.
-* PDF thumbnails should reuse the existing virtualized page architecture.
-* filesystem reconciliation should exist before sophisticated library curation.
-* covers should exist before finalizing bookshelf UX.
-* search should exist before advanced notes/annotation UX.
-* unified reader abstractions should emerge from the real EPUB/PDF implementations, not be over-designed beforehand.
-* release packaging should wait until the core reader/library workflows are stable.
+- EPUB should be completed before adding many annotation features.
+- PDF thumbnails should reuse the existing virtualized page architecture.
+- filesystem reconciliation should exist before sophisticated library curation.
+- covers should exist before finalizing bookshelf UX.
+- search should exist before advanced notes/annotation UX.
+- unified reader abstractions should emerge from the real EPUB/PDF implementations, not be over-designed beforehand.
+- release packaging should wait until the core reader/library workflows are stable.
 
 ---
 
@@ -858,11 +858,11 @@ just build
 
 and, where applicable:
 
-* updated fixtures
-* updated E2E tests
-* updated documentation
-* updated `AGENTS.md`
-* no regressions in completed milestones
+- updated fixtures
+- updated E2E tests
+- updated documentation
+- updated `AGENTS.md`
+- no regressions in completed milestones
 
 A milestone is complete only when both the implementation and its automated verification are complete.
 

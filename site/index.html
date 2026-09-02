@@ -1,223 +1,381 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TuxBooks — a local-first ebook library for Linux</title>
-  <meta name="description" content="TuxBooks is a local-first, bookshelf-style desktop ebook library and reader for EPUB and PDF. No accounts, no cloud, no network services. Built with Rust + Tauri.">
-  <meta property="og:title" content="TuxBooks — a local-first ebook library for Linux">
-  <meta property="og:description" content="A fast, native-feeling personal library for local EPUB and PDF files. No accounts, no cloud, no network services.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://tuxbooks.github.io/">
-  <link rel="canonical" href="https://tuxbooks.github.io/">
-  <meta name="theme-color" content="#161009">
-  <link rel="icon" type="image/png" href="img/logo-dark.png">
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-<header class="nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="#top" aria-label="TuxBooks home">
-      <img src="img/logo-dark.png" alt="TuxBooks logo" width="30" height="30">
-    </a>
-    <nav class="nav-links" aria-label="Site">
-      <a href="#features">Features</a>
-      <a href="#screenshots">Screenshots</a>
-      <a href="#roadmap">Roadmap</a>
-      <a href="https://github.com/tuunanet/tuxbooks/issues">Issues</a>
-      <a class="btn btn--small" href="https://github.com/tuunanet/tuxbooks">GitHub</a>
-    </nav>
-  </div>
-</header>
-
-<main id="top">
-
-  <section class="hero">
-    <div class="wrap hero-inner">
-      <img class="hero-logo" src="img/logo-dark.png" alt="TuxBooks logo — Tux the penguin reading a book in front of colorful book spines" width="120" height="119">
-      <p class="badge"><span class="badge-dot" aria-hidden="true"></span> v0.1.0 &middot; in active development</p>
-      <h1>Your books. Your shelf.<br>Your machine.</h1>
-      <p class="lede">
-        TuxBooks is a local-first, bookshelf-style ebook library and reader for Linux.
-        Point it at a folder of EPUB and PDF files &mdash; it indexes your library,
-        remembers where you stopped reading, and stays completely offline.
-      </p>
-      <p class="hero-cta">
-        <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks#getting-started">Build from source</a>
-        <a class="btn" href="https://github.com/tuunanet/tuxbooks">View on GitHub</a>
-      </p>
-      <p class="hero-note">Free software under GPL&#8209;3.0 &middot; Rust + Tauri &middot; React + TypeScript</p>
-      <div class="spines" aria-hidden="true">
-        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TuxBooks — a local-first ebook library for Linux</title>
+    <meta
+      name="description"
+      content="TuxBooks is a local-first, bookshelf-style desktop ebook library and reader for EPUB and PDF. No accounts, no cloud, no network services. Built with Rust + Tauri."
+    />
+    <meta property="og:title" content="TuxBooks — a local-first ebook library for Linux" />
+    <meta
+      property="og:description"
+      content="A fast, native-feeling personal library for local EPUB and PDF files. No accounts, no cloud, no network services."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://tuxbooks.github.io/" />
+    <link rel="canonical" href="https://tuxbooks.github.io/" />
+    <meta name="theme-color" content="#161009" />
+    <link rel="icon" type="image/png" href="img/logo-dark.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="TuxBooks home">
+          <img src="img/logo-dark.png" alt="TuxBooks logo" width="30" height="30" />
+        </a>
+        <nav class="nav-links" aria-label="Site">
+          <a href="#features">Features</a>
+          <a href="#screenshots">Screenshots</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="https://github.com/tuunanet/tuxbooks/issues">Issues</a>
+          <a class="btn btn--small" href="https://github.com/tuunanet/tuxbooks">GitHub</a>
+        </nav>
       </div>
-    </div>
-  </section>
+    </header>
 
-  <section class="section" id="features">
-    <div class="wrap">
-      <h2>A library that stays yours</h2>
-      <p class="section-lede">No accounts, no cloud sync, no telemetry. Your books and reading data never leave your machine.</p>
-      <div class="grid">
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <main id="top">
+      <section class="hero">
+        <div class="wrap hero-inner">
+          <img
+            class="hero-logo"
+            src="img/logo-dark.png"
+            alt="TuxBooks logo — Tux the penguin reading a book in front of colorful book spines"
+            width="120"
+            height="119"
+          />
+          <p class="badge">
+            <span class="badge-dot" aria-hidden="true"></span> v0.1.0 &middot; in active development
+          </p>
+          <h1>Your books. Your shelf.<br />Your machine.</h1>
+          <p class="lede">
+            TuxBooks is a local-first, bookshelf-style ebook library and reader for Linux. Point it
+            at a folder of EPUB and PDF files &mdash; it indexes your library, remembers where you
+            stopped reading, and stays completely offline.
+          </p>
+          <p class="hero-cta">
+            <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks#getting-started"
+              >Build from source</a
+            >
+            <a class="btn" href="https://github.com/tuunanet/tuxbooks">View on GitHub</a>
+          </p>
+          <p class="hero-note">
+            Free software under GPL&#8209;3.0 &middot; Rust + Tauri &middot; React + TypeScript
+          </p>
+          <div class="spines" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+            ><i></i><i></i>
           </div>
-          <h3>Local-first by design</h3>
-          <p>Books, metadata, and reading progress live in a local SQLite database. No cloud services, no external databases, no network dependencies.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="wrap">
+          <h2>A library that stays yours</h2>
+          <p class="section-lede">
+            No accounts, no cloud sync, no telemetry. Your books and reading data never leave your
+            machine.
+          </p>
+          <div class="grid">
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </div>
+              <h3>Local-first by design</h3>
+              <p>
+                Books, metadata, and reading progress live in a local SQLite database. No cloud
+                services, no external databases, no network dependencies.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+              </div>
+              <h3>Bookshelf library</h3>
+              <p>
+                Point it at a folder of EPUB and PDF files. TuxBooks indexes metadata and covers
+                into a searchable library with collections and reading progress.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                  <path d="M8 13h8M8 17h5" />
+                </svg>
+              </div>
+              <h3>Serious PDF reader</h3>
+              <p>
+                Continuous scrolling with virtualized page rendering, zoom, mixed page sizes,
+                per-page error recovery, and position persistence.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
+              </div>
+              <h3>Pick up where you left off</h3>
+              <p>
+                Reading position is persisted per book and restored when you return &mdash; close
+                the app mid-chapter, come back to the same spot.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <path d="M8 21h8M12 17v4" />
+                </svg>
+              </div>
+              <h3>Native desktop feel</h3>
+              <p>
+                Built with Tauri 2 and a Rust core: a small, fast binary that behaves like a real
+                desktop application on Linux, not a web page in a box.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <path d="M22 4L12 14.01l-3-3" />
+                </svg>
+              </div>
+              <h3>Engineered to last</h3>
+              <p>
+                Strict TypeScript, a layered Rust domain, and a real test pyramid &mdash; unit,
+                property, frontend, and headless real-app desktop E2E tests.
+              </p>
+            </article>
           </div>
-          <h3>Bookshelf library</h3>
-          <p>Point it at a folder of EPUB and PDF files. TuxBooks indexes metadata and covers into a searchable library with collections and reading progress.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+        </div>
+      </section>
+
+      <section class="section section--alt" id="screenshots">
+        <div class="wrap">
+          <h2>Screenshots</h2>
+          <p class="section-lede">
+            Drop PNGs into <code>site/img/</code> with these names and they appear here
+            automatically.
+          </p>
+          <div class="shots">
+            <figure class="shot">
+              <img
+                src="img/library.png"
+                alt="TuxBooks library view: a grid of book covers on the bookshelf"
+                loading="lazy"
+                onerror="
+                  this.closest('figure').classList.add('shot--missing');
+                  this.remove();
+                "
+              />
+              <div class="shot-ph">
+                <strong>img/library.png</strong><span>The library / bookshelf view</span>
+              </div>
+              <figcaption>The library</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="img/pdf-reader.png"
+                alt="TuxBooks PDF reader: continuous scrolling page view"
+                loading="lazy"
+                onerror="
+                  this.closest('figure').classList.add('shot--missing');
+                  this.remove();
+                "
+              />
+              <div class="shot-ph">
+                <strong>img/pdf-reader.png</strong><span>The PDF reader in action</span>
+              </div>
+              <figcaption>The PDF reader</figcaption>
+            </figure>
           </div>
-          <h3>Serious PDF reader</h3>
-          <p>Continuous scrolling with virtualized page rendering, zoom, mixed page sizes, per-page error recovery, and position persistence.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-          </div>
-          <h3>Pick up where you left off</h3>
-          <p>Reading position is persisted per book and restored when you return &mdash; close the app mid-chapter, come back to the same spot.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          </div>
-          <h3>Native desktop feel</h3>
-          <p>Built with Tauri 2 and a Rust core: a small, fast binary that behaves like a real desktop application on Linux, not a web page in a box.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
-          </div>
-          <h3>Engineered to last</h3>
-          <p>Strict TypeScript, a layered Rust domain, and a real test pyramid &mdash; unit, property, frontend, and headless real-app desktop E2E tests.</p>
-        </article>
+        </div>
+      </section>
+
+      <section class="section" id="roadmap">
+        <div class="wrap wrap--narrow">
+          <h2>Roadmap</h2>
+          <p class="section-lede">
+            Incremental development: one coherent subsystem at a time, each milestone shipped with
+            tests. The full plan lives in
+            <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
+          </p>
+          <ol class="timeline">
+            <li class="mile milestone--done">
+              <span class="mile-status">Shipped</span>
+              <h3>Foundation</h3>
+              <p>
+                Tauri 2 app, Rust domain/service/repository layers, SQLite persistence, local
+                library import, and a production PDF reader &mdash; continuous scrolling,
+                virtualized rendering, zoom, and reading-position persistence &mdash; backed by
+                unit, property, frontend, and headless desktop E2E tests.
+              </p>
+            </li>
+            <li class="mile milestone--now">
+              <span class="mile-status">Current</span>
+              <h3>Milestone 1 &middot; Production EPUB reader</h3>
+              <p>
+                Replace the EPUB placeholder with a real reading experience: chapter rendering,
+                table of contents, navigation, configurable typography and themes, and stable
+                document locators so you reopen the book exactly where you stopped.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 2 &middot; PDF navigation</h3>
+              <p>
+                Virtualized page thumbnails and a clickable outline, so large PDFs can be navigated
+                without endless scrolling.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 3 &middot; Filesystem watcher &amp; reconciliation</h3>
+              <p>
+                The library stays in sync with your files &mdash; additions, moves, renames,
+                deletions. Missing books can be reconnected without losing metadata or progress.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 4 &middot; Covers &amp; artwork pipeline</h3>
+              <p>
+                Cached cover art for every book &mdash; extracted from EPUBs, rendered from PDF
+                first pages &mdash; for a polished bookshelf.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 5 &middot; Search</h3>
+              <p>
+                Library-wide search with a global shortcut, plus in-book text search for EPUB and
+                PDF.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 6 &middot; Bookmarks, highlights &amp; notes</h3>
+              <p>
+                Persistent reading annotations stored as stable document locators, not UI
+                coordinates.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 7 &middot; Metadata &amp; library curation</h3>
+              <p>
+                Correct messy metadata with library-level overrides while source files stay
+                untouched.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 8 &middot; Unified reader model</h3>
+              <p>
+                A shared ReaderShell for position, progress, navigation, and persistence, with
+                dedicated EPUB and PDF adapters underneath.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 9 &middot; Reliability &amp; performance hardening</h3>
+              <p>
+                Stress-tested reader interactions, bounded memory, and safe async lifecycle under
+                rapid navigation.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 10 &middot; UX polish</h3>
+              <p>
+                Keyboard-first workflows, accessibility audit, desktop niceties &mdash; making it
+                feel like a finished product.
+              </p>
+            </li>
+            <li class="mile">
+              <span class="mile-status">Planned</span>
+              <h3>Milestone 11 &middot; Release &amp; distribution</h3>
+              <p>
+                Linux packaging (AppImage / deb), release automation, and distributable artifacts
+                built by CI.
+              </p>
+            </li>
+          </ol>
+          <p class="principles">
+            One subsystem at a time &middot; Tests are part of the feature &middot; Real desktop E2E
+            &middot; Local-first &middot; No fake persistence
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <p>
+          <img src="img/logo-dark.png" alt="" width="22" height="22" />
+          <strong>TuxBooks</strong> &mdash; free software under
+          <a href="https://github.com/tuunanet/tuxbooks/blob/main/LICENSE.md">GPL&#8209;3.0</a>
+          &middot; &copy; 2026 Tuomo Tuunanen
+        </p>
+        <p class="footer-links">
+          <a href="https://github.com/tuunanet/tuxbooks">Source</a>
+          <a href="https://github.com/tuunanet/tuxbooks/issues">Report an issue</a>
+          <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">Roadmap</a>
+        </p>
       </div>
-    </div>
-  </section>
-
-  <section class="section section--alt" id="screenshots">
-    <div class="wrap">
-      <h2>Screenshots</h2>
-      <p class="section-lede">Drop PNGs into <code>site/img/</code> with these names and they appear here automatically.</p>
-      <div class="shots">
-        <figure class="shot">
-          <img src="img/library.png" alt="TuxBooks library view: a grid of book covers on the bookshelf" loading="lazy"
-               onerror="this.closest('figure').classList.add('shot--missing'); this.remove()">
-          <div class="shot-ph"><strong>img/library.png</strong><span>The library / bookshelf view</span></div>
-          <figcaption>The library</figcaption>
-        </figure>
-        <figure class="shot">
-          <img src="img/pdf-reader.png" alt="TuxBooks PDF reader: continuous scrolling page view" loading="lazy"
-               onerror="this.closest('figure').classList.add('shot--missing'); this.remove()">
-          <div class="shot-ph"><strong>img/pdf-reader.png</strong><span>The PDF reader in action</span></div>
-          <figcaption>The PDF reader</figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="roadmap">
-    <div class="wrap wrap--narrow">
-      <h2>Roadmap</h2>
-      <p class="section-lede">
-        Incremental development: one coherent subsystem at a time, each milestone shipped with tests.
-        The full plan lives in <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
-      </p>
-      <ol class="timeline">
-        <li class="mile milestone--done">
-          <span class="mile-status">Shipped</span>
-          <h3>Foundation</h3>
-          <p>Tauri 2 app, Rust domain/service/repository layers, SQLite persistence, local library import, and a production PDF reader &mdash; continuous scrolling, virtualized rendering, zoom, and reading-position persistence &mdash; backed by unit, property, frontend, and headless desktop E2E tests.</p>
-        </li>
-        <li class="mile milestone--now">
-          <span class="mile-status">Current</span>
-          <h3>Milestone 1 &middot; Production EPUB reader</h3>
-          <p>Replace the EPUB placeholder with a real reading experience: chapter rendering, table of contents, navigation, configurable typography and themes, and stable document locators so you reopen the book exactly where you stopped.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 2 &middot; PDF navigation</h3>
-          <p>Virtualized page thumbnails and a clickable outline, so large PDFs can be navigated without endless scrolling.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 3 &middot; Filesystem watcher &amp; reconciliation</h3>
-          <p>The library stays in sync with your files &mdash; additions, moves, renames, deletions. Missing books can be reconnected without losing metadata or progress.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 4 &middot; Covers &amp; artwork pipeline</h3>
-          <p>Cached cover art for every book &mdash; extracted from EPUBs, rendered from PDF first pages &mdash; for a polished bookshelf.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 5 &middot; Search</h3>
-          <p>Library-wide search with a global shortcut, plus in-book text search for EPUB and PDF.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 6 &middot; Bookmarks, highlights &amp; notes</h3>
-          <p>Persistent reading annotations stored as stable document locators, not UI coordinates.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 7 &middot; Metadata &amp; library curation</h3>
-          <p>Correct messy metadata with library-level overrides while source files stay untouched.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 8 &middot; Unified reader model</h3>
-          <p>A shared ReaderShell for position, progress, navigation, and persistence, with dedicated EPUB and PDF adapters underneath.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 9 &middot; Reliability &amp; performance hardening</h3>
-          <p>Stress-tested reader interactions, bounded memory, and safe async lifecycle under rapid navigation.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 10 &middot; UX polish</h3>
-          <p>Keyboard-first workflows, accessibility audit, desktop niceties &mdash; making it feel like a finished product.</p>
-        </li>
-        <li class="mile">
-          <span class="mile-status">Planned</span>
-          <h3>Milestone 11 &middot; Release &amp; distribution</h3>
-          <p>Linux packaging (AppImage / deb), release automation, and distributable artifacts built by CI.</p>
-        </li>
-      </ol>
-      <p class="principles">One subsystem at a time &middot; Tests are part of the feature &middot; Real desktop E2E &middot; Local-first &middot; No fake persistence</p>
-    </div>
-  </section>
-
-</main>
-
-<footer class="footer">
-  <div class="wrap footer-inner">
-    <p>
-      <img src="img/logo-dark.png" alt="" width="22" height="22">
-      <strong>TuxBooks</strong> &mdash; free software under
-      <a href="https://github.com/tuunanet/tuxbooks/blob/main/LICENSE.md">GPL&#8209;3.0</a>
-      &middot; &copy; 2026 Tuomo Tuunanen
-    </p>
-    <p class="footer-links">
-      <a href="https://github.com/tuunanet/tuxbooks">Source</a>
-      <a href="https://github.com/tuunanet/tuxbooks/issues">Report an issue</a>
-      <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">Roadmap</a>
-    </p>
-  </div>
-</footer>
-
-</body>
+    </footer>
+  </body>
 </html>
 <!-- Source of truth: github.com/tuunanet/tuxbooks (site/) - published by CI to tuxbooks/tuxbooks.github.io -->
-
