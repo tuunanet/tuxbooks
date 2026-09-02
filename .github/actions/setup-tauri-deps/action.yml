@@ -16,15 +16,24 @@ runs:
     - name: Cache apt archives
       uses: actions/cache@v4
       with:
-        # Directory-level cache: extra .debs a sibling job saved are simply
-        # ignored by apt, so all jobs can share one cache entry.
-        path: /var/cache/apt/archives
-        # Bump v1 -> v2 if the runner image baseline ever shifts in a way
-        # that makes old .debs incompatible.
-        key: apt-noble-tauri-v1
+        # A user-owned workspace dir, NOT /var/cache/apt/archives: that dir
+        # holds root-owned lock/partial entries the runner user cannot read,
+        # which breaks both cache restore and save. One entry per job so a
+        # job's superset (e.g. xvfb for E2E) never races a smaller one.
+        path: .apt-cache
+        key: apt-noble-tauri-${{ github.job }}-v1
 
     - name: Install apt packages
       shell: bash
       run: |
+        mkdir -p .apt-cache
         sudo apt-get update
-        sudo apt-get install -y ${{ inputs.packages }}
+        # Point apt's archive cache at the cached dir: .debs already present
+        # are reused and only missing ones are downloaded.
+        sudo apt-get install -y \
+          -o Dir::Cache::archives="$GITHUB_WORKSPACE/.apt-cache" \
+          ${{ inputs.packages }}
+        # apt leaves root-owned lock/partial behind; drop them so the
+        # post-run cache save can archive the directory cleanly.
+        sudo rm -f .apt-cache/lock
+        sudo rm -rf .apt-cache/partial
