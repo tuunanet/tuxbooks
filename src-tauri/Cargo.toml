@@ -1,6 +1,6 @@
 [package]
 name = "tuxbooks"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first ebook library manager"
 authors = ["tuxbooks"]
 edition = "2021"

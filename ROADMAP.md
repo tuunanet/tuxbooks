@@ -734,6 +734,27 @@ Investigate and implement:
 
 Given the project's Ubuntu/Linux focus, prioritize the formats most useful for Ubuntu users.
 
+## Versioning policy (pre-1.0)
+
+Releases are cut by `.github/workflows/release.yml` from `v*` tags. Tags are
+immutable release points, so the scheme makes re-releases impossible by
+construction:
+
+- Versions are semver `0.y.z` while pre-1.0: milestone-scale batches and
+  breaking changes bump `y`, fixes bump `z`.
+- Every release is a new, unique version. A tag is never moved or reused; a
+  bad build is fixed in the next version, never patched in place.
+- Bump before tag: the version is bumped in `tauri.conf.json` (the bundler's
+  source of truth), `Cargo.toml`, `Cargo.lock`, and both `package.json`
+  files in a normal commit on main, CI goes green, and only then is that
+  commit tagged.
+- The release workflow fails unless the tag exactly matches the version in
+  `tauri.conf.json`, so a stale or reused version can never publish.
+- Releases are marked pre-release until 1.0; the site links to the releases
+  list, not `/releases/latest`, which ignores pre-releases.
+- The homepage version badge is updated in the same bump commit when the
+  headline version changes.
+
 ## CI
 
 Release pipeline should:
