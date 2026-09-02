@@ -740,8 +740,9 @@ Releases are cut by `.github/workflows/release.yml` from `v*` tags. Tags are
 immutable release points, so the scheme makes re-releases impossible by
 construction:
 
-- Versions are semver `0.y.z` while pre-1.0: milestone-scale batches and
-  breaking changes bump `y`, fixes bump `z`.
+- The version line starts at `0.0.1` with the first published build. Early
+  releases increment the patch (`0.0.x`); `0.y.0` marks milestone-scale or
+  beta-quality points; `1.0.0` waits for this milestone's exit criteria.
 - Every release is a new, unique version. A tag is never moved or reused; a
   bad build is fixed in the next version, never patched in place.
 - Bump before tag: the version is bumped in `tauri.conf.json` (the bundler's
