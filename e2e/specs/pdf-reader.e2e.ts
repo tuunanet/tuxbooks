@@ -297,6 +297,9 @@ describe("tuxbooks continuous PDF reader", () => {
       timeoutMsg: "outline jump never reached page 41",
     });
     await waitForRendered(41);
+    // Selecting an entry closes the drawer; wait out the exit animation so
+    // the fading sheet overlay cannot swallow the header clicks below.
+    await $("[data-testid=reader-nav]").waitForExist({ reverse: true, timeout: 30000 });
 
     // A nested entry resolves to its own destination, not its parent's.
     await $("[data-testid=reader-nav-trigger]").click();
@@ -308,6 +311,7 @@ describe("tuxbooks continuous PDF reader", () => {
       timeoutMsg: "outline jump never reached page 51",
     });
     await waitForRendered(51);
+    await $("[data-testid=reader-nav]").waitForExist({ reverse: true, timeout: 30000 });
 
     await returnToLibrary();
   });
