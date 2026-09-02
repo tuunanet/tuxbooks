@@ -11,7 +11,7 @@ vi.mock("@/lib/pdf/pdfEngine", () => ({
   closePdfDocument: vi.fn(async () => {}),
   getPdfOutline: vi.fn(async () => []),
   pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
-  RenderingCancelledException: class RenderingCancelledException extends Error {},
+  isRenderingCancelled: vi.fn(() => false),
 }));
 vi.mock("@/lib/epub/epubEngine", async () => {
   const { makeFakeEpubModule } = await import("./mocks/epubEngine");

@@ -55,10 +55,11 @@ Per-file failures never abort an import run: the importer collects them in
 Rendering is the frontend's job: `pdfjs-dist` (PDF.js) rasterizes pages to a
 canvas in the webview, with parsing off the UI thread in a bundled worker
 (`frontend/src/lib/pdf/pdfEngine.ts` is the only module that touches
-PDF.js). Rust controls byte access: the `get_book_bytes` command resolves a
-book id to its stored path through the database (`services::reader`) and
-answers with an IPC raw byte response, so paths never cross the boundary and
-multi-megabyte files avoid JSON encoding.
+PDF.js, and loads the library lazily on first document open so PDF.js stays
+out of the entry chunk). Rust controls byte access: the `get_book_bytes`
+command resolves a book id to its stored path through the database
+(`services::reader`) and answers with an IPC raw byte response, so paths
+never cross the boundary and multi-megabyte files avoid JSON encoding.
 
 ### Continuous reader architecture (`frontend/src/components/reader/pdf/`)
 

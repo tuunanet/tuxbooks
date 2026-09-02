@@ -1,3 +1,15 @@
 packages:
   - frontend
   - e2e
+
+# pnpm 10 blocks dependency postinstall scripts by default.
+onlyBuiltDependencies:
+  # esbuild's install script places its platform binary; the Vite build needs it.
+  - esbuild
+
+# Explicitly not built: transitive webdriverio driver managers (via
+# @wdio/utils). E2E drives the app through tauri-driver, never a browser
+# driver, so their driver downloads would be dead weight.
+ignoredBuiltDependencies:
+  - edgedriver
+  - geckodriver

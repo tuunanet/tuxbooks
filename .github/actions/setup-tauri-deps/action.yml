@@ -14,7 +14,7 @@ runs:
   using: composite
   steps:
     - name: Cache apt archives
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         # A user-owned workspace dir, NOT /var/cache/apt/archives: that dir
         # holds root-owned lock/partial entries the runner user cannot read,

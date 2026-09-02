@@ -9,7 +9,7 @@ vi.mock("@/lib/pdf/pdfEngine", () => ({
   closePdfDocument: vi.fn(async () => {}),
   getPdfOutline: vi.fn(async () => []),
   pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
-  RenderingCancelledException: class RenderingCancelledException extends Error {},
+  isRenderingCancelled: vi.fn(() => false),
 }));
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";

@@ -38,6 +38,13 @@ export default defineConfig({
   build: {
     target: "chrome105",
     outDir: "dist",
+    // The entry chunk (~520 kB) is the always-loaded app shell: React,
+    // radix primitives, and every bookshelf surface. Reader engines (epub,
+    // mobi, pdf, …) already ship as lazy per-format chunks — PDF.js in
+    // particular only loads when a PDF opens. Chunks come from local disk,
+    // not the network, so ~0.5 MB minified is immaterial here; the raised
+    // limit keeps Vite quiet while still flagging runaway growth.
+    chunkSizeWarningLimit: 600,
   },
   test: {
     environment: "jsdom",

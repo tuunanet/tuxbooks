@@ -1,9 +1,5 @@
 import { useEffect, useRef } from "react";
-import {
-  RenderingCancelledException,
-  type PdfDocument,
-  type PdfRenderTask,
-} from "@/lib/pdf/pdfEngine";
+import { isRenderingCancelled, type PdfDocument, type PdfRenderTask } from "@/lib/pdf/pdfEngine";
 
 interface PdfPageCanvasProps {
   document: PdfDocument;
@@ -100,7 +96,7 @@ export function PdfPageCanvas({
 
       renderedRef.current?.(pageNumber);
     })().catch((err: unknown) => {
-      if (cancelled || err instanceof RenderingCancelledException) return;
+      if (cancelled || isRenderingCancelled(err)) return;
       errorRef.current?.(pageNumber, err);
     });
 
