@@ -53,8 +53,18 @@ TuxBooks currently has:
 - mixed-page-size PDF support
 - page-level rendering error handling
 - E2E rendering and scrolling verification
+- vendored foliate-js EPUB engine behind a single-module seam
+- production EPUB reader (chapter rendering, nested TOC, navigation)
+- paginated and scrolled EPUB flow
+- EPUB appearance controls (font size, font family, line spacing, themes)
+- EPUB CFI + spine-href position persistence and validated restoration
+- WebKit-native MathML rendering
+- EPUB rendering/navigation/appearance E2E, including CFI persistence
+- deterministic EPUB fixture with an EPUB 3 MathML chapter
 
-The PDF subsystem should now be treated as the architectural reference for robust document-reader engineering.
+The PDF subsystem should now be treated as the architectural reference for robust
+document-reader engineering. The EPUB reader follows the same contract: a
+single-module engine seam, persisted stable locators, and real desktop E2E.
 
 ---
 
