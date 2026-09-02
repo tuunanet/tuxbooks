@@ -13,6 +13,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  workflows:
+    name: Workflows (actionlint)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: actionlint
+        run: |
+          bash scripts/install-actionlint.sh
+          .build/bin/actionlint
+
   frontend:
     name: Frontend (lint, typecheck, test)
     runs-on: ubuntu-24.04

@@ -113,13 +113,20 @@ test-epub-extended: frontend-dist
 test-epub-conformance: frontend-dist
     {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol --test extended_epub conformance::
 
-lint: lint-rust lint-frontend
+lint: lint-rust lint-frontend lint-workflows
 
 lint-rust:
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
 lint-frontend:
     pnpm --filter frontend lint
+
+# Lint GitHub Actions workflows (expressions, references, run: shell).
+# Downloads the pinned binary on first use (scripts/install-actionlint.sh),
+# then runs offline from .build/bin/.
+lint-workflows:
+    bash scripts/install-actionlint.sh
+    .build/bin/actionlint
 
 format:
     cargo fmt --manifest-path src-tauri/Cargo.toml
@@ -147,7 +154,8 @@ check:
         'frontend-lint: just lint-frontend' \
         'frontend-types: just typecheck' \
         'format: just format-check-frontend' \
-        'fixtures: just check-epub-fixtures'
+        'fixtures: just check-epub-fixtures' \
+        'workflows: just lint-workflows'
     @echo "check: OK"
 
 # Complete CI-equivalent validation, including E2E and the release build.
