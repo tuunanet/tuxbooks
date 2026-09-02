@@ -97,9 +97,13 @@ export function teardownEnvironment(): void {
  */
 export function armTeardownWatchdog(appBinaryPath: string): void {
   const watchdog = path.join(repoRoot, "e2e", "setup", "watchdog.mjs");
+  // E2E_XVFB=1 marks the headless wrapper: DISPLAY then names the private
+  // Xvfb of this phase, which the watchdog reaps if `timeout` SIGKILLs
+  // xvfb-run before it could clean up. Headed runs pass no display.
+  const display = process.env.E2E_XVFB === "1" ? (process.env.DISPLAY ?? "") : "";
   const child = spawn(
     process.execPath,
-    [watchdog, String(process.pid), "45000", scratchDir, appBinaryPath],
+    [watchdog, String(process.pid), "45000", scratchDir, appBinaryPath, display],
     { detached: true, stdio: "ignore" },
   );
   child.unref();

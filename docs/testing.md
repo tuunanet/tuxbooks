@@ -9,6 +9,49 @@ Four layers, all runnable locally via `just`:
 | Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC       |
 | E2E (WebdriverIO) | `just test-e2e`      | real binary, real window, real SQLite |
 
+## Timeouts and termination
+
+Every test invocation is guaranteed to terminate; a wedged run is killed,
+never left blocking development. Healthy runtimes are a small fraction of
+each bound.
+
+| What                       | Guard                                              |
+| -------------------------- | -------------------------------------------------- |
+| Unit tests (rust/frontend) | `timeout 900` wrapper in the justfile (linux only) |
+| E2E phase                  | `timeout 300` wrapper in the justfile              |
+| Single E2E test            | `mochaOpts.timeout` 120s (`wdio.conf.ts`)          |
+| E2E teardown               | watchdog (`e2e/setup/watchdog.mjs`), see below     |
+| CI jobs                    | `timeout-minutes` per job in `.github/workflows`   |
+
+The E2E watchdog reaps the app, `tauri-driver`, `WebKitWebDriver`, and —
+for headless phases (`E2E_XVFB=1`) — the phase's private `Xvfb` server if
+`timeout` had to SIGKILL `xvfb-run` before its own cleanup. The sweep only
+kills processes that predate the watchdog, so the next phase's processes
+(`just test-e2e` runs two phases back to back) are never caught by the
+previous phase's teardown. `onPrepare` additionally sweeps stale
+app/driver processes so a crashed run cannot poison the next one.
+
+## Parallelism
+
+- `just check` runs five independent toolchains concurrently via
+  `scripts/run-parallel.sh` (rust fmt+clippy+tests, vitest, eslint, tsc,
+  prettier); wall time is the slowest stream (usually rust). `just test`
+  runs the cargo and vitest layers concurrently the same way. Cargo work
+  stays in a single stream: parallel cargo commands only block each other
+  on the target-dir file lock.
+- Within layers, parallelism is already the default: cargo runs test
+  threads, vitest runs worker processes.
+- E2E phases stay sequential on purpose. Specs share one app session per
+  phase (`maxInstances: 1`), and every session in a run inherits the
+  phase's scratch env (`TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` are set
+  launcher-side before the driver spawns) — per-spec isolation would need
+  env injection at driver-spawn time, which the external provider does not
+  offer. Scaling path when the E2E suite grows: split more specs into
+  phases, or move to the embedded driver provider which can per-session
+  env. The stale-process sweep and watchdog kill by binary name, so two
+  concurrent E2E invocations would kill each other — never run them in
+  parallel.
+
 ## Rust (`cargo test`)
 
 - Tests live next to the code (`#[cfg(test)] mod tests`) plus
@@ -18,6 +61,10 @@ Four layers, all runnable locally via `just`:
 - Filesystem and database tests use `tempfile::tempdir()` — they never
   touch the user's library or home directory. Tests run in parallel and
   each gets its own temp dir/database, so there is no shared state.
+- Tests run with `--features custom-protocol` (see `just test-rust`) so
+  the debug binary keeps the build-debug feature set; for a single test:
+  `cargo test --manifest-path src-tauri/Cargo.toml --features
+custom-protocol <test>`.
 - Before the first `cargo test`/`clippy` on a fresh clone, build the
   frontend once (`just frontend-dist`): the Tauri context macro embeds
   `frontend/dist` at compile time.
@@ -144,14 +191,14 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
   justfile, so `just test-e2e` always terminates and always returns a
   meaningful exit code.
 - Failed tests capture a screenshot into `artifacts/e2e/<runId>/`
-   (gitignored, pruned after 7 days) next to the per-run wdio/driver logs;
-   backend and frontend console logs are forwarded into those logs by
-   `tauri-plugin-wdio` (debug-only test infrastructure: the plugin is
-   registered under `#[cfg(debug_assertions)]` in `lib.rs` and the frontend
-   bridge is only bundled when `VITE_WDIO=1`, set by `just build-debug` —
-   release builds must never include it. The crate stays a non-optional
-   dependency so the `wdio:default` capability permission resolves in every
-   build).
+  (gitignored, pruned after 7 days) next to the per-run wdio/driver logs;
+  backend and frontend console logs are forwarded into those logs by
+  `tauri-plugin-wdio` (debug-only test infrastructure: the plugin is
+  registered under `#[cfg(debug_assertions)]` in `lib.rs` and the frontend
+  bridge is only bundled when `VITE_WDIO=1`, set by `just build-debug` —
+  release builds must never include it. The crate stays a non-optional
+  dependency so the `wdio:default` capability permission resolves in every
+  build).
 - WebKitGTK quirk: WebDriver `getText` walks the accessibility tree and
   omits text inside `line-clamp`/`truncate` boxes, so specs assert on DOM
   `textContent` for book and reader titles.

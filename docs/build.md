@@ -11,15 +11,15 @@ cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
 ```
 
 `just build-debug` does this (and sets `VITE_WDIO=1`); `tauri build` does it
-automatically.
+automatically. Every cargo invocation in the justfile pins the feature —
+`just test-rust` and `just lint-rust` included — so `just check` leaves
+`target/debug/tuxbooks` E2E-capable and the `test-e2e-empty` /
+`test-e2e-seeded` sub-recipes (which do not depend on `build-debug`) work
+right after it.
 
-Cargo feature unification bites here: `just check` / `just test-rust`
-rebuild `target/debug/tuxbooks` WITHOUT the feature, and the
-`test-e2e-empty` / `test-e2e-seeded` sub-recipes do not depend on
-`build-debug`. Running them right after `just check` launches a binary that
-loads the (absent) Vite dev server — every test fails with "Could not
-connect to localhost". Run `just build-debug` first, or use `just test-e2e`,
-which depends on it.
+The trap survives as: any **bare** `cargo build`/`test`/`clippy` (outside
+the justfile) rebuilds the binary without the feature. If E2E fails with
+"Could not connect to localhost", run `just build-debug` and retry.
 
 ## `frontend/dist` must exist before cargo
 

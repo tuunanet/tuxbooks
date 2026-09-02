@@ -30,7 +30,7 @@ application/domain language; React/TypeScript is only the presentation layer.**
 
 ```sh
 pnpm install          # first thing after cloning
-just check            # daily driver: format-check -> lint -> typecheck -> all unit tests
+just check            # daily driver: format+lint+typecheck+unit tests, parallel streams
 just dev              # launch the app (Tauri + Vite hot reload)
 just test-e2e         # real-app desktop E2E, headless on Linux (builds first)
 just test-e2e-headed  # same E2E on the visible display (debugging only)
@@ -40,9 +40,10 @@ just ci               # everything CI runs: check + e2e + release build
 Single layers:
 
 ```sh
-just test-rust                      # cargo test
-cargo test --manifest-path src-tauri/Cargo.toml <test_name>   # one test
-just test-frontend                  # vitest run (CI mode)
+just test                            # unit tests, rust + frontend concurrently
+just test-rust                       # cargo test
+cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol <test_name>   # one test
+just test-frontend                   # vitest run (CI mode)
 pnpm --filter frontend exec vitest run <file-or-pattern>      # one frontend test
 pnpm --filter frontend dev          # vite only, no Tauri
 ```
@@ -74,8 +75,8 @@ read the relevant doc before touching that layer:
   `docs/database.md`.
 - Frontend: no synchronous `setState` inside effects — `docs/STANDARDS.md`.
 - Testing: `vi.mock` declared per test file, E2E env set in config
-  `onPrepare` before the driver spawns, `just check` invalidates the E2E
-  binary — `docs/testing.md`.
+  `onPrepare` before the driver spawns, bare `cargo test` strips the E2E
+  binary's `custom-protocol` feature — `docs/testing.md`, `docs/build.md`.
 - Readers: single-module engine seams, position/persistence invariants,
   pinned DOM attributes, vendored foliate-js — `docs/epub.md`,
   `docs/pdf.md`.

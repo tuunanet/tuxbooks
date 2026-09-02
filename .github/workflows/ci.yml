@@ -16,6 +16,7 @@ jobs:
   frontend:
     name: Frontend (lint, typecheck, test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +45,7 @@ jobs:
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -73,11 +75,14 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        # Same feature set as `just test-rust` so the binary keeps the
+        # build-debug feature set (see docs/build.md).
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
   e2e:
     name: E2E (WebdriverIO + Tauri WebDriver)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v4
@@ -128,6 +133,7 @@ jobs:
   build:
     name: Release build (Tauri bundle)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v4

@@ -29,9 +29,16 @@ export const config: Options.Testrunner = {
   // wdio worker/driver logs (always) + failure screenshots (afterTest).
   outputDir: artifactsDir,
 
-  connectionRetryCount: 15,
+  // Session-creation patience: 3 x 45s. A dead app is not fixed by more
+  // retries — a fresh run is — and the old 15-retry budget let a wedged
+  // startup burn the whole phase before the justfile timeout stepped in.
+  connectionRetryCount: 3,
   connectionRetryTimeout: 45000,
   waitforTimeout: 10000,
+  // Per-test bound (mocha). Healthy tests take seconds; without this a
+  // wedged test stalls its whole spec file. Bigger than any explicit
+  // waitFor inside the tests so those fail with their own message first.
+  mochaOpts: { timeout: 120000 },
 
   services: [
     [

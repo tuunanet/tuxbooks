@@ -20,6 +20,12 @@ frontend-dist:
 dev:
     pnpm tauri dev
 
+# GNU timeout is the last-resort hang guard for test commands (linux only:
+# macOS lacks coreutils' timeout). Healthy runs finish in a fraction of
+# these bounds; a wedged run is killed instead of blocking development.
+_test_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
+_e2e_timeout := if os() == "linux" { "timeout --kill-after=15 300" } else { "" }
+
 # Build the release application bundle.
 build:
     pnpm tauri build
@@ -31,13 +37,22 @@ build-debug:
     VITE_WDIO=1 pnpm --filter frontend build
     cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
-test: test-rust test-frontend
+# Unit tests: rust + frontend, concurrently (different toolchains — cargo
+# and node never contend). `test-rust` pins custom-protocol so
+# target/debug/tuxbooks always keeps the feature set build-debug gives it
+# and `just check` no longer invalidates the E2E binary (docs/build.md).
+test: test-parallel
 
 test-rust: frontend-dist
-    cargo test --manifest-path src-tauri/Cargo.toml
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
 test-frontend:
-    pnpm --filter frontend test:ci
+    {{_test_timeout}} pnpm --filter frontend test:ci
+
+test-parallel:
+    bash scripts/run-parallel.sh \
+        'rust: just test-rust' \
+        'frontend: just test-frontend'
 
 # E2E runs the real desktop app against WebdriverIO. Headless by default:
 # on Linux each phase runs under a private Xvfb. `env -u WAYLAND_DISPLAY` is
@@ -45,9 +60,9 @@ test-frontend:
 # Wayland session otherwise prefers the (inherited) WAYLAND_DISPLAY and pops
 # up on the real desktop instead of the virtual framebuffer. GDK_BACKEND=x11
 # pins the choice. timeout is the last-resort guard so an agent invocation
-# always terminates (healthy phases finish in well under a minute).
-_headless := if os() == "linux" { "env -u WAYLAND_DISPLAY GDK_BACKEND=x11 xvfb-run --auto-servernum" } else { "" }
-_e2e_timeout := "timeout --kill-after=15 600"
+# always terminates (healthy phases finish in under a minute; E2E_XVFB marks
+# the watchdog to sweep the phase's private Xvfb if teardown is killed).
+_headless := if os() == "linux" { "env -u WAYLAND_DISPLAY GDK_BACKEND=x11 E2E_XVFB=1 xvfb-run --auto-servernum" } else { "" }
 
 test-e2e: build-debug
     just test-e2e-empty
@@ -70,23 +85,40 @@ test-e2e-headed-empty:
 test-e2e-headed-seeded:
     env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
-lint:
+lint: lint-rust lint-frontend
+
+lint-rust:
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+lint-frontend:
     pnpm --filter frontend lint
 
 format:
     cargo fmt --manifest-path src-tauri/Cargo.toml
     pnpm format
 
-format-check:
+format-check: format-check-rust format-check-frontend
+
+format-check-rust:
     cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+format-check-frontend:
     pnpm format:check
 
 typecheck:
     pnpm --filter frontend typecheck
 
-# Full local validation: format check -> lint -> typecheck -> unit tests.
-check: format-check lint typecheck test
+# Full local validation. The five streams are independent toolchains, so
+# they run concurrently (wall time = the slowest stream, usually rust).
+# Cargo work stays in one stream: parallel cargo commands would just block
+# each other on the target-dir file lock.
+check:
+    bash scripts/run-parallel.sh \
+        'rust: just format-check-rust && just lint-rust && just test-rust' \
+        'frontend-test: just test-frontend' \
+        'frontend-lint: just lint-frontend' \
+        'frontend-types: just typecheck' \
+        'format: just format-check-frontend'
     @echo "check: OK"
 
 # Complete CI-equivalent validation, including E2E and the release build.
