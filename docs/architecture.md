@@ -95,9 +95,10 @@ frontend/src/
         library/          LibraryView, header, empty states, import UX, section helpers
         books/            BookCard, BookListItem, BookDetail, book context menu
         search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
-        reader/           ReaderShell, EPUB placeholder, pdf/ continuous PDF
+        reader/           ReaderShell, EPUB reader, pdf/ continuous PDF
                           reader (layout math, virtualization, render queue,
-                          scroll tracking, persistence — see pdf.md)
+                          scroll tracking, thumbnails sidebar, outline,
+                          persistence — see pdf.md)
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

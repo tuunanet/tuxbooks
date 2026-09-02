@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
-import { pdfWorkerSrc } from "@/lib/pdf/pdfEngine";
+import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { useFitWidthScale } from "./hooks/useFitWidthScale";
@@ -15,6 +16,7 @@ import {
 } from "./hooks/usePdfScrollTracking";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
+import { PdfSidebar } from "./PdfSidebar";
 import { PdfToolbar } from "./PdfToolbar";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
@@ -30,6 +32,16 @@ interface PdfReaderProps {
   book: Book;
   /** Reports the real page count once the document has loaded. */
   onDocumentLoad?: (pageCount: number) => void;
+  /** Reports the document outline (possibly empty) once it is resolved. */
+  onOutlineLoad?: (outline: PdfOutlineItem[]) => void;
+  /**
+   * Host element for the thumbnails sidebar (owned by the shell's layout).
+   * Null while the sidebar is closed or the book is not a PDF; the sidebar
+   * renders through a portal so it can dock beside the scroll container
+   * without scrolling with it, while this component stays the single owner
+   * of the document handle.
+   */
+  sidebarHost?: HTMLElement | null;
   /** The reader's scroll container, owned by ReaderShell. */
   scrollContainerRef?: RefObject<HTMLElement | null>;
 }
@@ -42,10 +54,18 @@ interface PdfReaderProps {
  * document loading (usePdfDocument), geometry (usePdfGeometry + pdfLayout),
  * fit-width layout scale (useFitWidthScale), slot rendering
  * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), toolbar state (PdfToolbar),
- * and persistence (usePdfPersistence). Outlines, annotations, and search
+ * the thumbnails sidebar (PdfSidebar, portaled into the shell's host), and
+ * persistence (usePdfPersistence). The outline comes from the engine seam
+ * and is reported upward for the navigation drawer. Annotations and search
  * stay out of scope.
  */
-export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReaderProps) {
+export function PdfReader({
+  book,
+  onDocumentLoad,
+  onOutlineLoad,
+  sidebarHost,
+  scrollContainerRef,
+}: PdfReaderProps) {
   const { position, setPosition } = useReader();
   const {
     status,
@@ -94,6 +114,29 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
     ),
   });
   const interactive = layoutReady && restored;
+
+  // Outline resolution is engine-side (the document is already parsed);
+  // failures degrade to an empty outline, never a reader error. The ref
+  // indirection keeps the effect on the document alone, and the cancelled
+  // flag stops a superseded load from reporting.
+  const onOutlineLoadRef = useRef(onOutlineLoad);
+  useEffect(() => {
+    onOutlineLoadRef.current = onOutlineLoad;
+  });
+  useEffect(() => {
+    if (!pdfDocument) return;
+    let cancelled = false;
+    getPdfOutline(pdfDocument)
+      .then((outline) => {
+        if (!cancelled) onOutlineLoadRef.current?.(outline);
+      })
+      .catch(() => {
+        if (!cancelled) onOutlineLoadRef.current?.([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfDocument]);
 
   const slots = useMemo(
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),
@@ -342,6 +385,17 @@ export function PdfReader({ book, onDocumentLoad, scrollContainerRef }: PdfReade
         contentAreaRef={contentAreaRef}
         onRetryPage={retryPage}
       />
+      {sidebarHost &&
+        createPortal(
+          <PdfSidebar
+            document={pdfDocument}
+            sizes={sizes}
+            currentPage={currentPage}
+            measurePages={measurePages}
+            onNavigate={goToPage}
+          />,
+          sidebarHost,
+        )}
     </div>
   );
 }

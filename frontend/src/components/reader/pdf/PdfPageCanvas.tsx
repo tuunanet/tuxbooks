@@ -13,6 +13,8 @@ interface PdfPageCanvasProps {
   height: number;
   /** PDF.js render scale (displayed pixels / page units). */
   scale: number;
+  /** Test hook; distinct per surface (main pages vs. thumbnails). */
+  testId?: string;
   onPageRendered?: (pageNumber: number) => void;
   onPageError?: (pageNumber: number, error: unknown) => void;
 }
@@ -36,6 +38,7 @@ export function PdfPageCanvas({
   width,
   height,
   scale,
+  testId = "pdf-canvas",
   onPageRendered,
   onPageError,
 }: PdfPageCanvasProps) {
@@ -110,7 +113,7 @@ export function PdfPageCanvas({
   return (
     <canvas
       ref={canvasRef}
-      data-testid="pdf-canvas"
+      data-testid={testId}
       data-pdf-page={pageNumber}
       className="block rounded-sm border bg-white shadow-sm"
     />

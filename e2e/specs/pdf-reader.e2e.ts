@@ -5,7 +5,11 @@ import {
   renderedCount,
   returnToLibrary,
   scrollToSlot,
+  scrollThumbnailsToBottom,
   textOf,
+  thumbnailCanvasCount,
+  thumbnailIsActive,
+  thumbnailState,
   waitForRendered,
 } from "./helpers.js";
 
@@ -15,6 +19,7 @@ describe("tuxbooks continuous PDF reader", () => {
   // The upper bound is a regression guard against rendering the entire
   // document — not an exact contract.
   const RENDER_BUDGET_LIMIT = 15;
+  const THUMBNAIL_BUDGET_LIMIT = 20;
 
   async function openLargeFixture(): Promise<void> {
     await openInReader("A Large Fixture (PDF)");
@@ -268,6 +273,121 @@ describe("tuxbooks continuous PDF reader", () => {
 
     // The bounded render budget holds on a mixed-size document too.
     expect(await renderedCount()).toBeLessThan(6);
+    await returnToLibrary();
+  });
+
+  it("navigates to destinations from the document outline", async () => {
+    await openInReader("A Large Fixture (PDF)");
+    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
+    await browser.waitUntil(
+      async () => /Page \d+ of 100/.test(await textOf("pdf-page-indicator")),
+      { timeout: 30000, timeoutMsg: "large fixture never reported its page count" },
+    );
+
+    await $("[data-testid=reader-nav-trigger]").click();
+    await $("[data-testid=nav-tab-outline]").click();
+    // 15 deterministic entries (5 parts × 2 sections), flattened depth-first:
+    // index 6 is "Part Three" (page 41), index 8 "Section Three-B" (page 51).
+    await $("[data-testid=nav-outline-item-0]").waitForDisplayed({ timeout: 30000 });
+    expect(await textOf("nav-outline-item-6")).toContain("Part Three");
+
+    await $("[data-testid=nav-outline-item-6]").click();
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 41 of 100", {
+      timeout: 30000,
+      timeoutMsg: "outline jump never reached page 41",
+    });
+    await waitForRendered(41);
+
+    // A nested entry resolves to its own destination, not its parent's.
+    await $("[data-testid=reader-nav-trigger]").click();
+    await $("[data-testid=nav-tab-outline]").click();
+    await $("[data-testid=nav-outline-item-8]").waitForDisplayed({ timeout: 30000 });
+    await $("[data-testid=nav-outline-item-8]").click();
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 51 of 100", {
+      timeout: 30000,
+      timeoutMsg: "outline jump never reached page 51",
+    });
+    await waitForRendered(51);
+
+    await returnToLibrary();
+  });
+
+  it("shows an empty outline state for documents without one", async () => {
+    await openInReader("A Minimal Manual (PDF)");
+    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
+    // The document may restore a previously read page (persistence), so only
+    // the page count itself is a stable expectation here.
+    await browser.waitUntil(async () => /Page \d+ of 3/.test(await textOf("pdf-page-indicator")), {
+      timeout: 30000,
+      timeoutMsg: "minimal fixture never reported its page count",
+    });
+
+    await $("[data-testid=reader-nav-trigger]").click();
+    await $("[data-testid=nav-tab-outline]").click();
+    await $("[data-testid=nav-outline-empty]").waitForDisplayed({ timeout: 30000 });
+    expect(await textOf("nav-outline-empty")).toContain("no outline");
+
+    // Close the drawer before leaving: the sheet overlay covers the header.
+    await browser.keys(["Escape"]);
+    await $("[data-testid=reader-nav]").waitForExist({ reverse: true, timeout: 30000 });
+
+    await returnToLibrary();
+  });
+
+  it("navigates with virtualized thumbnails in a bounded sidebar", async () => {
+    await openLargeFixture();
+
+    await $("[data-testid=reader-sidebar-toggle]").click();
+    await $("[data-testid=pdf-thumbnails]").waitForDisplayed({ timeout: 30000 });
+
+    // The reading page is indicated without any interaction — whichever page
+    // the reader restored to, its thumbnail is marked active.
+    const restoredPage = Number(
+      (await textOf("pdf-page-indicator")).match(/Page (\d+) of 100/)?.[1],
+    );
+    expect(restoredPage).toBeGreaterThanOrEqual(1);
+    await browser.waitUntil(async () => thumbnailIsActive(restoredPage), {
+      timeout: 30000,
+      timeoutMsg: `page ${restoredPage} thumbnail never marked active`,
+    });
+
+    // Clicking a thumbnail navigates the document (the whole list reserves
+    // cells up front, so the target exists even while far out of view).
+    await $('[data-pdf-thumb-slot="50"] button').click();
+    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 50 of 100", {
+      timeout: 30000,
+      timeoutMsg: "thumbnail click never reached page 50",
+    });
+    await waitForRendered(50);
+    expect(await thumbnailIsActive(50)).toBe(true);
+    expect(await thumbnailCanvasCount()).toBeLessThan(THUMBNAIL_BUDGET_LIMIT);
+
+    // Scrolling the sidebar deep renders destination thumbnails and still
+    // never mounts the whole document as bitmaps.
+    await scrollThumbnailsToBottom();
+    await browser.waitUntil(async () => (await thumbnailState(100)) === "rendered", {
+      timeout: 30000,
+      timeoutMsg: "deep thumbnail never rendered",
+    });
+    expect(await thumbnailCanvasCount()).toBeLessThan(THUMBNAIL_BUDGET_LIMIT);
+
+    // Current-page synchronization: scrolling the document moves the
+    // highlight (and brings the page's thumbnail into view and rendered).
+    await scrollToSlot(70);
+    await browser.waitUntil(async () => thumbnailIsActive(70), {
+      timeout: 30000,
+      timeoutMsg: "thumbnail highlight never followed the reading position",
+    });
+    await browser.waitUntil(async () => (await thumbnailState(70)) === "rendered", {
+      timeout: 30000,
+      timeoutMsg: "active thumbnail never rendered",
+    });
+    expect(await canvasIsNonBlank(70, "pdf-thumbnail")).toBe(true);
+
+    // Closing the sidebar unmounts the thumbnails with it.
+    await $("[data-testid=reader-sidebar-toggle]").click();
+    await $("[data-testid=pdf-thumbnails]").waitForExist({ reverse: true, timeout: 30000 });
+
     await returnToLibrary();
   });
 });

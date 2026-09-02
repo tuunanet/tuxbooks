@@ -2,6 +2,7 @@ import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import { RenderingCancelledException } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { normalizePdfOutline } from "./pdfOutline";
 
 /**
  * The single seam between the app and the PDF.js engine. Components depend on
@@ -35,3 +36,14 @@ export async function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
 export async function closePdfDocument(document: PdfDocument): Promise<void> {
   await document.loadingTask.destroy();
 }
+
+/**
+ * The document's outline (table of contents) with every destination
+ * resolved to a 1-based page. Documents without an outline normalize to an
+ * empty list. Normalization lives in pdfOutline.ts (pure, unit-tested
+ * without the engine); this re-export keeps components on the seam.
+ */
+export function getPdfOutline(document: PdfDocument) {
+  return normalizePdfOutline(document);
+}
+export type { PdfOutlineItem } from "./pdfOutline";

@@ -9,6 +9,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useReader } from "@/state/readerState";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
+import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Book } from "@/types/domain";
 
 interface ReaderNavigationProps {
@@ -21,9 +22,13 @@ interface ReaderNavigationProps {
   epubToc: EpubTocItem[] | null;
   /** Navigates the EPUB engine to a TOC destination (href or CFI). */
   onEpubJump: (href: string) => void;
+  /** Engine-resolved PDF outline; null while the document opens. */
+  pdfOutline: PdfOutlineItem[] | null;
+  /** Navigates the PDF reader to an outline entry's page. */
+  onPdfJump: (page: number) => void;
 }
 
-/** Flattens the TOC tree into rows with their nesting depth. */
+/** Flattens a TOC tree into rows with their nesting depth. */
 interface TocRow {
   item: EpubTocItem;
   depth: number;
@@ -33,11 +38,21 @@ function flattenToc(items: EpubTocItem[], depth = 0): TocRow[] {
   return items.flatMap((item) => [{ item, depth }, ...flattenToc(item.subitems, depth + 1)]);
 }
 
+/** Flattens an outline tree into rows with their nesting depth. */
+interface OutlineRow {
+  item: PdfOutlineItem;
+  depth: number;
+}
+
+function flattenOutline(items: PdfOutlineItem[], depth = 0): OutlineRow[] {
+  return items.flatMap((item) => [{ item, depth }, ...flattenOutline(item.items, depth + 1)]);
+}
+
 /**
  * Reading navigation drawer. EPUB contents come from the foliate-js engine
- * (real labels, real destinations); PDF pages come from the loaded PDF.js
- * document; outlines and bookmark persistence remain honest placeholders
- * until their engines/backend exist.
+ * (real labels, real destinations); PDF pages, thumbnails, and the outline
+ * come from the loaded PDF.js document; bookmark persistence remains an
+ * honest session-only placeholder until the backend exists.
  */
 export function ReaderNavigation({
   open,
@@ -47,6 +62,8 @@ export function ReaderNavigation({
   onJump,
   epubToc,
   onEpubJump,
+  pdfOutline,
+  onPdfJump,
 }: ReaderNavigationProps) {
   const isEpub = book.format === "epub";
   const { bookmarks } = useReader();
@@ -58,6 +75,11 @@ export function ReaderNavigation({
 
   const jumpToChapter = (href: string) => {
     onEpubJump(href);
+    onOpenChange(false);
+  };
+
+  const jumpToOutlinePage = (page: number) => {
+    onPdfJump(page);
     onOpenChange(false);
   };
 
@@ -152,10 +174,49 @@ export function ReaderNavigation({
                   <ScrollBar />
                 </ScrollArea>
               </TabsContent>
-              <TabsContent value="outline" className="min-h-0 flex-1 px-4 py-3">
-                <p data-testid="nav-outline" className="text-sm text-muted-foreground">
-                  PDF outlines are not supported yet — there is nothing to show here.
-                </p>
+              <TabsContent
+                data-testid="nav-outline"
+                value="outline"
+                className="min-h-0 flex-1 px-2 py-2"
+              >
+                <ScrollArea className="h-full pr-2">
+                  {pdfOutline === null && (
+                    <p className="px-2 py-1 text-sm text-muted-foreground">Loading outline…</p>
+                  )}
+                  {pdfOutline !== null && pdfOutline.length === 0 && (
+                    <p
+                      data-testid="nav-outline-empty"
+                      className="px-2 py-1 text-sm text-muted-foreground"
+                    >
+                      This document has no outline.
+                    </p>
+                  )}
+                  {pdfOutline !== null &&
+                    pdfOutline.length > 0 &&
+                    flattenOutline(pdfOutline).map(({ item, depth }, index) =>
+                      item.page === null ? (
+                        <p
+                          key={`${item.title}-${index}`}
+                          style={{ paddingLeft: `${8 + depth * 16}px` }}
+                          className="block max-w-full truncate px-2 py-1.5 text-sm text-muted-foreground"
+                        >
+                          {item.title}
+                        </p>
+                      ) : (
+                        <button
+                          key={`${item.title}-${index}`}
+                          type="button"
+                          data-testid={`nav-outline-item-${index}`}
+                          onClick={() => jumpToOutlinePage(item.page as number)}
+                          style={{ paddingLeft: `${8 + depth * 16}px` }}
+                          className="block w-full max-w-full truncate rounded-md py-1.5 pr-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
+                        >
+                          {item.title}
+                        </button>
+                      ),
+                    )}
+                  <ScrollBar />
+                </ScrollArea>
               </TabsContent>
             </>
           )}

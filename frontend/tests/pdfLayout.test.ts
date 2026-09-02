@@ -10,6 +10,7 @@ import {
   offsetForPage,
   pageAtOffset,
   PAGE_GAP_PX,
+  thumbnailGeometry,
   type LayoutSlot,
   type PageSize,
 } from "@/components/reader/pdf/pdfLayout";
@@ -181,5 +182,29 @@ describe("compensateOffset", () => {
 
   it("handles an empty document", () => {
     expect(compensateOffset(10, [], [])).toBe(10);
+  });
+});
+
+describe("thumbnailGeometry", () => {
+  it("preserves the page aspect at the cell width", () => {
+    expect(thumbnailGeometry(LETTER, 112)).toEqual({
+      width: 112,
+      height: (112 * 792) / 612,
+    });
+    expect(thumbnailGeometry({ width: 792, height: 612 }, 112).height).toBeCloseTo(
+      (112 * 612) / 792,
+      10,
+    );
+  });
+
+  it("falls back to a square cell for degenerate page units", () => {
+    expect(thumbnailGeometry({ width: 0, height: 792 }, 112)).toEqual({
+      width: 112,
+      height: 112,
+    });
+    expect(thumbnailGeometry({ width: 612, height: 0 }, 112)).toEqual({
+      width: 112,
+      height: 112,
+    });
   });
 });

@@ -7,12 +7,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/pdf/pdfEngine", () => ({
   openPdfDocument: vi.fn(),
   closePdfDocument: vi.fn(async () => {}),
+  getPdfOutline: vi.fn(async () => []),
   pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
   RenderingCancelledException: class RenderingCancelledException extends Error {},
 }));
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
-import { closePdfDocument, openPdfDocument } from "@/lib/pdf/pdfEngine";
+import { closePdfDocument, getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
@@ -50,6 +51,8 @@ const pdfBook = makeBook({
 function renderPdfReader(
   props: {
     onDocumentLoad?: (count: number) => void;
+    onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
+    sidebarHost?: HTMLElement | null;
     scrollContainerRef?: RefObject<HTMLElement | null>;
   } = {},
 ) {
@@ -59,6 +62,8 @@ function renderPdfReader(
         <PdfReader
           book={pdfBook}
           onDocumentLoad={props.onDocumentLoad}
+          onOutlineLoad={props.onOutlineLoad}
+          sidebarHost={props.sidebarHost}
           scrollContainerRef={props.scrollContainerRef}
         />
       </ReaderProvider>
@@ -66,7 +71,13 @@ function renderPdfReader(
   );
 }
 
-async function renderLoadedReader(props: { onDocumentLoad?: (count: number) => void } = {}) {
+async function renderLoadedReader(
+  props: {
+    onDocumentLoad?: (count: number) => void;
+    onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
+    sidebarHost?: HTMLElement | null;
+  } = {},
+) {
   const view = renderPdfReader(props);
   await screen.findByTestId("pdf-canvas");
   return view;
@@ -228,6 +239,95 @@ describe("PdfReader loading", () => {
     view.unmount();
 
     expect(closeDocumentMock).toHaveBeenCalledWith(doc);
+  });
+});
+
+describe("PdfReader outline and thumbnails", () => {
+  it("reports the engine outline once the document loads", async () => {
+    const outline = [{ title: "Part One", page: 1, items: [] }];
+    vi.mocked(getPdfOutline).mockResolvedValueOnce(outline as never);
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const onOutlineLoad = vi.fn();
+    await renderLoadedReader({ onOutlineLoad });
+
+    expect(getPdfOutline).toHaveBeenCalledWith(expect.objectContaining({ numPages: 3 }));
+    await waitFor(() => expect(onOutlineLoad).toHaveBeenCalledWith(outline));
+  });
+
+  it("degrades outline failures to an empty outline", async () => {
+    vi.mocked(getPdfOutline).mockRejectedValueOnce(new Error("outline boom"));
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const onOutlineLoad = vi.fn();
+    await renderLoadedReader({ onOutlineLoad });
+
+    await waitFor(() => expect(onOutlineLoad).toHaveBeenCalledWith([]));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("renders thumbnails into the provided sidebar host", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const host = document.createElement("aside");
+    document.body.appendChild(host);
+    const view = await renderLoadedReader({ sidebarHost: host });
+    try {
+      // The whole document reserves thumbnail cells; the current page paints.
+      expect(host.querySelectorAll("[data-pdf-thumb-slot]")).toHaveLength(3);
+      await waitFor(() =>
+        expect(host.querySelector('[data-pdf-thumb-slot="1"]')).toHaveAttribute(
+          "data-thumb-state",
+          "rendered",
+        ),
+      );
+      expect(host.querySelector('[data-pdf-thumb-slot="1"] button')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+
+      // A thumbnail click navigates the reader.
+      await userEvent.click(
+        host.querySelector('[data-pdf-thumb-slot="3"] button') as HTMLButtonElement,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+      );
+      expect(host.querySelector('[data-pdf-thumb-slot="3"] button')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    } finally {
+      view.unmount();
+      host.remove();
+    }
+  });
+
+  it("does not render a sidebar without a host", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    expect(document.querySelector("[data-testid=pdf-thumbnails]")).toBeNull();
   });
 });
 

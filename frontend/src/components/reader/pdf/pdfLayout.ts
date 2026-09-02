@@ -58,6 +58,21 @@ export function displayedSizes(sizes: PageSize[], scale: number): PageSize[] {
   }));
 }
 
+/**
+ * Displayed geometry of one page thumbnail at a fixed cell width: the page
+ * aspect is preserved, so mixed documents stack thumbnails of different
+ * heights (reserving real space up front from measured-or-estimated sizes).
+ * Degenerate page units fall back to a square cell so callers never divide
+ * by zero.
+ */
+export function thumbnailGeometry(
+  size: Pick<PageSize, "width" | "height">,
+  cellWidth: number,
+): { width: number; height: number } {
+  if (size.width <= 0 || size.height <= 0) return { width: cellWidth, height: cellWidth };
+  return { width: cellWidth, height: (cellWidth * size.height) / size.width };
+}
+
 /** Compute slot tops from displayed sizes; the first page starts at 0. */
 export function layoutSlots(sizes: PageSize[], gapPx: number = PAGE_GAP_PX): LayoutSlot[] {
   let top = 0;

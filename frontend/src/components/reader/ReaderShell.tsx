@@ -1,5 +1,12 @@
 import { useRef, useState } from "react";
-import { ArrowLeft, Bookmark, BookmarkCheck, Search, TableOfContents } from "lucide-react";
+import {
+  ArrowLeft,
+  Bookmark,
+  BookmarkCheck,
+  PanelLeft,
+  Search,
+  TableOfContents,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,7 +16,9 @@ import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
+import { pageToPosition } from "./pdf/pdfPages";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
+import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation } from "./ReaderNavigation";
@@ -43,6 +52,16 @@ export function ReaderShell() {
     toc: EpubTocItem[];
   } | null>(null);
   const epubJumpRef = useRef<((href: string) => void) | null>(null);
+  // Real PDF outline, reported by PdfReader once the engine resolves it.
+  // Kept with its owning book id so a stale book's outline is never shown.
+  const [pdfOutlineState, setPdfOutlineState] = useState<{
+    bookId: number;
+    outline: PdfOutlineItem[];
+  } | null>(null);
+  // PDF thumbnails sidebar: the shell owns the docked host and the toggle;
+  // PdfReader fills the host through a portal (it owns the document handle).
+  const [pdfSidebarOpen, setPdfSidebarOpen] = useState(false);
+  const [pdfSidebarHost, setPdfSidebarHost] = useState<HTMLElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
 
@@ -51,6 +70,10 @@ export function ReaderShell() {
   const isEpub = book?.format === "epub";
   const epubToc =
     epubTocState !== null && epubTocState.bookId === book?.id ? epubTocState.toc : null;
+  const pdfOutline =
+    pdfOutlineState !== null && pdfOutlineState.bookId === book?.id
+      ? pdfOutlineState.outline
+      : null;
   const pageCount = isPdf ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT) : 0;
   // The pages drawer lists real pages only; 0 keeps it in its loading state.
   const knownPageCount = isPdf ? (pdfPageCount ?? 0) : 0;
@@ -142,6 +165,24 @@ export function ReaderShell() {
           <TooltipContent>Search (not wired up yet)</TooltipContent>
         </Tooltip>
 
+        {isPdf && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-sidebar-toggle"
+                aria-label="Toggle page thumbnails"
+                aria-pressed={pdfSidebarOpen}
+                onClick={() => setPdfSidebarOpen((open) => !open)}
+              >
+                <PanelLeft />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Page thumbnails</TooltipContent>
+          </Tooltip>
+        )}
+
         <ReaderAppearance />
 
         <Tooltip>
@@ -176,28 +217,40 @@ export function ReaderShell() {
         </Tooltip>
       </header>
 
-      <main
-        ref={readerContentRef}
-        data-testid="reader-content"
-        aria-label="Reading view"
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        {isEpub ? (
-          <EpubReader
-            key={book.id}
-            book={book}
-            onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
-            jumpTargetRef={epubJumpRef}
-          />
-        ) : (
-          <PdfReader
-            key={book.id}
-            book={book}
-            onDocumentLoad={setPdfPageCount}
-            scrollContainerRef={readerContentRef}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {isPdf && pdfSidebarOpen && (
+          <aside
+            ref={setPdfSidebarHost}
+            data-testid="pdf-sidebar"
+            aria-label="Page thumbnails"
+            className="h-full w-44 shrink-0 overflow-hidden border-r"
           />
         )}
-      </main>
+        <main
+          ref={readerContentRef}
+          data-testid="reader-content"
+          aria-label="Reading view"
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          {isEpub ? (
+            <EpubReader
+              key={book.id}
+              book={book}
+              onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
+              jumpTargetRef={epubJumpRef}
+            />
+          ) : (
+            <PdfReader
+              key={book.id}
+              book={book}
+              onDocumentLoad={setPdfPageCount}
+              onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
+              sidebarHost={pdfSidebarHost}
+              scrollContainerRef={readerContentRef}
+            />
+          )}
+        </main>
+      </div>
 
       <footer className="shrink-0 border-t px-4 py-2">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
@@ -224,6 +277,10 @@ export function ReaderShell() {
         onJump={setPosition}
         epubToc={isEpub ? epubToc : null}
         onEpubJump={(href) => epubJumpRef.current?.(href)}
+        pdfOutline={isPdf ? pdfOutline : null}
+        onPdfJump={(page) => {
+          if (knownPageCount > 0) setPosition(pageToPosition(page, knownPageCount));
+        }}
       />
     </div>
   );

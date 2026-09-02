@@ -118,16 +118,58 @@ export async function fitFactor(): Promise<number> {
 }
 
 /** Canvas-pixel probe shared by rendering assertions (mirrors books.e2e). */
-export async function canvasIsNonBlank(pageNumber: number): Promise<boolean> {
-  return browser.execute((page) => {
-    const el = document.querySelector(`[data-testid=pdf-canvas][data-pdf-page="${page}"]`);
-    if (!(el instanceof HTMLCanvasElement)) return false;
-    const ctx = el.getContext("2d");
-    if (!ctx) return false;
-    const { data } = ctx.getImageData(0, 0, el.width, el.height);
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] < 200 || data[i + 1] < 200 || data[i + 2] < 200) return true;
-    }
-    return false;
-  }, pageNumber);
+export async function canvasIsNonBlank(
+  pageNumber: number,
+  testId = "pdf-canvas",
+): Promise<boolean> {
+  return browser.execute(
+    (page, id) => {
+      const el = document.querySelector(
+        `[data-testid=${JSON.stringify(id)}][data-pdf-page="${page}"]`,
+      );
+      if (!(el instanceof HTMLCanvasElement)) return false;
+      const ctx = el.getContext("2d");
+      if (!ctx) return false;
+      const { data } = ctx.getImageData(0, 0, el.width, el.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 200 || data[i + 1] < 200 || data[i + 2] < 200) return true;
+      }
+      return false;
+    },
+    pageNumber,
+    testId,
+  );
+}
+
+/** Thumbnail cells are always mounted; canvases only inside the render set. */
+export async function thumbnailState(pageNumber: number): Promise<string> {
+  return browser.execute(
+    (page) =>
+      document.querySelector(`[data-pdf-thumb-slot="${page}"]`)?.getAttribute("data-thumb-state") ??
+      "",
+    pageNumber,
+  );
+}
+
+export async function thumbnailCanvasCount(): Promise<number> {
+  return browser.execute(() => document.querySelectorAll('[data-testid="pdf-thumbnail"]').length);
+}
+
+/** True when the sidebar names this page as the reading position. */
+export async function thumbnailIsActive(pageNumber: number): Promise<boolean> {
+  return browser.execute(
+    (page) =>
+      document
+        .querySelector(`[data-pdf-thumb-slot="${page}"]`)
+        ?.hasAttribute("data-thumb-active") ?? false,
+    pageNumber,
+  );
+}
+
+/** Scrolls the thumbnails sidebar list so deep pages approach the viewport. */
+export async function scrollThumbnailsToBottom(): Promise<void> {
+  await browser.execute(() => {
+    const list = document.querySelector<HTMLElement>('[data-testid="pdf-thumbnails-scroll"]');
+    if (list) list.scrollTop = list.scrollHeight;
+  });
 }

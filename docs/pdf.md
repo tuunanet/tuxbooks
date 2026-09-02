@@ -81,13 +81,22 @@ multi-megabyte files avoid JSON encoding.
   Wider pages in mixed documents overflow horizontally.
 - `hooks/usePdfPersistence` — debounced save + restore-once (below).
 - `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an
-  offset, clamping, scroll compensation, fit-width scale); unit-tested
-  without a browser.
+  offset, clamping, scroll compensation, fit-width scale, thumbnail
+  geometry); unit-tested without a browser.
+- `pdfOutline.ts` — pure outline normalization: the engine's raw outline
+  (named or explicit destinations, external-link entries) resolves to a
+  tree of `{ title, page (1-based | null), items }`; unresolvable entries
+  degrade to inert rows, never errors. Re-exported through the engine seam
+  as `getPdfOutline` so components never touch the engine's raw types.
 - `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` / `PdfToolbar` — one
   geometry slot per page for the entire document; canvases only for the
   bounded render set. Slots carry `data-pdf-slot` + `data-render-state`
   lifecycle attributes (`unloaded|queued|loading|rendering|rendered|error`)
   for tests and diagnostics.
+- `PdfSidebar` — the thumbnails panel (below). Rendered through a React
+  portal into a host `<aside>` owned by ReaderShell's layout: the shell
+  docks the host beside the scroll container, while PdfReader keeps single
+  ownership of the document handle the thumbnails render from.
 
 ### Virtualization and rendering policy
 
@@ -110,6 +119,34 @@ interleaved paint loops on shared canvas state produced mirrored page
 fragments under fast scrollbar drags on WebKitGTK). Page render failures
 show a per-slot error with Retry; a page failure never breaks the document.
 
+### Thumbnails sidebar (`PdfSidebar`)
+
+The same virtualization policy at low resolution. The sidebar reuses the
+slot/observer pattern: one cell per page reserves space up front (aspect
+from the shared page sizes, corrected lazily via the same `measurePages`
+path), and an observer pair feeds a render set capped at
+`MAX_THUMBNAIL_CANVASES` (12) with exactly one render in flight — the
+worker rasterizes serially, so unbounded thumbnail requests would starve
+the page the user is looking at. Canvases render at the cell width
+(`THUMBNAIL_WIDTH_PX`, 112), mount only inside the window, and evict with
+it, so memory stays bounded on any document. The reading page's cell is
+marked (`data-thumb-active` / `aria-current`) and follows the position
+whether it moves by scrolling, navigation, or restore; clicking a cell
+navigates the reader (and suppresses the one follow-up auto-scroll).
+Failed thumbnails flag their cell and re-attempt when the cell re-enters
+the window — no per-cell retry buttons.
+
+### Outline
+
+The document outline comes from the engine seam (`getPdfOutline`) — the
+PDF.js document is already parsed in the webview, so the outline shares the
+engine with rendering instead of growing a second parser in Rust. Every
+destination resolves to the same 1-based page locator the reader persists;
+PdfReader reports the normalized tree upward and ReaderNavigation's Outline
+tab renders it with depth indentation (loading / empty / inert-row states
+included). Outline navigation reuses `pageToPosition`, so jumping lands in
+the same position model as scrolling, thumbnails, and restore.
+
 ### Reading position persistence
 
 `save_reading_progress` / `get_reading_progress` commands store
@@ -129,4 +166,4 @@ engine. A silent "fake worker" fallback (main-thread rendering) is the
 classic cause of seconds-long variable renders — the reader exposes
 `data-pdf-worker-src` and the seeded E2E verifies the asset is fetchable.
 
-Still out of scope: thumbnails, annotations, text search, and outlines.
+Still out of scope: annotations and text search.

@@ -136,14 +136,21 @@ def tiny_png() -> bytes:
         + chunk(b"IEND", b"")
     )
 
-def build_pdf(pages: list[dict], title: str, subject: str) -> bytes:
+def build_pdf(
+    pages: list[dict],
+    title: str,
+    subject: str,
+    outline: list[dict] | None = None,
+) -> bytes:
     """Deterministic multi-page PDF: catalog, page tree, Info dictionary, one
     page object + one content stream per page, and a standard Helvetica font.
     Each entry of `pages` is {"mediabox": (x0, y0, w, h), "label": str}; every
     page draws a filled rectangle and two text lines ("Tuxbooks PDF Fixture"
     and the label) so a rendered canvas is visibly non-blank on any page size.
-    Byte-identical on every run (no timestamps), so imported book ids stay
-    stable."""
+    `outline` is an optional list of {"title", "page", "children": [...]}
+    entries (1-based page numbers) emitted as a classic /Outlines tree with
+    explicit /XYZ destinations. Byte-identical on every run (no timestamps),
+    so imported book ids stay stable."""
 
     def pdf_string(value: str) -> str:
         escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
@@ -169,8 +176,57 @@ def build_pdf(pages: list[dict], title: str, subject: str) -> bytes:
     first_stream, last_stream = last_page + 1, last_page + page_count
     font_object = last_stream + 1
 
+    # The outline tree is planned before any object body is built: the
+    # catalog needs the /Outlines root's object number, and item numbers are
+    # allocated depth-first (pre-order) right after the font object.
+    outline_root: int | None = None
+    outline_top: list[dict] = []
+    if outline:
+        outline_root = font_object + 1
+        next_number = outline_root + 1
+
+        def allocate(entry: dict, parent: int) -> dict:
+            nonlocal next_number
+            node = {
+                "title": entry["title"],
+                "page": entry["page"],
+                "number": next_number,
+                "parent": parent,
+                "children": [],
+            }
+            next_number += 1
+            node["children"] = [allocate(child, node["number"]) for child in entry.get("children", [])]
+            return node
+
+        outline_top = [allocate(entry, outline_root) for entry in outline]
+
+    def subtree_count(node: dict) -> int:
+        return 1 + sum(subtree_count(child) for child in node["children"])
+
+    def outline_item_dict(node: dict, prev: int | None, nxt: int | None) -> str:
+        parts = [
+            f"/Title {pdf_string(node['title'])}",
+            f"/Parent {node['parent']} 0 R",
+        ]
+        if prev is not None:
+            parts.append(f"/Prev {prev} 0 R")
+        if nxt is not None:
+            parts.append(f"/Next {nxt} 0 R")
+        if node["children"]:
+            parts.append(f"/First {node['children'][0]['number']} 0 R")
+            parts.append(f"/Last {node['children'][-1]['number']} 0 R")
+            parts.append(f"/Count {sum(subtree_count(child) for child in node['children'])}")
+        dest_page = first_page + node["page"] - 1
+        parts.append(f"/Dest [{dest_page} 0 R /XYZ null null null]")
+        return "<< " + " ".join(parts) + " >>"
+
+    catalog = "<< /Type /Catalog /Pages 2 0 R"
+    if outline_root is not None:
+        catalog += f" /Outlines {outline_root} 0 R"
+    catalog += " >>"
+
     objects: list[bytes | str] = [
-        "<< /Type /Catalog /Pages 2 0 R >>",
+        catalog,
         " ".join(
             [
                 "<< /Type /Pages",
@@ -207,6 +263,27 @@ def build_pdf(pages: list[dict], title: str, subject: str) -> bytes:
     objects.append(
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
     )
+    if outline_root is not None:
+        objects.append(
+            " ".join(
+                [
+                    "<< /Type /Outlines",
+                    f"/First {outline_top[0]['number']} 0 R",
+                    f"/Last {outline_top[-1]['number']} 0 R",
+                    f"/Count {sum(subtree_count(node) for node in outline_top)} >>",
+                ]
+            )
+        )
+        # Emit item bodies in ascending object-number order (pre-order
+        # allocation guarantees this walk is already sorted).
+        def emit(nodes: list[dict]) -> None:
+            for index, node in enumerate(nodes):
+                prev = nodes[index - 1]["number"] if index > 0 else None
+                nxt = nodes[index + 1]["number"] if index < len(nodes) - 1 else None
+                objects.append(outline_item_dict(node, prev, nxt))
+                emit(node["children"])
+
+        emit(outline_top)
 
     pdf = bytearray(b"%PDF-1.4\n")
     offsets = []
@@ -272,9 +349,24 @@ def uniform_pages(count: int, width: float = 612, height: float = 792) -> list[d
 # 100% zoom so no horizontal scrolling is needed to see them fully.
 MIXED_PAGE_SIZES = [(612, 792), (792, 612), (420, 1008), (500, 500), (595, 842), (360, 504)]
 
+# Nested outline for the large fixture: five parts on pages 1/21/41/61/81,
+# each with two sections offset by ten pages. Exercises hierarchical outline
+# navigation and deep destinations in reader and E2E tests.
+LARGE_OUTLINE = [
+    {
+        "title": f"Part {name}",
+        "page": 1 + index * 20,
+        "children": [
+            {"title": f"Section {name}-A", "page": 1 + index * 20},
+            {"title": f"Section {name}-B", "page": 11 + index * 20},
+        ],
+    }
+    for index, name in enumerate(["One", "Two", "Three", "Four", "Five"])
+]
 
-def write_pdf(path: Path, pages: list[dict], title: str, subject: str) -> None:
-    path.write_bytes(build_pdf(pages, title, subject))
+
+def write_pdf(path: Path, pages: list[dict], title: str, subject: str, outline: list[dict] | None = None) -> None:
+    path.write_bytes(build_pdf(pages, title, subject, outline=outline))
     print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 
@@ -282,7 +374,13 @@ def main() -> None:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     write_epub()
     write_pdf(PDF_FIXTURE, uniform_pages(3), "A Minimal Manual", "A tiny PDF used as a test fixture.")
-    write_pdf(FIXTURES / "large.pdf", uniform_pages(100), "A Large Fixture", "A 100-page PDF used to verify virtualized rendering.")
+    write_pdf(
+        FIXTURES / "large.pdf",
+        uniform_pages(100),
+        "A Large Fixture",
+        "A 100-page PDF used to verify virtualized rendering.",
+        outline=LARGE_OUTLINE,
+    )
     write_pdf(
         FIXTURES / "mixed.pdf",
         [

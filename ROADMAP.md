@@ -61,6 +61,11 @@ TuxBooks currently has:
 - WebKit-native MathML rendering
 - EPUB rendering/navigation/appearance E2E, including CFI persistence
 - deterministic EPUB fixture with an EPUB 3 MathML chapter
+- PDF thumbnails sidebar with virtualized, memory-bounded rendering and
+  current-page synchronization
+- PDF outline extracted through the engine seam with page-destination
+  navigation in the reader navigation drawer
+- outline and thumbnails E2E on a 100-page fixture with a nested outline
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

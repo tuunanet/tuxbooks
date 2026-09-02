@@ -122,14 +122,16 @@ Two isolated invocations per run:
    sidebar, window title, the empty-library state, and Settings navigation.
 2. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the four
    committed fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100
-   pages, `mixed.pdf` — six page sizes) into the scratch library; the app
-   imports them on startup. Runs `books.e2e.ts` (library navigation: cards,
-   stats, EPUB detail, PDF reader shell) and `pdf-reader.e2e.ts`
-   (continuous-reader scenarios: fit-width canvas geometry, scroll-driven
-   page tracking, bounded canvas count while scrolling a 100-page document
-   with eviction, deep-zoom position preservation, mixed page sizes, the
-   reopen-restore persistence acceptance test, and a PDF.js worker-asset
-   check).
+   pages with a nested 15-entry outline, `mixed.pdf` — six page sizes) into
+   the scratch library; the app imports them on startup. Runs
+   `books.e2e.ts` (library navigation: cards, stats, EPUB detail, PDF
+   reader shell) and `pdf-reader.e2e.ts` (continuous-reader scenarios:
+   fit-width canvas geometry, scroll-driven page tracking, bounded canvas
+   count while scrolling a 100-page document with eviction, deep-zoom
+   position preservation, mixed page sizes, outline navigation with
+   hierarchical destinations, the bounded virtualized thumbnails sidebar
+   with current-page synchronization, the reopen-restore persistence
+   acceptance test, and a PDF.js worker-asset check).
 
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.
@@ -211,8 +213,9 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
   `scripts/make-fixture.py` (original content only — no copyrighted books,
   ever). Deterministic: byte-identical across runs (no timestamps), so
   imported book ids stay stable. Current set: `minimal.epub`,
-  `minimal.pdf` (3 pages), `large.pdf` (100 pages, virtualization proof),
-  `mixed.pdf` (six MediaBoxes, per-page geometry).
+  `minimal.pdf` (3 pages), `large.pdf` (100 pages with a nested outline,
+  virtualization + outline-navigation proof), `mixed.pdf` (six MediaBoxes,
+  per-page geometry).
 - Exception: `tests/fixtures/books/EBooks/` holds a real user-created
   library (real copyrighted files). It is gitignored and must never be
   committed. `src-tauri/tests/realistic_library.rs` runs against it and

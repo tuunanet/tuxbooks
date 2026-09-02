@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
 vi.mock("@/lib/pdf/pdfEngine", () => ({
   openPdfDocument: vi.fn(),
   closePdfDocument: vi.fn(async () => {}),
+  getPdfOutline: vi.fn(async () => []),
   pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
   RenderingCancelledException: class RenderingCancelledException extends Error {},
 }));
@@ -18,7 +19,7 @@ vi.mock("@/lib/epub/epubEngine", async () => {
 });
 
 import { AppShell } from "@/components/layout/AppShell";
-import { openPdfDocument } from "@/lib/pdf/pdfEngine";
+import { getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfEngine";
 import { makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
@@ -100,6 +101,8 @@ describe("ReaderShell chrome", () => {
 
     expect(await screen.findByTestId("reader-view")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search document" })).toBeDisabled();
+    // The thumbnails sidebar is a PDF affordance; EPUBs have none.
+    expect(screen.queryByTestId("reader-sidebar-toggle")).toBeNull();
   });
 });
 
@@ -246,7 +249,15 @@ describe("ReaderNavigation", () => {
     expect(await screen.findByText("Loading contents…")).toBeInTheDocument();
   });
 
-  it("gives PDFs Pages and an honest Outline instead of EPUB contents", async () => {
+  it("gives PDFs Pages and a real outline that jumps to pages", async () => {
+    vi.mocked(getPdfOutline).mockResolvedValueOnce([
+      { title: "Chapter One", page: 1, items: [] },
+      {
+        title: "Part Two",
+        page: 2,
+        items: [{ title: "Section Two-A", page: 3, items: [] }],
+      },
+    ]);
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
 
@@ -261,7 +272,53 @@ describe("ReaderNavigation", () => {
     // Re-open for the Outline tab (Radix unmounts inactive tab content).
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-outline"));
-    expect(await screen.findByTestId("nav-outline")).toHaveTextContent(/not supported yet/i);
+    // Hierarchical entries flatten with depth; leaf navigation jumps pages.
+    expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Chapter One");
+    expect(screen.getByTestId("nav-outline-item-1")).toHaveTextContent("Part Two");
+    expect(screen.getByTestId("nav-outline-item-2")).toHaveTextContent("Section Two-A");
+
+    await userEvent.click(screen.getByTestId("nav-outline-item-2"));
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("100%"));
+    expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty outline state for documents without one", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    await openNavigation();
+    await userEvent.click(await screen.findByTestId("nav-tab-outline"));
+    expect(await screen.findByTestId("nav-outline-empty")).toHaveTextContent(/no outline/i);
+  });
+
+  it("toggles the thumbnails sidebar and navigates from it", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const toggle = screen.getByTestId("reader-sidebar-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("pdf-sidebar")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    const sidebar = await screen.findByTestId("pdf-sidebar");
+    // Whole document reserved; the current page paints and is marked.
+    expect(sidebar.querySelectorAll("[data-pdf-thumb-slot]")).toHaveLength(3);
+    await waitFor(() =>
+      expect(sidebar.querySelector('[data-pdf-thumb-slot="1"]')).toHaveAttribute(
+        "data-thumb-state",
+        "rendered",
+      ),
+    );
+    await userEvent.click(
+      sidebar.querySelector('[data-pdf-thumb-slot="3"] button') as HTMLButtonElement,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("pdf-sidebar")).toBeNull();
   });
 
   it("shows the pdf page counter following the reading position", async () => {
