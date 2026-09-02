@@ -3,6 +3,14 @@
 Instructions for coding agents working in this repository. Verified commands
 only — run them, don't assume.
 
+## Keep this file compact
+
+AGENTS.md loads into every session, so it must stay short. Before adding
+anything here, first check whether an existing doc in `docs/` (see Working
+documents) is the right home for that information. If no suitable `.md` file
+exists, create one in `docs/` and refer to it from here in the appropriate
+section — do not inline the content.
+
 ## What this project is
 
 Local-first desktop ebook library (bookshelf style). **Rust is the
