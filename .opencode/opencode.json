@@ -7,6 +7,7 @@
     "docs/database.md",
     "docs/epub.md",
     "docs/pdf.md",
-    "docs/testing.md"
+    "docs/testing.md",
+    "docs/coverage.md"
   ]
 }

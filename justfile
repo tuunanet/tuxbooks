@@ -124,3 +124,10 @@ check:
 # Complete CI-equivalent validation, including E2E and the release build.
 ci: check test-e2e build
     @echo "ci: OK"
+
+# Coverage gate (docs/coverage.md). Frontend thresholds are enforced by
+# every vitest run; this recipe adds the Rust instrumented run (slow first
+# time: cargo-llvm-cov keeps its own target dir).
+coverage:
+    node scripts/coverage-gate.mjs
+    pnpm --filter frontend exec vitest run --coverage --coverage.reporter=text-summary

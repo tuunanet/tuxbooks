@@ -1,10 +1,14 @@
 import { beforeAll, afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import {
   installMockIntersectionObserver,
   resetIntersectionObservers,
 } from "./mocks/intersectionObserver";
+
+// Coverage-instrumented runs are slower on the main thread; the 1s default
+// otherwise makes waitFor-based tests flaky exactly when the gate matters.
+configure({ asyncUtilTimeout: 2000 });
 
 beforeAll(() => {
   // jsdom lacks the pointer-capture plumbing Radix primitives rely on.

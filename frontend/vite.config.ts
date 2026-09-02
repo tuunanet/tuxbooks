@@ -44,5 +44,41 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
     css: false,
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      exclude: [
+        // Entry point — the app boot is covered by the E2E suite.
+        "src/main.tsx",
+        // Sample data for tests/previews, no logic.
+        "src/lib/fixtures.ts",
+        // Vendored foliate-js submodule.
+        "src/lib/epub/foliate-js/**",
+        // Engine seams: thin wrappers around the vendored engines, covered
+        // end to end by the E2E reader suites (unit tests mock them).
+        "src/lib/epub/epubEngine.ts",
+        "src/lib/pdf/pdfEngine.ts",
+        // Pure type declarations, no runtime code.
+        "src/types/**",
+        // shadcn/ui primitives: vendored scaffolding, not app logic.
+        "src/components/ui/**",
+      ],
+      reporter: ["text-summary", "html"],
+      // Quality gate (docs/coverage.md): per-category floors. Vitest fails
+      // the run when any glob drops below its threshold.
+      thresholds: {
+        "src/App.tsx": { lines: 80 },
+        "src/components/library/**": { lines: 80 },
+        "src/components/books/**": { lines: 80 },
+        "src/components/reader/**": { lines: 80 },
+        "src/components/search/**": { lines: 80 },
+        "src/components/collections/**": { lines: 100 },
+        "src/components/settings/**": { lines: 80 },
+        "src/components/layout/**": { lines: 80 },
+        "src/state/**": { lines: 80 },
+        "src/hooks/**": { lines: 80 },
+        "src/lib/**": { lines: 80 },
+      },
+    },
   },
 });
