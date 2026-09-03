@@ -83,6 +83,17 @@ TuxBooks currently has:
 - watcher/reconciliation integration tests on real inotify events
   (creation, deletion, rename, move, modification, duplicate events, rapid
   sequences) and live-sync E2E against the real binary
+- content-addressed artwork cache: cover files are keyed by a stable hash
+  of their bytes (FNV-1a, written atomically), so identical covers share
+  one file, moved/re-imported books hit the cache instead of duplicating
+  it, and a changed source naturally produces a new entry; unreferenced
+  files are swept at startup and after book removal, and indeterminate PDF
+  extraction (PDFium unavailable or a render failure) never strips an
+  existing cover
+
+This completes milestone 4: EPUB cover extraction, PDF page-1 cover
+rendering, placeholder fallback for missing/corrupt artwork, and an
+efficient, self-invalidating cache.
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

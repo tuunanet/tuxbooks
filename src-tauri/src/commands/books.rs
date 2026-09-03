@@ -26,6 +26,8 @@ pub async fn list_books(state: State<'_, AppState>) -> Result<Vec<Book>, AppErro
 /// Remove a book from the library (user-initiated). The source file on disk
 /// is never touched. Progress, collections, and the book row are deleted
 /// together; the frontend is told to drop the book via `library-changed`.
+/// Cover files the removed row owned are artwork-cache garbage and are
+/// swept (best effort, shared files survive the reference check).
 #[tauri::command]
 pub async fn remove_book(
     app: tauri::AppHandle,
@@ -34,6 +36,14 @@ pub async fn remove_book(
 ) -> Result<bool, AppError> {
     let removed = books::delete_book(&state.db, book_id).await?;
     if removed {
+        if let Err(err) = crate::services::artwork_cache::sweep_unreferenced_covers(
+            &state.db,
+            &crate::covers_dir(&state.db_path),
+        )
+        .await
+        {
+            eprintln!("cover sweep after removal failed: {err}");
+        }
         let _ignored = app.emit("library-changed", LibraryChange::Removed { book_id });
     }
     Ok(removed)

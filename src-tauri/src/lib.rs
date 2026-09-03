@@ -151,6 +151,17 @@ pub fn run() {
                 }
             }
 
+            // Artwork-cache GC (milestone 4): content-addressed covers stop
+            // being referenced when their source changes or their book is
+            // removed; unreferenced files are swept once at startup.
+            match tauri::async_runtime::block_on(
+                services::artwork_cache::sweep_unreferenced_covers(&pool, &covers_dir(&db_path)),
+            ) {
+                Ok(0) => {}
+                Ok(removed) => println!("swept {removed} unreferenced cover file(s)"),
+                Err(err) => eprintln!("cover sweep failed: {err}"),
+            }
+
             app.manage(AppState {
                 db: pool,
                 db_path,

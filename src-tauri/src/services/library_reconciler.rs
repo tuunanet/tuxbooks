@@ -452,11 +452,16 @@ pub async fn reconnect_book(
     let parsed = crate::services::library_scanner::parse_book(path).map_err(|err| {
         AppError::InvalidInput(format!("that file is not a readable book: {err}"))
     })?;
+    let previous_cover = books::get_book(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?
+        .cover_path;
     let new_book = crate::services::book_importer::new_book_from_parsed(
         path,
         &parsed,
         covers_dir,
         pdfium_dirs,
+        previous_cover.as_deref(),
     )?;
 
     if let Some(existing) = books::find_id_by_path(pool, &new_book.path).await? {

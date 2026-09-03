@@ -108,6 +108,15 @@ pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     Ok(books)
 }
 
+/// Every referenced cover path — the live set for artwork-cache sweeps.
+pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
+    let paths: Vec<String> =
+        sqlx::query_scalar("SELECT cover_path FROM books WHERE cover_path IS NOT NULL")
+            .fetch_all(pool)
+            .await?;
+    Ok(paths)
+}
+
 pub async fn get_book(pool: &SqlitePool, id: i64) -> Result<Option<Book>, AppError> {
     let book =
         sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS} FROM books WHERE id = ?1"))

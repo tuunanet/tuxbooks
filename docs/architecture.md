@@ -77,11 +77,19 @@ layout, virtualization, the render queue, and persistence — see
   discovers `.epub` and `.pdf` files (`parse_book` for one file,
   `list_book_files` for a parse-free listing used by reconciliation).
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
-  covers next to the database (EPUB packages; PDF page 1 via PDFium, best
-  effort). Idempotent on re-scan. Takes a per-book progress callback; the
-  `scan_library` command forwards it as `import-progress` events so the UI
-  shows books and covers while the scan runs. `import_file` is the
-  single-file primitive the watcher reuses.
+  covers into the artwork cache next to the database (EPUB packages; PDF
+  page 1 via PDFium, best effort). Idempotent on re-scan. Takes a per-book
+  progress callback; the `scan_library` command forwards it as
+  `import-progress` events so the UI shows books and covers while the scan
+  runs. `import_file` is the single-file primitive the watcher reuses.
+- `artwork_cache`: content-addressed cover storage (`covers/<fnv1a>.<ext>`
+  next to the database — stable, version-independent keys; identical bytes
+  share one file, moves and re-imports are cache hits, atomic writes).
+  `sweep_unreferenced_covers` is the invalidation step: files no
+  `books.cover_path` row references (changed source, removed book, stale
+  temps) are collected at startup and after book removal. Indeterminate
+  PDF extraction (PDFium unavailable/render error) never strips an
+  existing cover; a definite EPUB cover removal does.
 - `library_reconciler`: turns filesystem observations into minimal database
   transitions (milestone 3). Path truth: every book file in a watched
   location has exactly one available row; vanished files flip
