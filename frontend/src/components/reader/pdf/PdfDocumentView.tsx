@@ -2,6 +2,7 @@ import { useMemo, type Ref } from "react";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
+import type { PdfBitmapCache } from "./pdfBitmapCache";
 import type { LayoutSlot } from "./pdfLayout";
 
 interface PdfDocumentViewProps {
@@ -19,6 +20,8 @@ interface PdfDocumentViewProps {
   scale: number;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
+  /** Shared per-document cache of finished page bitmaps. */
+  bitmapCache?: PdfBitmapCache | null;
   onPageRendered: (pageNumber: number) => void;
   onPageError: (pageNumber: number, error: unknown) => void;
   registerSlot: (pageNumber: number, element: HTMLDivElement | null) => void;
@@ -46,6 +49,7 @@ export function PdfDocumentView({
   scale,
   renderedPages,
   failedPages,
+  bitmapCache = null,
   onPageRendered,
   onPageError,
   registerSlot,
@@ -103,6 +107,7 @@ export function PdfDocumentView({
                   width={slot.width}
                   height={slot.height}
                   scale={scale}
+                  bitmapCache={bitmapCache}
                   onPageRendered={onPageRendered}
                   onPageError={onPageError}
                 />

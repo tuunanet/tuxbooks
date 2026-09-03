@@ -361,7 +361,7 @@ describe("PdfReader virtualization", () => {
     expect(doc.getPage).toHaveBeenCalledWith(4);
   });
 
-  it("renders one page at a time, reading anchor first", async () => {
+  it("renders up to two pages concurrently, anchor first", async () => {
     const doc = makeFakePdfDocument(100, undefined, { holdRenderFor: [1] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
@@ -373,18 +373,25 @@ describe("PdfReader virtualization", () => {
     await renderLoadedReader();
     expect(canvasPages()).toEqual(["1"]);
 
-    // While the anchor page's render is in flight, newly visible pages must
-    // not start their own renders (the worker is serial — queueing behind
-    // invisible work is what made image-heavy pages take seconds).
+    // PDF.js pipelines pages: each page's operator list is produced
+    // independently in the worker and each paint loop time-slices on the
+    // main thread, so while the anchor's heavy raster is held, the next
+    // visible page starts instead of waiting behind it (a heavy page 1
+    // must never starve page 2).
     fireVisible(slot(3) as Element, true);
-    expect(canvasPages()).toEqual(["1"]);
-
-    doc.releaseRender(1);
     await waitFor(() => expect(canvasPages()).toEqual(["1", "3"]));
+
+    // The concurrency budget is full: a further visible page waits.
+    fireVisible(slot(4) as Element, true);
+    expect(canvasPages()).toEqual(["1", "3"]);
+
+    // Completing a render frees its slot for the next priority page.
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "4"]));
 
     // With nothing visible pending, a single prerender page is allowed.
     firePreload(slot(7) as Element, true);
-    await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "7"]));
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "4", "7"]));
   });
 
   it("evicts canvases once pages leave the preload window", async () => {
@@ -427,6 +434,65 @@ describe("PdfReader virtualization", () => {
     await waitFor(() => expect(canvasPages()).toHaveLength(8));
     expect(canvasPages()).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
     expect(slot(20)).toHaveAttribute("data-render-state", "unloaded");
+  });
+
+  it("blits a cached bitmap on window re-entry instead of re-rendering", async () => {
+    const doc = makeFakePdfDocument(100);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    fireVisible(slot(2) as Element, true);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+
+    const page2GetPageCalls = () => doc.getPage.mock.calls.filter(([page]) => page === 2).length;
+    const callsBeforeEviction = page2GetPageCalls();
+    expect(callsBeforeEviction).toBeGreaterThan(0);
+    // Diagnostics: both rendered pages are retained in the bitmap cache.
+    expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(/^2:/);
+
+    // Eviction unmounts the canvas, but its pixels move into the cache.
+    fireVisible(slot(2) as Element, false);
+    firePreload(slot(2) as Element, false);
+    await waitFor(() => expect(canvasPages()).not.toContain("2"));
+
+    // Re-entry blits the retained bitmap: the slot reports rendered again
+    // without a second engine page request or raster.
+    fireVisible(slot(2) as Element, true);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+    expect(page2GetPageCalls()).toBe(callsBeforeEviction);
+  });
+
+  it("invalidates cached bitmaps on zoom so re-entry re-renders at the new scale", async () => {
+    const doc = makeFakePdfDocument(100);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    fireVisible(slot(2) as Element, true);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+
+    const page2GetPageCalls = () => doc.getPage.mock.calls.filter(([page]) => page === 2).length;
+
+    fireVisible(slot(2) as Element, false);
+    firePreload(slot(2) as Element, false);
+    await waitFor(() => expect(canvasPages()).not.toContain("2"));
+    const callsBeforeZoom = page2GetPageCalls();
+
+    // Cached bitmaps are scale-keyed and dropped on zoom: re-entry must go
+    // back to the engine rather than blit a stale-scale bitmap.
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    fireVisible(slot(2) as Element, true);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+    expect(page2GetPageCalls()).toBeGreaterThan(callsBeforeZoom);
   });
 });
 

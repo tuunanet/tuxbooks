@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isRenderingCancelled, type PdfDocument, type PdfRenderTask } from "@/lib/pdf/pdfEngine";
+import type { PdfBitmapCache } from "./pdfBitmapCache";
 
 interface PdfPageCanvasProps {
   document: PdfDocument;
@@ -9,10 +10,30 @@ interface PdfPageCanvasProps {
   height: number;
   /** PDF.js render scale (displayed pixels / page units). */
   scale: number;
+  /**
+   * Shared per-document bitmap cache (§ rendering policy). A hit blits the
+   * retained bitmap synchronously — no engine work; a completed render
+   * stores its offscreen buffer so a future re-entry can do the same.
+   */
+  bitmapCache?: PdfBitmapCache | null;
   /** Test hook; distinct per surface (main pages vs. thumbnails). */
   testId?: string;
   onPageRendered?: (pageNumber: number) => void;
   onPageError?: (pageNumber: number, error: unknown) => void;
+}
+
+/** One-shot copy of a finished buffer onto the visible canvas. */
+function blit(
+  canvas: HTMLCanvasElement,
+  buffer: HTMLCanvasElement,
+  width: number,
+  height: number,
+): void {
+  canvas.width = buffer.width;
+  canvas.height = buffer.height;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  canvas.getContext("2d")?.drawImage(buffer, 0, 0);
 }
 
 /**
@@ -27,6 +48,11 @@ interface PdfPageCanvasProps {
  * produced mirrored/offset page fragments on WebKitGTK. Superseded
  * instances never even start (cancellation checkpoints) and never blit.
  * Cancellation is expected control flow, never an error.
+ *
+ * Completed buffers are retained in the shared bitmap cache, so a page that
+ * re-enters the virtualization window after eviction blits instantly
+ * instead of re-running the full raster — the dominant cost of scrolling
+ * back and forth across a heavy (image-laden) page.
  */
 export function PdfPageCanvas({
   document,
@@ -34,6 +60,7 @@ export function PdfPageCanvas({
   width,
   height,
   scale,
+  bitmapCache = null,
   testId = "pdf-canvas",
   onPageRendered,
   onPageError,
@@ -55,6 +82,16 @@ export function PdfPageCanvas({
     if (!canvas) return;
 
     let cancelled = false;
+
+    // Fast path: a bitmap rendered at this scale is already retained from
+    // an earlier visit — blit it and report completion. No page request, no
+    // raster, no worker round-trip.
+    const cached = bitmapCache?.get(pageNumber, scale);
+    if (cached) {
+      blit(canvas, cached.buffer, width, height);
+      renderedRef.current?.(pageNumber);
+      return;
+    }
 
     (async () => {
       // Stop the previous generation's work early; it renders into its own
@@ -87,12 +124,8 @@ export function PdfPageCanvas({
 
       // Checkpoint 2: only the current generation may touch the canvas.
       if (cancelled) return;
-      canvas.width = buffer.width;
-      canvas.height = buffer.height;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      const context = canvas.getContext("2d");
-      context?.drawImage(buffer, 0, 0);
+      bitmapCache?.put({ pageNumber, scale, buffer });
+      blit(canvas, buffer, width, height);
 
       renderedRef.current?.(pageNumber);
     })().catch((err: unknown) => {
@@ -104,7 +137,7 @@ export function PdfPageCanvas({
       cancelled = true;
       taskRef.current?.cancel();
     };
-  }, [document, pageNumber, width, height, scale]);
+  }, [document, pageNumber, width, height, scale, bitmapCache]);
 
   return (
     <canvas

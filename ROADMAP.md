@@ -90,6 +90,17 @@ TuxBooks currently has:
   files are swept at startup and after book removal, and indeterminate PDF
   extraction (PDFium unavailable or a render failure) never strips an
   existing cover
+- milestone 9 render-pipeline hardening (first phase): the PDF reader now
+  starts up to two page renders concurrently (priority-ordered; PDF.js v6
+  pipelines per-page operator lists in the worker and time-slices paint
+  loops on the main thread, so a heavy page no longer starves the next
+  one), and evicted page bitmaps move into a bounded per-document LRU
+  cache (`pdfBitmapCache`, byte-budget + entry-count, scale-keyed, dropped
+  on zoom and book switch) so scrolling back across a heavy page blits
+  instead of re-rendering; cache occupancy is exposed as
+  `data-pdf-bitmap-cache` for memory diagnostics; a rapid
+  scroll-oscillation + zoom-churn stress E2E guards the behavior on the
+  real binary
 
 This completes milestone 4: EPUB cover extraction, PDF page-1 cover
 rendering, placeholder fallback for missing/corrupt artwork, and an

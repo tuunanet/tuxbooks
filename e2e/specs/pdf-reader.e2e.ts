@@ -152,6 +152,55 @@ describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary();
   });
 
+  // Milestone 9 stress: the report that motivated the render-policy rework.
+  // Oscillating scroll between two pages must converge — each page, as the
+  // reading anchor, renders and paints; revisited pages blit retained
+  // bitmaps instead of re-running the full raster; zoom churn during the
+  // same session settles cleanly. (Only the anchor page is a guaranteed
+  // render-set member at fit-width geometry, so every assertion targets the
+  // page currently scrolled to.)
+  it("recovers rendered pages under rapid scroll oscillation and zoom churn", async () => {
+    await openLargeFixture();
+
+    for (let round = 0; round < 3; round++) {
+      await scrollToSlot(10);
+      await scrollToSlot(11);
+    }
+    await scrollToSlot(10);
+    await browser.waitUntil(async () => canvasIsNonBlank(10), {
+      timeout: 30000,
+      timeoutMsg: "page 10 never painted non-blank after oscillation",
+    });
+    await scrollToSlot(11);
+    await browser.waitUntil(async () => canvasIsNonBlank(11), {
+      timeout: 30000,
+      timeoutMsg: "page 11 never painted non-blank after oscillation",
+    });
+
+    // Zoom invalidates every cached bitmap; the visible page must converge
+    // to a freshly rendered canvas at the new scale.
+    await $("[data-testid=pdf-zoom-in]").click();
+    await browser.waitUntil(async () => (await textOf("pdf-zoom-level")).includes("150%"), {
+      timeout: 30000,
+      timeoutMsg: "zoom never reached 150%",
+    });
+    await browser.waitUntil(async () => canvasIsNonBlank(11), {
+      timeout: 30000,
+      timeoutMsg: "page 11 never repainted at the new zoom",
+    });
+
+    // Reverse scroll across already-visited pages: cached bitmaps make
+    // re-entry cheap, and the render budget still holds at the end.
+    await scrollToSlot(1);
+    await browser.waitUntil(async () => canvasIsNonBlank(1), {
+      timeout: 30000,
+      timeoutMsg: "page 1 never painted after reverse scroll",
+    });
+    expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);
+
+    await returnToLibrary();
+  });
+
   // Critical acceptance test (§ persistence): the reader resumes where the
   // user stopped, across close/reopen.
   it("restores the reading position when a PDF is reopened", async () => {

@@ -102,18 +102,32 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
 
 ### Virtualization and rendering policy
 
-Modeled on the official viewer's `PDFRenderingQueue` (the PDF.js worker
-rasterizes serially, so concurrent `render()` calls just queue FIFO and the
-read page can starve behind invisible work):
+Modeled on the official viewer's `PDFRenderingQueue`, adjusted for what
+PDF.js v6 actually parallelizes (verified against `mozilla/pdf.js` source):
+each page's operator list is produced independently in the worker, and each
+render's paint loop is a time-sliced task on the main thread — so a small
+number of concurrent renders pipeline (page N paints while page N+1 parses
+and decodes) instead of page N+1 waiting behind N's entire raster. Only
+same-canvas concurrency is forbidden by the engine (`InternalRenderTask`
+tracks canvases in use), and the reader's private-buffer-per-render design
+never shares one.
 
-1. Exactly one render runs at a time.
-2. Priority: reading anchor page, then visible pages (closest first).
-3. Exactly one prerender page beyond the viewport — and only while nothing
-   visible needs rendering.
-4. A superseded render is unmounted (cancelled); it never starts or blits.
-5. Completed canvases stay mounted while their page stays inside the
+1. Up to `MAX_CONCURRENT_RENDERS` (2) renders run at a time; completions
+   and cancellations free their slot for the next priority page. The
+   reading anchor starts first, then visible pages (closest first).
+2. Exactly one prerender page beyond the viewport — and only while the
+   concurrency budget has room to spare.
+3. A superseded render is unmounted (cancelled); it never starts or blits.
+4. Completed canvases stay mounted while their page stays inside the
    virtualization window (≤ 8, `MAX_ACTIVE_CANVASES`); distant pages keep
    geometry-only slots and report `data-render-state="unloaded"`.
+5. On eviction the finished bitmap moves into a per-document LRU cache
+   (`pdfBitmapCache`, bounded by byte budget and entry count, keyed by
+   render scale, dropped on zoom and on document switch). A page that
+   re-enters the window blits its retained bitmap in one synchronous draw —
+   scrolling back across a heavy page never re-pays the raster. Cache
+   occupancy is exposed for diagnostics as `data-pdf-bitmap-cache`
+   (`entries:bytes`) on the reader element.
 
 Every render paints into a private offscreen buffer; the visible canvas is
 touched only by the atomic blit of a completed render (single-writer —
