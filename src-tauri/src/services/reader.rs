@@ -35,6 +35,8 @@ mod tests {
             isbn: None,
             description: None,
             cover_path: None,
+            file_size: 0,
+            file_mtime: 0,
         };
         books::insert_book(pool, &new_book).await.unwrap()
     }

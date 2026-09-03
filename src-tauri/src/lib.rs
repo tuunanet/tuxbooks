@@ -8,16 +8,21 @@ pub mod repository;
 pub mod services;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use sqlx::SqlitePool;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::db::connection::init_pool;
+use crate::services::library_reconciler::Reconciler;
+use crate::services::library_watcher::LibraryWatcher;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub db: SqlitePool,
     pub db_path: PathBuf,
+    pub watcher: Arc<LibraryWatcher>,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -98,13 +103,67 @@ pub fn run() {
                 }
             }
 
-            app.manage(AppState { db: pool, db_path });
+            // Library reconciliation (milestone 3): one reconciler shared by
+            // the watcher thread and IPC commands; its change callback is the
+            // single place that turns service-layer changes into IPC events.
+            let pdfium_dirs = pdfium_library_dirs(app.path().resource_dir().ok());
+            let emitter = app.handle().clone();
+            let reconciler = Arc::new(Reconciler::new(
+                pool.clone(),
+                covers_dir(&db_path),
+                pdfium_dirs,
+                tauri::async_runtime::handle().inner().clone(),
+                Box::new(move |change| {
+                    let _ignored = emitter.emit("library-changed", change);
+                }),
+            ));
+
+            let watcher = LibraryWatcher::start(crate::services::library_watcher::WatcherConfig {
+                reconciler: reconciler.clone(),
+                debounce: Duration::from_millis(600),
+            })?;
+
+            // Incremental startup reconciliation: watched locations are
+            // diffed against the database (only new/changed files parse), so
+            // events missed while the app was closed are caught up here.
+            let locations = tauri::async_runtime::block_on(
+                crate::repository::library_locations::list_locations(&pool),
+            )?;
+            for location in locations {
+                let root = Path::new(&location);
+                // Errors are logged inside; a missing location skips cleanly.
+                let _ignored = tauri::async_runtime::block_on(reconciler.reconcile_location(root));
+                watcher.watch(root);
+            }
+
+            // The test library is registered like a user import so E2E can
+            // exercise live synchronization against a real watched root.
+            if let Ok(library_root) = std::env::var("TEST_LIBRARY_PATH") {
+                if !library_root.is_empty() {
+                    tauri::async_runtime::block_on(async {
+                        crate::repository::library_locations::add_location(&pool, &library_root)
+                            .await
+                    })?;
+                    let _ignored = tauri::async_runtime::block_on(
+                        reconciler.reconcile_location(Path::new(&library_root)),
+                    );
+                    watcher.watch(Path::new(&library_root));
+                }
+            }
+
+            app.manage(AppState {
+                db: pool,
+                db_path,
+                watcher: Arc::new(watcher),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::books::get_library_stats,
             commands::books::list_books,
+            commands::books::remove_book,
             commands::library::scan_library,
+            commands::library::reconnect_book,
             commands::progress::get_reading_progress,
             commands::progress::save_reading_progress,
             commands::reader::get_book_bytes,

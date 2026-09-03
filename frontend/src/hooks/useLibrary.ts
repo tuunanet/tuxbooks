@@ -3,6 +3,7 @@ import {
   getLibraryStats,
   listBooks,
   onImportProgress,
+  onLibraryChanged,
   type Book,
   type LibraryStats,
 } from "@/lib/tauri";
@@ -24,6 +25,19 @@ function fetchLibrary(): Promise<{ stats: LibraryStats; books: Book[] }> {
     stats,
     books,
   }));
+}
+
+/** Insert-or-replace a book in the list, keeping title order. */
+function patchBook(existing: Book[], book: Book): Book[] {
+  const index = existing.findIndex((candidate) => candidate.id === book.id);
+  if (index === -1) {
+    const next = [...existing, book];
+    next.sort((a, b) => a.title.localeCompare(b.title));
+    return next;
+  }
+  const next = [...existing];
+  next[index] = book;
+  return next;
 }
 
 /**
@@ -80,23 +94,41 @@ export function useLibraryData(): LibraryState {
     let unlisten: (() => void) | undefined;
     void onImportProgress((book) => {
       if (disposed) return;
-      setBooks((prev) => {
-        const index = prev.findIndex((existing) => existing.id === book.id);
-        if (index === -1) {
-          const next = [...prev, book];
-          next.sort((a, b) => a.title.localeCompare(b.title));
-          return next;
-        }
-        const next = [...prev];
-        next[index] = book;
-        return next;
-      });
+      setBooks((prev) => patchBook(prev, book));
     })
       .then((fn) => {
         if (disposed) fn();
         else unlisten = fn;
       })
       .catch((err) => console.error("import-progress subscription failed:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Filesystem synchronization (milestone 3): the watcher pushes book
+  // changes (new/updated/relinked/unavailable) and removals live, so the
+  // library view tracks the folder without any polling or manual rescan.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onLibraryChanged((change) => {
+      if (disposed) return;
+      if (change.kind === "changed") {
+        setBooks((prev) => patchBook(prev, change.book));
+      } else {
+        setBooks((prev) => prev.filter((book) => book.id !== change.bookId));
+        setStats((prev) =>
+          prev === null ? prev : { ...prev, bookCount: Math.max(0, prev.bookCount - 1) },
+        );
+      }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("library-changed subscription failed:", err));
     return () => {
       disposed = true;
       unlisten?.();

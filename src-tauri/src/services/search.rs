@@ -65,6 +65,8 @@ mod tests {
                 isbn: None,
                 description: Some("Mole and Rat adventure on the river.".into()),
                 cover_path: None,
+                file_size: 0,
+                file_mtime: 0,
             },
         )
         .await
@@ -117,6 +119,8 @@ mod tests {
                 isbn: None,
                 description: None,
                 cover_path: None,
+                file_size: 0,
+                file_mtime: 0,
             },
         )
         .await

@@ -14,21 +14,38 @@ and `foreign_keys` is forced ON for every connection.
 
 ### books
 
-| column         | type                           | notes                      |
-| -------------- | ------------------------------ | -------------------------- |
-| id             | INTEGER PK AUTOINCREMENT       |                            |
-| path           | TEXT NOT NULL UNIQUE           | absolute file path         |
-| title          | TEXT NOT NULL, CHECK non-blank |                            |
-| subtitle       | TEXT                           |                            |
-| author         | TEXT                           |                            |
-| publisher      | TEXT                           |                            |
-| language       | TEXT                           |                            |
-| isbn           | TEXT                           |                            |
-| description    | TEXT                           |                            |
-| cover_path     | TEXT                           | extracted cover image file |
-| added_at       | TEXT NOT NULL, DB default      | set by INSERT              |
-| modified_at    | TEXT NOT NULL, DB default      | bumped on UPDATE           |
-| last_opened_at | TEXT NULL                      | set when reading starts    |
+| column         | type                           | notes                       |
+| -------------- | ------------------------------ | --------------------------- |
+| id             | INTEGER PK AUTOINCREMENT       |                             |
+| path           | TEXT NOT NULL UNIQUE           | absolute file path          |
+| title          | TEXT NOT NULL, CHECK non-blank |                             |
+| subtitle       | TEXT                           |                             |
+| author         | TEXT                           |                             |
+| publisher      | TEXT                           |                             |
+| language       | TEXT                           |                             |
+| isbn           | TEXT                           |                             |
+| description    | TEXT                           |                             |
+| cover_path     | TEXT                           | extracted cover image file  |
+| added_at       | TEXT NOT NULL, DB default      | set by INSERT               |
+| modified_at    | TEXT NOT NULL, DB default      | bumped on UPDATE            |
+| last_opened_at | TEXT NULL                      | set when reading starts     |
+| available      | INTEGER NOT NULL DEFAULT 1     | 0 once the file disappears  |
+| file_size      | INTEGER NOT NULL DEFAULT 0     | bytes at last import        |
+| file_mtime     | INTEGER NOT NULL DEFAULT 0     | unix seconds at last import |
+
+`available`/`file_size`/`file_mtime` back the filesystem watcher (milestone
+3): a disappeared file marks `available = 0` but never deletes the row
+(metadata, collections, and reading progress are preserved for
+reconnection), and the size/mtime snapshot lets the watcher distinguish
+real modifications from duplicate events without re-parsing documents.
+
+### library_locations
+
+`id`, `path` (UNIQUE), `added_at`. The filesystem roots registered by
+`scan_library` (or the test seeding); only these are watched and
+reconciled. Books outside watched locations are never touched by
+reconciliation — a fresh database that predates milestone 3 stays
+unwatched until the next folder import.
 
 ### collections
 
@@ -62,3 +79,23 @@ test `updating_book_keeps_fts_index_in_sync` must keep passing.
 - Imports upsert by `path`; a re-scan updates metadata instead of
   duplicating rows.
 - Tests always create the pool in a `tempfile` temp dir.
+
+## Reconciliation rules (milestone 3)
+
+The watcher reconciles toward **path truth**: after a batch settles, every
+book file inside a watched location has exactly one `available = 1` row with
+that path, and rows whose files vanished have `available = 0`. Rules:
+
+- Removals never delete rows; they only flip availability (prefix-aware:
+  removing a directory marks everything beneath it).
+- Renames/moves relink the existing row by id (`relink_book`), so reading
+  progress and collections survive. A rename whose destination path is
+  owned by another row resolves by fs truth (content import + old path
+  unavailable).
+- When the destination half of a rename event is lost (watch registered a
+  moment too late) the move is recovered during reconciliation sweeps by
+  relinking the book whose stored file vanished and whose name+size match
+  the unknown file — a copied file (source still on disk) is imported as a
+  new book instead.
+- Modification events re-parse only when the stored size/mtime snapshot
+  differs; duplicate/touch events are no-ops.

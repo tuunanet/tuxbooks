@@ -2,12 +2,12 @@
 
 Four layers, all runnable locally via `just`:
 
-| Layer             | Command              | What it covers                        |
-| ----------------- | -------------------- | ------------------------------------- |
-| Rust unit/prop    | `just test-rust`     | parsers, scanner, repos, search, db   |
-| Rust integration  | `just test-rust`     | fixture → scan → DB → search slice    |
-| Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC       |
-| E2E (WebdriverIO) | `just test-e2e`      | real binary, real window, real SQLite |
+| Layer             | Command              | What it covers                                                |
+| ----------------- | -------------------- | ------------------------------------------------------------- |
+| Rust unit/prop    | `just test-rust`     | parsers, scanner, repos, search, db, watcher batching         |
+| Rust integration  | `just test-rust`     | fixture → scan → DB → search slice; filesystem sync scenarios |
+| Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC                               |
+| E2E (WebdriverIO) | `just test-e2e`      | real binary, real window, real SQLite                         |
 
 ## Timeouts and termination
 
@@ -58,6 +58,13 @@ app/driver processes so a crashed run cannot poison the next one.
   `src-tauri/tests/vertical_slice.rs` for the full slice.
 - Property tests (`proptest`): `parse_epub` never panics on arbitrary
   bytes; the scanner only ever reports `*.epub` files.
+- `src-tauri/tests/library_sync.rs` drives the real `notify` watcher against
+  a real database in tempdirs, covering creation, deletion, rename, move,
+  modification, duplicate events, rapid sequences, and startup
+  reconciliation. These tests need the tokio runtime to be multi-threaded
+  (`#[tokio::test(flavor = "multi_thread")]`): watcher threads drive
+  sqlx work via `Handle::block_on`, which deadlocks on the current-thread
+  runtime.
 - Filesystem and database tests use `tempfile::tempdir()` — they never
   touch the user's library or home directory. Tests run in parallel and
   each gets its own temp dir/database, so there is no shared state.

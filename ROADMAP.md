@@ -69,6 +69,20 @@ TuxBooks currently has:
 - PDF covers: page 1 rasterized to a cover image at import time (PDFium
   via `pdfium-render`, bundled with the app), so PDFs show real cover art
   in the library grid; imports degrade gracefully without the library
+- filesystem watcher and incremental library reconciliation (`notify`
+  behind a two-thread watcher service; debounced batches with rename
+  pairing; reconciliation sweeps recover moves whose destination event was
+  lost), so folders imported through `scan_library` stay synchronized
+  without manual rescans
+- missing-file handling: disappeared files keep their rows (metadata,
+  collections, reading progress) and surface a "File unavailable" state
+  with Locate File (identity-preserving reconnection) and Remove from
+  Library actions on cards, list rows, the detail view, and the context
+  menu; startup reconciliation catches changes made while the app was
+  closed
+- watcher/reconciliation integration tests on real inotify events
+  (creation, deletion, rename, move, modification, duplicate events, rapid
+  sequences) and live-sync E2E against the real binary
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

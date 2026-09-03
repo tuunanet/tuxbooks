@@ -49,6 +49,44 @@ fn has_book_extension(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("pdf"))
 }
 
+/// Parse a single book file, dispatching on its extension. Shared by the
+/// directory scan and the watcher reconciliation so both paths stay in sync.
+pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+    {
+        parse_pdf(path).map(ScannedBook::Pdf).map_err(Into::into)
+    } else {
+        parse_epub(path).map(ScannedBook::Epub).map_err(Into::into)
+    }
+}
+
+/// List `.epub`/`.pdf` files under `root` without parsing them — the
+/// cheap enumeration the reconciler uses to diff a location against the
+/// database before deciding what is worth parsing. Sorted for determinism.
+pub fn list_book_files(root: &Path) -> Result<Vec<PathBuf>, ScanError> {
+    let metadata = std::fs::metadata(root).map_err(|source| ScanError::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    if !metadata.is_dir() {
+        return Err(ScanError::NotADirectory(root.to_path_buf()));
+    }
+
+    let mut files: Vec<PathBuf> = WalkDir::new(root)
+        .follow_links(false)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| has_book_extension(entry.path()))
+        .map(|entry| entry.into_path())
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 /// Recursively scan `root` for `.epub` and `.pdf` files (case-insensitive
 /// extension) and parse each one. Results are sorted by path for determinism.
 /// The filesystem is only read, never modified.
@@ -70,12 +108,7 @@ pub fn scan_directory(root: &Path) -> Result<Vec<ScannedEntry>, ScanError> {
         .filter(|entry| has_book_extension(entry.path()))
         .map(|entry| {
             let path = entry.into_path();
-            let extension = path.extension().unwrap_or_default();
-            let book = if extension.eq_ignore_ascii_case("pdf") {
-                parse_pdf(&path).map(ScannedBook::Pdf).map_err(Into::into)
-            } else {
-                parse_epub(&path).map(ScannedBook::Epub).map_err(Into::into)
-            };
+            let book = parse_book(&path);
             ScannedEntry { path, book }
         })
         .collect();

@@ -95,7 +95,6 @@ describe("BookCard", () => {
       "Mark as Finished",
       "Edit Metadata",
       "Show in File Manager",
-      "Remove from Library",
     ]) {
       // Radix marks disabled div-based items with aria-disabled, not disabled.
       expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-disabled", "true");
@@ -104,6 +103,49 @@ describe("BookCard", () => {
     expect(open).not.toHaveAttribute("aria-disabled");
     const continueReading = screen.getByRole("menuitem", { name: "Continue Reading" });
     expect(continueReading).not.toHaveAttribute("aria-disabled");
+    const remove = screen.getByRole("menuitem", { name: "Remove from Library" });
+    expect(remove).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("removes the book through the context menu", async () => {
+    const onRemove = vi.fn();
+    render(<BookCard book={makeBook()} onRemove={onRemove} />);
+
+    fireEvent.contextMenu(screen.getByTestId("book-card"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove from Library" }));
+    expect(onRemove).toHaveBeenCalledWith(1);
+  });
+
+  it("shows missing-file state with recovery actions for unavailable books", async () => {
+    const onLocate = vi.fn();
+    const onRemove = vi.fn();
+    const { rerender } = render(
+      <BookCard book={makeBook({ available: false })} onLocate={onLocate} onRemove={onRemove} />,
+    );
+
+    expect(screen.getByTestId("book-card-missing")).toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("missing-locate"));
+    expect(onLocate).toHaveBeenCalledWith(1);
+    await userEvent.click(screen.getByTestId("missing-remove"));
+    expect(onRemove).toHaveBeenCalledWith(1);
+
+    // Available books have no missing UI at all.
+    rerender(<BookCard book={makeBook({ available: true })} />);
+    expect(screen.queryByTestId("book-card-missing")).not.toBeInTheDocument();
+  });
+
+  it("disables Continue Reading in the context menu while the file is missing", async () => {
+    const onRead = vi.fn();
+    render(<BookCard book={makeBook({ available: false })} onRead={onRead} />);
+
+    fireEvent.contextMenu(screen.getByTestId("book-card"));
+    const continueReading = await screen.findByRole("menuitem", { name: "Continue Reading" });
+    expect(continueReading).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Locate File…" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
   });
 
   it("shows the add-to-collection submenu as an honest shell", async () => {

@@ -10,8 +10,10 @@ export type FixtureBook = Book & { progress?: ReadingProgress };
 /**
  * Realistic, original sample data so the UI can be evaluated visually.
  * Dates are staggered to exercise "Recently Added" / "Recently Read" ordering.
+ * File-snapshot fields (available/fileSize/fileMtime) get representative
+ * defaults below so each fixture reads like a healthy import.
  */
-export const fixtureBooks: FixtureBook[] = [
+const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">[] = [
   {
     id: 1,
     path: "/library/the-quiet-meridian.epub",
@@ -153,3 +155,10 @@ export const fixtureBooks: FixtureBook[] = [
     lastOpenedAt: null,
   },
 ];
+
+export const fixtureBooks: FixtureBook[] = rawFixtureBooks.map((book, index) => ({
+  ...book,
+  available: true,
+  fileSize: 900_000 + index * 137_000,
+  fileMtime: 1_760_000_000 + index * 86400,
+}));

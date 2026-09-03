@@ -15,24 +15,44 @@ interface BookContextMenuProps {
   book: Book;
   onOpen?: (bookId: number) => void;
   onRead?: (bookId: number) => void;
+  onLocate?: (bookId: number) => void;
+  onRemove?: (bookId: number) => void;
   children: ReactNode;
 }
 
 /**
- * Right-click actions for a book. Only Open (book detail) and Continue
- * Reading (reader) have a real flow behind them. The collection entries are
- * submenu shells: the structure is real, the persistence is not, and the
- * disabled entries say so instead of pretending.
+ * Right-click actions for a book. Open/Continue Reading, removal from the
+ * library (local-first: the source file on disk is never touched), and —
+ * for books whose file disappeared — the Locate File reconnection flow.
+ * The collection entries are submenu shells: the structure is real, the
+ * persistence is not, and the disabled entries say so instead of pretending.
  */
-export function BookContextMenu({ book, onOpen, onRead, children }: BookContextMenuProps) {
+export function BookContextMenu({
+  book,
+  onOpen,
+  onRead,
+  onLocate,
+  onRemove,
+  children,
+}: BookContextMenuProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent aria-label={`Actions for ${book.title}`}>
+        {!book.available && (
+          <ContextMenuItem data-testid="context-locate-file" onSelect={() => onLocate?.(book.id)}>
+            Locate File…
+          </ContextMenuItem>
+        )}
         <ContextMenuItem data-testid="context-open" onSelect={() => onOpen?.(book.id)}>
           Open
         </ContextMenuItem>
-        <ContextMenuItem data-testid="context-continue-reading" onSelect={() => onRead?.(book.id)}>
+        <ContextMenuItem
+          data-testid="context-continue-reading"
+          disabled={!book.available}
+          title={book.available ? undefined : "The source file is unavailable"}
+          onSelect={() => onRead?.(book.id)}
+        >
           Continue Reading
         </ContextMenuItem>
         <ContextMenuSeparator />
@@ -68,7 +88,11 @@ export function BookContextMenu({ book, onOpen, onRead, children }: BookContextM
           Show in File Manager
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled variant="destructive" title="Removing books is not wired up yet">
+        <ContextMenuItem
+          data-testid="context-remove-book"
+          variant="destructive"
+          onSelect={() => onRemove?.(book.id)}
+        >
           Remove from Library
         </ContextMenuItem>
       </ContextMenuContent>

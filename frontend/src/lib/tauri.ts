@@ -4,12 +4,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Book,
   ImportReport,
+  LibraryChange,
   LibraryStats,
   ReadingProgressInput,
   ReadingProgressRecord,
 } from "@/types/domain";
 
-export type { Book, BookFormat, ImportReport, LibraryStats } from "@/types/domain";
+export type { Book, BookFormat, ImportReport, LibraryChange, LibraryStats } from "@/types/domain";
 
 export function getLibraryStats(): Promise<LibraryStats> {
   return invoke("get_library_stats");
@@ -30,6 +31,25 @@ export function scanLibrary(path: string): Promise<ImportReport> {
  */
 export function onImportProgress(callback: (book: Book) => void): Promise<() => void> {
   return listen<Book>("import-progress", (event) => callback(event.payload));
+}
+
+/**
+ * Subscribe to live library synchronization (the `library-changed` backend
+ * event). The filesystem watcher and the remove/reconnect commands push
+ * every mutation here; see `LibraryChange` in types/domain.
+ */
+export function onLibraryChanged(callback: (change: LibraryChange) => void): Promise<() => void> {
+  return listen<LibraryChange>("library-changed", (event) => callback(event.payload));
+}
+
+/** Remove a book from the library (source file on disk is never touched). */
+export function removeBook(bookId: number): Promise<boolean> {
+  return invoke("remove_book", { bookId });
+}
+
+/** Reconnect an unavailable book to a newly located file, keeping its identity. */
+export function reconnectBook(bookId: number, path: string): Promise<Book> {
+  return invoke("reconnect_book", { bookId, path });
 }
 
 /**
@@ -56,6 +76,15 @@ export function saveReadingProgress(bookId: number, progress: ReadingProgressInp
 /** Native folder picker; resolves to null when the user cancels. */
 export function pickDirectory(): Promise<string | null> {
   return open({ directory: true, multiple: false, title: "Choose a folder to import" });
+}
+
+/** Native file picker for relocating a missing book; null when cancelled. */
+export function pickBookFile(): Promise<string | null> {
+  return open({
+    multiple: false,
+    title: "Locate the book file",
+    filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+  });
 }
 
 /** Tauri asset-protocol URL for an extracted cover image on disk. */

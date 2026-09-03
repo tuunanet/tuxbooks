@@ -55,6 +55,61 @@ describe("useLibraryData import-progress streaming", () => {
   });
 });
 
+describe("useLibraryData library-changed synchronization", () => {
+  it("patches a book pushed by the filesystem watcher", async () => {
+    const first = makeBook({ id: 3, title: "Before" });
+    mockInvoke({ ...emptyLibrary, list_books: [first] });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      emitTauriEvent("library-changed", {
+        kind: "changed",
+        book: makeBook({ id: 3, title: "After", available: true }),
+      });
+    });
+
+    await waitFor(() => expect(result.current.books[0]).toMatchObject({ id: 3, title: "After" }));
+    expect(result.current.books).toHaveLength(1);
+  });
+
+  it("marks a book unavailable when its file disappears", async () => {
+    const book = makeBook({ id: 5, title: "Vanishing", available: true });
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [book],
+    });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      emitTauriEvent("library-changed", {
+        kind: "changed",
+        book: makeBook({ id: 5, title: "Vanishing", available: false }),
+      });
+    });
+
+    await waitFor(() => expect(result.current.books[0]).toMatchObject({ id: 5, available: false }));
+    // The row stays: metadata, collections, and progress survive.
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.stats?.bookCount).toBe(1);
+  });
+
+  it("drops a removed book from the list and the stats", async () => {
+    const book = makeBook({ id: 9, title: "Removed Book" });
+    mockInvoke({ ...emptyLibrary, list_books: [book] });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      emitTauriEvent("library-changed", { kind: "removed", bookId: 9 });
+    });
+
+    await waitFor(() => expect(result.current.books).toHaveLength(0));
+    expect(result.current.stats?.bookCount).toBe(0);
+  });
+});
+
 function act_emit(book: ReturnType<typeof makeBook>): void {
   act(() => {
     emitTauriEvent("import-progress", book);

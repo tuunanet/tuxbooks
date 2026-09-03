@@ -1,8 +1,9 @@
 import { Fragment } from "react";
-import { ArrowLeft, BookOpen, Pencil } from "lucide-react";
+import { ArrowLeft, BookOpen, FileWarning, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BookCover } from "./BookCover";
+import { useBookActions } from "@/hooks/useBookActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState } from "@/state/appState";
@@ -26,6 +27,7 @@ function formatDate(iso: string | null): string {
 export function BookDetail() {
   const { selectedBookId, section } = useAppState();
   const { books } = useLibrary();
+  const { locateBook, removeBookFromLibrary } = useBookActions();
   const dispatch = useAppDispatch();
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
@@ -87,13 +89,48 @@ export function BookDetail() {
           )}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              data-testid="detail-continue"
-              onClick={() => dispatch({ type: "open-reader", bookId: book.id })}
-            >
-              <BookOpen data-icon="inline-start" />
-              Continue Reading
-            </Button>
+            {!book.available ? (
+              // Missing file: recovery replaces the reading entry point. The
+              // row survives on the backend, so reconnecting keeps progress.
+              <div
+                data-testid="detail-missing"
+                className="w-full rounded-md border border-destructive/50 bg-destructive/10 p-3"
+              >
+                <p className="flex items-center gap-2 text-sm font-medium text-destructive">
+                  <FileWarning data-icon="inline-start" className="size-4" />
+                  File unavailable
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  The source file is missing at its recorded location. Locate it to keep this book's
+                  reading progress, or remove it from the library.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    data-testid="detail-locate"
+                    onClick={() => void locateBook(book.id)}
+                  >
+                    Locate File…
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="detail-remove"
+                    onClick={() => void removeBookFromLibrary(book.id)}
+                  >
+                    Remove from Library
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                data-testid="detail-continue"
+                onClick={() => dispatch({ type: "open-reader", bookId: book.id })}
+              >
+                <BookOpen data-icon="inline-start" />
+                Continue Reading
+              </Button>
+            )}
             <Button
               variant="outline"
               data-testid="detail-edit"

@@ -21,7 +21,18 @@ export interface Book {
   addedAt: string;
   modifiedAt: string;
   lastOpenedAt: string | null;
+  /** False when the source file has disappeared — the row waits for reconnection. */
+  available: boolean;
+  fileSize: number;
+  fileMtime: number;
 }
+
+/**
+ * Payload of the `library-changed` backend event: the filesystem watcher and
+ * the remove/reconnect commands push every library mutation here so the UI
+ * stays live without polling.
+ */
+export type LibraryChange = { kind: "changed"; book: Book } | { kind: "removed"; bookId: number };
 
 export interface LibraryStats {
   bookCount: number;

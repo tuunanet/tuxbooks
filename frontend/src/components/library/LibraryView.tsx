@@ -8,6 +8,7 @@ import {
 import { BookCard } from "@/components/books/BookCard";
 import { BookListItem } from "@/components/books/BookListItem";
 import { Button } from "@/components/ui/button";
+import { useBookActions } from "@/hooks/useBookActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { EmptyCollectionState } from "./EmptyCollectionState";
@@ -38,6 +39,7 @@ function columnCount(container: HTMLElement): number {
 
 export function LibraryView({ section }: LibraryViewProps) {
   const { books, loading, error, refresh } = useLibrary();
+  const { locateBook, removeBookFromLibrary } = useBookActions();
   const app = useAppState();
   const dispatch = useAppDispatch();
 
@@ -56,8 +58,13 @@ export function LibraryView({ section }: LibraryViewProps) {
     [dispatch],
   );
   const openReader = useCallback(
-    (bookId: number) => dispatch({ type: "open-reader", bookId }),
-    [dispatch],
+    (bookId: number) => {
+      // A missing file cannot be read; the recovery entry points live on
+      // the card and detail view instead.
+      if (books.find((book) => book.id === bookId)?.available === false) return;
+      dispatch({ type: "open-reader", bookId });
+    },
+    [books, dispatch],
   );
   const setQuery = useCallback(
     (next: string) => dispatch({ type: "set-library-query", query: next }),
@@ -178,6 +185,8 @@ export function LibraryView({ section }: LibraryViewProps) {
       onSelect: selectBook,
       onOpen: openDetail,
       onRead: openReader,
+      onLocate: locateBook,
+      onRemove: removeBookFromLibrary,
     };
     return view === "grid" ? (
       <BookCard key={book.id} {...itemProps} />

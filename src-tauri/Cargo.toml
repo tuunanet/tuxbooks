@@ -36,6 +36,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 thiserror = "2"
 anyhow = "1"
 walkdir = "2"
+# Filesystem watching for library reconciliation (ROADMAP milestone 3):
+# inotify events are debounced and reconciled incrementally by
+# services/library_watcher.rs; there is no other way to keep the library in
+# sync without full rescans.
+notify = "8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
 # PDF metadata via a pure-Rust object reader (no rendering engine).

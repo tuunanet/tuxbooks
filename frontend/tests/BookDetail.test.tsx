@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
 }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import { BookDetail } from "@/components/books/BookDetail";
 import { AppShell } from "@/components/layout/AppShell";
@@ -14,7 +15,7 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
 import { makeBook } from "./factories";
-import { mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/tauri";
 
 function renderDetail(
   state: Partial<AppState> = {},
@@ -183,5 +184,23 @@ describe("BookDetail", () => {
     );
 
     expect(await screen.findByTestId("book-detail-missing")).toBeInTheDocument();
+  });
+
+  it("replaces Continue Reading with recovery actions when the file is unavailable", async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    vi.mocked(open).mockResolvedValue("/library/located/renamed.epub");
+
+    renderDetail({}, [makeBook({ available: false })]);
+
+    expect(await screen.findByTestId("detail-missing")).toBeInTheDocument();
+    expect(screen.queryByTestId("detail-continue")).not.toBeInTheDocument();
+
+    // Locate → plugin-dialog open → reconnect_book invocation.
+    await userEvent.click(screen.getByTestId("detail-locate"));
+    expect(open).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("reconnect_book", {
+      bookId: 1,
+      path: "/library/located/renamed.epub",
+    });
   });
 });

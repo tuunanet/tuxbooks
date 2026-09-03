@@ -74,12 +74,27 @@ layout, virtualization, the render queue, and persistence — see
 ## Services
 
 - `library_scanner`: pure filesystem read; recursive, typed per-file errors;
-  discovers `.epub` and `.pdf` files.
+  discovers `.epub` and `.pdf` files (`parse_book` for one file,
+  `list_book_files` for a parse-free listing used by reconciliation).
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
   covers next to the database (EPUB packages; PDF page 1 via PDFium, best
   effort). Idempotent on re-scan. Takes a per-book progress callback; the
   `scan_library` command forwards it as `import-progress` events so the UI
-  shows books and covers while the scan runs.
+  shows books and covers while the scan runs. `import_file` is the
+  single-file primitive the watcher reuses.
+- `library_reconciler`: turns filesystem observations into minimal database
+  transitions (milestone 3). Path truth: every book file in a watched
+  location has exactly one available row; vanished files flip
+  `available = 0` (never delete); renames/moves relink rows by id so
+  progress and collections survive. Also owns startup/periodic
+  reconciliation of watched locations and the explicit `reconnect_book`
+  flow. Emits `LibraryChange` through a callback — the only Tauri-free
+  seam; `lib.rs` wires it to the `library-changed` IPC event.
+- `library_watcher`: `notify`-based watching of the registered
+  `library_locations` roots (recursive), with a quiet-period debounce,
+  rename pairing that survives window boundaries, and a reconciliation
+  sweep after lost-destination moves or backend rescan requests. One
+  reconciler thread; never blocks the app. Runs only for watched roots.
 - `reader`: controlled file-byte access for the reading engines — resolves a
   book id to its stored path via the repository and reads it; paths never
   cross the IPC boundary.
@@ -118,6 +133,11 @@ commands. `LibraryDataProvider` owns the fetched library data so the library
 view, global search, and import flows share one copy; `ImportProvider` runs
 `scan_library` for picked folders and drag-dropped paths, while the provider
 patches its book list from `import-progress` events so imports stream in.
+The same provider listens to `library-changed` events, so watcher
+reconciliations (new/updated/relinked books, missing files, removals) reach
+the UI live without polling. Missing-file recovery UI (Locate File /
+Remove) lives on the book card, list row, detail view, and context menu,
+driven by `hooks/useBookActions.ts`.
 
 ## Testing layers
 

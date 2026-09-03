@@ -9,7 +9,7 @@ use crate::domain::NewBook;
 use crate::epub::EpubBook;
 use crate::error::AppError;
 use crate::repository::books;
-use crate::services::library_scanner::{scan_directory, ScanError, ScannedBook};
+use crate::services::library_scanner::{parse_book, scan_directory, ScanError, ScannedBook};
 
 /// Summary of an import run over a library directory.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -25,6 +25,50 @@ pub struct ImportReport {
 pub struct FailedImport {
     pub path: String,
     pub error: String,
+}
+
+/// A single persisted book and whether the upsert newly inserted it.
+#[derive(Debug, Clone)]
+pub struct ImportOutcome {
+    pub book: crate::domain::Book,
+    pub inserted: bool,
+}
+
+/// Build a [`NewBook`] from an already-parsed document: best-effort cover
+/// extraction plus the filesystem snapshot (size/mtime) for change detection.
+pub(crate) fn new_book_from_parsed(
+    path: &Path,
+    parsed: &ScannedBook,
+    covers_dir: &Path,
+    pdfium_dirs: &[PathBuf],
+) -> Result<NewBook, AppError> {
+    std::fs::create_dir_all(covers_dir)?;
+    Ok(match parsed {
+        ScannedBook::Epub(book) => to_new_book(path, book, write_cover(book, covers_dir, path)?),
+        ScannedBook::Pdf(book) => {
+            pdf_to_new_book(path, book, pdf_cover_path(path, covers_dir, pdfium_dirs)?)
+        }
+    })
+}
+
+/// Import a single file (watcher path): parse, build the book, upsert by
+/// path. `Ok(None)` means the file did not parse (e.g. still being written);
+/// the caller simply waits for a later event instead of treating it as an
+/// error. Errors are real failures (database, cover IO).
+pub async fn import_file(
+    pool: &SqlitePool,
+    path: &Path,
+    covers_dir: &Path,
+    pdfium_dirs: &[PathBuf],
+) -> Result<Option<ImportOutcome>, AppError> {
+    let parsed = match parse_book(path) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(None),
+    };
+    let new_book = new_book_from_parsed(path, &parsed, covers_dir, pdfium_dirs)?;
+    let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+    let book = books::get_book(pool, id).await?.expect("row just upserted");
+    Ok(Some(ImportOutcome { book, inserted }))
 }
 
 /// Scan `library_root` for EPUBs and PDFs and persist them (upsert keyed by
@@ -46,43 +90,24 @@ pub async fn import_directory(
         other => AppError::InvalidInput(other.to_string()),
     })?;
 
-    std::fs::create_dir_all(covers_dir)?;
-
     let mut report = ImportReport::default();
     for entry in entries {
-        match entry.book {
+        match &entry.book {
             Err(error) => report.failed.push(FailedImport {
                 path: entry.path.to_string_lossy().into_owned(),
                 error: error.to_string(),
             }),
-            Ok(ScannedBook::Epub(parsed)) => {
-                let cover_path = write_cover(&parsed, covers_dir, &entry.path)?;
-                let new_book = to_new_book(&entry.path, &parsed, cover_path);
-                let inserted = persist(pool, &new_book, on_book).await?;
-                bump(&mut report, inserted);
-            }
-            Ok(ScannedBook::Pdf(parsed)) => {
-                let cover_path = pdf_cover_path(&entry.path, covers_dir, pdfium_dirs)?;
-                let new_book = pdf_to_new_book(&entry.path, &parsed, cover_path);
-                let inserted = persist(pool, &new_book, on_book).await?;
+            Ok(parsed) => {
+                let new_book = new_book_from_parsed(&entry.path, parsed, covers_dir, pdfium_dirs)?;
+                let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+                if let Some(book) = books::get_book(pool, id).await? {
+                    on_book(&book);
+                }
                 bump(&mut report, inserted);
             }
         }
     }
     Ok(report)
-}
-
-/// Upsert and hand the persisted row to the progress callback.
-async fn persist(
-    pool: &SqlitePool,
-    new_book: &NewBook,
-    on_book: &(dyn Fn(&crate::domain::Book) + Send + Sync),
-) -> Result<bool, AppError> {
-    let (id, inserted) = books::upsert_book(pool, new_book).await?;
-    if let Some(book) = books::get_book(pool, id).await? {
-        on_book(&book);
-    }
-    Ok(inserted)
 }
 
 fn bump(report: &mut ImportReport, inserted: bool) {
@@ -93,7 +118,24 @@ fn bump(report: &mut ImportReport, inserted: bool) {
     }
 }
 
+/// Snapshot a file's size and mtime (unix seconds) for change detection.
+/// Unreadable files snapshot as `(0, 0)`, which never matches a previously
+/// imported book, so the next modification event re-imports instead of
+/// skipping — a safe default for transient stat failures.
+pub fn file_stats(path: &Path) -> Option<(i64, i64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let size = metadata.len() as i64;
+    let mtime = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    Some((size, mtime))
+}
+
 fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewBook {
+    let (file_size, file_mtime) = file_stats(path).unwrap_or((0, 0));
     NewBook {
         path: path.to_string_lossy().into_owned(),
         title: book.metadata.title.clone(),
@@ -104,10 +146,13 @@ fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewB
         isbn: book.metadata.isbn.clone(),
         description: book.metadata.description.clone(),
         cover_path,
+        file_size,
+        file_mtime,
     }
 }
 
 fn pdf_to_new_book(path: &Path, book: &crate::pdf::PdfBook, cover_path: Option<String>) -> NewBook {
+    let (file_size, file_mtime) = file_stats(path).unwrap_or((0, 0));
     NewBook {
         path: path.to_string_lossy().into_owned(),
         title: book.metadata.title.clone(),
@@ -118,6 +163,8 @@ fn pdf_to_new_book(path: &Path, book: &crate::pdf::PdfBook, cover_path: Option<S
         isbn: None,
         description: book.metadata.description.clone(),
         cover_path,
+        file_size,
+        file_mtime,
     }
 }
 

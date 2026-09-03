@@ -54,6 +54,9 @@ function makeBookShim() {
     addedAt: "2026-01-01T00:00:00.000Z",
     modifiedAt: "2026-01-01T00:00:00.000Z",
     lastOpenedAt: null,
+    available: true,
+    fileSize: 1024,
+    fileMtime: 1767225600,
   };
 }
 

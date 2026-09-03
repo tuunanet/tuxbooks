@@ -44,11 +44,18 @@ pub struct Book {
     pub added_at: DateTime<Utc>,
     pub modified_at: DateTime<Utc>,
     pub last_opened_at: Option<DateTime<Utc>>,
+    /// Whether the source file still exists at `path`. Disappeared files keep
+    /// the row (metadata, collections, progress) for reconnection.
+    pub available: bool,
+    /// Source file size in bytes at the last import/refresh.
+    pub file_size: i64,
+    /// Source file mtime as unix seconds at the last import/refresh.
+    pub file_mtime: i64,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 14)?;
+        let mut state = serializer.serialize_struct("Book", 17)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("path", &self.path)?;
         state.serialize_field("format", &BookFormat::from_path(&self.path))?;
@@ -63,12 +70,17 @@ impl Serialize for Book {
         state.serialize_field("addedAt", &self.added_at)?;
         state.serialize_field("modifiedAt", &self.modified_at)?;
         state.serialize_field("lastOpenedAt", &self.last_opened_at)?;
+        state.serialize_field("available", &self.available)?;
+        state.serialize_field("fileSize", &self.file_size)?;
+        state.serialize_field("fileMtime", &self.file_mtime)?;
         state.end()
     }
 }
 
 /// Data required to insert or update a book. `added_at`/`modified_at` are managed
 /// by the database; `last_opened_at` is lifecycle state, not import data.
+/// File snapshots (`file_size`/`file_mtime`) come from the filesystem at parse
+/// time; `available` is not import data (rows always import as available).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewBook {
     pub path: String,
@@ -80,6 +92,8 @@ pub struct NewBook {
     pub isbn: Option<String>,
     pub description: Option<String>,
     pub cover_path: Option<String>,
+    pub file_size: i64,
+    pub file_mtime: i64,
 }
 
 #[cfg(test)]
@@ -101,6 +115,9 @@ mod tests {
             added_at: Utc::now(),
             modified_at: Utc::now(),
             last_opened_at: None,
+            available: true,
+            file_size: 0,
+            file_mtime: 0,
         }
     }
 
@@ -109,6 +126,9 @@ mod tests {
         let json = serde_json::to_value(sample("/tmp/book.epub")).unwrap();
         assert!(json.get("addedAt").is_some());
         assert!(json.get("lastOpenedAt").is_some());
+        assert!(json.get("available").is_some());
+        assert!(json.get("fileSize").is_some());
+        assert!(json.get("fileMtime").is_some());
         assert!(json.get("added_at").is_none());
     }
 
