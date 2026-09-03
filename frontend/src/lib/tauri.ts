@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Book,
@@ -20,6 +21,15 @@ export function listBooks(): Promise<Book[]> {
 
 export function scanLibrary(path: string): Promise<ImportReport> {
   return invoke("scan_library", { path });
+}
+
+/**
+ * Subscribe to per-book import progress (the `import-progress` backend
+ * event). The callback receives each book as soon as it is persisted, so
+ * covers appear while a scan is still running. Resolves an unlisten fn.
+ */
+export function onImportProgress(callback: (book: Book) => void): Promise<() => void> {
+  return listen<Book>("import-progress", (event) => callback(event.payload));
 }
 
 /**

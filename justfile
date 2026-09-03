@@ -21,6 +21,12 @@ frontend-dist:
 make-epub-fixtures:
     python3 scripts/make-epub-fixtures.py
 
+# Fetch the PDFium shared library used for PDF cover extraction
+# (src-tauri/pdfium/, gitignored). Idempotent: skips when already present.
+# The pinned build tracks pdfium-render's default bindings (docs/build.md).
+fetch-pdfium:
+    bash scripts/fetch-pdfium.sh
+
 # Validate the EPUB fixture corpus: determinism, manifest checksums, EPUB
 # version identity, malformed markers, and the committed size budget.
 check-epub-fixtures:
@@ -36,14 +42,15 @@ dev:
 _test_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
 _e2e_timeout := if os() == "linux" { "timeout --kill-after=15 300" } else { "" }
 
-# Build the release application bundle.
-build:
+# Build the release application bundle. Requires the PDFium library (bundled
+# as an app resource); `tauri build` fails when it is absent.
+build: fetch-pdfium
     pnpm tauri build
 
 # Build an un-bundled debug binary with embedded assets (used by E2E).
 # VITE_WDIO=1 bundles the @wdio/tauri-plugin frontend bridge; every other
 # build tree-shakes it out.
-build-debug:
+build-debug: fetch-pdfium
     VITE_WDIO=1 pnpm --filter frontend build
     cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
@@ -51,9 +58,10 @@ build-debug:
 # and node never contend). `test-rust` pins custom-protocol so
 # target/debug/tuxbooks always keeps the feature set build-debug gives it
 # and `just check` no longer invalidates the E2E binary (docs/build.md).
+# fetch-pdfium first so PDF cover tests exercise a real render, not a skip.
 test: test-parallel
 
-test-rust: frontend-dist
+test-rust: frontend-dist fetch-pdfium
     {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol
 
 test-frontend:

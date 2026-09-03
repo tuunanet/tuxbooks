@@ -84,7 +84,9 @@ async fn realistic_library_imports_every_book_file() {
     let tmp = tempfile::tempdir().unwrap();
     let pool = init_pool(&tmp.path().join("tuxbooks.db")).await.unwrap();
     let covers = tmp.path().join("covers");
-    let report = import_directory(&pool, &root, &covers).await.unwrap();
+    let report = import_directory(&pool, &root, &covers, &[], &|_| {})
+        .await
+        .unwrap();
     eprintln!(
         "realistic library: {} files discovered, {} imported, {} failed",
         expected_files,
@@ -136,7 +138,9 @@ async fn realistic_library_imports_every_book_file() {
     }
 
     // Re-import updates in place instead of duplicating.
-    let rerun = import_directory(&pool, &root, &covers).await.unwrap();
+    let rerun = import_directory(&pool, &root, &covers, &[], &|_| {})
+        .await
+        .unwrap();
     assert_eq!(
         rerun.imported, 0,
         "second run must update, not duplicate: {rerun:?}"

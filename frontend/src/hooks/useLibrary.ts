@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { getLibraryStats, listBooks, type Book, type LibraryStats } from "@/lib/tauri";
+import {
+  getLibraryStats,
+  listBooks,
+  onImportProgress,
+  type Book,
+  type LibraryStats,
+} from "@/lib/tauri";
 
 export interface LibraryState {
   stats: LibraryStats | null;
@@ -62,6 +68,38 @@ export function useLibraryData(): LibraryState {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Imports stream one event per persisted book; patch the list in place so
+  // books and covers appear while the scan is still running. The final
+  // refresh after the import completes reconciles ordering and stats (the
+  // sidebar count lags a few seconds by design).
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onImportProgress((book) => {
+      if (disposed) return;
+      setBooks((prev) => {
+        const index = prev.findIndex((existing) => existing.id === book.id);
+        if (index === -1) {
+          const next = [...prev, book];
+          next.sort((a, b) => a.title.localeCompare(b.title));
+          return next;
+        }
+        const next = [...prev];
+        next[index] = book;
+        return next;
+      });
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("import-progress subscription failed:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
     };
   }, []);
 

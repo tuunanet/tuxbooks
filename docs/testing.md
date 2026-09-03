@@ -224,6 +224,10 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
 - `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` / `REALISTIC_LIBRARY_PATH`
   are the only override hooks; production code resolves the OS app-data
   dir when the first two are unset.
+- PDF cover tests need the PDFium shared library (`just fetch-pdfium`,
+  automatic in the justfile flows — see `docs/build.md`). When it is
+  absent (bare `cargo test` on a fresh clone), those tests print a notice
+  and skip instead of failing.
 
 ## EPUB fixture corpus (three tiers)
 

@@ -44,4 +44,7 @@ tests/fixtures/books/EBooks/
 # Tauri-generated capability schemas (regenerated on build)
 src-tauri/gen/schemas/
 
+# Fetched PDFium shared library for cover extraction (scripts/fetch-pdfium.sh)
+src-tauri/pdfium/
+
 *.swp

@@ -60,8 +60,11 @@ value. It is Tauri- and database-independent and unit-tested against
 ## PDF layer
 
 `pdf/` extracts bibliographic metadata (title/author/subject) from PDF
-files via `lopdf`; no rendering. PDFs import without covers. Rendering
-happens in the frontend as a continuous, virtualized reader: the
+files via `lopdf` and rasterizes page 1 to a PNG cover at import time via
+`pdfium-render` (`pdf/render.rs`), probing for the PDFium shared library
+fetched by `scripts/fetch-pdfium.sh` (see [build.md](build.md)); when the
+library is absent, PDFs import without covers. Reader rendering happens in
+the frontend as a continuous, virtualized reader: the
 `get_book_bytes` command serves a book's file bytes (`services/reader.rs`)
 and PDF.js rasterizes pages to canvases (`frontend/src/lib/pdf/pdfEngine.ts`
 is the only PDF.js import site; the `components/reader/pdf/` modules own
@@ -73,7 +76,10 @@ layout, virtualization, the render queue, and persistence — see
 - `library_scanner`: pure filesystem read; recursive, typed per-file errors;
   discovers `.epub` and `.pdf` files.
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
-  covers next to the database (EPUBs only). Idempotent on re-scan.
+  covers next to the database (EPUB packages; PDF page 1 via PDFium, best
+  effort). Idempotent on re-scan. Takes a per-book progress callback; the
+  `scan_library` command forwards it as `import-progress` events so the UI
+  shows books and covers while the scan runs.
 - `reader`: controlled file-byte access for the reading engines — resolves a
   book id to its stored path via the repository and reads it; paths never
   cross the IPC boundary.
@@ -110,7 +116,8 @@ UI primitives come from shadcn/ui (`pnpm dlx shadcn add ...`; icons from
 and call the typed wrappers in `lib/tauri.ts`; no component invokes raw
 commands. `LibraryDataProvider` owns the fetched library data so the library
 view, global search, and import flows share one copy; `ImportProvider` runs
-`scan_library` for picked folders and drag-dropped paths.
+`scan_library` for picked folders and drag-dropped paths, while the provider
+patches its book list from `import-progress` events so imports stream in.
 
 ## Testing layers
 

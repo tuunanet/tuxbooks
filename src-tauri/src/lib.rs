@@ -28,6 +28,30 @@ pub fn covers_dir(db_path: &Path) -> PathBuf {
         .join("covers")
 }
 
+/// Candidate directories that may contain the PDFium dynamic library, in
+/// probe order: explicit override (`PDFIUM_LIB_DIR`), packaged resources,
+/// next to the executable, and the development checkout where
+/// `scripts/fetch-pdfium.sh` installs it. Absent candidates are skipped at
+/// probe time; see `pdf/render.rs` and docs/build.md.
+pub fn pdfium_library_dirs(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = std::env::var("PDFIUM_LIB_DIR") {
+        if !dir.is_empty() {
+            dirs.push(PathBuf::from(dir));
+        }
+    }
+    if let Some(dir) = resource_dir {
+        dirs.push(dir.join("pdfium"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium"));
+    dirs
+}
+
 /// Production uses the OS app-data directory; tests override via `TEST_DATABASE_PATH`.
 fn resolve_db_path(handle: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(path) = std::env::var("TEST_DATABASE_PATH") {
@@ -58,11 +82,15 @@ pub fn run() {
             if let Ok(library_root) = std::env::var("TEST_LIBRARY_PATH") {
                 if !library_root.is_empty() {
                     let covers = covers_dir(&db_path);
+                    let pdfium_dirs = pdfium_library_dirs(app.path().resource_dir().ok());
+                    // No progress callback: the webview is not listening yet.
                     let report = tauri::async_runtime::block_on(
                         services::book_importer::import_directory(
                             &pool,
                             Path::new(&library_root),
                             &covers,
+                            &pdfium_dirs,
+                            &|_| {},
                         ),
                     )
                     .map_err(|e| anyhow::anyhow!("failed to import library {library_root}: {e}"))?;

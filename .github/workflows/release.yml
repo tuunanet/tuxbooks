@@ -57,6 +57,9 @@ jobs:
           fi
           echo "Releasing $tagged"
 
+      - name: Fetch PDFium (bundled app resource)
+        run: bash scripts/fetch-pdfium.sh
+
       - name: Build Debian bundle
         run: |
           pnpm install --frozen-lockfile

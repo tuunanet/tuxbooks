@@ -37,13 +37,14 @@ pub struct PdfMetadata {
 
 ## Import mapping
 
-| PDF field  | Library column                                                       |
-| ---------- | -------------------------------------------------------------------- |
-| `/Title`   | `title` (file-name fallback)                                         |
-| `/Author`  | `author`                                                             |
-| `/Subject` | `description`                                                        |
-| —          | `publisher`, `language`, `isbn` stay NULL                            |
-| —          | `cover_path` stays NULL (no rendering; the UI shows placeholder art) |
+| PDF field  | Library column                                                     |
+| ---------- | ------------------------------------------------------------------ |
+| `/Title`   | `title` (file-name fallback)                                       |
+| `/Author`  | `author`                                                           |
+| `/Subject` | `description`                                                      |
+| —          | `publisher`, `language`, `isbn` stay NULL                          |
+| page 1     | `cover_path` (rasterized to PNG by `pdf/render.rs` at import; NULL |
+|            | when the PDFium library is unavailable — placeholder art then)     |
 
 ## Error handling
 

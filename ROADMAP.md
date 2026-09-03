@@ -66,6 +66,9 @@ TuxBooks currently has:
 - PDF outline extracted through the engine seam with page-destination
   navigation in the reader navigation drawer
 - outline and thumbnails E2E on a 100-page fixture with a nested outline
+- PDF covers: page 1 rasterized to a cover image at import time (PDFium
+  via `pdfium-render`, bundled with the app), so PDFs show real cover art
+  in the library grid; imports degrade gracefully without the library
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

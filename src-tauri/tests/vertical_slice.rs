@@ -42,7 +42,7 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     assert_eq!(stats_before.book_count, 0);
 
     let covers = tmp.path().join("covers");
-    let report = import_directory(&pool, &library, &covers).await?;
+    let report = import_directory(&pool, &library, &covers, &[], &|_| {}).await?;
     assert_eq!(report.imported, 1, "fixture should import: {report:?}");
     assert!(report.failed.is_empty());
 
@@ -65,7 +65,7 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     assert_eq!(hits[0].book_id, book.id);
 
     // Re-import must update in place, not duplicate.
-    let rerun = import_directory(&pool, &library, &covers).await?;
+    let rerun = import_directory(&pool, &library, &covers, &[], &|_| {}).await?;
     assert_eq!(rerun.updated, 1);
     assert_eq!(rerun.imported, 0);
     assert_eq!(books::count_books(&pool).await?, 1);
@@ -90,7 +90,8 @@ async fn malformed_epub_is_reported_and_does_not_break_the_library() -> anyhow::
     std::fs::write(library.join("corrupt.epub"), b"this is not a zip")?;
 
     let pool = init_pool(&tmp.path().join("t.db")).await?;
-    let report = import_directory(&pool, &library, &tmp.path().join("covers")).await?;
+    let report =
+        import_directory(&pool, &library, &tmp.path().join("covers"), &[], &|_| {}).await?;
 
     assert_eq!(report.imported, 0);
     assert_eq!(report.failed.len(), 1);
@@ -101,17 +102,22 @@ async fn malformed_epub_is_reported_and_does_not_break_the_library() -> anyhow::
 
 /// Reader slice: every committed fixture PDF imports through the same stack
 /// the app uses and its bytes are served back verbatim for the frontend
-/// PDF.js engine (lopdf must parse them all).
+/// PDF.js engine (lopdf must parse them all). When the PDFium library is
+/// installed, the import also rasterizes a page-1 cover.
 #[tokio::test]
 async fn fixture_pdfs_import_and_serve_their_bytes() -> anyhow::Result<()> {
+    let pdfium_dirs = tuxbooks_lib::pdfium_library_dirs(None);
+    let covers_expected = tuxbooks_lib::pdf::render::pdfium_available(&pdfium_dirs);
+
     for name in ["minimal.pdf", "large.pdf", "mixed.pdf"] {
         let tmp = tempfile::tempdir()?;
         let library = tmp.path().join("library");
         std::fs::create_dir_all(&library)?;
         std::fs::copy(fixture_pdf(name), library.join(name))?;
 
+        let covers = tmp.path().join("covers");
         let pool = init_pool(&tmp.path().join("t.db")).await?;
-        let report = import_directory(&pool, &library, &tmp.path().join("covers")).await?;
+        let report = import_directory(&pool, &library, &covers, &pdfium_dirs, &|_| {}).await?;
         assert_eq!(report.imported, 1, "{name} should import: {report:?}");
         assert!(report.failed.is_empty(), "lopdf must parse {name}");
 
@@ -119,6 +125,21 @@ async fn fixture_pdfs_import_and_serve_their_bytes() -> anyhow::Result<()> {
         let expected = std::fs::read(fixture_pdf(name))?;
         let served = load_book_file(&pool, book.id).await?;
         assert_eq!(served, expected);
+
+        match (&book.cover_path, covers_expected) {
+            (Some(path), true) => {
+                let png = std::fs::read(path)?;
+                assert_eq!(
+                    &png[..8],
+                    b"\x89PNG\r\n\x1a\n",
+                    "{name} cover must be a PNG"
+                );
+            }
+            (None, false) => {}
+            got => panic!(
+                "{name}: unexpected cover state {got:?} (pdfium installed: {covers_expected})"
+            ),
+        }
     }
     Ok(())
 }
