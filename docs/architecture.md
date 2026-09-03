@@ -11,7 +11,7 @@ Rust process owns the database and the filesystem; the webview renders.
 │  WebView (frontend/)                Rust process (src-tauri/)     │
 │  React + TypeScript + Vite          Tauri runtime (tokio)         │
 │                                     │                             │
-│  invoke("cmd", args) ────────────►  commands/  (IPC boundary)    │
+│  invoke("cmd", args) ────────────►  commands/  (IPC boundary)     │
 │  typed Promise result  ◄──────────  services/ (application ops)   │
 │                                     ├─ repository/ (SQL)          │
 │                                     ├─ epub/ (parsing)            │
