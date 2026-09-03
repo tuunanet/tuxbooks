@@ -1,4 +1,4 @@
-# tuxbooks
+# TuxBooks
 
 A local-first, bookshelf-style desktop ebook library for Linux
 (additional desktop targets supported by Tauri). Point it at a folder of EPUB
