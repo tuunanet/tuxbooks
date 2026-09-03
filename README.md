@@ -1,14 +1,10 @@
 # tuxbooks
 
-A local-first, bookshelf-style desktop ebook library for Linux and Windows
+A local-first, bookshelf-style desktop ebook library for Linux
 (additional desktop targets supported by Tauri). Point it at a folder of EPUB
 files; it indexes
 metadata and covers into a local SQLite database, keeps collections and reading
-progress, and (soon) provides an EPUB reading experience. No accounts, no cloud,
-no network services.
-
-**Status:** project foundation + minimal vertical slice
-(fixture EPUB → parser → scanner → SQLite → Tauri command → React UI → E2E test).
+progress, and provides an EPUB reading experience.
 
 ## Stack
 
@@ -71,12 +67,6 @@ scripts/           fixture/icon generators, env helper
 Start with [docs/architecture.md](docs/architecture.md), then
 [docs/database.md](docs/database.md), [docs/epub.md](docs/epub.md), and
 [docs/testing.md](docs/testing.md). Agents: read `AGENTS.md` first.
-
-## Test data policy
-
-Fixtures are tiny, deterministic, and generated from original content
-(`scripts/make-fixture.py`). Tests never touch your real library: they use
-temporary directories via `TEST_LIBRARY_PATH` / `TEST_DATABASE_PATH`.
 
 ## License
 
