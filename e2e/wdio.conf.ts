@@ -66,6 +66,13 @@ export const config: Options.Testrunner = {
       // session.
       "wdio:enforceWebDriverClassic": true,
       browserName: "tauri",
+      // Display-only. The tauri service deletes browserName during startup
+      // (tauri-driver rejects it during capability matching), which leaves
+      // wdio's worker status lines reading "RUNNING in undefined". The CLI's
+      // status formatter falls back to appium:platformName for the worker
+      // name; unknown extension capabilities are ignored per the W3C
+      // capability-processing rules, so this never reaches session matching.
+      "appium:platformName": "Tauri",
       "tauri:options": {
         application: appBinary,
       },
