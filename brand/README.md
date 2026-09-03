@@ -18,11 +18,9 @@ regenerate it after editing the source art:
 python3 -c "from PIL import Image; im = Image.open('brand/tuxbooks-dark.png'); im.thumbnail((320, 320)); im.save('site/img/logo-dark.png', optimize=True)"
 ```
 
-The desktop app icons under `src-tauri/icons/` are generated from the same
-art: `scripts/make-icon.py` crops the logo's rounded frame into the square
-`scripts/icon-source.png`, then Tauri renders every platform size from it:
+The desktop app icons under `src-tauri/icons/` are rendered from the
+hand-maintained square source `scripts/icon-source.png`:
 
 ```sh
-python3 scripts/make-icon.py
 pnpm tauri icon scripts/icon-source.png
 ```
