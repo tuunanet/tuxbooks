@@ -3,7 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    # Nothing in CI consumes these: markdown (README, docs/, AGENTS.md,
+    # LICENSE.md), the static site (published by publish-site.yml), and
+    # ignore-file churn. Skips fire when EVERY changed file matches.
+    paths-ignore:
+      - "**.md"
+      - "site/**"
+      - ".gitignore"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "site/**"
+      - ".gitignore"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
