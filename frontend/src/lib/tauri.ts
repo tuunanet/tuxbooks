@@ -8,6 +8,7 @@ import type {
   LibraryStats,
   ReadingProgressInput,
   ReadingProgressRecord,
+  SearchHit,
 } from "@/types/domain";
 
 export type { Book, BookFormat, ImportReport, LibraryChange, LibraryStats } from "@/types/domain";
@@ -18,6 +19,11 @@ export function getLibraryStats(): Promise<LibraryStats> {
 
 export function listBooks(): Promise<Book[]> {
   return invoke("list_books");
+}
+
+/** Full-text library search (FTS5 over titles, authors, publishers, and more). */
+export function searchLibrary(query: string): Promise<SearchHit[]> {
+  return invoke("search_books", { query });
 }
 
 export function scanLibrary(path: string): Promise<ImportReport> {

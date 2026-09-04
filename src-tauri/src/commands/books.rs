@@ -1,6 +1,6 @@
 use tauri::{Emitter, State};
 
-use crate::domain::{Book, LibraryStats};
+use crate::domain::{Book, LibraryStats, SearchHit};
 use crate::error::AppError;
 use crate::repository::{books, collections};
 use crate::services::library_reconciler::LibraryChange;
@@ -21,6 +21,17 @@ pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStat
 #[tauri::command]
 pub async fn list_books(state: State<'_, AppState>) -> Result<Vec<Book>, AppError> {
     books::list_books(&state.db).await
+}
+
+/// Full-text library search behind the global search box (Ctrl/Cmd+K).
+/// Plain user text in; ranked hits with snippets out. Empty queries are
+/// rejected — the frontend never sends them.
+#[tauri::command]
+pub async fn search_books(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<SearchHit>, AppError> {
+    crate::services::search::search_books(&state.db, &query).await
 }
 
 /// Remove a book from the library (user-initiated). The source file on disk

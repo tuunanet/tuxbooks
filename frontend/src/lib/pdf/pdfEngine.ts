@@ -1,6 +1,7 @@
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { normalizePdfOutline } from "./pdfOutline";
+import { assemblePageText, type PdfTextItem } from "./pdfSearch";
 
 /**
  * The single seam between the app and the PDF.js engine. Components depend on
@@ -81,3 +82,17 @@ export function getPdfOutline(document: PdfDocument) {
   return normalizePdfOutline(document);
 }
 export type { PdfOutlineItem } from "./pdfOutline";
+
+/**
+ * Assembled plain text of one page (PDF.js text content), for in-book
+ * search. Items are joined at their boundaries so queries match across
+ * line breaks like they read in the rendered page. Assembly itself is a
+ * pure function in pdfSearch.ts (unit-tested without the engine).
+ */
+export async function getPdfPageText(document: PdfDocument, pageNumber: number): Promise<string> {
+  const page: PDFPageProxy = await document.getPage(pageNumber);
+  const content = await page.getTextContent();
+  return assemblePageText(content.items as PdfTextItem[]);
+}
+
+export { findPageMatches, type PdfSearchExcerpt } from "./pdfSearch";

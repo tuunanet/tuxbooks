@@ -106,7 +106,11 @@ layout, virtualization, the render queue, and persistence — see
 - `reader`: controlled file-byte access for the reading engines — resolves a
   book id to its stored path via the repository and reads it; paths never
   cross the IPC boundary.
-- `search`: FTS5 MATCH queries against `books_fts`.
+- `search`: library full-text search (milestone 5). Sanitizes the raw user
+  query into FTS5 MATCH syntax (quoted prefix phrases, ANDed) and queries
+  `books_fts` through `repository::books::search_fts`; hits carry the
+  book id, title, author, and an auto-column snippet. Exposed as the
+  `search_books` command behind the global search box (Ctrl/Cmd+K).
 
 ## Frontend structure
 
@@ -123,11 +127,12 @@ frontend/src/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers
         books/            BookCard, BookListItem, BookDetail, book context menu
-        search/           GlobalSearch (Ctrl/Cmd+K) + client-side searchBooks
+        search/           GlobalSearch (Ctrl/Cmd+K, backend FTS) + snippet splitting
         reader/           ReaderShell, EPUB reader, pdf/ continuous PDF
                           reader (layout math, virtualization, render queue,
                           scroll tracking, thumbnails sidebar, outline,
-                          persistence — see pdf.md)
+                          persistence — see pdf.md), ReaderNavigation with
+                          the in-book Search tab, shared searchModel
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

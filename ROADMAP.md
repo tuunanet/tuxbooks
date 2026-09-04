@@ -114,6 +114,19 @@ TuxBooks currently has:
   count) on the real binary; rapid-jump and outline-jump E2E interactions
   are hardened against lost programmatic scrolls and stale element
   handles under load
+- milestone 5 search: the library search box (Ctrl/Cmd+K) queries the
+  FTS5 index over title, subtitle, author, publisher, ISBN, description,
+  and file path (migration 0006 widened the external-content table and
+  its triggers; user queries are sanitized into quoted prefix phrases, so
+  input cannot inject MATCH syntax) and shows ranked hits with snippets;
+  in-book search ships as one shared reader Search tab (Ctrl/Cmd+F or the
+  toolbar button) over a format-agnostic match model — EPUB matches come
+  from the foliate-js engine (per-chapter groups, excerpts, CFI
+  navigation, engine-drawn match highlights) and PDF matches from PDF.js
+  text extraction behind the same seam (per-page groups, page navigation,
+  per-document text cache, bounded match count), both pinned by unit
+  tests and real-binary E2E (library hit → detail, EPUB match → section
+  move, PDF match → page move)
 
 This completes milestone 4: EPUB cover extraction, PDF page-1 cover
 rendering, placeholder fallback for missing/corrupt artwork, and an
@@ -123,6 +136,11 @@ With the two phases above, milestone 9 (reader reliability and
 performance hardening) is complete: stress interactions, async
 lifecycle guarantees, and memory bounds are implemented and pinned by
 unit and real-binary E2E tests.
+
+Milestone 5 (search) is complete: library-wide search through SQLite
+FTS5 behind Ctrl/Cmd+K, and in-book search for both reader formats
+through one shared navigation tab, each reached by unit tests and real
+desktop E2E.
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

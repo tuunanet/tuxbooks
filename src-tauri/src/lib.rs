@@ -173,6 +173,7 @@ pub fn run() {
             commands::books::get_library_stats,
             commands::books::list_books,
             commands::books::remove_book,
+            commands::books::search_books,
             commands::library::scan_library,
             commands::library::reconnect_book,
             commands::progress::get_reading_progress,

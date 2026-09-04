@@ -5,16 +5,26 @@ import userEvent from "@testing-library/user-event";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@/lib/pdf/pdfEngine", () => ({
-  openPdfDocument: vi.fn(),
-  closePdfDocument: vi.fn(async () => {}),
-  getPdfOutline: vi.fn(async () => []),
-  pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
-  isRenderingCancelled: vi.fn(() => false),
-}));
+vi.mock("@/lib/pdf/pdfEngine", async () => {
+  const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
+  return {
+    openPdfDocument: vi.fn(),
+    closePdfDocument: vi.fn(async () => {}),
+    getPdfOutline: vi.fn(async () => []),
+    getPdfPageText: vi.fn(async () => ""),
+    findPageMatches,
+    pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
+    isRenderingCancelled: vi.fn(() => false),
+  };
+});
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
-import { closePdfDocument, getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfEngine";
+import {
+  closePdfDocument,
+  getPdfOutline,
+  getPdfPageText,
+  openPdfDocument,
+} from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
@@ -56,6 +66,9 @@ interface PdfReaderProps {
   onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
   sidebarHost?: HTMLElement | null;
   scrollContainerRef?: RefObject<HTMLElement | null>;
+  searchTargetRef?: { current: unknown };
+  onSearchGroup?: (bookId: number, group: unknown) => void;
+  onSearchDone?: (bookId: number) => void;
 }
 
 function renderPdfReader(props: PdfReaderProps = {}) {
@@ -78,6 +91,9 @@ function readerTree(props: PdfReaderProps) {
           onOutlineLoad={props.onOutlineLoad}
           sidebarHost={props.sidebarHost}
           scrollContainerRef={props.scrollContainerRef}
+          searchTargetRef={props.searchTargetRef as never}
+          onSearchGroup={props.onSearchGroup as never}
+          onSearchDone={props.onSearchDone}
         />
       </ReaderProvider>
     </ShortcutProvider>
@@ -1120,5 +1136,70 @@ describe("PdfReader zoom", () => {
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 0.75)),
     );
     expect(screen.getByTestId("pdf-zoom-level")).toHaveTextContent("75%");
+  });
+});
+
+describe("PdfReader in-book search", () => {
+  it("streams per-page match groups and reports completion", async () => {
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    const doc = makeFakePdfDocument(2);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    vi.mocked(getPdfPageText).mockImplementation(async (_document, page) =>
+      page === 1 ? "alpha beta gamma" : "delta beta epsilon",
+    );
+
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const groups: Array<{ label: string; matches: unknown[] }> = [];
+    let done = false;
+    renderPdfReader({
+      searchTargetRef,
+      onSearchGroup: (_bookId, group) => groups.push(group as never),
+      onSearchDone: () => {
+        done = true;
+      },
+    });
+    await screen.findByTestId("pdf-canvas");
+
+    searchTargetRef.current!.run("beta");
+    await waitFor(() => expect(groups).toHaveLength(2));
+    expect(groups[0]).toEqual({
+      label: "Page 1",
+      matches: [{ cfi: null, page: 1, excerpt: { pre: "alpha ", match: "beta", post: " gamma" } }],
+    });
+    expect(groups[1]?.label).toBe("Page 2");
+    await waitFor(() => expect(done).toBe(true));
+  });
+
+  it("drops the page-text cache when the document changes", async () => {
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    const first = makeFakePdfDocument(1);
+    const second = makeFakePdfDocument(1);
+    openDocumentMock.mockResolvedValueOnce(first as unknown as EngineDocument);
+    openDocumentMock.mockResolvedValueOnce(second as unknown as EngineDocument);
+    vi.mocked(getPdfPageText).mockImplementation(async (_document, page) => `text ${page}`);
+
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const { rerenderBook } = renderPdfReader({ searchTargetRef, book: pdfBook });
+    await screen.findByTestId("pdf-canvas");
+    searchTargetRef.current!.run("text");
+    await waitFor(() => expect(vi.mocked(getPdfPageText)).toHaveBeenCalled());
+
+    rerenderBook({ searchTargetRef, book: { ...pdfBook, id: 8 } });
+    await screen.findAllByTestId("pdf-canvas");
+    searchTargetRef.current!.run("text");
+    await waitFor(() =>
+      expect(vi.mocked(getPdfPageText)).toHaveBeenCalledWith(
+        second as unknown as EngineDocument,
+        1,
+      ),
+    );
   });
 });

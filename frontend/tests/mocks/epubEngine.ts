@@ -7,7 +7,7 @@ import { vi } from "vitest";
  * `makeFakeEpubModule()`. Created handles land in `fakeEpubHandles` so tests
  * can drive the engine (emit relocate, inspect calls) from outside.
  */
-import type { EpubRelocateDetail, EpubTocItem } from "@/lib/epub/epubEngine";
+import type { EpubRelocateDetail, EpubSearchCallbacks, EpubTocItem } from "@/lib/epub/epubEngine";
 
 export interface FakeEpubHandle {
   host: HTMLDivElement;
@@ -23,6 +23,12 @@ export interface FakeEpubHandle {
   getToc: ReturnType<typeof vi.fn>;
   getSectionHref: ReturnType<typeof vi.fn>;
   getFraction: ReturnType<typeof vi.fn>;
+  search: (query: string, callbacks: EpubSearchCallbacks) => ReturnType<typeof vi.fn>;
+  clearSearch: ReturnType<typeof vi.fn>;
+  /** Callbacks from the most recent search call, for driving matches. */
+  lastSearchCallbacks: EpubSearchCallbacks | null;
+  /** Cancel functions returned by each search call, in call order. */
+  searchCancelFns: Array<ReturnType<typeof vi.fn>>;
   onRelocate: (fn: (detail: EpubRelocateDetail) => void) => () => void;
   onLoad: (fn: (detail: { index: number; doc: Document }) => void) => () => void;
   onExternalLink: (fn: (href: string) => void) => () => void;
@@ -53,6 +59,15 @@ function makeFakeHandle(toc: EpubTocItem[]): FakeEpubHandle {
     getToc: vi.fn(() => toc),
     getSectionHref: vi.fn((index: number) => `chapter${index + 1}.xhtml`),
     getFraction: vi.fn(() => 0),
+    clearSearch: vi.fn(),
+    lastSearchCallbacks: null as EpubSearchCallbacks | null,
+    searchCancelFns: [] as Array<ReturnType<typeof vi.fn>>,
+    search: (_query: string, callbacks: EpubSearchCallbacks) => {
+      handle.lastSearchCallbacks = callbacks;
+      const cancel = vi.fn();
+      handle.searchCancelFns.push(cancel);
+      return cancel;
+    },
     onRelocate: (fn: (detail: EpubRelocateDetail) => void) => {
       relocateListeners.add(fn);
       return unsub(relocateListeners, fn);
@@ -102,6 +117,15 @@ export function lastFakeHandle(): FakeEpubHandle {
   const handle = fakeEpubHandles[fakeEpubHandles.length - 1];
   if (!handle) throw new Error("no fake epub handle created");
   return handle;
+}
+
+/** Flush the search callbacks the last run seeded: section → done. */
+export function emitSearchResults(
+  handle: FakeEpubHandle,
+  sections: Parameters<EpubSearchCallbacks["onSection"]>[0][],
+): void {
+  for (const section of sections) handle.lastSearchCallbacks?.onSection(section);
+  handle.lastSearchCallbacks?.onDone();
 }
 
 /** The module shape installed by the `vi.mock` factory in test files. */

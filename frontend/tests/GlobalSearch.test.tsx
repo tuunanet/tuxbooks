@@ -13,12 +13,20 @@ import { AppShell } from "@/components/layout/AppShell";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { makeBook } from "./factories";
-import { mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/tauri";
 
-function renderBareSearch() {
+const DEEP_WATERS_HIT = {
+  bookId: 2,
+  title: "Deep Waters",
+  author: "Moa Berg",
+  snippet: "…the <em>deep</em> waters held their breath…",
+};
+
+function renderBareSearch(hits: unknown[] = [DEEP_WATERS_HIT]) {
   mockInvoke({
     get_library_stats: { bookCount: 2, collectionCount: 0 },
     list_books: [makeBook(), makeBook({ id: 2, title: "Deep Waters", author: "Moa Berg" })],
+    search_books: hits,
   });
   return render(
     <AppStateProvider>
@@ -30,7 +38,7 @@ function renderBareSearch() {
 }
 
 describe("GlobalSearch", () => {
-  it("lists matching books as a dropdown while typing", async () => {
+  it("lists backend FTS hits as a dropdown while typing", async () => {
     renderBareSearch();
     const input = screen.getByTestId("global-search");
 
@@ -39,10 +47,23 @@ describe("GlobalSearch", () => {
     expect(options).toHaveLength(1);
     expect(options[0]).toHaveAccessibleName(/Deep Waters/);
     expect(input).toHaveAttribute("aria-expanded", "true");
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("search_books", { query: "deep" }),
+    );
+  });
+
+  it("shows the match snippet with the matched term emphasized", async () => {
+    renderBareSearch();
+
+    await userEvent.type(screen.getByTestId("global-search"), "deep");
+    const snippet = await screen.findAllByTestId("global-search-snippet");
+    expect(snippet[0]).toHaveTextContent("deep");
+    const strong = snippet[0]?.querySelector("strong");
+    expect(strong).toHaveTextContent("deep");
   });
 
   it("shows an honest empty message when nothing matches", async () => {
-    renderBareSearch();
+    renderBareSearch([]);
 
     await userEvent.type(screen.getByTestId("global-search"), "zzz-not-here");
     expect(await screen.findByTestId("global-search-empty")).toHaveTextContent(/No books match/i);
@@ -53,7 +74,7 @@ describe("GlobalSearch", () => {
     const input = screen.getByTestId("global-search");
 
     await userEvent.type(input, "deep");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(await screen.findByRole("option")).toBeInTheDocument();
 
     await userEvent.type(input, "{Escape}");
     expect(input).toHaveValue("");
@@ -64,6 +85,7 @@ describe("GlobalSearch", () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
       list_books: [makeBook(), makeBook({ id: 2, title: "Deep Waters", author: "Moa Berg" })],
+      search_books: [DEEP_WATERS_HIT],
     });
 
     render(<AppShell />);
@@ -82,6 +104,9 @@ describe("GlobalSearch", () => {
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
+      search_books: [
+        { bookId: 1, title: makeBook().title, author: null, snippet: "<em>minimal</em> book" },
+      ],
     });
 
     render(<AppShell />);
@@ -94,6 +119,16 @@ describe("GlobalSearch", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
+  });
+
+  it("queries the backend with the trimmed text", async () => {
+    renderBareSearch();
+    const input = screen.getByTestId("global-search");
+
+    await userEvent.type(input, "  deep  ");
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("search_books", { query: "deep" }),
+    );
   });
 });
 

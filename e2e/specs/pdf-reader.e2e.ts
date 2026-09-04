@@ -2,6 +2,8 @@ import {
   bitmapCacheUsage,
   canvasIsNonBlank,
   clickUntilEffect,
+  closeReaderNavigation,
+  currentPageNumber,
   fitFactor,
   maxSingleBitmapBytes,
   openInReader,
@@ -460,6 +462,42 @@ describe("tuxbooks continuous PDF reader", () => {
     await $("[data-testid=reader-sidebar-toggle]").click();
     await $("[data-testid=pdf-thumbnails]").waitForExist({ reverse: true, timeout: 30000 });
 
+    await returnToLibrary();
+  });
+
+  // Milestone 5 — in-book search: page text comes from the PDF.js engine
+  // through the seam; picking a match navigates to its page.
+  it("finds page text and navigates to the matching page", async () => {
+    await openInReader("A Minimal Manual (PDF)");
+    await waitForRendered(1);
+
+    await $("[data-testid=reader-search]").click();
+    await $("[data-testid=reader-search-input]").waitForDisplayed({ timeout: 30000 });
+    // "Page 2 of 3" exists only on page 2 of the fixture.
+    await $("[data-testid=reader-search-input]").setValue("Page 2 of 3");
+
+    await browser.waitUntil(
+      async () => (await $$("[data-testid=reader-search-match]")).length > 0,
+      { timeout: 30000, timeoutMsg: "pdf in-book search never produced results" },
+    );
+    await browser.waitUntil(
+      async () => (await textOf("reader-search-status")).includes("1 match"),
+      { timeout: 30000, timeoutMsg: "search status never reported the match count" },
+    );
+    const resultsText = await browser.execute(
+      () => document.querySelector("[data-testid=reader-search-results]")?.textContent ?? "",
+    );
+    expect(resultsText).toContain("Page 2");
+
+    // Clicking the match navigates to page 2; the drawer stays open.
+    await $("[data-testid=reader-search-match]").click();
+    await browser.waitUntil(async () => (await currentPageNumber()) === 2, {
+      timeout: 30000,
+      timeoutMsg: "search match never navigated to page 2",
+    });
+    await expect($("[data-testid=reader-nav]")).toBeDisplayed();
+
+    await closeReaderNavigation();
     await returnToLibrary();
   });
 });

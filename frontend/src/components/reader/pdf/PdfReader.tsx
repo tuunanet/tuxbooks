@@ -8,6 +8,7 @@ import { useFitWidthScale } from "./hooks/useFitWidthScale";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
 import { usePdfPersistence } from "./hooks/usePdfPersistence";
+import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
   READING_ANCHOR_RATIO,
   setScrollTop,
@@ -21,6 +22,7 @@ import { PdfToolbar } from "./PdfToolbar";
 import { PdfBitmapCache } from "./pdfBitmapCache";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
+import type { ReaderSearchController, ReaderSearchGroup } from "../searchModel";
 import type { Book } from "@/types/domain";
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2] as const;
@@ -59,6 +61,16 @@ interface PdfReaderProps {
   sidebarHost?: HTMLElement | null;
   /** The reader's scroll container, owned by ReaderShell. */
   scrollContainerRef?: RefObject<HTMLElement | null>;
+  /**
+   * Filled with the in-book search controller once the document is loaded;
+   * the shell's search drawer drives it without knowing the document lives
+   * here.
+   */
+  searchTargetRef?: { current: ReaderSearchController | null };
+  /** Streams one page's worth of matches up to the shell. */
+  onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
+  /** Reports that the running search finished (for this book). */
+  onSearchDone?: (bookId: number) => void;
 }
 
 /**
@@ -71,8 +83,9 @@ interface PdfReaderProps {
  * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), toolbar state (PdfToolbar),
  * the thumbnails sidebar (PdfSidebar, portaled into the shell's host), and
  * persistence (usePdfPersistence). The outline comes from the engine seam
- * and is reported upward for the navigation drawer. Annotations and search
- * stay out of scope.
+ * and is reported upward for the navigation drawer, and in-book search
+ * streams page text matches through usePdfSearch. Annotations stay out of
+ * scope.
  */
 export function PdfReader({
   book,
@@ -80,6 +93,9 @@ export function PdfReader({
   onOutlineLoad,
   sidebarHost,
   scrollContainerRef,
+  searchTargetRef,
+  onSearchGroup,
+  onSearchDone,
 }: PdfReaderProps) {
   const { position, setPosition } = useReader();
   const {
@@ -152,6 +168,24 @@ export function PdfReader({
       cancelled = true;
     };
   }, [pdfDocument]);
+
+  // In-book search: extracts page text through the engine seam and streams
+  // matches up to the shell. Registered on the shell's ref only while a
+  // document is loaded, so a switched book can never be searched through a
+  // stale handle.
+  const searchController = usePdfSearch({
+    document: pdfDocument,
+    bookId: book.id,
+    onGroup: onSearchGroup ?? (() => {}),
+    onDone: onSearchDone ?? (() => {}),
+  });
+  useEffect(() => {
+    if (!searchTargetRef || !pdfDocument) return;
+    searchTargetRef.current = searchController;
+    return () => {
+      searchTargetRef.current = null;
+    };
+  }, [searchTargetRef, pdfDocument, searchController]);
 
   const slots = useMemo(
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),

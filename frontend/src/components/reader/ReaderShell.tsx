@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bookmark,
@@ -21,8 +21,17 @@ import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
-import { ReaderNavigation } from "./ReaderNavigation";
+import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
 import { ReaderAppearance } from "./ReaderAppearance";
+import {
+  appendSearchGroup,
+  emptySearchState,
+  finishSearchGroup,
+  type ReaderSearchController,
+  type ReaderSearchGroup,
+  type ReaderSearchMatch,
+  type ReaderSearchState,
+} from "./searchModel";
 
 const THEME_CLASSES: Record<ReaderTheme, string> = {
   light: "bg-background text-foreground",
@@ -40,7 +49,13 @@ export function ReaderShell() {
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
   const { preferences, position, setPosition, bookmarks, toggleBookmark } = useReader();
-  const [navOpen, setNavOpen] = useState(false);
+  // The navigation drawer plus its selected tab: the Search toolbar button
+  // and Ctrl/Cmd+F open the drawer straight onto the Search tab.
+  const [nav, setNav] = useState<{ open: boolean; tab: ReaderNavTab }>({
+    open: false,
+    tab: "contents",
+  });
+  const openNav = (tab: ReaderNavTab) => setNav({ open: true, tab });
   // Real PDF page count, reported by PdfReader once the document loads.
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   // Real EPUB table of contents, reported by EpubReader once the engine
@@ -52,6 +67,13 @@ export function ReaderShell() {
     toc: EpubTocItem[];
   } | null>(null);
   const epubJumpRef = useRef<((href: string) => void) | null>(null);
+  // In-book search controllers, registered by the open reader; the shell's
+  // search drawer drives them without knowing the document format.
+  const epubSearchRef = useRef<ReaderSearchController | null>(null);
+  const pdfSearchRef = useRef<ReaderSearchController | null>(null);
+  // Streaming in-book search results for the open book (shared model for
+  // both formats; stale books' results are ignored by the model helpers).
+  const [searchState, setSearchState] = useState<ReaderSearchState | null>(null);
   // Real PDF outline, reported by PdfReader once the engine resolves it.
   // Kept with its owning book id so a stale book's outline is never shown.
   const [pdfOutlineState, setPdfOutlineState] = useState<{
@@ -100,6 +122,41 @@ export function ReaderShell() {
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
+  useShortcut("mod+f", () => openNav("search"));
+
+  // In-book search: the shell owns the state (one book open at a time), the
+  // active reader streams matches in through the shared model helpers,
+  // which ignore anything not belonging to the book being searched.
+  const bookId = book?.id ?? -1;
+  const runSearch = useCallback(
+    (query: string) => {
+      if (query === "") {
+        epubSearchRef.current?.cancel();
+        pdfSearchRef.current?.cancel();
+        setSearchState(null);
+        return;
+      }
+      setSearchState(emptySearchState(bookId, query));
+      (isEpub ? epubSearchRef : pdfSearchRef).current?.run(query);
+    },
+    [bookId, isEpub],
+  );
+  const appendSearchGroupFrom = useCallback((id: number, group: ReaderSearchGroup) => {
+    setSearchState((prev) => (prev ? appendSearchGroup(prev, id, group) : prev));
+  }, []);
+  const finishSearchFrom = useCallback((id: number) => {
+    setSearchState((prev) => (prev ? finishSearchGroup(prev, id) : prev));
+  }, []);
+  const pickSearchMatch = useCallback(
+    (match: ReaderSearchMatch) => {
+      if (match.cfi !== null) {
+        epubJumpRef.current?.(match.cfi);
+      } else if (match.page !== null && knownPageCount > 0) {
+        setPosition(pageToPosition(match.page, knownPageCount));
+      }
+    },
+    [knownPageCount, setPosition],
+  );
 
   const bookmarked = bookmarks.some(
     (bookmark) => Math.round(bookmark.percentage) === Math.round(position),
@@ -150,19 +207,17 @@ export function ReaderShell() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Search document"
-                disabled
-                title="Search arrives with the real document renderer"
-              >
-                <Search />
-              </Button>
-            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              data-testid="reader-search"
+              aria-label="Search in book"
+              onClick={() => openNav("search")}
+            >
+              <Search />
+            </Button>
           </TooltipTrigger>
-          <TooltipContent>Search (not wired up yet)</TooltipContent>
+          <TooltipContent>Search in book (Ctrl+F)</TooltipContent>
         </Tooltip>
 
         {isPdf && (
@@ -192,7 +247,7 @@ export function ReaderShell() {
               size="icon-sm"
               data-testid="reader-nav-trigger"
               aria-label="Contents and bookmarks"
-              onClick={() => setNavOpen(true)}
+              onClick={() => openNav(isEpub ? "contents" : "pages")}
             >
               <TableOfContents />
             </Button>
@@ -238,6 +293,9 @@ export function ReaderShell() {
               book={book}
               onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
               jumpTargetRef={epubJumpRef}
+              searchTargetRef={epubSearchRef}
+              onSearchGroup={appendSearchGroupFrom}
+              onSearchDone={finishSearchFrom}
             />
           ) : (
             <PdfReader
@@ -247,6 +305,9 @@ export function ReaderShell() {
               onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
               sidebarHost={pdfSidebarHost}
               scrollContainerRef={readerContentRef}
+              searchTargetRef={pdfSearchRef}
+              onSearchGroup={appendSearchGroupFrom}
+              onSearchDone={finishSearchFrom}
             />
           )}
         </main>
@@ -270,8 +331,8 @@ export function ReaderShell() {
       </footer>
 
       <ReaderNavigation
-        open={navOpen}
-        onOpenChange={setNavOpen}
+        open={nav.open}
+        onOpenChange={(open) => setNav((prev) => ({ ...prev, open }))}
         book={book}
         pageCount={knownPageCount}
         onJump={setPosition}
@@ -281,6 +342,11 @@ export function ReaderShell() {
         onPdfJump={(page) => {
           if (knownPageCount > 0) setPosition(pageToPosition(page, knownPageCount));
         }}
+        search={searchState !== null && searchState.bookId === book.id ? searchState : null}
+        onSearch={runSearch}
+        onSearchPick={pickSearchMatch}
+        tab={nav.tab}
+        onTabChange={(tab) => setNav((prev) => ({ ...prev, tab }))}
       />
     </div>
   );

@@ -77,6 +77,17 @@ impl Serialize for Book {
     }
 }
 
+/// One library full-text search hit: the book's identity plus an FTS5
+/// snippet taken from whichever indexed column matched best.
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub book_id: i64,
+    pub title: String,
+    pub author: Option<String>,
+    pub snippet: String,
+}
+
 /// Data required to insert or update a book. `added_at`/`modified_at` are managed
 /// by the database; `last_opened_at` is lifecycle state, not import data.
 /// File snapshots (`file_size`/`file_mtime`) come from the filesystem at parse

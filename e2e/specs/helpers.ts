@@ -103,6 +103,24 @@ export async function openReaderNavigation(): Promise<void> {
   throw new Error("reader navigation drawer never opened");
 }
 
+/**
+ * Closes the navigation drawer when a test intentionally left it open
+ * (in-book search keeps it open so the next match is one click away).
+ * The open drawer's overlay would otherwise block the reader toolbar.
+ */
+export async function closeReaderNavigation(): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (!(await $("[data-testid=reader-nav]").isExisting())) return;
+    await $("[data-testid=reader-nav] [data-slot=sheet-close]").click();
+    const closed = await $("[data-testid=reader-nav]")
+      .waitForExist({ reverse: true, timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (closed) return;
+  }
+  throw new Error("reader navigation drawer never closed");
+}
+
 /** Open a book's detail view and continue into the reader. */
 export async function openInReader(ariaLabel: string): Promise<void> {
   await openBookDetail(ariaLabel);

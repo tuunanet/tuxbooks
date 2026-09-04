@@ -7,13 +7,18 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
 }));
-vi.mock("@/lib/pdf/pdfEngine", () => ({
-  openPdfDocument: vi.fn(),
-  closePdfDocument: vi.fn(async () => {}),
-  getPdfOutline: vi.fn(async () => []),
-  pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
-  isRenderingCancelled: vi.fn(() => false),
-}));
+vi.mock("@/lib/pdf/pdfEngine", async () => {
+  const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
+  return {
+    openPdfDocument: vi.fn(),
+    closePdfDocument: vi.fn(async () => {}),
+    getPdfOutline: vi.fn(async () => []),
+    getPdfPageText: vi.fn(async () => ""),
+    findPageMatches,
+    pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
+    isRenderingCancelled: vi.fn(() => false),
+  };
+});
 vi.mock("@/lib/epub/epubEngine", async () => {
   const { makeFakeEpubModule } = await import("./mocks/epubEngine");
   return makeFakeEpubModule();
@@ -97,13 +102,18 @@ describe("ReaderShell chrome", () => {
     expect(screen.queryByTestId("reader-view")).not.toBeInTheDocument();
   });
 
-  it("keeps the search affordance honestly disabled", async () => {
+  it("opens the navigation drawer onto the Search tab", async () => {
     renderReader();
 
     expect(await screen.findByTestId("reader-view")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Search document" })).toBeDisabled();
+    const searchButton = screen.getByRole("button", { name: "Search in book" });
+    expect(searchButton).toBeEnabled();
     // The thumbnails sidebar is a PDF affordance; EPUBs have none.
     expect(screen.queryByTestId("reader-sidebar-toggle")).toBeNull();
+
+    await userEvent.click(searchButton);
+    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-search-input")).toBeInTheDocument();
   });
 });
 

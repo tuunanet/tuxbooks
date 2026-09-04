@@ -1,46 +1,35 @@
-use serde::Serialize;
 use sqlx::SqlitePool;
 
+use crate::domain::SearchHit;
 use crate::error::AppError;
+use crate::repository::books;
 
-/// One full-text search hit against the `books_fts` index.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchHit {
-    pub book_id: i64,
-    pub title: String,
-    pub snippet: String,
+/// Turns a raw user query into FTS5 MATCH syntax: whitespace-separated
+/// tokens become quoted prefix phrases ANDed together (`wind river` →
+/// `"wind"* "river"*`). Quotation marks are stripped so user input can
+/// never inject or break MATCH syntax; a query with no remaining tokens
+/// yields `None`.
+pub fn build_fts_query(user_query: &str) -> Option<String> {
+    let terms: Vec<String> = user_query
+        .split_whitespace()
+        .map(|token| token.chars().filter(|c| *c != '"').collect::<String>())
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("\"{token}\"*"))
+        .collect();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" "))
+    }
 }
 
-/// Search the library using the FTS5 index. The query syntax is FTS5 MATCH
-/// syntax; malformed queries surface as [`AppError::Database`].
+/// Search the library using the FTS5 index over title, subtitle, author,
+/// publisher, ISBN, description, and file path. The query is plain user
+/// text; it is sanitized into MATCH syntax before hitting the index.
 pub async fn search_books(pool: &SqlitePool, query: &str) -> Result<Vec<SearchHit>, AppError> {
-    if query.trim().is_empty() {
-        return Err(AppError::InvalidInput("search query is empty".into()));
-    }
-
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        r#"
-        SELECT b.id, b.title, snippet(books_fts, 3, '<em>', '</em>', '…', 12) AS snippet
-        FROM books_fts
-        JOIN books b ON b.id = books_fts.rowid
-        WHERE books_fts MATCH ?1
-        ORDER BY rank
-        LIMIT 50
-        "#,
-    )
-    .bind(query)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(book_id, title, snippet)| SearchHit {
-            book_id,
-            title,
-            snippet,
-        })
-        .collect())
+    let match_query = build_fts_query(query)
+        .ok_or_else(|| AppError::InvalidInput("search query is empty".into()))?;
+    books::search_fts(pool, &match_query).await
 }
 
 #[cfg(test)]
@@ -48,7 +37,6 @@ mod tests {
     use super::*;
     use crate::db::connection::init_pool;
     use crate::domain::NewBook;
-    use crate::repository::books;
 
     async fn pool_with_one_book() -> (tempfile::TempDir, SqlitePool) {
         let tmp = tempfile::tempdir().unwrap();
@@ -60,9 +48,9 @@ mod tests {
                 title: "The Wind in the Willows".into(),
                 subtitle: None,
                 author: Some("Kenneth Grahame".into()),
-                publisher: None,
+                publisher: Some("Riverbank Press".into()),
                 language: Some("en".into()),
-                isbn: None,
+                isbn: Some("978-0-14-036122-2".into()),
                 description: Some("Mole and Rat adventure on the river.".into()),
                 cover_path: None,
                 file_size: 0,
@@ -74,20 +62,88 @@ mod tests {
         (tmp, pool)
     }
 
+    #[test]
+    fn fts_query_quotes_each_token_as_a_prefix_phrase() {
+        assert_eq!(
+            build_fts_query("wind river").as_deref(),
+            Some("\"wind\"* \"river\"*")
+        );
+    }
+
+    #[test]
+    fn fts_query_strips_quotes_and_ignores_empty_tokens() {
+        assert_eq!(build_fts_query("wi\"nd").as_deref(), Some("\"wind\"*"));
+        assert_eq!(build_fts_query("\"  \"").as_deref(), None);
+    }
+
+    #[test]
+    fn fts_query_none_for_blank_input() {
+        assert_eq!(build_fts_query(""), None);
+        assert_eq!(build_fts_query("   "), None);
+    }
+
     #[tokio::test]
     async fn finds_books_by_title() {
         let (_tmp, pool) = pool_with_one_book().await;
         let hits = search_books(&pool, "willows").await.unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "The Wind in the Willows");
+        assert_eq!(hits[0].author.as_deref(), Some("Kenneth Grahame"));
     }
 
     #[tokio::test]
     async fn finds_books_by_description() {
         let (_tmp, pool) = pool_with_one_book().await;
-        let hits = search_books(&pool, "river").await.unwrap();
+        // "adventure" only occurs in the description (publisher is
+        // "Riverbank Press", so "river" would match there too).
+        let hits = search_books(&pool, "adventure").await.unwrap();
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].snippet.contains("river"));
+        assert!(hits[0].snippet.contains("adventure"));
+    }
+
+    #[tokio::test]
+    async fn finds_books_by_publisher() {
+        let (_tmp, pool) = pool_with_one_book().await;
+        let hits = search_books(&pool, "riverbank").await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "The Wind in the Willows");
+    }
+
+    #[tokio::test]
+    async fn finds_books_by_isbn_and_by_file_name() {
+        let (_tmp, pool) = pool_with_one_book().await;
+        assert_eq!(
+            search_books(&pool, "978-0-14-036122-2")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(search_books(&pool, "willows.epub").await.unwrap().len(), 1);
+        assert_eq!(search_books(&pool, "willows.e").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn multi_term_query_requires_every_term() {
+        let (_tmp, pool) = pool_with_one_book().await;
+        assert_eq!(search_books(&pool, "wind river").await.unwrap().len(), 1);
+        assert!(search_books(&pool, "wind potato").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn prefix_matches_partial_words() {
+        let (_tmp, pool) = pool_with_one_book().await;
+        assert_eq!(search_books(&pool, "gra").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn match_syntax_is_never_injected_through_user_input() {
+        let (_tmp, pool) = pool_with_one_book().await;
+        // Raw FTS5 boolean syntax would error or change semantics; the
+        // sanitizer quotes it away instead.
+        assert!(search_books(&pool, "\" OR 1").await.is_ok());
+        assert!(search_books(&pool, "NOT").await.is_ok());
+        assert!(search_books(&pool, "wi*nd").await.is_ok());
     }
 
     #[tokio::test]
@@ -126,7 +182,9 @@ mod tests {
         .await
         .unwrap();
 
-        let old = search_books(&pool, "willows").await.unwrap();
+        // "wind" only occurs in the old title — "willows" would still match
+        // the indexed path /tmp/willows.epub.
+        let old = search_books(&pool, "wind").await.unwrap();
         assert!(old.is_empty(), "old title must no longer match");
         let new = search_books(&pool, "different").await.unwrap();
         assert_eq!(new.len(), 1);

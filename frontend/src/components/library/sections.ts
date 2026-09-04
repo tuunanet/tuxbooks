@@ -94,13 +94,29 @@ export function sortBooks(books: Book[], sort: BookSortId): Book[] {
   return sorted;
 }
 
-/** Case-insensitive client-side search over title, author, and publisher. */
+/**
+ * Case-insensitive instant filter over the same fields the global search
+ * indexes (title, subtitle, author, publisher, ISBN, description, file
+ * name). This is the library grid's view filter; ranked full-text search
+ * lives in the backend (`search_books`) behind the global search box.
+ */
 export function filterBooksByQuery(books: Book[], query: string): Book[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return books;
   return books.filter((book) =>
-    [book.title, book.author, book.publisher].some(
-      (field) => field !== null && field.toLowerCase().includes(needle),
-    ),
+    [
+      book.title,
+      book.subtitle,
+      book.author,
+      book.publisher,
+      book.isbn,
+      book.description,
+      fileNameOf(book.path),
+    ].some((field) => field !== null && field.toLowerCase().includes(needle)),
   );
+}
+
+/** The last path segment, regardless of platform separator. */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }

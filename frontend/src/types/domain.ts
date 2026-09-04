@@ -39,6 +39,18 @@ export interface LibraryStats {
   collectionCount: number;
 }
 
+/**
+ * One full-text library search hit (mirrors `domain::SearchHit`). The
+ * snippet comes from whichever indexed column matched best, with `<em>` /
+ * `</em>` markers around the matching text.
+ */
+export interface SearchHit {
+  bookId: number;
+  title: string;
+  author: string | null;
+  snippet: string;
+}
+
 export interface ImportReport {
   imported: number;
   updated: number;

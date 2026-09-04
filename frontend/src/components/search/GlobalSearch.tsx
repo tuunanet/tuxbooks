@@ -1,27 +1,51 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { useLibrary } from "@/hooks/useLibrary";
+import { searchLibrary } from "@/lib/tauri";
 import { useAppDispatch } from "@/state/appState";
-import { searchBooks } from "./searchBooks";
+import type { SearchHit } from "@/types/domain";
+import { splitSnippet } from "./snippet";
 
 const MAX_RESULTS = 8;
+const DEBOUNCE_MS = 150;
 
 /**
  * App-wide search (Ctrl/Cmd+K focuses the field via the shortcut registry).
- * Results come from `searchBooks` over the shared library data; picking one
- * opens its detail view. The dropdown derives from the query, so clearing
- * the query (Escape, selection, outside click) always closes it.
+ * Results come from the backend FTS5 index (`search_books`), debounced per
+ * keystroke; only the latest response is rendered. Picking one opens its
+ * detail view. The dropdown derives from the query, so clearing the query
+ * (Escape, selection, outside click) always closes it.
  */
 export function GlobalSearch() {
-  const { books } = useLibrary();
   const dispatch = useAppDispatch();
   const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  // Monotonic request id: a slow earlier response never overwrites a newer one.
+  const requestRef = useRef(0);
 
-  const results = useMemo(() => searchBooks(books, query).slice(0, MAX_RESULTS), [books, query]);
-  const open = query.trim() !== "";
+  const trimmed = query.trim();
+  const open = trimmed !== "";
+  const results = open ? hits.slice(0, MAX_RESULTS) : [];
+
+  useEffect(() => {
+    if (!open) return;
+    const id = ++requestRef.current;
+    const timer = setTimeout(() => {
+      searchLibrary(trimmed)
+        .then((found) => {
+          if (requestRef.current === id) {
+            setHits(found);
+            setActiveIndex(0);
+          }
+        })
+        .catch(() => {
+          if (requestRef.current === id) setHits([]);
+        });
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [open, trimmed]);
 
   const setQueryAndReset = (next: string) => {
     setQuery(next);
@@ -42,8 +66,8 @@ export function GlobalSearch() {
       setActiveIndex((index) => Math.max(index - 1, 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const book = results[activeIndex];
-      if (book) openBook(book.id);
+      const hit = results[activeIndex];
+      if (hit) openBook(hit.bookId);
     }
   };
 
@@ -62,7 +86,9 @@ export function GlobalSearch() {
             aria-expanded={open}
             aria-controls="global-search-results"
             aria-activedescendant={
-              results[activeIndex] ? `global-search-option-${results[activeIndex].id}` : undefined
+              results[activeIndex]
+                ? `global-search-option-${results[activeIndex].bookId}`
+                : undefined
             }
             aria-label="Search library"
             type="search"
@@ -89,30 +115,43 @@ export function GlobalSearch() {
             data-testid="global-search-empty"
             className="px-2 py-3 text-sm text-muted-foreground"
           >
-            No books match “{query.trim()}”
+            No books match “{trimmed}”
           </p>
         ) : (
-          results.map((book, index) => (
-            <button
-              key={book.id}
-              type="button"
-              id={`global-search-option-${book.id}`}
-              role="option"
-              aria-selected={index === activeIndex}
-              data-testid="global-search-result"
-              onMouseDown={(event) => {
-                // Select before the input blur can close the popover.
-                event.preventDefault();
-                openBook(book.id);
-              }}
-              className="w-full rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-selected:bg-accent hover:bg-accent/60"
-            >
-              <p className="truncate text-sm font-medium">{book.title}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {book.author ?? "Unknown author"}
-              </p>
-            </button>
-          ))
+          results.map((hit, index) => {
+            const snippet = splitSnippet(hit.snippet);
+            return (
+              <button
+                key={hit.bookId}
+                type="button"
+                id={`global-search-option-${hit.bookId}`}
+                role="option"
+                aria-selected={index === activeIndex}
+                data-testid="global-search-result"
+                onMouseDown={(event) => {
+                  // Select before the input blur can close the popover.
+                  event.preventDefault();
+                  openBook(hit.bookId);
+                }}
+                className="w-full rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-selected:bg-accent hover:bg-accent/60"
+              >
+                <p className="truncate text-sm font-medium">{hit.title}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {hit.author ?? "Unknown author"}
+                </p>
+                {snippet !== null && (
+                  <p
+                    data-testid="global-search-snippet"
+                    className="truncate text-xs text-muted-foreground"
+                  >
+                    {snippet.pre}
+                    <strong className="font-medium text-foreground">{snippet.match}</strong>
+                    {snippet.post}
+                  </p>
+                )}
+              </button>
+            );
+          })
         )}
       </PopoverContent>
     </Popover>

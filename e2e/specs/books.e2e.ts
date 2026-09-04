@@ -57,4 +57,24 @@ describe("tuxbooks library navigation", () => {
     await returnToLibrary();
     await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
   });
+
+  // Milestone 5 — library search: the global search field queries the
+  // backend FTS index; picking a hit (Enter) opens its detail view and
+  // clears the query.
+  it("finds books through the global search and opens the picked hit", async () => {
+    await waitForLibraryView();
+
+    const input = await $("[data-testid=global-search]");
+    await input.click();
+    await input.setValue("minimal");
+    await $("[data-testid=global-search-result]").waitForDisplayed({ timeout: 30000 });
+    await expect($("[data-testid=global-search-result]")).toBeDisplayed();
+
+    await browser.keys("Enter");
+    await $("[data-testid=book-detail]").waitForDisplayed({ timeout: 30000 });
+    await expect($("[data-testid=global-search]")).toHaveValue("");
+
+    await $("[data-testid=detail-back]").click();
+    await waitForLibraryView();
+  });
 });

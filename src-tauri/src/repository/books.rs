@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::domain::Book;
 use crate::domain::NewBook;
+use crate::domain::SearchHit;
 use crate::error::AppError;
 
 const BOOK_COLUMNS: &str = "id, path, title, subtitle, author, publisher, language, isbn, \
@@ -301,6 +302,28 @@ pub async fn find_books_with_size(
     .fetch_all(pool)
     .await?;
     Ok(books)
+}
+
+/// FTS5 MATCH search over `books_fts`, joined back to `books` for identity.
+/// `match_query` must already be valid FTS5 MATCH syntax — the search
+/// service sanitizes user input into it. Snippets come from whichever
+/// indexed column matched best (column index -1 = automatic).
+pub async fn search_fts(pool: &SqlitePool, match_query: &str) -> Result<Vec<SearchHit>, AppError> {
+    let hits = sqlx::query_as::<_, SearchHit>(
+        r#"
+        SELECT b.id AS book_id, b.title, b.author,
+               snippet(books_fts, -1, '<em>', '</em>', '…', 12) AS snippet
+        FROM books_fts
+        JOIN books b ON b.id = books_fts.rowid
+        WHERE books_fts MATCH ?1
+        ORDER BY rank
+        LIMIT 50
+        "#,
+    )
+    .bind(match_query)
+    .fetch_all(pool)
+    .await?;
+    Ok(hits)
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ import { useReader } from "@/state/readerState";
 import { useEpubDocument } from "./epub/hooks/useEpubDocument";
 import { useEpubPersistence, type EpubLocator } from "./epub/hooks/useEpubPersistence";
 import type { Book } from "@/types/domain";
+import type { ReaderSearchController, ReaderSearchGroup } from "./searchModel";
 
 interface EpubReaderProps {
   book: Book;
@@ -23,6 +24,15 @@ interface EpubReaderProps {
    * through shell percentage stepping.
    */
   jumpTargetRef?: MutableRefObject<((href: string) => void) | null>;
+  /**
+   * Filled with the in-book search controller once the engine is open; the
+   * shell's search drawer drives it without knowing the engine exists.
+   */
+  searchTargetRef?: MutableRefObject<ReaderSearchController | null>;
+  /** Streams one chapter's worth of matches up to the shell. */
+  onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
+  /** Reports that the running search finished (for this book). */
+  onSearchDone?: (bookId: number) => void;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
@@ -40,7 +50,14 @@ const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown",
  * (bookmarks, Home/End) map back onto the nearest spine section — the CFI
  * stays the exact locator either way.
  */
-export function EpubReader({ book, onTocLoad, jumpTargetRef }: EpubReaderProps) {
+export function EpubReader({
+  book,
+  onTocLoad,
+  jumpTargetRef,
+  searchTargetRef,
+  onSearchGroup,
+  onSearchDone,
+}: EpubReaderProps) {
   const { preferences, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const reportedFractionRef = useRef<number | null>(null);
@@ -232,6 +249,47 @@ export function EpubReader({ book, onTocLoad, jumpTargetRef }: EpubReaderProps) 
       jumpTargetRef.current = null;
     };
   }, [jumpTargetRef, handle]);
+
+  // In-book search runs on the engine and streams matches up to the shell;
+  // callbacks reach the shell through refs so re-renders never re-register
+  // the controller. Unmounting (book switch) cancels a running search.
+  const onSearchGroupRef = useRef(onSearchGroup);
+  const onSearchDoneRef = useRef(onSearchDone);
+  useEffect(() => {
+    onSearchGroupRef.current = onSearchGroup;
+    onSearchDoneRef.current = onSearchDone;
+  });
+  useEffect(() => {
+    if (!searchTargetRef || !handle) return;
+    let cancelLast: (() => void) | null = null;
+    // Chapter numbering fallback for books without TOC labels.
+    let unlabeledOrdinal = 0;
+    searchTargetRef.current = {
+      run: (query: string) => {
+        cancelLast?.();
+        unlabeledOrdinal = 0;
+        cancelLast = handle.search(query, {
+          onSection: (section) => {
+            const label = section.label !== "" ? section.label : `Chapter ${++unlabeledOrdinal}`;
+            onSearchGroupRef.current?.(book.id, {
+              label,
+              matches: section.subitems.map((match) => ({
+                cfi: match.cfi,
+                page: null,
+                excerpt: match.excerpt,
+              })),
+            });
+          },
+          onDone: () => onSearchDoneRef.current?.(book.id),
+        });
+      },
+      cancel: () => cancelLast?.(),
+    };
+    return () => {
+      cancelLast?.();
+      searchTargetRef.current = null;
+    };
+  }, [searchTargetRef, handle, book.id]);
 
   if (status === "error") {
     return (

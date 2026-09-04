@@ -180,6 +180,30 @@ skipped so opening a book writes nothing, and unmount flushes the final
 position. The document surface renders only after restoration, so reopening
 never flashes page 1 before the jump.
 
+### In-book search (milestone 5)
+
+Search reuses the engine that already renders the document instead of
+growing a second extraction architecture (the milestone's explicit
+requirement): `pdfEngine.getPdfPageText` pulls a page's text content
+through PDF.js and assembles it with the pure helpers in
+`lib/pdf/pdfSearch.ts` (item and line boundaries become single spaces, so
+queries match across them like they read on the page).
+
+`components/reader/pdf/hooks/usePdfSearch.ts` walks pages sequentially
+(the worker serializes extraction anyway), matches case-insensitively,
+streams one group per page with matches up to the shell, and stops at
+500 total matches so a pathological document cannot flood the drawer.
+Each page's text is cached for the document's lifetime (dropped on
+document switch), so refining a query re-searches without re-parsing; a
+generation token makes a new query supersede the running one.
+
+The drawer's Search tab is the shared `ReaderSearchTab`; PDF matches
+carry `page` (EPUB matches carry a CFI — see `searchModel.ts`). Picking a
+match navigates with the same `pageToPosition` model as scrolling,
+thumbnails, outline, and restore. No on-canvas match highlighting yet:
+the continuous reader paints pages without a text layer, so highlights
+would need an overlay pass — navigation-to-page is the shipped contract.
+
 ### Worker
 
 The worker is bundled via a Vite `?url` import and configured once in the
@@ -187,4 +211,4 @@ engine. A silent "fake worker" fallback (main-thread rendering) is the
 classic cause of seconds-long variable renders — the reader exposes
 `data-pdf-worker-src` and the seeded E2E verifies the asset is fetchable.
 
-Still out of scope: annotations and text search.
+Still out of scope: annotations.

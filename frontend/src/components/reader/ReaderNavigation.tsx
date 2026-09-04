@@ -11,6 +11,10 @@ import { useReader } from "@/state/readerState";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Book } from "@/types/domain";
+import { ReaderSearchTab } from "./ReaderSearchTab";
+import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
+
+export type ReaderNavTab = "contents" | "pages" | "outline" | "search" | "bookmarks";
 
 interface ReaderNavigationProps {
   open: boolean;
@@ -26,6 +30,15 @@ interface ReaderNavigationProps {
   pdfOutline: PdfOutlineItem[] | null;
   /** Navigates the PDF reader to an outline entry's page. */
   onPdfJump: (page: number) => void;
+  /** In-book search state for the open book; null before the first search. */
+  search: ReaderSearchState | null;
+  /** Starts (or clears) the in-book search for the open book. */
+  onSearch: (query: string) => void;
+  /** Navigates to an in-book search match. */
+  onSearchPick: (match: ReaderSearchMatch) => void;
+  /** The selected navigation tab (controlled by the shell). */
+  tab: ReaderNavTab;
+  onTabChange: (tab: ReaderNavTab) => void;
 }
 
 /** Flattens a TOC tree into rows with their nesting depth. */
@@ -51,8 +64,9 @@ function flattenOutline(items: PdfOutlineItem[], depth = 0): OutlineRow[] {
 /**
  * Reading navigation drawer. EPUB contents come from the foliate-js engine
  * (real labels, real destinations); PDF pages, thumbnails, and the outline
- * come from the loaded PDF.js document; bookmark persistence remains an
- * honest session-only placeholder until the backend exists.
+ * come from the loaded PDF.js document; in-book search streams from the
+ * open book's reader; bookmark persistence remains an honest session-only
+ * placeholder until the backend exists.
  */
 export function ReaderNavigation({
   open,
@@ -64,6 +78,11 @@ export function ReaderNavigation({
   onEpubJump,
   pdfOutline,
   onPdfJump,
+  search,
+  onSearch,
+  onSearchPick,
+  tab,
+  onTabChange,
 }: ReaderNavigationProps) {
   const isEpub = book.format === "epub";
   const { bookmarks } = useReader();
@@ -92,7 +111,8 @@ export function ReaderNavigation({
         </SheetHeader>
 
         <Tabs
-          defaultValue={isEpub ? "contents" : "pages"}
+          value={tab}
+          onValueChange={(value) => onTabChange(value as ReaderNavTab)}
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2">
@@ -111,6 +131,9 @@ export function ReaderNavigation({
                 </TabsTrigger>
               </>
             )}
+            <TabsTrigger data-testid="nav-tab-search" value="search">
+              Search
+            </TabsTrigger>
             <TabsTrigger data-testid="nav-tab-bookmarks" value="bookmarks">
               Bookmarks
             </TabsTrigger>
@@ -220,6 +243,10 @@ export function ReaderNavigation({
               </TabsContent>
             </>
           )}
+
+          <TabsContent value="search" className="min-h-0 flex-1 overflow-hidden">
+            <ReaderSearchTab search={search} onSearch={onSearch} onPickMatch={onSearchPick} />
+          </TabsContent>
 
           <TabsContent value="bookmarks" className="min-h-0 flex-1 px-2 py-2">
             <ScrollArea className="h-full px-2 pr-2">

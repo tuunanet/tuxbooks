@@ -51,6 +51,34 @@ export interface EpubLoadDetail {
   doc: Document;
 }
 
+/** Surrounding text around one search match. */
+export interface EpubSearchExcerpt {
+  pre: string;
+  match: string;
+  post: string;
+}
+
+/** One content match: the CFI to jump to plus its excerpt. */
+export interface EpubSearchMatch {
+  cfi: string;
+  excerpt: EpubSearchExcerpt;
+}
+
+/** All matches in one section (chapter), as reported by the engine. */
+export interface EpubSearchSectionResult {
+  label: string;
+  subitems: EpubSearchMatch[];
+}
+
+/** Streaming callbacks for a whole-book search. */
+export interface EpubSearchCallbacks {
+  onSection: (section: EpubSearchSectionResult) => void;
+  /** Overall progress (0–1) across the spine; optional. */
+  onProgress?: (fraction: number) => void;
+  /** Always called once the search finishes (success or partial failure). */
+  onDone: () => void;
+}
+
 /** Reflow layout of the reading surface. */
 export type EpubFlow = "paginated" | "scrolled";
 
@@ -122,6 +150,8 @@ interface FoliateView extends HTMLElement {
     sections?: { id?: unknown }[];
   } | null;
   lastLocation: { fraction?: number } | null;
+  search(opts: { query: string }): AsyncGenerator<unknown, void, unknown>;
+  clearSearch(): void;
 }
 
 function asString(value: unknown): string {
@@ -140,6 +170,24 @@ function normalizeToc(node: unknown): EpubTocItem[] {
     }));
 }
 
+/** Normalizes one engine search result (`{ cfi, excerpt: {pre,match,post} }`). */
+function normalizeSearchMatch(value: unknown): EpubSearchMatch {
+  const record =
+    value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const excerpt =
+    record.excerpt !== null && typeof record.excerpt === "object"
+      ? (record.excerpt as Record<string, unknown>)
+      : {};
+  return {
+    cfi: asString(record.cfi),
+    excerpt: {
+      pre: asString(excerpt.pre),
+      match: asString(excerpt.match),
+      post: asString(excerpt.post),
+    },
+  };
+}
+
 /**
  * Typed wrapper around one `<foliate-view>` instance. Created per open book
  * by `EpubReader`; owns nothing but the element and the listeners attached
@@ -147,6 +195,8 @@ function normalizeToc(node: unknown): EpubTocItem[] {
  */
 export class EpubViewHandle {
   private readonly view: FoliateView;
+  private searchGeneration = 0;
+  private activeSearchIterator: AsyncGenerator<unknown, void, unknown> | null = null;
 
   private constructor(element: HTMLDivElement) {
     this.view = element.querySelector("foliate-view") as FoliateView;
@@ -205,6 +255,68 @@ export class EpubViewHandle {
   getSectionHref(index: number): string | null {
     const id = this.view.book?.sections?.[index]?.id;
     return typeof id === "string" && id.length > 0 ? id : null;
+  }
+
+  /**
+   * Whole-book search over actual EPUB content via the engine's matcher.
+   * Results stream in per section through `callbacks` (the engine walks the
+   * spine asynchronously) and every match is drawn into the rendered pages
+   * by the engine's overlayer until the next search or `clearSearch`.
+   *
+   * Starting a new search supersedes a running one: the previous iteration
+   * is stopped and its callbacks never fire again. Returns a cancel
+   * function that does the same on demand.
+   */
+  search(query: string, callbacks: EpubSearchCallbacks): () => void {
+    const generation = ++this.searchGeneration;
+    this.activeSearchIterator?.return(undefined);
+    this.view.clearSearch();
+    const iterator = this.view.search({ query });
+    this.activeSearchIterator = iterator;
+    void this.consumeSearch(iterator, generation, callbacks).finally(() => {
+      if (this.activeSearchIterator === iterator) this.activeSearchIterator = null;
+    });
+    return () => {
+      void iterator.return(undefined);
+    };
+  }
+
+  private async consumeSearch(
+    iterator: AsyncGenerator<unknown, void, unknown>,
+    generation: number,
+    callbacks: EpubSearchCallbacks,
+  ): Promise<void> {
+    try {
+      for await (const raw of iterator) {
+        if (generation !== this.searchGeneration) return;
+        if (raw === "done" || raw === null || typeof raw !== "object") continue;
+        const result = raw as Record<string, unknown>;
+        // Whole-book searches interleave `{ progress }` heartbeat items.
+        if (typeof result.progress === "number" && result.subitems === undefined) {
+          callbacks.onProgress?.(result.progress);
+          continue;
+        }
+        if (Array.isArray(result.subitems)) {
+          callbacks.onSection({
+            label: asString(result.label),
+            subitems: result.subitems.map(normalizeSearchMatch),
+          });
+        }
+      }
+    } catch (error) {
+      // A section that fails to parse ends the iteration early; the UI
+      // contract only requires that the search eventually reports done.
+      console.warn("epub search ended with an error:", error);
+    }
+    if (generation === this.searchGeneration) callbacks.onDone();
+  }
+
+  /** Removes all match highlights from the rendered pages. */
+  clearSearch(): void {
+    this.searchGeneration += 1;
+    this.activeSearchIterator?.return(undefined);
+    this.activeSearchIterator = null;
+    this.view.clearSearch();
   }
 
   onRelocate(handler: (detail: EpubRelocateDetail) => void): () => void {

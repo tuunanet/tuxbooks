@@ -13,7 +13,7 @@ import { EpubReader } from "@/components/reader/EpubReader";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
-import { lastFakeHandle, fakeEpubHandles } from "./mocks/epubEngine";
+import { emitSearchResults, fakeEpubHandles, lastFakeHandle } from "./mocks/epubEngine";
 
 const SAVED_PROGRESS = {
   bookId: 1,
@@ -278,6 +278,130 @@ describe("EpubReader appearance and navigation", () => {
     // The engine-reported position must not be fed back into the engine
     // (the echo guard skips the section round-trip).
     expect(handle.goTo).not.toHaveBeenCalledWith(1);
+  });
+});
+
+describe("EpubReader in-book search", () => {
+  beforeEach(() => {
+    fakeEpubHandles.length = 0;
+  });
+
+  interface SearchProps {
+    searchTargetRef?: { current: unknown };
+    onSearchGroup?: (bookId: number, group: unknown) => void;
+    onSearchDone?: (bookId: number) => void;
+  }
+
+  function renderSearchableReader(props: SearchProps = {}) {
+    return render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader
+            book={makeBookShim()}
+            searchTargetRef={props.searchTargetRef as never}
+            onSearchGroup={props.onSearchGroup as never}
+            onSearchDone={props.onSearchDone}
+          />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+  }
+
+  it("runs searches on the engine and streams mapped groups upward", async () => {
+    mockHappyPath(null);
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const groups: Array<{ label: string; matches: unknown[] }> = [];
+    let done = false;
+    renderSearchableReader({
+      searchTargetRef,
+      onSearchGroup: (_id, group) => groups.push(group as never),
+      onSearchDone: () => {
+        done = true;
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
+
+    searchTargetRef.current!.run("mole");
+    await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
+    emitSearchResults(handle, [
+      {
+        label: "Chapter One",
+        subitems: [
+          {
+            cfi: "epubcfi(/6/2!/4/2,/1:0,/1:8)",
+            excerpt: { pre: "The ", match: "mole", post: " was digging" },
+          },
+        ],
+      },
+    ]);
+
+    await waitFor(() => expect(done).toBe(true));
+    expect(groups).toEqual([
+      {
+        label: "Chapter One",
+        matches: [
+          {
+            cfi: "epubcfi(/6/2!/4/2,/1:0,/1:8)",
+            page: null,
+            excerpt: { pre: "The ", match: "mole", post: " was digging" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("labels groups without a chapter name", async () => {
+    mockHappyPath(null);
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const groups: Array<{ label: string }> = [];
+    renderSearchableReader({
+      searchTargetRef,
+      onSearchGroup: (_id, group) => groups.push(group as never),
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
+
+    searchTargetRef.current!.run("river");
+    await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
+    emitSearchResults(handle, [
+      { label: "", subitems: [] },
+      { label: "", subitems: [] },
+    ]);
+    expect(groups.map((group) => group.label)).toEqual(["Chapter 1", "Chapter 2"]);
+  });
+
+  it("cancels the previous search when a new query runs", async () => {
+    mockHappyPath(null);
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    renderSearchableReader({ searchTargetRef });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
+
+    searchTargetRef.current!.run("first");
+    await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
+    searchTargetRef.current!.run("second");
+    expect(handle.searchCancelFns[0]).toHaveBeenCalledTimes(1);
+    expect(handle.searchCancelFns).toHaveLength(2);
+  });
+
+  it("unregisters the controller on unmount", async () => {
+    mockHappyPath(null);
+    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const { unmount } = renderSearchableReader({ searchTargetRef });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    expect(searchTargetRef.current).not.toBeNull();
+
+    unmount();
+    expect(searchTargetRef.current).toBeNull();
   });
 });
 

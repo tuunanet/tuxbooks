@@ -1,4 +1,4 @@
-import { openInReader, returnToLibrary, textOf } from "./helpers.js";
+import { closeReaderNavigation, openInReader, returnToLibrary, textOf } from "./helpers.js";
 
 /** Waits until the EPUB engine reports the given spine section. */
 async function waitForSection(section: number): Promise<void> {
@@ -164,6 +164,49 @@ describe("tuxbooks EPUB reader", () => {
     const percent = await textOf("reader-position");
     expect(parseInt(percent, 10)).toBeGreaterThan(30);
 
+    await returnToLibrary();
+  });
+
+  // Milestone 5 — in-book search: the drawer's Search tab streams matches
+  // from the engine (query, count, excerpt, chapter) and navigating to a
+  // match moves the engine to the match's CFI.
+  it("finds text in the book and navigates to a match", async () => {
+    await openReadyEpub();
+
+    // Move away from Chapter One so navigating to the match is observable.
+    await jumpToTocItem(2);
+    await waitForSection(2);
+    await $("[data-testid=reader-nav]").waitForDisplayed({ reverse: true, timeout: 30000 });
+
+    await $("[data-testid=reader-search]").click();
+    await $("[data-testid=reader-search-input]").waitForDisplayed({ timeout: 30000 });
+    await $("[data-testid=reader-search-input]").setValue("deterministic");
+
+    // "deterministic" occurs exactly once, in Chapter One's text.
+    await browser.waitUntil(
+      async () => (await $$("[data-testid=reader-search-match]")).length > 0,
+      { timeout: 30000, timeoutMsg: "in-book search never produced results" },
+    );
+    await browser.waitUntil(
+      async () => (await textOf("reader-search-status")).includes("1 match"),
+      { timeout: 30000, timeoutMsg: "search status never reported the match count" },
+    );
+    const matchText = await browser.execute(
+      () => document.querySelector("[data-testid=reader-search-match]")?.textContent ?? "",
+    );
+    expect(matchText).toContain("deterministic");
+    const resultsText = await browser.execute(
+      () => document.querySelector("[data-testid=reader-search-results]")?.textContent ?? "",
+    );
+    expect(resultsText).toContain("Chapter One");
+
+    // Clicking the match drives the engine back to Chapter One (section 0);
+    // the drawer stays open so the next hit is one click away.
+    await $("[data-testid=reader-search-match]").click();
+    await waitForSection(0);
+    await expect($("[data-testid=reader-nav]")).toBeDisplayed();
+
+    await closeReaderNavigation();
     await returnToLibrary();
   });
 });

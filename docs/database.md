@@ -65,11 +65,22 @@ PK `book_id` (FK, cascade) — one progress row per book.
 ## Full-text search
 
 `books_fts` is an FTS5 **external-content** table over
-`books(title, subtitle, author, description)` kept in sync by three
-triggers (`books_fts_ai/ad/au`). Search code joins `books_fts.rowid =
-books.id` and uses `snippet()`; the index never needs a backfill. If you
-change `books` columns covered by the index, update those triggers — the
-test `updating_book_keeps_fts_index_in_sync` must keep passing.
+`books(title, subtitle, author, publisher, isbn, description, path)` kept
+in sync by three triggers (`books_fts_ai/ad/au`). Search code joins
+`books_fts.rowid = books.id` and uses `snippet(…, -1, …)` (automatic
+column: the snippet comes from whichever column matched best); the index
+never needs a backfill. Migration `0006` widened the index from the
+original four columns (external-content tables cannot be altered, so the
+table and triggers are recreated and `'rebuild'` re-reads every row); the
+path column doubles as the file-name field — the default tokenizer splits
+on `/` and `.`, so bare file-name tokens match. If you change `books`
+columns covered by the index, update those triggers — the test
+`updating_book_keeps_fts_index_in_sync` must keep passing.
+
+User queries never reach FTS5 raw: `services/search.rs`
+(`build_fts_query`) strips quotes and turns whitespace-separated tokens
+into quoted prefix phrases ANDed together (`wind river` →
+`"wind"* "river"*`), so input cannot inject MATCH syntax.
 
 ## Conventions
 

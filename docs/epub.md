@@ -57,8 +57,8 @@ panic on malformed input — a property test feeds arbitrary bytes through
   engine parses document structure itself from the file bytes).
 - Fixed-layout EPUBs use the engine's fixed-layout renderer, the least
   mature part of foliate-js; reflowable books are the product priority.
-- Reader: no in-book search, annotations, or media overlays yet (later
-  milestones; the engine already exposes the needed modules).
+- Reader: no annotations or media overlays yet (later milestones; the
+  engine already exposes the needed modules).
 
 ## Reader rendering (frontend, foliate-js)
 
@@ -134,6 +134,29 @@ missing or malformed.
   spine position (`section` + in-section page fraction); outside
   percent-jumps map onto spine indexes — the CFI stays the exact locator.
 
+### In-book search (milestone 5)
+
+Search runs entirely in the engine through the seam:
+`EpubViewHandle.search(query, callbacks)` drives the vendored
+`search.js` matcher over every spine section and streams results per
+chapter (`onSection` → `{ label, subitems: [{ cfi, excerpt }] }`, with
+`excerpt = { pre, match, post }`) plus `onDone`. The engine's overlayer
+draws every match into the rendered pages until the next search or
+`clearSearch()`. A new search supersedes the running one by generation:
+the old iteration is stopped (`AsyncGenerator.return`) and its callbacks
+never fire again.
+
+The UI side is format-agnostic: `EpubReader` registers a
+`ReaderSearchController` on the shell's `searchTargetRef`; `ReaderShell`
+owns the shared `ReaderSearchState` (`components/reader/searchModel.ts`)
+and the navigation drawer's Search tab (`ReaderSearchTab`) renders query,
+match count, per-chapter groups, and excerpts. Picking a match calls
+`goTo(cfi)` — the exact locator EPUB persistence already uses — and the
+drawer stays open for the next hit. The toolbar Search button and
+Ctrl/Cmd+F open the drawer straight onto the Search tab. Chapter labels
+come from the engine's TOC progress; label-less chapters fall back to
+"Chapter N".
+
 ### Security
 
 EPUB content may contain scripts; foliate-js renders sections in
@@ -169,6 +192,6 @@ and validated by `just check-epub-fixtures`. See
 
 The engine seam is the swap point: if foliate-js ever blocks a product
 need, `@readium/navigator` (ts-toolkit) is the evaluated fallback, and only
-`epubEngine.ts` + `EpubReader` would change. Search (`search.js`),
-annotations (`overlayer.js`), and TTS modules exist in the vendored engine
-for later milestones.
+`epubEngine.ts` + `EpubReader` would change. Annotations (`overlayer.js`)
+and TTS modules exist in the vendored engine for later milestones
+(`search.js` is already in use behind the seam).
