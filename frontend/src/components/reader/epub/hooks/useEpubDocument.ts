@@ -10,6 +10,10 @@ export interface EpubDocumentState {
   error: string | null;
 }
 
+interface EpubDocumentSnapshot extends EpubDocumentState {
+  bookId: number;
+}
+
 /**
  * Loads a book's bytes through `get_book_bytes` and opens them in a
  * `<foliate-view>` engine handle. The hook owns the engine lifetime:
@@ -21,9 +25,18 @@ export interface EpubDocumentState {
  * out of hook arguments.
  */
 export function useEpubDocument(bookId: number): EpubDocumentState {
-  const [status, setStatus] = useState<EpubDocumentStatus>("loading");
-  const [handle, setHandle] = useState<EpubViewHandle | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<EpubDocumentSnapshot>(() => ({
+    bookId,
+    status: "loading",
+    handle: null,
+    error: null,
+  }));
+  // Render-phase reset on book switch (mirrors usePdfDocument): the closed
+  // engine's handle and host leave state immediately instead of lingering
+  // until the next book finishes opening.
+  if (snapshot.bookId !== bookId) {
+    setSnapshot({ bookId, status: "loading", handle: null, error: null });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -40,12 +53,14 @@ export function useEpubDocument(bookId: number): EpubDocumentState {
           return;
         }
         opened = view;
-        setHandle(view);
-        setStatus("ready");
+        setSnapshot((current) => ({ ...current, handle: view, status: "ready" }));
       } catch (err: unknown) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setStatus("error");
+          setSnapshot((current) => ({
+            ...current,
+            error: err instanceof Error ? err.message : String(err),
+            status: "error",
+          }));
         }
       }
     })();
@@ -56,5 +71,5 @@ export function useEpubDocument(bookId: number): EpubDocumentState {
     };
   }, [bookId]);
 
-  return { status, handle, error };
+  return { status: snapshot.status, handle: snapshot.handle, error: snapshot.error };
 }

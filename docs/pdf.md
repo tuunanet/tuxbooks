@@ -68,7 +68,10 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
   sequence (document ready → layout ready → position restored →
   interactive), and the render-set derivation.
 - `hooks/usePdfDocument` — loads bytes via `get_book_bytes`; owns the
-  document lifetime (destroy on unmount/book switch).
+  document lifetime (destroy on unmount/book switch). A switch also drops
+  the previous document from state in that render (render-phase reset), so
+  a closed document never serves a render while the next loads, and a load
+  that lands after its book was superseded is destroyed, never mounted.
 - `hooks/usePdfGeometry` — reserves the whole document from a page-1
   estimate, then corrects pages lazily as they approach visibility
   (`measurePages`; corrections are idempotent per document).
@@ -120,7 +123,9 @@ never shares one.
 3. A superseded render is unmounted (cancelled); it never starts or blits.
 4. Completed canvases stay mounted while their page stays inside the
    virtualization window (≤ 8, `MAX_ACTIVE_CANVASES`); distant pages keep
-   geometry-only slots and report `data-render-state="unloaded"`.
+   geometry-only slots and report `data-render-state="unloaded"`. The
+   rendered/failed page sets reset with the document, so a switched book
+   can never inherit the previous book's render marks.
 5. On eviction the finished bitmap moves into a per-document LRU cache
    (`pdfBitmapCache`, bounded by byte budget and entry count, keyed by
    render scale, dropped on zoom and on document switch). A page that

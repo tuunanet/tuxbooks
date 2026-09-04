@@ -109,8 +109,10 @@ else depends on its types and on `EpubViewHandle`:
 
 Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
 POSITION_RESTORED → INTERACTIVE), `epub/hooks/useEpubDocument` owns the
-engine lifetime, `epub/hooks/useEpubPersistence` owns position save/restore
-(same debounced contract as the PDF reader).
+engine lifetime (a book switch drops the previous handle and detaches its
+host in that render; a superseded open is closed, never mounted),
+`epub/hooks/useEpubPersistence` owns position save/restore (same debounced
+contract as the PDF reader).
 
 ### Position locator
 

@@ -26,14 +26,29 @@ const SAVED_PROGRESS = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
-function renderReader(props: { onTocLoad?: (toc: unknown[]) => void } = {}) {
-  return render(
+function renderReader(props: { onTocLoad?: (toc: unknown[]) => void; bookId?: number } = {}) {
+  const view = render(
     <ShortcutProvider>
       <ReaderProvider>
-        <EpubReader book={{ ...makeBookShim() }} onTocLoad={props.onTocLoad} />
+        <EpubReader
+          book={{ ...makeBookShim(), id: props.bookId ?? 1 }}
+          onTocLoad={props.onTocLoad}
+        />
       </ReaderProvider>
     </ShortcutProvider>,
   );
+  return {
+    ...view,
+    rerenderBook(bookId: number) {
+      view.rerender(
+        <ShortcutProvider>
+          <ReaderProvider>
+            <EpubReader book={{ ...makeBookShim(), id: bookId }} onTocLoad={props.onTocLoad} />
+          </ReaderProvider>
+        </ShortcutProvider>,
+      );
+    },
+  };
 }
 
 // Local minimal book literal instead of importing factories (keeps this
@@ -130,6 +145,65 @@ describe("EpubReader lifecycle", () => {
     unmount();
     expect(handle.close).toHaveBeenCalledTimes(1);
     expect(handle.host.isConnected).toBe(false);
+  });
+
+  it("closes the previous engine and mounts a fresh one when the book changes", async () => {
+    mockHappyPath(null);
+
+    const view = renderReader({ bookId: 1 });
+    const first = await waitFor(fakeHandleOrThrow);
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    expect(first.host.isConnected).toBe(true);
+
+    view.rerenderBook(2);
+    const second = await waitFor(() => {
+      expect(fakeEpubHandles.length).toBe(2);
+      return fakeEpubHandles[1]!;
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // The old engine is closed and its host is detached; the new book's
+    // host is the one connected to the document.
+    expect(first.close).toHaveBeenCalledTimes(1);
+    expect(first.host.isConnected).toBe(false);
+    expect(second.open).toHaveBeenCalledTimes(1);
+    expect(second.host.isConnected).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 2 });
+  });
+
+  it("closes an open that finishes after the book changed", async () => {
+    mockHappyPath(null);
+
+    const view = renderReader({ bookId: 1 });
+    const first = await waitFor(fakeHandleOrThrow);
+    let resolveFirstOpen: () => void = () => {};
+    first.open.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveFirstOpen = resolve)),
+    );
+
+    view.rerenderBook(2);
+    const second = await waitFor(() => {
+      expect(fakeEpubHandles.length).toBe(2);
+      return fakeEpubHandles[1]!;
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // The first book's engine was superseded mid-open: its host must leave
+    // the document immediately (state reset on switch), not linger until
+    // the second book's engine arrives.
+    expect(first.host.isConnected).toBe(false);
+
+    resolveFirstOpen();
+    await waitFor(() => expect(first.close).toHaveBeenCalledTimes(1));
+    expect(first.host.isConnected).toBe(false);
+    expect(second.host.isConnected).toBe(true);
+    expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready");
   });
 });
 

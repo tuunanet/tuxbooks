@@ -222,6 +222,18 @@ export function PdfReader({
   }
   const bitmapCache = cacheState.cache;
 
+  // Render bookkeeping is per-document too: stale "rendered" marks from a
+  // previous document would let the next one bypass the concurrency budget,
+  // and stale failures would hide pages. (ReaderShell remounts the reader
+  // per book via `key`; this reset keeps the composition root honest even
+  // without it.)
+  const [bookkeepingDocument, setBookkeepingDocument] = useState<typeof pdfDocument>(null);
+  if (bookkeepingDocument !== pdfDocument) {
+    setBookkeepingDocument(pdfDocument);
+    setRenderedPages(new Set());
+    setFailedPages(new Set());
+  }
+
   // Measure pages as they approach visibility so slot estimates become real
   // dimensions before their canvases render (lazy geometry correction).
   useEffect(() => {

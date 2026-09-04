@@ -101,10 +101,28 @@ TuxBooks currently has:
   `data-pdf-bitmap-cache` for memory diagnostics; a rapid
   scroll-oscillation + zoom-churn stress E2E guards the behavior on the
   real binary
+- milestone 9 lifecycle hardening (second phase, completing the
+  milestone): the document hooks drop a closed document's state in the
+  same render as a book switch (a load that lands after its book was
+  superseded is destroyed, never mounted), and PDF render bookkeeping
+  resets per document so stale "rendered" marks can never bypass the
+  concurrency budget; a reader-lifecycle E2E drives document-type
+  switching, rapid repeated open/close, close-while-rendering recovery,
+  rapid navigation convergence (toolbar and thumbnail bursts), window
+  resize with re-anchoring, and memory-bound assertions (live canvas
+  bytes, bitmap-cache occupancy within its configured budget, EPUB host
+  count) on the real binary; rapid-jump and outline-jump E2E interactions
+  are hardened against lost programmatic scrolls and stale element
+  handles under load
 
 This completes milestone 4: EPUB cover extraction, PDF page-1 cover
 rendering, placeholder fallback for missing/corrupt artwork, and an
 efficient, self-invalidating cache.
+
+With the two phases above, milestone 9 (reader reliability and
+performance hardening) is complete: stress interactions, async
+lifecycle guarantees, and memory bounds are implemented and pinned by
+unit and real-binary E2E tests.
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

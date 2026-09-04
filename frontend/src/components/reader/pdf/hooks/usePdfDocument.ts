@@ -11,6 +11,10 @@ export interface PdfDocumentState {
   error: string | null;
 }
 
+interface PdfDocumentSnapshot extends PdfDocumentState {
+  bookId: number;
+}
+
 /**
  * Loads a book's bytes through `get_book_bytes` and opens the PDF.js
  * document. The hook owns the document lifetime: switching books or
@@ -26,10 +30,20 @@ export function usePdfDocument(
     onDocumentLoadRef.current = onDocumentLoad;
   });
 
-  const [status, setStatus] = useState<PdfDocumentStatus>("loading");
-  const [document_, setDocument] = useState<PdfDocument | null>(null);
-  const [pageCount, setPageCount] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<PdfDocumentSnapshot>(() => ({
+    bookId,
+    status: "loading",
+    document: null,
+    pageCount: 0,
+    error: null,
+  }));
+  // Render-phase reset on book switch (same pattern as the reader's bitmap
+  // cache): the previous document leaves state the moment the book id
+  // changes, so a closed document can never serve a render while the next
+  // one loads.
+  if (snapshot.bookId !== bookId) {
+    setSnapshot({ bookId, status: "loading", document: null, pageCount: 0, error: null });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -44,14 +58,24 @@ export function usePdfDocument(
           await closePdfDocument(loaded);
           return;
         }
-        setDocument(loaded);
-        setPageCount(loaded.numPages);
-        setStatus("ready");
-        onDocumentLoadRef.current?.(loaded.numPages);
+        const opened = loaded;
+        const numPages = opened.numPages;
+        // Read engine values outside the updater: state updaters must stay
+        // pure, so a malformed engine result fails in this try/catch.
+        setSnapshot((current) => ({
+          ...current,
+          document: opened,
+          pageCount: numPages,
+          status: "ready",
+        }));
+        onDocumentLoadRef.current?.(numPages);
       } catch (err: unknown) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-          setStatus("error");
+          setSnapshot((current) => ({
+            ...current,
+            error: err instanceof Error ? err.message : String(err),
+            status: "error",
+          }));
         }
       }
     })();
@@ -62,5 +86,10 @@ export function usePdfDocument(
     };
   }, [bookId]);
 
-  return { status, document: document_, pageCount, error };
+  return {
+    status: snapshot.status,
+    document: snapshot.document,
+    pageCount: snapshot.pageCount,
+    error: snapshot.error,
+  };
 }

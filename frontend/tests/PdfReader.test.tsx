@@ -18,6 +18,7 @@ import { closePdfDocument, getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfE
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { makeBook } from "./factories";
+import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
@@ -49,31 +50,43 @@ const pdfBook = makeBook({
   title: "A Minimal PDF",
 });
 
-function renderPdfReader(
-  props: {
-    onDocumentLoad?: (count: number) => void;
-    onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
-    sidebarHost?: HTMLElement | null;
-    scrollContainerRef?: RefObject<HTMLElement | null>;
-  } = {},
-) {
-  return render(
+interface PdfReaderProps {
+  book?: Book;
+  onDocumentLoad?: (count: number) => void;
+  onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
+  sidebarHost?: HTMLElement | null;
+  scrollContainerRef?: RefObject<HTMLElement | null>;
+}
+
+function renderPdfReader(props: PdfReaderProps = {}) {
+  const view = render(readerTree(props));
+  return {
+    ...view,
+    rerenderBook(next: PdfReaderProps) {
+      view.rerender(readerTree({ ...props, ...next }));
+    },
+  };
+}
+
+function readerTree(props: PdfReaderProps) {
+  return (
     <ShortcutProvider>
       <ReaderProvider>
         <PdfReader
-          book={pdfBook}
+          book={props.book ?? pdfBook}
           onDocumentLoad={props.onDocumentLoad}
           onOutlineLoad={props.onOutlineLoad}
           sidebarHost={props.sidebarHost}
           scrollContainerRef={props.scrollContainerRef}
         />
       </ReaderProvider>
-    </ShortcutProvider>,
+    </ShortcutProvider>
   );
 }
 
 async function renderLoadedReader(
   props: {
+    book?: Book;
     onDocumentLoad?: (count: number) => void;
     onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
     sidebarHost?: HTMLElement | null;
@@ -240,6 +253,108 @@ describe("PdfReader loading", () => {
     view.unmount();
 
     expect(closeDocumentMock).toHaveBeenCalledWith(doc);
+  });
+});
+
+describe("PdfReader book switching", () => {
+  const secondBook = makeBook({
+    id: 8,
+    format: "pdf",
+    path: "/tmp/library/second.pdf",
+    title: "A Second PDF",
+  });
+
+  it("destroys the old document and opens the next one when the book changes", async () => {
+    const docA = makeFakePdfDocument(3);
+    const docB = makeFakePdfDocument(5);
+    openDocumentMock.mockResolvedValueOnce(docA as unknown as EngineDocument);
+    openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const view = await renderLoadedReader();
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+
+    view.rerenderBook({ book: secondBook });
+
+    // The previous document is destroyed the moment the book changes, and
+    // its reading surface leaves instead of lingering while the next loads.
+    expect(closeDocumentMock).toHaveBeenCalledWith(docA);
+    expect(await screen.findByTestId("pdf-loading")).toBeInTheDocument();
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
+    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 8 });
+    expect(openDocumentMock).toHaveBeenCalledTimes(2);
+    expect(closeDocumentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never mounts a load that finishes after the book changed", async () => {
+    let resolveFirst: (doc: EngineDocument) => void = () => {};
+    openDocumentMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve as (doc: EngineDocument) => void;
+        }) as never,
+    );
+    const docB = makeFakePdfDocument(5);
+    openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const view = renderPdfReader();
+    expect(await screen.findByTestId("pdf-loading")).toBeInTheDocument();
+    view.rerenderBook({ book: secondBook });
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
+
+    // The superseded document resolves late: it must be destroyed, never
+    // mounted, and never reported as the shell's page count.
+    const lateDocument = makeFakePdfDocument(7);
+    resolveFirst(lateDocument as unknown as EngineDocument);
+    await waitFor(() => expect(closeDocumentMock).toHaveBeenCalledWith(lateDocument));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
+    expect(closeDocumentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("render bookkeeping and the bitmap cache never survive a document switch", async () => {
+    const docA = makeFakePdfDocument(4);
+    const docB = makeFakePdfDocument(6, undefined, { holdRenderFor: [1, 2] });
+    openDocumentMock.mockResolvedValueOnce(docA as unknown as EngineDocument);
+    openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    const view = await renderLoadedReader();
+    // Widen the window to pages 1–2 and let both complete, so the previous
+    // document leaves rendered marks and cached bitmaps behind.
+    firePreload(slot(2) as Element, true);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-bitmap-cache", "2:3877632");
+
+    view.rerenderBook({ book: secondBook });
+    await screen.findAllByTestId("pdf-canvas");
+
+    // The new document's pages 1–2 are in-flight again (held by the fake):
+    // stale "rendered" marks must not report them done, and the cache must
+    // start empty — the previous book's pixels never leak into this one.
+    expect(slot(1)).toHaveAttribute("data-render-state", "rendering");
+    expect(slot(2)).toHaveAttribute("data-render-state", "rendering");
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-bitmap-cache", "0:0");
+    expect(screen.getAllByTestId("pdf-canvas")).toHaveLength(2);
+
+    docB.releaseRender(1);
+    docB.releaseRender(2);
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
   });
 });
 

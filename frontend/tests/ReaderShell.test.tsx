@@ -410,3 +410,70 @@ describe("ReaderAppearance", () => {
     expect(screen.getByLabelText("Line spacing")).toBeInTheDocument();
   });
 });
+
+describe("Reader book switching", () => {
+  it("gives a switched book a fresh reader and its own navigation data", async () => {
+    const epub = makeBook();
+    const pdf = makeBook({
+      id: 2,
+      format: "pdf",
+      path: "/tmp/library/minimal.pdf",
+      title: "A Minimal PDF",
+    });
+    vi.mocked(getPdfOutline).mockResolvedValue([{ title: "Part One", page: 1, items: [] }]);
+    vi.mocked(openPdfDocument).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocument>>,
+    );
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [epub, pdf],
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      />,
+    );
+
+    // The EPUB session lists its engine TOC in the drawer.
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    await openNavigation();
+    expect(await screen.findByTestId("toc-item-0")).toHaveTextContent("Chapter One");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument());
+
+    // Back to the library, then open the PDF through the normal flow.
+    await userEvent.click(screen.getByTestId("reader-back"));
+    await screen.findByTestId("library-view");
+    fireEvent.doubleClick(await screen.findByLabelText("A Minimal PDF (PDF)"));
+    await screen.findByTestId("book-detail");
+    await userEvent.click(screen.getByTestId("detail-continue"));
+
+    // The remounted reader starts clean: EPUB chrome is gone, position is
+    // fresh, and the drawer shows the PDF's outline — never the previous
+    // book's table of contents (the shell's bookId-tagged state guard).
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.queryByTestId("epub-reader")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
+    await openNavigation();
+    await userEvent.click(await screen.findByTestId("nav-tab-outline"));
+    expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Part One");
+    expect(screen.queryByTestId("toc-item-0")).not.toBeInTheDocument();
+
+    // The switch closed the EPUB engine and opened no new one (the PDF has
+    // no engine handles): the old engine died with its reader unmount.
+    expect(fakeEpubHandles).toHaveLength(1);
+    expect(fakeEpubHandles[0]!.close).toHaveBeenCalledTimes(1);
+    expect(fakeEpubHandles[0]!.host.isConnected).toBe(false);
+  });
+});

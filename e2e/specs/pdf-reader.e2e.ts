@@ -1,7 +1,11 @@
 import {
+  bitmapCacheUsage,
   canvasIsNonBlank,
+  clickUntilEffect,
   fitFactor,
+  maxSingleBitmapBytes,
   openInReader,
+  openReaderNavigation,
   renderedCount,
   returnToLibrary,
   scrollToSlot,
@@ -142,9 +146,16 @@ describe("tuxbooks continuous PDF reader", () => {
     // Rapid long-distance jumps (scrollbar-drag churn): superseded renders
     // must unwind cleanly, and the final revisit ends with a fully painted
     // canvas — no interleaved-paint fragments.
+    // Rapid long-distance jumps (scrollbar-drag churn): superseded renders
+    // must unwind cleanly, and the final revisit ends with a fully painted
+    // canvas — no interleaved-paint fragments. The last jump is re-driven
+    // once: under load WebKit can drop one programmatic scroll of a rapid
+    // burst, and the stress target here is the render unwind, not scroll
+    // coalescing. (A systematic scroll loss still fails the wait below.)
     await scrollToSlot(87);
     await scrollToSlot(30);
     await scrollToSlot(74);
+    await scrollToSlot(60);
     await scrollToSlot(60);
     await waitForRendered(60);
     expect(await canvasIsNonBlank(60)).toBe(true);
@@ -197,6 +208,18 @@ describe("tuxbooks continuous PDF reader", () => {
       timeoutMsg: "page 1 never painted after reverse scroll",
     });
     expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);
+
+    // Milestone 9 memory bound: after the stress, cache occupancy as
+    // reported by the diagnostics attribute stays within its configured
+    // budget (8 entries / 48 MiB — mirroring PdfBitmapCache's defaults).
+    const cache = await bitmapCacheUsage();
+    expect(cache).not.toBeNull();
+    expect(cache!.entries).toBeLessThanOrEqual(8);
+    // The byte budget bounds retained memory except the newest single page
+    // (oversized-keep-latest): at this point the reader sits at 150% zoom,
+    // so one dpr-scaled page bitmap is the allowed excess.
+    const onePage = await maxSingleBitmapBytes(1.5);
+    expect(cache!.bytes).toBeLessThanOrEqual(48 * 1024 * 1024 + onePage);
 
     await returnToLibrary();
   });
@@ -333,32 +356,28 @@ describe("tuxbooks continuous PDF reader", () => {
       { timeout: 30000, timeoutMsg: "large fixture never reported its page count" },
     );
 
-    await $("[data-testid=reader-nav-trigger]").click();
+    await openReaderNavigation();
     await $("[data-testid=nav-tab-outline]").click();
     // 15 deterministic entries (5 parts × 2 sections), flattened depth-first:
     // index 6 is "Part Three" (page 41), index 8 "Section Three-B" (page 51).
     await $("[data-testid=nav-outline-item-0]").waitForDisplayed({ timeout: 30000 });
     expect(await textOf("nav-outline-item-6")).toContain("Part Three");
 
-    await $("[data-testid=nav-outline-item-6]").click();
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 41 of 100", {
-      timeout: 30000,
-      timeoutMsg: "outline jump never reached page 41",
-    });
+    await clickUntilEffect("[data-testid=nav-outline-item-6]", async () =>
+      /Page 41 of 100/.test(await textOf("pdf-page-indicator")),
+    );
     await waitForRendered(41);
     // Selecting an entry closes the drawer; wait out the exit animation so
     // the fading sheet overlay cannot swallow the header clicks below.
     await $("[data-testid=reader-nav]").waitForExist({ reverse: true, timeout: 30000 });
 
     // A nested entry resolves to its own destination, not its parent's.
-    await $("[data-testid=reader-nav-trigger]").click();
+    await openReaderNavigation();
     await $("[data-testid=nav-tab-outline]").click();
     await $("[data-testid=nav-outline-item-8]").waitForDisplayed({ timeout: 30000 });
-    await $("[data-testid=nav-outline-item-8]").click();
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 51 of 100", {
-      timeout: 30000,
-      timeoutMsg: "outline jump never reached page 51",
-    });
+    await clickUntilEffect("[data-testid=nav-outline-item-8]", async () =>
+      /Page 51 of 100/.test(await textOf("pdf-page-indicator")),
+    );
     await waitForRendered(51);
     await $("[data-testid=reader-nav]").waitForExist({ reverse: true, timeout: 30000 });
 

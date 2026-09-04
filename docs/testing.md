@@ -138,7 +138,13 @@ Two isolated invocations per run:
    position preservation, mixed page sizes, outline navigation with
    hierarchical destinations, the bounded virtualized thumbnails sidebar
    with current-page synchronization, the reopen-restore persistence
-   acceptance test, and a PDF.js worker-asset check).
+   acceptance test, a PDF.js worker-asset check, and bitmap-cache budget
+   assertions after the scroll-oscillation stress) and
+   `reader-lifecycle.e2e.ts` (milestone 9 hardening: document-type
+   switching, rapid repeated open/close, close-while-rendering recovery,
+   rapid navigation convergence, window-resize re-anchoring, and
+   memory-bound assertions — live canvas bytes, bitmap-cache occupancy,
+   EPUB engine host count).
 
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.
@@ -196,7 +202,7 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
 - The Tauri app can outlive `tauri-driver`; a detached watchdog
   (`watchdog.mjs`, armed in `onComplete`) reaps leftover app/driver
   processes once the run finishes and SIGKILLs a wedged launcher after 45s.
-  Each phase is additionally bounded by `timeout --kill-after=15 600` in the
+  Each phase is additionally bounded by `timeout --kill-after=15 300` in the
   justfile, so `just test-e2e` always terminates and always returns a
   meaningful exit code.
 - Failed tests capture a screenshot into `artifacts/e2e/<runId>/`
