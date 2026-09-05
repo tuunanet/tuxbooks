@@ -33,7 +33,13 @@ function renderLibrary(section: LibrarySection = { kind: "smart", id: "all-books
 function renderShell(section: LibrarySection = { kind: "smart", id: "all-books" }) {
   return render(
     <AppShell
-      initialState={{ view: "library", section, selectedBookId: null, libraryQuery: "" }}
+      initialState={{
+        view: "library",
+        section,
+        selectedBookId: null,
+        libraryQuery: "",
+        metadataEditorBookId: null,
+      }}
     />,
   );
 }

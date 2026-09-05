@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BookCover } from "./BookCover";
 import { useBookActions } from "@/hooks/useBookActions";
+import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState } from "@/state/appState";
@@ -29,8 +30,10 @@ export function BookDetail() {
   const { books } = useLibrary();
   const { locateBook, removeBookFromLibrary } = useBookActions();
   const dispatch = useAppDispatch();
-
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
+  // Subjects live in the normalized metadata view, not the flat book list.
+  const { metadata } = useBookMetadata(book ? book.id : null);
+  const subjects = metadata?.effective.subjects ?? [];
 
   if (!book) {
     return (
@@ -57,6 +60,15 @@ export function BookDetail() {
     ["Publisher", book.publisher ?? "—"],
     ["Language", book.language ?? "—"],
     ["ISBN", book.isbn ?? "—"],
+    ["Published", book.publicationDate ?? "—"],
+    [
+      "Series",
+      book.seriesName === null
+        ? "—"
+        : book.seriesIndex === null
+          ? book.seriesName
+          : `${book.seriesName} #${book.seriesIndex}`,
+    ],
     ["Added", formatDate(book.addedAt)],
     ["Last opened", formatDate(book.lastOpenedAt)],
     ["File", book.path],
@@ -134,8 +146,7 @@ export function BookDetail() {
             <Button
               variant="outline"
               data-testid="detail-edit"
-              disabled
-              title="Metadata editing will be connected to the Rust backend"
+              onClick={() => dispatch({ type: "open-metadata-editor", bookId: book.id })}
             >
               <Pencil data-icon="inline-start" />
               Edit Metadata
@@ -150,6 +161,21 @@ export function BookDetail() {
           <p className="mt-2 text-sm leading-relaxed">{book.description}</p>
         </div>
       )}
+
+      <div className="mt-8">
+        <h3 className="text-sm font-medium text-muted-foreground">Subjects</h3>
+        <div data-testid="detail-subjects" className="mt-2 flex flex-wrap gap-1.5">
+          {subjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">—</p>
+          ) : (
+            subjects.map((subject) => (
+              <Badge key={subject} variant="secondary">
+                {subject}
+              </Badge>
+            ))
+          )}
+        </div>
+      </div>
 
       <div className="mt-8">
         <h3 className="text-sm font-medium text-muted-foreground">Details</h3>

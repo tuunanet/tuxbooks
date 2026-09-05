@@ -9,6 +9,7 @@ describe("appStateReducer", () => {
         section: { kind: "smart", id: "all-books" },
         selectedBookId: 7,
         libraryQuery: "meridian",
+        metadataEditorBookId: null,
       },
       { type: "select-section", section: { kind: "smart", id: "pdfs" } },
     );
@@ -17,6 +18,7 @@ describe("appStateReducer", () => {
       section: { kind: "smart", id: "pdfs" },
       selectedBookId: 7,
       libraryQuery: "",
+      metadataEditorBookId: null,
     });
   });
 
@@ -36,6 +38,7 @@ describe("appStateReducer", () => {
       section: { kind: "smart", id: "all-books" },
       selectedBookId: 3,
       libraryQuery: "",
+      metadataEditorBookId: null,
     });
   });
 
@@ -52,6 +55,7 @@ describe("appStateReducer", () => {
         section: { kind: "collection", id: 2 },
         selectedBookId: 9,
         libraryQuery: "",
+        metadataEditorBookId: null,
       },
       { type: "return-to-library" },
     );
@@ -60,6 +64,7 @@ describe("appStateReducer", () => {
       section: { kind: "collection", id: 2 },
       selectedBookId: 9,
       libraryQuery: "",
+      metadataEditorBookId: null,
     });
   });
 

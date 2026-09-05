@@ -6,14 +6,24 @@ use quick_xml::Reader;
 use super::EpubError;
 
 /// Bibliographic metadata extracted from the OPF `<metadata>` section.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Author/subject lists keep every `dc:creator`/`dc:subject` (normalized
+/// entities, milestone 7); `author` stays as the first creator for the
+/// flat display column.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EpubMetadata {
     pub title: String,
     pub author: Option<String>,
+    pub authors: Vec<String>,
+    pub subjects: Vec<String>,
     pub language: Option<String>,
     pub publisher: Option<String>,
     pub isbn: Option<String>,
     pub description: Option<String>,
+    /// `dc:date` verbatim (a year or full date, whatever the file carries).
+    pub publication_date: Option<String>,
+    /// Calibre's `calibre:series` / `calibre:series_index` meta pair.
+    pub series: Option<String>,
+    pub series_index: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +40,7 @@ impl ManifestItem {
 }
 
 /// Parsed OPF package: metadata plus manifest/spine enough to establish reading order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OpfPackage {
     pub metadata: EpubMetadata,
     pub manifest: HashMap<String, ManifestItem>,
@@ -49,6 +59,7 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
     let mut manifest: HashMap<String, ManifestItem> = HashMap::new();
     let mut spine = Vec::new();
     let mut legacy_cover_id = None;
+    let mut series_index_raw: Option<String> = None;
 
     // None | "metadata" | "manifest" | "spine"
     let mut section: Option<String> = None;
@@ -66,6 +77,8 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                     }
                     (Some("metadata"), "title")
                     | (Some("metadata"), "creator")
+                    | (Some("metadata"), "subject")
+                    | (Some("metadata"), "date")
                     | (Some("metadata"), "language")
                     | (Some("metadata"), "publisher")
                     | (Some("metadata"), "description") => {
@@ -81,9 +94,8 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                         }
                     }
                     (Some("metadata"), "meta") => {
-                        if let Some(content) = handle_legacy_cover_meta(e) {
-                            legacy_cover_id = Some(content);
-                        }
+                        handle_legacy_cover_meta(e, &mut legacy_cover_id);
+                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
                     }
                     (Some("manifest"), "item") => {
                         insert_manifest_item(&mut manifest, e)?;
@@ -100,9 +112,8 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                 let local = local_name(e.name().into_inner());
                 match (section.as_deref(), local) {
                     (Some("metadata"), "meta") => {
-                        if let Some(content) = handle_legacy_cover_meta(e) {
-                            legacy_cover_id = Some(content);
-                        }
+                        handle_legacy_cover_meta(e, &mut legacy_cover_id);
+                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
                     }
                     (Some("manifest"), "item") => {
                         insert_manifest_item(&mut manifest, e)?;
@@ -129,7 +140,13 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                     if !value.is_empty() {
                         match target {
                             "title" => metadata.title = value,
-                            "creator" => metadata.author = Some(value),
+                            "creator" => metadata.authors.push(value),
+                            "subject" => metadata.subjects.push(value),
+                            "date" => {
+                                if metadata.publication_date.is_none() {
+                                    metadata.publication_date = Some(value);
+                                }
+                            }
                             "language" => metadata.language = Some(value),
                             "publisher" => metadata.publisher = Some(value),
                             "description" => metadata.description = Some(value),
@@ -151,6 +168,12 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
         }
     }
 
+    // The flat author is the first creator; the list is the normalized truth.
+    metadata.author = metadata.authors.first().cloned();
+    if let Some(raw) = series_index_raw.as_deref().and_then(parse_series_index) {
+        metadata.series_index = Some(raw);
+    }
+
     if metadata.title.is_empty() {
         return Err(EpubError::MissingTitle);
     }
@@ -167,6 +190,8 @@ fn local_static(name: &str) -> &'static str {
     match name {
         "title" => "title",
         "creator" => "creator",
+        "subject" => "subject",
+        "date" => "date",
         "language" => "language",
         "publisher" => "publisher",
         "description" => "description",
@@ -175,14 +200,51 @@ fn local_static(name: &str) -> &'static str {
     }
 }
 
-fn handle_legacy_cover_meta(e: &quick_xml::events::BytesStart<'_>) -> Option<String> {
+fn handle_legacy_cover_meta(
+    e: &quick_xml::events::BytesStart<'_>,
+    legacy_cover_id: &mut Option<String>,
+) {
     let name = attribute(&e.attributes(), "name");
     let content = attribute(&e.attributes(), "content");
     if name.as_deref() == Some("cover") {
-        content
-    } else {
-        None
+        if let Some(content) = content {
+            *legacy_cover_id = Some(content);
+        }
     }
+}
+
+/// Calibre writes its series through legacy `<meta>` elements:
+/// `<meta name="calibre:series" content="..."/>` and
+/// `<meta name="calibre:series_index" content="3"/>`. The index is kept raw
+/// until the end of the parse so a missing/invalid value simply stays unset.
+fn handle_calibre_meta(
+    e: &quick_xml::events::BytesStart<'_>,
+    series: &mut Option<String>,
+    series_index_raw: &mut Option<String>,
+) {
+    let name = attribute(&e.attributes(), "name");
+    let content = attribute(&e.attributes(), "content");
+    match (name.as_deref(), content) {
+        (Some("calibre:series"), Some(value)) => {
+            let value = value.trim();
+            if !value.is_empty() {
+                *series = Some(value.to_string());
+            }
+        }
+        (Some("calibre:series_index"), Some(value)) => {
+            let value = value.trim();
+            if !value.is_empty() {
+                *series_index_raw = Some(value.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Series indexes are decimal numbers, sometimes written with a trailing
+/// `.0` or a comma decimal separator.
+fn parse_series_index(raw: &str) -> Option<f64> {
+    raw.replace(',', ".").trim().parse::<f64>().ok()
 }
 
 fn insert_manifest_item(
@@ -243,11 +305,17 @@ mod tests {
     <dc:identifier id="book-id">urn:uuid:1234</dc:identifier>
     <dc:title>A Minimal Book</dc:title>
     <dc:creator>Ada Lovelace</dc:creator>
+    <dc:creator>Charles Babbage</dc:creator>
+    <dc:subject>Computing</dc:subject>
+    <dc:subject>Victorian science</dc:subject>
+    <dc:date>1843</dc:date>
     <dc:language>en</dc:language>
     <dc:publisher>Tuxbooks Press</dc:publisher>
     <dc:description>A tiny EPUB used as a test fixture.</dc:description>
     <dc:identifier opf:scheme="ISBN" xmlns:opf="http://www.idpf.org/2007/opf">978-3-16-148410-0</dc:identifier>
     <meta name="cover" content="cover-image"/>
+    <meta name="calibre:series" content="Analytical Engines"/>
+    <meta name="calibre:series_index" content="2"/>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -266,6 +334,15 @@ mod tests {
         let opf = parse_opf(MINIMAL_OPF).unwrap();
         assert_eq!(opf.metadata.title, "A Minimal Book");
         assert_eq!(opf.metadata.author.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(
+            opf.metadata.authors,
+            vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()]
+        );
+        assert_eq!(
+            opf.metadata.subjects,
+            vec!["Computing".to_string(), "Victorian science".to_string()]
+        );
+        assert_eq!(opf.metadata.publication_date.as_deref(), Some("1843"));
         assert_eq!(opf.metadata.language.as_deref(), Some("en"));
         assert_eq!(opf.metadata.publisher.as_deref(), Some("Tuxbooks Press"));
         assert_eq!(
@@ -273,6 +350,32 @@ mod tests {
             Some("A tiny EPUB used as a test fixture.")
         );
         assert_eq!(opf.metadata.isbn.as_deref(), Some("978-3-16-148410-0"));
+        assert_eq!(opf.metadata.series.as_deref(), Some("Analytical Engines"));
+        assert_eq!(opf.metadata.series_index, Some(2.0));
+    }
+
+    #[test]
+    fn calibre_series_fields_are_optional_and_tolerant() {
+        let without = MINIMAL_OPF
+            .replace(
+                r#"<meta name="calibre:series" content="Analytical Engines"/>"#,
+                "",
+            )
+            .replace(r#"<meta name="calibre:series_index" content="2"/>"#, "");
+        let opf = parse_opf(&without).unwrap();
+        assert_eq!(opf.metadata.series, None);
+        assert_eq!(opf.metadata.series_index, None);
+
+        // A non-numeric index is dropped, not an error.
+        let odd = MINIMAL_OPF.replace(r#"content="2""#, r#"content="two""#);
+        let opf = parse_opf(&odd).unwrap();
+        assert_eq!(opf.metadata.series.as_deref(), Some("Analytical Engines"));
+        assert_eq!(opf.metadata.series_index, None);
+
+        // A comma decimal separator parses.
+        let comma = MINIMAL_OPF.replace(r#"content="2""#, r#"content="2,5""#);
+        let opf = parse_opf(&comma).unwrap();
+        assert_eq!(opf.metadata.series_index, Some(2.5));
     }
 
     #[test]

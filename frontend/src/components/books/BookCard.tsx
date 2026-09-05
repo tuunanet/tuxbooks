@@ -20,6 +20,7 @@ export interface InteractiveBookProps {
   onOpen?: (bookId: number) => void;
   onRead?: (bookId: number) => void;
   onLocate?: (bookId: number) => void;
+  onEditMetadata?: (bookId: number) => void;
   onRemove?: (bookId: number) => void;
 }
 
@@ -40,6 +41,7 @@ export function BookCard({
   onOpen,
   onRead,
   onLocate,
+  onEditMetadata,
   onRemove,
 }: BookCardProps) {
   return (
@@ -49,6 +51,7 @@ export function BookCard({
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
+        onEditMetadata={onEditMetadata}
         onRemove={onRemove}
       >
         <button

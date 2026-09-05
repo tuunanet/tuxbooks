@@ -474,6 +474,9 @@ pub async fn reconnect_book(
     if !books::update_book_by_id(pool, book_id, &new_book).await? {
         return Err(AppError::NotFound);
     }
+    // The newly located file becomes the source truth; user metadata
+    // overrides stay on top of it (milestone 7).
+    crate::services::metadata::apply_source_metadata(pool, book_id, &new_book).await?;
     books::get_book(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)

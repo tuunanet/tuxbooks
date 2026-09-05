@@ -79,6 +79,7 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
         section: { kind: "smart", id: "all-books" },
         selectedBookId: 1,
         libraryQuery: "",
+        metadataEditorBookId: null,
       }}
     />,
   );
@@ -275,6 +276,7 @@ describe("Reader bookmarks", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );
@@ -313,6 +315,7 @@ describe("Reader bookmarks", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );
@@ -369,6 +372,7 @@ describe("ReaderNavigation", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );
@@ -568,6 +572,7 @@ describe("Reader book switching", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );

@@ -171,6 +171,37 @@ recolor, delete, notes), stored in SQLite under stable document
 locators, and revisited after closing and reopening a book, pinned by
 unit tests and real desktop E2E.
 
+- milestone 7 metadata and library curation: a three-layer metadata model
+  (migration 0008) separates source-file truth (`book_source_metadata`,
+  refreshed by every import/reconnect) from user overrides
+  (`book_metadata_overrides`; NULL = inherit, empty = explicitly cleared)
+  and recomputes the effective `books` columns through one merge in
+  `services::metadata` — so curation never rewrites EPUB/PDF files and
+  survives file changes. Normalized entities replace opaque strings:
+  shared `authors`/`subjects`/`series` vocabulary tables with per-book
+  join tables (`books.author` becomes a maintained display projection so
+  FTS keeps working), series membership resolved to `series` rows with a
+  position index, and orphaned rows swept after edits/removals. The EPUB
+  parser now extracts every `dc:creator`/`dc:subject`, `dc:date`, and
+  calibre series metas. The reader-facing editor (detail view Edit
+  Metadata button and card context menus) edits all fields — title,
+  subtitle, authors, publisher, language, ISBN, publication date, series
+  - entry, subjects, description, and a cover override copied into the
+    artwork cache — marks fields that differ from the file, applies the
+    minimal-override rule (restoring a file value removes its override),
+    and offers reset-to-source; edits propagate live through
+    `library-changed` so the grid, detail view, and FTS search stay in
+    sync. Pinned by Rust repo/service tests (merge rules, re-import
+    survival, FTS sync, cover override), frontend unit tests (dialog,
+    hook, detail display), and real-binary E2E (edit → grid/detail/search
+    update, source bytes untouched, reset round trip)
+
+Milestone 7 (metadata and library curation) is complete: the edit form
+stores minimal, per-field overrides in the library database, multiple
+authors/subjects/series are first-class normalized rows, "Reset to
+source" returns the file's own metadata, and the source files are never
+modified — pinned by unit tests and real desktop E2E.
+
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a
 single-module engine seam, persisted stable locators, and real desktop E2E.

@@ -17,7 +17,9 @@ reader (`frontend/src/lib/epub/`).
 pub fn parse_epub(path: &Path) -> Result<EpubBook, EpubError>;
 
 pub struct EpubBook {
-    pub metadata: EpubMetadata, // title, author, language, publisher, isbn, description
+    pub metadata: EpubMetadata, // title, author(+authors), subjects, language,
+                                // publisher, isbn, description, publication_date,
+                                // series(+series_index from calibre metas)
     pub spine: Vec<String>,     // manifest hrefs in reading order
     pub cover: Option<CoverImage>, // media_type + raw bytes
 }
@@ -30,10 +32,16 @@ pub struct EpubBook {
 2. **META-INF/container.xml** — first `<rootfile full-path=...>` is the
    OPF location; missing container or rootfile are typed errors.
 3. **OPF (package document)** — single streaming pass collects:
-   - `<dc:title/creator/language/publisher/description>` (namespace
-     prefix agnostic, entities unescaped)
+   - `<dc:title/creator/subject/date/language/publisher/description>`
+     (namespace prefix agnostic, entities unescaped); every `dc:creator`
+     and `dc:subject` is kept — the first creator doubles as the flat
+     `author` display value
    - `<dc:identifier opf:scheme="ISBN">` for the ISBN
    - `<meta name="cover" content="id">` (EPUB2 legacy cover)
+   - `<meta name="calibre:series" content="...">` and
+     `<meta name="calibre:series_index" content="n">` (index parse is
+     tolerant: a comma decimal separator works, a non-numeric value is
+     simply dropped)
    - `<item id, href, media-type, properties>` manifest
    - `<itemref idref>` spine
 4. **Reading order** — spine idrefs resolved through the manifest;

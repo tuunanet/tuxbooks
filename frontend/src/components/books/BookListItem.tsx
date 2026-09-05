@@ -20,6 +20,7 @@ export function BookListItem({
   onOpen,
   onRead,
   onLocate,
+  onEditMetadata,
   onRemove,
 }: BookListItemProps) {
   return (
@@ -29,6 +30,7 @@ export function BookListItem({
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
+        onEditMetadata={onEditMetadata}
         onRemove={onRemove}
       >
         <button

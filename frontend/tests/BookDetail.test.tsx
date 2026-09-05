@@ -32,6 +32,7 @@ function renderDetail(
         section: { kind: "smart", id: "all-books" },
         selectedBookId: 1,
         libraryQuery: "",
+        metadataEditorBookId: null,
         ...state,
       }}
     >
@@ -78,6 +79,7 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       >
         <LibraryDataProvider>
@@ -107,14 +109,115 @@ describe("BookDetail", () => {
     expect(screen.queryByText("Description")).not.toBeInTheDocument();
   });
 
-  it("keeps Edit Metadata as an explicit backend placeholder", async () => {
-    renderDetail();
-    const button = await screen.findByTestId("detail-edit");
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(/rust backend/i);
+  it("opens the metadata editor from the Edit button (milestone 7)", async () => {
+    // BookDetail fetches the curation view for the subjects row; the dialog
+    // is only mounted after the click.
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+    });
+
+    render(
+      <AppShell
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+          metadataEditorBookId: null,
+        }}
+      />,
+    );
+
+    await screen.findByTestId("book-detail");
     expect(screen.getByTestId("detail-collections")).toHaveTextContent(
       /collections are not connected to the backend/i,
     );
+    await userEvent.click(screen.getByTestId("detail-edit"));
+    expect(await screen.findByTestId("metadata-dialog")).toBeInTheDocument();
+  });
+
+  it("shows the detail's subjects from the metadata view", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [
+        makeBook({
+          publicationDate: "1843",
+          seriesId: 1,
+          seriesIndex: 2,
+          seriesName: "Analytical Engines",
+        }),
+      ],
+      get_book_metadata: {
+        bookId: 1,
+        effective: {
+          title: "A Minimal Book",
+          subtitle: null,
+          publisher: "Tuxbooks Press",
+          language: "en",
+          isbn: null,
+          description: null,
+          publicationDate: "1843",
+          series: "Analytical Engines",
+          seriesIndex: 2,
+          authors: ["Ada Lovelace"],
+          subjects: ["Computing", "Mathematics"],
+        },
+        source: {
+          title: "A Minimal Book",
+          subtitle: null,
+          publisher: "Tuxbooks Press",
+          language: "en",
+          isbn: null,
+          description: null,
+          publicationDate: "1843",
+          series: "Analytical Engines",
+          seriesIndex: 2,
+          authors: ["Ada Lovelace"],
+          subjects: ["Computing", "Mathematics"],
+        },
+        overridden: {
+          title: false,
+          subtitle: false,
+          publisher: false,
+          language: false,
+          isbn: false,
+          description: false,
+          publicationDate: false,
+          series: false,
+          cover: false,
+          authors: false,
+          subjects: false,
+        },
+        coverPath: null,
+      },
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+          metadataEditorBookId: null,
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await screen.findByTestId("book-detail");
+    // The subjects arrive asynchronously from get_book_metadata.
+    expect(await screen.findByText("Computing")).toBeInTheDocument();
+    const subjects = screen.getByTestId("detail-subjects");
+    expect(subjects).toHaveTextContent("Computing");
+    expect(subjects).toHaveTextContent("Mathematics");
+    const facts = screen.getByTestId("detail-facts");
+    expect(facts).toHaveTextContent("1843");
+    expect(facts).toHaveTextContent("Analytical Engines #2");
   });
 
   it("returns to the library from the back button", async () => {
@@ -130,6 +233,7 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );
@@ -153,6 +257,7 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       />,
     );
@@ -175,6 +280,7 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 99,
           libraryQuery: "",
+          metadataEditorBookId: null,
         }}
       >
         <LibraryDataProvider>

@@ -12,6 +12,7 @@ export interface Book {
   format: BookFormat;
   title: string;
   subtitle: string | null;
+  /** Display projection of the (possibly multiple) authors, joined with ", ". */
   author: string | null;
   publisher: string | null;
   language: string | null;
@@ -25,6 +26,56 @@ export interface Book {
   available: boolean;
   fileSize: number;
   fileMtime: number;
+  /** Effective (override-over-source) publication date. */
+  publicationDate: string | null;
+  /** Effective series membership, resolved through the backend `series` table. */
+  seriesId: number | null;
+  seriesIndex: number | null;
+  seriesName: string | null;
+}
+
+/** One complete set of bibliographic metadata (mirrors `domain::MetadataFields`). */
+export interface MetadataFields {
+  title: string;
+  subtitle: string | null;
+  publisher: string | null;
+  language: string | null;
+  isbn: string | null;
+  description: string | null;
+  publicationDate: string | null;
+  series: string | null;
+  seriesIndex: number | null;
+  authors: string[];
+  subjects: string[];
+}
+
+/** Which fields a user has overridden away from the source-file values. */
+export interface MetadataOverridden {
+  title: boolean;
+  subtitle: boolean;
+  publisher: boolean;
+  language: boolean;
+  isbn: boolean;
+  description: boolean;
+  publicationDate: boolean;
+  series: boolean;
+  cover: boolean;
+  authors: boolean;
+  subjects: boolean;
+}
+
+/**
+ * Full curation view of one book (mirrors `domain::BookMetadata`): the
+ * effective metadata, the untouched source-file values, and which fields
+ * differ. The source file is never rewritten; overrides live in the library
+ * database only.
+ */
+export interface BookMetadata {
+  bookId: number;
+  effective: MetadataFields;
+  source: MetadataFields;
+  overridden: MetadataOverridden;
+  coverPath: string | null;
 }
 
 /**

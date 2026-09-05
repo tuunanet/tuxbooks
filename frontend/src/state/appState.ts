@@ -24,6 +24,12 @@ export interface AppState {
    * instead of in view-local state.
    */
   libraryQuery: string;
+  /**
+   * Book whose metadata editor is open (milestone 7 curation). Rendered as
+   * a global overlay so the context menu can trigger it from the grid as
+   * well as the detail view's Edit button.
+   */
+  metadataEditorBookId: number | null;
 }
 
 export type AppAction =
@@ -32,13 +38,16 @@ export type AppAction =
   | { type: "open-book-detail"; bookId: number }
   | { type: "open-reader"; bookId: number }
   | { type: "return-to-library" }
-  | { type: "set-library-query"; query: string };
+  | { type: "set-library-query"; query: string }
+  | { type: "open-metadata-editor"; bookId: number }
+  | { type: "close-metadata-editor" };
 
 export const initialAppState: AppState = {
   view: "library",
   section: { kind: "smart", id: "all-books" },
   selectedBookId: null,
   libraryQuery: "",
+  metadataEditorBookId: null,
 };
 
 export function appStateReducer(state: AppState, action: AppAction): AppState {
@@ -57,6 +66,10 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       return { ...state, view: "library" };
     case "set-library-query":
       return state.libraryQuery === action.query ? state : { ...state, libraryQuery: action.query };
+    case "open-metadata-editor":
+      return { ...state, metadataEditorBookId: action.bookId };
+    case "close-metadata-editor":
+      return state.metadataEditorBookId === null ? state : { ...state, metadataEditorBookId: null };
   }
 }
 

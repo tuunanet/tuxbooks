@@ -119,6 +119,17 @@ layout, virtualization, the render queue, and persistence — see
   `repository::annotations`. Exposed as the `list_annotations` /
   `create_annotation` / `update_annotation` / `delete_annotation` commands;
   note and color edits go through `update_annotation`.
+- `metadata`: library curation (milestone 7). Owns the three-layer merge —
+  `book_source_metadata` (file truth, written by the importer/reconnect),
+  `book_metadata_overrides` (user truth), and the effective `books`
+  columns — plus the normalized authors/subjects/series entities
+  (`repository::metadata`). Edits follow the minimal-override rule (a value
+  equal to the source clears its override; an emptied field is an explicit
+  clear), reset restores the untouched source snapshot, and cover overrides
+  are copied into the artwork cache. Source files are never rewritten.
+  Exposed as `get_book_metadata` / `update_book_metadata` /
+  `reset_book_metadata` / `set_book_cover` / `clear_book_cover_override`;
+  every mutation emits `library-changed`.
 
 ## Frontend structure
 
@@ -132,10 +143,12 @@ frontend/src/
     lib/pdf/pdfEngine.ts  the only PDF.js import site (worker setup + open/close)
     hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`)
     hooks/useAnnotations.ts  persistent annotations of the open reader book
+    hooks/useBookMetadata.ts  curation view + metadata edits for the editor
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers
-        books/            BookCard, BookListItem, BookDetail, book context menu
+        books/            BookCard, BookListItem, BookDetail, book context menu,
+                          BookMetadataDialog (milestone 7 edit form, global overlay)
         search/           GlobalSearch (Ctrl/Cmd+K, backend FTS) + snippet splitting
         reader/           ReaderShell, EPUB reader, pdf/ continuous PDF
                           reader (layout math, virtualization, render queue,

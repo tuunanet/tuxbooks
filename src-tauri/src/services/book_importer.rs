@@ -80,6 +80,9 @@ pub async fn import_file(
         previous_cover.as_deref(),
     )?;
     let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+    // Record the fresh parse as source truth and re-merge the effective
+    // view, so user metadata overrides survive file changes (milestone 7).
+    crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
     let book = books::get_book(pool, id).await?.expect("row just upserted");
     Ok(Some(ImportOutcome { book, inserted }))
 }
@@ -120,6 +123,7 @@ pub async fn import_directory(
                     previous_cover.as_deref(),
                 )?;
                 let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+                crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
                 if let Some(book) = books::get_book(pool, id).await? {
                     on_book(&book);
                 }
@@ -165,15 +169,21 @@ pub fn file_stats(path: &Path) -> Option<(i64, i64)> {
 
 fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewBook {
     let (file_size, file_mtime) = file_stats(path).unwrap_or((0, 0));
+    let metadata = &book.metadata;
     NewBook {
         path: path.to_string_lossy().into_owned(),
-        title: book.metadata.title.clone(),
+        title: metadata.title.clone(),
         subtitle: None,
-        author: book.metadata.author.clone(),
-        publisher: book.metadata.publisher.clone(),
-        language: book.metadata.language.clone(),
-        isbn: book.metadata.isbn.clone(),
-        description: book.metadata.description.clone(),
+        author: metadata.author.clone(),
+        authors: metadata.authors.clone(),
+        subjects: metadata.subjects.clone(),
+        publisher: metadata.publisher.clone(),
+        language: metadata.language.clone(),
+        isbn: metadata.isbn.clone(),
+        description: metadata.description.clone(),
+        publication_date: metadata.publication_date.clone(),
+        series: metadata.series.clone(),
+        series_index: metadata.series_index,
         cover_path,
         file_size,
         file_mtime,
@@ -187,10 +197,15 @@ fn pdf_to_new_book(path: &Path, book: &crate::pdf::PdfBook, cover_path: Option<S
         title: book.metadata.title.clone(),
         subtitle: None,
         author: book.metadata.author.clone(),
+        authors: book.metadata.author.iter().cloned().collect(),
+        subjects: Vec::new(),
         publisher: None,
         language: None,
         isbn: None,
         description: book.metadata.description.clone(),
+        publication_date: None,
+        series: None,
+        series_index: None,
         cover_path,
         file_size,
         file_mtime,
@@ -254,8 +269,9 @@ fn stable_hash(data: &[u8]) -> u64 {
 /// share one file, and a source change produces a new name, which is what
 /// makes the startup sweep able to invalidate stale artwork. Writing is
 /// atomic (temp file + rename) so a crash can never leave a truncated file
-/// at a name a later import would treat as a cache hit.
-fn write_cover_bytes(
+/// at a name a later import would treat as a cache hit. Also used by the
+/// metadata service for user-uploaded cover overrides (milestone 7).
+pub(crate) fn write_cover_bytes(
     media_type: &str,
     data: &[u8],
     covers_dir: &Path,

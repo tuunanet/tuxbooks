@@ -5,9 +5,14 @@ use crate::domain::NewBook;
 use crate::domain::SearchHit;
 use crate::error::AppError;
 
-const BOOK_COLUMNS: &str = "id, path, title, subtitle, author, publisher, language, isbn, \
-     description, cover_path, added_at, modified_at, last_opened_at, available, file_size, \
-     file_mtime";
+/// Effective book columns for SELECT queries. The bibliographic fields are
+/// the effective (override-over-source) values; `series_name` resolves the
+/// normalized `series` table so readers never need a second query.
+const BOOK_COLUMNS: &str = "b.id, b.path, b.title, b.subtitle, b.author, b.publisher, \
+     b.language, b.isbn, b.description, b.cover_path, b.added_at, b.modified_at, \
+     b.last_opened_at, b.available, b.file_size, b.file_mtime, b.publication_date, \
+     b.series_id, b.series_index, s.name AS series_name";
+const BOOK_FROM: &str = " FROM books b LEFT JOIN series s ON s.id = b.series_id";
 
 /// Insert a new book. Errors if `path` already exists — use [`upsert_book`] for
 /// scan imports.
@@ -85,11 +90,12 @@ pub async fn find_id_by_path(pool: &SqlitePool, path: &str) -> Result<Option<i64
 }
 
 pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Book>, AppError> {
-    let book =
-        sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS} FROM books WHERE path = ?1"))
-            .bind(path)
-            .fetch_optional(pool)
-            .await?;
+    let book = sqlx::query_as::<_, Book>(&format!(
+        "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.path = ?1"
+    ))
+    .bind(path)
+    .fetch_optional(pool)
+    .await?;
     Ok(book)
 }
 
@@ -102,7 +108,7 @@ pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
 
 pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
-        "SELECT {BOOK_COLUMNS} FROM books ORDER BY title COLLATE NOCASE, id"
+        "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY b.title COLLATE NOCASE, b.id"
     ))
     .fetch_all(pool)
     .await?;
@@ -120,7 +126,7 @@ pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError
 
 pub async fn get_book(pool: &SqlitePool, id: i64) -> Result<Option<Book>, AppError> {
     let book =
-        sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS} FROM books WHERE id = ?1"))
+        sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.id = ?1"))
             .bind(id)
             .fetch_optional(pool)
             .await?;
@@ -242,9 +248,9 @@ pub async fn set_availability_prefix(
 ) -> Result<Vec<Book>, AppError> {
     let mut affected: Vec<Book> = sqlx::query_as::<_, Book>(&format!(
         r#"
-        SELECT {BOOK_COLUMNS} FROM books
-        WHERE available != ?2
-          AND (path = ?1 OR substr(path, 1, length(?1) + 1) = ?1 || '/')
+        SELECT {BOOK_COLUMNS}{BOOK_FROM}
+        WHERE b.available != ?2
+          AND (b.path = ?1 OR substr(b.path, 1, length(?1) + 1) = ?1 || '/')
         "#
     ))
     .bind(path_prefix)
@@ -277,9 +283,9 @@ pub async fn set_availability_prefix(
 pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
         r#"
-        SELECT {BOOK_COLUMNS} FROM books
-        WHERE path = ?1 OR substr(path, 1, length(?1) + 1) = ?1 || '/'
-        ORDER BY path
+        SELECT {BOOK_COLUMNS}{BOOK_FROM}
+        WHERE b.path = ?1 OR substr(b.path, 1, length(?1) + 1) = ?1 || '/'
+        ORDER BY b.path
         "#
     ))
     .bind(prefix)
@@ -296,7 +302,7 @@ pub async fn find_books_with_size(
     file_size: i64,
 ) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
-        "SELECT {BOOK_COLUMNS} FROM books WHERE file_size = ?1"
+        "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.file_size = ?1"
     ))
     .bind(file_size)
     .fetch_all(pool)
@@ -336,11 +342,16 @@ mod tests {
             title: title.into(),
             subtitle: Some("A Subtitle".into()),
             author: Some("Author".into()),
+            authors: vec!["Author".into()],
+            subjects: Vec::new(),
             publisher: None,
             language: Some("en".into()),
             isbn: None,
             description: None,
             cover_path: None,
+            publication_date: None,
+            series: None,
+            series_index: None,
             file_size: 100,
             file_mtime: 1_700_000_000,
         }

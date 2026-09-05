@@ -6,15 +6,25 @@ import type {
   AnnotationInput,
   AnnotationPatch,
   Book,
+  BookMetadata,
   ImportReport,
   LibraryChange,
   LibraryStats,
+  MetadataFields,
   ReadingProgressInput,
   ReadingProgressRecord,
   SearchHit,
 } from "@/types/domain";
 
-export type { Book, BookFormat, ImportReport, LibraryChange, LibraryStats } from "@/types/domain";
+export type {
+  Book,
+  BookFormat,
+  BookMetadata,
+  ImportReport,
+  LibraryChange,
+  LibraryStats,
+  MetadataFields,
+} from "@/types/domain";
 
 export function getLibraryStats(): Promise<LibraryStats> {
   return invoke("get_library_stats");
@@ -54,6 +64,43 @@ export function onLibraryChanged(callback: (change: LibraryChange) => void): Pro
 /** Remove a book from the library (source file on disk is never touched). */
 export function removeBook(bookId: number): Promise<boolean> {
   return invoke("remove_book", { bookId });
+}
+
+/** Curation view of a book: effective metadata, source values, overridden flags. */
+export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
+  return invoke("get_book_metadata", { bookId });
+}
+
+/**
+ * Save the metadata edit form. Only fields that differ from the source file
+ * become overrides — source files are never rewritten.
+ */
+export function updateBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
+  return invoke("update_book_metadata", { bookId, form });
+}
+
+/** Drop every override; the book returns to its source-file metadata. */
+export function resetBookMetadata(bookId: number): Promise<BookMetadata> {
+  return invoke("reset_book_metadata", { bookId });
+}
+
+/** Replace the cover with a user-picked image (copied into the artwork cache). */
+export function setBookCover(bookId: number, imagePath: string): Promise<Book> {
+  return invoke("set_book_cover", { bookId, imagePath });
+}
+
+/** Remove a cover override; the extracted (source) cover returns. */
+export function clearBookCoverOverride(bookId: number): Promise<Book> {
+  return invoke("clear_book_cover_override", { bookId });
+}
+
+/** Native image picker for cover overrides; null when cancelled. */
+export function pickCoverImage(): Promise<string | null> {
+  return open({
+    multiple: false,
+    title: "Choose a cover image",
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+  });
 }
 
 /** Reconnect an unavailable book to a newly located file, keeping its identity. */

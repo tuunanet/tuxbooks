@@ -13,10 +13,11 @@ pub struct ScannedEntry {
     pub book: Result<ScannedBook, BookParseError>,
 }
 
-/// A parsed book of either supported format.
+/// A parsed book of either supported format. The EPUB variant is boxed to
+/// keep the enum size balanced (metadata carries Vec fields).
 #[derive(Debug)]
 pub enum ScannedBook {
-    Epub(EpubBook),
+    Epub(Box<EpubBook>),
     Pdf(PdfBook),
 }
 
@@ -58,7 +59,9 @@ pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
     {
         parse_pdf(path).map(ScannedBook::Pdf).map_err(Into::into)
     } else {
-        parse_epub(path).map(ScannedBook::Epub).map_err(Into::into)
+        parse_epub(path)
+            .map(|book| ScannedBook::Epub(Box::new(book)))
+            .map_err(Into::into)
     }
 }
 

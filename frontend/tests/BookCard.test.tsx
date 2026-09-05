@@ -84,18 +84,14 @@ describe("BookCard", () => {
     expect(onOpen).toHaveBeenCalledWith(1);
   });
 
-  it("keeps backend-less actions as disabled placeholders", async () => {
-    render(<BookCard book={makeBook()} />);
+  it("keeps backend-less actions as disabled placeholders and wires metadata editing", async () => {
+    const onEditMetadata = vi.fn();
+    render(<BookCard book={makeBook()} onEditMetadata={onEditMetadata} />);
 
     fireEvent.contextMenu(screen.getByTestId("book-card"));
     await screen.findByRole("menuitem", { name: "Open" });
 
-    for (const name of [
-      "Remove from Collection",
-      "Mark as Finished",
-      "Edit Metadata",
-      "Show in File Manager",
-    ]) {
+    for (const name of ["Remove from Collection", "Mark as Finished", "Show in File Manager"]) {
       // Radix marks disabled div-based items with aria-disabled, not disabled.
       expect(screen.getByRole("menuitem", { name })).toHaveAttribute("aria-disabled", "true");
     }
@@ -105,6 +101,10 @@ describe("BookCard", () => {
     expect(continueReading).not.toHaveAttribute("aria-disabled");
     const remove = screen.getByRole("menuitem", { name: "Remove from Library" });
     expect(remove).not.toHaveAttribute("aria-disabled");
+
+    // Milestone 7: metadata editing is real now and opens the editor.
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit Metadata" }));
+    expect(onEditMetadata).toHaveBeenCalledWith(1);
   });
 
   it("removes the book through the context menu", async () => {

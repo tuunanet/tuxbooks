@@ -16,22 +16,25 @@ interface BookContextMenuProps {
   onOpen?: (bookId: number) => void;
   onRead?: (bookId: number) => void;
   onLocate?: (bookId: number) => void;
+  onEditMetadata?: (bookId: number) => void;
   onRemove?: (bookId: number) => void;
   children: ReactNode;
 }
 
 /**
  * Right-click actions for a book. Open/Continue Reading, removal from the
- * library (local-first: the source file on disk is never touched), and —
- * for books whose file disappeared — the Locate File reconnection flow.
- * The collection entries are submenu shells: the structure is real, the
- * persistence is not, and the disabled entries say so instead of pretending.
+ * library (local-first: the source file on disk is never touched), metadata
+ * editing (milestone 7), and — for books whose file disappeared — the
+ * Locate File reconnection flow. The collection entries are submenu shells:
+ * the structure is real, the persistence is not, and the disabled entries
+ * say so instead of pretending.
  */
 export function BookContextMenu({
   book,
   onOpen,
   onRead,
   onLocate,
+  onEditMetadata,
   onRemove,
   children,
 }: BookContextMenuProps) {
@@ -81,7 +84,10 @@ export function BookContextMenu({
           Mark as Finished
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem disabled title="Metadata editing is not implemented yet">
+        <ContextMenuItem
+          data-testid="context-edit-metadata"
+          onSelect={() => onEditMetadata?.(book.id)}
+        >
           Edit Metadata
         </ContextMenuItem>
         <ContextMenuItem disabled title="Revealing files is not wired up yet">

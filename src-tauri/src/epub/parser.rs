@@ -17,7 +17,7 @@ pub struct CoverImage {
 }
 
 /// Tauri- and database-independent representation of a parsed EPUB.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EpubBook {
     pub metadata: super::EpubMetadata,
     /// Manifest hrefs in spine/reading order.

@@ -19,6 +19,10 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     available: true,
     fileSize: 1024,
     fileMtime: 1767225600,
+    publicationDate: null,
+    seriesId: null,
+    seriesIndex: null,
+    seriesName: null,
     ...overrides,
   };
 }

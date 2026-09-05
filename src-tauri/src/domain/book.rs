@@ -29,6 +29,10 @@ impl BookFormat {
 ///
 /// `Serialize` is implemented manually (instead of derived) so the IPC payload
 /// can include `format`, which is derived from `path` and has no column.
+///
+/// The bibliographic columns are the *effective* metadata: user overrides
+/// (milestone 7) merged over the source-file values. `series_name` is
+/// resolved through the normalized `series` table by the repository queries.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub struct Book {
     pub id: i64,
@@ -51,11 +55,17 @@ pub struct Book {
     pub file_size: i64,
     /// Source file mtime as unix seconds at the last import/refresh.
     pub file_mtime: i64,
+    /// Effective publication date (override or source).
+    pub publication_date: Option<String>,
+    /// Effective series membership, resolved through the `series` table.
+    pub series_id: Option<i64>,
+    pub series_index: Option<f64>,
+    pub series_name: Option<String>,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 17)?;
+        let mut state = serializer.serialize_struct("Book", 21)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("path", &self.path)?;
         state.serialize_field("format", &BookFormat::from_path(&self.path))?;
@@ -73,6 +83,10 @@ impl Serialize for Book {
         state.serialize_field("available", &self.available)?;
         state.serialize_field("fileSize", &self.file_size)?;
         state.serialize_field("fileMtime", &self.file_mtime)?;
+        state.serialize_field("publicationDate", &self.publication_date)?;
+        state.serialize_field("seriesId", &self.series_id)?;
+        state.serialize_field("seriesIndex", &self.series_index)?;
+        state.serialize_field("seriesName", &self.series_name)?;
         state.end()
     }
 }
@@ -92,19 +106,40 @@ pub struct SearchHit {
 /// by the database; `last_opened_at` is lifecycle state, not import data.
 /// File snapshots (`file_size`/`file_mtime`) come from the filesystem at parse
 /// time; `available` is not import data (rows always import as available).
+///
+/// The bibliographic fields are the source-file truth: this struct is also
+/// the payload the metadata service merges into `book_source_metadata`
+/// (milestone 7), so user overrides survive re-imports.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewBook {
     pub path: String,
     pub title: String,
     pub subtitle: Option<String>,
     pub author: Option<String>,
+    pub authors: Vec<String>,
+    pub subjects: Vec<String>,
     pub publisher: Option<String>,
     pub language: Option<String>,
     pub isbn: Option<String>,
     pub description: Option<String>,
+    pub publication_date: Option<String>,
+    pub series: Option<String>,
+    pub series_index: Option<f64>,
     pub cover_path: Option<String>,
     pub file_size: i64,
     pub file_mtime: i64,
+}
+
+impl NewBook {
+    /// Source metadata with the flat `author` display value folded into the
+    /// author list (the EPUB parser keeps `author` as the first creator; the
+    /// list is the normalized truth).
+    pub fn author_list(&self) -> Vec<String> {
+        if self.authors.is_empty() {
+            return self.author.iter().cloned().collect();
+        }
+        self.authors.clone()
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +164,10 @@ mod tests {
             available: true,
             file_size: 0,
             file_mtime: 0,
+            publication_date: None,
+            series_id: None,
+            series_index: None,
+            series_name: None,
         }
     }
 

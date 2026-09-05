@@ -57,6 +57,10 @@ export function LibraryView({ section }: LibraryViewProps) {
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),
     [dispatch],
   );
+  const openMetadataEditor = useCallback(
+    (bookId: number) => dispatch({ type: "open-metadata-editor", bookId }),
+    [dispatch],
+  );
   const openReader = useCallback(
     (bookId: number) => {
       // A missing file cannot be read; the recovery entry points live on
@@ -186,6 +190,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       onOpen: openDetail,
       onRead: openReader,
       onLocate: locateBook,
+      onEditMetadata: openMetadataEditor,
       onRemove: removeBookFromLibrary,
     };
     return view === "grid" ? (

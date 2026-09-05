@@ -14,24 +14,31 @@ and `foreign_keys` is forced ON for every connection.
 
 ### books
 
-| column         | type                           | notes                       |
-| -------------- | ------------------------------ | --------------------------- |
-| id             | INTEGER PK AUTOINCREMENT       |                             |
-| path           | TEXT NOT NULL UNIQUE           | absolute file path          |
-| title          | TEXT NOT NULL, CHECK non-blank |                             |
-| subtitle       | TEXT                           |                             |
-| author         | TEXT                           |                             |
-| publisher      | TEXT                           |                             |
-| language       | TEXT                           |                             |
-| isbn           | TEXT                           |                             |
-| description    | TEXT                           |                             |
-| cover_path     | TEXT                           | extracted cover image file  |
-| added_at       | TEXT NOT NULL, DB default      | set by INSERT               |
-| modified_at    | TEXT NOT NULL, DB default      | bumped on UPDATE            |
-| last_opened_at | TEXT NULL                      | set when reading starts     |
-| available      | INTEGER NOT NULL DEFAULT 1     | 0 once the file disappears  |
-| file_size      | INTEGER NOT NULL DEFAULT 0     | bytes at last import        |
-| file_mtime     | INTEGER NOT NULL DEFAULT 0     | unix seconds at last import |
+| column           | type                                    | notes                                                |
+| ---------------- | --------------------------------------- | ---------------------------------------------------- |
+| id               | INTEGER PK AUTOINCREMENT                |                                                      |
+| path             | TEXT NOT NULL UNIQUE                    | absolute file path                                   |
+| title            | TEXT NOT NULL, CHECK non-blank          |                                                      |
+| subtitle         | TEXT                                    |                                                      |
+| author           | TEXT                                    | display projection of the author list (see metadata) |
+| publisher        | TEXT                                    |                                                      |
+| language         | TEXT                                    |                                                      |
+| isbn             | TEXT                                    |                                                      |
+| description      | TEXT                                    |                                                      |
+| cover_path       | TEXT                                    | extracted cover image file                           |
+| added_at         | TEXT NOT NULL, DB default               | set by INSERT                                        |
+| modified_at      | TEXT NOT NULL, DB default               | bumped on UPDATE                                     |
+| last_opened_at   | TEXT NULL                               | set when reading starts                              |
+| available        | INTEGER NOT NULL DEFAULT 1              | 0 once the file disappears                           |
+| file_size        | INTEGER NOT NULL DEFAULT 0              | bytes at last import                                 |
+| file_mtime       | INTEGER NOT NULL DEFAULT 0              | unix seconds at last import                          |
+| publication_date | TEXT                                    | effective (override over source)                     |
+| series_id        | INTEGER, FK `series` ON DELETE SET NULL | effective series membership                          |
+| series_index     | REAL                                    | position inside the series                           |
+
+The bibliographic columns hold the **effective** metadata — user overrides
+(milestone 7) merged over the source-file values. `series_name` is not a
+column: book queries LEFT JOIN the `series` table.
 
 `available`/`file_size`/`file_mtime` back the filesystem watcher (milestone
 3): a disappeared file marks `available = 0` but never deletes the row
@@ -90,6 +97,57 @@ normalized to page space (`0..1` per axis, validated by the service), so
 highlights redraw correctly at any zoom or window size. Index on
 `(book_id, kind)`; deleting a book cascades.
 
+## Metadata curation (milestone 7)
+
+Milestone 7 keeps three layers so a book's curated metadata can never lose
+the file's own values — and so source files are never rewritten:
+
+1. `book_source_metadata` — **file truth**, one row per book, refreshed by
+   the importer on every (re)import and by the reconnect flow. `authors`/
+   `subjects` are JSON arrays (NULL = pre-normalization backfill, treated
+   as empty); `cover_path` is the extracted cover at import time.
+2. `book_metadata_overrides` — **user truth**, one row per book (created by
+   migration 0008 for existing rows). `NULL` = inherit the source value;
+   an empty string = explicitly cleared. `cover_path` overrides the
+   extracted cover. `authors_customized`/`subjects_customized` gate whether
+   a re-import may replace the normalized lists (0 = follow the file,
+   1 = the user owns the list).
+3. `books` columns — the **effective view** every reader path consumes,
+   recomputed by `services/metadata.rs` after imports, edits, resets, and
+   cover changes. The FTS5 triggers then keep the search index in sync
+   automatically.
+
+### Normalized entities
+
+- `authors` (shared vocabulary, UNIQUE name) + `book_authors` (join table
+  with a `position` for display order). `books.author` is a maintained
+  display projection (joined with `", "`) so FTS and list views keep
+  working unchanged.
+- `subjects` + `book_subjects`.
+- `series` + `books.series_id`/`books.series_index`. Source and override
+  series are stored by name in their layers; the effective name is
+  resolved to a shared `series` row id. Series/author/subject rows no
+  book references are swept (`sweep_orphans`) after edits, resets, and
+  removals.
+- Collection membership stays in `collections`/`book_collections`
+  (unchanged since milestone 3).
+
+### Merge and override rules
+
+Implemented once in `services/metadata.rs::recompute_and_apply`:
+
+- Scalar fields: override `NULL` → source value; `Some("")` → cleared;
+  `Some(v)` → `v`.
+- Series travels as one unit (name + index): an overridden unit owns both
+  values; clearing the name clears the index; an inherited unit takes both
+  from the source.
+- The minimal-override save (`update_book_metadata`) stores an override
+  only where the form differs from the source — typing the original value
+  back removes the override. The cover override always wins over the
+  extracted cover until cleared or reset.
+
+Deleting a book cascades to all of these tables.
+
 ## Full-text search
 
 `books_fts` is an FTS5 **external-content** table over
@@ -116,7 +174,10 @@ into quoted prefix phrases ANDed together (`wind river` →
 - Queries use runtime `sqlx::query`/`query_as` (not `query!` macros), so
   builds do not need `DATABASE_URL` or `sqlx prepare`.
 - Imports upsert by `path`; a re-scan updates metadata instead of
-  duplicating rows.
+  duplicating rows. After the upsert, the importer records the fresh parse
+  in `book_source_metadata` and re-merges the effective view
+  (`services::metadata::apply_source_metadata`), so user overrides survive
+  file changes (milestone 7).
 - Tests always create the pool in a `tempfile` temp dir.
 
 ## Reconciliation rules (milestone 3)
