@@ -11,6 +11,8 @@ import "@/lib/epub/foliate-js/view.js";
  * application CSP (`script-src 'self'`); blob: documents inherit it.
  */
 
+import { Overlayer } from "@/lib/epub/foliate-js/overlayer.js";
+
 export const EPUB_MIME_TYPE = "application/epub+zip";
 
 /** Node of the EPUB 2/3 table of contents as reported by the engine. */
@@ -144,6 +146,8 @@ interface FoliateView extends HTMLElement {
     setAttribute(name: string, value: string): void;
     getAttribute(name: string): string | null;
     setStyles?(css: string): void;
+    /** One entry per mounted section document (engine-internal shape). */
+    getContents?(): { index: number; doc: Document; overlayer?: unknown }[];
   } | null;
   book: {
     toc?: unknown;
@@ -152,6 +156,18 @@ interface FoliateView extends HTMLElement {
   lastLocation: { fraction?: number } | null;
   search(opts: { query: string }): AsyncGenerator<unknown, void, unknown>;
   clearSearch(): void;
+  /** Draws (or removes) one annotation in the engine's section overlays. */
+  addAnnotation(annotation: { value: string; color?: string }, remove?: boolean): Promise<unknown>;
+  /** Resolves a CFI/href target to its spine index (+ engine anchor). */
+  resolveNavigation(target: string): { index: number; anchor: unknown } | undefined;
+  /** Canonical `epubcfi(...)` for a range inside section `index`. */
+  getCFI(index: number, range: Range): string;
+}
+
+/** A highlight drawn into the engine's overlays, kept for section remounts. */
+interface EpubHighlight {
+  value: string;
+  color: string;
 }
 
 function asString(value: unknown): string {
@@ -197,10 +213,26 @@ export class EpubViewHandle {
   private readonly view: FoliateView;
   private searchGeneration = 0;
   private activeSearchIterator: AsyncGenerator<unknown, void, unknown> | null = null;
+  /** All live highlights, by spine index, for `create-overlay` remounts. */
+  private readonly highlightsByIndex = new Map<number, EpubHighlight[]>();
 
   private constructor(element: HTMLDivElement) {
     this.view = element.querySelector("foliate-view") as FoliateView;
     if (!this.view) throw new Error("foliate-view element missing from host");
+    // The engine asks the host how to draw every annotation; highlights are
+    // translucent marks in the annotation's color. The paginator redraws
+    // overlays on reflow, and `create-overlay` remounts one per section —
+    // this subscription re-adds that section's highlights.
+    this.view.addEventListener("draw-annotation", ((event: CustomEvent) => {
+      const { draw, annotation } = event.detail ?? {};
+      if (typeof draw === "function") draw(Overlayer.highlight, { color: annotation?.color });
+    }) as EventListener);
+    this.view.addEventListener("create-overlay", ((event: CustomEvent) => {
+      const index = Number(event.detail?.index);
+      for (const highlight of this.highlightsByIndex.get(index) ?? []) {
+        void this.view.addAnnotation(highlight);
+      }
+    }) as EventListener);
   }
 
   /** Creates the host + `<foliate-view>` element pair. Not yet holding a book. */
@@ -317,6 +349,50 @@ export class EpubViewHandle {
     this.activeSearchIterator?.return(undefined);
     this.activeSearchIterator = null;
     this.view.clearSearch();
+  }
+
+  /**
+   * Draws a highlight at `cfi` and keeps it for section remounts. The
+   * engine draws immediately when the section is mounted; otherwise the
+   * `create-overlay` subscription re-adds it when the section arrives.
+   */
+  addHighlight(cfi: string, color: string): void {
+    this.forgetHighlight(cfi);
+    const resolved = this.view.resolveNavigation(cfi);
+    if (resolved && Number.isFinite(resolved.index)) {
+      const list = this.highlightsByIndex.get(resolved.index) ?? [];
+      list.push({ value: cfi, color });
+      this.highlightsByIndex.set(resolved.index, list);
+    }
+    void this.view.addAnnotation({ value: cfi, color });
+  }
+
+  /** Removes a highlight from the overlays and the remount bookkeeping. */
+  removeHighlight(cfi: string): void {
+    this.forgetHighlight(cfi);
+    void this.view.addAnnotation({ value: cfi }, true);
+  }
+
+  private forgetHighlight(cfi: string): void {
+    for (const [index, list] of this.highlightsByIndex) {
+      const next = list.filter((highlight) => highlight.value !== cfi);
+      if (next.length === list.length) continue;
+      if (next.length === 0) this.highlightsByIndex.delete(index);
+      else this.highlightsByIndex.set(index, next);
+    }
+  }
+
+  /**
+   * Canonical `epubcfi(...)` for a range inside a mounted section document,
+   * plus that section's spine href. Null when the document is not a mounted
+   * section (never expected for selections captured through `onLoad`).
+   */
+  getCfiFromRange(doc: Document, range: Range): { cfi: string; href: string | null } | null {
+    const contents = this.view.renderer?.getContents?.() ?? [];
+    const entry = contents.find((candidate) => candidate.doc === doc);
+    if (!entry) return null;
+    const cfi = this.view.getCFI(entry.index, range);
+    return { cfi, href: this.getSectionHref(entry.index) };
   }
 
   onRelocate(handler: (detail: EpubRelocateDetail) => void): () => void {

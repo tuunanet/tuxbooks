@@ -108,9 +108,17 @@ layout, virtualization, the render queue, and persistence — see
   cross the IPC boundary.
 - `search`: library full-text search (milestone 5). Sanitizes the raw user
   query into FTS5 MATCH syntax (quoted prefix phrases, ANDed) and queries
-  `books_fts` through `repository::books::search_fts`; hits carry the
-  book id, title, author, and an auto-column snippet. Exposed as the
+  `books_fts` through `repository::books::search_fts`; hits carry the book
+  id, title, author, and an auto-column snippet. Exposed as the
   `search_books` command behind the global search box (Ctrl/Cmd+K).
+- `annotations`: persistent reading annotations (milestone 6). Validates
+  that every annotation names a document position (EPUB CFI or 1-based PDF
+  page, optional page fraction inside the page), that EPUB highlights quote
+  their selected text, and that PDF highlight geometry decodes to rects
+  normalized to page space (0..1); CRUD passes through
+  `repository::annotations`. Exposed as the `list_annotations` /
+  `create_annotation` / `update_annotation` / `delete_annotation` commands;
+  note and color edits go through `update_annotation`.
 
 ## Frontend structure
 
@@ -123,6 +131,7 @@ frontend/src/
     lib/fixtures.ts       realistic sample books for tests/previews
     lib/pdf/pdfEngine.ts  the only PDF.js import site (worker setup + open/close)
     hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`)
+    hooks/useAnnotations.ts  persistent annotations of the open reader book
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers
@@ -132,7 +141,9 @@ frontend/src/
                           reader (layout math, virtualization, render queue,
                           scroll tracking, thumbnails sidebar, outline,
                           persistence — see pdf.md), ReaderNavigation with
-                          the in-book Search tab, shared searchModel
+                          the in-book Search, Bookmarks, and Highlights tabs,
+                          shared searchModel + annotationModel, selection
+                          toolbar, and annotation list tabs
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

@@ -96,3 +96,31 @@ export async function getPdfPageText(document: PdfDocument, pageNumber: number):
 }
 
 export { findPageMatches, type PdfSearchExcerpt } from "./pdfSearch";
+
+/**
+ * Renders one page's text layer into `container` (positioned over the page
+ * canvas by the caller). The layer is what makes PDF text selectable, so
+ * highlights can be created from real user selections; it carries no visuals
+ * of its own (transparent text spans). Failures are non-fatal: a page
+ * without a text layer simply cannot be selected.
+ *
+ * The caller owns lifecycle: cancel when the page leaves the render set.
+ * Requires the `--scale-factor` CSS custom properties on an ancestor (set by
+ * the page slot wrapper).
+ */
+export async function renderPdfTextLayer(
+  document: PdfDocument,
+  pageNumber: number,
+  container: HTMLElement,
+  scale: number,
+): Promise<{ cancel(): void }> {
+  const { TextLayer } = await loadEngine();
+  const page = await document.getPage(pageNumber);
+  const textContent = await page.getTextContent();
+  const viewport = page.getViewport({ scale });
+  const layer = new TextLayer({ textContentSource: textContent, container, viewport });
+  void layer.render().catch((err: unknown) => {
+    console.warn(`text layer render failed on page ${pageNumber}`, err);
+  });
+  return { cancel: () => layer.cancel() };
+}

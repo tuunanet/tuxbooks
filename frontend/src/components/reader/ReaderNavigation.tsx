@@ -7,14 +7,15 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useReader } from "@/state/readerState";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
+import type { Annotation, AnnotationPatch } from "@/types/domain";
 import type { Book } from "@/types/domain";
+import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
 import { ReaderSearchTab } from "./ReaderSearchTab";
 import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
 
-export type ReaderNavTab = "contents" | "pages" | "outline" | "search" | "bookmarks";
+export type ReaderNavTab = "contents" | "pages" | "outline" | "bookmarks" | "highlights" | "search";
 
 interface ReaderNavigationProps {
   open: boolean;
@@ -30,6 +31,14 @@ interface ReaderNavigationProps {
   pdfOutline: PdfOutlineItem[] | null;
   /** Navigates the PDF reader to an outline entry's page. */
   onPdfJump: (page: number) => void;
+  /** Persistent annotations of the open book (bookmarks + highlights). */
+  annotations: Annotation[];
+  /** Navigates the reader to an annotation's position. */
+  onAnnotationJump: (annotation: Annotation) => void;
+  /** Deletes a persistent annotation. */
+  onDeleteAnnotation: (id: number) => void;
+  /** Updates an annotation's color and/or note. */
+  onUpdateAnnotation: (id: number, patch: AnnotationPatch) => void;
   /** In-book search state for the open book; null before the first search. */
   search: ReaderSearchState | null;
   /** Starts (or clears) the in-book search for the open book. */
@@ -61,12 +70,21 @@ function flattenOutline(items: PdfOutlineItem[], depth = 0): OutlineRow[] {
   return items.flatMap((item) => [{ item, depth }, ...flattenOutline(item.items, depth + 1)]);
 }
 
+/** TOC label for a spine href, or null when the book has no matching entry. */
+function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null {
+  if (!epubToc) return null;
+  for (const { item } of flattenToc(epubToc)) {
+    if (item.href === href) return item.label || item.href;
+  }
+  return null;
+}
+
 /**
- * Reading navigation drawer. EPUB contents come from the foliate-js engine
- * (real labels, real destinations); PDF pages, thumbnails, and the outline
- * come from the loaded PDF.js document; in-book search streams from the
- * open book's reader; bookmark persistence remains an honest session-only
- * placeholder until the backend exists.
+ * Reading navigation drawer: EPUB contents from the foliate-js engine (real
+ * labels, real destinations); PDF pages, thumbnails, and outline from the
+ * loaded PDF.js document; persistent bookmarks, highlights, and notes from
+ * the backend annotations; in-book search streamed from the open book's
+ * reader.
  */
 export function ReaderNavigation({
   open,
@@ -78,6 +96,10 @@ export function ReaderNavigation({
   onEpubJump,
   pdfOutline,
   onPdfJump,
+  annotations,
+  onAnnotationJump,
+  onDeleteAnnotation,
+  onUpdateAnnotation,
   search,
   onSearch,
   onSearchPick,
@@ -85,7 +107,8 @@ export function ReaderNavigation({
   onTabChange,
 }: ReaderNavigationProps) {
   const isEpub = book.format === "epub";
-  const { bookmarks } = useReader();
+  const bookmarks = annotations.filter((annotation) => annotation.kind === "bookmark");
+  const highlights = annotations.filter((annotation) => annotation.kind === "highlight");
 
   const jump = (percentage: number) => {
     onJump(percentage);
@@ -100,6 +123,27 @@ export function ReaderNavigation({
   const jumpToOutlinePage = (page: number) => {
     onPdfJump(page);
     onOpenChange(false);
+  };
+
+  const jumpToAnnotation = (annotation: Annotation) => {
+    onAnnotationJump(annotation);
+    onOpenChange(false);
+  };
+
+  const bookmarkLabel = (annotation: Annotation): string => {
+    if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
+    if (annotation.chapterHref) {
+      return tocLabelFor(epubToc, annotation.chapterHref) ?? annotation.chapterHref;
+    }
+    return "Bookmark";
+  };
+
+  const highlightLabel = (annotation: Annotation): string => {
+    if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
+    if (annotation.chapterHref) {
+      return tocLabelFor(epubToc, annotation.chapterHref) ?? "Highlight";
+    }
+    return "Highlight";
   };
 
   return (
@@ -131,11 +175,14 @@ export function ReaderNavigation({
                 </TabsTrigger>
               </>
             )}
-            <TabsTrigger data-testid="nav-tab-search" value="search">
-              Search
-            </TabsTrigger>
             <TabsTrigger data-testid="nav-tab-bookmarks" value="bookmarks">
               Bookmarks
+            </TabsTrigger>
+            <TabsTrigger data-testid="nav-tab-highlights" value="highlights">
+              Highlights
+            </TabsTrigger>
+            <TabsTrigger data-testid="nav-tab-search" value="search">
+              Search
             </TabsTrigger>
           </TabsList>
 
@@ -244,38 +291,50 @@ export function ReaderNavigation({
             </>
           )}
 
-          <TabsContent value="search" className="min-h-0 flex-1 overflow-hidden">
-            <ReaderSearchTab search={search} onSearch={onSearch} onPickMatch={onSearchPick} />
+          <TabsContent value="bookmarks" className="min-h-0 flex-1 px-2 py-2">
+            {bookmarks.length === 0 ? (
+              <p
+                data-testid="nav-bookmarks-empty"
+                className="px-1 py-1 text-sm text-muted-foreground"
+              >
+                No bookmarks yet. Press the bookmark action to mark the current position.
+              </p>
+            ) : (
+              <ReaderAnnotationList
+                annotations={bookmarks}
+                withColor={false}
+                label={bookmarkLabel}
+                onJump={jumpToAnnotation}
+                onDelete={onDeleteAnnotation}
+                onUpdate={onUpdateAnnotation}
+                testIdPrefix="nav-bookmark"
+              />
+            )}
           </TabsContent>
 
-          <TabsContent value="bookmarks" className="min-h-0 flex-1 px-2 py-2">
-            <ScrollArea className="h-full px-2 pr-2">
-              {bookmarks.length === 0 ? (
-                <p
-                  data-testid="nav-bookmarks-empty"
-                  className="px-1 py-1 text-sm text-muted-foreground"
-                >
-                  No bookmarks yet. Press the bookmark action to mark the current position.
-                </p>
-              ) : (
-                bookmarks.map((bookmark) => (
-                  <button
-                    key={bookmark.id}
-                    type="button"
-                    data-testid={`nav-bookmark-${bookmark.percentage}`}
-                    onClick={() => jump(bookmark.percentage)}
-                    className="block w-full rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
-                  >
-                    {bookmark.label}
-                  </button>
-                ))
-              )}
-              <p className="mt-3 px-1 text-xs text-muted-foreground">
-                Bookmarks live for this reading session only — saving them needs backend support
-                that does not exist yet.
+          <TabsContent value="highlights" className="min-h-0 flex-1 px-2 py-2">
+            {highlights.length === 0 ? (
+              <p
+                data-testid="nav-highlights-empty"
+                className="px-1 py-1 text-sm text-muted-foreground"
+              >
+                No highlights yet. Select text in the book and pick a color.
               </p>
-              <ScrollBar />
-            </ScrollArea>
+            ) : (
+              <ReaderAnnotationList
+                annotations={highlights}
+                withColor
+                label={highlightLabel}
+                onJump={jumpToAnnotation}
+                onDelete={onDeleteAnnotation}
+                onUpdate={onUpdateAnnotation}
+                testIdPrefix="nav-highlight"
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="search" className="min-h-0 flex-1 overflow-hidden">
+            <ReaderSearchTab search={search} onSearch={onSearch} onPickMatch={onSearchPick} />
           </TabsContent>
         </Tabs>
       </SheetContent>

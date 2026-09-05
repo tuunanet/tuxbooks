@@ -1,3 +1,4 @@
+pub mod annotations;
 pub mod artwork_cache;
 pub mod book_importer;
 pub mod library_reconciler;

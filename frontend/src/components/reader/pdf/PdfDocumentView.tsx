@@ -1,7 +1,10 @@
-import { useMemo, type Ref } from "react";
+import { useMemo, type CSSProperties, type Ref } from "react";
+import type { Annotation } from "@/types/domain";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
+import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
+import { PdfPageTextLayer } from "./PdfPageTextLayer";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 import type { LayoutSlot } from "./pdfLayout";
 
@@ -33,7 +36,23 @@ interface PdfDocumentViewProps {
   contentAreaRef?: Ref<HTMLDivElement>;
   /** Called when the user asks a failed page to render again. */
   onRetryPage?: (pageNumber: number) => void;
+  /** Persisted highlights by page number; drawn over rendered pages. */
+  highlightsByPage?: Map<number, Annotation[]>;
 }
+
+/**
+ * CSS custom properties the PDF.js text layer expects on its ancestor
+ * (`--scale-factor` = the render scale in CSS px per page unit; see
+ * pdfTextLayer.css).
+ */
+const scaleCssProperties = (scale: number): CSSProperties =>
+  ({
+    "--scale-factor": scale,
+    "--user-unit": 1,
+    "--total-scale-factor": "calc(var(--scale-factor) * var(--user-unit))",
+    "--scale-round-x": "1px",
+    "--scale-round-y": "1px",
+  }) as CSSProperties;
 
 /**
  * The virtualized continuous document surface: one lightweight slot per page
@@ -57,6 +76,7 @@ export function PdfDocumentView({
   documentRef,
   contentAreaRef,
   onRetryPage,
+  highlightsByPage,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -101,16 +121,26 @@ export function PdfDocumentView({
               onRetry={onRetryPage ? () => onRetryPage(slot.pageNumber) : undefined}
             >
               {canvasPages.has(slot.pageNumber) ? (
-                <PdfPageCanvas
-                  document={document}
-                  pageNumber={slot.pageNumber}
-                  width={slot.width}
-                  height={slot.height}
-                  scale={scale}
-                  bitmapCache={bitmapCache}
-                  onPageRendered={onPageRendered}
-                  onPageError={onPageError}
-                />
+                <div className="relative" style={scaleCssProperties(scale)}>
+                  <PdfPageCanvas
+                    document={document}
+                    pageNumber={slot.pageNumber}
+                    width={slot.width}
+                    height={slot.height}
+                    scale={scale}
+                    bitmapCache={bitmapCache}
+                    onPageRendered={onPageRendered}
+                    onPageError={onPageError}
+                  />
+                  {renderedPages.has(slot.pageNumber) && (
+                    <PdfPageTextLayer
+                      document={document}
+                      pageNumber={slot.pageNumber}
+                      scale={scale}
+                    />
+                  )}
+                  <PdfHighlightOverlay highlights={highlightsByPage?.get(slot.pageNumber) ?? []} />
+                </div>
               ) : null}
             </PdfPageSlot>
           );

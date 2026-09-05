@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bookmark,
@@ -12,17 +12,28 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
+import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
+import {
+  byKind,
+  isBookmarkAtCfi,
+  isBookmarkAtPage,
+  type HighlightColor,
+  type ReaderAnnotationController,
+} from "./annotationModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
-import { pageToPosition } from "./pdf/pdfPages";
+import { pageToPosition, positionToPage } from "./pdf/pdfPages";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
+import type { Annotation, AnnotationInput } from "@/types/domain";
+import type { EpubLocator } from "./epub/hooks/useEpubPersistence";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
 import { ReaderAppearance } from "./ReaderAppearance";
+import { SelectionToolbar } from "./SelectionToolbar";
 import {
   appendSearchGroup,
   emptySearchState,
@@ -48,7 +59,7 @@ export function ReaderShell() {
   const { selectedBookId } = useAppState();
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
-  const { preferences, position, setPosition, bookmarks, toggleBookmark } = useReader();
+  const { preferences, position, setPosition } = useReader();
   // The navigation drawer plus its selected tab: the Search toolbar button
   // and Ctrl/Cmd+F open the drawer straight onto the Search tab.
   const [nav, setNav] = useState<{ open: boolean; tab: ReaderNavTab }>({
@@ -67,10 +78,18 @@ export function ReaderShell() {
     toc: EpubTocItem[];
   } | null>(null);
   const epubJumpRef = useRef<((href: string) => void) | null>(null);
+  // Latest PDF locator (page + anchor fraction): what a bookmark placed
+  // right now would persist. Written by the reader on page changes, read by
+  // toggleBookmark from event handlers only.
+  const pdfLocatorRef = useRef<{ page: number; fraction: number } | null>(null);
   // In-book search controllers, registered by the open reader; the shell's
   // search drawer drives them without knowing the document format.
   const epubSearchRef = useRef<ReaderSearchController | null>(null);
   const pdfSearchRef = useRef<ReaderSearchController | null>(null);
+  // Annotation controllers: the selection toolbar drives highlight creation
+  // through whichever reader is open.
+  const epubAnnotationRef = useRef<ReaderAnnotationController | null>(null);
+  const pdfAnnotationRef = useRef<ReaderAnnotationController | null>(null);
   // Streaming in-book search results for the open book (shared model for
   // both formats; stale books' results are ignored by the model helpers).
   const [searchState, setSearchState] = useState<ReaderSearchState | null>(null);
@@ -90,6 +109,8 @@ export function ReaderShell() {
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
+  // Persistent annotations of the open book: bookmarks, highlights, notes.
+  const { annotations, create, remove, update } = useAnnotations(book?.id ?? null);
   const epubToc =
     epubTocState !== null && epubTocState.bookId === book?.id ? epubTocState.toc : null;
   const pdfOutline =
@@ -105,7 +126,6 @@ export function ReaderShell() {
 
   useShortcut("home", () => setPosition(0));
   useShortcut("end", () => setPosition(100));
-  useShortcut("mod+b", () => toggleBookmark());
   // Arrow/space stepping and PageUp/PageDown scrolling are PDF behaviors:
   // they are not registered while an EPUB is open, where EpubReader owns
   // those combos outright (engine page turns) regardless of registration
@@ -158,9 +178,94 @@ export function ReaderShell() {
     [knownPageCount, setPosition],
   );
 
-  const bookmarked = bookmarks.some(
-    (bookmark) => Math.round(bookmark.percentage) === Math.round(position),
+  // Selection toolbar state, tagged with the book whose reader reported it
+  // (readers remount per book, so a stale book can never write here).
+  const [selection, setSelection] = useState<{ bookId: number; text: string } | null>(null);
+  const activeSelection =
+    selection !== null && selection.bookId === book?.id ? { text: selection.text } : null;
+
+  // The EPUB engine's current locator, tagged with its book for the same
+  // staleness guard. Relocates already re-render the shell, so keeping this
+  // in state costs nothing extra and keeps `bookmarked` render-honest.
+  const [epubLocator, setEpubLocator] = useState<{ bookId: number; locator: EpubLocator } | null>(
+    null,
   );
+  const activeEpubLocator =
+    epubLocator !== null && epubLocator.bookId === book?.id ? epubLocator.locator : null;
+
+  // Bookmarks: toggle at the exact current locator (EPUB CFI / PDF page),
+  // so the button also removes a bookmark placed on the same spot.
+  const toggleBookmark = useCallback(() => {
+    if (isEpub) {
+      const locator = activeEpubLocator;
+      if (!locator) return;
+      const existing = annotations.find((annotation) => isBookmarkAtCfi(annotation, locator.cfi));
+      if (existing) void remove(existing.id);
+      else {
+        void create({
+          kind: "bookmark",
+          cfi: locator.cfi,
+          chapterHref: locator.chapterHref,
+        });
+      }
+      return;
+    }
+    const locator = pdfLocatorRef.current;
+    if (!locator) return;
+    const existing = annotations.find((annotation) => isBookmarkAtPage(annotation, locator.page));
+    if (existing) void remove(existing.id);
+    else {
+      void create({
+        kind: "bookmark",
+        pageNumber: locator.page,
+        pageFraction: locator.fraction > 0 ? locator.fraction : null,
+      });
+    }
+  }, [isEpub, activeEpubLocator, annotations, create, remove]);
+  useShortcut("mod+b", toggleBookmark);
+
+  const activePdfPage =
+    isPdf && knownPageCount > 0 ? positionToPage(position, knownPageCount) : null;
+  const bookmarked = isEpub
+    ? annotations.some(
+        (annotation) =>
+          activeEpubLocator !== null && isBookmarkAtCfi(annotation, activeEpubLocator.cfi),
+      )
+    : annotations.some(
+        (annotation) => activePdfPage !== null && isBookmarkAtPage(annotation, activePdfPage),
+      );
+
+  const jumpToAnnotation = useCallback(
+    (annotation: Annotation) => {
+      if (annotation.cfi !== null) {
+        epubJumpRef.current?.(annotation.cfi);
+      } else if (annotation.pageNumber !== null && knownPageCount > 0) {
+        setPosition(pageToPosition(annotation.pageNumber, knownPageCount));
+      }
+    },
+    [knownPageCount, setPosition],
+  );
+
+  const handleCreateHighlight = useCallback(
+    (input: AnnotationInput) => {
+      void create(input);
+    },
+    [create],
+  );
+  const handleSelectionFrom = useCallback((bookId: number, text: string | null) => {
+    setSelection(text === null ? null : { bookId, text });
+  }, []);
+  const handleCreateHighlightColor = useCallback(
+    (color: HighlightColor) => {
+      (isEpub ? epubAnnotationRef : pdfAnnotationRef).current?.createHighlight(color);
+    },
+    [isEpub],
+  );
+  const handleDismissSelection = useCallback(() => {
+    (isEpub ? epubAnnotationRef : pdfAnnotationRef).current?.clearSelection();
+  }, [isEpub]);
+
+  const highlights = useMemo(() => byKind(annotations, "highlight"), [annotations]);
 
   if (!book) {
     return (
@@ -293,9 +398,16 @@ export function ReaderShell() {
               book={book}
               onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
               jumpTargetRef={epubJumpRef}
+              onLocatorChange={(locator) => setEpubLocator({ bookId: book.id, locator })}
               searchTargetRef={epubSearchRef}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
+              highlights={highlights}
+              onCreateHighlight={handleCreateHighlight}
+              onSelectionChange={(sel) =>
+                handleSelectionFrom(book.id, sel === null ? null : sel.text)
+              }
+              annotationTargetRef={epubAnnotationRef}
             />
           ) : (
             <PdfReader
@@ -308,6 +420,13 @@ export function ReaderShell() {
               searchTargetRef={pdfSearchRef}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
+              locatorTargetRef={pdfLocatorRef}
+              highlights={highlights}
+              onCreateHighlight={handleCreateHighlight}
+              onSelectionChange={(sel) =>
+                handleSelectionFrom(book.id, sel === null ? null : sel.text)
+              }
+              annotationTargetRef={pdfAnnotationRef}
             />
           )}
         </main>
@@ -342,11 +461,21 @@ export function ReaderShell() {
         onPdfJump={(page) => {
           if (knownPageCount > 0) setPosition(pageToPosition(page, knownPageCount));
         }}
+        annotations={annotations}
+        onAnnotationJump={jumpToAnnotation}
+        onDeleteAnnotation={(id) => void remove(id)}
+        onUpdateAnnotation={(id, patch) => void update(id, patch)}
         search={searchState !== null && searchState.bookId === book.id ? searchState : null}
         onSearch={runSearch}
         onSearchPick={pickSearchMatch}
         tab={nav.tab}
         onTabChange={(tab) => setNav((prev) => ({ ...prev, tab }))}
+      />
+
+      <SelectionToolbar
+        selection={activeSelection}
+        onCreate={handleCreateHighlightColor}
+        onDismiss={handleDismissSelection}
       />
     </div>
   );

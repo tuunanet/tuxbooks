@@ -17,6 +17,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
     findPageMatches,
     pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
     isRenderingCancelled: vi.fn(() => false),
+    renderPdfTextLayer: vi.fn(async () => ({ cancel: vi.fn() })),
   };
 });
 vi.mock("@/lib/epub/epubEngine", async () => {
@@ -26,7 +27,7 @@ vi.mock("@/lib/epub/epubEngine", async () => {
 
 import { AppShell } from "@/components/layout/AppShell";
 import { getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfEngine";
-import { makeBook } from "./factories";
+import { makeAnnotation, makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { lastFakeHandle, fakeEpubHandles } from "./mocks/epubEngine";
@@ -58,6 +59,18 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
     get_book_bytes: new ArrayBuffer(16),
     get_reading_progress: null,
     save_reading_progress: null,
+    list_annotations: [],
+    create_annotation: makeAnnotation({
+      id: 1,
+      kind: "bookmark",
+      cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)",
+      chapterHref: "chapter1.xhtml",
+      pageNumber: null,
+      rects: null,
+      text: null,
+    }),
+    update_annotation: null,
+    delete_annotation: true,
   });
   return render(
     <AppShell
@@ -194,28 +207,132 @@ describe("Reader keyboard navigation", () => {
 });
 
 describe("Reader bookmarks", () => {
-  it("toggles a session bookmark and lists it in the drawer", async () => {
+  it("creates a persistent bookmark at the engine locator and removes it on toggle", async () => {
     renderReader();
 
     await screen.findByTestId("reader-view");
-    fireEvent.keyDown(window, { key: "End" });
-    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("100%"));
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    // The relocate gives the shell a concrete CFI to bookmark.
+    lastFakeHandle().emitRelocate({ cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)" });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("0%"));
+
     fireEvent.click(screen.getByTestId("reader-bookmark"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("create_annotation", {
+        bookId: 1,
+        annotation: {
+          kind: "bookmark",
+          cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)",
+          chapterHref: "chapter1.xhtml",
+        },
+      }),
+    );
     expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true");
+
+    // The drawer lists the stored bookmark (from the create response).
+    await openNavigation();
+    await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
+    expect(await screen.findByTestId("nav-bookmark-0")).toBeInTheDocument();
+    expect(screen.queryByText(/session only/i)).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+
+    // Toggling again removes the bookmark at the same locator.
+    fireEvent.click(screen.getByTestId("reader-bookmark"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 1 }));
+    expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("lists stored bookmarks and highlights on open and deletes from the drawer", async () => {
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [
+        makeAnnotation({ id: 7, kind: "highlight", text: "the quoted words" }),
+        makeAnnotation({
+          id: 9,
+          kind: "bookmark",
+          cfi: "epubcfi(/6/2!/4/2)",
+          chapterHref: "chapter1.xhtml",
+          pageNumber: null,
+          rects: null,
+          text: null,
+        }),
+      ],
+      create_annotation: makeAnnotation(),
+      update_annotation: null,
+      delete_annotation: true,
+    });
+    render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      />,
+    );
+    await screen.findByTestId("reader-view");
 
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
-    expect(await screen.findByTestId("nav-bookmark-100")).toBeInTheDocument();
-    expect(screen.getByText(/session only/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("nav-bookmark-0")).toHaveTextContent("Chapter One");
 
-    // Close the drawer before interacting with the toolbar underneath it.
-    await userEvent.keyboard("{Escape}");
-    fireEvent.click(screen.getByTestId("reader-bookmark"));
-    expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(screen.getByTestId("nav-tab-highlights"));
+    const row = await screen.findByTestId("nav-highlight-0");
+    expect(row).toHaveTextContent("the quoted words");
+    expect(screen.getByTestId("nav-highlight-color-0")).toHaveStyle({ background: "#facc15" });
+
+    await userEvent.click(screen.getByTestId("nav-highlight-delete-0"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 7 }));
+  });
+
+  it("attaches a note to a highlight through the drawer", async () => {
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [makeAnnotation({ id: 5 })],
+      create_annotation: makeAnnotation(),
+      update_annotation: makeAnnotation({ id: 5, note: "remember this" }),
+      delete_annotation: true,
+    });
+    render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      />,
+    );
+    await screen.findByTestId("reader-view");
 
     await openNavigation();
-    await userEvent.click(screen.getByTestId("nav-tab-bookmarks"));
-    expect(await screen.findByTestId("nav-bookmarks-empty")).toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("nav-tab-highlights"));
+    await screen.findByTestId("nav-highlight-0");
+    await userEvent.click(screen.getByTestId("nav-highlight-note-0"));
+
+    const input = screen.getByTestId("annotation-note-input");
+    await userEvent.type(input, "remember this");
+    await userEvent.click(screen.getByTestId("annotation-note-save"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 5,
+        patch: { note: "remember this" },
+      }),
+    );
   });
 });
 
@@ -243,6 +360,7 @@ describe("ReaderNavigation", () => {
       get_book_bytes: new Promise(() => {}),
       get_reading_progress: null,
       save_reading_progress: null,
+      list_annotations: [],
     });
     render(
       <AppShell
@@ -441,6 +559,7 @@ describe("Reader book switching", () => {
       get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
+      list_annotations: [],
     });
     render(
       <AppShell

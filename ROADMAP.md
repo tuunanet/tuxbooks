@@ -127,6 +127,28 @@ TuxBooks currently has:
   per-document text cache, bounded match count), both pinned by unit
   tests and real-binary E2E (library hit → detail, EPUB match → section
   move, PDF match → page move)
+- milestone 6 annotations: persistent bookmarks, highlights, and notes in
+  a new `annotations` table (migration 0007; FK cascade on book removal),
+  locators are stable document coordinates — EPUB canonical CFI (+ spine
+  href), PDF 1-based page (+ optional page-local fraction), PDF highlight
+  geometry as rects normalized to page space — validated by the
+  annotations service (a CFI-or-page locator, EPUB highlights must quote
+  their text, geometry stays inside the page). CRUD crosses IPC as
+  `list/create/update/delete_annotation` commands. The reader draws EPUB
+  highlights through the foliate-js overlayer behind the engine seam
+  (per-section re-add on overlay remount) and PDF highlights through
+  PDF.js text layers (transparent selectable spans on the bounded render
+  set) plus normalized-rect overlays; both formats create highlights from
+  real text selections via one shared selection toolbar (rects and text
+  are captured at selection time, so the toolbar click may collapse the
+  native selection). The navigation drawer's Bookmarks and Highlights
+  tabs list, jump to, recolor, delete, and annotate (notes) rows for both
+  formats; Ctrl/Cmd+B toggles a persistent bookmark at the exact current
+  locator, replacing the old session-only bookmark placeholder. Pinned by
+  Rust repo/service tests, frontend unit tests (model, hook, both
+  readers, drawer tabs), and real-binary E2E (PDF highlight from a real
+  text-layer selection + note + bookmark, EPUB bookmark, each revisited
+  after close/reopen)
 
 This completes milestone 4: EPUB cover extraction, PDF page-1 cover
 rendering, placeholder fallback for missing/corrupt artwork, and an
@@ -141,6 +163,13 @@ Milestone 5 (search) is complete: library-wide search through SQLite
 FTS5 behind Ctrl/Cmd+K, and in-book search for both reader formats
 through one shared navigation tab, each reached by unit tests and real
 desktop E2E.
+
+Milestone 6 (bookmarks, highlights, and notes) is complete: persistent
+reading annotations for both formats — created in the reader (selection
+toolbar, bookmark toggle), managed in the navigation drawer (jump,
+recolor, delete, notes), stored in SQLite under stable document
+locators, and revisited after closing and reopening a book, pinned by
+unit tests and real desktop E2E.
 
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a

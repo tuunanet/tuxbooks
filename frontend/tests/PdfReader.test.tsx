@@ -15,6 +15,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
     findPageMatches,
     pdfWorkerSrc: vi.fn(() => "/assets/pdf.worker.min.mjs"),
     isRenderingCancelled: vi.fn(() => false),
+    renderPdfTextLayer: vi.fn(async () => ({ cancel: vi.fn() })),
   };
 });
 
@@ -24,10 +25,12 @@ import {
   getPdfOutline,
   getPdfPageText,
   openPdfDocument,
+  renderPdfTextLayer,
 } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
-import { makeBook } from "./factories";
+import { makeAnnotation, makeBook } from "./factories";
+import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
@@ -69,6 +72,10 @@ interface PdfReaderProps {
   searchTargetRef?: { current: unknown };
   onSearchGroup?: (bookId: number, group: unknown) => void;
   onSearchDone?: (bookId: number) => void;
+  highlights?: Annotation[];
+  onCreateHighlight?: (input: Record<string, unknown>) => void;
+  onSelectionChange?: (selection: { text: string } | null) => void;
+  annotationTargetRef?: { current: unknown };
 }
 
 function renderPdfReader(props: PdfReaderProps = {}) {
@@ -94,6 +101,10 @@ function readerTree(props: PdfReaderProps) {
           searchTargetRef={props.searchTargetRef as never}
           onSearchGroup={props.onSearchGroup as never}
           onSearchDone={props.onSearchDone}
+          highlights={props.highlights}
+          onCreateHighlight={props.onCreateHighlight as never}
+          onSelectionChange={props.onSelectionChange}
+          annotationTargetRef={props.annotationTargetRef as never}
         />
       </ReaderProvider>
     </ShortcutProvider>
@@ -1201,5 +1212,105 @@ describe("PdfReader in-book search", () => {
         1,
       ),
     );
+  });
+});
+
+describe("PdfReader text layer and highlights", () => {
+  function mockLoadedDocument(): void {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+  }
+
+  it("mounts a text layer for every rendered page", async () => {
+    mockLoadedDocument();
+    renderPdfReader();
+    await screen.findByTestId("pdf-canvas");
+    fireVisible(slot(1) as Element, true);
+
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+    const layer = document.querySelector('[data-pdf-text-layer="1"]');
+    expect(layer).not.toBeNull();
+    expect(vi.mocked(renderPdfTextLayer)).toHaveBeenCalledWith(
+      expect.anything(),
+      1,
+      layer,
+      expect.any(Number),
+    );
+  });
+
+  it("draws persisted highlights over the rendered page", async () => {
+    mockLoadedDocument();
+    renderPdfReader({
+      highlights: [
+        makeAnnotation({
+          id: 11,
+          pageNumber: 1,
+          color: "blue",
+          rects: [
+            { x: 0.1, y: 0.2, width: 0.5, height: 0.02 },
+            { x: 0.1, y: 0.25, width: 0.3, height: 0.02 },
+          ],
+        }),
+      ],
+    });
+    await screen.findByTestId("pdf-canvas");
+    fireVisible(slot(1) as Element, true);
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+
+    const drawn = document.querySelectorAll('[data-pdf-highlight="11"]');
+    expect(drawn).toHaveLength(2);
+  });
+
+  it("creates a highlight from the live selection with normalized rects", async () => {
+    mockLoadedDocument();
+    const onCreateHighlight = vi.fn();
+    const onSelectionChange = vi.fn();
+    const annotationTargetRef: {
+      current: { createHighlight: (c: string) => void; clearSelection: () => void } | null;
+    } = { current: null };
+    renderPdfReader({ onCreateHighlight, onSelectionChange, annotationTargetRef });
+    await screen.findByTestId("pdf-canvas");
+
+    // A selection anchored inside page 1's slot with two client rects (one
+    // zero-sized, which must be dropped).
+    const pageSlot = slot(1) as HTMLElement;
+    const anchor = document.createElement("span");
+    pageSlot.appendChild(anchor);
+    pageSlot.getBoundingClientRect = () => new DOMRect(0, 0, 512, 512);
+    const fakeRange = {
+      getClientRects: () => [new DOMRect(64, 64, 128, 32), new DOMRect(0, 0, 0, 0)],
+    };
+    const fakeSelection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => "selected words",
+      getRangeAt: () => fakeRange,
+      removeAllRanges: vi.fn(),
+    };
+    const selectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue(fakeSelection as unknown as Selection);
+
+    // The selection is captured on pointerup (deferred one tick).
+    fireEvent.pointerUp(document);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "selected words" });
+
+    annotationTargetRef.current!.createHighlight("green");
+    expect(onCreateHighlight).toHaveBeenCalledWith({
+      kind: "highlight",
+      pageNumber: 1,
+      rects: [{ x: 0.125, y: 0.125, width: 0.25, height: 0.0625 }],
+      text: "selected words",
+      color: "green",
+    });
+    expect(fakeSelection.removeAllRanges).toHaveBeenCalled();
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+    selectionSpy.mockRestore();
   });
 });

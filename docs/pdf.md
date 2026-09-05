@@ -204,11 +204,37 @@ thumbnails, outline, and restore. No on-canvas match highlighting yet:
 the continuous reader paints pages without a text layer, so highlights
 would need an overlay pass — navigation-to-page is the shipped contract.
 
+### Text layer, selection, and highlights (milestone 6)
+
+Rendered pages mount a PDF.js `TextLayer` (`PdfPageTextLayer`, through the
+`renderPdfTextLayer` seam function) over the canvas: transparent,
+selectable text spans — the interaction affordance for highlights, no
+visuals of its own. The layer's stylesheet is the minimal `.textLayer`
+subset of pdfjs-dist's viewer CSS (`lib/pdf/pdfTextLayer.css`, pinned to
+the vendored version; re-extract on upgrade), and the page slot wrapper
+sets the `--scale-factor` custom properties PDF.js expects. Text layers
+exist only on the bounded render set, like canvases.
+
+Text selections are captured on `pointerup` (deferred one tick): the
+anchor node resolves the page through the slot's `data-pdf-slot`, the
+selected text and the range's client rects normalize to page space
+(`normalizeRect`, clamped to 0..1 so the backend's geometry validation
+accepts sub-pixel bleed), and the whole candidate — page, text, rects — is
+stored at capture time. This matters: clicking the selection toolbar's
+color swatch collapses the native selection before the click handler runs,
+so creation must not re-read the live selection (the reader's `pointerup`
+capture also ignores events originating inside the toolbar).
+
+Persisted highlights render through `PdfHighlightOverlay`: absolutely
+positioned translucent rects in normalized page space, so they track the
+canvas at every zoom without recomputation, drawn for the open book's
+annotation list (grouped by page in PdfReader, rendered inside the page
+wrapper). Bookmarks persist the anchor page + in-page fraction reported by
+the scroll tracker — a coarse page-local position, per the data model.
+
 ### Worker
 
 The worker is bundled via a Vite `?url` import and configured once in the
 engine. A silent "fake worker" fallback (main-thread rendering) is the
 classic cause of seconds-long variable renders — the reader exposes
 `data-pdf-worker-src` and the seeded E2E verifies the asset is fetchable.
-
-Still out of scope: annotations.

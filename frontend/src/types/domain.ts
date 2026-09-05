@@ -101,3 +101,58 @@ export interface PdfReadingProgress {
 }
 
 export type ReadingProgress = EpubReadingProgress | PdfReadingProgress;
+
+/** Kind of a persistent reading annotation. */
+export type AnnotationKind = "bookmark" | "highlight";
+
+/** One highlight rect normalized to page space (0..1 on both axes). */
+export interface AnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A persistent reading annotation (mirrors `domain::Annotation` with the
+ * command layer's decoded `rects`). Locators are stable document
+ * coordinates: EPUB carries a canonical CFI (+ spine href), PDF a 1-based
+ * page number with an optional page-local fraction; PDF highlights also
+ * carry normalized page-space rects so they redraw at any zoom.
+ */
+export interface Annotation {
+  id: number;
+  bookId: number;
+  kind: AnnotationKind;
+  cfi: string | null;
+  chapterHref: string | null;
+  pageNumber: number | null;
+  pageFraction: number | null;
+  text: string | null;
+  color: string | null;
+  rects: AnnotationRect[] | null;
+  note: string | null;
+  createdAt: string;
+  modifiedAt: string;
+}
+
+/** Payload for creating a bookmark or highlight. */
+export interface AnnotationInput {
+  kind: AnnotationKind;
+  cfi?: string | null;
+  chapterHref?: string | null;
+  pageNumber?: number | null;
+  pageFraction?: number | null;
+  text?: string | null;
+  color?: string | null;
+  rects?: AnnotationRect[] | null;
+}
+
+/**
+ * Editable fields of an existing annotation. `note` replaces the stored
+ * note: a string sets it (empty string clears), null keeps it.
+ */
+export interface AnnotationPatch {
+  color?: string | null;
+  note?: string | null;
+}

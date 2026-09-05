@@ -12,8 +12,7 @@ export type ReaderFontFamily = "serif" | "sans";
 /**
  * Reader appearance preferences. UI-only state (no Rust mirror yet) —
  * consumed by the rendering engines (EPUB reflow styles, PDF zoom).
- */
-export interface ReaderPreferences {
+ */ export interface ReaderPreferences {
   fontSize: number;
   lineHeight: number;
   fontFamily: ReaderFontFamily | null;
@@ -29,25 +28,12 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   layout: "paginated",
 };
 
-/**
- * A bookmark placed at a reading position. Session-only by design: there is
- * no backend persistence for bookmarks yet, and the UI says so honestly.
- */
-export interface ReaderBookmark {
-  id: string;
-  percentage: number;
-  label: string;
-}
-
 export interface ReaderState {
   preferences: ReaderPreferences;
   /** Reading position as a percentage, 0–100. */
   position: number;
-  bookmarks: ReaderBookmark[];
   setPosition: (percentage: number) => void;
   setPreferences: (patch: Partial<ReaderPreferences>) => void;
-  /** Places or removes a bookmark at the current position. */
-  toggleBookmark: () => void;
 }
 
 export const ReaderContext = createContext<ReaderState | null>(null);

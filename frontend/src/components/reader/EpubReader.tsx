@@ -9,8 +9,14 @@ import {
 } from "@/lib/epub/epubEngine";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
+import {
+  highlightCssColor,
+  isHighlightColor,
+  type ReaderAnnotationController,
+} from "./annotationModel";
 import { useEpubDocument } from "./epub/hooks/useEpubDocument";
 import { useEpubPersistence, type EpubLocator } from "./epub/hooks/useEpubPersistence";
+import type { Annotation, AnnotationInput } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import type { ReaderSearchController, ReaderSearchGroup } from "./searchModel";
 
@@ -25,6 +31,12 @@ interface EpubReaderProps {
    */
   jumpTargetRef?: MutableRefObject<((href: string) => void) | null>;
   /**
+   * Reports the engine's latest locator (CFI + spine href) on every
+   * relocate — the exact position a bookmark would be placed at. Event
+   * callbacks, not effects: relocates already drive a render.
+   */
+  onLocatorChange?: (locator: EpubLocator) => void;
+  /**
    * Filled with the in-book search controller once the engine is open; the
    * shell's search drawer drives it without knowing the engine exists.
    */
@@ -33,6 +45,17 @@ interface EpubReaderProps {
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
   onSearchDone?: (bookId: number) => void;
+  /** Highlights of the open book; drawn into the engine's overlays. */
+  highlights?: Annotation[];
+  /** Persists a highlight created from a text selection. */
+  onCreateHighlight?: (input: AnnotationInput) => void;
+  /** Reports the current selection's text; null when nothing is selected. */
+  onSelectionChange?: (selection: { text: string } | null) => void;
+  /**
+   * Filled with the annotation controller once the engine is open; the
+   * shell's selection toolbar drives it without knowing the engine exists.
+   */
+  annotationTargetRef?: MutableRefObject<ReaderAnnotationController | null>;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
@@ -54,9 +77,14 @@ export function EpubReader({
   book,
   onTocLoad,
   jumpTargetRef,
+  onLocatorChange,
   searchTargetRef,
   onSearchGroup,
   onSearchDone,
+  highlights = [],
+  onCreateHighlight,
+  onSelectionChange,
+  annotationTargetRef,
 }: EpubReaderProps) {
   const { preferences, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -66,6 +94,10 @@ export function EpubReader({
   const [locator, setLocator] = useState<EpubLocator | null>(null);
 
   const { status, handle, error } = useEpubDocument(book.id);
+  const onLocatorChangeRef = useRef(onLocatorChange);
+  useEffect(() => {
+    onLocatorChangeRef.current = onLocatorChange;
+  });
 
   // Shell-level progress from spine position; the engine's in-section page
   // fraction refines it where the engine reports one.
@@ -94,10 +126,11 @@ export function EpubReader({
       view.host.dataset.epubSection = String(detail.section.current);
       view.host.dataset.epubSectionTotal = String(detail.section.total);
       syncMathCount(view, detail.section);
-      setLocator({
-        cfi: detail.cfi,
-        chapterHref: view.getSectionHref(detail.section.current) ?? null,
-      });
+      const chapterHref = view.getSectionHref(detail.section.current) ?? null;
+      setLocator({ cfi: detail.cfi, chapterHref });
+      // Bookmarks read this state; it must hold the exact locator a
+      // bookmark placed right now would persist.
+      onLocatorChangeRef.current?.({ cfi: detail.cfi, chapterHref });
       setPosition(overall);
     },
     [setPosition, syncMathCount, preferences.layout],
@@ -114,12 +147,40 @@ export function EpubReader({
     });
   }, [handle, handleRelocate]);
 
+  // Text selections inside a section document become highlight candidates:
+  // the range is kept (not copied to pixels) so creation translates it to a
+  // canonical CFI at the moment the user picks a color.
+  const pendingSelectionRef = useRef<{ doc: Document; range: Range; text: string } | null>(null);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  });
+  const captureSelectionOnPointerUp = useCallback((doc: Document) => {
+    doc.addEventListener("pointerup", () => {
+      window.setTimeout(() => {
+        const selection = doc.getSelection();
+        const text = selection?.toString().replace(/\s+/g, " ").trim() ?? "";
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0 || text === "") {
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          return;
+        }
+        pendingSelectionRef.current = {
+          doc,
+          range: selection.getRangeAt(0).cloneRange(),
+          text,
+        };
+        onSelectionChangeRef.current?.({ text });
+      }, 0);
+    });
+  }, []);
+
   // Section documents: record MathML presence per spine section (E2E
   // attribute reflects the current section), forward navigation keys —
-  // iframe key events never reach the window registry — and schedule a
+  // iframe key events never reach the window registry — schedule a
   // relayout once the section's fonts have settled (the engine's deferred
   // re-expand can otherwise collapse a section to zero width; see
-  // EpubViewHandle.relayout).
+  // EpubViewHandle.relayout), and capture text selections for highlights.
   useEffect(() => {
     if (!handle) return;
     return handle.onLoad(({ index, doc }) => {
@@ -131,8 +192,9 @@ export function EpubReader({
         else if (key === "arrowleft" || key === "pageup") void handle.prev();
       });
       scheduleFontsSettledRelayout(doc, () => handle.relayout());
+      captureSelectionOnPointerUp(doc);
     });
-  }, [handle, syncMathCount]);
+  }, [handle, syncMathCount, captureSelectionOnPointerUp]);
 
   // External links must not navigate the reading surface; the engine's
   // default window.open is cancelled by this subscription's existence.
@@ -290,6 +352,69 @@ export function EpubReader({
       searchTargetRef.current = null;
     };
   }, [searchTargetRef, handle, book.id]);
+
+  // Draw highlights through the engine and keep them in step with the
+  // persisted list (created in the tabs, deleted, recolored). The engine
+  // re-adds a section's highlights whenever that section remounts, so this
+  // only has to move the diff since the last commit.
+  const drawnHighlightsRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!handle) return;
+    const next = new Map<string, string>();
+    for (const highlight of highlights) {
+      if (highlight.cfi !== null) next.set(highlight.cfi, highlight.color ?? "");
+    }
+    for (const [cfi, color] of next) {
+      if (drawnHighlightsRef.current.get(cfi) !== color) {
+        handle.addHighlight(cfi, highlightCssColor(color));
+      }
+    }
+    for (const cfi of drawnHighlightsRef.current.keys()) {
+      if (!next.has(cfi)) handle.removeHighlight(cfi);
+    }
+    drawnHighlightsRef.current = next;
+  }, [handle, highlights]);
+
+  // The shell's selection toolbar drives highlight creation through this
+  // controller; the reader owns the selection → CFI translation.
+  const onCreateHighlightRef = useRef(onCreateHighlight);
+  useEffect(() => {
+    onCreateHighlightRef.current = onCreateHighlight;
+  });
+  useEffect(() => {
+    if (!annotationTargetRef) return;
+    if (!handle) {
+      annotationTargetRef.current = null;
+      return;
+    }
+    annotationTargetRef.current = {
+      createHighlight: (color) => {
+        const pending = pendingSelectionRef.current;
+        if (!pending) return;
+        const located = handle.getCfiFromRange(pending.doc, pending.range);
+        pending.doc.getSelection()?.removeAllRanges();
+        pendingSelectionRef.current = null;
+        onSelectionChangeRef.current?.(null);
+        if (!located) return;
+        onCreateHighlightRef.current?.({
+          kind: "highlight",
+          cfi: located.cfi,
+          chapterHref: located.href,
+          text: pending.text,
+          color: isHighlightColor(color) ? color : null,
+        });
+      },
+      clearSelection: () => {
+        const pending = pendingSelectionRef.current;
+        if (pending) pending.doc.getSelection()?.removeAllRanges();
+        pendingSelectionRef.current = null;
+        onSelectionChangeRef.current?.(null);
+      },
+    };
+    return () => {
+      annotationTargetRef.current = null;
+    };
+  }, [annotationTargetRef, handle]);
 
   if (status === "error") {
     return (

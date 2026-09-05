@@ -2,6 +2,9 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  Annotation,
+  AnnotationInput,
+  AnnotationPatch,
   Book,
   ImportReport,
   LibraryChange,
@@ -77,6 +80,29 @@ export function getReadingProgress(bookId: number): Promise<ReadingProgressRecor
 /** Persist (upsert) where the user stopped reading a book. */
 export function saveReadingProgress(bookId: number, progress: ReadingProgressInput): Promise<null> {
   return invoke("save_reading_progress", { bookId, progress });
+}
+
+/** Every annotation of one book (bookmarks + highlights), in document order. */
+export function listAnnotations(bookId: number): Promise<Annotation[]> {
+  return invoke("list_annotations", { bookId });
+}
+
+/** Creates a bookmark or highlight and returns the stored row. */
+export function createAnnotation(bookId: number, annotation: AnnotationInput): Promise<Annotation> {
+  return invoke("create_annotation", { bookId, annotation });
+}
+
+/**
+ * Updates an annotation's color and/or note. `note` replaces the stored
+ * note (empty string clears, null keeps); resolves null for unknown ids.
+ */
+export function updateAnnotation(id: number, patch: AnnotationPatch): Promise<Annotation | null> {
+  return invoke("update_annotation", { id, patch });
+}
+
+/** Deletes an annotation; true when a row was removed. */
+export function deleteAnnotation(id: number): Promise<boolean> {
+  return invoke("delete_annotation", { id });
 }
 
 /** Native folder picker; resolves to null when the user cancels. */

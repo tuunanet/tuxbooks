@@ -14,6 +14,8 @@ import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 import { emitSearchResults, fakeEpubHandles, lastFakeHandle } from "./mocks/epubEngine";
+import { makeAnnotation } from "./factories";
+import type { Annotation } from "@/types/domain";
 
 const SAVED_PROGRESS = {
   bookId: 1,
@@ -408,3 +410,128 @@ describe("EpubReader in-book search", () => {
 function fakeHandleOrThrow() {
   return lastFakeHandle();
 }
+
+describe("EpubReader highlights and selection", () => {
+  beforeEach(() => {
+    fakeEpubHandles.length = 0;
+  });
+
+  function renderWithHighlights(
+    props: {
+      highlights?: Annotation[];
+      onCreateHighlight?: (input: Record<string, unknown>) => void;
+      onSelectionChange?: (selection: { text: string } | null) => void;
+      annotationTargetRef?: { current: unknown };
+    } = {},
+  ) {
+    mockHappyPath(null);
+    return render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader
+            book={makeBookShim()}
+            highlights={props.highlights}
+            onCreateHighlight={props.onCreateHighlight as never}
+            onSelectionChange={props.onSelectionChange}
+            annotationTargetRef={props.annotationTargetRef as never}
+          />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+  }
+
+  it("draws new highlights through the engine and removes deleted ones", async () => {
+    const highlights = [
+      makeAnnotation({
+        id: 1,
+        cfi: "epubcfi(/6/2!/4/2,/1:0,/1:4)",
+        color: "green",
+        pageNumber: null,
+        rects: null,
+      }),
+    ];
+    const { rerender } = renderWithHighlights({ highlights });
+    const handle = await waitFor(fakeHandleOrThrow);
+
+    await waitFor(() =>
+      expect(handle.addHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)", "#4ade80"),
+    );
+
+    // Recoloring redraws the same CFI with the new color; removing clears it.
+    const recolored = [{ ...highlights[0]!, color: "blue" }];
+    rerender(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader book={makeBookShim()} highlights={recolored} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await waitFor(() =>
+      expect(handle.addHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)", "#60a5fa"),
+    );
+
+    rerender(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader book={makeBookShim()} highlights={[]} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await waitFor(() =>
+      expect(handle.removeHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)"),
+    );
+  });
+
+  it("creates a highlight from a section text selection", async () => {
+    const onCreateHighlight = vi.fn();
+    const onSelectionChange = vi.fn();
+    const annotationTargetRef: {
+      current: { createHighlight: (c: string) => void; clearSelection: () => void } | null;
+    } = { current: null };
+    renderWithHighlights({ onCreateHighlight, onSelectionChange, annotationTargetRef });
+    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // Capture the section document the component's load handler sees.
+    const emitted: Document[] = [];
+    handle.onLoad(({ doc }) => emitted.push(doc));
+    handle.emitLoad({ index: 0, doc: document.implementation.createHTMLDocument() });
+    const sectionDoc = emitted[0];
+    if (!sectionDoc) throw new Error("no section document emitted");
+
+    // The component stores range.cloneRange(); hand back a marker we can
+    // assert on.
+    const clonedRange = {} as unknown as Range;
+    const fakeRange = { cloneRange: () => clonedRange } as unknown as Range;
+    const fakeSelection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      toString: () => "a quoted passage",
+      getRangeAt: () => fakeRange,
+      removeAllRanges: vi.fn(),
+    };
+    const selectionSpy = vi
+      .spyOn(sectionDoc, "getSelection")
+      .mockReturnValue(fakeSelection as unknown as Selection);
+
+    // Selections are captured on pointerup, deferred one tick.
+    sectionDoc.dispatchEvent(new Event("pointerup", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "a quoted passage" });
+
+    annotationTargetRef.current!.createHighlight("yellow");
+    expect(handle.getCfiFromRange).toHaveBeenCalledWith(sectionDoc, clonedRange);
+    expect(onCreateHighlight).toHaveBeenCalledWith({
+      kind: "highlight",
+      cfi: "epubcfi(/6/2!/4/2,/1:0,/1:4)",
+      chapterHref: "chapter1.xhtml",
+      text: "a quoted passage",
+      color: "yellow",
+    });
+    expect(fakeSelection.removeAllRanges).toHaveBeenCalled();
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+    selectionSpy.mockRestore();
+  });
+});

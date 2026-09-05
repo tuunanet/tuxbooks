@@ -10,6 +10,12 @@ function ScrollArea({
   children,
   ...props
 }: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
+  // The `block!` override defeats Radix's inline `display: table` on the
+  // content wrapper: a table sizes to its widest row's intrinsic width, so
+  // long truncated rows (book titles, TOC labels) would stretch the content
+  // past the viewport instead of ellipsizing, pushing trailing buttons out
+  // of view. Block + the wrapper's inline `min-width: 100%` keeps the
+  // content at viewport width so `truncate` children actually truncate.
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -18,7 +24,7 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="[&>div]:block! size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

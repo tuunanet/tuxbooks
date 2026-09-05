@@ -62,6 +62,34 @@ PK `book_id` (FK, cascade) — one progress row per book.
 `chapter_href`, `character_offset`, `progress_percent`
 (REAL, CHECK 0..=100 or NULL), `updated_at`.
 
+### annotations
+
+One row per persistent reading annotation (milestone 6): bookmarks,
+highlights, and the note attached to either (1:1 through the nullable
+`note` column — there is no separate notes table).
+
+| column        | type                                           | notes                                                         |
+| ------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| id            | INTEGER PK AUTOINCREMENT                       |                                                               |
+| book_id       | INTEGER NOT NULL, FK `books` ON DELETE CASCADE |                                                               |
+| kind          | TEXT NOT NULL, CHECK `bookmark`\|`highlight`   |                                                               |
+| cfi           | TEXT                                           | canonical EPUB CFI (bookmarks and highlights)                 |
+| chapter_href  | TEXT                                           | spine href of the EPUB section (display grouping)             |
+| page_number   | INTEGER, CHECK >= 1                            | 1-based PDF page                                              |
+| page_fraction | REAL, CHECK 0..=1                              | optional page-local anchor (PDF bookmarks)                    |
+| text          | TEXT                                           | selected text (highlights; mandatory for EPUB, optional PDF)  |
+| color         | TEXT                                           | highlight palette key (`yellow`, `green`, …)                  |
+| geometry      | TEXT                                           | JSON array of rects normalized to page space (PDF highlights) |
+| note          | TEXT                                           | the attached note (empty string = no note text)               |
+| created_at    | TEXT NOT NULL, DB default                      |                                                               |
+| modified_at   | TEXT NOT NULL, DB default                      | bumped on UPDATE                                              |
+
+Locator invariant: every row names one stable document position — a CFI or
+a page number — never UI pixels. PDF highlight `geometry` is stored
+normalized to page space (`0..1` per axis, validated by the service), so
+highlights redraw correctly at any zoom or window size. Index on
+`(book_id, kind)`; deleting a book cascades.
+
 ## Full-text search
 
 `books_fts` is an FTS5 **external-content** table over

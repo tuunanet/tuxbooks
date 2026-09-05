@@ -3,6 +3,11 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
+import {
+  isHighlightColor,
+  normalizeRect,
+  type ReaderAnnotationController,
+} from "../annotationModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { useFitWidthScale } from "./hooks/useFitWidthScale";
 import { usePdfDocument } from "./hooks/usePdfDocument";
@@ -23,6 +28,7 @@ import { PdfBitmapCache } from "./pdfBitmapCache";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
 import type { ReaderSearchController, ReaderSearchGroup } from "../searchModel";
+import type { Annotation, AnnotationInput, AnnotationRect } from "@/types/domain";
 import type { Book } from "@/types/domain";
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2] as const;
@@ -71,6 +77,23 @@ interface PdfReaderProps {
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
   onSearchDone?: (bookId: number) => void;
+  /**
+   * Holds the current bookmark locator (1-based page + in-page anchor
+   * fraction), updated as the reading position moves. Read by the shell
+   * without a re-render.
+   */
+  locatorTargetRef?: { current: { page: number; fraction: number } | null };
+  /** Highlights of the open book; drawn over rendered pages. */
+  highlights?: Annotation[];
+  /** Persists a highlight created from a text selection. */
+  onCreateHighlight?: (input: AnnotationInput) => void;
+  /** Reports the current selection's text; null when nothing is selected. */
+  onSelectionChange?: (selection: { text: string } | null) => void;
+  /**
+   * Filled with the annotation controller once the document is loaded; the
+   * shell's selection toolbar drives it without knowing the format.
+   */
+  annotationTargetRef?: { current: ReaderAnnotationController | null };
 }
 
 /**
@@ -96,6 +119,11 @@ export function PdfReader({
   searchTargetRef,
   onSearchGroup,
   onSearchDone,
+  locatorTargetRef,
+  highlights = [],
+  onCreateHighlight,
+  onSelectionChange,
+  annotationTargetRef,
 }: PdfReaderProps) {
   const { position, setPosition } = useReader();
   const {
@@ -186,6 +214,128 @@ export function PdfReader({
       searchTargetRef.current = null;
     };
   }, [searchTargetRef, pdfDocument, searchController]);
+
+  // Text selections on the text layers become highlight candidates. Page,
+  // text, and normalized rects are all captured as soon as the selection
+  // settles — a click on the toolbar's color swatch collapses the native
+  // selection, so creation must not depend on it. Rects are normalized to
+  // page space, which keeps them valid across later scroll and zoom.
+  const pendingSelectionRef = useRef<{
+    page: number;
+    text: string;
+    rects: AnnotationRect[];
+  } | null>(null);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  });
+  useEffect(() => {
+    if (!pdfDocument) return;
+    const readSelection = (event: Event) => {
+      // Toolbar interactions must not clear the candidate they are about to
+      // consume: the click's pointerdown collapses the native selection
+      // before the button's click handler runs.
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-testid=selection-toolbar]")
+      ) {
+        return;
+      }
+      window.setTimeout(() => {
+        const selection = window.getSelection();
+        const text = selection?.toString().replace(/\s+/g, " ").trim() ?? "";
+        if (
+          !selection ||
+          selection.isCollapsed ||
+          selection.rangeCount === 0 ||
+          text === "" ||
+          !pdfDocument
+        ) {
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          return;
+        }
+        const anchorNode = selection.anchorNode;
+        const element =
+          anchorNode instanceof Element ? anchorNode : (anchorNode?.parentElement ?? null);
+        const slot = element?.closest("[data-pdf-slot]") ?? null;
+        const page = Number(slot?.getAttribute("data-pdf-slot"));
+        if (!slot || !Number.isInteger(page) || page < 1) {
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          return;
+        }
+        const slotRect = slot.getBoundingClientRect();
+        const rects = Array.from(selection.getRangeAt(0).getClientRects())
+          .filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) =>
+            normalizeRect(rect, slotRect.left, slotRect.top, slotRect.width, slotRect.height),
+          )
+          .filter((rect) => rect.width > 0 && rect.height > 0);
+        if (rects.length === 0) {
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          return;
+        }
+        pendingSelectionRef.current = { page, text, rects };
+        onSelectionChangeRef.current?.({ text });
+      }, 0);
+    };
+    document.addEventListener("pointerup", readSelection);
+    return () => {
+      document.removeEventListener("pointerup", readSelection);
+      pendingSelectionRef.current = null;
+    };
+  }, [pdfDocument]);
+
+  // The shell's selection toolbar drives highlight creation through this
+  // controller; the reader owns the selection → normalized rects translation.
+  const onCreateHighlightRef = useRef(onCreateHighlight);
+  useEffect(() => {
+    onCreateHighlightRef.current = onCreateHighlight;
+  });
+  useEffect(() => {
+    if (!annotationTargetRef) return;
+    if (!pdfDocument) {
+      annotationTargetRef.current = null;
+      return;
+    }
+    annotationTargetRef.current = {
+      createHighlight: (color) => {
+        const pending = pendingSelectionRef.current;
+        if (!pending) return;
+        window.getSelection()?.removeAllRanges();
+        pendingSelectionRef.current = null;
+        onSelectionChangeRef.current?.(null);
+        onCreateHighlightRef.current?.({
+          kind: "highlight",
+          pageNumber: pending.page,
+          rects: pending.rects,
+          text: pending.text,
+          color: isHighlightColor(color) ? color : null,
+        });
+      },
+      clearSelection: () => {
+        window.getSelection()?.removeAllRanges();
+        pendingSelectionRef.current = null;
+        onSelectionChangeRef.current?.(null);
+      },
+    };
+    return () => {
+      annotationTargetRef.current = null;
+    };
+  }, [annotationTargetRef, pdfDocument]);
+
+  const highlightsByPage = useMemo(() => {
+    const byPage = new Map<number, Annotation[]>();
+    for (const highlight of highlights) {
+      if (highlight.pageNumber === null) continue;
+      const list = byPage.get(highlight.pageNumber) ?? [];
+      list.push(highlight);
+      byPage.set(highlight.pageNumber, list);
+    }
+    return byPage;
+  }, [highlights]);
 
   const slots = useMemo(
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),
@@ -283,6 +433,17 @@ export function PdfReader({
   const activeSlotRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
   const anchorInfoRef = useRef<PdfAnchorInfo | null>(null);
+
+  // Bookmark locator: the page the reading anchor sits in, with its in-page
+  // fraction at the time the page was entered (a coarse page-local position
+  // is all a PDF bookmark keeps).
+  useEffect(() => {
+    if (!locatorTargetRef) return;
+    locatorTargetRef.current = {
+      page: currentPage,
+      fraction: anchorInfoRef.current?.fraction ?? 0,
+    };
+  }, [locatorTargetRef, currentPage]);
   const scrollReportedPageRef = useRef<number | null>(null);
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
@@ -478,6 +639,7 @@ export function PdfReader({
         documentRef={documentRef}
         contentAreaRef={contentAreaRef}
         onRetryPage={retryPage}
+        highlightsByPage={highlightsByPage}
       />
       {sidebarHost &&
         createPortal(

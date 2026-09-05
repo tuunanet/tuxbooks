@@ -144,7 +144,10 @@ Two isolated invocations per run:
    switching, rapid repeated open/close, close-while-rendering recovery,
    rapid navigation convergence, window-resize re-anchoring, and
    memory-bound assertions — live canvas bytes, bitmap-cache occupancy,
-   EPUB engine host count).
+   EPUB engine host count) and `annotations.e2e.ts` (milestone 6: a PDF
+   highlight created from a real text-layer selection, its attached note,
+   and a bookmark on both formats, each revisited after close/reopen —
+   the reader reloads everything from SQLite).
 
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.

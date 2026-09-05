@@ -57,8 +57,6 @@ panic on malformed input — a property test feeds arbitrary bytes through
   engine parses document structure itself from the file bytes).
 - Fixed-layout EPUBs use the engine's fixed-layout renderer, the least
   mature part of foliate-js; reflowable books are the product priority.
-- Reader: no annotations or media overlays yet (later milestones; the
-  engine already exposes the needed modules).
 
 ## Reader rendering (frontend, foliate-js)
 
@@ -157,6 +155,27 @@ Ctrl/Cmd+F open the drawer straight onto the Search tab. Chapter labels
 come from the engine's TOC progress; label-less chapters fall back to
 "Chapter N".
 
+### Annotations (milestone 6)
+
+Highlights live in the engine's overlay layer, behind the same seam. The
+seam wraps the vendored `Overlayer`: `EpubViewHandle.addHighlight(cfi,
+color)` draws (or queues per spine index) a translucent highlight, and the
+handle's `create-overlay` subscription re-adds a section's highlights
+whenever the engine mounts that section's overlay; the paginator redraws
+on reflow. `removeHighlight` and the add/remove diff in `EpubReader` keep
+the engine in step with the persisted annotation list.
+
+Creation runs through real text selections: each section document gets a
+`pointerup` capture (deferred one tick), the selection's text is reported
+to the shell's shared `SelectionToolbar`, and picking a color asks the
+engine for the canonical locator via `getCfiFromRange` — the engine's own
+`getCFI(index, range)` over the mounted section — then persists a
+highlight through the annotations commands. The pending selection is kept
+as a cloned `Range`, never pixels, so creation does not depend on the
+native selection surviving the toolbar click. Bookmarks persist the
+current relocate CFI (+ spine href), reported upward through
+`onLocatorChange`.
+
 ### Security
 
 EPUB content may contain scripts; foliate-js renders sections in
@@ -192,6 +211,6 @@ and validated by `just check-epub-fixtures`. See
 
 The engine seam is the swap point: if foliate-js ever blocks a product
 need, `@readium/navigator` (ts-toolkit) is the evaluated fallback, and only
-`epubEngine.ts` + `EpubReader` would change. Annotations (`overlayer.js`)
-and TTS modules exist in the vendored engine for later milestones
-(`search.js` is already in use behind the seam).
+`epubEngine.ts` + `EpubReader` would change. Media overlays and TTS modules
+exist in the vendored engine for later milestones (`search.js` and the
+annotation overlayer are already in use behind the seam).

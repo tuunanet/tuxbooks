@@ -170,6 +170,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::annotations::create_annotation,
+            commands::annotations::delete_annotation,
+            commands::annotations::list_annotations,
+            commands::annotations::update_annotation,
             commands::books::get_library_stats,
             commands::books::list_books,
             commands::books::remove_book,

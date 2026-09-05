@@ -23,6 +23,9 @@ export interface FakeEpubHandle {
   getToc: ReturnType<typeof vi.fn>;
   getSectionHref: ReturnType<typeof vi.fn>;
   getFraction: ReturnType<typeof vi.fn>;
+  addHighlight: ReturnType<typeof vi.fn>;
+  removeHighlight: ReturnType<typeof vi.fn>;
+  getCfiFromRange: ReturnType<typeof vi.fn>;
   search: (query: string, callbacks: EpubSearchCallbacks) => ReturnType<typeof vi.fn>;
   clearSearch: ReturnType<typeof vi.fn>;
   /** Callbacks from the most recent search call, for driving matches. */
@@ -59,6 +62,9 @@ function makeFakeHandle(toc: EpubTocItem[]): FakeEpubHandle {
     getToc: vi.fn(() => toc),
     getSectionHref: vi.fn((index: number) => `chapter${index + 1}.xhtml`),
     getFraction: vi.fn(() => 0),
+    addHighlight: vi.fn(),
+    removeHighlight: vi.fn(),
+    getCfiFromRange: vi.fn(() => ({ cfi: "epubcfi(/6/2!/4/2,/1:0,/1:4)", href: "chapter1.xhtml" })),
     clearSearch: vi.fn(),
     lastSearchCallbacks: null as EpubSearchCallbacks | null,
     searchCancelFns: [] as Array<ReturnType<typeof vi.fn>>,
