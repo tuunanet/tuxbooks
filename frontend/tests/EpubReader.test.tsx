@@ -10,6 +10,7 @@ vi.mock("@/lib/epub/epubEngine", async () => {
 });
 
 import { EpubReader } from "@/components/reader/EpubReader";
+import type { ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
@@ -245,14 +246,14 @@ describe("EpubReader appearance and navigation", () => {
     expect(handle.prev).toHaveBeenCalledTimes(1);
   });
 
-  it("jumps to a TOC target through the engine", async () => {
+  it("jumps to a TOC target through the engine adapter", async () => {
     mockHappyPath(null);
-    const jumpTargetRef = { current: null as ((href: string) => void) | null };
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
 
     render(
       <ShortcutProvider>
         <ReaderProvider>
-          <EpubReader book={makeBookShim()} jumpTargetRef={jumpTargetRef} />
+          <EpubReader book={makeBookShim()} adapterRef={adapterRef} />
         </ReaderProvider>
       </ShortcutProvider>,
     );
@@ -261,14 +262,24 @@ describe("EpubReader appearance and navigation", () => {
     );
     const handle = lastFakeHandle();
 
-    jumpTargetRef.current?.("chapter2.xhtml");
+    adapterRef.current?.jump({ format: "epub", locator: "chapter2.xhtml" });
     expect(handle.goTo).toHaveBeenCalledWith("chapter2.xhtml");
+    // The EPUB adapter ignores other formats' jump targets.
+    adapterRef.current?.jump({ format: "pdf", page: 3 });
+    expect(handle.goTo).toHaveBeenCalledTimes(1);
   });
 
-  it("updates the locator from relocate events without feeding position back", async () => {
+  it("reports the tagged engine position from relocate events without feeding position back", async () => {
     mockHappyPath(null);
+    const onPositionChange = vi.fn();
 
-    renderReader();
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader book={makeBookShim()} onPositionChange={onPositionChange} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
     const handle = await waitFor(fakeHandleOrThrow);
     await screen.findByTestId("epub-reader");
 
@@ -280,6 +291,11 @@ describe("EpubReader appearance and navigation", () => {
     await waitFor(() => expect(handle.host.dataset.epubState).toBe("ready"));
     expect(handle.host.dataset.epubSection).toBe("1");
     expect(handle.host.dataset.epubFraction).toBe("0.55");
+    expect(onPositionChange).toHaveBeenLastCalledWith({
+      format: "epub",
+      cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)",
+      chapterHref: "chapter2.xhtml",
+    });
 
     // The engine-reported position must not be fed back into the engine
     // (the echo guard skips the section round-trip).
@@ -293,7 +309,7 @@ describe("EpubReader in-book search", () => {
   });
 
   interface SearchProps {
-    searchTargetRef?: { current: unknown };
+    adapterRef?: { current: ReaderAdapter | null };
     onSearchGroup?: (bookId: number, group: unknown) => void;
     onSearchDone?: (bookId: number) => void;
   }
@@ -304,7 +320,7 @@ describe("EpubReader in-book search", () => {
         <ReaderProvider>
           <EpubReader
             book={makeBookShim()}
-            searchTargetRef={props.searchTargetRef as never}
+            adapterRef={props.adapterRef}
             onSearchGroup={props.onSearchGroup as never}
             onSearchDone={props.onSearchDone}
           />
@@ -315,11 +331,11 @@ describe("EpubReader in-book search", () => {
 
   it("runs searches on the engine and streams mapped groups upward", async () => {
     mockHappyPath(null);
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
     const groups: Array<{ label: string; matches: unknown[] }> = [];
     let done = false;
     renderSearchableReader({
-      searchTargetRef,
+      adapterRef,
       onSearchGroup: (_id, group) => groups.push(group as never),
       onSearchDone: () => {
         done = true;
@@ -330,7 +346,7 @@ describe("EpubReader in-book search", () => {
     );
     const handle = lastFakeHandle();
 
-    searchTargetRef.current!.run("mole");
+    adapterRef.current!.search.run("mole");
     await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
     emitSearchResults(handle, [
       {
@@ -361,10 +377,10 @@ describe("EpubReader in-book search", () => {
 
   it("labels groups without a chapter name", async () => {
     mockHappyPath(null);
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
     const groups: Array<{ label: string }> = [];
     renderSearchableReader({
-      searchTargetRef,
+      adapterRef,
       onSearchGroup: (_id, group) => groups.push(group as never),
     });
     await waitFor(() =>
@@ -372,7 +388,7 @@ describe("EpubReader in-book search", () => {
     );
     const handle = lastFakeHandle();
 
-    searchTargetRef.current!.run("river");
+    adapterRef.current!.search.run("river");
     await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
     emitSearchResults(handle, [
       { label: "", subitems: [] },
@@ -383,31 +399,31 @@ describe("EpubReader in-book search", () => {
 
   it("cancels the previous search when a new query runs", async () => {
     mockHappyPath(null);
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
-    renderSearchableReader({ searchTargetRef });
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    renderSearchableReader({ adapterRef });
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
     const handle = lastFakeHandle();
 
-    searchTargetRef.current!.run("first");
+    adapterRef.current!.search.run("first");
     await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
-    searchTargetRef.current!.run("second");
+    adapterRef.current!.search.run("second");
     expect(handle.searchCancelFns[0]).toHaveBeenCalledTimes(1);
     expect(handle.searchCancelFns).toHaveLength(2);
   });
 
-  it("unregisters the controller on unmount", async () => {
+  it("unregisters the adapter on unmount", async () => {
     mockHappyPath(null);
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
-    const { unmount } = renderSearchableReader({ searchTargetRef });
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    const { unmount } = renderSearchableReader({ adapterRef });
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
-    expect(searchTargetRef.current).not.toBeNull();
+    expect(adapterRef.current).not.toBeNull();
 
     unmount();
-    expect(searchTargetRef.current).toBeNull();
+    expect(adapterRef.current).toBeNull();
   });
 });
 
@@ -425,7 +441,7 @@ describe("EpubReader highlights and selection", () => {
       highlights?: Annotation[];
       onCreateHighlight?: (input: Record<string, unknown>) => void;
       onSelectionChange?: (selection: { text: string } | null) => void;
-      annotationTargetRef?: { current: unknown };
+      adapterRef?: { current: ReaderAdapter | null };
     } = {},
   ) {
     mockHappyPath(null);
@@ -437,7 +453,7 @@ describe("EpubReader highlights and selection", () => {
             highlights={props.highlights}
             onCreateHighlight={props.onCreateHighlight as never}
             onSelectionChange={props.onSelectionChange}
-            annotationTargetRef={props.annotationTargetRef as never}
+            adapterRef={props.adapterRef}
           />
         </ReaderProvider>
       </ShortcutProvider>,
@@ -489,10 +505,8 @@ describe("EpubReader highlights and selection", () => {
   it("creates a highlight from a section text selection", async () => {
     const onCreateHighlight = vi.fn();
     const onSelectionChange = vi.fn();
-    const annotationTargetRef: {
-      current: { createHighlight: (c: string) => void; clearSelection: () => void } | null;
-    } = { current: null };
-    renderWithHighlights({ onCreateHighlight, onSelectionChange, annotationTargetRef });
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    renderWithHighlights({ onCreateHighlight, onSelectionChange, adapterRef });
     const handle = await waitFor(fakeHandleOrThrow);
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
@@ -525,7 +539,7 @@ describe("EpubReader highlights and selection", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "a quoted passage" });
 
-    annotationTargetRef.current!.createHighlight("yellow");
+    adapterRef.current!.annotations.createHighlight("yellow");
     expect(handle.getCfiFromRange).toHaveBeenCalledWith(sectionDoc, clonedRange);
     expect(onCreateHighlight).toHaveBeenCalledWith({
       kind: "highlight",

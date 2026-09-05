@@ -16,19 +16,20 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
+import { byKind, type HighlightColor } from "./annotationModel";
 import {
-  byKind,
-  isBookmarkAtCfi,
-  isBookmarkAtPage,
-  type HighlightColor,
-  type ReaderAnnotationController,
-} from "./annotationModel";
+  bookmarkInputFor,
+  isBookmarkAtPosition,
+  jumpToAnnotation as annotationJumpTarget,
+  jumpToSearchMatch,
+  type ReaderAdapter,
+  type ReaderJump,
+  type ReaderPosition,
+} from "./readerModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
-import { pageToPosition, positionToPage } from "./pdf/pdfPages";
 import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationInput } from "@/types/domain";
-import type { EpubLocator } from "./epub/hooks/useEpubPersistence";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
@@ -38,7 +39,6 @@ import {
   appendSearchGroup,
   emptySearchState,
   finishSearchGroup,
-  type ReaderSearchController,
   type ReaderSearchGroup,
   type ReaderSearchMatch,
   type ReaderSearchState,
@@ -52,8 +52,13 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
 
 /**
  * Full-window reading mode: no sidebar, its own visual language, and a
- * distinct visual language from the library. Position and appearance are
- * session state; persistence goes through the backend progress commands.
+ * distinct visual language from the library. The shell owns the genuinely
+ * shared reader concepts — current book, progress, navigation, bookmark
+ * placement, in-book search state, and the selection toolbar — while the
+ * open format reader (EPUB or PDF) registers its adapter (`readerModel`)
+ * for jumps, search, and highlight creation. Position persistence lives in
+ * the shared useReaderProgress contract; the format adapters keep their
+ * own rendering models and engines.
  */
 export function ReaderShell() {
   const { selectedBookId } = useAppState();
@@ -77,28 +82,28 @@ export function ReaderShell() {
     bookId: number;
     toc: EpubTocItem[];
   } | null>(null);
-  const epubJumpRef = useRef<((href: string) => void) | null>(null);
-  // Latest PDF locator (page + anchor fraction): what a bookmark placed
-  // right now would persist. Written by the reader on page changes, read by
-  // toggleBookmark from event handlers only.
-  const pdfLocatorRef = useRef<{ page: number; fraction: number } | null>(null);
-  // In-book search controllers, registered by the open reader; the shell's
-  // search drawer drives them without knowing the document format.
-  const epubSearchRef = useRef<ReaderSearchController | null>(null);
-  const pdfSearchRef = useRef<ReaderSearchController | null>(null);
-  // Annotation controllers: the selection toolbar drives highlight creation
-  // through whichever reader is open.
-  const epubAnnotationRef = useRef<ReaderAnnotationController | null>(null);
-  const pdfAnnotationRef = useRef<ReaderAnnotationController | null>(null);
-  // Streaming in-book search results for the open book (shared model for
-  // both formats; stale books' results are ignored by the model helpers).
-  const [searchState, setSearchState] = useState<ReaderSearchState | null>(null);
   // Real PDF outline, reported by PdfReader once the engine resolves it.
   // Kept with its owning book id so a stale book's outline is never shown.
   const [pdfOutlineState, setPdfOutlineState] = useState<{
     bookId: number;
     outline: PdfOutlineItem[];
   } | null>(null);
+  // The open reader's adapter: how the shell jumps, searches, and creates
+  // highlights without knowing which engine is underneath. Registered while
+  // the reader's document is open, nulled on unmount/book switch.
+  const adapterRef = useRef<ReaderAdapter | null>(null);
+  // The open reader's latest position (EPUB CFI / PDF page), tagged with
+  // its book id for the same staleness guard. Written through the unified
+  // onPositionChange callback; relocates already re-render the shell, so
+  // keeping this in state costs nothing extra and keeps `bookmarked`
+  // render-honest.
+  const [reportedPosition, setReportedPosition] = useState<{
+    bookId: number;
+    position: ReaderPosition;
+  } | null>(null);
+  // Streaming in-book search results for the open book (shared model for
+  // both formats; stale books' results are ignored by the model helpers).
+  const [searchState, setSearchState] = useState<ReaderSearchState | null>(null);
   // PDF thumbnails sidebar: the shell owns the docked host and the toggle;
   // PdfReader fills the host through a portal (it owns the document handle).
   const [pdfSidebarOpen, setPdfSidebarOpen] = useState(false);
@@ -145,21 +150,20 @@ export function ReaderShell() {
   useShortcut("mod+f", () => openNav("search"));
 
   // In-book search: the shell owns the state (one book open at a time), the
-  // active reader streams matches in through the shared model helpers,
-  // which ignore anything not belonging to the book being searched.
+  // open reader's adapter streams matches in through the shared model
+  // helpers, which ignore anything not belonging to the book being searched.
   const bookId = book?.id ?? -1;
   const runSearch = useCallback(
     (query: string) => {
       if (query === "") {
-        epubSearchRef.current?.cancel();
-        pdfSearchRef.current?.cancel();
+        adapterRef.current?.search.cancel();
         setSearchState(null);
         return;
       }
       setSearchState(emptySearchState(bookId, query));
-      (isEpub ? epubSearchRef : pdfSearchRef).current?.run(query);
+      adapterRef.current?.search.run(query);
     },
-    [bookId, isEpub],
+    [bookId],
   );
   const appendSearchGroupFrom = useCallback((id: number, group: ReaderSearchGroup) => {
     setSearchState((prev) => (prev ? appendSearchGroup(prev, id, group) : prev));
@@ -167,15 +171,25 @@ export function ReaderShell() {
   const finishSearchFrom = useCallback((id: number) => {
     setSearchState((prev) => (prev ? finishSearchGroup(prev, id) : prev));
   }, []);
+  // Every navigation entry point funnels through the open adapter: search
+  // matches, annotations, TOC entries, outline entries, and pages all jump
+  // in the document's own coordinates.
+  const jump = useCallback((target: ReaderJump) => {
+    adapterRef.current?.jump(target);
+  }, []);
   const pickSearchMatch = useCallback(
     (match: ReaderSearchMatch) => {
-      if (match.cfi !== null) {
-        epubJumpRef.current?.(match.cfi);
-      } else if (match.page !== null && knownPageCount > 0) {
-        setPosition(pageToPosition(match.page, knownPageCount));
-      }
+      const target = jumpToSearchMatch(match);
+      if (target) jump(target);
     },
-    [knownPageCount, setPosition],
+    [jump],
+  );
+  const jumpToAnnotation = useCallback(
+    (annotation: Annotation) => {
+      const target = annotationJumpTarget(annotation);
+      if (target) jump(target);
+    },
+    [jump],
   );
 
   // Selection toolbar state, tagged with the book whose reader reported it
@@ -184,67 +198,26 @@ export function ReaderShell() {
   const activeSelection =
     selection !== null && selection.bookId === book?.id ? { text: selection.text } : null;
 
-  // The EPUB engine's current locator, tagged with its book for the same
-  // staleness guard. Relocates already re-render the shell, so keeping this
-  // in state costs nothing extra and keeps `bookmarked` render-honest.
-  const [epubLocator, setEpubLocator] = useState<{ bookId: number; locator: EpubLocator } | null>(
-    null,
-  );
-  const activeEpubLocator =
-    epubLocator !== null && epubLocator.bookId === book?.id ? epubLocator.locator : null;
+  const activePosition =
+    reportedPosition !== null && reportedPosition.bookId === book?.id
+      ? reportedPosition.position
+      : null;
 
-  // Bookmarks: toggle at the exact current locator (EPUB CFI / PDF page),
+  // Bookmarks: toggle at the exact current position (EPUB CFI / PDF page),
   // so the button also removes a bookmark placed on the same spot.
   const toggleBookmark = useCallback(() => {
-    if (isEpub) {
-      const locator = activeEpubLocator;
-      if (!locator) return;
-      const existing = annotations.find((annotation) => isBookmarkAtCfi(annotation, locator.cfi));
-      if (existing) void remove(existing.id);
-      else {
-        void create({
-          kind: "bookmark",
-          cfi: locator.cfi,
-          chapterHref: locator.chapterHref,
-        });
-      }
-      return;
-    }
-    const locator = pdfLocatorRef.current;
-    if (!locator) return;
-    const existing = annotations.find((annotation) => isBookmarkAtPage(annotation, locator.page));
+    if (!activePosition) return;
+    const existing = annotations.find((annotation) =>
+      isBookmarkAtPosition(annotation, activePosition),
+    );
     if (existing) void remove(existing.id);
-    else {
-      void create({
-        kind: "bookmark",
-        pageNumber: locator.page,
-        pageFraction: locator.fraction > 0 ? locator.fraction : null,
-      });
-    }
-  }, [isEpub, activeEpubLocator, annotations, create, remove]);
+    else void create(bookmarkInputFor(activePosition));
+  }, [activePosition, annotations, create, remove]);
   useShortcut("mod+b", toggleBookmark);
 
-  const activePdfPage =
-    isPdf && knownPageCount > 0 ? positionToPage(position, knownPageCount) : null;
-  const bookmarked = isEpub
-    ? annotations.some(
-        (annotation) =>
-          activeEpubLocator !== null && isBookmarkAtCfi(annotation, activeEpubLocator.cfi),
-      )
-    : annotations.some(
-        (annotation) => activePdfPage !== null && isBookmarkAtPage(annotation, activePdfPage),
-      );
-
-  const jumpToAnnotation = useCallback(
-    (annotation: Annotation) => {
-      if (annotation.cfi !== null) {
-        epubJumpRef.current?.(annotation.cfi);
-      } else if (annotation.pageNumber !== null && knownPageCount > 0) {
-        setPosition(pageToPosition(annotation.pageNumber, knownPageCount));
-      }
-    },
-    [knownPageCount, setPosition],
-  );
+  const bookmarked =
+    activePosition !== null &&
+    annotations.some((annotation) => isBookmarkAtPosition(annotation, activePosition));
 
   const handleCreateHighlight = useCallback(
     (input: AnnotationInput) => {
@@ -252,18 +225,15 @@ export function ReaderShell() {
     },
     [create],
   );
-  const handleSelectionFrom = useCallback((bookId: number, text: string | null) => {
-    setSelection(text === null ? null : { bookId, text });
+  const handleSelectionFrom = useCallback((id: number, text: string | null) => {
+    setSelection(text === null ? null : { bookId: id, text });
   }, []);
-  const handleCreateHighlightColor = useCallback(
-    (color: HighlightColor) => {
-      (isEpub ? epubAnnotationRef : pdfAnnotationRef).current?.createHighlight(color);
-    },
-    [isEpub],
-  );
+  const handleCreateHighlightColor = useCallback((color: HighlightColor) => {
+    adapterRef.current?.annotations.createHighlight(color);
+  }, []);
   const handleDismissSelection = useCallback(() => {
-    (isEpub ? epubAnnotationRef : pdfAnnotationRef).current?.clearSelection();
-  }, [isEpub]);
+    adapterRef.current?.annotations.clearSelection();
+  }, []);
 
   const highlights = useMemo(() => byKind(annotations, "highlight"), [annotations]);
 
@@ -397,9 +367,8 @@ export function ReaderShell() {
               key={book.id}
               book={book}
               onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
-              jumpTargetRef={epubJumpRef}
-              onLocatorChange={(locator) => setEpubLocator({ bookId: book.id, locator })}
-              searchTargetRef={epubSearchRef}
+              onPositionChange={(position) => setReportedPosition({ bookId: book.id, position })}
+              adapterRef={adapterRef}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
               highlights={highlights}
@@ -407,7 +376,6 @@ export function ReaderShell() {
               onSelectionChange={(sel) =>
                 handleSelectionFrom(book.id, sel === null ? null : sel.text)
               }
-              annotationTargetRef={epubAnnotationRef}
             />
           ) : (
             <PdfReader
@@ -417,16 +385,15 @@ export function ReaderShell() {
               onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
               sidebarHost={pdfSidebarHost}
               scrollContainerRef={readerContentRef}
-              searchTargetRef={pdfSearchRef}
+              onPositionChange={(position) => setReportedPosition({ bookId: book.id, position })}
+              adapterRef={adapterRef}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
-              locatorTargetRef={pdfLocatorRef}
               highlights={highlights}
               onCreateHighlight={handleCreateHighlight}
               onSelectionChange={(sel) =>
                 handleSelectionFrom(book.id, sel === null ? null : sel.text)
               }
-              annotationTargetRef={pdfAnnotationRef}
             />
           )}
         </main>
@@ -454,13 +421,9 @@ export function ReaderShell() {
         onOpenChange={(open) => setNav((prev) => ({ ...prev, open }))}
         book={book}
         pageCount={knownPageCount}
-        onJump={setPosition}
+        onJump={jump}
         epubToc={isEpub ? epubToc : null}
-        onEpubJump={(href) => epubJumpRef.current?.(href)}
         pdfOutline={isPdf ? pdfOutline : null}
-        onPdfJump={(page) => {
-          if (knownPageCount > 0) setPosition(pageToPosition(page, knownPageCount));
-        }}
         annotations={annotations}
         onAnnotationJump={jumpToAnnotation}
         onDeleteAnnotation={(id) => void remove(id)}

@@ -11,6 +11,7 @@ import type { EpubTocItem } from "@/lib/epub/epubEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationPatch } from "@/types/domain";
 import type { Book } from "@/types/domain";
+import type { ReaderJump } from "./readerModel";
 import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
 import { ReaderSearchTab } from "./ReaderSearchTab";
 import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
@@ -22,15 +23,12 @@ interface ReaderNavigationProps {
   onOpenChange: (open: boolean) => void;
   book: Book;
   pageCount: number;
-  onJump: (percentage: number) => void;
+  /** Navigates the open reader to a position in the document's own coordinates. */
+  onJump: (target: ReaderJump) => void;
   /** Engine-reported EPUB table of contents; null while the book opens. */
   epubToc: EpubTocItem[] | null;
-  /** Navigates the EPUB engine to a TOC destination (href or CFI). */
-  onEpubJump: (href: string) => void;
   /** Engine-resolved PDF outline; null while the document opens. */
   pdfOutline: PdfOutlineItem[] | null;
-  /** Navigates the PDF reader to an outline entry's page. */
-  onPdfJump: (page: number) => void;
   /** Persistent annotations of the open book (bookmarks + highlights). */
   annotations: Annotation[];
   /** Navigates the reader to an annotation's position. */
@@ -93,9 +91,7 @@ export function ReaderNavigation({
   pageCount,
   onJump,
   epubToc,
-  onEpubJump,
   pdfOutline,
-  onPdfJump,
   annotations,
   onAnnotationJump,
   onDeleteAnnotation,
@@ -110,19 +106,17 @@ export function ReaderNavigation({
   const bookmarks = annotations.filter((annotation) => annotation.kind === "bookmark");
   const highlights = annotations.filter((annotation) => annotation.kind === "highlight");
 
-  const jump = (percentage: number) => {
-    onJump(percentage);
+  const jump = (target: ReaderJump) => {
+    onJump(target);
     onOpenChange(false);
   };
 
   const jumpToChapter = (href: string) => {
-    onEpubJump(href);
-    onOpenChange(false);
+    jump({ format: "epub", locator: href });
   };
 
   const jumpToOutlinePage = (page: number) => {
-    onPdfJump(page);
-    onOpenChange(false);
+    jump({ format: "pdf", page });
   };
 
   const jumpToAnnotation = (annotation: Annotation) => {
@@ -231,9 +225,7 @@ export function ReaderNavigation({
                           type="button"
                           data-testid={`nav-page-${page}`}
                           aria-label={`Go to page ${page}`}
-                          onClick={() =>
-                            jump(Math.round(((page - 1) / Math.max(pageCount - 1, 1)) * 100))
-                          }
+                          onClick={() => jump({ format: "pdf", page })}
                           className="rounded-md border py-2 text-sm tabular-nums outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
                         >
                           {page}

@@ -150,13 +150,20 @@ frontend/src/
         books/            BookCard, BookListItem, BookDetail, book context menu,
                           BookMetadataDialog (milestone 7 edit form, global overlay)
         search/           GlobalSearch (Ctrl/Cmd+K, backend FTS) + snippet splitting
-        reader/           ReaderShell, EPUB reader, pdf/ continuous PDF
-                          reader (layout math, virtualization, render queue,
-                          scroll tracking, thumbnails sidebar, outline,
-                          persistence — see pdf.md), ReaderNavigation with
-                          the in-book Search, Bookmarks, and Highlights tabs,
-                          shared searchModel + annotationModel, selection
-                          toolbar, and annotation list tabs
+        reader/           ReaderShell — the unified reader model (milestone 8):
+                          it owns current book, progress, navigation entry
+                          points, bookmark placement, in-book search state,
+                          and the selection toolbar, while the open format
+                          reader registers its `ReaderAdapter` (`readerModel`)
+                          for jumps, search, and highlight creation; one
+                          shared persistence core (`useReaderProgress`),
+                          shared searchModel + annotationModel, EPUB reader,
+                          pdf/ continuous PDF reader (layout math,
+                          virtualization, render queue, scroll tracking,
+                          thumbnails sidebar, outline — see pdf.md),
+                          ReaderNavigation with the in-book Search, Bookmarks,
+                          and Highlights tabs, selection toolbar, and
+                          annotation list tabs
         collections/      CollectionDialog (creation shell, not backend-wired yet)
         settings/         SettingsShell with presentational sections
         ui/               shadcn/ui primitives (components.json, radix-nova)

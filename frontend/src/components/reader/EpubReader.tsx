@@ -9,38 +9,35 @@ import {
 } from "@/lib/epub/epubEngine";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
+import { highlightCssColor, isHighlightColor } from "./annotationModel";
 import {
-  highlightCssColor,
-  isHighlightColor,
-  type ReaderAnnotationController,
-} from "./annotationModel";
+  epubProgressPayload,
+  parseEpubProgress,
+  type EpubLocator,
+  type ReaderAdapter,
+  type ReaderPosition,
+} from "./readerModel";
+import { useReaderProgress } from "./useReaderProgress";
 import { useEpubDocument } from "./epub/hooks/useEpubDocument";
-import { useEpubPersistence, type EpubLocator } from "./epub/hooks/useEpubPersistence";
 import type { Annotation, AnnotationInput } from "@/types/domain";
 import type { Book } from "@/types/domain";
-import type { ReaderSearchController, ReaderSearchGroup } from "./searchModel";
+import type { ReaderSearchGroup } from "./searchModel";
 
 interface EpubReaderProps {
   book: Book;
   /** TOC of the opened book, reported once the engine has it. */
   onTocLoad?: (toc: EpubTocItem[]) => void;
   /**
-   * Filled with a jump-to-TOC-target function once the engine is interactive;
-   * EPUB navigation goes through the engine (real chapter destinations), not
-   * through shell percentage stepping.
-   */
-  jumpTargetRef?: MutableRefObject<((href: string) => void) | null>;
-  /**
-   * Reports the engine's latest locator (CFI + spine href) on every
+   * Reports the engine's latest position (CFI + spine href) on every
    * relocate — the exact position a bookmark would be placed at. Event
    * callbacks, not effects: relocates already drive a render.
    */
-  onLocatorChange?: (locator: EpubLocator) => void;
+  onPositionChange?: (position: ReaderPosition) => void;
   /**
-   * Filled with the in-book search controller once the engine is open; the
-   * shell's search drawer drives it without knowing the engine exists.
+   * Filled with this reader's shell adapter while the engine is open: jump,
+   * search, and highlight creation. Nulled on unmount/book switch.
    */
-  searchTargetRef?: MutableRefObject<ReaderSearchController | null>;
+  adapterRef?: MutableRefObject<ReaderAdapter | null>;
   /** Streams one chapter's worth of matches up to the shell. */
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
@@ -51,21 +48,17 @@ interface EpubReaderProps {
   onCreateHighlight?: (input: AnnotationInput) => void;
   /** Reports the current selection's text; null when nothing is selected. */
   onSelectionChange?: (selection: { text: string } | null) => void;
-  /**
-   * Filled with the annotation controller once the engine is open; the
-   * shell's selection toolbar drives it without knowing the engine exists.
-   */
-  annotationTargetRef?: MutableRefObject<ReaderAnnotationController | null>;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
 const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown", "pageup"]);
 
 /**
- * EPUB reading surface, powered by the foliate-js engine (see
- * `lib/epub/epubEngine.ts`). Initialization follows the PDF reader's
- * lifecycle: DOCUMENT_READY → POSITION_RESTORED → INTERACTIVE, so a reader
- * never flashes the start of the book before jumping to the restored CFI.
+ * EPUB reading surface and the shell's EPUB adapter, powered by the
+ * foliate-js engine (see `lib/epub/epubEngine.ts`). Initialization follows
+ * the PDF reader's lifecycle: DOCUMENT_READY → POSITION_RESTORED →
+ * INTERACTIVE, so a reader never flashes the start of the book before
+ * jumping to the restored CFI.
  *
  * Progress mapping: the engine does not report byte sizes, so the shell's
  * coarse position (0–100) is derived from the spine position
@@ -76,15 +69,13 @@ const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown",
 export function EpubReader({
   book,
   onTocLoad,
-  jumpTargetRef,
-  onLocatorChange,
-  searchTargetRef,
+  onPositionChange,
+  adapterRef,
   onSearchGroup,
   onSearchDone,
   highlights = [],
   onCreateHighlight,
   onSelectionChange,
-  annotationTargetRef,
 }: EpubReaderProps) {
   const { preferences, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -94,9 +85,9 @@ export function EpubReader({
   const [locator, setLocator] = useState<EpubLocator | null>(null);
 
   const { status, handle, error } = useEpubDocument(book.id);
-  const onLocatorChangeRef = useRef(onLocatorChange);
+  const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
-    onLocatorChangeRef.current = onLocatorChange;
+    onPositionChangeRef.current = onPositionChange;
   });
 
   // Shell-level progress from spine position; the engine's in-section page
@@ -130,7 +121,7 @@ export function EpubReader({
       setLocator({ cfi: detail.cfi, chapterHref });
       // Bookmarks read this state; it must hold the exact locator a
       // bookmark placed right now would persist.
-      onLocatorChangeRef.current?.({ cfi: detail.cfi, chapterHref });
+      onPositionChangeRef.current?.({ format: "epub", cfi: detail.cfi, chapterHref });
       setPosition(overall);
     },
     [setPosition, syncMathCount, preferences.layout],
@@ -206,21 +197,26 @@ export function EpubReader({
   }, [handle]);
 
   const [restored, setRestored] = useState(false);
-  useEpubPersistence({
+  useReaderProgress<EpubLocator>({
     bookId: book.id,
     enabled: status === "ready",
-    locator,
+    current: locator,
     position,
+    parseRestored: (record) => {
+      const cfi = parseEpubProgress(record);
+      return cfi === null ? null : { cfi, chapterHref: null };
+    },
     onRestored: useCallback(
-      (savedCfi: string | null) => {
+      (saved: EpubLocator | null) => {
         if (handle) {
-          void handle.init(savedCfi).finally(() => setRestored(true));
+          void handle.init(saved?.cfi ?? null).finally(() => setRestored(true));
         } else {
           setRestored(true);
         }
       },
       [handle],
     ),
+    savePayload: epubProgressPayload,
   });
   const interactive = status === "ready" && restored;
 
@@ -301,57 +297,15 @@ export function EpubReader({
   useShortcut("pagedown", () => void handle?.next());
   useShortcut("pageup", () => void handle?.prev());
 
-  // TOC jumping goes straight to the engine destination (href or CFI).
-  useEffect(() => {
-    if (!jumpTargetRef) return;
-    jumpTargetRef.current = (href: string) => {
-      if (handle) void handle.goTo(href);
-    };
-    return () => {
-      jumpTargetRef.current = null;
-    };
-  }, [jumpTargetRef, handle]);
-
   // In-book search runs on the engine and streams matches up to the shell;
   // callbacks reach the shell through refs so re-renders never re-register
-  // the controller. Unmounting (book switch) cancels a running search.
+  // the adapter. Unmounting (book switch) cancels a running search.
   const onSearchGroupRef = useRef(onSearchGroup);
   const onSearchDoneRef = useRef(onSearchDone);
   useEffect(() => {
     onSearchGroupRef.current = onSearchGroup;
     onSearchDoneRef.current = onSearchDone;
   });
-  useEffect(() => {
-    if (!searchTargetRef || !handle) return;
-    let cancelLast: (() => void) | null = null;
-    // Chapter numbering fallback for books without TOC labels.
-    let unlabeledOrdinal = 0;
-    searchTargetRef.current = {
-      run: (query: string) => {
-        cancelLast?.();
-        unlabeledOrdinal = 0;
-        cancelLast = handle.search(query, {
-          onSection: (section) => {
-            const label = section.label !== "" ? section.label : `Chapter ${++unlabeledOrdinal}`;
-            onSearchGroupRef.current?.(book.id, {
-              label,
-              matches: section.subitems.map((match) => ({
-                cfi: match.cfi,
-                page: null,
-                excerpt: match.excerpt,
-              })),
-            });
-          },
-          onDone: () => onSearchDoneRef.current?.(book.id),
-        });
-      },
-      cancel: () => cancelLast?.(),
-    };
-    return () => {
-      cancelLast?.();
-      searchTargetRef.current = null;
-    };
-  }, [searchTargetRef, handle, book.id]);
 
   // Draw highlights through the engine and keep them in step with the
   // persisted list (created in the tabs, deleted, recolored). The engine
@@ -381,40 +335,76 @@ export function EpubReader({
   useEffect(() => {
     onCreateHighlightRef.current = onCreateHighlight;
   });
+
+  // The shell adapter: one object covering jumps (TOC hrefs, bookmark and
+  // search CFIs — the engine accepts both), search, and highlight creation.
+  // Registered only while a handle is open, so a switched book can never be
+  // driven through a stale engine.
   useEffect(() => {
-    if (!annotationTargetRef) return;
+    if (!adapterRef) return;
     if (!handle) {
-      annotationTargetRef.current = null;
+      adapterRef.current = null;
       return;
     }
-    annotationTargetRef.current = {
-      createHighlight: (color) => {
-        const pending = pendingSelectionRef.current;
-        if (!pending) return;
-        const located = handle.getCfiFromRange(pending.doc, pending.range);
-        pending.doc.getSelection()?.removeAllRanges();
-        pendingSelectionRef.current = null;
-        onSelectionChangeRef.current?.(null);
-        if (!located) return;
-        onCreateHighlightRef.current?.({
-          kind: "highlight",
-          cfi: located.cfi,
-          chapterHref: located.href,
-          text: pending.text,
-          color: isHighlightColor(color) ? color : null,
-        });
+    let cancelLast: (() => void) | null = null;
+    // Chapter numbering fallback for books without TOC labels.
+    let unlabeledOrdinal = 0;
+    adapterRef.current = {
+      jump: (target) => {
+        if (target.format !== "epub") return;
+        void handle.goTo(target.locator);
       },
-      clearSelection: () => {
-        const pending = pendingSelectionRef.current;
-        if (pending) pending.doc.getSelection()?.removeAllRanges();
-        pendingSelectionRef.current = null;
-        onSelectionChangeRef.current?.(null);
+      search: {
+        run: (query: string) => {
+          cancelLast?.();
+          unlabeledOrdinal = 0;
+          cancelLast = handle.search(query, {
+            onSection: (section) => {
+              const label = section.label !== "" ? section.label : `Chapter ${++unlabeledOrdinal}`;
+              onSearchGroupRef.current?.(book.id, {
+                label,
+                matches: section.subitems.map((match) => ({
+                  cfi: match.cfi,
+                  page: null,
+                  excerpt: match.excerpt,
+                })),
+              });
+            },
+            onDone: () => onSearchDoneRef.current?.(book.id),
+          });
+        },
+        cancel: () => cancelLast?.(),
+      },
+      annotations: {
+        createHighlight: (color) => {
+          const pending = pendingSelectionRef.current;
+          if (!pending) return;
+          const located = handle.getCfiFromRange(pending.doc, pending.range);
+          pending.doc.getSelection()?.removeAllRanges();
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          if (!located) return;
+          onCreateHighlightRef.current?.({
+            kind: "highlight",
+            cfi: located.cfi,
+            chapterHref: located.href,
+            text: pending.text,
+            color: isHighlightColor(color) ? color : null,
+          });
+        },
+        clearSelection: () => {
+          const pending = pendingSelectionRef.current;
+          if (pending) pending.doc.getSelection()?.removeAllRanges();
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+        },
       },
     };
     return () => {
-      annotationTargetRef.current = null;
+      cancelLast?.();
+      adapterRef.current = null;
     };
-  }, [annotationTargetRef, handle]);
+  }, [adapterRef, handle, book.id]);
 
   if (status === "error") {
     return (

@@ -12,6 +12,7 @@ import {
   returnToLibrary,
   scrollToSlot,
   scrollThumbnailsToBottom,
+  slotStates,
   textOf,
   thumbnailCanvasCount,
   thumbnailIsActive,
@@ -469,6 +470,15 @@ describe("tuxbooks continuous PDF reader", () => {
   // through the seam; picking a match navigates to its page.
   it("finds page text and navigates to the matching page", async () => {
     await openInReader("A Minimal Manual (PDF)");
+    // Earlier specs leave the book's saved position past page 1, and the
+    // reader restores it before the surface mounts — so wait for the
+    // document slots, then navigate to page 1 explicitly before waiting
+    // for its render.
+    await browser.waitUntil(async () => (await slotStates()).length > 0, {
+      timeout: 30000,
+      timeoutMsg: "pdf slots never appeared",
+    });
+    await scrollToSlot(1);
     await waitForRendered(1);
 
     await $("[data-testid=reader-search]").click();

@@ -5,6 +5,7 @@ import {
   openReaderNavigation,
   returnToLibrary,
   scrollToSlot,
+  slotStates,
   textOf,
   waitForRendered,
 } from "./helpers.js";
@@ -21,7 +22,14 @@ describe("reading annotations", () => {
     await openInReader("A Minimal Manual (PDF)");
 
     // Deterministic anchor: page 1 rendered, with its selectable text layer
-    // (the spans render asynchronously after the container mounts).
+    // (the spans render asynchronously after the container mounts). The
+    // reader restores the book's saved position before the surface mounts,
+    // so wait for the document slots before scrolling — scrollToSlot
+    // no-ops while the reader is still loading.
+    await browser.waitUntil(async () => (await slotStates()).length > 0, {
+      timeout: 30000,
+      timeoutMsg: "pdf slots never appeared",
+    });
     await scrollToSlot(1);
     await waitForRendered(1, 60000);
     await browser.waitUntil(

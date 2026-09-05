@@ -20,6 +20,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 });
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
+import type { ReaderAdapter } from "@/components/reader/readerModel";
 import {
   closePdfDocument,
   getPdfOutline,
@@ -69,13 +70,12 @@ interface PdfReaderProps {
   onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
   sidebarHost?: HTMLElement | null;
   scrollContainerRef?: RefObject<HTMLElement | null>;
-  searchTargetRef?: { current: unknown };
+  adapterRef?: { current: ReaderAdapter | null };
   onSearchGroup?: (bookId: number, group: unknown) => void;
   onSearchDone?: (bookId: number) => void;
   highlights?: Annotation[];
   onCreateHighlight?: (input: Record<string, unknown>) => void;
   onSelectionChange?: (selection: { text: string } | null) => void;
-  annotationTargetRef?: { current: unknown };
 }
 
 function renderPdfReader(props: PdfReaderProps = {}) {
@@ -98,13 +98,12 @@ function readerTree(props: PdfReaderProps) {
           onOutlineLoad={props.onOutlineLoad}
           sidebarHost={props.sidebarHost}
           scrollContainerRef={props.scrollContainerRef}
-          searchTargetRef={props.searchTargetRef as never}
+          adapterRef={props.adapterRef}
           onSearchGroup={props.onSearchGroup as never}
           onSearchDone={props.onSearchDone}
           highlights={props.highlights}
           onCreateHighlight={props.onCreateHighlight as never}
           onSelectionChange={props.onSelectionChange}
-          annotationTargetRef={props.annotationTargetRef as never}
         />
       </ReaderProvider>
     </ShortcutProvider>
@@ -1163,11 +1162,11 @@ describe("PdfReader in-book search", () => {
       page === 1 ? "alpha beta gamma" : "delta beta epsilon",
     );
 
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
     const groups: Array<{ label: string; matches: unknown[] }> = [];
     let done = false;
     renderPdfReader({
-      searchTargetRef,
+      adapterRef,
       onSearchGroup: (_bookId, group) => groups.push(group as never),
       onSearchDone: () => {
         done = true;
@@ -1175,7 +1174,7 @@ describe("PdfReader in-book search", () => {
     });
     await screen.findByTestId("pdf-canvas");
 
-    searchTargetRef.current!.run("beta");
+    adapterRef.current!.search.run("beta");
     await waitFor(() => expect(groups).toHaveLength(2));
     expect(groups[0]).toEqual({
       label: "Page 1",
@@ -1197,15 +1196,15 @@ describe("PdfReader in-book search", () => {
     openDocumentMock.mockResolvedValueOnce(second as unknown as EngineDocument);
     vi.mocked(getPdfPageText).mockImplementation(async (_document, page) => `text ${page}`);
 
-    const searchTargetRef: { current: { run: (q: string) => void } | null } = { current: null };
-    const { rerenderBook } = renderPdfReader({ searchTargetRef, book: pdfBook });
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    const { rerenderBook } = renderPdfReader({ adapterRef, book: pdfBook });
     await screen.findByTestId("pdf-canvas");
-    searchTargetRef.current!.run("text");
+    adapterRef.current!.search.run("text");
     await waitFor(() => expect(vi.mocked(getPdfPageText)).toHaveBeenCalled());
 
-    rerenderBook({ searchTargetRef, book: { ...pdfBook, id: 8 } });
+    rerenderBook({ adapterRef, book: { ...pdfBook, id: 8 } });
     await screen.findAllByTestId("pdf-canvas");
-    searchTargetRef.current!.run("text");
+    adapterRef.current!.search.run("text");
     await waitFor(() =>
       expect(vi.mocked(getPdfPageText)).toHaveBeenCalledWith(
         second as unknown as EngineDocument,
@@ -1269,10 +1268,8 @@ describe("PdfReader text layer and highlights", () => {
     mockLoadedDocument();
     const onCreateHighlight = vi.fn();
     const onSelectionChange = vi.fn();
-    const annotationTargetRef: {
-      current: { createHighlight: (c: string) => void; clearSelection: () => void } | null;
-    } = { current: null };
-    renderPdfReader({ onCreateHighlight, onSelectionChange, annotationTargetRef });
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    renderPdfReader({ onCreateHighlight, onSelectionChange, adapterRef });
     await screen.findByTestId("pdf-canvas");
 
     // A selection anchored inside page 1's slot with two client rects (one
@@ -1301,7 +1298,7 @@ describe("PdfReader text layer and highlights", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "selected words" });
 
-    annotationTargetRef.current!.createHighlight("green");
+    adapterRef.current!.annotations.createHighlight("green");
     expect(onCreateHighlight).toHaveBeenCalledWith({
       kind: "highlight",
       pageNumber: 1,

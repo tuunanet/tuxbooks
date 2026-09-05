@@ -84,7 +84,9 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
 - `hooks/useFitWidthScale` — layout scale = fit-width base (reference page
   1 vs. content area) × zoom multiplier (50–200%; keyboard +/= and -).
   Wider pages in mixed documents overflow horizontally.
-- `hooks/usePdfPersistence` — debounced save + restore-once (below).
+- shared `components/reader/useReaderProgress` — debounced save +
+  restore-once (below); one persistence core for both formats since
+  milestone 8, with PDF page validation in `readerModel.parsePdfProgress`.
 - `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an
   offset, clamping, scroll compensation, fit-width scale, thumbnail
   geometry); unit-tested without a browser.
@@ -178,7 +180,13 @@ after the layout is ready — invalid values degrade to page 1 — saves are
 debounced (1s) so scrolling never writes per event, the first armed run is
 skipped so opening a book writes nothing, and unmount flushes the final
 position. The document surface renders only after restoration, so reopening
-never flashes page 1 before the jump.
+never flashes page 1 before the jump. Since milestone 8 this contract lives
+in one shared hook (`useReaderProgress`) used by both readers; the PDF
+reader also registers the shell's `ReaderAdapter` (`readerModel.ts`) while
+its document is loaded — `jump` maps page targets through the same
+`pageToPosition` model as scrolling, thumbnails, outline, and restore — and
+reports `{ format: "pdf", page, fraction }` positions upward for bookmark
+placement.
 
 ### In-book search (milestone 5)
 

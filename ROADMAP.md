@@ -202,6 +202,32 @@ authors/subjects/series are first-class normalized rows, "Reset to
 source" returns the file's own metadata, and the source files are never
 modified — pinned by unit tests and real desktop E2E.
 
+- milestone 8 unified reader model: the genuinely shared reader concepts
+  moved into the shared layer — a tagged `ReaderPosition` (EPUB CFI +
+  spine href, PDF page + anchor fraction) both readers report through one
+  `onPositionChange` contract, a `ReaderJump` union every navigation entry
+  point funnels through (TOC, outline, pages, thumbnails, search matches,
+  annotation jumps, Home/End), and one `ReaderAdapter` per open reader
+  (jump + the shared search and highlight-creation controllers) that
+  replaces the per-format controller refs in ReaderShell. Bookmark
+  placement, search-match jumping, and annotation jumping are now
+  format-blind model helpers (`readerModel.ts`), and reading-position
+  persistence collapsed into one shared `useReaderProgress` hook
+  (restore-once, debounced saves, skip-first, unmount flush) with the
+  per-format validation/serialization as pure helpers. The engines keep
+  their own rendering models — no artificial common abstraction: EPUB
+  percentage-stepping keys stay engine-owned, PDF stepping/scrolling stays
+  shell-owned, and the navigation drawer's Contents vs. Pages/Outline tabs
+  stay format-specific.
+
+Milestone 8 (unified reader model) is complete: ReaderShell owns current
+book, progress, navigation, bookmark placement, search state, and the
+selection toolbar; each format reader registers one adapter on the shell
+contract; persistence runs through one shared hook; and both engines
+retain their own position models and rendering — pinned by new model unit
+tests, the reader unit suites, and the real-binary E2E suites (no reader
+behavior change).
+
 The PDF subsystem should now be treated as the architectural reference for robust
 document-reader engineering. The EPUB reader follows the same contract: a
 single-module engine seam, persisted stable locators, and real desktop E2E.

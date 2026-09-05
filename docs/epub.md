@@ -114,11 +114,12 @@ else depends on its types and on `EpubViewHandle`:
   every section document, user-`!important` over publisher styles.
 
 Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
-POSITION_RESTORED → INTERACTIVE), `epub/hooks/useEpubDocument` owns the
-engine lifetime (a book switch drops the previous handle and detaches its
-host in that render; a superseded open is closed, never mounted),
-`epub/hooks/useEpubPersistence` owns position save/restore (same debounced
-contract as the PDF reader).
+POSITION_RESTORED → INTERACTIVE), `epub/hooks/useEpubDocument` owns
+the engine lifetime (a book switch drops the previous handle and detaches its
+host in that render; a superseded open is closed, never mounted), and the
+shared `components/reader/useReaderProgress` hook owns position save/restore
+(the same debounced contract the PDF reader uses — one persistence core for
+both formats since milestone 8).
 
 ### Position locator
 
@@ -129,8 +130,17 @@ EPUB persists `cfi` (canonical EPUB CFI — resource + location together),
 the stored CFI (`epubcfi(` prefix) and degrades to the book start when
 missing or malformed.
 
-### Shell integration invariants
+### Shell integration invariants (unified reader model, milestone 8)
 
+- `EpubReader` registers the shell's `ReaderAdapter` (`readerModel.ts`)
+  while its engine handle is open: `jump` (engine destinations — TOC hrefs
+  and bookmark/search CFIs share the engine's locator grammar), the shared
+  `ReaderSearchController`, and the shared `ReaderAnnotationController`.
+  ReaderShell drives all three without format branches; the adapter is
+  nulled on unmount/book switch so a stale engine can never be driven.
+- The reader reports its position as the tagged `ReaderPosition`
+  (`{ format: "epub", cfi, chapterHref }`) through `onPositionChange`;
+  that tagged value is what bookmark placement persists.
 - Arrow/space/PageUp/PageDown are owned exclusively by the EPUB engine
   while an EPUB is open: the shell must not register its
   percentage-stepping/scrolling handlers for EPUB (null-combo gating in

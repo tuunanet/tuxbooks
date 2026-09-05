@@ -3,16 +3,18 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
+import { isHighlightColor, normalizeRect } from "../annotationModel";
 import {
-  isHighlightColor,
-  normalizeRect,
-  type ReaderAnnotationController,
-} from "../annotationModel";
+  parsePdfProgress,
+  pdfProgressPayload,
+  type ReaderAdapter,
+  type ReaderPosition,
+} from "../readerModel";
+import { useReaderProgress } from "../useReaderProgress";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { useFitWidthScale } from "./hooks/useFitWidthScale";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
-import { usePdfPersistence } from "./hooks/usePdfPersistence";
 import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
   READING_ANCHOR_RATIO,
@@ -27,7 +29,7 @@ import { PdfToolbar } from "./PdfToolbar";
 import { PdfBitmapCache } from "./pdfBitmapCache";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
-import type { ReaderSearchController, ReaderSearchGroup } from "../searchModel";
+import type { ReaderSearchGroup } from "../searchModel";
 import type { Annotation, AnnotationInput, AnnotationRect } from "@/types/domain";
 import type { Book } from "@/types/domain";
 
@@ -68,47 +70,40 @@ interface PdfReaderProps {
   /** The reader's scroll container, owned by ReaderShell. */
   scrollContainerRef?: RefObject<HTMLElement | null>;
   /**
-   * Filled with the in-book search controller once the document is loaded;
-   * the shell's search drawer drives it without knowing the document lives
-   * here.
+   * Filled with this reader's shell adapter while the document is loaded:
+   * jump, search, and highlight creation. Nulled on unmount/book switch.
    */
-  searchTargetRef?: { current: ReaderSearchController | null };
+  adapterRef?: { current: ReaderAdapter | null };
+  /**
+   * Reports the reading position (1-based page + anchor fraction) whenever
+   * the page changes — the position a bookmark placed right now would keep.
+   */
+  onPositionChange?: (position: ReaderPosition) => void;
   /** Streams one page's worth of matches up to the shell. */
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
   onSearchDone?: (bookId: number) => void;
-  /**
-   * Holds the current bookmark locator (1-based page + in-page anchor
-   * fraction), updated as the reading position moves. Read by the shell
-   * without a re-render.
-   */
-  locatorTargetRef?: { current: { page: number; fraction: number } | null };
   /** Highlights of the open book; drawn over rendered pages. */
   highlights?: Annotation[];
   /** Persists a highlight created from a text selection. */
   onCreateHighlight?: (input: AnnotationInput) => void;
   /** Reports the current selection's text; null when nothing is selected. */
   onSelectionChange?: (selection: { text: string } | null) => void;
-  /**
-   * Filled with the annotation controller once the document is loaded; the
-   * shell's selection toolbar drives it without knowing the format.
-   */
-  annotationTargetRef?: { current: ReaderAnnotationController | null };
 }
 
 /**
- * PDF reading surface: a continuous, vertically scrolling document. The
- * reading position owned by ReaderProvider is the single source of truth —
- * this component renders the document according to that position and
- * reports page changes back. Responsibilities live in the pdf/ modules:
- * document loading (usePdfDocument), geometry (usePdfGeometry + pdfLayout),
- * fit-width layout scale (useFitWidthScale), slot rendering
+ * PDF reading surface and the shell's PDF adapter: a continuous, vertically
+ * scrolling document. The reading position owned by ReaderProvider is the
+ * single source of truth — this component renders the document according to
+ * that position and reports page changes back. Responsibilities live in the
+ * pdf/ modules: document loading (usePdfDocument), geometry (usePdfGeometry
+ * + pdfLayout), fit-width layout scale (useFitWidthScale), slot rendering
  * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), toolbar state (PdfToolbar),
- * the thumbnails sidebar (PdfSidebar, portaled into the shell's host), and
- * persistence (usePdfPersistence). The outline comes from the engine seam
- * and is reported upward for the navigation drawer, and in-book search
- * streams page text matches through usePdfSearch. Annotations stay out of
- * scope.
+ * and the thumbnails sidebar (PdfSidebar, portaled into the shell's host).
+ * Persistence runs through the shared useReaderProgress contract. The
+ * outline comes from the engine seam and is reported upward for the
+ * navigation drawer, and in-book search streams page text matches through
+ * usePdfSearch.
  */
 export function PdfReader({
   book,
@@ -116,14 +111,13 @@ export function PdfReader({
   onOutlineLoad,
   sidebarHost,
   scrollContainerRef,
-  searchTargetRef,
+  adapterRef,
+  onPositionChange,
   onSearchGroup,
   onSearchDone,
-  locatorTargetRef,
   highlights = [],
   onCreateHighlight,
   onSelectionChange,
-  annotationTargetRef,
 }: PdfReaderProps) {
   const { position, setPosition } = useReader();
   const {
@@ -156,12 +150,12 @@ export function PdfReader({
   // the saved position has been applied, so a reader never flashes page 1
   // before jumping to the restored location.
   const [restored, setRestored] = useState(false);
-  usePdfPersistence({
+  useReaderProgress<number>({
     bookId: book.id,
     enabled: layoutReady,
-    currentPage,
+    current: currentPage,
     position,
-    pageCount: effectivePageCount,
+    parseRestored: (record) => parsePdfProgress(record, effectivePageCount),
     onRestored: useCallback(
       (savedPage: number | null) => {
         if (savedPage !== null) {
@@ -171,6 +165,7 @@ export function PdfReader({
       },
       [effectivePageCount, setPosition],
     ),
+    savePayload: pdfProgressPayload,
   });
   const interactive = layoutReady && restored;
 
@@ -198,22 +193,14 @@ export function PdfReader({
   }, [pdfDocument]);
 
   // In-book search: extracts page text through the engine seam and streams
-  // matches up to the shell. Registered on the shell's ref only while a
-  // document is loaded, so a switched book can never be searched through a
-  // stale handle.
+  // matches up to the shell. Consumed by the shell adapter below; a running
+  // search is cancelled by unmount (book switch).
   const searchController = usePdfSearch({
     document: pdfDocument,
     bookId: book.id,
     onGroup: onSearchGroup ?? (() => {}),
     onDone: onSearchDone ?? (() => {}),
   });
-  useEffect(() => {
-    if (!searchTargetRef || !pdfDocument) return;
-    searchTargetRef.current = searchController;
-    return () => {
-      searchTargetRef.current = null;
-    };
-  }, [searchTargetRef, pdfDocument, searchController]);
 
   // Text selections on the text layers become highlight candidates. Page,
   // text, and normalized rects are all captured as soon as the selection
@@ -294,37 +281,51 @@ export function PdfReader({
   useEffect(() => {
     onCreateHighlightRef.current = onCreateHighlight;
   });
+
+  // The shell adapter: one object covering jumps (pages/outlines/thumbnail
+  // navigation all land in the same position model), search, and highlight
+  // creation. Registered only while a document is loaded, so a switched
+  // book can never be driven through a stale handle. `goToPage` closes over
+  // the live page count through a ref, keeping the adapter stable.
+  const goToPageRef = useRef<(page: number) => void>(() => {});
   useEffect(() => {
-    if (!annotationTargetRef) return;
+    if (!adapterRef) return;
     if (!pdfDocument) {
-      annotationTargetRef.current = null;
+      adapterRef.current = null;
       return;
     }
-    annotationTargetRef.current = {
-      createHighlight: (color) => {
-        const pending = pendingSelectionRef.current;
-        if (!pending) return;
-        window.getSelection()?.removeAllRanges();
-        pendingSelectionRef.current = null;
-        onSelectionChangeRef.current?.(null);
-        onCreateHighlightRef.current?.({
-          kind: "highlight",
-          pageNumber: pending.page,
-          rects: pending.rects,
-          text: pending.text,
-          color: isHighlightColor(color) ? color : null,
-        });
+    adapterRef.current = {
+      jump: (target) => {
+        if (target.format !== "pdf") return;
+        goToPageRef.current(target.page);
       },
-      clearSelection: () => {
-        window.getSelection()?.removeAllRanges();
-        pendingSelectionRef.current = null;
-        onSelectionChangeRef.current?.(null);
+      search: searchController,
+      annotations: {
+        createHighlight: (color) => {
+          const pending = pendingSelectionRef.current;
+          if (!pending) return;
+          window.getSelection()?.removeAllRanges();
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          onCreateHighlightRef.current?.({
+            kind: "highlight",
+            pageNumber: pending.page,
+            rects: pending.rects,
+            text: pending.text,
+            color: isHighlightColor(color) ? color : null,
+          });
+        },
+        clearSelection: () => {
+          window.getSelection()?.removeAllRanges();
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+        },
       },
     };
     return () => {
-      annotationTargetRef.current = null;
+      adapterRef.current = null;
     };
-  }, [annotationTargetRef, pdfDocument]);
+  }, [adapterRef, pdfDocument, searchController]);
 
   const highlightsByPage = useMemo(() => {
     const byPage = new Map<number, Annotation[]>();
@@ -434,16 +435,20 @@ export function PdfReader({
   const documentRef = useRef<HTMLDivElement | null>(null);
   const anchorInfoRef = useRef<PdfAnchorInfo | null>(null);
 
-  // Bookmark locator: the page the reading anchor sits in, with its in-page
-  // fraction at the time the page was entered (a coarse page-local position
-  // is all a PDF bookmark keeps).
+  // Position reporting to the shell: the page the reading anchor sits in,
+  // with its in-page fraction at the time the page was entered (a coarse
+  // page-local position is all a PDF bookmark keeps).
+  const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
-    if (!locatorTargetRef) return;
-    locatorTargetRef.current = {
+    onPositionChangeRef.current = onPositionChange;
+  });
+  useEffect(() => {
+    onPositionChangeRef.current?.({
+      format: "pdf",
       page: currentPage,
       fraction: anchorInfoRef.current?.fraction ?? 0,
-    };
-  }, [locatorTargetRef, currentPage]);
+    });
+  }, [currentPage]);
   const scrollReportedPageRef = useRef<number | null>(null);
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
@@ -560,6 +565,10 @@ export function PdfReader({
     const clamped = Math.max(1, Math.min(effectivePageCount, page));
     setPosition(pageToPosition(clamped, effectivePageCount));
   };
+  // Keep the adapter's jump on the latest page count and position mapping.
+  useEffect(() => {
+    goToPageRef.current = goToPage;
+  });
 
   // A zoom change invalidates rendered canvases; the new scale re-renders
   // the visible pages while evicted slots simply resize their reservations.
