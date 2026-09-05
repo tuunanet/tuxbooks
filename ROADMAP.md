@@ -235,6 +235,35 @@ restore are all real backend-backed behavior — the library no longer has
 disabled entries that pretend features are coming, pinned by unit tests
 and real desktop E2E.
 
+- milestone 11 release and distribution: the tag-driven release pipeline
+  (.github/workflows/release.yml) now runs the full gate before publishing —
+  a verify job (Rust + frontend unit/integration tests, headless real-binary
+  E2E) blocks a publish job that refuses any tag not exactly matching the
+  version in tauri.conf.json, builds the Debian bundle and a portable
+  AppImage, writes SHA256SUMS.txt over both, and publishes a pre-release
+  with install instructions. The deb gained real bundle metadata
+  (publisher, copyright, short/long descriptions) in tauri.conf.json, and
+  packaging is under automated test: `just package-check` builds the deb and
+  scripts/check-deb.sh asserts control metadata vs the config, the desktop
+  entry (structure + desktop-file-validate), hicolor icons, the bundled
+  PDFium resource, and the webkit2gtk runtime dependency — CI's build job
+  runs the same gate. AppImage bundling resolves GTK dev pkg-config data at
+  bundle time (librsvg2-dev), so it is a CI artifact; locally it needs the
+  full dev package set (`just build-appimage`) and the deb-only default
+  keeps `just build` working on the no-sudo machine. Operations live in
+  docs/release.md. Signed artifacts and an auto-update strategy are
+  deliberately deferred (checksums over HTTPS are the pre-1.0 baseline;
+  deb upgrades in place via apt). No tag has been pushed: the first
+  release is cut deliberately after the next round of fixes, so the
+  milestone's exit criterion (a stranger installs and launches TuxBooks)
+  is pending the first published tag, not missing infrastructure.
+
+Milestone 11 (release and distribution) is implemented: tag-gated,
+test-gated release automation producing a deb and an AppImage with
+checksums, a packaging gate under `just package-check`, and the release
+operating manual in docs/release.md — the first tag is deliberately
+deferred until after the planned post-milestone fixes.
+
 - milestone 8 unified reader model: the genuinely shared reader concepts
   moved into the shared layer — a tagged `ReaderPosition` (EPUB CFI +
   spine href, PDF page + anchor fraction) both readers report through one

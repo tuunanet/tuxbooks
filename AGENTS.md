@@ -139,3 +139,4 @@ Read the one that fits the task; each is short.
 - `docs/epub.md` / `docs/pdf.md` — reader layer contracts.
 - `docs/testing.md` — test layers and E2E infrastructure.
 - `docs/coverage.md` — per-category coverage floors and what is excluded.
+- `docs/release.md` — packaging, the deb gate, and cutting releases.

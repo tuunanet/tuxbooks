@@ -13,6 +13,22 @@ progress, and provides an EPUB reading experience.
 - **Testing:** Vitest + React Testing Library, WebdriverIO + Tauri WebDriver, cargo test
 - **Tooling:** pnpm, just, rustfmt, clippy, ESLint, Prettier, GitHub Actions
 
+## Install
+
+Prebuilt packages (deb, AppImage) are on the
+[releases page](https://github.com/tuunanet/tuxbooks/releases) — TuxBooks is
+pre-1.0, so releases are marked pre-release:
+
+```sh
+# Ubuntu/Debian
+sudo apt install ./tuxbooks_<version>_amd64.deb
+# Any other Linux — portable, no installation
+chmod +x tuxbooks_<version>_amd64.AppImage && ./tuxbooks_<version>_amd64.AppImage
+```
+
+Verify downloads against `SHA256SUMS.txt` in the same release. See
+[docs/release.md](docs/release.md) for how releases are cut and packaged.
+
 ## Getting started
 
 Prerequisites: Node ≥ 22, pnpm 10, Rust (stable), Linux Tauri deps
@@ -39,7 +55,8 @@ just build      # release bundle
 | `just lint`            | clippy (`-D warnings`) + ESLint                                    |
 | `just format`          | rustfmt + Prettier                                                 |
 | `just check`           | format-check → lint → typecheck → tests (daily driver)             |
-| `just ci`              | `check` + E2E + release build (what CI runs)                       |
+| `just ci`              | `check` + E2E + release build + packaging gate (what CI runs)      |
+| `just package-check`   | Build the deb and verify its contents (docs/release.md)            |
 
 Individual pieces: `pnpm dev`, `pnpm tauri dev`, `pnpm --filter frontend test`,
 `cargo test --manifest-path src-tauri/Cargo.toml`.

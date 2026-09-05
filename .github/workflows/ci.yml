@@ -205,3 +205,6 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm tauri build --bundles deb
+
+      - name: Verify Debian bundle
+        run: bash scripts/check-deb.sh

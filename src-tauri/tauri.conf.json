@@ -32,6 +32,10 @@
     "active": true,
     "targets": ["deb", "rpm"],
     "category": "Reference",
+    "publisher": "Tuomo Tuunanen",
+    "copyright": "GPL-3.0-or-later",
+    "shortDescription": "Local-first ebook library and reader",
+    "longDescription": "TuxBooks is a local-first, bookshelf-style desktop ebook library for Linux. Point it at a folder of EPUB and PDF files; it indexes metadata and covers into a local SQLite database, keeps collections and reading progress, and provides production EPUB and PDF reading experiences. No cloud services, no accounts — your files stay on your machine.",
     "resources": {
       "pdfium/libpdfium.so": "pdfium/libpdfium.so"
     },

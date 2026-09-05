@@ -47,6 +47,20 @@ _e2e_timeout := if os() == "linux" { "timeout --kill-after=15 300" } else { "" }
 build: fetch-pdfium
     pnpm tauri build
 
+# Build the Debian bundle and verify it: control metadata vs
+# tauri.conf.json, desktop entry validity, hicolor icons, bundled PDFium
+# (scripts/check-deb.sh, docs/release.md). The packaging regression gate;
+# the release workflow builds the same bundler output from a tag.
+package-check: build
+    bash scripts/check-deb.sh
+
+# Build the AppImage on machines with the full Tauri dev packages: unlike
+# deb, AppImage bundling resolves librsvg/GTK dev pkg-config data at bundle
+# time (librsvg2-dev et al). CI builds it in the release workflow; on this
+# project's no-sudo dev machine only the deb/rpm targets are available.
+build-appimage: fetch-pdfium
+    pnpm tauri build --bundles appimage
+
 # Build an un-bundled debug binary with embedded assets (used by E2E).
 # VITE_WDIO=1 bundles the @wdio/tauri-plugin frontend bridge; every other
 # build tree-shakes it out.
@@ -166,8 +180,9 @@ check:
         'workflows: just lint-workflows'
     @echo "check: OK"
 
-# Complete CI-equivalent validation, including E2E and the release build.
-ci: check test-e2e build
+# Complete CI-equivalent validation, including E2E, the release build, and
+# the packaging gate.
+ci: check test-e2e package-check
     @echo "ci: OK"
 
 # Coverage gate (docs/coverage.md). Frontend thresholds are enforced by
