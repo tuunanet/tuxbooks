@@ -8,17 +8,20 @@ import {
 import { BookCard } from "@/components/books/BookCard";
 import { BookListItem } from "@/components/books/BookListItem";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useBookActions } from "@/hooks/useBookActions";
+import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
+import { revealInFileManager } from "@/lib/tauri";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { EmptyCollectionState } from "./EmptyCollectionState";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { LibraryHeader } from "./LibraryHeader";
 import { NoSearchResultsState } from "./NoSearchResultsState";
 import {
+  filterBooksByCollection,
   filterBooksByQuery,
   filterBooksBySection,
-  sectionNeedsProgressData,
   sectionTitle,
   sortBooks,
   type BookSortId,
@@ -37,9 +40,30 @@ function columnCount(container: HTMLElement): number {
   return count > 0 ? count : 1;
 }
 
+/** Skeleton grid shown while the shared library payload is loading. */
+function LibrarySkeleton() {
+  return (
+    <div
+      data-testid="library-loading"
+      aria-label="Loading library"
+      role="status"
+      className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4"
+    >
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="flex flex-col gap-2">
+          <Skeleton className="aspect-[2/3] w-full rounded-xl" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LibraryView({ section }: LibraryViewProps) {
-  const { books, loading, error, refresh } = useLibrary();
-  const { locateBook, removeBookFromLibrary } = useBookActions();
+  const { books, collections, loading, error, refresh } = useLibrary();
+  const { locateBook, removeBookFromLibrary, markFinished } = useBookActions();
+  const collectionActions = useCollectionActions();
   const app = useAppState();
   const dispatch = useAppDispatch();
 
@@ -74,11 +98,25 @@ export function LibraryView({ section }: LibraryViewProps) {
     (next: string) => dispatch({ type: "set-library-query", query: next }),
     [dispatch],
   );
-
-  const visible = useMemo(
-    () => filterBooksByQuery(sortBooks(filterBooksBySection(books, section), sort), query),
-    [books, section, sort, query],
+  const handleReveal = useCallback(
+    (bookId: number) => {
+      const target = books.find((book) => book.id === bookId);
+      if (target) void revealInFileManager(target.path);
+    },
+    [books],
   );
+
+  const visible = useMemo(() => {
+    let scoped =
+      section.kind === "collection"
+        ? filterBooksByCollection(
+            books,
+            collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
+          )
+        : filterBooksBySection(books, section);
+    scoped = sortBooks(scoped, sort);
+    return filterBooksByQuery(scoped, query);
+  }, [books, collections, section, sort, query]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -138,11 +176,7 @@ export function LibraryView({ section }: LibraryViewProps) {
   );
 
   if (loading) {
-    return (
-      <p data-testid="library-loading" className="text-muted-foreground">
-        Loading library…
-      </p>
-    );
+    return <LibrarySkeleton />;
   }
 
   if (error) {
@@ -161,18 +195,6 @@ export function LibraryView({ section }: LibraryViewProps) {
     );
   }
 
-  if (sectionNeedsProgressData(section)) {
-    return (
-      <section data-testid="section-needs-progress">
-        <h2 className="text-2xl font-semibold">{sectionTitle(section)}</h2>
-        <p className="mt-2 max-w-md text-muted-foreground">
-          This list needs reading-progress persistence from the Rust backend, which is not wired up
-          yet.
-        </p>
-      </section>
-    );
-  }
-
   if (books.length === 0 && section.kind === "smart" && section.id === "all-books") {
     return <EmptyLibraryState />;
   }
@@ -184,6 +206,7 @@ export function LibraryView({ section }: LibraryViewProps) {
   const renderItem = (book: (typeof visible)[number], index: number) => {
     const itemProps = {
       book,
+      collections,
       selected: book.id === selectedId,
       tabIndex: index === defaultFocusIndex ? 0 : -1,
       onSelect: selectBook,
@@ -192,6 +215,10 @@ export function LibraryView({ section }: LibraryViewProps) {
       onLocate: locateBook,
       onEditMetadata: openMetadataEditor,
       onRemove: removeBookFromLibrary,
+      onAddToCollection: collectionActions.addBook,
+      onRemoveFromCollection: collectionActions.removeBook,
+      onMarkFinished: markFinished,
+      onReveal: handleReveal,
     };
     return view === "grid" ? (
       <BookCard key={book.id} {...itemProps} />
@@ -203,7 +230,11 @@ export function LibraryView({ section }: LibraryViewProps) {
   return (
     <section data-testid="library-view">
       <LibraryHeader
-        title={sectionTitle(section)}
+        title={
+          section.kind === "collection"
+            ? (collections.find((collection) => collection.id === section.id)?.name ?? "Collection")
+            : sectionTitle(section)
+        }
         count={visible.length}
         query={query}
         onQueryChange={setQuery}

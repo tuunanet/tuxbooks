@@ -2,18 +2,24 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import {
   getLibraryStats,
   listBooks,
+  listCollections,
   onImportProgress,
   onLibraryChanged,
   type Book,
+  type CollectionSummary,
   type LibraryStats,
 } from "@/lib/tauri";
 
 export interface LibraryState {
   stats: LibraryStats | null;
   books: Book[];
+  /** Every collection with member book ids; empty until first fetched. */
+  collections: CollectionSummary[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  /** Re-fetch collections after a membership or grouping change. */
+  refreshCollections: () => Promise<void>;
 }
 
 function toMessage(err: unknown): string {
@@ -48,8 +54,21 @@ function patchBook(existing: Book[], book: Book): Book[] {
 export function useLibraryData(): LibraryState {
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
+  const [collections, setCollections] = useState<CollectionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchCollections = useCallback(
+    () =>
+      listCollections()
+        .then(setCollections)
+        .catch((err) => console.error("list_collections failed:", toMessage(err))),
+    [],
+  );
+
+  const refreshCollections = useCallback(async () => {
+    await fetchCollections();
+  }, [fetchCollections]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -80,10 +99,11 @@ export function useLibraryData(): LibraryState {
         if (!cancelled) setLoading(false);
       }
     })();
+    void fetchCollections();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchCollections]);
 
   // Imports stream one event per persisted book; patch the list in place so
   // books and covers appear while the scan is still running. The final
@@ -135,7 +155,7 @@ export function useLibraryData(): LibraryState {
     };
   }, []);
 
-  return { stats, books, loading, error, refresh };
+  return { stats, books, collections, loading, error, refresh, refreshCollections };
 }
 
 export const LibraryDataContext = createContext<LibraryState | null>(null);

@@ -70,7 +70,13 @@ fn resolve_db_path(handle: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::er
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        // "Show in File Manager" (milestone 10): reveals a book file in the
+        // system file manager.
+        .plugin(tauri_plugin_opener::init())
+        // Desktop polish (milestone 10): window size/position survive restarts.
+        .plugin(tauri_plugin_window_state::Builder::default().build());
 
     // Test-only plugin backing @wdio/tauri-service (execute, mocking, log
     // forwarding). Debug binaries only — release builds never register it.
@@ -178,6 +184,12 @@ pub fn run() {
             commands::books::list_books,
             commands::books::remove_book,
             commands::books::search_books,
+            commands::collections::add_book_to_collection,
+            commands::collections::create_collection,
+            commands::collections::delete_collection,
+            commands::collections::list_collections,
+            commands::collections::remove_book_from_collection,
+            commands::library::import_paths,
             commands::library::scan_library,
             commands::library::reconnect_book,
             commands::metadata::clear_book_cover_override,
@@ -186,6 +198,7 @@ pub fn run() {
             commands::metadata::set_book_cover,
             commands::metadata::update_book_metadata,
             commands::progress::get_reading_progress,
+            commands::progress::mark_book_finished,
             commands::progress::save_reading_progress,
             commands::reader::get_book_bytes,
         ])

@@ -202,6 +202,39 @@ authors/subjects/series are first-class normalized rows, "Reset to
 source" returns the file's own metadata, and the source files are never
 modified — pinned by unit tests and real desktop E2E.
 
+- milestone 10 library and reader UX polish: collections are wired
+  end-to-end — `list_collections`/`create_collection`/`delete_collection`
+  and membership commands over the existing `collections` tables, with
+  summaries that carry member book ids so one call feeds the sidebar list,
+  the clickable collection sections (filtering happens client-side over
+  the shared payload), the card/list context menus (Add to / Remove from
+  Collection with real entries), and the detail view's membership badges;
+  the create dialog saves through the backend and surfaces duplicate-name
+  rejections inline. The dead menu entries are gone: "Import Files…" opens
+  a native multi-file picker into a new `import_paths` command (mixed
+  files + folders; folders register watched locations like
+  `scan_library`, files import in place, per-path failures surface in the
+  report), "Mark as Finished" sets `progress_percent = 100` through
+  `mark_book_finished` while preserving the stored resume position, and
+  "Show in File Manager" reveals the source file via the opener plugin.
+  The "In Progress" and "Finished" smart sections are real now —
+  `list_books` LEFT JOINs `reading_progress` so the shared payload carries
+  `progressPercent`/`progressUpdatedAt`, cards and list rows draw progress
+  bars, and the detail view shows the reading position — and the window's
+  size/position survive restarts through `tauri-plugin-window-state`. The
+  library loading state became a skeleton grid, and every dead-shell
+  placeholder ("no collections yet", "progress not wired up",
+  "Import Files… disabled") was replaced by working behavior. Pinned by
+  Rust repository/vertical-slice tests, frontend unit tests (sections,
+  dialog, sidebar, context menu, import flow), and a real-binary E2E
+  spec (`collections.e2e.ts`) driving the whole flow.
+
+Milestone 10 (library and reader UX polish) is complete: collections,
+finished-tracking, file import, file-manager reveal, and window-state
+restore are all real backend-backed behavior — the library no longer has
+disabled entries that pretend features are coming, pinned by unit tests
+and real desktop E2E.
+
 - milestone 8 unified reader model: the genuinely shared reader concepts
   moved into the shared layer — a tagged `ReaderPosition` (EPUB CFI +
   spine href, PDF page + anchor fraction) both readers report through one

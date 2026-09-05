@@ -31,12 +31,13 @@ import { invokeMock, mockInvoke } from "./mocks/tauri";
 
 function renderShellWithLibrary(
   books: ReturnType<typeof makeBook>[] = [],
-  scanLibrary: unknown = { imported: 0, updated: 0, failed: [] },
+  importReport: unknown = { imported: 0, updated: 0, failed: [] },
 ) {
   mockInvoke({
     get_library_stats: { bookCount: books.length, collectionCount: 0 },
     list_books: books,
-    scan_library: scanLibrary,
+    list_collections: [],
+    import_paths: importReport,
   });
   return render(<AppShell />);
 }
@@ -48,13 +49,13 @@ function captureDragHandler(): DragHandler {
 }
 
 describe("Import via the header menu", () => {
-  it("keeps single-file import as an honest placeholder", async () => {
+  it("offers Import Files… as a real entry", async () => {
     renderShellWithLibrary([makeBook()]);
     await screen.findByTestId("library-header");
 
     await userEvent.click(screen.getByTestId("import-menu"));
     const filesItem = await screen.findByRole("menuitem", { name: "Import Files…" });
-    expect(filesItem).toHaveAttribute("aria-disabled", "true");
+    expect(filesItem).not.toHaveAttribute("aria-disabled");
   });
 
   it("offers the folder picker from the empty library state", async () => {
@@ -64,11 +65,11 @@ describe("Import via the header menu", () => {
 
     await userEvent.click(screen.getByTestId("empty-library-import"));
 
-    expect(invokeMock).toHaveBeenCalledWith("scan_library", { path: "/first/library" });
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/first/library"] });
     expect(await screen.findByTestId("import-status")).toHaveTextContent("Imported 4 new");
   });
 
-  it("imports the picked folder through scan_library and reports the result", async () => {
+  it("imports the picked folder through import_paths and reports the result", async () => {
     vi.mocked(open).mockResolvedValue("/picked/books");
     renderShellWithLibrary([makeBook()], { imported: 2, updated: 1, failed: [] });
     await screen.findByTestId("library-header");
@@ -76,7 +77,7 @@ describe("Import via the header menu", () => {
     await userEvent.click(screen.getByTestId("import-menu"));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Import Folder…" }));
 
-    expect(invokeMock).toHaveBeenCalledWith("scan_library", { path: "/picked/books" });
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/picked/books"] });
 
     const status = await screen.findByTestId("import-status");
     expect(status).toHaveTextContent("Imported 2 new, updated 1");
@@ -89,12 +90,27 @@ describe("Import via the header menu", () => {
     expect(screen.queryByTestId("import-status")).not.toBeInTheDocument();
   });
 
+  it("imports picked files through import_paths", async () => {
+    vi.mocked(open).mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
+    renderShellWithLibrary([makeBook()], { imported: 2, updated: 0, failed: [] });
+    await screen.findByTestId("library-header");
+
+    await userEvent.click(screen.getByTestId("import-menu"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Import Files…" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", {
+      paths: ["/a/one.epub", "/b/two.pdf"],
+    });
+    expect(await screen.findByTestId("import-status")).toHaveTextContent("Imported 2 new");
+  });
+
   it("shows a summary without pretending success when nothing was imported", async () => {
     vi.mocked(open).mockResolvedValue("/picked/empty");
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
-      scan_library: { imported: 0, updated: 0, failed: [] },
+      list_collections: [],
+      import_paths: { imported: 0, updated: 0, failed: [] },
     });
 
     render(<AppShell />);
@@ -106,16 +122,17 @@ describe("Import via the header menu", () => {
     expect(await screen.findByTestId("import-status")).toHaveTextContent("No new books found");
   });
 
-  it("surfaces per-path failures honestly", async () => {
+  it("surfaces per-path failures from the report", async () => {
     vi.mocked(open).mockResolvedValue("/picked/stray.epub");
-    invokeMock.mockImplementation((command: string, args?: unknown) => {
-      if (command === "scan_library") {
-        const path = (args as { path?: string } | undefined)?.path;
-        return Promise.reject(new Error(`library path is not a directory: ${path}`));
-      }
-      return command === "get_library_stats"
-        ? Promise.resolve({ bookCount: 1, collectionCount: 0 })
-        : Promise.resolve([makeBook()]);
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_collections: [],
+      import_paths: {
+        imported: 0,
+        updated: 0,
+        failed: [{ path: "/picked/stray.epub", error: "not a supported book file (.epub/.pdf)" }],
+      },
     });
 
     render(<AppShell />);
@@ -155,23 +172,18 @@ describe("Import via drag-and-drop", () => {
       });
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("scan_library", { path: "/dropped/books" });
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/dropped/books"] });
     expect(await screen.findByTestId("import-status")).toHaveTextContent("Imported 1 new");
     expect(screen.queryByTestId("dropzone-overlay")).not.toBeInTheDocument();
   });
 
   it("collects a failure for dropped entries the backend cannot import", async () => {
-    renderShellWithLibrary();
-    await screen.findByTestId("empty-library");
-    invokeMock.mockImplementation((command: string, args?: unknown) => {
-      if (command === "scan_library") {
-        const path = (args as { path?: string } | undefined)?.path;
-        return Promise.reject(new Error(`library path is not a directory: ${path}`));
-      }
-      return command === "get_library_stats"
-        ? Promise.resolve({ bookCount: 0, collectionCount: 0 })
-        : Promise.resolve([]);
+    renderShellWithLibrary([], {
+      imported: 0,
+      updated: 0,
+      failed: [{ path: "/dropped/loose.epub", error: "not a supported book file (.epub/.pdf)" }],
     });
+    await screen.findByTestId("empty-library");
 
     const dragHandler = captureDragHandler();
     await act(async () => {

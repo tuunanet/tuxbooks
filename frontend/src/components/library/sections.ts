@@ -23,18 +23,7 @@ export function sectionTitle(section: LibrarySection): string {
 }
 
 /**
- * "In Progress" and "Finished" derive from reading-progress data, which no
- * backend command exposes yet. Callers show an honest placeholder instead of
- * pretending to filter (task §28).
- */
-export function sectionNeedsProgressData(section: LibrarySection): boolean {
-  return section.kind === "smart" && (section.id === "in-progress" || section.id === "finished");
-}
-
-/**
- * Client-side filtering over the full `list_books` payload. Sections that
- * need progress data return an empty list — check
- * `sectionNeedsProgressData` first.
+ * Client-side filtering over the full `list_books` payload.
  */
 export function filterBooksBySection(books: Book[], section: LibrarySection): Book[] {
   if (section.kind !== "smart") return books;
@@ -52,9 +41,25 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
         .filter((book) => book.lastOpenedAt !== null)
         .sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
     case "in-progress":
+      // Started but not finished: a saved position below 100 (milestone 10).
+      return books
+        .filter((book) => book.progressPercent !== null && book.progressPercent < 100)
+        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
     case "finished":
-      return [];
+      // Explicitly marked finished (progress 100) or completed while reading.
+      return books
+        .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
+        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
   }
+}
+
+/**
+ * Membership filter for collection sections (milestone 10): keeps only the
+ * books whose id appears in the collection's member list.
+ */
+export function filterBooksByCollection(books: Book[], bookIds: number[]): Book[] {
+  const members = new Set(bookIds);
+  return books.filter((book) => members.has(book.id));
 }
 
 /** Sort orders offered by the library header select. */

@@ -23,18 +23,6 @@ function GlobalSearchShortcut() {
   return null;
 }
 
-function CollectionsPlaceholder() {
-  return (
-    <section data-testid="collections-view">
-      <h2 className="text-2xl font-semibold">Collections</h2>
-      <p className="mt-2 text-muted-foreground">
-        Collections are not connected to the backend yet — create one from the sidebar once import
-        support lands.
-      </p>
-    </section>
-  );
-}
-
 /**
  * Reader: the full window, no library sidebar. Own providers — reader state
  * is session-scoped and the toolbar introduces the app's first tooltips.
@@ -78,9 +66,9 @@ function Shell() {
           <BookDetail />
         ) : app.section.kind === "settings" ? (
           <SettingsShell />
-        ) : app.section.kind === "collection" ? (
-          <CollectionsPlaceholder />
         ) : (
+          /* Smart and collection sections share the library view; collection
+             filtering happens inside (milestone 10). */
           <LibraryView section={app.section} />
         )}
       </main>

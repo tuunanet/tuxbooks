@@ -131,6 +131,19 @@ layout, virtualization, the render queue, and persistence — see
   `reset_book_metadata` / `set_book_cover` / `clear_book_cover_override`;
   every mutation emits `library-changed`.
 
+Collection and progress plumbing (milestone 10) stays in thin command +
+repository layers: `list_collections` / `create_collection` /
+`delete_collection` / `add_book_to_collection` /
+`remove_book_from_collection` over `repository::collections` (summaries
+carry member book ids so one call feeds the sidebar, the collection
+sections, and the context menus), and `mark_book_finished` over
+`repository::reading_progress` (sets `progress_percent = 100` while keeping
+the stored position). `list_books` LEFT JOINs `reading_progress`, so the
+shared book payload carries `progress_percent` / `progress_updated_at`.
+`import_paths` accepts a mixed batch of files and folders: folders go
+through `import_directory` and register a watched location exactly like
+`scan_library`; plain files go through `import_file` and stay unwatched.
+
 ## Frontend structure
 
 ```
@@ -141,9 +154,12 @@ frontend/src/
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/fixtures.ts       realistic sample books for tests/previews
     lib/pdf/pdfEngine.ts  the only PDF.js import site (worker setup + open/close)
-    hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`)
+    hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`;
+                          books + collections, one shared copy)
     hooks/useAnnotations.ts  persistent annotations of the open reader book
     hooks/useBookMetadata.ts  curation view + metadata edits for the editor
+    hooks/useBookActions.ts   locate/remove/mark-finished book actions
+    hooks/useCollectionActions.ts  collection create/delete/membership actions
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX, section helpers

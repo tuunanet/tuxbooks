@@ -15,6 +15,7 @@ function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
   mockInvoke({
     get_library_stats: { bookCount: 0, collectionCount: 0 },
     list_books: [],
+    list_collections: [],
   });
   return render(
     <AppStateProvider>
@@ -65,7 +66,7 @@ describe("Sidebar", () => {
     expect(onSectionChange).toHaveBeenCalledWith({ kind: "settings" });
   });
 
-  it("opens the create-collection dialog as an honest shell", async () => {
+  it("opens the create-collection dialog", async () => {
     renderSidebar(vi.fn());
 
     await userEvent.click(screen.getByTestId("new-collection-button"));
@@ -73,7 +74,30 @@ describe("Sidebar", () => {
     const dialog = await screen.findByTestId("collection-dialog");
     expect(dialog).toBeInTheDocument();
     expect(screen.getByTestId("collection-name")).toBeInTheDocument();
+    // Create stays disabled until a name is typed.
     expect(screen.getByTestId("collection-create")).toBeDisabled();
-    expect(screen.getByTestId("collection-create")).toHaveAccessibleDescription(/rust backend/i);
+  });
+
+  it("lists collections as clickable sections", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 1 },
+      list_books: [],
+      list_collections: [
+        { id: 5, name: "Vacation Reads", createdAt: "2026-01-01T00:00:00.000Z", bookIds: [] },
+      ],
+    });
+    const onSectionChange = vi.fn();
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Vacation Reads"));
+    expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", id: 5 });
   });
 });

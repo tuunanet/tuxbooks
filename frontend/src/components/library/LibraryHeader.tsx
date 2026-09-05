@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { pickDirectory } from "@/lib/tauri";
+import { pickBookFiles, pickDirectory } from "@/lib/tauri";
 import { useImport } from "@/state/importState";
 import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./sections";
 
@@ -45,6 +45,11 @@ export function LibraryHeader({
   const importFolder = async () => {
     const dir = await pickDirectory();
     if (dir) await importPaths([dir]);
+  };
+
+  const importFiles = async () => {
+    const files = await pickBookFiles();
+    if (files.length > 0) await importPaths(files);
   };
 
   return (
@@ -102,10 +107,7 @@ export function LibraryHeader({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              disabled
-              title="Single-file import needs a backend command that does not exist yet"
-            >
+            <DropdownMenuItem data-testid="import-files" onSelect={() => void importFiles()}>
               Import Files…
             </DropdownMenuItem>
             <DropdownMenuItem data-testid="import-folder" onSelect={() => void importFolder()}>

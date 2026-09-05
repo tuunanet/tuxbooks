@@ -23,6 +23,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
+# Desktop polish (milestone 10): restores window size/position across restarts.
+tauri-plugin-window-state = "2"
+# "Show in File Manager" reveal action (milestone 10).
+tauri-plugin-opener = "2"
 # Test-only WebDriver helpers (execute/mocking/log forwarding) for
 # @wdio/tauri-service. Registered in debug builds only (see lib.rs); kept as a
 # non-optional dependency so the `wdio:default` capability permission resolves

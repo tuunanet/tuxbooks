@@ -79,6 +79,8 @@ function makeBookShim() {
     seriesId: null,
     seriesIndex: null,
     seriesName: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
   };
 }
 

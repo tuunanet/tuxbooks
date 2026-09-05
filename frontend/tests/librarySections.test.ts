@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   BOOK_SORT_OPTIONS,
+  filterBooksByCollection,
   filterBooksByQuery,
   filterBooksBySection,
-  sectionNeedsProgressData,
   sectionTitle,
   sortBooks,
 } from "@/components/library/sections";
@@ -36,15 +36,6 @@ describe("sectionTitle", () => {
   });
 });
 
-describe("sectionNeedsProgressData", () => {
-  it("flags only the progress-backed sections", () => {
-    expect(sectionNeedsProgressData({ kind: "smart", id: "in-progress" })).toBe(true);
-    expect(sectionNeedsProgressData({ kind: "smart", id: "finished" })).toBe(true);
-    expect(sectionNeedsProgressData({ kind: "smart", id: "pdfs" })).toBe(false);
-    expect(sectionNeedsProgressData({ kind: "collection", id: 1 })).toBe(false);
-  });
-});
-
 describe("filterBooksBySection", () => {
   const books = [epub(), pdf(), neverOpened()];
 
@@ -72,9 +63,67 @@ describe("filterBooksBySection", () => {
     expect(result.map((b) => b.id)).toEqual([2, 1]);
   });
 
-  it("returns nothing for progress-backed sections (callers show a placeholder)", () => {
-    expect(filterBooksBySection(books, { kind: "smart", id: "in-progress" })).toEqual([]);
-    expect(filterBooksBySection(books, { kind: "smart", id: "finished" })).toEqual([]);
+  it("keeps started-but-unfinished books in In Progress, most recent first", () => {
+    const inProgress = [
+      makeBook({
+        id: 10,
+        title: "Halfway",
+        progressPercent: 55,
+        progressUpdatedAt: "2026-08-01T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 11,
+        title: "Just Started",
+        progressPercent: 5,
+        progressUpdatedAt: "2026-08-09T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 12,
+        title: "Done",
+        progressPercent: 100,
+        progressUpdatedAt: "2026-08-05T00:00:00.000Z",
+      }),
+      makeBook({ id: 13, title: "Unread", progressPercent: null, progressUpdatedAt: null }),
+    ];
+    const result = filterBooksBySection(inProgress, { kind: "smart", id: "in-progress" });
+    expect(result.map((b) => b.id)).toEqual([11, 10]);
+  });
+
+  it("keeps 100%-progress books in Finished, most recent first", () => {
+    const finished = [
+      makeBook({
+        id: 20,
+        title: "Done First",
+        progressPercent: 100,
+        progressUpdatedAt: "2026-08-02T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 21,
+        title: "Done Second",
+        progressPercent: 100,
+        progressUpdatedAt: "2026-08-08T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 22,
+        title: "Halfway",
+        progressPercent: 50,
+        progressUpdatedAt: "2026-08-09T00:00:00.000Z",
+      }),
+    ];
+    const result = filterBooksBySection(finished, { kind: "smart", id: "finished" });
+    expect(result.map((b) => b.id)).toEqual([21, 20]);
+  });
+});
+
+describe("filterBooksByCollection", () => {
+  const books = [epub(), pdf(), neverOpened()];
+
+  it("keeps only member books, in library order", () => {
+    expect(filterBooksByCollection(books, [3, 1]).map((b) => b.id)).toEqual([1, 3]);
+  });
+
+  it("returns nothing when the collection is empty", () => {
+    expect(filterBooksByCollection(books, [])).toEqual([]);
   });
 });
 

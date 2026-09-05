@@ -128,16 +128,46 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "PDFs" })).toHaveAttribute("aria-current");
   });
 
-  it("shows an honest placeholder for sections that need progress data", async () => {
+  it("shows the progress-backed Finished section driven by the shared payload", async () => {
     mockInvoke({
-      get_library_stats: { bookCount: 0, collectionCount: 0 },
-      list_books: [],
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [
+        makeBook({ progressPercent: 100, progressUpdatedAt: "2026-08-09T00:00:00.000Z" }),
+        makeBook({ id: 2, title: "Second Book", author: null }),
+      ],
+      list_collections: [],
     });
 
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "Finished" }));
 
-    expect(await screen.findByTestId("section-needs-progress")).toBeInTheDocument();
+    // Only the finished book lands in the section; the empty library state
+    // never replaces a real (if small) section.
+    expect(await screen.findAllByTestId("book-card")).toHaveLength(1);
+    expect(screen.getByText("A Minimal Book")).toBeInTheDocument();
     expect(screen.queryByTestId("empty-library")).not.toBeInTheDocument();
+  });
+
+  it("filters collection sections to their member books", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 1 },
+      list_books: [makeBook(), makeBook({ id: 2, title: "Second Book", author: null })],
+      list_collections: [
+        {
+          id: 3,
+          name: "Shortlist",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          bookIds: [2],
+        },
+      ],
+    });
+
+    render(<App />);
+    await userEvent.click(await screen.findByText("Shortlist"));
+
+    const cards = await screen.findAllByTestId("book-card");
+    expect(cards).toHaveLength(1);
+    expect(screen.getByText("Second Book")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Shortlist" })).toBeInTheDocument();
   });
 });

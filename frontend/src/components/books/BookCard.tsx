@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import type { Book, ReadingProgress } from "@/types/domain";
+import type { Book, CollectionSummary } from "@/types/domain";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
 
@@ -10,11 +10,13 @@ import { BookCover } from "./BookCover";
  * Interaction surface shared by the grid card and the list row: single click
  * selects, double click opens the detail view, right click opens the action
  * menu. `tabIndex` is the roving-tabindex value handed out by the grid/list
- * container. `onLocate`/`onRemove` power the missing-file actions.
+ * container. `onLocate`/`onRemove` power the missing-file actions;
+ * `onAddToCollection`/`onRemoveFromCollection`/`onMarkFinished`/`onReveal`
+ * power the milestone-10 menu entries.
  */
 export interface InteractiveBookProps {
   selected?: boolean;
-  progress?: ReadingProgress;
+  collections: CollectionSummary[];
   tabIndex?: number;
   onSelect?: (bookId: number) => void;
   onOpen?: (bookId: number) => void;
@@ -22,20 +24,25 @@ export interface InteractiveBookProps {
   onLocate?: (bookId: number) => void;
   onEditMetadata?: (bookId: number) => void;
   onRemove?: (bookId: number) => void;
+  onAddToCollection?: (bookId: number, collectionId: number) => void;
+  onRemoveFromCollection?: (bookId: number, collectionId: number) => void;
+  onMarkFinished?: (bookId: number) => void;
+  onReveal?: (bookId: number) => void;
 }
 
 interface BookCardProps extends InteractiveBookProps {
   book: Book;
 }
 
-function readingProgressLabel(progress: ReadingProgress): string {
-  return `Reading progress: ${progress.percentage}%`;
+/** The card's progress bar shows the coarse percent from the shared payload. */
+function progressPercentOf(book: Book): number | null {
+  return book.progressPercent;
 }
 
 export function BookCard({
   book,
   selected = false,
-  progress,
+  collections,
   tabIndex = 0,
   onSelect,
   onOpen,
@@ -43,16 +50,26 @@ export function BookCard({
   onLocate,
   onEditMetadata,
   onRemove,
+  onAddToCollection,
+  onRemoveFromCollection,
+  onMarkFinished,
+  onReveal,
 }: BookCardProps) {
+  const percent = progressPercentOf(book);
   return (
     <div className="relative">
       <BookContextMenu
         book={book}
+        collections={collections}
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
         onEditMetadata={onEditMetadata}
         onRemove={onRemove}
+        onAddToCollection={onAddToCollection}
+        onRemoveFromCollection={onRemoveFromCollection}
+        onMarkFinished={onMarkFinished}
+        onReveal={onReveal}
       >
         <button
           type="button"
@@ -98,11 +115,11 @@ export function BookCard({
             <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
               {book.author ?? "Unknown author"}
             </p>
-            {progress && (
+            {percent !== null && (
               <Progress
-                value={progress.percentage}
-                aria-label={readingProgressLabel(progress)}
-                title={`${progress.percentage}% read`}
+                value={percent}
+                aria-label={`Reading progress: ${Math.round(percent)}%`}
+                title={`${Math.round(percent)}% read`}
                 className="mt-2"
               />
             )}

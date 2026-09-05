@@ -6,8 +6,12 @@ use std::path::PathBuf;
 
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::LibraryStats;
-use tuxbooks_lib::repository::{books, collections};
-use tuxbooks_lib::services::book_importer::import_directory;
+use tuxbooks_lib::domain::ProgressUpdate;
+use tuxbooks_lib::repository::{
+    books, collections,
+    reading_progress::{get_progress, mark_finished, upsert_progress},
+};
+use tuxbooks_lib::services::book_importer::{import_directory, import_file};
 use tuxbooks_lib::services::reader::load_book_file;
 use tuxbooks_lib::services::search::search_books;
 
@@ -78,6 +82,71 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     };
     assert_eq!(stats_after.book_count, 1);
     assert_eq!(stats_after.collection_count, 1);
+
+    // Milestone 10: the list payload carries reading progress so the UI can
+    // drive the In Progress / Finished sections without extra round trips.
+    upsert_progress(
+        &pool,
+        book.id,
+        &ProgressUpdate {
+            chapter_href: Some("chapter1.xhtml".into()),
+            progress_percent: Some(40.0),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let listed = books::list_books(&pool).await?;
+    assert_eq!(listed[0].progress_percent, Some(40.0));
+    assert!(listed[0].progress_updated_at.is_some());
+
+    // Marking finished flips the percent to 100 while the saved position
+    // (chapter href) survives for resume.
+    mark_finished(&pool, book.id).await?;
+    let listed = books::list_books(&pool).await?;
+    assert_eq!(listed[0].progress_percent, Some(100.0));
+    let progress = get_progress(&pool, book.id).await?.expect("progress row");
+    assert_eq!(progress.chapter_href.as_deref(), Some("chapter1.xhtml"));
+
+    // Collection membership shows up in the summary shape behind
+    // `list_collections`.
+    let favorites = collections::list_collection_summaries(&pool).await?;
+    assert_eq!(favorites.len(), 1);
+    assert!(favorites[0].book_ids.is_empty());
+    collections::add_book_to_collection(&pool, book.id, favorites[0].id).await?;
+    let favorites = collections::list_collection_summaries(&pool).await?;
+    assert_eq!(favorites[0].book_ids, vec![book.id]);
+
+    Ok(())
+}
+
+/// Milestone 10: single-file import — the same `import_file` primitive the
+/// `import_paths` command uses for plain files — persists a book outside any
+/// watched folder, and an unsupported path lands in the report's failures.
+#[tokio::test]
+async fn single_file_import_persists_without_a_watched_root() -> anyhow::Result<()> {
+    let tmp = tempfile::tempdir()?;
+    let library = tmp.path().join("loose files");
+    std::fs::create_dir_all(&library)?;
+    let file_path = library.join("minimal.epub");
+    std::fs::copy(fixture_epub(), &file_path)?;
+
+    let pool = init_pool(&tmp.path().join("t.db")).await?;
+    let outcome = import_file(&pool, &file_path, &tmp.path().join("covers"), &[]).await?;
+    let outcome = outcome.expect("fixture epub should parse");
+    assert!(outcome.inserted);
+    assert_eq!(books::count_books(&pool).await?, 1);
+
+    // Re-importing the same file updates in place.
+    let rerun = import_file(&pool, &file_path, &tmp.path().join("covers"), &[]).await?;
+    assert!(matches!(rerun, Some(ref o) if !o.inserted));
+    assert_eq!(books::count_books(&pool).await?, 1);
+
+    // A non-book file is reported, not imported and not fatal.
+    let stray = library.join("notes.txt");
+    std::fs::write(&stray, b"not a book")?;
+    let missing = import_file(&pool, &stray, &tmp.path().join("covers"), &[]).await?;
+    assert!(missing.is_none());
+    assert_eq!(books::count_books(&pool).await?, 1);
 
     Ok(())
 }

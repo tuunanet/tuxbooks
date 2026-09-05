@@ -147,7 +147,12 @@ Two isolated invocations per run:
    EPUB engine host count) and `annotations.e2e.ts` (milestone 6: a PDF
    highlight created from a real text-layer selection, its attached note,
    and a bookmark on both formats, each revisited after close/reopen —
-   the reader reloads everything from SQLite).
+   the reader reloads everything from SQLite) and `metadata.e2e.ts`
+   (milestone 7: edit → grid/detail/search update, source bytes untouched,
+   reset round trip) and `collections.e2e.ts` (milestone 10: create a
+   collection from the sidebar, add and remove a book through the card
+   context menu, mark a book finished and see it land in Finished but not
+   In Progress, then delete the collection).
 
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.

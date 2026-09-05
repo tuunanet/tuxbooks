@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::domain::{ProgressUpdate, ReadingProgress};
 use crate::error::AppError;
-use crate::repository::reading_progress::{get_progress, upsert_progress};
+use crate::repository::reading_progress::{get_progress, mark_finished, upsert_progress};
 use crate::AppState;
 
 /// Wire shape of a reading-progress update. Fields are optional so each
@@ -50,4 +50,12 @@ pub async fn get_reading_progress(
     book_id: i64,
 ) -> Result<Option<ReadingProgress>, AppError> {
     get_progress(&state.db, book_id).await
+}
+
+/// Flag a book as finished (milestone 10). Sets `progress_percent = 100`
+/// while preserving the stored position, so the book lands in the
+/// "Finished" section but still resumes where reading stopped.
+#[tauri::command]
+pub async fn mark_book_finished(state: State<'_, AppState>, book_id: i64) -> Result<(), AppError> {
+    mark_finished(&state.db, book_id).await
 }

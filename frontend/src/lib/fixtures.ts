@@ -1,11 +1,10 @@
-import type { Book, ReadingProgress } from "@/types/domain";
+import type { Book } from "@/types/domain";
 
 /**
- * A book fixture plus optional reading progress. Progress has no backend
- * command yet, so it exists only in fixtures/tests until
- * `get_reading_progress` / `save_reading_progress` are wired up.
+ * A book fixture: identical to the shared payload shape (milestone 10 added
+ * the reading-progress fields to `list_books`).
  */
-export type FixtureBook = Book & { progress?: ReadingProgress };
+export type FixtureBook = Book;
 
 /**
  * Realistic, original sample data so the UI can be evaluated visually.
@@ -34,7 +33,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-08-12T09:15:00.000Z",
     modifiedAt: "2026-08-12T09:15:00.000Z",
     lastOpenedAt: "2026-08-28T20:42:00.000Z",
-    progress: { kind: "epub", cfi: "epubcfi(/6/14!/4/2/16)", percentage: 78 },
+    progressPercent: 78,
+    progressUpdatedAt: "2026-08-28T20:42:00.000Z",
   },
   {
     id: 2,
@@ -56,6 +56,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-08-10T14:00:00.000Z",
     modifiedAt: "2026-08-10T14:00:00.000Z",
     lastOpenedAt: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
   },
   {
     id: 3,
@@ -77,7 +79,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-07-30T18:30:00.000Z",
     modifiedAt: "2026-07-30T18:30:00.000Z",
     lastOpenedAt: "2026-08-27T22:10:00.000Z",
-    progress: { kind: "epub", cfi: "epubcfi(/6/4!/4/2)", percentage: 12 },
+    progressPercent: 12,
+    progressUpdatedAt: "2026-08-27T22:10:00.000Z",
   },
   {
     id: 4,
@@ -99,7 +102,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-07-21T11:05:00.000Z",
     modifiedAt: "2026-07-21T11:05:00.000Z",
     lastOpenedAt: "2026-08-25T07:55:00.000Z",
-    progress: { kind: "epub", cfi: "epubcfi(/6/26!/4)", percentage: 100 },
+    progressPercent: 100,
+    progressUpdatedAt: "2026-08-25T07:55:00.000Z",
   },
   {
     id: 5,
@@ -121,6 +125,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-07-15T16:45:00.000Z",
     modifiedAt: "2026-07-15T16:45:00.000Z",
     lastOpenedAt: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
   },
   {
     id: 6,
@@ -142,6 +148,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-06-28T08:20:00.000Z",
     modifiedAt: "2026-06-28T08:20:00.000Z",
     lastOpenedAt: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
   },
   {
     id: 7,
@@ -163,7 +171,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-06-12T13:10:00.000Z",
     modifiedAt: "2026-06-12T13:10:00.000Z",
     lastOpenedAt: "2026-08-20T19:30:00.000Z",
-    progress: { kind: "pdf", page: 88, percentage: 45 },
+    progressPercent: 45,
+    progressUpdatedAt: "2026-08-20T19:30:00.000Z",
   },
   {
     id: 8,
@@ -185,6 +194,8 @@ const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">
     addedAt: "2026-05-30T10:00:00.000Z",
     modifiedAt: "2026-05-30T10:00:00.000Z",
     lastOpenedAt: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
   },
 ];
 

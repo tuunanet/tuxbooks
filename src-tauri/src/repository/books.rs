@@ -7,12 +7,17 @@ use crate::error::AppError;
 
 /// Effective book columns for SELECT queries. The bibliographic fields are
 /// the effective (override-over-source) values; `series_name` resolves the
-/// normalized `series` table so readers never need a second query.
+/// normalized `series` table so readers never need a second query, and the
+/// `reading_progress` join exposes the coarse reading position that backs
+/// the "In Progress" / "Finished" library sections (milestone 10).
 const BOOK_COLUMNS: &str = "b.id, b.path, b.title, b.subtitle, b.author, b.publisher, \
      b.language, b.isbn, b.description, b.cover_path, b.added_at, b.modified_at, \
      b.last_opened_at, b.available, b.file_size, b.file_mtime, b.publication_date, \
-     b.series_id, b.series_index, s.name AS series_name";
-const BOOK_FROM: &str = " FROM books b LEFT JOIN series s ON s.id = b.series_id";
+     b.series_id, b.series_index, s.name AS series_name, \
+     rp.progress_percent AS progress_percent, rp.updated_at AS progress_updated_at";
+const BOOK_FROM: &str = " FROM books b \
+     LEFT JOIN series s ON s.id = b.series_id \
+     LEFT JOIN reading_progress rp ON rp.book_id = b.id";
 
 /// Insert a new book. Errors if `path` already exists — use [`upsert_book`] for
 /// scan imports.

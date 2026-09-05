@@ -32,6 +32,18 @@ export interface Book {
   seriesId: number | null;
   seriesIndex: number | null;
   seriesName: string | null;
+  /** Coarse reading position (0..=100); null = never opened. */
+  progressPercent: number | null;
+  /** When the reading position was last saved. */
+  progressUpdatedAt: string | null;
+}
+
+/** A user-defined collection with its member book ids (mirrors `domain::CollectionSummary`). */
+export interface CollectionSummary {
+  id: number;
+  name: string;
+  createdAt: string;
+  bookIds: number[];
 }
 
 /** One complete set of bibliographic metadata (mirrors `domain::MetadataFields`). */

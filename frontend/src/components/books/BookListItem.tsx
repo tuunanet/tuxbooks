@@ -14,7 +14,7 @@ interface BookListItemProps extends InteractiveBookProps {
 export function BookListItem({
   book,
   selected = false,
-  progress,
+  collections,
   tabIndex = 0,
   onSelect,
   onOpen,
@@ -22,16 +22,25 @@ export function BookListItem({
   onLocate,
   onEditMetadata,
   onRemove,
+  onAddToCollection,
+  onRemoveFromCollection,
+  onMarkFinished,
+  onReveal,
 }: BookListItemProps) {
   return (
     <div className="flex items-center gap-2">
       <BookContextMenu
         book={book}
+        collections={collections}
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
         onEditMetadata={onEditMetadata}
         onRemove={onRemove}
+        onAddToCollection={onAddToCollection}
+        onRemoveFromCollection={onRemoveFromCollection}
+        onMarkFinished={onMarkFinished}
+        onReveal={onReveal}
       >
         <button
           type="button"
@@ -65,11 +74,11 @@ export function BookListItem({
           </div>
           {book.format === "pdf" && <Badge variant="secondary">PDF</Badge>}
           {!book.available && <Badge variant="destructive">Missing</Badge>}
-          {progress && (
+          {book.progressPercent !== null && (
             <Progress
-              value={progress.percentage}
-              aria-label={`Reading progress: ${progress.percentage}%`}
-              title={`${progress.percentage}% read`}
+              value={book.progressPercent}
+              aria-label={`Reading progress: ${Math.round(book.progressPercent)}%`}
+              title={`${Math.round(book.progressPercent)}% read`}
               className="w-24 shrink-0"
             />
           )}

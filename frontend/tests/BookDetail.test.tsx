@@ -130,9 +130,7 @@ describe("BookDetail", () => {
     );
 
     await screen.findByTestId("book-detail");
-    expect(screen.getByTestId("detail-collections")).toHaveTextContent(
-      /collections are not connected to the backend/i,
-    );
+    expect(screen.getByTestId("detail-collections")).toHaveTextContent(/not in any collection/i);
     await userEvent.click(screen.getByTestId("detail-edit"));
     expect(await screen.findByTestId("metadata-dialog")).toBeInTheDocument();
   });

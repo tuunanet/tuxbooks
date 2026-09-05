@@ -21,19 +21,20 @@ function formatDate(iso: string | null): string {
 /**
  * Book detail view, rendered inside the library shell (sidebar stays).
  * Data comes from the shared `list_books` payload — there is no
- * `get_book` command yet (decision D1). Reading progress is not shown:
- * no backend command exposes it, and progress without data would be a
- * pretend-success.
+ * `get_book` command yet (decision D1). Reading position comes from the
+ * same payload's progress join (milestone 10).
  */
 export function BookDetail() {
   const { selectedBookId, section } = useAppState();
-  const { books } = useLibrary();
+  const { books, collections } = useLibrary();
   const { locateBook, removeBookFromLibrary } = useBookActions();
   const dispatch = useAppDispatch();
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   // Subjects live in the normalized metadata view, not the flat book list.
   const { metadata } = useBookMetadata(book ? book.id : null);
   const subjects = metadata?.effective.subjects ?? [];
+  const memberCollections =
+    book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
 
   if (!book) {
     return (
@@ -71,6 +72,10 @@ export function BookDetail() {
     ],
     ["Added", formatDate(book.addedAt)],
     ["Last opened", formatDate(book.lastOpenedAt)],
+    [
+      "Reading position",
+      book.progressPercent === null ? "—" : `${Math.round(book.progressPercent)}%`,
+    ],
     ["File", book.path],
   ];
 
@@ -194,10 +199,18 @@ export function BookDetail() {
 
       <div className="mt-8">
         <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
-        <div data-testid="detail-collections" className="mt-2">
-          <p className="text-sm text-muted-foreground">
-            No collections yet — collections are not connected to the backend yet.
-          </p>
+        <div data-testid="detail-collections" className="mt-2 flex flex-wrap gap-1.5">
+          {memberCollections.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Not in any collection — add one from a book's right-click menu.
+            </p>
+          ) : (
+            memberCollections.map((collection) => (
+              <Badge key={collection.id} variant="secondary">
+                {collection.name}
+              </Badge>
+            ))
+          )}
         </div>
       </div>
     </section>

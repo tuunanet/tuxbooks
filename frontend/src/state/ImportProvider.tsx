@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { scanLibrary } from "@/lib/tauri";
+import { importPaths as importPathsCommand } from "@/lib/tauri";
 import { useLibrary } from "@/hooks/useLibrary";
 import {
   ImportContext,
@@ -13,10 +13,10 @@ function toMessage(err: unknown): string {
 }
 
 /**
- * Shared import flow state. `scan_library` accepts a directory, so dropped
- * or picked entries are imported one by one; per-path failures (e.g. single
- * files, which the backend cannot import yet) are collected and surfaced
- * honestly instead of being hidden or pretended away.
+ * Shared import flow state (milestone 10). The `import_paths` command accepts
+ * a mixed batch of files and folders — folders become watched locations,
+ * files import in place — so picked and dropped entries go through one
+ * call; per-path failures are surfaced honestly instead of being hidden.
  */
 export function ImportProvider({ children }: { children: ReactNode }) {
   const { refresh } = useLibrary();
@@ -33,24 +33,17 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       setSummary(null);
       setFailures([]);
 
-      let imported = 0;
-      let updated = 0;
-      const collected: ImportFailure[] = [];
-      for (const path of targets) {
-        try {
-          const report = await scanLibrary(path);
-          imported += report.imported;
-          updated += report.updated;
-          collected.push(...report.failed);
-        } catch (err) {
-          collected.push({ path, error: toMessage(err) });
-        }
+      try {
+        const report = await importPathsCommand(targets);
+        await refresh();
+        setSummary({ imported: report.imported, updated: report.updated });
+        setFailures(report.failed);
+        setPhase("done");
+      } catch (err) {
+        setFailures(targets.map((path) => ({ path, error: toMessage(err) })));
+        setSummary({ imported: 0, updated: 0 });
+        setPhase("done");
       }
-
-      await refresh();
-      setSummary({ imported, updated });
-      setFailures(collected);
-      setPhase("done");
     },
     [refresh],
   );

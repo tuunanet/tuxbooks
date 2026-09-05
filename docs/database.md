@@ -66,8 +66,12 @@ Join table, PK `(book_id, collection_id)`, both FK with
 ### reading_progress
 
 PK `book_id` (FK, cascade) — one progress row per book.
-`chapter_href`, `character_offset`, `progress_percent`
-(REAL, CHECK 0..=100 or NULL), `updated_at`.
+`chapter_href`, `cfi`, `character_offset`, `page_number`, `scroll_offset`,
+`progress_percent` (REAL, CHECK 0..=100 or NULL), `updated_at`. The reader
+writes the format-specific locators it tracks; `progress_percent` is the
+coarse shell position that backs the library's "In Progress" /
+"Finished" sections, and `mark_finished` (milestone 10) sets it to 100
+without disturbing the stored locators.
 
 ### annotations
 

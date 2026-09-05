@@ -1,12 +1,14 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   Annotation,
   AnnotationInput,
   AnnotationPatch,
   Book,
   BookMetadata,
+  CollectionSummary,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -20,6 +22,7 @@ export type {
   Book,
   BookFormat,
   BookMetadata,
+  CollectionSummary,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -41,6 +44,15 @@ export function searchLibrary(query: string): Promise<SearchHit[]> {
 
 export function scanLibrary(path: string): Promise<ImportReport> {
   return invoke("scan_library", { path });
+}
+
+/**
+ * Import a mixed batch of files and/or folders. Folders become watched
+ * library locations; plain files are imported in place. Per-path failures
+ * come back in the report.
+ */
+export function importPaths(paths: string[]): Promise<ImportReport> {
+  return invoke("import_paths", { paths });
 }
 
 /**
@@ -129,6 +141,36 @@ export function saveReadingProgress(bookId: number, progress: ReadingProgressInp
   return invoke("save_reading_progress", { bookId, progress });
 }
 
+/** Flag a book as finished (progress 100) without moving its saved position. */
+export function markBookFinished(bookId: number): Promise<null> {
+  return invoke("mark_book_finished", { bookId });
+}
+
+/** Every collection with its member book ids, in name order. */
+export function listCollections(): Promise<CollectionSummary[]> {
+  return invoke("list_collections");
+}
+
+/** Create a named collection; rejects blank or duplicate names. */
+export function createCollection(name: string): Promise<CollectionSummary> {
+  return invoke("create_collection", { name });
+}
+
+/** Delete a collection; member books are never touched. */
+export function deleteCollection(collectionId: number): Promise<boolean> {
+  return invoke("delete_collection", { collectionId });
+}
+
+/** Add a book to a collection (idempotent). */
+export function addBookToCollection(bookId: number, collectionId: number): Promise<null> {
+  return invoke("add_book_to_collection", { bookId, collectionId });
+}
+
+/** Remove a book from a collection; true when a membership was deleted. */
+export function removeBookFromCollection(bookId: number, collectionId: number): Promise<boolean> {
+  return invoke("remove_book_from_collection", { bookId, collectionId });
+}
+
 /** Every annotation of one book (bookmarks + highlights), in document order. */
 export function listAnnotations(bookId: number): Promise<Annotation[]> {
   return invoke("list_annotations", { bookId });
@@ -164,6 +206,20 @@ export function pickBookFile(): Promise<string | null> {
     title: "Locate the book file",
     filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
   });
+}
+
+/** Native multi-file picker for Import Files…; empty when cancelled. */
+export function pickBookFiles(): Promise<string[]> {
+  return open({
+    multiple: true,
+    title: "Choose book files to import",
+    filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+  }).then((paths) => paths ?? []);
+}
+
+/** Reveal a file in the system file manager (does not open it). */
+export function revealInFileManager(path: string): Promise<void> {
+  return revealItemInDir(path);
 }
 
 /** Tauri asset-protocol URL for an extracted cover image on disk. */

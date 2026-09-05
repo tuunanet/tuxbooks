@@ -1,4 +1,4 @@
-import type { Annotation, Book } from "@/types/domain";
+import type { Annotation, Book, CollectionSummary } from "@/types/domain";
 
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {
@@ -23,6 +23,18 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     seriesId: null,
     seriesIndex: null,
     seriesName: null,
+    progressPercent: null,
+    progressUpdatedAt: null,
+    ...overrides,
+  };
+}
+
+export function makeCollection(overrides: Partial<CollectionSummary> = {}): CollectionSummary {
+  return {
+    id: 1,
+    name: "Favorites",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    bookIds: [],
     ...overrides,
   };
 }

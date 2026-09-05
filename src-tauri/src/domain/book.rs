@@ -61,11 +61,17 @@ pub struct Book {
     pub series_id: Option<i64>,
     pub series_index: Option<f64>,
     pub series_name: Option<String>,
+    /// Coarse reading position (0..=100) from the `reading_progress` row,
+    /// when the book has been opened. NULL = never read.
+    pub progress_percent: Option<f64>,
+    /// When the reading position was last saved; drives "In Progress" /
+    /// "Finished" recency assumptions in the UI.
+    pub progress_updated_at: Option<DateTime<Utc>>,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 21)?;
+        let mut state = serializer.serialize_struct("Book", 23)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("path", &self.path)?;
         state.serialize_field("format", &BookFormat::from_path(&self.path))?;
@@ -87,6 +93,8 @@ impl Serialize for Book {
         state.serialize_field("seriesId", &self.series_id)?;
         state.serialize_field("seriesIndex", &self.series_index)?;
         state.serialize_field("seriesName", &self.series_name)?;
+        state.serialize_field("progressPercent", &self.progress_percent)?;
+        state.serialize_field("progressUpdatedAt", &self.progress_updated_at)?;
         state.end()
     }
 }
@@ -168,6 +176,8 @@ mod tests {
             series_id: None,
             series_index: None,
             series_name: None,
+            progress_percent: None,
+            progress_updated_at: None,
         }
     }
 

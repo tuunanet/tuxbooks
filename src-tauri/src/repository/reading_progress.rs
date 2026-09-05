@@ -55,6 +55,27 @@ pub async fn get_progress(
     Ok(progress)
 }
 
+/// Flag a book as finished (milestone 10 "Finished" section and the
+/// context-menu "Mark as Finished" action). Sets `progress_percent = 100`
+/// without touching the stored reading position, so resuming the book still
+/// lands where the user stopped; reading again saves a real percent and
+/// naturally moves the book back to "In Progress".
+pub async fn mark_finished(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        INSERT INTO reading_progress (book_id, progress_percent)
+        VALUES (?1, 100)
+        ON CONFLICT(book_id) DO UPDATE SET
+            progress_percent = 100,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        "#,
+    )
+    .bind(book_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +217,46 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Database(_)), "got: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn mark_finished_sets_100_and_preserves_position() {
+        let (_tmp, pool, book_id) = pool_with_book().await;
+        upsert_progress(
+            &pool,
+            book_id,
+            &ProgressUpdate {
+                chapter_href: Some("c3.xhtml".into()),
+                cfi: Some("epubcfi(/6/6!/4/2,/1:0,/1:30)".into()),
+                character_offset: None,
+                page_number: None,
+                scroll_offset: None,
+                progress_percent: Some(71.0),
+            },
+        )
+        .await
+        .unwrap();
+
+        mark_finished(&pool, book_id).await.unwrap();
+        let progress = get_progress(&pool, book_id).await.unwrap().unwrap();
+        assert_eq!(progress.progress_percent, Some(100.0));
+        // The stored reading position survives the "finished" flag, so
+        // reopening the book still resumes where reading stopped.
+        assert_eq!(progress.chapter_href.as_deref(), Some("c3.xhtml"));
+        assert_eq!(
+            progress.cfi.as_deref(),
+            Some("epubcfi(/6/6!/4/2,/1:0,/1:30)")
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_finished_creates_row_for_unread_book() {
+        let (_tmp, pool, book_id) = pool_with_book().await;
+        assert!(get_progress(&pool, book_id).await.unwrap().is_none());
+
+        mark_finished(&pool, book_id).await.unwrap();
+        let progress = get_progress(&pool, book_id).await.unwrap().unwrap();
+        assert_eq!(progress.progress_percent, Some(100.0));
+        assert_eq!(progress.chapter_href, None);
     }
 }
