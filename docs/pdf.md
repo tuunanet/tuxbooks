@@ -142,6 +142,11 @@ interleaved paint loops on shared canvas state produced mirrored page
 fragments under fast scrollbar drags on WebKitGTK). Page render failures
 show a per-slot error with Retry; a page failure never breaks the document.
 
+This pipeline is budgeted in pixels and bytes (canvas caps, cache
+occupancy, live-canvas memory) — the contracts and their verification live
+in `docs/performance.md`. Check them before changing rendering,
+virtualization, or cache policy.
+
 ### Thumbnails sidebar (`PdfSidebar`)
 
 The same virtualization policy at low resolution. The sidebar reuses the

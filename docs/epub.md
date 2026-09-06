@@ -87,6 +87,10 @@ to zero width (blank reader). `EpubReader` therefore schedules one
 the paginator layout with real geometry. It is consumed only through the
 engine seam.
 
+EPUB rendering is budgeted too (relocation debounce, per-turn raster
+volume) — the contracts and their verification live in
+`docs/performance.md`.
+
 ### Vendored submodule
 
 A fresh clone needs `git submodule update --init` (pnpm install does not

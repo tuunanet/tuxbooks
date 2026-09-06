@@ -80,6 +80,10 @@ read the relevant doc before touching that layer:
 - Readers: single-module engine seams, position/persistence invariants,
   pinned DOM attributes, vendored foliate-js — `docs/epub.md`,
   `docs/pdf.md`.
+- Performance: reader rendering is budgeted in pixels and bytes, not
+  element counts — canvas caps, cache occupancy, compositing hygiene,
+  scroll-commit discipline. Budgets are gates, not suggestions —
+  `docs/performance.md`.
 
 ## Testing rules
 
@@ -137,6 +141,8 @@ Read the one that fits the task; each is short.
 - `docs/build.md` — build flavors, `frontend/dist`, dev environment.
 - `docs/database.md` — schema, migrations, FTS5.
 - `docs/epub.md` / `docs/pdf.md` — reader layer contracts.
+- `docs/performance.md` — reader performance budgets/metrics and how each
+  is verified; check it before touching reader rendering.
 - `docs/testing.md` — test layers and E2E infrastructure.
 - `docs/coverage.md` — per-category coverage floors and what is excluded.
 - `docs/release.md` — packaging, the deb gate, and cutting releases.
