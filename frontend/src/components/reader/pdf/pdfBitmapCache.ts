@@ -9,13 +9,23 @@
  *
  * The cache is bounded twice over — a byte budget and an entry count — so
  * memory stays flat on any document (§ memory: avoid unbounded caches).
- * Entries are keyed by page and matched against the render scale, so a
- * zoom change naturally misses; explicit invalidation happens when the
- * reader zooms (new scales everywhere) and when the document is swapped.
+ * Entries are keyed by page and matched against the render scale and the
+ * effective render ratio (pdfRenderPolicy), so a zoom change naturally
+ * misses and a resize across monitors with a different devicePixelRatio
+ * never serves a stale low-ratio bitmap (a miss just re-renders once);
+ * explicit invalidation happens when the reader zooms and when the document
+ * is swapped.
  */
 
-/** Total pixel-buffer bytes the cache may hold (RGBA, 4 bytes per pixel). */
-const DEFAULT_BUDGET_BYTES = 48 * 1024 * 1024;
+/**
+ * Total pixel-buffer bytes the cache may hold (RGBA, 4 bytes per pixel).
+ * Sized against capped 4K page buffers (PERF-1 keeps each ≤ 2²⁵ px) at BOTH
+ * reference device pixel ratios: at dpr 2 a capped 4K buffer is the full
+ * 2²⁵ px ≈ 134 MB, so ≥ 2 retained buffers (PERF-3) needs ≥ 268 MB — the
+ * earlier 192 MB flat budget silently degenerated to a single entry at
+ * dpr 2. 320 MB holds two dpr-2 buffers with recency headroom.
+ */
+const DEFAULT_BUDGET_BYTES = 320 * 1024 * 1024;
 
 /** Hard cap on cached pages regardless of byte size. */
 const DEFAULT_MAX_ENTRIES = 8;
@@ -24,6 +34,12 @@ export interface PdfBitmap {
   readonly pageNumber: number;
   /** The PDF.js render scale the buffer was rasterized at. */
   readonly scale: number;
+  /**
+   * The effective render ratio (pdfRenderPolicy) the buffer was rasterized
+   * at — exact-match keying, like `scale`, so a monitor change never
+   * serves a buffer rendered for another devicePixelRatio.
+   */
+  readonly ratio: number;
   /** Offscreen (detached) canvas holding the rendered page pixels. */
   readonly buffer: HTMLCanvasElement;
 }
@@ -44,12 +60,12 @@ export class PdfBitmapCache {
   }
 
   /**
-   * The cached bitmap for a page rendered at exactly `scale`, or null.
-   * A successful lookup refreshes the entry's recency.
+   * The cached bitmap for a page rendered at exactly `scale` and `ratio`,
+   * or null. A successful lookup refreshes the entry's recency.
    */
-  get(pageNumber: number, scale: number): PdfBitmap | null {
+  get(pageNumber: number, scale: number, ratio: number): PdfBitmap | null {
     const hit = this.#entries.get(pageNumber);
-    if (!hit || hit.scale !== scale) return null;
+    if (!hit || hit.scale !== scale || hit.ratio !== ratio) return null;
     this.#entries.delete(pageNumber);
     this.#entries.set(pageNumber, hit);
     return hit;

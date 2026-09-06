@@ -27,6 +27,12 @@ import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfToolbar } from "./PdfToolbar";
 import { PdfBitmapCache } from "./pdfBitmapCache";
+import {
+  MAX_ACTIVE_CANVAS_BYTES,
+  capByBytes,
+  effectiveRenderRatio,
+  renderBufferBytes,
+} from "./pdfRenderPolicy";
 import { displayedSizes, layoutSlots } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
 import type { ReaderSearchGroup } from "../searchModel";
@@ -36,7 +42,12 @@ import type { Book } from "@/types/domain";
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2] as const;
 const DEFAULT_ZOOM_INDEX = 2;
 
-/** Upper bound on simultaneously active page canvases (the render budget). */
+/**
+ * Count fallback for simultaneously active page canvases. The primary
+ * render budget is bytes (MAX_ACTIVE_CANVAS_BYTES, pdfRenderPolicy) — at
+ * reference 4K conditions only a few page-sized buffers fit, while at
+ * smaller window sizes the byte budget is inert and this cap governs.
+ */
 const MAX_ACTIVE_CANVASES = 8;
 
 /**
@@ -142,8 +153,42 @@ export function PdfReader({
   // The reference page is page 1; wider pages in mixed documents overflow
   // horizontally instead of shrinking the fit reference.
   const referencePageWidth = sizes?.[0]?.width ?? 0;
-  const { scale: fitScale, contentAreaRef } = useFitWidthScale(referencePageWidth);
+  const { scale: fitScale, contentAreaRef: registerContentArea } =
+    useFitWidthScale(referencePageWidth);
   const scale = fitScale * zoom;
+
+  // PERF-11 diagnostics (docs/performance.md): the reader publishes one
+  // deterministic attribute snapshotting the geometry that drives every
+  // raster budget — device pixel ratio, content width (the fit-width
+  // input), viewport height, and the layout scale. It is refreshed when
+  // the fit scale settles or changes (fit measurement lands an
+  // effect-tick after mount) and is the baseline signal the 4K
+  // investigation records; E2E may assert its shape, never a timing.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const contentAreaElementRef = useRef<HTMLDivElement | null>(null);
+  const contentAreaRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      contentAreaElementRef.current = element;
+      registerContentArea(element);
+    },
+    [registerContentArea],
+  );
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const area = contentAreaElementRef.current;
+    const dpr = window.devicePixelRatio || 1;
+    root.setAttribute(
+      "data-pdf-render-info",
+      `dpr:${dpr};w:${area?.clientWidth ?? 0};h:${window.innerHeight};scale:${Math.round(scale * 100) / 100}`,
+    );
+  }, [scale]);
+  // The WebKitGTK version rides in the UA string; paired with the Rust
+  // startup log of the GPU-stack env vars (lib.rs setup) this is the
+  // environment record docs/research/performance-4k.md calls for.
+  useEffect(() => {
+    console.info(`[pdf] webview: ${navigator.userAgent}`);
+  }, []);
 
   // Initialization sequence (§ lifecycle): DOCUMENT_READY → LAYOUT_READY →
   // POSITION_RESTORED → INTERACTIVE. The document surface renders only once
@@ -356,10 +401,12 @@ export function PdfReader({
   //   4. a superseded in-flight render is simply unmounted (cancelled).
   //
   // Completed canvases stay mounted while their page remains inside the
-  // virtualization window (anchor ∪ visible ∪ preload), bounded by
-  // MAX_ACTIVE_CANVASES; on eviction the pixels move into the per-document
-  // bitmap cache, so re-entry blits instead of re-rendering. Distant pages
-  // keep only their geometry slots.
+  // virtualization window (anchor ∪ visible ∪ preload), bounded first by
+  // the byte budget (MAX_ACTIVE_CANVAS_BYTES — at 4K only the closest few
+  // page-sized buffers fit) and then by the MAX_ACTIVE_CANVASES count
+  // fallback; on eviction the pixels move into the per-document bitmap
+  // cache, so re-entry blits instead of re-rendering. Distant pages keep
+  // only their geometry slots.
   const renderOrder = useMemo(() => {
     const active = [...new Set([currentPage, ...visiblePages])].sort(
       (a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage),
@@ -368,8 +415,19 @@ export function PdfReader({
       .sort((a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage))
       .find((page) => !active.includes(page));
     if (preloaded !== undefined) active.push(preloaded);
-    return active.slice(0, MAX_ACTIVE_CANVASES);
-  }, [currentPage, visiblePages, preloadPages]);
+    // PERF-4: slice by each slot's capped buffer bytes (CSS size ×
+    // effective ratio² × 4, Phase 1's policy) before the count fallback.
+    // The anchor survives any budget (capByBytes keeps the first page).
+    const slotsByPage = new Map(slots.map((slot) => [slot.pageNumber, slot]));
+    const dpr = window.devicePixelRatio || 1;
+    const bufferBytes = (page: number): number => {
+      const slot = slotsByPage.get(page);
+      if (!slot) return 0;
+      const ratio = effectiveRenderRatio(slot.width / scale, slot.height / scale, scale, dpr);
+      return renderBufferBytes(slot.width, slot.height, ratio);
+    };
+    return capByBytes(active, bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(0, MAX_ACTIVE_CANVASES);
+  }, [currentPage, visiblePages, preloadPages, slots, scale]);
 
   // The render set, derived purely from the priority order and the
   // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
@@ -616,6 +674,7 @@ export function PdfReader({
 
   return (
     <div
+      ref={rootRef}
       data-testid="pdf-reader"
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}

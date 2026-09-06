@@ -214,7 +214,9 @@ describe("tuxbooks continuous PDF reader", () => {
 
     // Milestone 9 memory bound: after the stress, cache occupancy as
     // reported by the diagnostics attribute stays within its configured
-    // budget (8 entries / 48 MiB — mirroring PdfBitmapCache's defaults).
+    // budget (8 entries / 320 MiB — mirroring PdfBitmapCache's defaults;
+    // sized for ≥ 2 capped 4K page buffers at BOTH reference dprs,
+    // docs/performance.md PERF-3).
     const cache = await bitmapCacheUsage();
     expect(cache).not.toBeNull();
     expect(cache!.entries).toBeLessThanOrEqual(8);
@@ -222,7 +224,7 @@ describe("tuxbooks continuous PDF reader", () => {
     // (oversized-keep-latest): at this point the reader sits at 150% zoom,
     // so one dpr-scaled page bitmap is the allowed excess.
     const onePage = await maxSingleBitmapBytes(1.5);
-    expect(cache!.bytes).toBeLessThanOrEqual(48 * 1024 * 1024 + onePage);
+    expect(cache!.bytes).toBeLessThanOrEqual(320 * 1024 * 1024 + onePage);
 
     await returnToLibrary();
   });

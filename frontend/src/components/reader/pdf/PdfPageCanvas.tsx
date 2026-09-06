@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import { isRenderingCancelled, type PdfDocument, type PdfRenderTask } from "@/lib/pdf/pdfEngine";
+import { effectiveRenderRatio } from "./pdfRenderPolicy";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 
 interface PdfPageCanvasProps {
   document: PdfDocument;
   pageNumber: number;
-  /** Displayed size in CSS pixels; the backing store is devicePixelRatio-aware. */
+  /**
+   * Displayed size in CSS pixels; the backing store is rendered at the
+   * effective ratio (pdfRenderPolicy) — dpr, capped by the PERF-1 pixel
+   * and dimension budgets, with CSS upscaling beyond the cap.
+   */
   width: number;
   height: number;
   /** PDF.js render scale (displayed pixels / page units). */
@@ -29,12 +34,18 @@ function blit(
   width: number,
   height: number,
 ): void {
-  canvas.width = buffer.width;
-  canvas.height = buffer.height;
+  // Reassigning width/height reallocates the backing store (and clears it);
+  // when the size is unchanged — a cache-hit blit, or a re-render at the
+  // same geometry — draw straight into the existing store instead.
+  if (canvas.width !== buffer.width) canvas.width = buffer.width;
+  if (canvas.height !== buffer.height) canvas.height = buffer.height;
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
 }
+
+/** How many recent render durations the diagnostics attribute retains. */
+const RENDER_MS_SAMPLE_COUNT = 5;
 
 /**
  * Imperative page renderer: draws one page into one canvas at a fixed size.
@@ -67,6 +78,16 @@ export function PdfPageCanvas({
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<PdfRenderTask | null>(null);
+  // PERF-2 signal (docs/performance.md): durations (ms) of the last renders
+  // published as a deterministic `data-pdf-render-ms` attribute — a
+  // diagnostic only, never asserted by timing in CI.
+  const renderMsRef = useRef<number[]>([]);
+
+  const publishRenderMs = (canvas: HTMLCanvasElement, ms: number) => {
+    const samples = [...renderMsRef.current, ms].slice(-RENDER_MS_SAMPLE_COUNT);
+    renderMsRef.current = samples;
+    canvas.setAttribute("data-pdf-render-ms", samples.map((value) => value.toFixed(1)).join(";"));
+  };
 
   const renderedRef = useRef(onPageRendered);
   useEffect(() => {
@@ -83,12 +104,20 @@ export function PdfPageCanvas({
 
     let cancelled = false;
 
-    // Fast path: a bitmap rendered at this scale is already retained from
-    // an earlier visit — blit it and report completion. No page request, no
-    // raster, no worker round-trip.
-    const cached = bitmapCache?.get(pageNumber, scale);
+    // Fast path: a bitmap rendered at this scale and ratio is already
+    // retained from an earlier visit — blit it and report completion. No
+    // page request, no raster, no worker round-trip.
+    const ratio = effectiveRenderRatio(
+      width / scale,
+      height / scale,
+      scale,
+      window.devicePixelRatio || 1,
+    );
+    const cached = bitmapCache?.get(pageNumber, scale, ratio);
     if (cached) {
+      const startedAt = performance.now();
       blit(canvas, cached.buffer, width, height);
+      publishRenderMs(canvas, performance.now() - startedAt);
       renderedRef.current?.(pageNumber);
       return;
     }
@@ -104,7 +133,6 @@ export function PdfPageCanvas({
       if (cancelled) return;
 
       const viewport = page.getViewport({ scale });
-      const ratio = window.devicePixelRatio || 1;
 
       const buffer = canvas.ownerDocument.createElement("canvas");
       buffer.width = Math.floor(viewport.width * ratio);
@@ -113,7 +141,11 @@ export function PdfPageCanvas({
       if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
       // PDF.js acquires the context from `canvas`; the transform maps
-      // viewport units onto device pixels.
+      // viewport units onto device pixels at the (possibly capped) ratio.
+      // Timed from the raster's start (the paint loop is time-sliced across
+      // the await) to the blit — the user-visible render→blit latency of
+      // PERF-2.
+      const startedAt = performance.now();
       const task = page.render({
         canvas: buffer,
         viewport,
@@ -124,8 +156,9 @@ export function PdfPageCanvas({
 
       // Checkpoint 2: only the current generation may touch the canvas.
       if (cancelled) return;
-      bitmapCache?.put({ pageNumber, scale, buffer });
+      bitmapCache?.put({ pageNumber, scale, ratio, buffer });
       blit(canvas, buffer, width, height);
+      publishRenderMs(canvas, performance.now() - startedAt);
 
       renderedRef.current?.(pageNumber);
     })().catch((err: unknown) => {
@@ -144,7 +177,10 @@ export function PdfPageCanvas({
       ref={canvasRef}
       data-testid={testId}
       data-pdf-page={pageNumber}
-      className="block rounded-sm border bg-white shadow-sm"
+      // PERF-6: no decorations here — the canvas is a page-sized layer and
+      // any filter/effect on it is per-frame compositing work. Page chrome
+      // lives on the cheap wrapper (PdfDocumentView).
+      className="block"
     />
   );
 }

@@ -10,7 +10,15 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import { epubFixture, largePdfFixture, mixedPdfFixture, pdfFixture, repoRoot } from "./fixtures.js";
+import {
+  benchEpubFixture,
+  benchPdfFixture,
+  epubFixture,
+  largePdfFixture,
+  mixedPdfFixture,
+  pdfFixture,
+  repoRoot,
+} from "./fixtures.js";
 
 /** Unique per invocation; the launcher sets it and workers inherit it. */
 process.env.E2E_RUN_ID ??= `${process.env.E2E_PHASE ?? "run"}-${new Date()
@@ -26,6 +34,7 @@ export const artifactsDir = path.join(repoRoot, "artifacts", "e2e", runId);
 export const scratchDir = path.join(os.tmpdir(), `tuxbooks-e2e-${runId}`);
 export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
+export const configDir = path.join(scratchDir, "config");
 
 export function killStaleProcesses(appBinary: string): void {
   // A crashed run can leave the app (which outlives tauri-driver) or the
@@ -70,6 +79,7 @@ export function prepareEnvironment(appBinary: string, seeded: boolean): void {
 
   rmSync(scratchDir, { recursive: true, force: true });
   mkdirSync(libraryDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
   mkdirSync(artifactsDir, { recursive: true });
 
   if (seeded) {
@@ -79,11 +89,25 @@ export function prepareEnvironment(appBinary: string, seeded: boolean): void {
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
   }
 
+  // The benchmark phase (just bench-reader) seeds only the real-book
+  // fixtures: the suite measures render/turn latency, and the synthetic
+  // fixtures would dilute it.
+  if (process.env.E2E_PHASE === "bench") {
+    copyFileSync(benchPdfFixture, path.join(libraryDir, "AI_Agents_and_Applications.pdf"));
+    copyFileSync(benchEpubFixture, path.join(libraryDir, "AI_Agents_and_Applications.epub"));
+  }
+
   // The app (spawned by tauri-driver) inherits these; production paths are
   // unaffected. Set before the service spawns the driver (config onPrepare
   // hooks run before service onPrepare hooks).
   process.env.TEST_DATABASE_PATH = databasePath;
   process.env.TEST_LIBRARY_PATH = libraryDir;
+  // Same isolation rule for the app-config dir: the window-state plugin
+  // would otherwise restore (and overwrite!) the real user's saved window
+  // geometry, making every window-derived expectation depend on whatever
+  // size the developer's last real session saved. A fresh config dir means
+  // the window starts at the tauri.conf.json default, deterministically.
+  process.env.XDG_CONFIG_HOME = configDir;
 }
 
 export function teardownEnvironment(): void {

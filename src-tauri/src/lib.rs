@@ -85,6 +85,20 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            // PERF-11 diagnostics (docs/performance.md): these WebKitGTK env
+            // vars silently drop the webview to software/slow paths (see
+            // docs/research/performance-4k.md). Shipped code must never set
+            // them; log their state once so a misconfigured machine is
+            // visible in startup output. The WebKitGTK version itself is
+            // logged frontend-side at reader mount (PdfReader).
+            println!(
+                "gpu-stack: WEBKIT_DISABLE_DMABUF_RENDERER={} WEBKIT_DISABLE_COMPOSITING_MODE={}",
+                std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER")
+                    .unwrap_or_else(|_| "<unset>".into()),
+                std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE")
+                    .unwrap_or_else(|_| "<unset>".into()),
+            );
+
             let db_path = resolve_db_path(app.handle())?;
             let pool = tauri::async_runtime::block_on(init_pool(&db_path)).map_err(|e| {
                 anyhow::anyhow!("failed to initialize database at {db_path:?}: {e}")

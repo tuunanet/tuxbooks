@@ -117,6 +117,18 @@ test-e2e-headed-empty:
 test-e2e-headed-seeded:
     env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
+# Reader performance benchmark (docs/performance.md "How to measure"):
+# MEASURES pdf render→blit and epub scrolled-flow latency on the real-book
+# Agents fixtures, starting mid-book, with the window MAXIMIZED on the real
+# display (explicit WxH argument overrides). Asserts only the deterministic
+# budgets (PERF-1/3/4) and writes artifacts/e2e/<runId>/bench-results.json.
+# HEADED and opt-in — never Xvfb, never CI (timing assertions are excluded
+# from CI by policy).
+_bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
+
+bench-reader WINDOW_SIZE="": build-debug
+    {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
+
 # Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.
 

@@ -146,6 +146,16 @@ export function makeFakeEpubModule() {
   return {
     EPUB_MIME_TYPE: "application/epub+zip",
     EPUB_FONT_FAMILIES: { serif: "serif-stack", sans: "sans-stack" },
+    EPUB_SCROLLED_SURFACE_MAX_PX: 777,
+    // Valid CSS colors: jsdom validates longhand values and drops duds.
+    epubThemeBackground: vi.fn(
+      (theme: string) =>
+        ({
+          light: "#fefefe",
+          paper: "#f6f0e4",
+          dark: "#0e0e10",
+        })[theme] ?? "#fefefe",
+    ),
     epubAppearanceCss: vi.fn(
       (appearance: { fontSize: number; lineHeight: number; theme: string }) =>
         `css:${appearance.theme}:${appearance.fontSize}:${appearance.lineHeight}`,

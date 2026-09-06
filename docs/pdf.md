@@ -76,8 +76,8 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
   estimate, then corrects pages lazily as they approach visibility
   (`measurePages`; corrections are idempotent per document).
 - `hooks/usePdfVirtualization` — an IntersectionObserver pair over the slot
-  elements (visible: no margin; preload: ±1 viewport height) feeds the
-  visible/preload page sets.
+  elements (visible: no margin; preload: a fixed ±1200 px ≈ one 1080p
+  viewport, bounded at any window size) feeds the visible/preload page sets.
 - `hooks/usePdfScrollTracking` — rAF-coalesced scroll sampling. Current
   page = the page containing the reading anchor (viewport top + 25% of the
   viewport height); also records the anchor's in-page fraction.
@@ -90,6 +90,10 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
 - `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an
   offset, clamping, scroll compensation, fit-width scale, thumbnail
   geometry); unit-tested without a browser.
+- `pdfRenderPolicy.ts` — pure render-budget math: the effective render
+  ratio per page (devicePixelRatio capped by the 2²⁵ px / 8192 px backing
+  store budgets, CSS upscales beyond — the official viewer's
+  `maxCanvasPixels` policy) and the byte cap over the live render window.
 - `pdfOutline.ts` — pure outline normalization: the engine's raw outline
   (named or explicit destinations, external-link entries) resolves to a
   tree of `{ title, page (1-based | null), items }`; unresolvable entries
@@ -124,17 +128,27 @@ never shares one.
    concurrency budget has room to spare.
 3. A superseded render is unmounted (cancelled); it never starts or blits.
 4. Completed canvases stay mounted while their page stays inside the
-   virtualization window (≤ 8, `MAX_ACTIVE_CANVASES`); distant pages keep
-   geometry-only slots and report `data-render-state="unloaded"`. The
+   virtualization window, bounded first by a byte budget
+   (256 MB, `MAX_ACTIVE_CANVAS_BYTES`) and then by the count fallback
+   (`MAX_ACTIVE_CANVASES`, 8): at 4K only the closest few page-sized
+   buffers fit, at smaller windows the byte budget is inert. Distant pages
+   keep geometry-only slots and report `data-render-state="unloaded"`. The
    rendered/failed page sets reset with the document, so a switched book
    can never inherit the previous book's render marks.
-5. On eviction the finished bitmap moves into a per-document LRU cache
-   (`pdfBitmapCache`, bounded by byte budget and entry count, keyed by
-   render scale, dropped on zoom and on document switch). A page that
-   re-enters the window blits its retained bitmap in one synchronous draw —
-   scrolling back across a heavy page never re-pays the raster. Cache
-   occupancy is exposed for diagnostics as `data-pdf-bitmap-cache`
-   (`entries:bytes`) on the reader element.
+5. Each page rasterizes into an offscreen buffer at the effective render
+   ratio (`pdfRenderPolicy.effectiveRenderRatio`), a two-tier ladder:
+   devicePixelRatio preferred, degrading to the 2²⁴ px soft budget, then to
+   CSS resolution (never blurrier than the layout while the hard budget
+   allows), and only under zoom into the hard 2²⁵ px / 8192 px per side
+   budget; the canvas CSS size stays at the displayed size and CSS
+   upscales beyond the ratio.
+6. On eviction the finished bitmap moves into a per-document LRU cache
+   (`pdfBitmapCache`, bounded by a 320 MB byte budget and entry count,
+   keyed by render scale and effective ratio, dropped on zoom and on
+   document switch). A page that re-enters the window blits its retained
+   bitmap in one synchronous draw — scrolling back across a heavy page
+   never re-pays the raster. Cache occupancy is exposed for diagnostics as
+   `data-pdf-bitmap-cache` (`entries:bytes`) on the reader element.
 
 Every render paints into a private offscreen buffer; the visible canvas is
 touched only by the atomic blit of a completed render (single-writer —
@@ -145,7 +159,11 @@ show a per-slot error with Retry; a page failure never breaks the document.
 This pipeline is budgeted in pixels and bytes (canvas caps, cache
 occupancy, live-canvas memory) — the contracts and their verification live
 in `docs/performance.md`. Check them before changing rendering,
-virtualization, or cache policy.
+virtualization, or cache policy. Startup diagnostics (PERF-11) are
+deterministic attributes on the reader element (`data-pdf-render-info`:
+dpr, content width, viewport height, fit scale; `data-pdf-render-ms` on
+each canvas: the last render→blit durations) plus a Rust-side startup log
+of the WebKitGTK GPU-stack env vars.
 
 ### Thumbnails sidebar (`PdfSidebar`)
 

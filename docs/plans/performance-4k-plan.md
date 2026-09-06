@@ -1,5 +1,13 @@
 # 4K scrolling performance — implementation plan
 
+> **Status (2026-09-06):** Phases 0–5 implemented and measured; Phase 6.1
+> and 7.1 remain manual items. Measured outcome: app pixel budgets are no
+> longer the smoothness limiter — the webview frame clock runs at ~31 fps
+> idle on the reference machine (environment-level, under investigation).
+> Findings, measurements, and the ordered next levers live in
+> `docs/research/reader-perf-bench-handover.md`; measurement tool:
+> `just bench-reader`.
+
 Concrete, ordered steps to fix the 4K jank diagnosed in
 `docs/performance-4k.md`. Each step is a self-contained, PR-sized chunk with
 its own tests and acceptance signal, and every budget touched maps to a row
@@ -40,7 +48,7 @@ devicePixelRatio 1.0 and 2.0, letter PDF page at fit-width zoom 100%
 
 - New `pdfRenderPolicy.ts` (or extend `pdfLayout.ts`, the pure-math home):
   `effectiveRenderRatio(width, height, scale, dpr, { maxPixels = 2**25,
-  maxDimension = 8192 })` returns
+maxDimension = 8192 })` returns
   `min(dpr, sqrt(maxPixels/(w·h·s²)), maxDimension/(w·s), maxDimension/(h·s))`,
   floored at a minimum of 1. The buffer is CSS size × ratio; the canvas
   CSS `width`/`height` stay at displayed size (CSS upscales beyond the cap,

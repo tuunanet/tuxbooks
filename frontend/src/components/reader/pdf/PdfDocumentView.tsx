@@ -121,7 +121,16 @@ export function PdfDocumentView({
               onRetry={onRetryPage ? () => onRetryPage(slot.pageNumber) : undefined}
             >
               {canvasPages.has(slot.pageNumber) ? (
-                <div className="relative" style={scaleCssProperties(scale)}>
+                // Page chrome (border, rounded clip, paper background) sits
+                // on this cheap wrapper, never on the page-sized canvas
+                // layer itself (PERF-6): a clip here is nearly free, while
+                // painted effects on the canvas would be re-composited every
+                // frame. Text/highlight overlays are positioned in this same
+                // wrapper, so the 1px border inset applies to all equally.
+                <div
+                  className="relative overflow-hidden rounded-sm border bg-white"
+                  style={scaleCssProperties(scale)}
+                >
                   <PdfPageCanvas
                     document={document}
                     pageNumber={slot.pageNumber}

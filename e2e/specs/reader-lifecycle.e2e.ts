@@ -22,9 +22,9 @@ import {
  * across specs, so nothing may assume a fresh book.
  */
 
-/** Mirrors PdfBitmapCache's configured bounds (48 MiB / 8 entries). */
+/** Mirrors PdfBitmapCache's configured bounds (320 MiB / 8 entries). */
 const CACHE_MAX_ENTRIES = 8;
-const CACHE_MAX_BYTES = 48 * 1024 * 1024;
+const CACHE_MAX_BYTES = 320 * 1024 * 1024;
 
 /** The bounded render budget's regression ceiling (matches pdf-reader spec). */
 const RENDER_BUDGET_LIMIT = 15;
@@ -117,9 +117,13 @@ describe("tuxbooks reader lifecycle hardening", () => {
 
       const memory = await pdfSurfaceMemory();
       expect(memory.pageCanvases).toBeLessThan(RENDER_BUDGET_LIMIT);
-      // Live canvases alone stay in the tens of megabytes even at dpr 1 —
-      // the render budget bounds them regardless of scroll distance.
-      expect(memory.pageBytes).toBeLessThan(64 * 1024 * 1024);
+      // Live canvases are bounded by the render policy: the count cap
+      // (MAX_ACTIVE_CANVASES, 8) × the largest single fit-width buffer at
+      // this session's geometry. (An absolute MB figure would depend on the
+      // window size the session runs at — the budget is policy, not a
+      // fixed byte count.)
+      const onePageBound = await maxSingleBitmapBytes(1);
+      expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePageBound);
 
       const cache = await bitmapCacheUsage();
       expect(cache).not.toBeNull();

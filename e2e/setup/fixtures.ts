@@ -20,3 +20,34 @@ export const seededBookTitles = {
   largePdf: "A Large Fixture",
   mixedPdf: "Odd Sizes",
 } as const;
+
+/**
+ * Real-book fixtures for the performance benchmark suite only
+ * (`just bench-reader`): image-laden pages and heavy EPUB sections make
+ * render/turn latency measurement meaningful in a way the synthetic
+ * fixtures deliberately are not. Never seeded by the CI phases.
+ */
+export const benchPdfFixture = path.join(
+  repoRoot,
+  "tests",
+  "fixtures",
+  "books",
+  "EBooks",
+  "Agents",
+  "AI_Agents_and_Applications.pdf",
+);
+export const benchEpubFixture = path.join(
+  repoRoot,
+  "tests",
+  "fixtures",
+  "books",
+  "EBooks",
+  "Agents",
+  "AI_Agents_and_Applications.epub",
+);
+
+/** Cards expose `aria-label="{title} ({FORMAT})"`; both books share a title. */
+export const benchBookTitles = {
+  pdf: "AI Agents and Applications (PDF)",
+  epub: "AI Agents and Applications (EPUB)",
+} as const;

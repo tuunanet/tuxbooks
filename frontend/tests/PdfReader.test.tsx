@@ -577,6 +577,33 @@ describe("PdfReader virtualization", () => {
     expect(slot(20)).toHaveAttribute("data-render-state", "unloaded");
   });
 
+  it("byte-budgets active canvases when slots are 4K-sized (PERF-4)", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
+    mockInvoke({
+      get_book_bytes: new ArrayBuffer(16),
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    // Emulate the 4K reference conditions (docs/performance.md): a ~3816px
+    // content area fits the letter page at ~6.2×, so each slot's capped
+    // buffer is ~75 MB and only ~3 fit the 256 MB live-canvas budget.
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 3816, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "3816"));
+
+    for (let page = 2; page <= 8; page++) {
+      fireVisible(slot(page) as Element, true);
+    }
+
+    // The count fallback would allow 8; the byte budget keeps the closest 3
+    // (anchor first) and the rest stay geometry-only slots.
+    await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3"]));
+    expect(slot(8)).toHaveAttribute("data-render-state", "unloaded");
+  });
+
   it("blits a cached bitmap on window re-entry instead of re-rendering", async () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);

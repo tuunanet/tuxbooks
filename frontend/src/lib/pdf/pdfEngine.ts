@@ -15,8 +15,7 @@ import { assemblePageText, type PdfTextItem } from "./pdfSearch";
  */
 
 let engine: Promise<typeof import("pdfjs-dist")> | null = null;
-let renderingCancelledException:
-  (typeof import("pdfjs-dist"))["RenderingCancelledException"] | undefined;
+let renderingCancelledExceptions: (new (message?: string) => unknown)[] | undefined;
 
 /**
  * Load PDF.js once. Concurrent callers share one in-flight import; a failure
@@ -29,7 +28,10 @@ function loadEngine(): Promise<typeof import("pdfjs-dist")> {
       // The worker must be configured before any document can open; the
       // only path to pdfjs goes through this resolved promise.
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-      renderingCancelledException = pdfjs.RenderingCancelledException;
+      // Render tasks reject with RenderingCancelledException; pdf.js v6's
+      // TextLayer instead rejects with the base AbortException. Both mean
+      // "aborted" — expected control flow, never an error.
+      renderingCancelledExceptions = [pdfjs.RenderingCancelledException, pdfjs.AbortException];
       return pdfjs;
     },
     (err: unknown) => {
@@ -50,12 +52,13 @@ export function pdfWorkerSrc(): string {
 }
 
 /**
- * True when a render failure is a cancellation (superseded render, page left
- * the virtualization window) rather than a real error. Renders only exist
- * once the engine has loaded, so the lazily captured class is always set.
+ * True when a failure is a cancellation (superseded render, page left the
+ * virtualization window, text-layer task cancelled) rather than a real
+ * error. Cancellation classes only exist once the engine has loaded, so the
+ * lazily captured list is always set by then.
  */
 export function isRenderingCancelled(error: unknown): boolean {
-  return renderingCancelledException !== undefined && error instanceof renderingCancelledException;
+  return renderingCancelledExceptions?.some((cls) => error instanceof cls) ?? false;
 }
 
 /**
@@ -120,6 +123,10 @@ export async function renderPdfTextLayer(
   const viewport = page.getViewport({ scale });
   const layer = new TextLayer({ textContentSource: textContent, container, viewport });
   void layer.render().catch((err: unknown) => {
+    // Cancellation is expected control flow (page superseded or unmounted
+    // mid-render — the same rule PdfPageCanvas applies); only real failures
+    // are worth a console warning.
+    if (isRenderingCancelled(err)) return;
     console.warn(`text layer render failed on page ${pageNumber}`, err);
   });
   return { cancel: () => layer.cancel() };

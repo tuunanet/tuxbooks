@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** How far ahead of the viewport pages are preloaded, in viewport heights. */
-const PRELOAD_ROOT_MARGIN = "100% 0px 100% 0px";
+/**
+ * How far ahead of the viewport pages are preloaded: a fixed ~one-1080p
+ * viewport on each side. Pixels, not viewport percentages — a relative
+ * margin (±1 viewport height) grows to ±2160 px on a 4K window and sends
+ * pages nobody is approaching through the render pipeline (PDF-4,
+ * docs/research/performance-4k.md); a fixed bound keeps the same feel at
+ * every window size.
+ */
+const PRELOAD_ROOT_MARGIN = "1200px 0px 1200px 0px";
 
 export interface PdfVirtualization {
   /** Callback ref for a page slot element; null on unregistration. */
@@ -15,11 +22,12 @@ export interface PdfVirtualization {
 /**
  * Visibility tracking for page slots. One observer pair watches the slot
  * elements themselves (never nested internals): the visible observer uses no
- * margin, the preload observer extends the root by one viewport height on
- * each side so approaching pages render just before they scroll in. The
- * observers use the implicit root, so they work regardless of which
- * ancestor element scrolls. State updates coalesce: a callback that does not
- * change either set re-reports the previous state and React skips the render.
+ * margin, the preload observer extends the root by a fixed ~one-1080p
+ * viewport (1200 px) on each side so approaching pages render just before
+ * they scroll in. The observers use the implicit root, so they work
+ * regardless of which ancestor element scrolls. State updates coalesce: a
+ * callback that does not change either set re-reports the previous state
+ * and React skips the render.
  */
 export function usePdfVirtualization(): PdfVirtualization {
   const [visiblePages, setVisiblePages] = useState<ReadonlySet<number>>(() => new Set());

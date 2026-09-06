@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
+  EPUB_SCROLLED_SURFACE_MAX_PX,
   EpubViewHandle,
   epubAppearanceCss,
+  epubThemeBackground,
   type EpubFlow,
   type EpubRelocateDetail,
   type EpubSectionProgress,
@@ -420,12 +422,20 @@ export function EpubReader({
     );
   }
 
+  // Bounded measure (PERF-12, docs/performance.md): in scrolled flow the
+  // paginator's section iframe spans the full host width, so the container
+  // caps it and centers the column; paginated flow keeps the engine's own
+  // grid cap (~two 720px columns) and no app-side cap. The root bridges the
+  // engine's theme background so the area beside the capped column is
+  // seamless with the reading surface in every theme.
+  const scrolled = preferences.layout === "scrolling";
   return (
     <div
       data-testid="epub-reader"
       data-epub-state={interactive ? "ready" : "loading"}
       data-layout={preferences.layout}
       className="h-full"
+      style={{ backgroundColor: epubThemeBackground(preferences.theme) }}
     >
       {!interactive && (
         <p
@@ -435,7 +445,14 @@ export function EpubReader({
           Loading {book.title}…
         </p>
       )}
-      <div ref={containerRef} className="h-full" />
+      <div
+        ref={containerRef}
+        className="h-full"
+        data-epub-measure={scrolled ? "capped" : "full"}
+        style={
+          scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : undefined
+        }
+      />
     </div>
   );
 }

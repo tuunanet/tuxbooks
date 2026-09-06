@@ -84,6 +84,27 @@ export interface EpubSearchCallbacks {
 /** Reflow layout of the reading surface. */
 export type EpubFlow = "paginated" | "scrolled";
 
+/**
+ * Inline-size cap for the reading surface in scrolled flow (PERF-12,
+ * docs/performance.md). The vendored paginator bounds the paginated spread
+ * itself (its `--_max-inline-size` grid caps the section iframe at about
+ * two 720px columns), but its scrolled flow stretches the section iframe
+ * across the full host width — at a maximized 4K-class window that is a
+ * ~2.7× wider composited surface than the ~720px text column it displays.
+ * `EpubReader` therefore caps its own container at this width in scrolled
+ * flow only; the engine re-renders through its ResizeObserver, and the
+ * shell around the cap is bridged to the engine's theme background.
+ */
+export const EPUB_SCROLLED_SURFACE_MAX_PX = 960;
+
+/**
+ * Background color the engine paints for a theme. Used outside the scrolled
+ * measure cap so the shell-to-engine boundary is seamless in every theme.
+ */
+export function epubThemeBackground(theme: EpubThemeName): string {
+  return THEME_COLORS[theme].background;
+}
+
 /** Visual themes match the reader shell's `ReaderTheme`. */
 export type EpubThemeName = "light" | "paper" | "dark";
 

@@ -157,6 +157,26 @@ Two isolated invocations per run:
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.
 
+### Benchmark suite (headed, opt-in)
+
+`just bench-reader [WxH]` runs `bench-reader.e2e.ts` — the one suite that
+MEASURES timing instead of asserting structure. It is excluded from
+`test:empty`/`test:seeded` and from CI by policy (headless timings are
+unreliable; `docs/performance.md` — E2E asserts deterministic attributes
+only), runs **headed on the real display with the window maximized**
+(explicit `WxH` overrides), and seeds only the real-book fixtures in
+`tests/fixtures/books/EBooks/Agents/`. Both scenarios start mid-book. The
+PDF scenario walks pages collecting `data-pdf-render-ms` (p50/p95 reported;
+PERF-1/3/4 budget checks asserted deterministically); then both readers get
+a **synthetic scrollbar drag** — continuous scroll deltas per ~16 ms tick,
+driven on the shell scroll container (PDF) or the engine's own scroller via
+the paginator's public `scrollBy` (EPUB, switched to continuous layout
+through the appearance popover; PERF-7 untouched) — while a rAF sampler
+records frame intervals, the direct measure of scroll unsmoothness.
+Results land in `artifacts/e2e/<runId>/bench-results.json` plus a stdout
+summary. Keep the benchmark window unobstructed while it runs: WebKitGTK
+suspends rAF for occluded views, which would zero the frame samples.
+
 ### Headless on Linux (Xvfb)
 
 On Linux the justfile wraps every phase in

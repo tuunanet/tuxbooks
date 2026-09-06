@@ -117,6 +117,16 @@ else depends on its types and on `EpubViewHandle`:
   font size, optional serif/sans override, line spacing, theme colors) into
   every section document, user-`!important` over publisher styles.
 
+Bounded measure (PERF-12): the paginator's paginated grid caps its spread
+itself (`--_max-inline-size` 720 px, ≤ 2 columns — engine-internal, the app
+sets nothing), but its **scrolled** flow stretches the section iframe across
+the full host width. `EpubReader` therefore caps its container at
+`EPUB_SCROLLED_SURFACE_MAX_PX` (960) and centers it in scrolled flow only,
+exposing `data-epub-measure="capped" | "full"` for E2E; the reader root is
+bridged to the engine's theme background (`epubThemeBackground`) so the
+shell area beside the capped column is seamless in every theme. The engine
+re-renders on the resize through its own ResizeObserver.
+
 Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
 POSITION_RESTORED → INTERACTIVE), `epub/hooks/useEpubDocument` owns
 the engine lifetime (a book switch drops the previous handle and detaches its

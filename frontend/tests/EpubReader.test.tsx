@@ -13,6 +13,7 @@ import { EpubReader } from "@/components/reader/EpubReader";
 import type { ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
+import { useReader, type ReaderPreferences } from "@/state/readerState";
 import { invokeMock, mockInvoke } from "./mocks/tauri";
 import { emitSearchResults, fakeEpubHandles, lastFakeHandle } from "./mocks/epubEngine";
 import { makeAnnotation } from "./factories";
@@ -90,6 +91,34 @@ function mockHappyPath(saved: typeof SAVED_PROGRESS | null) {
     get_reading_progress: saved,
     save_reading_progress: null,
   });
+}
+
+/**
+ * Button that patches reader preferences through the real provider state —
+ * event-driven, so tests never setState synchronously inside effects.
+ */
+function PreferenceProbe({ label, patch }: { label: string; patch: Partial<ReaderPreferences> }) {
+  const { setPreferences } = useReader();
+  return (
+    <button type="button" onClick={() => setPreferences(patch)}>
+      {label}
+    </button>
+  );
+}
+
+function renderReaderWithProbe(label: string, patch: Partial<ReaderPreferences>) {
+  render(
+    <ShortcutProvider>
+      <ReaderProvider>
+        <PreferenceProbe label={label} patch={patch} />
+        <EpubReader book={makeBookShim()} />
+      </ReaderProvider>
+    </ShortcutProvider>,
+  );
+}
+
+async function clickProbe(label: string): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: label }));
 }
 
 describe("EpubReader lifecycle", () => {
@@ -229,6 +258,52 @@ describe("EpubReader appearance and navigation", () => {
     await waitFor(() => expect(handle.setFlow).toHaveBeenCalled());
     expect(handle.setFlow).toHaveBeenCalledWith("paginated");
     expect(handle.setAppearance).toHaveBeenCalledWith("css:light:17:1.6");
+  });
+
+  it("leaves the paginated reading surface uncapped (engine grid bounds it)", async () => {
+    mockHappyPath(null);
+
+    renderReader();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    const surface = screen.getByTestId("epub-reader").querySelector("[data-epub-measure]");
+    expect(surface).not.toBeNull();
+    expect(surface).toHaveAttribute("data-epub-measure", "full");
+    // No app-side width cap in paginated flow — the vendored paginator's
+    // grid already bounds the section iframe (~two 720px columns).
+    expect((surface as HTMLElement).style.maxWidth).toBe("");
+  });
+
+  it("caps and centers the scrolled reading surface at the seam constant", async () => {
+    mockHappyPath(null);
+
+    renderReaderWithProbe("probe-scrolling", { layout: "scrolling" });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    await clickProbe("probe-scrolling");
+
+    const surface = screen.getByTestId("epub-reader").querySelector("[data-epub-measure]")!;
+    expect(surface).toHaveAttribute("data-epub-measure", "capped");
+    expect((surface as HTMLElement).style.maxWidth).toBe("777px");
+    expect((surface as HTMLElement).style.marginInline).toBe("auto");
+  });
+
+  it("bridges the engine theme background on the reader root", async () => {
+    mockHappyPath(null);
+
+    renderReaderWithProbe("probe-paper", { theme: "paper" });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // Root background follows the engine's theme colors (mocked here) so
+    // the shell area beside the capped column is seamless.
+    expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("rgb(254, 254, 254)");
+    await clickProbe("probe-paper");
+    expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("rgb(246, 240, 228)");
   });
 
   it("drives engine page turns from keyboard shortcuts", async () => {
