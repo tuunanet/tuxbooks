@@ -6,12 +6,12 @@
     <title>TuxBooks — a local-first ebook library for Linux</title>
     <meta
       name="description"
-      content="TuxBooks is a local-first, bookshelf-style desktop ebook library and reader for EPUB and PDF. No accounts, no cloud, no network services. Built with Rust + Tauri."
+      content="TuxBooks is a local-first, bookshelf-style desktop ebook library and reader for EPUB and PDF. Your library lives on your machine."
     />
     <meta property="og:title" content="TuxBooks — a local-first ebook library for Linux" />
     <meta
       property="og:description"
-      content="A fast, native-feeling personal library for local EPUB and PDF files. No accounts, no cloud, no network services."
+      content="A fast, native-feeling personal library for your local EPUB and PDF files."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://tuxbooks.github.io/" />
@@ -53,7 +53,7 @@
           <p class="lede">
             TuxBooks is a local-first, bookshelf-style ebook library and reader for Linux. Point it
             at a folder of EPUB and PDF files &mdash; it indexes your library, remembers where you
-            stopped reading, and stays completely offline.
+            stopped reading, and keeps everything on your machine.
           </p>
           <p class="hero-cta">
             <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks/releases"
@@ -64,7 +64,7 @@
             >
           </p>
           <p class="hero-note">
-            Free software under GPL&#8209;3.0 &middot; Rust + Tauri &middot; React + TypeScript
+            Free software under GPL&#8209;3.0 &middot; Local-first
           </p>
           <div class="spines" aria-hidden="true">
             <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
@@ -77,29 +77,9 @@
         <div class="wrap">
           <h2>A library that stays yours</h2>
           <p class="section-lede">
-            No accounts, no cloud sync, no telemetry. Your books and reading data never leave your
-            machine.
+            TuxBooks is local-first: your library and reading data live on your machine.
           </p>
           <div class="grid">
-            <article class="card">
-              <div class="card-icon" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                </svg>
-              </div>
-              <h3>Local-first by design</h3>
-              <p>
-                Books, metadata, and reading progress live in a local SQLite database. No cloud
-                services, no external databases, no network dependencies.
-              </p>
-            </article>
             <article class="card">
               <div class="card-icon" aria-hidden="true">
                 <svg
@@ -114,10 +94,11 @@
                   <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                 </svg>
               </div>
-              <h3>Bookshelf library</h3>
+              <h3>A real bookshelf</h3>
               <p>
-                Point it at a folder of EPUB and PDF files. TuxBooks indexes metadata and covers
-                into a searchable library with collections and reading progress.
+                Point TuxBooks at a folder of EPUB and PDF files and every book shows up with its
+                cover and details. Group books into collections, and keep an eye on what you are
+                reading and what you have finished.
               </p>
             </article>
             <article class="card">
@@ -135,10 +116,9 @@
                   <path d="M8 13h8M8 17h5" />
                 </svg>
               </div>
-              <h3>Serious PDF reader</h3>
+              <h3>Readers for EPUB and PDF</h3>
               <p>
-                Continuous scrolling with virtualized page rendering, zoom, mixed page sizes,
-                per-page error recovery, and position persistence.
+                Choose your font, text size, and line spacing, and read in light or dark.
               </p>
             </article>
             <article class="card">
@@ -156,8 +136,8 @@
               </div>
               <h3>Pick up where you left off</h3>
               <p>
-                Reading position is persisted per book and restored when you return &mdash; close
-                the app mid-chapter, come back to the same spot.
+                Every book remembers your place. Close the app mid-chapter, come back tomorrow, and
+                you are on the same page &mdash; in EPUB and PDF alike.
               </p>
             </article>
             <article class="card">
@@ -170,14 +150,14 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <path d="M8 21h8M12 17v4" />
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="M21 21l-4.35-4.35" />
                 </svg>
               </div>
-              <h3>Native desktop feel</h3>
+              <h3>Find any book, any passage</h3>
               <p>
-                Built with Tauri 2 and a Rust core: a small, fast binary that behaves like a real
-                desktop application on Linux, not a web page in a box.
+                Search your whole library from anywhere with one keystroke, or search inside the
+                book you are reading and jump straight to the match.
               </p>
             </article>
             <article class="card">
@@ -190,14 +170,14 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                  <path d="M22 4L12 14.01l-3-3" />
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                 </svg>
               </div>
-              <h3>Engineered to last</h3>
+              <h3>Bookmarks, highlights &amp; notes</h3>
               <p>
-                Strict TypeScript, a layered Rust domain, and a real test pyramid &mdash; unit,
-                property, frontend, and headless real-app desktop E2E tests.
+                Mark a passage in any book: bookmark the page, highlight a line in color, attach a
+                note. All of it is waiting in the sidebar next time you open the book.
               </p>
             </article>
           </div>
@@ -250,117 +230,108 @@
         <div class="wrap wrap--narrow">
           <h2>Roadmap</h2>
           <p class="section-lede">
-            Incremental development: one coherent subsystem at a time, each milestone shipped with
-            tests. The full plan lives in
+            TuxBooks grows one coherent step at a time, newest first. The full plan lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Foundation</h3>
+            <li class="mile milestone--now">
+              <span class="mile-status">Current</span>
+              <h3>Milestone 11 &middot; Installable releases</h3>
               <p>
-                Tauri 2 app, Rust domain/service/repository layers, SQLite persistence, local
-                library import, and a production PDF reader &mdash; continuous scrolling,
-                virtualized rendering, zoom, and reading-position persistence &mdash; backed by
-                unit, property, frontend, and headless desktop E2E tests.
+                Ready-to-install Linux packages: a .deb for Ubuntu and a portable AppImage for
+                everything else, built and published automatically for every release.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 1 &middot; Production EPUB reader</h3>
+              <h3>Milestone 10 &middot; Collections &amp; library polish</h3>
               <p>
-                A real EPUB reading experience on the vendored foliate-js engine: chapter rendering,
-                table of contents, navigation, configurable typography and themes, and stable CFI
-                document locators so you reopen the book exactly where you stopped &mdash; pinned by
-                EPUB unit, frontend, and desktop E2E tests.
+                Collections, In Progress and Finished sections, adding books by file or folder,
+                finding a book on disk from the app, and a window that reopens where you left it.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 2 &middot; PDF navigation</h3>
+              <h3>Milestone 9 &middot; Speed &amp; stability</h3>
               <p>
-                Virtualized page thumbnails and a clickable outline, so large PDFs can be navigated
-                without endless scrolling.
+                Flipping pages quickly, jumping between chapters, and reading very large books all
+                stay smooth and reliable.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 3 &middot; Filesystem watcher &amp; reconciliation</h3>
+              <h3>Milestone 8 &middot; One consistent reading experience</h3>
               <p>
-                The library stays in sync with your files &mdash; additions, moves, renames,
-                deletions. Missing books can be reconnected without losing metadata or progress.
+                Both readers now behave the same way: progress, navigation, and search work
+                identically whether your book is EPUB or PDF.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 4 &middot; Covers &amp; artwork pipeline</h3>
+              <h3>Milestone 7 &middot; Fix your book details</h3>
               <p>
-                Cached cover art for every book &mdash; extracted from EPUBs, rendered from PDF
-                first pages &mdash; for a polished bookshelf.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 5 &middot; Search</h3>
-              <p>
-                Library-wide search with a global shortcut, plus in-book text search for EPUB and
-                PDF.
+                Correct wrong titles, authors, series, and covers from inside the app. Your original
+                files are never modified, and you can always reset to what the file says.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
               <h3>Milestone 6 &middot; Bookmarks, highlights &amp; notes</h3>
               <p>
-                Persistent reading annotations for both formats &mdash; bookmarks, color highlights,
-                and attached notes stored as stable document locators, not UI coordinates &mdash;
-                created in the reader and revisited from the navigation drawer.
+                Bookmark pages, highlight passages in color, and attach notes &mdash; in both EPUB
+                and PDF. Everything is still there when you come back.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 7 &middot; Metadata &amp; library curation</h3>
+              <h3>Milestone 5 &middot; Search</h3>
               <p>
-                Correct messy metadata with library-level overrides while source files stay
-                untouched &mdash; multiple authors, subjects, and series as first-class rows, plus
-                reset-to-source for every field.
+                Search your entire library from anywhere, and search inside the book you are reading
+                &mdash; EPUB and PDF alike.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 8 &middot; Unified reader model</h3>
+              <h3>Milestone 4 &middot; Cover art</h3>
               <p>
-                A shared ReaderShell for position, progress, navigation, and persistence, with
-                dedicated EPUB and PDF adapters underneath.
+                Every book gets its cover &mdash; taken from the EPUB or rendered from the PDF's
+                first page &mdash; so the shelf looks like a shelf.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 9 &middot; Reliability &amp; performance hardening</h3>
+              <h3>Milestone 3 &middot; The shelf stays in sync</h3>
               <p>
-                Stress-tested reader interactions, bounded memory, and safe async lifecycle under
-                rapid navigation.
+                Add, move, rename, or delete book files and the library follows &mdash; without
+                losing your progress or details.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 10 &middot; UX polish</h3>
+              <h3>Milestone 2 &middot; PDF navigation</h3>
+              <p>Page thumbnails and a clickable outline keep long PDFs easy to navigate.</p>
+            </li>
+            <li class="mile milestone--done">
+              <span class="mile-status">Shipped</span>
+              <h3>Milestone 1 &middot; EPUB reader</h3>
               <p>
-                Real collections, In Progress / Finished sections, file &amp; folder import,
-                file-manager reveal, and window-state restore &mdash; no dead ends left.
+                A real EPUB reading experience: chapters, a table of contents, adjustable fonts and
+                themes &mdash; and books reopen exactly where you stopped.
               </p>
             </li>
-            <li class="mile milestone--now">
-              <span class="mile-status">Current</span>
-              <h3>Milestone 11 &middot; Release &amp; distribution</h3>
+            <li class="mile milestone--done">
+              <span class="mile-status">Shipped</span>
+              <h3>Foundation</h3>
               <p>
-                Linux packaging (AppImage / deb), release automation, and distributable artifacts
-                built by CI.
+                The beginning: a native Linux app with your own book library &mdash; import a folder
+                of books, browse it with covers and details, and read PDFs with smooth scrolling and
+                zoom.
               </p>
             </li>
           </ol>
           <p class="principles">
-            One subsystem at a time &middot; Tests are part of the feature &middot; Real desktop E2E
-            &middot; Local-first &middot; No fake persistence
+            Free software under GPL&#8209;3.0 &middot; Local-first &middot; Private by default
+            &middot; One milestone at a time
           </p>
         </div>
       </section>
