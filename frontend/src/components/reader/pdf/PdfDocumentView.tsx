@@ -85,7 +85,12 @@ export function PdfDocumentView({
     <div
       ref={contentAreaRef}
       data-testid="pdf-content-area"
-      className="flex min-h-0 w-full justify-center overflow-x-auto"
+      // No self-scrolling: the shell scroller (reader-content) owns both
+      // axes. An overflow here gives the area its own scrollbars, whose
+      // width feeds back into useFitWidthScale's measurement — the fit
+      // scale then oscillates and re-anchoring yanks the viewport
+      // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
+      className="flex min-h-0 w-full justify-center"
     >
       <div
         ref={documentRef}

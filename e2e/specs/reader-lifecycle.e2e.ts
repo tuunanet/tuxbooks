@@ -186,7 +186,14 @@ describe("tuxbooks reader lifecycle hardening", () => {
   });
 
   it("keeps the current page rendered through window resizes", async () => {
-    const original = await browser.getWindowSize();
+    // chromedriver 152 dropped the legacy CDP window commands wdio's
+    // getWindowSize/setWindowSize fall back to; window geometry goes
+    // through the service's main-process execute instead.
+    const original = await browser.electron.execute((electron) => {
+      const win = electron.BrowserWindow.getAllWindows()[0];
+      const bounds = win.getBounds();
+      return { width: bounds.width, height: bounds.height };
+    });
     try {
       await openLargePdf();
       await scrollToSlot(30);
@@ -196,7 +203,14 @@ describe("tuxbooks reader lifecycle hardening", () => {
       // Shrink within the window's minimum bounds: fit-width recomputes,
       // the anchor re-lands by fraction, and page 30 (or its immediate
       // neighbor — the anchor is a fraction into the page) renders again.
-      await browser.setWindowSize(860, 600);
+      await browser.electron.execute((electron) => {
+        electron.BrowserWindow.getAllWindows()[0].setBounds({
+          x: 10,
+          y: 10,
+          width: 860,
+          height: 600,
+        });
+      });
       await browser.waitUntil(
         async () => {
           const page = await currentPageNumber();
@@ -210,7 +224,14 @@ describe("tuxbooks reader lifecycle hardening", () => {
       expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);
     } finally {
       // The session is shared by every spec: restore the initial geometry.
-      await browser.setWindowSize(original.width, original.height);
+      await browser.electron.execute((electron, size) => {
+        electron.BrowserWindow.getAllWindows()[0].setBounds({
+          x: 10,
+          y: 10,
+          width: size.width,
+          height: size.height,
+        });
+      }, original);
     }
     await returnToLibrary();
   });

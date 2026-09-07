@@ -75,13 +75,64 @@ test-parallel:
         'rust: just test-rust' \
         'frontend: just test-frontend'
 
-# E2E: returns with the Electron driver migration (docs/electron-migration.md
-# phase 1+). The WebdriverIO suites still target tauri-driver/WebKitGTK and
-# are being re-anchored to the Electron binary.
-test-e2e:
-    #!/usr/bin/env bash
-    echo "E2E is being re-anchored to Electron (docs/electron-migration.md); not runnable yet." >&2
-    exit 1
+# Build the app the E2E suite runs against: renderer bundle, Electron
+# main/preload bundles, and the debug sidecar. The Electron harness needs
+# no special frontend build (the old VITE_WDIO flag died with Tauri).
+build-debug:
+    pnpm --filter frontend build
+    node scripts/build-electron.mjs
+    cargo build --manifest-path src-tauri/Cargo.toml
+
+# E2E runs the real Electron app against WebdriverIO. Headless by default:
+# on Linux each phase runs under a private Xvfb. Unsetting WAYLAND_DISPLAY
+# alone is NOT enough on Wayland desktops — Chromium still finds the
+# compositor socket in XDG_RUNTIME_DIR — so ELECTRON_OZONE_PLATFORM_HINT=x11
+# pins the app to the virtual X display (same mechanism as the old
+# GDK_BACKEND=x11 for WebKitGTK). timeout is the last-resort guard so an
+# agent invocation always terminates; E2E_XVFB marks the watchdog to sweep
+# the phase's private Xvfb if teardown is killed.
+_e2e_timeout := if os() == "linux" { "timeout --kill-after=15 600" } else { "" }
+_x11 := if os() == "linux" { "env -u WAYLAND_DISPLAY ELECTRON_OZONE_PLATFORM_HINT=x11" } else { "" }
+_headless := if os() == "linux" { _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum" } else { "" }
+
+# Fetch the chromedriver matching the app's Electron version
+# (.build/chromedriver/, gitignored). The service's own downloader hangs;
+# the harness needs this binary (docs/testing.md, docs/build.md).
+fetch-chromedriver:
+    bash scripts/fetch-chromedriver.sh
+
+test-e2e: build-debug fetch-chromedriver
+    just test-e2e-empty
+    just test-e2e-seeded
+
+test-e2e-empty: fetch-chromedriver
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
+
+test-e2e-seeded: fetch-chromedriver
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# Same suites on the developer's real display, for visual debugging.
+test-e2e-headed: build-debug fetch-chromedriver
+    just test-e2e-headed-empty
+    just test-e2e-headed-seeded
+
+test-e2e-headed-empty: fetch-chromedriver
+    {{_x11}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
+
+test-e2e-headed-seeded: fetch-chromedriver
+    {{_x11}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# Reader performance benchmark (docs/performance.md "How to measure"):
+# MEASURES pdf render→blit and epub scrolled-flow latency on the real-book
+# Agents fixtures, starting mid-book, with the window MAXIMIZED on the real
+# display (explicit WxH argument overrides). Asserts only the deterministic
+# budgets (PERF-1/3/4) and writes artifacts/e2e/<runId>/bench-results.json.
+# HEADED and opt-in — never Xvfb, never CI (timing assertions are excluded
+# from CI by policy).
+_bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
+
+bench-reader WINDOW_SIZE="": build-debug fetch-chromedriver
+    {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
 
 # Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.

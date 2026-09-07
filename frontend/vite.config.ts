@@ -23,6 +23,9 @@ const stubFoliatePdf = {
 export default defineConfig({
   plugins: [react(), tailwindcss(), stubFoliatePdf],
   clearScreen: false,
+  // Electron loads the built renderer over file:// — absolute asset URLs
+  // would resolve to the filesystem root, so assets must stay relative.
+  base: "./",
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

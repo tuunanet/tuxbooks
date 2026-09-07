@@ -16,10 +16,13 @@ const api = {
 
   /**
    * Subscribe to a service event (`library-changed`, `import-progress`).
-   * Returns the unsubscribe function.
+   * Main sends `{channel, name, payload}`; only the payload of the requested
+   * name is forwarded. Returns the unsubscribe function.
    */
   onEvent(name: string, callback: (payload: unknown) => void): () => void {
-    const listener = (_event: unknown, payload: unknown): void => callback(payload);
+    const listener = (_event: unknown, eventName: string, payload: unknown): void => {
+      if (eventName === name) callback(payload);
+    };
     ipcRenderer.on("tuxbooks:event", listener);
     return () => ipcRenderer.removeListener("tuxbooks:event", listener);
   },

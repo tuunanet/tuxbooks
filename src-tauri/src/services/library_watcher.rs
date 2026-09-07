@@ -130,6 +130,14 @@ fn run_reconciler_loop(
 fn flush(batch: &mut EventBatch, reconciler: &Reconciler) {
     let changes = batch.take();
     if !changes.is_empty() {
+        if std::env::var_os("TUXBOOKS_DEBUG_IPC").is_some() {
+            eprintln!(
+                "sidecar[{}]: flush {} change(s): {:?}",
+                std::process::id(),
+                changes.len(),
+                changes
+            );
+        }
         reconciler.block_on(reconciler.apply(changes));
     }
     // A rename source expired without a destination. The destination half of

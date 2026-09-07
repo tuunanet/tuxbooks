@@ -29,16 +29,7 @@ const report = "target/llvm-cov/coverage.json";
 mkdirSync("target/llvm-cov", { recursive: true });
 execFileSync(
   "cargo",
-  [
-    "llvm-cov",
-    "--manifest-path",
-    "src-tauri/Cargo.toml",
-    "--features",
-    "custom-protocol",
-    "--json",
-    "--output-path",
-    report,
-  ],
+  ["llvm-cov", "--manifest-path", "src-tauri/Cargo.toml", "--json", "--output-path", report],
   { stdio: "inherit" },
 );
 

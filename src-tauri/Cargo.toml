@@ -41,6 +41,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # (tuxbooks:// protocol handler) as base64 — the only encoding the JSON
 # framing supports.
 base64 = "0.22"
+# Parent-death signal for the service (PR_SET_PDEATHSIG): when the Electron
+# main process is killed hard, the kernel reaps the sidecar immediately
+# instead of leaving it watching the library against the next instance.
+libc = "0.2"
 
 [dev-dependencies]
 proptest = "1"

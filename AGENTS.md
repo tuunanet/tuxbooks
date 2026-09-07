@@ -80,11 +80,6 @@ task complete, and run `just format` if you touched formatting-sensitive code.
 
 ### E2E contract for agents
 
-**Migration state:** the E2E suite is being re-anchored from
-tauri-driver/WebKitGTK to the Electron binary
-(`docs/electron-migration.md`); `just test-e2e` currently fails fast with a
-message instead of running. Once it lands, the contract below applies:
-
 `just test-e2e` is **safe to run from an automated environment** (SSH, CI,
 containers, no desktop session). It provisions its own virtual display via
 `xvfb-run`, builds the app, runs both suites against the real Electron

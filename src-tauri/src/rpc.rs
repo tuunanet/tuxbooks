@@ -52,6 +52,7 @@ impl EventEmitter {
 
 /// JSON-RPC error object: a transport-protocol code plus a human-readable
 /// message (the `AppError` display string at the boundary).
+#[derive(Debug)]
 struct RpcError {
     code: i32,
     message: String,
@@ -115,6 +116,12 @@ struct IdArgs {
 #[serde(rename_all = "camelCase")]
 struct BookIdArgs {
     book_id: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionIdArgs {
+    collection_id: i64,
 }
 
 #[derive(serde::Deserialize)]
@@ -287,8 +294,13 @@ async fn dispatch(
             )))
         }
         "delete_collection" => {
-            let p: IdArgs = parse_params(params)?;
-            Ok(call!(commands::collections::delete_collection(state, p.id)))
+            // The wire param stays `collectionId`, as the bridge has always
+            // sent it (only the annotation methods use a bare `id`).
+            let p: CollectionIdArgs = parse_params(params)?;
+            Ok(call!(commands::collections::delete_collection(
+                state,
+                p.collection_id
+            )))
         }
         "add_book_to_collection" => {
             let p: CollectionMemberArgs = parse_params(params)?;
@@ -449,4 +461,87 @@ fn handle_line(
         };
         let _ignored = tx.send(format!("{line}\n"));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_state(dir: &std::path::Path) -> Arc<AppState> {
+        let pool = crate::db::connection::init_pool(&dir.join("t.db"))
+            .await
+            .unwrap();
+        let reconciler = Arc::new(crate::services::library_reconciler::Reconciler::new(
+            pool.clone(),
+            dir.join("covers"),
+            Vec::new(),
+            tokio::runtime::Handle::current(),
+            Box::new(|_| {}),
+        ));
+        let watcher = crate::services::library_watcher::LibraryWatcher::start(
+            crate::services::library_watcher::WatcherConfig {
+                reconciler,
+                debounce: std::time::Duration::from_millis(50),
+            },
+        )
+        .unwrap();
+        Arc::new(AppState {
+            db: pool,
+            db_path: dir.join("t.db"),
+            watcher: Arc::new(watcher),
+        })
+    }
+
+    fn test_events() -> EventEmitter {
+        EventEmitter::new(|_, _| {})
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ping_answers_pong() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let result = dispatch(&state, &test_events(), "ping", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result, json!("pong"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unknown_methods_are_method_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let err = dispatch(&state, &test_events(), "nope", json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, -32601);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn delete_collection_takes_the_bridge_wire_param() {
+        // The bridge has always sent `collectionId` (the Tauri-era camelCase
+        // param); the method table must keep accepting exactly that shape —
+        // a bare `id` here silently breaks collection deletion client-side.
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let events = test_events();
+        let created = dispatch(&state, &events, "create_collection", json!({"name": "Q"}))
+            .await
+            .unwrap();
+        let id = created["id"].as_i64().unwrap();
+
+        let deleted = dispatch(
+            &state,
+            &events,
+            "delete_collection",
+            json!({"collectionId": id}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted, json!(true));
+
+        let malformed = dispatch(&state, &events, "delete_collection", json!({"id": id}))
+            .await
+            .unwrap_err();
+        assert_eq!(malformed.code, -32602);
+    }
 }

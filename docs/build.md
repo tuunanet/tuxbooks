@@ -25,6 +25,15 @@ precondition. The Electron main process locates the sidecar binary
 (dev: target dir; packaged: bundled resource) — keep that resolution in
 one place in main.
 
+## Chromedriver for E2E
+
+`wdio-electron-service` needs a chromedriver matching the app's Electron
+version, and its own downloader hangs (the install promise never
+settles). `scripts/fetch-chromedriver.sh` downloads the matching
+Chrome-for-Testing build into `.build/chromedriver/` (gitignored,
+version-stamped, idempotent); `just test-e2e` and friends run it
+automatically. `CHROMEDRIVER_BUILD` overrides the resolved version.
+
 ## PDFium shared library (PDF covers)
 
 Unchanged from the Tauri era: `pdf/render.rs` rasterizes PDF page 1 to a

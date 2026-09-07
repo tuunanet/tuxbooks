@@ -17,6 +17,7 @@ import {
   largePdfFixture,
   mixedPdfFixture,
   pdfFixture,
+  processTargets,
   repoRoot,
 } from "./fixtures.js";
 
@@ -36,12 +37,12 @@ export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
 export const configDir = path.join(scratchDir, "config");
 
-export function killStaleProcesses(appBinary: string): void {
-  // A crashed run can leave the app (which outlives tauri-driver) or the
-  // driver itself alive. Both would interfere with the next run: a leftover
-  // app grabs the new automation session, a leftover driver holds ports.
-  // Runs happen before the service spawns anything fresh, so this is safe.
-  for (const target of [appBinary, "tauri-driver"]) {
+export function killStaleProcesses(): void {
+  // A crashed run can leave the app, its sidecar, or chromedriver alive. All
+  // would interfere with the next run: a leftover app grabs the new
+  // automation session, a leftover driver holds ports. Runs happen before
+  // the service spawns anything fresh, so this is safe.
+  for (const target of processTargets) {
     try {
       execFileSync("pkill", ["-f", target]);
     } catch {
@@ -73,8 +74,8 @@ function pruneOldArtifacts(): void {
   }
 }
 
-export function prepareEnvironment(appBinary: string, seeded: boolean): void {
-  killStaleProcesses(appBinary);
+export function prepareEnvironment(seeded: boolean): void {
+  killStaleProcesses();
   pruneOldArtifacts();
 
   rmSync(scratchDir, { recursive: true, force: true });
@@ -115,19 +116,20 @@ export function teardownEnvironment(): void {
 }
 
 /**
- * Arms the detached teardown watchdog (see setup/watchdog.mjs). Must be
- * called from the config's onComplete: user hooks run before the service
- * tears the driver down, so the watchdog is in place either way.
+ * Arms the detached teardown watchdog (see setup/watchdog.mjs): it sweeps
+ * this run's processes the moment the launcher dies — however it dies. The
+ * config arms it in onPrepare (before anything spawns, covering aborts) and
+ * again in onComplete (belt and braces; a second watcher is harmless).
  */
-export function armTeardownWatchdog(appBinaryPath: string): void {
+export function armTeardownWatchdog(): void {
   const watchdog = path.join(repoRoot, "e2e", "setup", "watchdog.mjs");
   // E2E_XVFB=1 marks the headless wrapper: DISPLAY then names the private
-  // Xvfb of this phase, which the watchdog reaps if `timeout` SIGKILLs
-  // xvfb-run before it could clean up. Headed runs pass no display.
+  // Xvfb of this phase, which the watchdog reaps if the launcher dies
+  // before xvfb-run could clean up. Headed runs pass no display.
   const display = process.env.E2E_XVFB === "1" ? (process.env.DISPLAY ?? "") : "";
   const child = spawn(
     process.execPath,
-    [watchdog, String(process.pid), "45000", scratchDir, appBinaryPath, display],
+    [watchdog, String(process.pid), scratchDir, processTargets.join("\u001f"), display],
     { detached: true, stdio: "ignore" },
   );
   child.unref();

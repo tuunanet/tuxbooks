@@ -1,26 +1,25 @@
 import path from "node:path";
 import type { Options } from "@wdio/types";
 
-import { appBinary } from "./setup/fixtures.js";
+import { appEntryPoint, chromedriverBinaryPath } from "./setup/fixtures.js";
 import {
-  artifactsDir,
   armTeardownWatchdog,
+  artifactsDir,
   prepareEnvironment,
   runId,
   teardownEnvironment,
 } from "./setup/environment.js";
 
 /**
- * Desktop E2E against the real Tauri binary. The driver lifecycle (external
- * `tauri-driver` + WebKitWebDriver) is owned by @wdio/tauri-service; this
- * config only owns the isolated environment (setup/environment.ts) and the
- * failure artifacts.
+ * Desktop E2E against the real Electron app (docs/testing.md). The app is
+ * launched through wdio-electron-service: it points the local electron
+ * binary at our CJS bundle, manages a chromedriver matching the Electron
+ * version, and drives the app over WebDriver Classic.
  *
  * Headless: on Linux `just test-e2e` wraps the whole invocation in
- * `xvfb-run --auto-servernum`, so tauri-driver and the app inherit a virtual
- * display. (`autoXvfb` alone is not enough here: with maxInstances 1 the
- * service spawns the driver from the launcher process, which wdio's
- * per-worker Xvfb wrapping does not cover.)
+ * `xvfb-run --auto-servernum`, so the app inherits a virtual display (the
+ * service spawns chromedriver from the launcher/worker chain, which wdio's
+ * per-worker autoXvfb wrapping does not cover).
  */
 export const config: Options.Testrunner = {
   runner: "local",
@@ -30,8 +29,8 @@ export const config: Options.Testrunner = {
   outputDir: artifactsDir,
 
   // Session-creation patience: 3 x 45s. A dead app is not fixed by more
-  // retries — a fresh run is — and the old 15-retry budget let a wedged
-  // startup burn the whole phase before the justfile timeout stepped in.
+  // retries — a fresh run is — and a bigger retry budget lets a wedged
+  // startup burn the whole phase before the justfile timeout steps in.
   connectionRetryCount: 3,
   connectionRetryTimeout: 45000,
   waitforTimeout: 10000,
@@ -42,47 +41,43 @@ export const config: Options.Testrunner = {
 
   services: [
     [
-      "@wdio/tauri-service",
+      "electron",
       {
-        // External provider = the cargo-installed tauri-driver relaying to
-        // WebKitWebDriver (Linux/Windows). The embedded provider would need a
-        // WebDriver server compiled into the app itself.
-        driverProvider: "external",
-        // `cargo install tauri-driver` on first use when missing from PATH.
-        autoInstallTauriDriver: true,
-        // App stdout -> wdio log; console -> wdio log via the frontend plugin.
-        captureBackendLogs: true,
-        captureFrontendLogs: true,
-        backendLogLevel: "debug",
-        frontendLogLevel: "debug",
+        // Unpackaged dev app: the service combines the electron binary from
+        // this package's node_modules with our built main bundle.
+        appEntryPoint,
+        // Pin X11 explicitly: a Wayland desktop session is reachable through
+        // the compositor socket in XDG_RUNTIME_DIR even under xvfb-run with
+        // WAYLAND_DISPLAY unset, which would put test windows on the real
+        // desktop. The ozone env hint alone is belt; this is braces.
+        appArgs: ["--no-sandbox", "--ozone-platform=x11"],
       },
     ],
   ],
 
   capabilities: [
     {
-      // Force WebDriver Classic: WebKitWebDriver has no BiDi support, and
-      // WebdriverIO 9 otherwise requests `webSocketUrl` for every non-Safari
-      // session.
-      "wdio:enforceWebDriverClassic": true,
-      browserName: "tauri",
-      // Display-only. The tauri service deletes browserName during startup
-      // (tauri-driver rejects it during capability matching), which leaves
-      // wdio's worker status lines reading "RUNNING in undefined". The CLI's
-      // status formatter falls back to appium:platformName for the worker
-      // name; unknown extension capabilities are ignored per the W3C
-      // capability-processing rules, so this never reaches session matching.
-      "appium:platformName": "Tauri",
-      "tauri:options": {
-        application: appBinary,
+      browserName: "electron",
+      // Explicit, version-matched chromedriver — the service's own
+      // downloader is broken (hangs mid-extraction); scripts/
+      // fetch-chromedriver.sh provides the binary instead.
+      "wdio:chromedriverOptions": {
+        binary: chromedriverBinaryPath(),
       },
     } as never,
   ],
 
   onPrepare() {
     // Unique scratch dir per run; stale processes cleared first. Runs before
-    // the service spawns tauri-driver, so the env below reaches the app.
-    prepareEnvironment(appBinary, process.env.E2E_SEED_LIBRARY === "1");
+    // the service spawns the driver, so the env below reaches the app
+    // through the chromedriver spawn chain.
+    prepareEnvironment(process.env.E2E_SEED_LIBRARY === "1");
+    // Arm the teardown watchdog HERE, not only in onComplete: an aborted or
+    // killed launcher never reaches onComplete, and the watchdog sweeps the
+    // moment its parent disappears — an interrupted run cannot leak app,
+    // sidecar, driver, or Xvfb processes. The sweep only kills processes
+    // that predate the watchdog, so the next phase's processes are safe.
+    armTeardownWatchdog();
   },
 
   afterTest(test, _context, result) {
@@ -100,9 +95,9 @@ export const config: Options.Testrunner = {
   onComplete() {
     teardownEnvironment();
     // User onComplete hooks run before the service's, so the watchdog is
-    // armed regardless of how service teardown goes. It reaps the app or
-    // driver if either outlives the run (they hold the stdout pipe) and
-    // SIGKILLs this process if teardown wedges past 45s.
-    armTeardownWatchdog(appBinary);
+    // armed regardless of how service teardown goes. It reaps the app,
+    // sidecar, or chromedriver if any outlives the run (they hold the stdout
+    // pipe) and SIGKILLs this process if teardown wedges past 45s.
+    armTeardownWatchdog();
   },
 };

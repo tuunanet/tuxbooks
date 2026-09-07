@@ -8,15 +8,15 @@ describe the target contract.
 
 ## Status
 
-| Phase | Scope                                                    | Status                                                                                                     |
-| ----- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| 0     | Architecture inventory, progress-format inspection       | done                                                                                                       |
-| 1     | Electron shell + Rust sidecar bridge (library works)     | in progress — sidecar, shell, bridge, and `tuxbooks://` work end-to-end; E2E re-anchor + packaging pending |
-| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                    |
-| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                    |
-| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                    |
-| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                  |
-| 6     | Performance pass + full validation                       | planned                                                                                                    |
+| Phase | Scope                                                    | Status                                                                                                                                         |
+| ----- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Architecture inventory, progress-format inspection       | done                                                                                                                                           |
+| 1     | Electron shell + Rust sidecar bridge (library works)     | done — sidecar, shell, bridge, `tuxbooks://`, and the E2E suites (wdio-electron-service) all green; packaging (electron-builder) still pending |
+| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                                                        |
+| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                                                        |
+| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                                                        |
+| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                                                      |
+| 6     | Performance pass + full validation                       | planned                                                                                                                                        |
 
 Update this table as phases land.
 

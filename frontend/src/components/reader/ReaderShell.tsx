@@ -360,7 +360,17 @@ export function ReaderShell() {
           ref={readerContentRef}
           data-testid="reader-content"
           aria-label="Reading view"
-          className="min-h-0 flex-1 overflow-y-auto"
+          // overflow-anchor off: Chromium's scroll anchoring adjusts scrollTop
+          // when the PDF virtualizer corrects slot heights above the
+          // viewport, double-compensating against pdfLayout's own scroll
+          // compensation — long jumps then never converge (WebKit has no
+          // scroll anchoring, which is why this only bites on Electron).
+          // scrollbar-gutter stable: Chromium's classic scrollbars take real
+          // width, so without it the fit-width scale recomputes twice (once
+          // before, once after the scrollbar appears) and every fit-scale
+          // change re-anchors the viewport — long jumps land on the wrong
+          // page. WebKitGTK overlay scrollbars made this invisible before.
+          className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
         >
           {isEpub ? (
             <EpubReader

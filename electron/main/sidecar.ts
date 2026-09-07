@@ -61,8 +61,15 @@ export class Sidecar {
       throw new SidecarError(`sidecar binary not found at ${this.binaryPath}`);
     }
     this.stopped = false;
+    // Under E2E diagnostics the sidecar's stderr goes to a per-instance file
+    // (the inherited stderr would be swallowed by chromedriver).
+    const debugLogPath =
+      process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
+        ? `/tmp/tuxbooks-sidecar-${process.pid}-${process.env.E2E_RUN_ID}.log`
+        : null;
+    const stderr = debugLogPath ? fs.openSync(debugLogPath, "a") : "inherit";
     this.child = spawn(this.binaryPath, [], {
-      stdio: ["pipe", "pipe", "inherit"],
+      stdio: ["pipe", "pipe", stderr],
     });
     this.child.stdout!.setEncoding("utf8");
     this.child.stdout!.on("data", (chunk: string) => this.onData(chunk));
@@ -112,6 +119,9 @@ export class Sidecar {
     }
 
     if (message.method === "event" && typeof message.params?.name === "string") {
+      if (process.env.TUXBOOKS_DEBUG_IPC === "1") {
+        console.log(`[sidecar] event: ${message.params.name}`);
+      }
       this.events(message.params.name, message.params.payload ?? null);
     }
   }

@@ -2370,6 +2370,7 @@ dependencies = [
  "base64",
  "chrono",
  "image",
+ "libc",
  "lopdf",
  "notify",
  "pdfium-render",

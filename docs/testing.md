@@ -98,21 +98,33 @@ cannot poison the next one.
 
 ## E2E (WebdriverIO against Electron)
 
-**Migration state:** the suites below still target tauri-driver/WebKitGTK
-and are being re-anchored to the Electron binary
-([electron-migration.md](electron-migration.md)); `just test-e2e` currently
-fails fast with a message. The contract below is the target.
-
 `just test-e2e` runs the **real desktop app** headlessly — no display, no
 desktop session, safe from SSH/CI/agent environments. `just
 test-e2e-headed` runs the same suites on your visible display for
 debugging.
 
-Stack: WebdriverIO driving the real Electron binary (via the Electron
-service/CDP — wire the concrete service at migration phase 1 and record it
-here). Chromium supports BiDi; prefer it over classic WebDriver where the
-service allows. Driver ports are probed and auto-allocated — never
-hardcode 4444/4445 in specs.
+Stack: `wdio-electron-service` launches the unpackaged app (the electron
+binary from `e2e/node_modules` pointed at the built
+`electron/dist/main.cjs`) and manages a chromedriver matching the
+Electron version. The service's own chromedriver downloader hangs, so
+`scripts/fetch-chromedriver.sh` provides a version-matched binary instead
+(`just fetch-chromedriver`, cached under `.build/chromedriver/`); the
+capability pins it via `wdio:chromedriverOptions`. Driver ports are probed
+and auto-allocated — never hardcode 4444/4445 in specs.
+
+Two Chromium-only traps are pinned in the harness: the app launches with
+`--ozone-platform=x11` (a Wayland desktop is reachable through the
+compositor socket even with `WAYLAND_DISPLAY` unset — without the pin, E2E
+windows land on the real desktop), and the teardown watchdog
+(`e2e/setup/watchdog.mjs`) is armed in `onPrepare`, so an aborted run
+still sweeps the app tree, sidecar, chromedriver, and the phase's private
+Xvfb the moment the launcher dies. Sweep patterns are precise binary
+paths — a coarse pattern raced and killed the next phase's recipes once.
+
+Each spec file gets a fresh app instance against the shared scratch
+library; the previous instance's sidecar is reaped via `PR_SET_PDEATHSIG`
+(armed in the service binary) — without it, orphaned sidecars kept
+watching the library and raced the live one for imports.
 
 The app inherits the launcher's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set in the wdio config `onPrepare` — keep that

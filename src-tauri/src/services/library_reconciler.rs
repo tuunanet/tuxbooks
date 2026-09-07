@@ -120,7 +120,14 @@ impl Reconciler {
     /// written" — retry once, then leave the file alone and wait for the
     /// next modify event. Unknown formats are silently ignored.
     pub async fn import_created(&self, path: &Path) {
-        for attempt in 0..2 {
+        // Database errors are transient here by construction: another live
+        // reconciler (a not-yet-reaped sidecar of a previous app instance)
+        // can win the race to insert the same row, and the loser's upsert
+        // surfaces a constraint/busy error. The file is fs truth — it stays
+        // on disk, so a bounded retry re-imports cleanly and the change is
+        // still announced. Parse failures are the Ok(None) lane, not this.
+        let attempts = 4usize;
+        for attempt in 0..attempts {
             match import_file(&self.pool, path, &self.covers_dir, &self.pdfium_dirs).await {
                 Ok(Some(outcome)) => {
                     self.emit(LibraryChange::Changed {
@@ -138,6 +145,10 @@ impl Reconciler {
                     return;
                 }
                 Err(err) => {
+                    if attempt + 1 < attempts {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        continue;
+                    }
                     eprintln!("reconciler: import failed for {}: {err}", path.display());
                     return;
                 }

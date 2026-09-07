@@ -38,10 +38,18 @@ describe("tuxbooks filesystem synchronization", () => {
 
     copyFileSync(epubFixture, path.join(libraryDir, "sync-added.epub"));
 
-    await browser.waitUntil(async () => (await cardCount()) === 5, {
-      timeout: 30000,
-      timeoutMsg: "a book added on disk never appeared in the library",
-    });
+    await browser
+      .waitUntil(async () => (await cardCount()) === 5, {
+        timeout: 30000,
+        timeoutMsg: "a book added on disk never appeared in the library",
+      })
+      .catch(async (err) => {
+        const truth = await browser.execute(async () => ({
+          backendTitles: (await window.tuxbooks!.invoke("list_books")).map((book) => book.title),
+        }));
+        console.log("SYNCDIAG:", JSON.stringify(truth));
+        throw err;
+      });
   });
 
   it("keeps the book available when its file is renamed on disk", async () => {

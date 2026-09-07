@@ -309,8 +309,10 @@ function createWindow(
     }
   });
 
-  if (!app.isPackaged || process.env.VITE_DEV_SERVER_URL !== undefined) {
-    void window.loadURL(DEV_SERVER_URL);
+  // Dev server only when explicitly requested (just dev); everything else —
+  // packaged builds and the E2E runs — loads the built renderer from disk.
+  if (process.env.VITE_DEV_SERVER_URL !== undefined) {
+    void window.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     void window.loadFile(path.join(__dirname, "../../frontend/dist/index.html"));
   }
@@ -372,7 +374,7 @@ function createWindow(
   return window;
 }
 
-function registerIpc(sidecar: Sidecar): void {
+function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
   const debugIpc = process.env.TUXBOOKS_DEBUG_IPC === "1";
   ipcMain.handle("tuxbooks:invoke", async (_event, method: unknown, params: unknown) => {
     if (typeof method !== "string" || !SIDECAR_METHODS.has(method)) {
@@ -381,7 +383,10 @@ function registerIpc(sidecar: Sidecar): void {
     if (params === null || typeof params !== "object" || Array.isArray(params)) {
       throw new SidecarError("params must be an object");
     }
-    if (debugIpc) console.log(`[ipc] ${method}`);
+    if (debugIpc) {
+      debugLog?.(`ipc ${method}`);
+      console.log(`[ipc] ${method}`);
+    }
     return sidecar.call(method, params as Record<string, unknown>);
   });
 
@@ -429,17 +434,51 @@ function registerIpc(sidecar: Sidecar): void {
 }
 
 app.whenReady().then(() => {
+  // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to the
+  // per-run userData dir — chromedriver swallows process stdout, so E2E
+  // diagnosis needs this on disk (artifacts keep the scratch config).
+  const debugLogPath =
+    process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
+      ? `/tmp/tuxbooks-main-debug-${process.env.E2E_RUN_ID}.log`
+      : null;
+  const debugLog = (line: string): void => {
+    if (!debugLogPath) return;
+    try {
+      fs.appendFileSync(debugLogPath, `${new Date().toISOString()} [pid ${process.pid}] ${line}\n`);
+    } catch {
+      // Diagnostics only.
+    }
+  };
+
   // Sidecar events (library changes, import progress) reach the renderer
   // through the one channel the preload listens on.
   const forward = (name: string, payload: unknown): void => {
-    for (const window of BrowserWindow.getAllWindows()) {
+    const windows = BrowserWindow.getAllWindows();
+    debugLog(`forward ${name} windows=${windows.length}`);
+    for (const window of windows) {
       window.webContents.send("tuxbooks:event", name, payload);
     }
   };
   const sidecar = new Sidecar(locateSidecar(process.resourcesPath), forward);
   registerProtocol(sidecar);
-  registerIpc(sidecar);
-  createWindow(sidecar, forward);
+  registerIpc(sidecar, debugLog);
+  // The window opens only after the sidecar is healthy: the renderer's very
+  // first invokes assume the method table is live, and the service registers
+  // its filesystem watchers during startup — a UI that outruns the sidecar
+  // races those registrations (a file added in that window is never picked
+  // up until an unrelated event). The Tauri shell guaranteed this ordering;
+  // keep it.
+  debugLog("app starting sidecar");
+  sidecar
+    .start()
+    .then(() => {
+      debugLog("sidecar healthy; creating window");
+      createWindow(sidecar, forward);
+    })
+    .catch((error) => {
+      console.error("[sidecar] startup failed:", error);
+      app.quit();
+    });
 
   app.on("before-quit", () => sidecar.stop());
   app.on("second-instance", () => {

@@ -163,9 +163,9 @@ describe("reading annotations", () => {
     // Created before the reader opens, so the drawer's initial load has it.
     const marker = "very-long-chapter-href-".padEnd(180, "x");
     const created = await browser.execute(async (marker) => {
-      const books = await window.__TAURI__.core.invoke("list_books");
+      const books = await window.tuxbooks!.invoke("list_books");
       const epub = books.find((book) => book.format === "epub");
-      return window.__TAURI__.core.invoke("create_annotation", {
+      return window.tuxbooks!.invoke("create_annotation", {
         bookId: epub.id,
         annotation: {
           kind: "bookmark",
@@ -223,7 +223,7 @@ describe("reading annotations", () => {
     expect(rowChecks.rowInsideSheet).toBe(true);
 
     await browser.execute(async (id) => {
-      await window.__TAURI__.core.invoke("delete_annotation", { id });
+      await window.tuxbooks!.invoke("delete_annotation", { id });
     }, created.id);
     await closeReaderNavigation();
     await returnToLibrary();
