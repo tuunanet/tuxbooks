@@ -40,17 +40,17 @@ Numbers drift as code changes; rerun `just coverage` for current values
 
 ## Outside the gate (and why)
 
-| What                                                     | Why it is excluded                                                                                                               |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/commands/`                                | IPC boundary — no business logic by contract (docs/architecture.md); every path is driven through the real app by the E2E suite. |
-| `src-tauri/src/lib.rs`                                   | Wiring (pool init, state, command registration) — boots in every E2E run.                                                        |
-| `src-tauri/src/error.rs`                                 | thiserror-derived Display/From code.                                                                                             |
-| `src-tauri/src/main.rs`, `frontend/src/main.tsx`         | Entry points.                                                                                                                    |
-| `src/lib/epub/epubEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around vendored engines; real behavior covered by the E2E reader suites, unit tests mock the seam.  |
-| `src/lib/epub/foliate-js/`                               | Vendored upstream submodule.                                                                                                     |
-| `frontend/src/components/ui/`                            | shadcn/ui primitives — vendored scaffolding, not app logic.                                                                      |
-| `frontend/src/lib/fixtures.ts`                           | Sample data for tests/previews.                                                                                                  |
-| `frontend/src/types/`                                    | Pure type declarations, no runtime code.                                                                                         |
+| What                                                        | Why it is excluded                                                                                                               |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/commands/` → sidecar method table            | IPC boundary — no business logic by contract (docs/architecture.md); every path is driven through the real app by the E2E suite. |
+| `src-tauri/src/lib.rs`                                      | Wiring (pool init, state, method registration) — boots in every E2E run.                                                         |
+| `src-tauri/src/error.rs`                                    | thiserror-derived Display/From code.                                                                                             |
+| `src-tauri/src/main.rs`, `frontend/src/main.tsx`            | Entry points.                                                                                                                    |
+| `electron/main/`, `electron/preload/`                       | Process plumbing — exercised on every E2E run; no business logic by contract (docs/architecture.md).                             |
+| `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around Readium/MuPDF; real behavior covered by the E2E reader suites, unit tests mock the seam.     |
+| `frontend/src/components/ui/`                               | shadcn/ui primitives — vendored scaffolding, not app logic.                                                                      |
+| `frontend/src/lib/fixtures.ts`                              | Sample data for tests/previews.                                                                                                  |
+| `frontend/src/types/`                                       | Pure type declarations, no runtime code.                                                                                         |
 
 Adding a new feature area: add its glob/module to the gate tables
 (`frontend/vite.config.ts` and `scripts/coverage-gate.mjs`) and a row here

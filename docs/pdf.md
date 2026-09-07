@@ -1,11 +1,11 @@
 # PDF layer
 
 `src-tauri/src/pdf/` is a metadata-only PDF reader built on `lopdf` (pure
-Rust, no rendering engine). Like `epub/`, it has no Tauri or SQLx imports
-and returns owned data. The stated reason for the dependency: the scanner
-must index real-world PDF libraries (title/author/subject) without pulling
-in a renderer — page rendering belongs to the frontend engine (see
-"Rendering" below).
+Rust, no rendering engine). Like `epub/`, it has no runtime (Tauri/Electron)
+or SQLx imports and returns owned data. The stated reason for the
+dependency: the scanner must index real-world PDF libraries
+(title/author/subject) without pulling in a renderer — page rendering
+belongs to the frontend engine (see "Rendering" below).
 
 ## Public API
 
@@ -46,6 +46,10 @@ pub struct PdfMetadata {
 | page 1     | `cover_path` (rasterized to PNG by `pdf/render.rs` at import; NULL |
 |            | when the PDFium library is unavailable — placeholder art then)     |
 
+Cover rasterization stays in Rust (PDFium) unless MuPDF in the renderer
+provably replaces it at import quality/latency; re-evaluate at migration
+phase 4 and record the decision here.
+
 ## Error handling
 
 Per-file failures never abort an import run: the importer collects them in
@@ -53,21 +57,21 @@ Per-file failures never abort an import run: the importer collects them in
 
 ## Rendering
 
-Rendering is the frontend's job: `pdfjs-dist` (PDF.js) rasterizes pages to a
-canvas in the webview, with parsing off the UI thread in a bundled worker
-(`frontend/src/lib/pdf/pdfEngine.ts` is the only module that touches
-PDF.js, and loads the library lazily on first document open so PDF.js stays
-out of the entry chunk). Rust controls byte access: the `get_book_bytes`
-command resolves a book id to its stored path through the database
-(`services::reader`) and answers with an IPC raw byte response, so paths
-never cross the boundary and multi-megabyte files avoid JSON encoding.
+Rendering is the renderer's job: **MuPDF.js/WASM** rasterizes pages to
+canvas, with expensive work off the UI thread in the MuPDF worker. Verify
+the current npm distribution and worker API at implementation time — no
+stale package-layout assumptions. `frontend/src/lib/pdf/pdfEngine.ts` is
+the only module that touches MuPDF, loaded lazily on first document open so
+the WASM bundle stays out of the entry chunk. Byte access flows through the
+`tuxbooks://` custom protocol (range requests supported) — paths never
+cross the boundary.
 
 ### Continuous reader architecture (`frontend/src/components/reader/pdf/`)
 
 - `PdfReader.tsx` — composition root: zoom state, the initialization
   sequence (document ready → layout ready → position restored →
   interactive), and the render-set derivation.
-- `hooks/usePdfDocument` — loads bytes via `get_book_bytes`; owns the
+- `hooks/usePdfDocument` — loads bytes via the bridge/protocol; owns the
   document lifetime (destroy on unmount/book switch). A switch also drops
   the previous document from state in that render (render-phase reset), so
   a closed document never serves a render while the next loads, and a load
@@ -85,41 +89,30 @@ never cross the boundary and multi-megabyte files avoid JSON encoding.
   1 vs. content area) × zoom multiplier (50–200%; keyboard +/= and -).
   Wider pages in mixed documents overflow horizontally.
 - shared `components/reader/useReaderProgress` — debounced save +
-  restore-once (below); one persistence core for both formats since
-  milestone 8, with PDF page validation in `readerModel.parsePdfProgress`.
+  restore-once (below); one persistence core for both formats, with PDF
+  page validation in `readerModel.parsePdfProgress`.
 - `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an
   offset, clamping, scroll compensation, fit-width scale, thumbnail
   geometry); unit-tested without a browser.
 - `pdfRenderPolicy.ts` — pure render-budget math: the effective render
-  ratio per page (devicePixelRatio capped by the 2²⁵ px / 8192 px backing
-  store budgets, CSS upscales beyond — the official viewer's
-  `maxCanvasPixels` policy) and the byte cap over the live render window.
+  ratio per page (devicePixelRatio capped by the backing-store budgets, CSS
+  upscales beyond) and the byte cap over the live render window.
 - `pdfOutline.ts` — pure outline normalization: the engine's raw outline
-  (named or explicit destinations, external-link entries) resolves to a
-  tree of `{ title, page (1-based | null), items }`; unresolvable entries
-  degrade to inert rows, never errors. Re-exported through the engine seam
-  as `getPdfOutline` so components never touch the engine's raw types.
+  resolves to a tree of `{ title, page (1-based | null), items }`;
+  unresolvable entries degrade to inert rows, never errors. Re-exported
+  through the engine seam so components never touch the engine's raw types.
 - `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` / `PdfToolbar` — one
   geometry slot per page for the entire document; canvases only for the
   bounded render set. Slots carry `data-pdf-slot` + `data-render-state`
   lifecycle attributes (`unloaded|queued|loading|rendering|rendered|error`)
   for tests and diagnostics.
 - `PdfSidebar` — the thumbnails panel (below). Rendered through a React
-  portal into a host `<aside>` owned by ReaderShell's layout: the shell
-  docks the host beside the scroll container, while PdfReader keeps single
-  ownership of the document handle the thumbnails render from.
+  portal into a host `<aside>` owned by ReaderShell's layout.
 
 ### Virtualization and rendering policy
 
-Modeled on the official viewer's `PDFRenderingQueue`, adjusted for what
-PDF.js v6 actually parallelizes (verified against `mozilla/pdf.js` source):
-each page's operator list is produced independently in the worker, and each
-render's paint loop is a time-sliced task on the main thread — so a small
-number of concurrent renders pipeline (page N paints while page N+1 parses
-and decodes) instead of page N+1 waiting behind N's entire raster. Only
-same-canvas concurrency is forbidden by the engine (`InternalRenderTask`
-tracks canvases in use), and the reader's private-buffer-per-render design
-never shares one.
+Never render a large PDF into the DOM at once; keep rasterization off the
+critical path.
 
 1. Up to `MAX_CONCURRENT_RENDERS` (2) renders run at a time; completions
    and cancellations free their slot for the next priority page. The
@@ -137,11 +130,11 @@ never shares one.
    can never inherit the previous book's render marks.
 5. Each page rasterizes into an offscreen buffer at the effective render
    ratio (`pdfRenderPolicy.effectiveRenderRatio`), a two-tier ladder:
-   devicePixelRatio preferred, degrading to the 2²⁴ px soft budget, then to
-   CSS resolution (never blurrier than the layout while the hard budget
-   allows), and only under zoom into the hard 2²⁵ px / 8192 px per side
-   budget; the canvas CSS size stays at the displayed size and CSS
-   upscales beyond the ratio.
+   devicePixelRatio preferred, degrading to the soft budget, then to CSS
+   resolution (never blurrier than the layout while the hard budget
+   allows), and only under zoom into the hard per-dimension budget; the
+   canvas CSS size stays at the displayed size and CSS upscales beyond the
+   ratio.
 6. On eviction the finished bitmap moves into a per-document LRU cache
    (`pdfBitmapCache`, bounded by a 320 MB byte budget and entry count,
    keyed by render scale and effective ratio, dropped on zoom and on
@@ -152,9 +145,9 @@ never shares one.
 
 Every render paints into a private offscreen buffer; the visible canvas is
 touched only by the atomic blit of a completed render (single-writer —
-interleaved paint loops on shared canvas state produced mirrored page
-fragments under fast scrollbar drags on WebKitGTK). Page render failures
-show a per-slot error with Retry; a page failure never breaks the document.
+interleaved paint on shared canvas state produced mirrored page fragments
+under fast scrollbar drags). Page render failures show a per-slot error
+with Retry; a page failure never breaks the document.
 
 This pipeline is budgeted in pixels and bytes (canvas caps, cache
 occupancy, live-canvas memory) — the contracts and their verification live
@@ -162,8 +155,7 @@ in `docs/performance.md`. Check them before changing rendering,
 virtualization, or cache policy. Startup diagnostics (PERF-11) are
 deterministic attributes on the reader element (`data-pdf-render-info`:
 dpr, content width, viewport height, fit scale; `data-pdf-render-ms` on
-each canvas: the last render→blit durations) plus a Rust-side startup log
-of the WebKitGTK GPU-stack env vars.
+each canvas: the last render→blit durations).
 
 ### Thumbnails sidebar (`PdfSidebar`)
 
@@ -171,31 +163,30 @@ The same virtualization policy at low resolution. The sidebar reuses the
 slot/observer pattern: one cell per page reserves space up front (aspect
 from the shared page sizes, corrected lazily via the same `measurePages`
 path), and an observer pair feeds a render set capped at
-`MAX_THUMBNAIL_CANVASES` (12) with exactly one render in flight — the
-worker rasterizes serially, so unbounded thumbnail requests would starve
-the page the user is looking at. Canvases render at the cell width
-(`THUMBNAIL_WIDTH_PX`, 112), mount only inside the window, and evict with
-it, so memory stays bounded on any document. The reading page's cell is
-marked (`data-thumb-active` / `aria-current`) and follows the position
-whether it moves by scrolling, navigation, or restore; clicking a cell
-navigates the reader (and suppresses the one follow-up auto-scroll).
-Failed thumbnails flag their cell and re-attempt when the cell re-enters
-the window — no per-cell retry buttons.
+`MAX_THUMBNAIL_CANVASES` (12) with exactly one render in flight — unbounded
+thumbnail requests would starve the page the user is looking at. Canvases
+render at the cell width (`THUMBNAIL_WIDTH_PX`, 112), mount only inside the
+window, and evict with it, so memory stays bounded on any document. The
+reading page's cell is marked (`data-thumb-active` / `aria-current`) and
+follows the position whether it moves by scrolling, navigation, or restore;
+clicking a cell navigates the reader (and suppresses the one follow-up
+auto-scroll). Failed thumbnails flag their cell and re-attempt when the
+cell re-enters the window — no per-cell retry buttons.
 
 ### Outline
 
 The document outline comes from the engine seam (`getPdfOutline`) — the
-PDF.js document is already parsed in the webview, so the outline shares the
+MuPDF document is already parsed in the renderer, so the outline shares the
 engine with rendering instead of growing a second parser in Rust. Every
 destination resolves to the same 1-based page locator the reader persists;
 PdfReader reports the normalized tree upward and ReaderNavigation's Outline
-tab renders it with depth indentation (loading / empty / inert-row states
-included). Outline navigation reuses `pageToPosition`, so jumping lands in
-the same position model as scrolling, thumbnails, and restore.
+tab renders it with depth indentation. Outline navigation reuses
+`pageToPosition`, so jumping lands in the same position model as scrolling,
+thumbnails, and restore.
 
 ### Reading position persistence
 
-`save_reading_progress` / `get_reading_progress` commands store
+`save_reading_progress` / `get_reading_progress` methods store
 `reading_progress` rows (migration `0003` added `page_number` and
 `scroll_offset`). For PDFs the page number is the stable position;
 `progress_percent` feeds the shell footer. The reader restores exactly once
@@ -203,48 +194,43 @@ after the layout is ready — invalid values degrade to page 1 — saves are
 debounced (1s) so scrolling never writes per event, the first armed run is
 skipped so opening a book writes nothing, and unmount flushes the final
 position. The document surface renders only after restoration, so reopening
-never flashes page 1 before the jump. Since milestone 8 this contract lives
-in one shared hook (`useReaderProgress`) used by both readers; the PDF
-reader also registers the shell's `ReaderAdapter` (`readerModel.ts`) while
-its document is loaded — `jump` maps page targets through the same
-`pageToPosition` model as scrolling, thumbnails, outline, and restore — and
-reports `{ format: "pdf", page, fraction }` positions upward for bookmark
+never flashes page 1 before the jump. This contract lives in one shared
+hook (`useReaderProgress`) used by both readers; the PDF reader also
+registers the shell's `ReaderAdapter` (`readerModel.ts`) while its document
+is loaded — `jump` maps page targets through the same `pageToPosition`
+model as scrolling, thumbnails, outline, and restore — and reports
+`{ format: "pdf", page, fraction }` positions upward for bookmark
 placement.
 
-### In-book search (milestone 5)
+### In-book search
 
 Search reuses the engine that already renders the document instead of
-growing a second extraction architecture (the milestone's explicit
-requirement): `pdfEngine.getPdfPageText` pulls a page's text content
-through PDF.js and assembles it with the pure helpers in
+growing a second extraction architecture: the seam pulls a page's text
+content through MuPDF and assembles it with the pure helpers in
 `lib/pdf/pdfSearch.ts` (item and line boundaries become single spaces, so
 queries match across them like they read on the page).
 
 `components/reader/pdf/hooks/usePdfSearch.ts` walks pages sequentially
-(the worker serializes extraction anyway), matches case-insensitively,
-streams one group per page with matches up to the shell, and stops at
-500 total matches so a pathological document cannot flood the drawer.
-Each page's text is cached for the document's lifetime (dropped on
-document switch), so refining a query re-searches without re-parsing; a
-generation token makes a new query supersede the running one.
+(worker-serialized), matches case-insensitively, streams one group per page
+with matches up to the shell, and stops at 500 total matches so a
+pathological document cannot flood the drawer. Each page's text is cached
+for the document's lifetime (dropped on document switch), so refining a
+query re-searches without re-parsing; a generation token makes a new query
+supersede the running one.
 
-The drawer's Search tab is the shared `ReaderSearchTab`; PDF matches
-carry `page` (EPUB matches carry a CFI — see `searchModel.ts`). Picking a
+The drawer's Search tab is the shared `ReaderSearchTab`; PDF matches carry
+`page` (EPUB matches carry a locator — see `searchModel.ts`). Picking a
 match navigates with the same `pageToPosition` model as scrolling,
-thumbnails, outline, and restore. No on-canvas match highlighting yet:
-the continuous reader paints pages without a text layer, so highlights
-would need an overlay pass — navigation-to-page is the shipped contract.
+thumbnails, outline, and restore.
 
-### Text layer, selection, and highlights (milestone 6)
+### Text layer, selection, and highlights
 
-Rendered pages mount a PDF.js `TextLayer` (`PdfPageTextLayer`, through the
-`renderPdfTextLayer` seam function) over the canvas: transparent,
-selectable text spans — the interaction affordance for highlights, no
-visuals of its own. The layer's stylesheet is the minimal `.textLayer`
-subset of pdfjs-dist's viewer CSS (`lib/pdf/pdfTextLayer.css`, pinned to
-the vendored version; re-extract on upgrade), and the page slot wrapper
-sets the `--scale-factor` custom properties PDF.js expects. Text layers
-exist only on the bounded render set, like canvases.
+Rendered pages mount a text layer (`PdfPageTextLayer`, through the seam)
+over the canvas: transparent, selectable text spans — the interaction
+affordance for highlights, no visuals of its own. The layer's stylesheet
+(`lib/pdf/pdfTextLayer.css`) is engine-coupled: pin it to the bundled
+MuPDF.js version and re-extract on upgrade. Text layers exist only on the
+bounded render set, like canvases.
 
 Text selections are captured on `pointerup` (deferred one tick): the
 anchor node resolves the page through the slot's `data-pdf-slot`, the
@@ -265,7 +251,7 @@ the scroll tracker — a coarse page-local position, per the data model.
 
 ### Worker
 
-The worker is bundled via a Vite `?url` import and configured once in the
-engine. A silent "fake worker" fallback (main-thread rendering) is the
-classic cause of seconds-long variable renders — the reader exposes
-`data-pdf-worker-src` and the seeded E2E verifies the asset is fetchable.
+The MuPDF worker is bundled and configured once in the engine. A
+main-thread fallback is the classic cause of seconds-long variable renders
+— the reader exposes `data-pdf-worker-src` and the seeded E2E verifies the
+asset is fetchable.

@@ -73,6 +73,15 @@ coarse shell position that backs the library's "In Progress" /
 "Finished" sections, and `mark_finished` (milestone 10) sets it to 100
 without disturbing the stored locators.
 
+Progress rows are user data and are migrated, never reset, when the
+rendering engine changes (foliate → Readium, see `docs/epub.md` and
+`docs/electron-migration.md`). The migration is versioned and idempotent:
+a schema/engine version marks which rows have been converted, the original
+locator values are preserved until the new ones are validated, and a
+per-book completion marker prevents re-running. New columns for the
+migration are added by an embedded numbered migration, like any schema
+change.
+
 ### annotations
 
 One row per persistent reading annotation (milestone 6): bookmarks,
