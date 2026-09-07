@@ -443,7 +443,7 @@ mod tests {
     /// realistic document (text + vector content, no embedded images).
     #[tokio::test]
     async fn pdf_import_writes_a_rasterized_cover_when_pdfium_is_available() {
-        let pdfium_dirs = crate::pdfium_library_dirs(None);
+        let pdfium_dirs = crate::pdfium_library_dirs();
         if !crate::pdf::render::pdfium_available(&pdfium_dirs) {
             eprintln!("skipping: no pdfium library fetched (just fetch-pdfium)");
             return;

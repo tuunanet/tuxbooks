@@ -18,6 +18,33 @@ pub async fn load_book_file(pool: &SqlitePool, book_id: i64) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+/// Load a byte range of a stored book's source file, with the file's total
+/// size. Backs range requests on the `tuxbooks://` protocol (the reader
+/// engines seek into large documents instead of reading them whole).
+///
+/// An empty range (`length == 0`) reads to end of file; offsets beyond the
+/// end produce empty data rather than an error, mirroring HTTP range
+/// semantics closely enough for the protocol handler to answer 416 itself.
+pub async fn load_book_file_range(
+    pool: &SqlitePool,
+    book_id: i64,
+    offset: u64,
+    length: u64,
+) -> Result<(Vec<u8>, u64), AppError> {
+    let book = books::get_book(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut file = tokio::fs::File::open(&book.path).await?;
+    let total = file.metadata().await?.len();
+    let start = offset.min(total);
+    let end = length.saturating_add(start).min(total);
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    file.seek(std::io::SeekFrom::Start(start)).await?;
+    let mut buffer = Vec::with_capacity((end - start) as usize);
+    file.take(end - start).read_to_end(&mut buffer).await?;
+    Ok((buffer, total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,41 +1,55 @@
 import { useEffect, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { BookUp } from "lucide-react";
+import { pathForFile } from "@/lib/bridge";
 import { useImport } from "@/state/importState";
 
 /**
- * Full-window overlay shown while files are dragged over the app. Tauri
- * intercepts native drag-and-drop, so HTML5 DOM drag events must not be used
- * (they never fire). Drops are handed to the shared import flow; folders of
- * EPUBs import, anything else is reported as a failure.
+ * Full-window overlay shown while files are dragged over the app. Chromium
+ * delivers native drag-and-drop as HTML5 DOM drag events; drops are handed
+ * to the shared import flow (folders of EPUBs import, anything else is
+ * reported as a failure). The sandboxed preload resolves dropped files to
+ * absolute paths (`File.path` no longer exists in Chromium).
  */
 export function DropZoneOverlay() {
   const { importPaths } = useImport();
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    let depth = 0;
+    const hasFiles = (event: DragEvent): boolean =>
+      Array.from(event.dataTransfer?.types ?? []).includes("Files");
 
-    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (cancelled) return;
-      switch (event.payload.type) {
-        case "enter":
-        case "over":
-          setDragging(true);
-          break;
-        case "leave":
-          setDragging(false);
-          break;
-        case "drop":
-          setDragging(false);
-          void importPaths(event.payload.paths);
-          break;
-      }
-    });
+    const onEnter = (event: DragEvent): void => {
+      if (!hasFiles(event)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const onOver = (event: DragEvent): void => {
+      // Required to keep receiving drop events over the document.
+      event.preventDefault();
+    };
+    const onLeave = (): void => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onDrop = (event: DragEvent): void => {
+      event.preventDefault();
+      depth = 0;
+      setDragging(false);
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      void importPaths(files.map(pathForFile));
+    };
 
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
     return () => {
-      cancelled = true;
-      void unlisten.then((fn) => fn());
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
     };
   }, [importPaths]);
 

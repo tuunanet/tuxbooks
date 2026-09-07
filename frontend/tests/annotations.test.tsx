@@ -1,7 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { useAnnotations } from "@/hooks/useAnnotations";
 import {
@@ -13,7 +11,7 @@ import {
   normalizeRect,
 } from "@/components/reader/annotationModel";
 import { makeAnnotation } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 describe("annotationModel", () => {
   it("maps stored color names to CSS colors with a yellow fallback", () => {

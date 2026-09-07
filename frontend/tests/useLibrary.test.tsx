@@ -1,11 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { useLibraryData } from "@/hooks/useLibrary";
 import { makeBook } from "./factories";
-import { emitTauriEvent, mockInvoke } from "./mocks/tauri";
-
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
 
 const emptyLibrary = {
   get_library_stats: { bookCount: 0, collectionCount: 0 },
@@ -63,7 +60,7 @@ describe("useLibraryData library-changed synchronization", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => {
-      emitTauriEvent("library-changed", {
+      emitBridgeEvent("library-changed", {
         kind: "changed",
         book: makeBook({ id: 3, title: "After", available: true }),
       });
@@ -83,7 +80,7 @@ describe("useLibraryData library-changed synchronization", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => {
-      emitTauriEvent("library-changed", {
+      emitBridgeEvent("library-changed", {
         kind: "changed",
         book: makeBook({ id: 5, title: "Vanishing", available: false }),
       });
@@ -102,7 +99,7 @@ describe("useLibraryData library-changed synchronization", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     act(() => {
-      emitTauriEvent("library-changed", { kind: "removed", bookId: 9 });
+      emitBridgeEvent("library-changed", { kind: "removed", bookId: 9 });
     });
 
     await waitFor(() => expect(result.current.books).toHaveLength(0));
@@ -112,6 +109,6 @@ describe("useLibraryData library-changed synchronization", () => {
 
 function act_emit(book: ReturnType<typeof makeBook>): void {
   act(() => {
-    emitTauriEvent("import-progress", book);
+    emitBridgeEvent("import-progress", book);
   });
 }

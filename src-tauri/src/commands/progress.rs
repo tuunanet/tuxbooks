@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use tauri::State;
 
 use crate::domain::{ProgressUpdate, ReadingProgress};
 use crate::error::AppError;
@@ -34,9 +33,8 @@ impl From<ProgressInput> for ProgressUpdate {
 }
 
 /// Persist (upsert) where the user stopped reading a book.
-#[tauri::command]
 pub async fn save_reading_progress(
-    state: State<'_, AppState>,
+    state: &AppState,
     book_id: i64,
     progress: ProgressInput,
 ) -> Result<(), AppError> {
@@ -44,9 +42,8 @@ pub async fn save_reading_progress(
 }
 
 /// Load the stored reading position for a book, if any.
-#[tauri::command]
 pub async fn get_reading_progress(
-    state: State<'_, AppState>,
+    state: &AppState,
     book_id: i64,
 ) -> Result<Option<ReadingProgress>, AppError> {
     get_progress(&state.db, book_id).await
@@ -55,7 +52,6 @@ pub async fn get_reading_progress(
 /// Flag a book as finished (milestone 10). Sets `progress_percent = 100`
 /// while preserving the stored position, so the book lands in the
 /// "Finished" section but still resumes where reading stopped.
-#[tauri::command]
-pub async fn mark_book_finished(state: State<'_, AppState>, book_id: i64) -> Result<(), AppError> {
+pub async fn mark_book_finished(state: &AppState, book_id: i64) -> Result<(), AppError> {
     mark_finished(&state.db, book_id).await
 }

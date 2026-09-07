@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { markBookFinished, pickBookFile, reconnectBook, removeBook } from "@/lib/tauri";
+import { markBookFinished, pickBookFile, reconnectBook, removeBook } from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
 
 function toMessage(err: unknown): string {

@@ -1,12 +1,15 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+/**
+ * The renderer's only window.tuxbooks consumer (docs/architecture.md). Every
+ * call to the Rust service, native picker, or protocol URL goes through the
+ * typed wrappers here; components never touch the preload API directly.
+ */
+
 import type {
   Annotation,
   AnnotationInput,
   AnnotationPatch,
   Book,
+  BookFormat,
   BookMetadata,
   CollectionSummary,
   ImportReport,
@@ -28,6 +31,41 @@ export type {
   LibraryStats,
   MetadataFields,
 } from "@/types/domain";
+
+/** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */
+export interface TuxbooksApi {
+  invoke(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  onEvent(name: string, callback: (payload: unknown) => void): () => void;
+  pickDirectory(): Promise<string | null>;
+  pickBookFile(): Promise<string | null>;
+  pickBookFiles(): Promise<string[]>;
+  pickCoverImage(): Promise<string | null>;
+  revealInFileManager(path: string): Promise<void>;
+  fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
+  pathForFile(file: File): string;
+}
+
+/** The preload API; missing only when a test or non-Electron host forgot the mock. */
+export function tuxbooks(): TuxbooksApi {
+  if (!window.tuxbooks) {
+    throw new Error("tuxbooks preload bridge is unavailable outside the Electron app");
+  }
+  return window.tuxbooks;
+}
+
+declare global {
+  interface Window {
+    tuxbooks?: TuxbooksApi;
+  }
+}
+
+async function invoke<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+  return tuxbooks().invoke(method, params) as Promise<T>;
+}
+
+function onEvent<T>(name: string, callback: (payload: T) => void): () => void {
+  return tuxbooks().onEvent(name, callback as (payload: unknown) => void);
+}
 
 export function getLibraryStats(): Promise<LibraryStats> {
   return invoke("get_library_stats");
@@ -61,16 +99,18 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
  * covers appear while a scan is still running. Resolves an unlisten fn.
  */
 export function onImportProgress(callback: (book: Book) => void): Promise<() => void> {
-  return listen<Book>("import-progress", (event) => callback(event.payload));
+  const unlisten = onEvent<Book>("import-progress", callback);
+  return Promise.resolve(unlisten);
 }
 
 /**
  * Subscribe to live library synchronization (the `library-changed` backend
- * event). The filesystem watcher and the remove/reconnect commands push
- * every mutation here; see `LibraryChange` in types/domain.
+ * event). The filesystem watcher and the remove/reconnect methods push every
+ * mutation here; see `LibraryChange` in types/domain.
  */
 export function onLibraryChanged(callback: (change: LibraryChange) => void): Promise<() => void> {
-  return listen<LibraryChange>("library-changed", (event) => callback(event.payload));
+  const unlisten = onEvent<LibraryChange>("library-changed", callback);
+  return Promise.resolve(unlisten);
 }
 
 /** Remove a book from the library (source file on disk is never touched). */
@@ -108,11 +148,7 @@ export function clearBookCoverOverride(bookId: number): Promise<Book> {
 
 /** Native image picker for cover overrides; null when cancelled. */
 export function pickCoverImage(): Promise<string | null> {
-  return open({
-    multiple: false,
-    title: "Choose a cover image",
-    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
-  });
+  return tuxbooks().pickCoverImage();
 }
 
 /** Reconnect an unavailable book to a newly located file, keeping its identity. */
@@ -121,14 +157,12 @@ export function reconnectBook(bookId: number, path: string): Promise<Book> {
 }
 
 /**
- * Raw bytes of a stored book's source file. The command answers with an IPC
- * raw byte response, so `invoke` normally resolves to an ArrayBuffer — but
- * when the custom protocol is unavailable Tauri falls back to postMessage
- * transport, which JSON-serializes the bytes into a plain number array.
- * Consumers must accept both.
+ * Raw bytes of a stored book's source file, fetched over the `tuxbooks://`
+ * protocol (range-capable; used whole here). Consumers wrap them in a Blob
+ * for the reader engines.
  */
-export function getBookBytes(bookId: number): Promise<ArrayBuffer | number[]> {
-  return invoke("get_book_bytes", { bookId });
+export function getBookBytes(bookId: number, format: BookFormat): Promise<ArrayBuffer> {
+  return tuxbooks().fetchBookBytes(bookId, format);
 }
 
 /** Load the stored reading position for a book, if any. */
@@ -196,33 +230,30 @@ export function deleteAnnotation(id: number): Promise<boolean> {
 
 /** Native folder picker; resolves to null when the user cancels. */
 export function pickDirectory(): Promise<string | null> {
-  return open({ directory: true, multiple: false, title: "Choose a folder to import" });
+  return tuxbooks().pickDirectory();
 }
 
 /** Native file picker for relocating a missing book; null when cancelled. */
 export function pickBookFile(): Promise<string | null> {
-  return open({
-    multiple: false,
-    title: "Locate the book file",
-    filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
-  });
+  return tuxbooks().pickBookFile();
 }
 
 /** Native multi-file picker for Import Files…; empty when cancelled. */
 export function pickBookFiles(): Promise<string[]> {
-  return open({
-    multiple: true,
-    title: "Choose book files to import",
-    filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
-  }).then((paths) => paths ?? []);
+  return tuxbooks().pickBookFiles();
 }
 
 /** Reveal a file in the system file manager (does not open it). */
 export function revealInFileManager(path: string): Promise<void> {
-  return revealItemInDir(path);
+  return tuxbooks().revealInFileManager(path);
 }
 
-/** Tauri asset-protocol URL for an extracted cover image on disk. */
+/** Absolute filesystem path of a dropped File (sandboxed preload helper). */
+export function pathForFile(file: File): string {
+  return tuxbooks().pathForFile(file);
+}
+
+/** `tuxbooks://cover/<encoded path>` for an extracted cover image on disk. */
 export function coverFileUrl(coverPath: string): string {
-  return convertFileSrc(coverPath);
+  return `tuxbooks://cover/${encodeURIComponent(coverPath)}`;
 }

@@ -19,6 +19,21 @@ beforeAll(() => {
   }
   Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});
 
+  // The (temporary, pre-migration) foliate-js paginator queries the color
+  // scheme at construction time; jsdom has no matchMedia.
+  if (!window.matchMedia) {
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  }
+
   // Radix ScrollArea and Slider observe size changes.
   if (!globalThis.ResizeObserver) {
     globalThis.ResizeObserver = class {

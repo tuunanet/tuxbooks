@@ -98,6 +98,11 @@ cannot poison the next one.
 
 ## E2E (WebdriverIO against Electron)
 
+**Migration state:** the suites below still target tauri-driver/WebKitGTK
+and are being re-anchored to the Electron binary
+([electron-migration.md](electron-migration.md)); `just test-e2e` currently
+fails fast with a message. The contract below is the target.
+
 `just test-e2e` runs the **real desktop app** headlessly — no display, no
 desktop session, safe from SSH/CI/agent environments. `just
 test-e2e-headed` runs the same suites on your visible display for

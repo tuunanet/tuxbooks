@@ -30,7 +30,11 @@ pub async fn sweep_unreferenced_covers(
     let referenced: HashSet<String> = books::list_cover_paths(pool).await?.into_iter().collect();
 
     let mut removed = 0u32;
-    for entry in std::fs::read_dir(covers_dir)?.flatten() {
+    // A fresh database has no covers directory yet: nothing to sweep.
+    let Ok(entries) = std::fs::read_dir(covers_dir) else {
+        return Ok(0);
+    };
+    for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -145,10 +149,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sweep_on_missing_dir_is_an_error() {
+    async fn sweep_on_missing_dir_sweeps_nothing() {
+        // A fresh database has no covers directory yet; startup must not
+        // surface that as an error (docs/electron-migration.md phase 1).
         let tmp = tempfile::tempdir().unwrap();
         let pool = setup(tmp.path()).await;
-        let result = sweep_unreferenced_covers(&pool, &tmp.path().join("nope")).await;
-        assert!(matches!(result, Err(AppError::Io(_))), "got: {result:?}");
+        let removed = sweep_unreferenced_covers(&pool, &tmp.path().join("nope"))
+            .await
+            .unwrap();
+        assert_eq!(removed, 0);
     }
 }

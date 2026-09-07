@@ -7,36 +7,19 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 rust-version = "1.82"
 
-# See docs/architecture.md for the module layout contract.
+# See docs/architecture.md for the module layout contract. This crate is the
+# native service binary: the Electron main process spawns it and talks
+# JSON-RPC over stdio (docs/electron-migration.md).
 [lib]
 name = "tuxbooks_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-# `custom-protocol` embeds `frontendDist` assets into the binary (what `tauri build`
-# passes). Without it, debug binaries load `build.devUrl` (the Vite dev server).
-[features]
-custom-protocol = ["tauri/custom-protocol"]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+crate-type = ["rlib"]
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-dialog = "2"
-# Desktop polish (milestone 10): restores window size/position across restarts.
-tauri-plugin-window-state = "2"
-# "Show in File Manager" reveal action (milestone 10).
-tauri-plugin-opener = "2"
-# Test-only WebDriver helpers (execute/mocking/log forwarding) for
-# @wdio/tauri-service. Registered in debug builds only (see lib.rs); kept as a
-# non-optional dependency so the `wdio:default` capability permission resolves
-# in release builds too.
-tauri-plugin-wdio = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "migrate"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "process"] }
 thiserror = "2"
 anyhow = "1"
 walkdir = "2"
@@ -54,6 +37,10 @@ lopdf = "0.44"
 # scripts/fetch-pdfium.sh and probed at runtime (see docs/build.md).
 pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Book bytes cross the JSON-RPC stdio channel to the Electron main process
+# (tuxbooks:// protocol handler) as base64 — the only encoding the JSON
+# framing supports.
+base64 = "0.22"
 
 [dev-dependencies]
 proptest = "1"

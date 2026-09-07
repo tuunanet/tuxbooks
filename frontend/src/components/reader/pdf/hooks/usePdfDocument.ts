@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { closePdfDocument, openPdfDocument, type PdfDocument } from "@/lib/pdf/pdfEngine";
-import { getBookBytes } from "@/lib/tauri";
+import { getBookBytes } from "@/lib/bridge";
 
 export type PdfDocumentStatus = "loading" | "ready" | "error";
 
@@ -51,7 +51,7 @@ export function usePdfDocument(
 
     (async () => {
       try {
-        const bytes = await getBookBytes(bookId);
+        const bytes = await getBookBytes(bookId, "pdf");
         // PDF.js transfers the buffer to its worker; it is not reused here.
         loaded = await openPdfDocument(new Uint8Array(bytes));
         if (cancelled) {

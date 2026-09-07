@@ -2,11 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
-}));
 vi.mock("@/lib/epub/epubEngine", async () => {
   const { makeFakeEpubModule } = await import("./mocks/epubEngine");
   return makeFakeEpubModule();
@@ -15,7 +10,7 @@ vi.mock("@/lib/epub/epubEngine", async () => {
 import App from "@/App";
 import { AppShell } from "@/components/layout/AppShell";
 import { makeBook } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 describe("App", () => {
   it("renders the application shell with an empty library", async () => {

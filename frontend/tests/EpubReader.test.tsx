@@ -2,8 +2,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock("@/lib/epub/epubEngine", async () => {
   const { makeFakeEpubModule } = await import("./mocks/epubEngine");
   return makeFakeEpubModule();
@@ -14,7 +12,7 @@ import type { ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { useReader, type ReaderPreferences } from "@/state/readerState";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { fetchBookBytesMock, mockInvoke } from "./mocks/bridge";
 import { emitSearchResults, fakeEpubHandles, lastFakeHandle } from "./mocks/epubEngine";
 import { makeAnnotation } from "./factories";
 import type { Annotation } from "@/types/domain";
@@ -87,7 +85,6 @@ function makeBookShim() {
 
 function mockHappyPath(saved: typeof SAVED_PROGRESS | null) {
   mockInvoke({
-    get_book_bytes: new ArrayBuffer(16),
     get_reading_progress: saved,
     save_reading_progress: null,
   });
@@ -148,7 +145,7 @@ describe("EpubReader lifecycle", () => {
       { label: "Chapter One", href: "chapter1.xhtml", subitems: [] },
       { label: "Chapter Two", href: "chapter2.xhtml", subitems: [] },
     ]);
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 1 });
+    expect(fetchBookBytesMock).toHaveBeenCalledWith(1, "epub");
   });
 
   it("restores the saved CFI through engine init", async () => {
@@ -163,10 +160,10 @@ describe("EpubReader lifecycle", () => {
 
   it("renders an honest error when the bytes cannot be loaded", async () => {
     mockInvoke({
-      get_book_bytes: new Error("file went away"),
       get_reading_progress: null,
       save_reading_progress: null,
     });
+    fetchBookBytesMock.mockRejectedValueOnce(new Error("file went away"));
 
     renderReader();
     expect(await screen.findByTestId("epub-error")).toHaveTextContent(
@@ -210,7 +207,7 @@ describe("EpubReader lifecycle", () => {
     expect(first.host.isConnected).toBe(false);
     expect(second.open).toHaveBeenCalledTimes(1);
     expect(second.host.isConnected).toBe(true);
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 2 });
+    expect(fetchBookBytesMock).toHaveBeenCalledWith(2, "epub");
   });
 
   it("closes an open that finishes after the book changed", async () => {

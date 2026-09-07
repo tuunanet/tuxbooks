@@ -8,17 +8,51 @@ describe the target contract.
 
 ## Status
 
-| Phase | Scope                                                    | Status  |
-| ----- | -------------------------------------------------------- | ------- |
-| 0     | Architecture inventory, progress-format inspection       | planned |
-| 1     | Electron shell + Rust sidecar bridge (library works)     | planned |
-| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned |
-| 3     | Readium EPUB reader + foliate→Readium progress migration | planned |
-| 4     | MuPDF.js/WASM PDF reader                                 | planned |
-| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned |
-| 6     | Performance pass + full validation                       | planned |
+| Phase | Scope                                                    | Status                                                                                                     |
+| ----- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 0     | Architecture inventory, progress-format inspection       | done                                                                                                       |
+| 1     | Electron shell + Rust sidecar bridge (library works)     | in progress — sidecar, shell, bridge, and `tuxbooks://` work end-to-end; E2E re-anchor + packaging pending |
+| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                    |
+| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                    |
+| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                    |
+| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                  |
+| 6     | Performance pass + full validation                       | planned                                                                                                    |
 
 Update this table as phases land.
+
+### Phase 1 decisions and state (2026-09-07)
+
+- The Rust crate stays `tuxbooks` in `src-tauri/` (rename is cosmetic churn;
+  the binary is now the sidecar). `commands/` became tauri-free service-call
+  functions; `rpc.rs` holds the JSON-RPC method table (one method per former
+  Tauri command, same camelCase DTOs).
+- Wire format: newline-delimited JSON over stdio. Requests
+  `{jsonrpc, id, method, params}`; events arrive as notifications
+  `{jsonrpc, method: "event", params: {name, payload}}`. `ping` is the
+  health check. Book bytes are base64 inside `get_book_bytes` responses
+  (`{data, offset, total}`) — the renderer normally fetches through the
+  `tuxbooks://` protocol instead, which supports HTTP-style ranges.
+- The renderer's entire outside world is `window.tuxbooks`
+  (`electron/preload/preload.ts`, enumerated): `invoke`, `onEvent`,
+  the four pickers, `revealInFileManager`, `fetchBookBytes` (protocol
+  fetch), and `pathForFile` (webUtils — File.path no longer exists).
+  `frontend/src/lib/bridge.ts` is the only consumer.
+- `tuxbooks://` privileges: `standard, secure, supportFetchAPI, corsEnabled,
+stream`. corsEnabled is load-bearing — Chromium refuses cross-origin
+  fetch() to a non-CORS-enabled scheme before the handler runs (found by
+  the boot probe). Handler responses carry `access-control-allow-origin`.
+- Sidecar logs go to stderr; stdout is the JSON-RPC channel only.
+- Frontend tests fake `window.tuxbooks` (`frontend/tests/mocks/bridge.ts`,
+  installed on import) — no vi.mock hoisting needed anymore.
+- Drag-and-drop import uses DOM drag events + `pathForFile`; the Tauri
+  webview drag-drop events are gone.
+- Boot diagnostics (dev only): main logs `[boot] renderer mounted` or a
+  loud failure; `TUXBOOKS_BOOT_PROBE=1` fetches book 1 through the
+  protocol; `TUXBOOKS_DEBUG_IPC=1` logs bridge calls and protocol hits.
+- Not yet done in phase 1: E2E re-anchored to the Electron binary
+  (`just test-e2e` fails fast with a message), packaging
+  (electron-builder; the CI release workflow is guarded off), PDFium
+  resource probing for packaged builds.
 
 ## Target process model
 

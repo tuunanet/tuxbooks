@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createAnnotation, deleteAnnotation, listAnnotations, updateAnnotation } from "@/lib/tauri";
+import {
+  createAnnotation,
+  deleteAnnotation,
+  listAnnotations,
+  updateAnnotation,
+} from "@/lib/bridge";
 import type { Annotation, AnnotationInput, AnnotationPatch } from "@/types/domain";
 
 interface AnnotationSnapshot {

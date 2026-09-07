@@ -21,7 +21,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The Tauri bundler pipeline (deb + AppImage + tauri-driver E2E) is being
+  # replaced by Electron packaging (docs/electron-migration.md). Until that
+  # lands, a tag must fail loudly instead of publishing unbuildable artifacts.
+  migration-guard:
+    name: Release pipeline unavailable (Electron migration in progress)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Explain and fail
+        run: |
+          echo "The release pipeline is being migrated from Tauri to Electron" >&2
+          echo "packaging (docs/electron-migration.md). Do not tag until it is" >&2
+          echo "re-implemented; see docs/release.md." >&2
+          exit 1
+
   verify:
+    needs: migration-guard
     name: Verify tag (tests + E2E)
     runs-on: ubuntu-24.04
     timeout-minutes: 45

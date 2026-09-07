@@ -2,16 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
-  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
-}));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-
 import { BookMetadataDialog } from "@/components/books/BookMetadataDialog";
 import type { BookMetadata, MetadataFields } from "@/types/domain";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 const effective = {
   title: "A Minimal Book",
@@ -212,7 +205,7 @@ describe("BookMetadataDialog", () => {
     const { unmount } = render(<BookMetadataDialog bookId={2} open onOpenChange={() => {}} />);
     expect(await screen.findByTestId("metadata-cover-thumb")).toHaveAttribute(
       "src",
-      "asset://localhost/%2Fcovers%2Fabc123.png",
+      "tuxbooks://cover/%2Fcovers%2Fabc123.png",
     );
     expect(screen.getByTestId("metadata-cover-restore")).toBeInTheDocument();
     unmount();

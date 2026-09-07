@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
-use tauri::{Emitter, Manager, State};
-
 use crate::error::AppError;
 use crate::repository::library_locations;
+use crate::rpc::EventEmitter;
 use crate::services::book_importer::{import_directory, import_file, ImportReport};
 use crate::services::library_reconciler::{reconnect_book as reconnect, LibraryChange};
 use crate::{covers_dir, pdfium_library_dirs, AppState};
@@ -15,10 +14,9 @@ use crate::{covers_dir, pdfium_library_dirs, AppState};
 ///
 /// The directory is also registered as a watched library location, so after
 /// this scan the filesystem watcher keeps it synchronized (milestone 3).
-#[tauri::command]
 pub async fn scan_library(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
+    events: &EventEmitter,
     path: String,
 ) -> Result<ImportReport, AppError> {
     if path.trim().is_empty() {
@@ -26,10 +24,9 @@ pub async fn scan_library(
     }
     let root = PathBuf::from(path);
     let covers = covers_dir(&state.db_path);
-    let pdfium_dirs = pdfium_library_dirs(app.path().resource_dir().ok());
-    let emitter = app.clone();
-    let report = import_directory(&state.db, &root, &covers, &pdfium_dirs, &move |book| {
-        let _ignored = emitter.emit("import-progress", book);
+    let pdfium_dirs = pdfium_library_dirs();
+    let report = import_directory(&state.db, &root, &covers, &pdfium_dirs, &|book| {
+        events.emit("import-progress", book);
     })
     .await?;
 
@@ -44,19 +41,15 @@ pub async fn scan_library(
 /// (a stray single file does not turn its folder into a library root).
 /// Each persisted book is emitted as `import-progress`; per-path failures
 /// come back in the report so the UI can surface them honestly.
-#[tauri::command]
 pub async fn import_paths(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
+    events: &EventEmitter,
     paths: Vec<String>,
 ) -> Result<ImportReport, AppError> {
     let covers = covers_dir(&state.db_path);
-    let pdfium_dirs = pdfium_library_dirs(app.path().resource_dir().ok());
-    let emit_progress = {
-        let emitter = app.clone();
-        move |book: &crate::domain::Book| {
-            let _ignored = emitter.emit("import-progress", book);
-        }
+    let pdfium_dirs = pdfium_library_dirs();
+    let emit_progress = |book: &crate::domain::Book| {
+        events.emit("import-progress", book);
     };
 
     let mut report = ImportReport::default();
@@ -119,7 +112,7 @@ pub async fn import_paths(
             report
                 .failed
                 .push(crate::services::book_importer::FailedImport {
-                    path: path.to_string_lossy().into_owned(),
+                    path: raw,
                     error: "path does not exist".into(),
                 });
         }
@@ -130,10 +123,9 @@ pub async fn import_paths(
 /// Reconnect an unavailable book to a new file chosen by the user. The book
 /// keeps its id — and therefore metadata, collections, and reading progress —
 /// while path and parsed metadata are refreshed from the located file.
-#[tauri::command]
 pub async fn reconnect_book(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
+    events: &EventEmitter,
     book_id: i64,
     path: String,
 ) -> Result<crate::domain::Book, AppError> {
@@ -141,7 +133,7 @@ pub async fn reconnect_book(
         return Err(AppError::InvalidInput("book path is empty".into()));
     }
     let covers = covers_dir(&state.db_path);
-    let pdfium_dirs = pdfium_library_dirs(app.path().resource_dir().ok());
+    let pdfium_dirs = pdfium_library_dirs();
     let book = reconnect(
         &state.db,
         book_id,
@@ -150,9 +142,9 @@ pub async fn reconnect_book(
         &pdfium_dirs,
     )
     .await?;
-    let _ignored = app.emit(
+    events.emit(
         "library-changed",
-        LibraryChange::Changed {
+        &LibraryChange::Changed {
             book: Box::new(book.clone()),
         },
     );

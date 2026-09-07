@@ -1,14 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
-  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
-}));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
-}));
 
 import { EmptyLibraryState } from "@/components/library/EmptyLibraryState";
 import { BookCover } from "@/components/books/BookCover";
@@ -16,7 +7,7 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { makeBook } from "./factories";
-import { mockInvoke } from "./mocks/tauri";
+import { mockInvoke } from "./mocks/bridge";
 
 describe("EmptyLibraryState", () => {
   it("explains how to add books and offers the folder picker", () => {
@@ -47,12 +38,12 @@ describe("BookCover", () => {
     expect(screen.getByText("A")).toBeInTheDocument();
   });
 
-  it("renders the extracted cover through the asset protocol", () => {
+  it("renders the extracted cover through the tuxbooks protocol", () => {
     const { container } = render(
       <BookCover book={makeBook({ coverPath: "/data/covers/1.png" })} />,
     );
     const img = container.querySelector("img");
-    expect(img).toHaveAttribute("src", "asset://localhost/%2Fdata%2Fcovers%2F1.png");
+    expect(img).toHaveAttribute("src", "tuxbooks://cover/%2Fdata%2Fcovers%2F1.png");
   });
 
   it("falls back to the placeholder when the cover fails to load", () => {

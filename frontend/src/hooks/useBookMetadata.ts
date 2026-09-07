@@ -5,7 +5,7 @@ import {
   resetBookMetadata,
   setBookCover,
   updateBookMetadata,
-} from "@/lib/tauri";
+} from "@/lib/bridge";
 import type { BookMetadata, MetadataFields } from "@/types/domain";
 
 interface LoadedView {

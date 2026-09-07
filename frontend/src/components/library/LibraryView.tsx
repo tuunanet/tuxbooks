@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
-import { revealInFileManager } from "@/lib/tauri";
+import { revealInFileManager } from "@/lib/bridge";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { EmptyCollectionState } from "./EmptyCollectionState";
 import { EmptyLibraryState } from "./EmptyLibraryState";

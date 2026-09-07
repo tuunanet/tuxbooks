@@ -48,3 +48,4 @@ src-tauri/gen/schemas/
 src-tauri/pdfium/
 
 *.swp
+electron/dist/

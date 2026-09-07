@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { EpubViewHandle } from "@/lib/epub/epubEngine";
-import { getBookBytes } from "@/lib/tauri";
+import { getBookBytes } from "@/lib/bridge";
 
 export type EpubDocumentStatus = "loading" | "ready" | "error";
 
@@ -44,7 +44,7 @@ export function useEpubDocument(bookId: number): EpubDocumentState {
 
     (async () => {
       try {
-        const bytes = await getBookBytes(bookId);
+        const bytes = await getBookBytes(bookId, "epub");
         const { host, handle: view } = EpubViewHandle.create();
         host.dataset.epubState = "opening";
         await view.open(bytes);

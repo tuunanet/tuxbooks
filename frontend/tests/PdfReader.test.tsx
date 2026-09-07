@@ -3,8 +3,6 @@ import type { RefObject } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
   return {
@@ -35,7 +33,7 @@ import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { fetchBookBytesMock, invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 
 const openDocumentMock = vi.mocked(openPdfDocument);
@@ -150,14 +148,13 @@ describe("PdfReader loading", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
 
     await renderLoadedReader();
 
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 7 });
+    expect(fetchBookBytesMock).toHaveBeenCalledWith(7, "pdf");
     expect(openDocumentMock).toHaveBeenCalledTimes(1);
     const [firstCall] = openDocumentMock.mock.calls;
     expect(firstCall?.[0]).toBeInstanceOf(Uint8Array);
@@ -185,7 +182,6 @@ describe("PdfReader loading", () => {
       }) as never,
     );
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -202,7 +198,6 @@ describe("PdfReader loading", () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -223,7 +218,6 @@ describe("PdfReader loading", () => {
     );
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -244,7 +238,6 @@ describe("PdfReader loading", () => {
   it("reports the loaded page count to the shell", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -256,7 +249,7 @@ describe("PdfReader loading", () => {
   });
 
   it("shows an honest error when the bytes cannot be loaded", async () => {
-    mockInvoke({ get_book_bytes: new Error("file went away") });
+    fetchBookBytesMock.mockRejectedValueOnce(new Error("file went away"));
 
     renderPdfReader();
 
@@ -270,7 +263,6 @@ describe("PdfReader loading", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -296,7 +288,6 @@ describe("PdfReader book switching", () => {
     openDocumentMock.mockResolvedValueOnce(docA as unknown as EngineDocument);
     openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -312,7 +303,7 @@ describe("PdfReader book switching", () => {
     expect(await screen.findByTestId("pdf-loading")).toBeInTheDocument();
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 8 });
+    expect(fetchBookBytesMock).toHaveBeenCalledWith(8, "pdf");
     expect(openDocumentMock).toHaveBeenCalledTimes(2);
     expect(closeDocumentMock).toHaveBeenCalledTimes(1);
   });
@@ -328,7 +319,6 @@ describe("PdfReader book switching", () => {
     const docB = makeFakePdfDocument(5);
     openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -354,7 +344,6 @@ describe("PdfReader book switching", () => {
     openDocumentMock.mockResolvedValueOnce(docA as unknown as EngineDocument);
     openDocumentMock.mockResolvedValueOnce(docB as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -390,7 +379,6 @@ describe("PdfReader outline and thumbnails", () => {
     vi.mocked(getPdfOutline).mockResolvedValueOnce(outline as never);
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -406,7 +394,6 @@ describe("PdfReader outline and thumbnails", () => {
     vi.mocked(getPdfOutline).mockRejectedValueOnce(new Error("outline boom"));
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -421,7 +408,6 @@ describe("PdfReader outline and thumbnails", () => {
   it("renders thumbnails into the provided sidebar host", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -463,7 +449,6 @@ describe("PdfReader outline and thumbnails", () => {
   it("does not render a sidebar without a host", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -478,7 +463,6 @@ describe("PdfReader virtualization", () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -506,7 +490,6 @@ describe("PdfReader virtualization", () => {
     const doc = makeFakePdfDocument(100, undefined, { holdRenderFor: [1] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -538,7 +521,6 @@ describe("PdfReader virtualization", () => {
   it("evicts canvases once pages leave the preload window", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -562,7 +544,6 @@ describe("PdfReader virtualization", () => {
   it("caps active canvases at the render budget, closest pages first", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -580,7 +561,6 @@ describe("PdfReader virtualization", () => {
   it("byte-budgets active canvases when slots are 4K-sized (PERF-4)", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -608,7 +588,6 @@ describe("PdfReader virtualization", () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -639,7 +618,6 @@ describe("PdfReader virtualization", () => {
     const doc = makeFakePdfDocument(100);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -669,7 +647,6 @@ describe("PdfReader scroll tracking", () => {
   async function renderScrollableReader() {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -740,7 +717,6 @@ describe("PdfReader scroll tracking", () => {
 describe("PdfReader persistence", () => {
   function progressRoutes(savedPage: number | null) {
     return {
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress:
         savedPage === null
           ? null
@@ -851,7 +827,6 @@ describe("PdfReader fit width and zoom anchoring", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -872,7 +847,6 @@ describe("PdfReader fit width and zoom anchoring", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -892,7 +866,6 @@ describe("PdfReader fit width and zoom anchoring", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -922,7 +895,6 @@ describe("PdfReader fit width and zoom anchoring", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -942,7 +914,6 @@ describe("PdfReader hardening", () => {
     const doc = makeFakePdfDocument(3, undefined, { failOnceFor: [2] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -971,7 +942,6 @@ describe("PdfReader hardening", () => {
     const doc = makeFakePdfDocument(3, undefined, { holdRenderFor: [1] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -987,7 +957,6 @@ describe("PdfReader hardening", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1008,7 +977,6 @@ describe("PdfReader navigation", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1046,7 +1014,6 @@ describe("PdfReader zoom", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1103,7 +1070,6 @@ describe("PdfReader zoom", () => {
 
     openDocumentMock.mockResolvedValue(gatedDoc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1141,7 +1107,6 @@ describe("PdfReader zoom", () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1179,7 +1144,6 @@ describe("PdfReader zoom", () => {
 describe("PdfReader in-book search", () => {
   it("streams per-page match groups and reports completion", async () => {
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1213,7 +1177,6 @@ describe("PdfReader in-book search", () => {
 
   it("drops the page-text cache when the document changes", async () => {
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });
@@ -1245,7 +1208,6 @@ describe("PdfReader text layer and highlights", () => {
   function mockLoadedDocument(): void {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
     });

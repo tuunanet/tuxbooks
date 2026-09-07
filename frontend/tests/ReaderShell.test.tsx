@@ -2,11 +2,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => {}) }),
-}));
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
   return {
@@ -31,7 +26,7 @@ import { makeAnnotation, makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { lastFakeHandle, fakeEpubHandles } from "./mocks/epubEngine";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { fetchBookBytesMock, invokeMock, mockInvoke } from "./mocks/bridge";
 
 beforeEach(() => {
   fakeEpubHandles.length = 0;
@@ -56,7 +51,6 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
   mockInvoke({
     get_library_stats: { bookCount: 1, collectionCount: 0 },
     list_books: [book],
-    get_book_bytes: new ArrayBuffer(16),
     get_reading_progress: null,
     save_reading_progress: null,
     list_annotations: [],
@@ -250,7 +244,6 @@ describe("Reader bookmarks", () => {
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
       list_annotations: [
@@ -300,7 +293,6 @@ describe("Reader bookmarks", () => {
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
       list_annotations: [makeAnnotation({ id: 5 })],
@@ -355,12 +347,12 @@ describe("ReaderNavigation", () => {
   });
 
   it("shows a loading state while the EPUB document is still opening", async () => {
+    fetchBookBytesMock.mockReturnValueOnce(new Promise(() => {}));
     const book = makeBook();
     invokeMock.mockClear();
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [book],
-      get_book_bytes: new Promise(() => {}),
       get_reading_progress: null,
       save_reading_progress: null,
       list_annotations: [],
@@ -397,7 +389,7 @@ describe("ReaderNavigation", () => {
     await openNavigation();
     expect(await screen.findByTestId("nav-pages")).toBeInTheDocument();
     expect(screen.getByTestId("nav-page-3")).toBeInTheDocument();
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 1 });
+    expect(fetchBookBytesMock).toHaveBeenCalledWith(1, "epub");
 
     await userEvent.click(screen.getByTestId("nav-page-2"));
     expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
@@ -560,7 +552,6 @@ describe("Reader book switching", () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
       list_books: [epub, pdf],
-      get_book_bytes: new ArrayBuffer(16),
       get_reading_progress: null,
       save_reading_progress: null,
       list_annotations: [],

@@ -175,7 +175,7 @@ async fn malformed_epub_is_reported_and_does_not_break_the_library() -> anyhow::
 /// installed, the import also rasterizes a page-1 cover.
 #[tokio::test]
 async fn fixture_pdfs_import_and_serve_their_bytes() -> anyhow::Result<()> {
-    let pdfium_dirs = tuxbooks_lib::pdfium_library_dirs(None);
+    let pdfium_dirs = tuxbooks_lib::pdfium_library_dirs();
     let covers_expected = tuxbooks_lib::pdf::render::pdfium_available(&pdfium_dirs);
 
     for name in ["minimal.pdf", "large.pdf", "mixed.pdf"] {

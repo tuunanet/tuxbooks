@@ -1,6 +1,6 @@
 import { BookOpen, Import } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { pickDirectory } from "@/lib/tauri";
+import { pickDirectory } from "@/lib/bridge";
 import { useImport } from "@/state/importState";
 
 export function EmptyLibraryState() {

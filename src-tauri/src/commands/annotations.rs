@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::domain::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
 use crate::error::AppError;
@@ -116,9 +115,8 @@ impl AnnotationDto {
 }
 
 /// Every annotation of one book, in document order.
-#[tauri::command]
 pub async fn list_annotations(
-    state: State<'_, AppState>,
+    state: &AppState,
     book_id: i64,
 ) -> Result<Vec<AnnotationDto>, AppError> {
     Ok(service::list_annotations(&state.db, book_id)
@@ -129,9 +127,8 @@ pub async fn list_annotations(
 }
 
 /// Creates a bookmark or highlight and returns the stored row.
-#[tauri::command]
 pub async fn create_annotation(
-    state: State<'_, AppState>,
+    state: &AppState,
     book_id: i64,
     annotation: AnnotationInput,
 ) -> Result<AnnotationDto, AppError> {
@@ -140,9 +137,8 @@ pub async fn create_annotation(
 }
 
 /// Updates an annotation's color and note; null when the id does not exist.
-#[tauri::command]
 pub async fn update_annotation(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: i64,
     patch: AnnotationPatchInput,
 ) -> Result<Option<AnnotationDto>, AppError> {
@@ -159,7 +155,6 @@ pub async fn update_annotation(
 }
 
 /// Deletes an annotation; true when a row was removed.
-#[tauri::command]
-pub async fn delete_annotation(state: State<'_, AppState>, id: i64) -> Result<bool, AppError> {
+pub async fn delete_annotation(state: &AppState, id: i64) -> Result<bool, AppError> {
     service::delete_annotation(&state.db, id).await
 }

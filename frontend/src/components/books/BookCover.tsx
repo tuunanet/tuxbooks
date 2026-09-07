@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { coverFileUrl } from "@/lib/tauri";
+import { coverFileUrl } from "@/lib/bridge";
 import type { Book } from "@/types/domain";
 
 interface BookCoverProps {

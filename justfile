@@ -2,19 +2,7 @@ set shell := ["bash", "-uc"]
 
 root := justfile_directory()
 
-# scripts/dev-env.sh passes the environment through unchanged on machines with
-# system WebKitGTK, and appends user-local webkit paths on no-sudo machines.
-export PKG_CONFIG_PATH := `bash scripts/dev-env.sh pkgconfig`
-export LD_LIBRARY_PATH := `bash scripts/dev-env.sh ldpath`
-export PATH := `bash scripts/dev-env.sh path`
-
 default: check
-
-frontend-dist:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd "{{root}}"
-    test -f frontend/dist/index.html || pnpm --filter frontend build
 
 # Regenerate the committed EPUB fixture corpus (tests/fixtures/epub/):
 # deterministic source trees + artifacts + manifest. Byte-identical per run.
@@ -32,51 +20,47 @@ fetch-pdfium:
 check-epub-fixtures:
     python3 scripts/make-epub-fixtures.py --check
 
-# Launch the app in development mode (Vite dev server + Tauri window, hot reload).
+# Launch the app in development mode: Vite dev server (hot reload for the
+# renderer), the Rust sidecar (debug build), and the Electron shell.
 dev:
-    pnpm tauri dev
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    cargo build --manifest-path src-tauri/Cargo.toml
+    pnpm install --frozen-lockfile --offline >/dev/null 2>&1 || true
+    node scripts/build-electron.mjs
+    pnpm --filter frontend dev &
+    vite_pid=$!
+    trap 'kill $vite_pid 2>/dev/null || true' EXIT
+    # Wait for the Vite server (port 1420, strictPort) before opening the shell.
+    for _ in $(seq 1 120); do
+        if (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null; then
+            exec 3>&- 3<&- || true
+            break
+        fi
+        sleep 0.5
+    done
+    VITE_DEV_SERVER_URL=http://localhost:1420 pnpm exec electron .
 
 # GNU timeout is the last-resort hang guard for test commands (linux only:
 # macOS lacks coreutils' timeout). Healthy runs finish in a fraction of
 # these bounds; a wedged run is killed instead of blocking development.
 _test_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
-_e2e_timeout := if os() == "linux" { "timeout --kill-after=15 300" } else { "" }
 
-# Build the release application bundle. Requires the PDFium library (bundled
-# as an app resource); `tauri build` fails when it is absent.
+# Build everything the packaged app needs: renderer bundle, Electron
+# main/preload bundles, and the release sidecar binary.
 build: fetch-pdfium
-    pnpm tauri build
-
-# Build the Debian bundle and verify it: control metadata vs
-# tauri.conf.json, desktop entry validity, hicolor icons, bundled PDFium
-# (scripts/check-deb.sh, docs/release.md). The packaging regression gate;
-# the release workflow builds the same bundler output from a tag.
-package-check: build
-    bash scripts/check-deb.sh
-
-# Build the AppImage on machines with the full Tauri dev packages: unlike
-# deb, AppImage bundling resolves librsvg/GTK dev pkg-config data at bundle
-# time (librsvg2-dev et al). CI builds it in the release workflow; on this
-# project's no-sudo dev machine only the deb/rpm targets are available.
-build-appimage: fetch-pdfium
-    pnpm tauri build --bundles appimage
-
-# Build an un-bundled debug binary with embedded assets (used by E2E).
-# VITE_WDIO=1 bundles the @wdio/tauri-plugin frontend bridge; every other
-# build tree-shakes it out.
-build-debug: fetch-pdfium
-    VITE_WDIO=1 pnpm --filter frontend build
-    cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
+    pnpm --filter frontend build
+    node scripts/build-electron.mjs
+    cargo build --manifest-path src-tauri/Cargo.toml --release
 
 # Unit tests: rust + frontend, concurrently (different toolchains — cargo
-# and node never contend). `test-rust` pins custom-protocol so
-# target/debug/tuxbooks always keeps the feature set build-debug gives it
-# and `just check` no longer invalidates the E2E binary (docs/build.md).
-# fetch-pdfium first so PDF cover tests exercise a real render, not a skip.
+# and node never contend). fetch-pdfium first so PDF cover tests exercise a
+# real render, not a skip.
 test: test-parallel
 
-test-rust: frontend-dist fetch-pdfium
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol
+test-rust: fetch-pdfium
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml
 
 test-frontend:
     {{_test_timeout}} pnpm --filter frontend test:ci
@@ -86,48 +70,13 @@ test-parallel:
         'rust: just test-rust' \
         'frontend: just test-frontend'
 
-# E2E runs the real desktop app against WebdriverIO. Headless by default:
-# on Linux each phase runs under a private Xvfb. `env -u WAYLAND_DISPLAY` is
-# essential: xvfb-run only overrides DISPLAY, and a GTK3 app launched from a
-# Wayland session otherwise prefers the (inherited) WAYLAND_DISPLAY and pops
-# up on the real desktop instead of the virtual framebuffer. GDK_BACKEND=x11
-# pins the choice. timeout is the last-resort guard so an agent invocation
-# always terminates (healthy phases finish in under a minute; E2E_XVFB marks
-# the watchdog to sweep the phase's private Xvfb if teardown is killed).
-_headless := if os() == "linux" { "env -u WAYLAND_DISPLAY GDK_BACKEND=x11 E2E_XVFB=1 xvfb-run --auto-servernum" } else { "" }
-
-test-e2e: build-debug
-    just test-e2e-empty
-    just test-e2e-seeded
-
-test-e2e-empty:
-    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
-
-test-e2e-seeded:
-    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
-
-# Same suites on the developer's real display, for visual debugging.
-test-e2e-headed: build-debug
-    just test-e2e-headed-empty
-    just test-e2e-headed-seeded
-
-test-e2e-headed-empty:
-    env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
-
-test-e2e-headed-seeded:
-    env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
-
-# Reader performance benchmark (docs/performance.md "How to measure"):
-# MEASURES pdf render→blit and epub scrolled-flow latency on the real-book
-# Agents fixtures, starting mid-book, with the window MAXIMIZED on the real
-# display (explicit WxH argument overrides). Asserts only the deterministic
-# budgets (PERF-1/3/4) and writes artifacts/e2e/<runId>/bench-results.json.
-# HEADED and opt-in — never Xvfb, never CI (timing assertions are excluded
-# from CI by policy).
-_bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
-
-bench-reader WINDOW_SIZE="": build-debug
-    {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
+# E2E: returns with the Electron driver migration (docs/electron-migration.md
+# phase 1+). The WebdriverIO suites still target tauri-driver/WebKitGTK and
+# are being re-anchored to the Electron binary.
+test-e2e:
+    #!/usr/bin/env bash
+    echo "E2E is being re-anchored to Electron (docs/electron-migration.md); not runnable yet." >&2
+    exit 1
 
 # Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.
@@ -140,20 +89,24 @@ fetch-epub-extended:
 
 # Tier B: run the real-world corpus through the parser. Requires a prior
 # `just fetch-epub-extended`; skips with a notice when nothing is fetched.
-test-epub-extended: frontend-dist
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol --test extended_epub extended::
+test-epub-extended:
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --test extended_epub extended::
 
 # Tier C: run the external W3C conformance corpus. Same opt-in contract.
-test-epub-conformance: frontend-dist
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol --test extended_epub conformance::
+test-epub-conformance:
+    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --test extended_epub conformance::
 
-lint: lint-rust lint-frontend lint-workflows
+lint: lint-rust lint-frontend lint-electron lint-workflows
 
 lint-rust:
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
 lint-frontend:
     pnpm --filter frontend lint
+
+lint-electron:
+    node scripts/build-electron.mjs >/dev/null
+    pnpm exec tsc -p electron --noEmit
 
 # Lint GitHub Actions workflows (expressions, references, run: shell).
 # Downloads the pinned binary on first use (scripts/install-actionlint.sh),
@@ -176,11 +129,12 @@ format-check-frontend:
 
 typecheck:
     pnpm --filter frontend typecheck
+    pnpm exec tsc -p electron --noEmit
 
-# Full local validation. The five streams are independent toolchains, so
-# they run concurrently (wall time = the slowest stream, usually rust).
-# Cargo work stays in one stream: parallel cargo commands would just block
-# each other on the target-dir file lock.
+# Full local validation. The streams are independent toolchains, so they run
+# concurrently (wall time = the slowest stream, usually rust). Cargo work
+# stays in one stream: parallel cargo commands would just block each other
+# on the target-dir file lock.
 check:
     bash scripts/run-parallel.sh \
         'rust: just format-check-rust && just lint-rust && just test-rust' \
@@ -191,11 +145,6 @@ check:
         'fixtures: just check-epub-fixtures' \
         'workflows: just lint-workflows'
     @echo "check: OK"
-
-# Complete CI-equivalent validation, including E2E, the release build, and
-# the packaging gate.
-ci: check test-e2e package-check
-    @echo "ci: OK"
 
 # Coverage gate (docs/coverage.md). Frontend thresholds are enforced by
 # every vitest run; this recipe adds the Rust instrumented run (slow first
