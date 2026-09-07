@@ -119,7 +119,10 @@ Readings:
    [bug 315997](https://bugs.webkit.org/show_bug.cgi?id=315997)
    (DisplayRefreshMonitor timer fallback); confirming comment drafted in
    `docs/research/webkit-bug-315997-comment.md`. No app-side change can
-   lift the ceiling.
+   lift the ceiling. **2.53.92 is only a partial fix**: rAF reaches 60 Hz
+   inside containers but still locks at ~31 fps natively (see
+   `docs/research/webview-frame-clock.md` for the full A/B); re-test
+   2.54.0 when it lands.
 2. ~~**The dpr/geometry anomaly.**~~ **Answered 2026-09-06** — KDE
    fractional scaling 1.45 on DP-1 (3840×2160@60); non-fractional-aware
    clients get integer scale 2 and are compositor-downscaled (buffer

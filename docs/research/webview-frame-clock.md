@@ -42,16 +42,32 @@ Readings:
 **Conclusion:** root-caused at the WebKitGTK level and already reported
 upstream as [bug 315997 — "DisplayRefreshMonitor falls back to Timer on
 Wayland, capping all WebKitGTK apps at ~30fps"](https://bugs.webkit.org/show_bug.cgi?id=315997)
-(NEW/P2, unconfirmed since 2026-06-01; no fix as of the 2.52 stable series
-— 2.53.x dev builds exist). The original report matches this environment
-(KWin + AMD radeonsi + GTK 4.22, `about:support` shows "VBlank type:
-Timer"). A ready-to-paste confirming comment with this matrix is in
-`docs/research/webkit-bug-315997-comment.md` — post it once logged in to
-bugs.webkit.org. Tracked locally in
-[tuxbooks#3](https://github.com/tuunanet/tuxbooks/issues/3). No app-side
-change can lift the ceiling; adjacent-version
-testing beyond 2.52.3/2.52.6 (both capped) needs an environment with more
-WebKitGTK versions (flatpak Epiphany, toolbox, or a VM).
+(NEW/P2, unconfirmed since 2026-06-01). The original report matches this
+environment (KWin + AMD radeonsi + GTK 4.22, `about:support` shows
+"VBlank type: Timer"). A ready-to-paste confirming comment with this
+matrix is in `docs/research/webkit-bug-315997-comment.md` — post it once
+logged in to bugs.webkit.org. No app-side change can lift the ceiling.
+
+**2.53.92 is a partial fix (2026-09-06):** the old web-process
+`DisplayRefreshMonitorGtk` (the subject of bug 315997) is gone, replaced
+by a UI-process `DisplayVBlankMonitor`/`DisplayLink` that feeds the web
+process over IPC. That link ticks at 61 Hz and the web process receives
+the refresh at 60 Hz **in every environment tested** — including natively.
+But rAF only reaches 60 Hz **inside containers**: a bare host against
+WebKitGTK 2.53.92 runs idle p50/p95 16/17 ms and 17/18 ms under damage
+in both a Debian sid and an Ubuntu 26.04 container (libraries, env vars,
+sandbox, dbus/UPower, CPU/memory pressure, timer slack, namespaces,
+seccomp and reduced-motion all A/B-excluded). Natively in the KDE
+session the **same** bits lock at idle 32/33 ms (every-other-tick) — the
+web process's rendering-update/frame-confirmation loop only completes
+every second display link tick there, while the UI display link keeps
+ticking at 61 Hz (VBlankMonitor thread nanosleep 16.3 ms median; UI main
+thread timers ~30 ms native vs ~12 ms container is the one residual
+scheduling difference found). `just bench-reader` on 2.53.92 confirms the
+app is unchanged natively (idle 32/33, drag p50 45–50, walk p95 588).
+So: 2.53/2.54 fixes the _architecture_ but a residual environmental
+interaction still caps a native desktop session at ~30 fps — re-test
+2.54.0 when it lands, but do not assume it is fixed on this machine.
 
 ## Verdict 2 — dpr 2 is fiction; the true compositor scale is 1.45
 

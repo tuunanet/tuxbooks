@@ -81,3 +81,37 @@ Display     single active DP-1 3840x2160@60 at KDE fractional scale
 Happy to test patches or a newer 2.53.x build on this hardware if
 useful.
 ```
+
+## Follow-up comment — version A/B (paste only after the first comment)
+
+The frame-clock behavior was then compared across WebKitGTK versions on
+the identical session/geometry (same probe, same display, maximized):
+
+```text
+Update: compared WebKitGTK versions on the identical session, display,
+and maximized geometry (same rAF samplers, bare GTK hosts).
+
+* WebKitGTK 2.52.3 (GTK3 4.1 API) and 2.52.6 (GTK4 6.0 API):
+  idle p50/p95 32/33 ms; with continuous per-frame damage 43/70 ms.
+* WebKitGTK 2.53.92 (Debian experimental, GTK 4.23.2, same container
+  environment otherwise):
+  idle 16/17 ms (~61 fps over 1200+ samples); with continuous
+  per-frame damage 17/18 ms.
+
+Correction and refinement: the 2.53 result above only holds inside a
+container. Running the same 2.53.92 binaries natively in the desktop
+session (KDE Wayland) still gives idle p50/p95 32/33 ms — rAF locks to
+every-other-display-link-tick. Excluded by A/B: libraries (the exact
+native lib mix reaches 60 fps in an Ubuntu 26.04 container), env vars,
+sandbox (WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1), dbus/UPower
+(OnBattery=false, dead-bus test), CPU/memory pressure (PSI 0), timer
+slack, namespaces (unshare), seccomp (docker blocklist), and
+prefers-reduced-motion (false). The UI-process DisplayVBlankMonitor
+ticks at 61 Hz natively (timer fallback, drmWaitVBlank never reached
+— connector mm-match fails on this KWin fractional-scaling setup), and
+the web process receives the refresh IPC at ~16 ms intervals, but its
+rendering-update/frame-confirmation only completes every second tick.
+So the timer-fallback symptom is fixed in 2.53, but a residual issue
+still halves rAF in a native desktop session — see comment for the
+container/native matrix.
+```
