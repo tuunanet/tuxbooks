@@ -26,8 +26,13 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{root}}"
+    # A stale dev server (crashed run, leftover terminal) holds the port and
+    # Vite would die with a cryptic bind error — fail with the fix instead.
+    if (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null; then
+        echo "dev: port 1420 is already in use — stop the other tuxbooks dev server first." >&2
+        exit 1
+    fi
     cargo build --manifest-path src-tauri/Cargo.toml
-    pnpm install --frozen-lockfile --offline >/dev/null 2>&1 || true
     node scripts/build-electron.mjs
     pnpm --filter frontend dev &
     vite_pid=$!
