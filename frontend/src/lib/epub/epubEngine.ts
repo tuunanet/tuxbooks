@@ -294,9 +294,28 @@ export class EpubViewHandle {
   /**
    * Moves to the restored location (a stored CFI) or the start of the book.
    * Must run after {@link open}; the first `relocate` follows it.
+   *
+   * A stale locator (e.g. a spine index past the end after the book
+   * changed) resolves to an out-of-range section, and the engine's
+   * `renderer.goTo` then never settles — the reader would wedge on a blank
+   * loading surface. Validate the resolved section against the spine first
+   * and drop a stale locator so the engine restores to the start instead.
    */
   async init(lastLocation: string | null): Promise<void> {
-    await this.view.init({ lastLocation: lastLocation ?? undefined });
+    const options: { lastLocation?: string } = {};
+    if (lastLocation) {
+      const resolved = this.view.resolveNavigation(lastLocation);
+      if (resolved) {
+        const sectionCount = this.view.book?.sections?.length ?? 0;
+        const stale =
+          !Number.isInteger(resolved.index) || resolved.index < 0 || resolved.index >= sectionCount;
+        if (!stale) options.lastLocation = lastLocation;
+      } else {
+        // Unresolvable locator: foliate itself falls back to the start.
+        options.lastLocation = lastLocation;
+      }
+    }
+    await this.view.init(options);
   }
 
   /** TOC tree of the opened book, or null before `open` resolves. */

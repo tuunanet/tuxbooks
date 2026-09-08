@@ -95,11 +95,14 @@ _e2e_timeout := if os() == "linux" { "timeout --kill-after=15 600" } else { "" }
 _x11 := if os() == "linux" { "env -u WAYLAND_DISPLAY ELECTRON_OZONE_PLATFORM_HINT=x11" } else { "" }
 _headless := if os() == "linux" { _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum" } else { "" }
 
-# Fetch the chromedriver matching the app's Electron version
-# (.build/chromedriver/, gitignored). The service's own downloader hangs;
-# the harness needs this binary (docs/testing.md, docs/build.md).
+# Fetch the chromedriver matching the app's Electron version into the pinned
+# service-managed cache (.build/chromedriver-cache, gitignored). Resolution
+# is automatic (electron -> chromium build id); only the download is done by
+# the deterministic fetcher because wdio-utils' own downloader hangs on some
+# networks (docs/testing.md). Idempotent: wdio.conf.ts also runs it when the
+# cache entry is missing.
 fetch-chromedriver:
-    bash scripts/fetch-chromedriver.sh
+    node e2e/setup/fetch-chromedriver.mjs
 
 test-e2e: build-debug fetch-chromedriver
     just test-e2e-empty
@@ -110,6 +113,23 @@ test-e2e-empty: fetch-chromedriver
 
 test-e2e-seeded: fetch-chromedriver
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# High-DPI configuration (docs/performance.md reference conditions name dpr
+# 2.0): the seeded reader scenarios against an app forced to
+# devicePixelRatio 2 via E2E_DEVICE_SCALE_FACTOR → --force-device-scale-factor.
+test-e2e-hidpi: build-debug fetch-chromedriver
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=hidpi E2E_SEED_LIBRARY=1 E2E_DEVICE_SCALE_FACTOR=2 pnpm --filter e2e test:hidpi
+
+# Production-form build: same renderer/Electron bundles, but the RELEASE
+# sidecar binary through TUXBOOKS_SIDECAR (the packaged-app resource
+# resolution path; full electron-builder packaging lands in migration
+# phase 5 — docs/electron-migration.md).
+_release_sidecar := "{{root}}/src-tauri/target/release/tuxbooks"
+
+test-e2e-release: build-debug fetch-chromedriver
+    cargo build --manifest-path src-tauri/Cargo.toml --release
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:empty
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:seeded
 
 # Same suites on the developer's real display, for visual debugging.
 test-e2e-headed: build-debug fetch-chromedriver

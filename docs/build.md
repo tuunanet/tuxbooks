@@ -27,12 +27,21 @@ one place in main.
 
 ## Chromedriver for E2E
 
-`wdio-electron-service` needs a chromedriver matching the app's Electron
-version, and its own downloader hangs (the install promise never
-settles). `scripts/fetch-chromedriver.sh` downloads the matching
-Chrome-for-Testing build into `.build/chromedriver/` (gitignored,
-version-stamped, idempotent); `just test-e2e` and friends run it
-automatically. `CHROMEDRIVER_BUILD` overrides the resolved version.
+`@wdio/electron-service` resolves the chromedriver automatically: it reads
+the installed Electron version from `e2e/package.json` (via `node_modules`)
+and derives the matching Chrome-for-Testing build id. Only the **download**
+is performed by the repo's own deterministic fetcher
+(`e2e/setup/fetch-chromedriver.mjs`, wired as `just fetch-chromedriver` and
+auto-run by `wdio.conf.ts` when the cache entry is missing): wdio-utils'
+built-in downloader (`@puppeteer/browsers` 2.13.x) hangs on some networks —
+its install promise never settles, and a killed run leaves a poisoned cache
+("the browser folder exists but the executable is missing"). The fetcher
+lands the same artifact in the same cache layout
+(`.build/chromedriver-cache/`, gitignored, pinned per build id), so
+wdio-utils finds a complete entry and skips its downloader entirely.
+A startup sanity check (`e2e/setup/versions.ts`, `docs/testing.md`) fails
+fast when the connected driver's major does not match the installed
+Electron's Chromium mapping.
 
 ## PDFium shared library (PDF covers)
 

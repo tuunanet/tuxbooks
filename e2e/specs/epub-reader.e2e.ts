@@ -1,4 +1,10 @@
-import { closeReaderNavigation, openInReader, returnToLibrary, textOf } from "./helpers.js";
+import {
+  closeReaderNavigation,
+  epubLocator,
+  openInReader,
+  returnToLibrary,
+  textOf,
+} from "./helpers.js";
 
 /** Waits until the EPUB engine reports the given spine section. */
 async function waitForSection(section: number): Promise<void> {
@@ -163,6 +169,40 @@ describe("tuxbooks EPUB reader", () => {
     await waitForSection(2);
     const percent = await textOf("reader-position");
     expect(parseInt(percent, 10)).toBeGreaterThan(30);
+
+    await returnToLibrary();
+  });
+
+  // Semantic persistence regression (docs/testing.md): the exact engine
+  // locator — not just the section index or a percentage — survives the
+  // close/reopen cycle. This is the reading-position regression protection
+  // the engine migration (foliate → Readium) must keep passing.
+  it("restores the exact CFI locator across close and reopen", async () => {
+    await openReadyEpub();
+
+    // Land on a known in-chapter position via the contents drawer.
+    await jumpToTocItem(1);
+    await waitForSection(1);
+    await browser.waitUntil(async () => (await epubLocator()) !== null, {
+      timeout: 30000,
+      timeoutMsg: "engine never reported its locator",
+    });
+    const savedLocator = await epubLocator();
+    expect(savedLocator).toMatch(/^epubcfi\(/);
+
+    // Let the debounced save flush before leaving the reader.
+    await browser.pause(1500);
+    await returnToLibrary();
+
+    // Reopen: the restored locator names the same logical content position.
+    await openReadyEpub();
+    await browser.waitUntil(async () => (await epubLocator()) !== null, {
+      timeout: 30000,
+      timeoutMsg: "reopened engine never reported its locator",
+    });
+    const restoredLocator = await epubLocator();
+    expect(restoredLocator).toBe(savedLocator);
+    await waitForSection(1);
 
     await returnToLibrary();
   });

@@ -650,7 +650,11 @@ export function PdfReader({
 
   if (status === "error") {
     return (
-      <div data-testid="pdf-reader" className="mx-auto max-w-3xl px-6 py-8">
+      <div
+        data-testid="pdf-reader"
+        data-pdf-engine-state="error"
+        className="mx-auto max-w-3xl px-6 py-8"
+      >
         <p
           data-testid="pdf-error"
           role="alert"
@@ -664,7 +668,17 @@ export function PdfReader({
 
   if (!interactive || !pdfDocument) {
     return (
-      <div data-testid="pdf-reader" className="mx-auto max-w-3xl px-6 py-8">
+      <div
+        data-testid="pdf-reader"
+        // Engine lifecycle as a deterministic attribute (docs/pdf.md): a
+        // stuck or failed stage names itself instead of leaving the tests to
+        // infer from a missing reader. status "ready" means the document is
+        // parsed (worker/document path); layout follows once sizes are known.
+        data-pdf-engine-state={
+          layoutReady ? "layout-ready" : status === "ready" ? "document-parsed" : "document-loading"
+        }
+        className="mx-auto max-w-3xl px-6 py-8"
+      >
         <p data-testid="pdf-loading" className="text-center text-sm text-muted-foreground">
           Loading {book.title}…
         </p>
@@ -676,6 +690,7 @@ export function PdfReader({
     <div
       ref={rootRef}
       data-testid="pdf-reader"
+      data-pdf-engine-state="interactive"
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
       className="flex flex-col items-stretch px-6 py-4"

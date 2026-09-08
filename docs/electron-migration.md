@@ -8,15 +8,15 @@ describe the target contract.
 
 ## Status
 
-| Phase | Scope                                                    | Status                                                                                                                                         |
-| ----- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Architecture inventory, progress-format inspection       | done                                                                                                                                           |
-| 1     | Electron shell + Rust sidecar bridge (library works)     | done — sidecar, shell, bridge, `tuxbooks://`, and the E2E suites (wdio-electron-service) all green; packaging (electron-builder) still pending |
-| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                                                        |
-| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                                                        |
-| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                                                        |
-| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                                                      |
-| 6     | Performance pass + full validation                       | planned                                                                                                                                        |
+| Phase | Scope                                                    | Status                                                                                                                                                                                                                                                                                                                      |
+| ----- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Architecture inventory, progress-format inspection       | done                                                                                                                                                                                                                                                                                                                        |
+| 1     | Electron shell + Rust sidecar bridge (library works)     | done — sidecar, shell, bridge, `tuxbooks://`, and the E2E suites all green on `@wdio/electron-service` 10.x + WebdriverIO 9.31 (service-managed chromedriver resolution with a deterministic repo fetcher, startup version record + driver sanity check, worker isolation gate); packaging (electron-builder) still pending |
+| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                                                                                                                                                                                                                                     |
+| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                                                                                                                                                                                                                                     |
+| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                                                                                                                                                                                                                                     |
+| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                                                                                                                                                                                                                                   |
+| 6     | Performance pass + full validation                       | planned                                                                                                                                                                                                                                                                                                                     |
 
 Update this table as phases land.
 
@@ -49,10 +49,10 @@ stream`. corsEnabled is load-bearing — Chromium refuses cross-origin
 - Boot diagnostics (dev only): main logs `[boot] renderer mounted` or a
   loud failure; `TUXBOOKS_BOOT_PROBE=1` fetches book 1 through the
   protocol; `TUXBOOKS_DEBUG_IPC=1` logs bridge calls and protocol hits.
-- Not yet done in phase 1: E2E re-anchored to the Electron binary
-  (`just test-e2e` fails fast with a message), packaging
-  (electron-builder; the CI release workflow is guarded off), PDFium
-  resource probing for packaged builds.
+- Not yet done in phase 1: packaging (electron-builder; the CI release
+  workflow is guarded off — `just test-e2e-release` covers the release
+  sidecar path in the meantime), PDFium resource probing for packaged
+  builds.
 
 ## Target process model
 

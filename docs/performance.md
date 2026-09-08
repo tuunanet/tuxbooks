@@ -76,15 +76,25 @@ Re-run the relevant verifications when editing:
   (`entries:bytes`) and `data-render-state` churn — e.g. cache occupancy
   after a scripted scroll oscillation.
 - **Bench suite (headed, explicit):** `just bench-reader [WxH]` runs the
-  `bench-reader.e2e.ts` suite on the real display, maximized: the PDF
-  scenario collects `data-pdf-render-ms` per walked page (PERF-1/3/4
-  budget checks asserted) and both readers get a synthetic scrollbar drag
-  (continuous scroll deltas per ~16 ms tick) with a rAF frame-interval
-  sampler — p50/p95 frame time and the share of frames over 32/50 ms are
-  the smoothness metrics — writing
-  `artifacts/e2e/<runId>/bench-results.json`. Never runs in CI — timings
-  are unreliable headless and the suite is the manual-measurement tool for
-  PERF-2.
+  `bench-reader.e2e.ts` suite on the real display, window maximized
+  (renderer-side `window.resizeTo` — chromedriver ≥ 152 removed the CDP
+  endpoint behind the WebDriver window commands). It collects: PDF
+  page-walk `data-pdf-render-ms` (PERF-1/3/4 budget checks asserted),
+  synthetic scrollbar drags on both readers with a rAF frame-interval
+  sampler (p50/p95/max frame time and the dropped-frame share over
+  16.7/32/50 ms), interaction latency for the reader's real interaction
+  patterns (PDF rapid page turns, zoom steps, large-document scroll jumps;
+  EPUB chapter changes), first-render latency (launch → first rendered
+  page), and live canvas memory (PERF-4). Results land in
+  `artifacts/e2e/<runId>/bench-results.json` plus a one-line summary in
+  `bench-trend.jsonl` for run-over-run drift comparison. Never runs in CI —
+  timings are unreliable headless and the suite is the manual-measurement
+  tool for PERF-2. Timing thresholds are opt-in via `BENCH_ENFORCE_P95_MS`,
+  and a threshold that fires on machine variance is compared against the
+  trend file before being changed. The high-DPI reference condition has its
+  own deterministic configuration: `just test-e2e-hidpi` forces
+  `devicePixelRatio` 2 and asserts the buffer caps (PERF-1) at that dpr
+  (timing stays out of it).
 - **Manual (timings):** log `performance.now()` around render → blit per
   page at reference conditions; record p95 before/after engine, scale, or
   virtualization changes. Chromium DevTools performance panel and

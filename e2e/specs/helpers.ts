@@ -322,6 +322,52 @@ export async function epubHostCount(): Promise<number> {
   return browser.execute(() => document.querySelectorAll("[data-epub-host]").length);
 }
 
+/**
+ * The engine host's stable attributes (docs/epub.md). The CFI locator is
+ * what the persistence layer would save right now — the semantic location
+ * probe for the round-trip and migration tests.
+ */
+export async function epubLocator(): Promise<string | null> {
+  return browser.execute(
+    () =>
+      document
+        .querySelector("[data-testid=epub-reader] [data-epub-host]")
+        ?.getAttribute("data-epub-locator") ?? null,
+  );
+}
+
+/** Spine section count reported by the engine host, or null before init. */
+export async function epubSectionTotal(): Promise<string | null> {
+  return browser.execute(
+    () =>
+      document
+        .querySelector("[data-testid=epub-reader] [data-epub-host]")
+        ?.getAttribute("data-epub-section-total") ?? null,
+  );
+}
+
+/**
+ * The PDF reader's engine lifecycle attribute (docs/pdf.md): one of
+ * document-loading | document-parsed | layout-ready | interactive | error.
+ * Failure modes name their stage instead of leaving the tests to infer from
+ * a missing reader surface.
+ */
+export async function pdfEngineState(): Promise<string | null> {
+  return browser.execute(
+    () =>
+      document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-engine-state") ??
+      null,
+  );
+}
+
+/** Waits until the PDF engine reaches the given lifecycle stage. */
+export async function waitForPdfEngineState(stage: string, timeoutMs = 30000): Promise<void> {
+  await browser.waitUntil(async () => (await pdfEngineState()) === stage, {
+    timeout: timeoutMs,
+    timeoutMsg: `pdf engine never reached state "${stage}"`,
+  });
+}
+
 /** The reading page reported by the PDF page indicator, or null. */
 export async function currentPageNumber(): Promise<number | null> {
   const text = await textOf("pdf-page-indicator");

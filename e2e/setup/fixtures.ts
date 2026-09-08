@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -15,38 +16,94 @@ export const electronBinaryPath = fs.realpathSync(
   path.join(repoRoot, "e2e", "node_modules", "electron", "dist", "electron"),
 );
 
-/** Rust sidecar binary spawned by the app (debug build). */
-export const sidecarBinaryPath = path.join(repoRoot, "src-tauri", "target", "debug", "tuxbooks");
+/**
+ * Rust sidecar binary spawned by the app. Debug build by default; the
+ * release flavor (`just test-e2e-release`) overrides via TUXBOOKS_SIDECAR —
+ * the packaged-app resource-resolution path exercised ahead of
+ * electron-builder packaging (migration phase 5).
+ */
+export const sidecarBinaryPath =
+  process.env.TUXBOOKS_SIDECAR ?? path.join(repoRoot, "src-tauri", "target", "debug", "tuxbooks");
 
 /**
- * Chromedriver binary fetched by scripts/fetch-chromedriver.sh. The
- * service's own downloader hangs (its install promise never settles), so
- * the harness always hands the service an explicit, version-matched binary.
+ * Service-managed chromedriver cache (docs/testing.md): wdio-utils' driver
+ * installer would otherwise default to the shared os.tmpdir(), so the
+ * capability pins `wdio:chromedriverOptions.cacheDir` here — machine-local,
+ * gitignored, keyed by exact build id. The stale-process sweep and the
+ * teardown watchdog target this directory: it is private to the E2E stack,
+ * so a precise pattern under it cannot race other tooling.
  */
-export function chromedriverBinaryPath(): string {
-  const dir = path.join(repoRoot, ".build", "chromedriver");
-  const stamp = path.join(dir, "version.txt");
-  const binary = path.join(dir, "chromedriver-linux64", "chromedriver");
-  if (!fs.existsSync(binary) || !fs.existsSync(stamp)) {
-    throw new Error(
-      "chromedriver is missing — run `just fetch-chromedriver` (scripts/fetch-chromedriver.sh)",
-    );
+export const chromedriverCacheDir = path.join(repoRoot, ".build", "chromedriver-cache");
+
+/**
+ * Ensure the pinned chromedriver cache holds a complete entry. Resolution is
+ * service-managed (the exact build id comes from the installed Electron);
+ * only the download is performed by the deterministic fetcher, because
+ * wdio-utils' @puppeteer/browsers downloader hangs on this network
+ * (docs/testing.md "Chromedriver"). Runs are self-healing: `just
+ * fetch-chromedriver` is wired in for explicitness and CI logs.
+ */
+export function ensureChromedriver(): void {
+  const stamp = path.join(chromedriverCacheDir, "chromedriver");
+  let complete = false;
+  try {
+    for (const entry of fs.readdirSync(stamp)) {
+      if (!entry.startsWith("linux-")) continue;
+      fs.accessSync(
+        path.join(stamp, entry, "chromedriver-linux64", "chromedriver"),
+        fs.constants.X_OK,
+      );
+      complete = true;
+    }
+  } catch {
+    complete = false;
   }
-  return binary;
+  if (complete) return;
+  execFileSync(process.execPath, [path.join(repoRoot, "e2e", "setup", "fetch-chromedriver.mjs")], {
+    stdio: "inherit",
+  });
 }
 
 /**
- * Stale-process sweep targets: the electron app tree, the sidecar, and the
- * fetched chromedriver binary. All are precise paths on purpose — a coarse
- * "chromedriver" would match the next phase's fetch-chromedriver.sh and
- * kill it (the sweeps race the next phase's justfile recipes). The
- * watchdog sweeps the same list.
+ * Remove interrupted driver installs. The @puppeteer/browsers installer
+ * never deletes a partially extracted `chromedriver/linux-<build>` folder —
+ * a killed run poisons the cache and every later run fails with "the browser
+ * folder exists but the executable is missing". Sweeping incomplete folders
+ * before the launcher resolves the driver keeps the automatic download
+ * deterministic (a complete entry is never touched).
  */
-export const processTargets = [
-  electronBinaryPath,
-  sidecarBinaryPath,
-  path.join(repoRoot, ".build", "chromedriver", "chromedriver-linux64", "chromedriver"),
-];
+export function pruneIncompleteDriverCache(): void {
+  const drivers = path.join(chromedriverCacheDir, "chromedriver");
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(drivers);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const binary = path.join(drivers, entry, "chromedriver-linux64", "chromedriver");
+    try {
+      fs.accessSync(binary, fs.constants.X_OK);
+    } catch {
+      try {
+        fs.rmSync(path.join(drivers, entry), { recursive: true, force: true });
+        console.log(`[e2e] pruned incomplete chromedriver cache entry: ${entry}`);
+      } catch {
+        // A folder we cannot remove will fail the download with a clear
+        // installer error — leave it for a human.
+      }
+    }
+  }
+}
+
+/**
+ * Stale-process sweep targets: the electron app tree and the sidecar, plus
+ * the service-managed chromedriver cache directory. All are precise paths on
+ * purpose — a coarse "chromedriver" would match unrelated tooling (the
+ * sweeps race the next phase's justfile recipes). The watchdog sweeps the
+ * same list.
+ */
+export const processTargets = [electronBinaryPath, sidecarBinaryPath, chromedriverCacheDir];
 
 /** Deterministic fixtures generated by `scripts/make-fixture.py`. */
 export const epubFixture = path.join(repoRoot, "tests", "fixtures", "books", "minimal.epub");

@@ -56,6 +56,14 @@ interface EpubReaderProps {
 const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown", "pageup"]);
 
 /**
+ * Upper bound on the engine's restore-to-saved-locator step (a stale saved
+ * CFI can leave foliate's init promise unsettled). Generous against the
+ * healthy path (sub-second); tight enough that a wedged restore degrades to
+ * a start-of-book open instead of a blank reader.
+ */
+const EPUB_RESTORE_TIMEOUT_MS = 10_000;
+
+/**
  * EPUB reading surface and the shell's EPUB adapter, powered by the
  * foliate-js engine (see `lib/epub/epubEngine.ts`). Initialization follows
  * the PDF reader's lifecycle: DOCUMENT_READY → POSITION_RESTORED →
@@ -85,7 +93,6 @@ export function EpubReader({
   const currentSectionRef = useRef<EpubSectionProgress | null>(null);
   const mathCountsRef = useRef(new Map<number, number>());
   const [locator, setLocator] = useState<EpubLocator | null>(null);
-
   const { status, handle, error } = useEpubDocument(book.id);
   const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
@@ -118,6 +125,11 @@ export function EpubReader({
       reportedFractionRef.current = overall / 100;
       view.host.dataset.epubSection = String(detail.section.current);
       view.host.dataset.epubSectionTotal = String(detail.section.total);
+      // The exact locator the persistence layer would save right now
+      // (docs/epub.md stable attributes): E2E reads it for the CFI
+      // round-trip regression test instead of inferring position from
+      // page-level state.
+      view.host.dataset.epubLocator = detail.cfi;
       syncMathCount(view, detail.section);
       const chapterHref = view.getSectionHref(detail.section.current) ?? null;
       setLocator({ cfi: detail.cfi, chapterHref });
@@ -211,7 +223,15 @@ export function EpubReader({
     onRestored: useCallback(
       (saved: EpubLocator | null) => {
         if (handle) {
-          void handle.init(saved?.cfi ?? null).finally(() => setRestored(true));
+          // A stale saved locator can make the engine's init never settle
+          // (observed with a CFI past the end of the spine) — bound it and
+          // fall back to the start of the book instead of wedging the
+          // reader on a blank loading surface. A late-settling init is
+          // harmless: the engine jumps only to a valid location.
+          void Promise.race([
+            handle.init(saved?.cfi ?? null),
+            new Promise<void>((resolve) => window.setTimeout(resolve, EPUB_RESTORE_TIMEOUT_MS)),
+          ]).finally(() => setRestored(true));
         } else {
           setRestored(true);
         }

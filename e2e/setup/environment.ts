@@ -5,7 +5,7 @@
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -92,10 +92,20 @@ export function prepareEnvironment(seeded: boolean): void {
 
   // The benchmark phase (just bench-reader) seeds only the real-book
   // fixtures: the suite measures render/turn latency, and the synthetic
-  // fixtures would dilute it.
+  // fixtures would dilute it. The fixtures are gitignored real files — a
+  // machine missing one benches the formats it has (the bench suite skips
+  // its missing-fixture scenarios with a notice).
   if (process.env.E2E_PHASE === "bench") {
-    copyFileSync(benchPdfFixture, path.join(libraryDir, "AI_Agents_and_Applications.pdf"));
-    copyFileSync(benchEpubFixture, path.join(libraryDir, "AI_Agents_and_Applications.epub"));
+    for (const [source, name] of [
+      [benchPdfFixture, "AI_Agents_and_Applications.pdf"],
+      [benchEpubFixture, "AI_Agents_and_Applications.epub"],
+    ] as const) {
+      if (existsSync(source)) {
+        copyFileSync(source, path.join(libraryDir, name));
+      } else {
+        console.warn(`[e2e] bench fixture missing, skipping: ${source}`);
+      }
+    }
   }
 
   // The app (spawned by tauri-driver) inherits these; production paths are

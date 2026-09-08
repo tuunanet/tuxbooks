@@ -78,15 +78,26 @@ pnpm --filter frontend exec vitest run <file-or-pattern>
 Run `just check` (or at minimum the relevant test layer) before declaring any
 task complete, and run `just format` if you touched formatting-sensitive code.
 
+### External Knowledge & Source Research
+
+- **Context7:** Use for up-to-date, version-specific documentation, API references, configuration, and usage examples for libraries, frameworks, SDKs, and tools. Prefer Context7 before relying on remembered API details.
+- **GitHits:** Use for source-level investigation of open-source dependencies: implementation details, internals, call paths, existing patterns, version changes, and behavior that is unclear or undocumented. Prefer it when debugging library/runtime behavior rather than merely learning the public API.
+
 ### E2E contract for agents
 
 `just test-e2e` is **safe to run from an automated environment** (SSH, CI,
 containers, no desktop session). It provisions its own virtual display via
 `xvfb-run`, builds the app, runs both suites against the real Electron
 binary, always terminates (watchdog + `timeout` guard), returns a non-zero
-exit code on failure, and leaves failure artifacts (screenshots, wdio/driver
-logs) in `artifacts/e2e/<runId>/`. Do not launch a second E2E run while one
-is still going.
+exit code on failure, and leaves failure artifacts (screenshots, failure
+metadata, environment/version record, wdio/driver logs) in
+`artifacts/e2e/<runId>/`. Do not launch a second E2E run while one is still
+going. The harness self-verifies before testing: stack versions
+(Electron/Chromium/chromedriver/wdio/service) are logged and sanity-checked,
+and a worker isolation gate proves the app runs against the scratch
+database — if the gate fires, fix the launcher failure, never bypass it.
+Opt-in flavors: `just test-e2e-hidpi` (devicePixelRatio 2) and
+`just test-e2e-release` (release sidecar via `TUXBOOKS_SIDECAR`).
 
 ## Non-obvious gotchas
 

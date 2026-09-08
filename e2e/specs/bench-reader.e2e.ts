@@ -1,10 +1,12 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
   bitmapCacheUsage,
+  closeReaderNavigation,
   maxSingleBitmapBytes,
   openInReader,
+  openReaderNavigation,
   pdfSurfaceMemory,
   returnToLibrary,
   scrollToSlot,
@@ -12,7 +14,7 @@ import {
   waitForRendered,
 } from "./helpers.js";
 import { artifactsDir } from "../setup/environment.js";
-import { benchBookTitles } from "../setup/fixtures.js";
+import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
 
 /**
  * Reader performance benchmark (docs/performance.md "How to measure").
@@ -62,7 +64,8 @@ interface FrameStats {
   p50: number;
   p95: number;
   max: number;
-  /** Share of frames slower than 30 fps / 20 fps. */
+  /** Share of frames slower than 16.7 ms (dropped vs 60 fps), 30 fps, 20 fps. */
+  pctOver16: number;
   pctOver32: number;
   pctOver50: number;
 }
@@ -77,7 +80,11 @@ interface BenchReport {
   };
   pdf: {
     startPage: number;
+    firstRenderLatencyMs: number | null;
     renderMs: number[];
+    pageTurnLatencyMs: number[];
+    zoomLatencyMs: number[];
+    bigJumpLatencyMs: number[];
     buffers: { page: number; bufferPx: number; maxSide: number }[];
     cacheAfterOscillation: { entries: number; bytes: number } | null;
     liveCanvases: { count: number; bytes: number; onePageBound: number } | null;
@@ -88,6 +95,8 @@ interface BenchReport {
   epub: {
     flow: "scrolled";
     measure: string | null;
+    firstRenderLatencyMs: number | null;
+    chapterChangeLatencyMs: number[];
     idle: FrameStats | null;
     drag: (FrameStats & { wallMs: number; distancePx: number; sectionJumps: number }) | null;
   };
@@ -103,14 +112,25 @@ const report: BenchReport = {
   },
   pdf: {
     startPage: 0,
+    firstRenderLatencyMs: null,
     renderMs: [],
+    pageTurnLatencyMs: [],
+    zoomLatencyMs: [],
+    bigJumpLatencyMs: [],
     buffers: [],
     cacheAfterOscillation: null,
     liveCanvases: null,
     idle: null,
     drag: null,
   },
-  epub: { flow: "scrolled", measure: null, idle: null, drag: null },
+  epub: {
+    flow: "scrolled",
+    measure: null,
+    firstRenderLatencyMs: null,
+    chapterChangeLatencyMs: [],
+    idle: null,
+    drag: null,
+  },
 };
 
 /** p-value of a sample list (0.5 = median); -1 when empty. */
@@ -129,21 +149,97 @@ function frameStats(frames: number[] | undefined): FrameStats {
     p50: percentile(values, 0.5),
     p95: percentile(values, 0.95),
     max: values.length ? Math.max(...values) : -1,
+    pctOver16: Number(over(16.7).toFixed(1)),
     pctOver32: Number(over(32).toFixed(1)),
     pctOver50: Number(over(50).toFixed(1)),
   };
 }
 
 function summarize(label: string, stats?: FrameStats | null): string {
-  const s = stats ?? { n: 0, p50: -1, p95: -1, max: -1, pctOver32: 0, pctOver50: 0 };
+  const s = stats ?? { n: 0, p50: -1, p95: -1, max: -1, pctOver16: 0, pctOver32: 0, pctOver50: 0 };
   return (
     `${label}: n=${s.n}` +
     ` p50=${s.p50}` +
     ` p95=${s.p95}` +
     ` max=${s.max}` +
+    ` >16.7ms:${s.pctOver16}%` +
     ` >32ms:${s.pctOver32}%` +
     ` >50ms:${s.pctOver50}%`
   );
+}
+
+/**
+ * Interaction latency: automation-visible time from a reader interaction
+ * (click) to its observable effect (indicator/state change). Includes the
+ * WebDriver round trip — consistent across runs, so it is comparable
+ * run-over-run in the trend file, not a pure app figure.
+ */
+async function interactionLatency(
+  action: () => Promise<void>,
+  effect: () => Promise<boolean>,
+  timeoutMs = 30_000,
+): Promise<number> {
+  const start = Date.now();
+  await action();
+  await browser.waitUntil(effect, {
+    timeout: timeoutMs,
+    timeoutMsg: "interaction never took effect",
+  });
+  return Date.now() - start;
+}
+
+/**
+ * Trend record: one JSON line per run appended to bench-trend.jsonl so
+ * run-over-run drift (machine noise vs real regression) is visible without
+ * any CI gate. Thresholds stay opt-in via BENCH_ENFORCE_P95_MS — CI timing
+ * assertions are policy-excluded (docs/performance.md), and a threshold
+ * that fires on machine variance is worse than none.
+ */
+function appendTrend(): void {
+  const record = {
+    timestamp: report.timestamp,
+    window: report.environment.window,
+    devicePixelRatio: report.environment.devicePixelRatio,
+    pdf: {
+      firstRenderLatencyMs: report.pdf.firstRenderLatencyMs,
+      renderP50: percentile(report.pdf.renderMs, 0.5),
+      renderP95: percentile(report.pdf.renderMs, 0.95),
+      pageTurnP50: percentile(report.pdf.pageTurnLatencyMs, 0.5),
+      pageTurnP95: percentile(report.pdf.pageTurnLatencyMs, 0.95),
+      zoomP50: percentile(report.pdf.zoomLatencyMs, 0.5),
+      zoomP95: percentile(report.pdf.zoomLatencyMs, 0.95),
+      bigJumpP50: percentile(report.pdf.bigJumpLatencyMs, 0.5),
+      dragP95: report.pdf.drag?.p95 ?? null,
+      dragDroppedPct: report.pdf.drag?.pctOver16 ?? null,
+      liveCanvasBytes: report.pdf.liveCanvases?.bytes ?? null,
+    },
+    epub: {
+      firstRenderLatencyMs: report.epub.firstRenderLatencyMs,
+      chapterChangeP50: percentile(report.epub.chapterChangeLatencyMs, 0.5),
+      chapterChangeP95: percentile(report.epub.chapterChangeLatencyMs, 0.95),
+      dragP95: report.epub.drag?.p95 ?? null,
+      dragDroppedPct: report.epub.drag?.pctOver16 ?? null,
+    },
+  };
+  mkdirSync(artifactsDir, { recursive: true });
+  const trendFile = path.join(artifactsDir, "bench-trend.jsonl");
+  writeFileSync(trendFile, `${JSON.stringify(record)}\n`, { flag: "a" });
+  console.log(`[bench] trend appended to ${trendFile}`);
+
+  const enforcedP95 = Number(process.env.BENCH_ENFORCE_P95_MS ?? "");
+  if (Number.isFinite(enforcedP95) && enforcedP95 > 0) {
+    for (const [label, stats] of [
+      ["pdf drag", report.pdf.drag],
+      ["epub drag", report.epub.drag],
+    ] as const) {
+      if (stats && stats.p95 > enforcedP95) {
+        throw new Error(
+          `[bench] ${label} p95 frame time ${stats.p95}ms exceeds the enforced budget ` +
+            `${enforcedP95}ms (BENCH_ENFORCE_P95_MS). Compare with bench-trend.jsonl before raising it.`,
+        );
+      }
+    }
+  }
 }
 
 function writeReport(): void {
@@ -155,7 +251,7 @@ function writeReport(): void {
     console.log(`[bench] ${summarize("pdf drag frame ms", report.pdf.drag)}`);
     console.log(`[bench] ${summarize("pdf idle frame ms", report.pdf.idle ?? undefined)}`);
     console.log(
-      `[bench] ${summarize("pdf render->blit during drag", frameStats(report.pdf.drag.renderMs))}`,
+      `[bench] ${summarize("pdf render->blit during drag", frameStats(report.pdf.drag.renderMsDuringDrag))}`,
     );
   }
   if (report.epub.drag) {
@@ -354,26 +450,80 @@ describe("reader performance benchmark", () => {
     report.environment.devicePixelRatio = await browser.execute(() => window.devicePixelRatio);
     // Reference conditions are a maximized window (docs/performance.md); an
     // explicit `just bench-reader WxH` argument overrides for targeted
-    // geometries. The applied size is what the report records.
+    // geometries. The applied size is what the report records. Sizing goes
+    // through the renderer's window.resizeTo — chromedriver ≥ 152 removed
+    // the CDP endpoint both the maximize shortcut and the W3C window-rect
+    // command used, while Electron's renderer resize keeps working.
     const requested = process.env.BENCH_WINDOW_SIZE ?? "";
     const match = /^(\d+)x(\d+)$/.exec(requested);
     if (match) {
-      await browser.setWindowSize(Number(match[1]), Number(match[2]));
+      await browser.execute((w, h) => window.resizeTo(w, h), Number(match[1]), Number(match[2]));
     } else {
-      await browser.maximizeWindow();
+      await browser.execute(() =>
+        window.resizeTo(window.screen.availWidth, window.screen.availHeight),
+      );
     }
-    const size = await browser.getWindowSize();
-    report.environment.window = { width: size.width, height: size.height };
+    await browser.waitUntil(
+      async () => {
+        // getWindowSize also routes through the removed CDP endpoint — read
+        // the applied size from the renderer.
+        const size = await browser.execute(() => ({
+          width: window.innerWidth,
+          height: window.outerHeight,
+        }));
+        const target = match
+          ? { width: Number(match[1]), height: Number(match[2]) }
+          : await browser.execute(() => ({
+              width: window.screen.availWidth,
+              height: window.screen.availHeight,
+            }));
+        return (
+          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 8
+        );
+      },
+      { timeout: 10_000, timeoutMsg: "bench window never reached its requested size" },
+    );
+    // The applied size from the renderer (same reason as above).
+    const applied = await browser.execute(() => ({
+      width: window.innerWidth,
+      height: window.outerHeight,
+    }));
+    report.environment.window = { width: applied.width, height: applied.height };
     console.log(
-      `[bench] window ${size.width}x${size.height} dpr ${report.environment.devicePixelRatio}`,
+      `[bench] window ${applied.width}x${applied.height} dpr ${report.environment.devicePixelRatio}`,
     );
   });
 
   it("pdf: page-walk render→blit latency from mid-book with budget checks", async function () {
+    if (!existsSync(benchPdfFixture)) {
+      this.skip(); // gitignored real-book fixture absent on this machine
+    }
     this.timeout(BENCH_TEST_TIMEOUT_MS);
 
+    // First-render latency: launch-to-first-page on the real-book fixture
+    // (open + engine init + first page bitmap) — the cold-open cost a
+    // reader feels when opening a book.
+    const firstRenderStart = Date.now();
     await openInReader(benchBookTitles.pdf);
     await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30_000 });
+    try {
+      await waitForRendered(1, 90_000);
+    } catch (err) {
+      // Diagnose from artifacts: which page is the reader actually on, and
+      // what state are the first slots in?
+      const probe = await browser.execute(() => ({
+        indicator: document.querySelector("[data-testid=pdf-page-indicator]")?.textContent ?? "",
+        slots: Array.from(document.querySelectorAll("[data-pdf-slot]"))
+          .slice(0, 5)
+          .map((slot) => ({
+            page: slot.getAttribute("data-pdf-slot"),
+            state: slot.getAttribute("data-render-state"),
+          })),
+      }));
+      console.log(`[bench] first-render probe: ${JSON.stringify(probe)}`);
+      throw err;
+    }
+    report.pdf.firstRenderLatencyMs = Date.now() - firstRenderStart;
     await browser.waitUntil(
       async () => /Page \d+ of \d+/.test(await textOf("pdf-page-indicator")),
       { timeout: 30_000, timeoutMsg: "bench pdf never reported its page count" },
@@ -479,6 +629,150 @@ describe("reader performance benchmark", () => {
     await returnToLibrary();
   });
 
+  it("pdf: rapid page-turn and zoom interaction latency", async function () {
+    if (!existsSync(benchPdfFixture)) {
+      this.skip(); // gitignored real-book fixture absent on this machine
+    }
+    this.timeout(BENCH_TEST_TIMEOUT_MS);
+
+    await openInReader(benchBookTitles.pdf);
+    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30_000 });
+    await browser.waitUntil(
+      async () => /Page \d+ of \d+/.test(await textOf("pdf-page-indicator")),
+      { timeout: 30_000, timeoutMsg: "bench pdf never reported its page count" },
+    );
+    const total = Number((await textOf("pdf-page-indicator")).match(/of (\d+)/)![1]);
+    const startPage = Math.max(1, Math.floor(total / 2));
+    await scrollToSlot(startPage);
+    await waitForRendered(startPage, 60_000);
+
+    const indicatorPage = async () =>
+      Number((await textOf("pdf-page-indicator")).match(/Page (\d+)/)?.[1]);
+
+    // Rapid page turning: the toolbar's next/prev buttons, one sample each —
+    // the interaction a reader repeats most. Turn down five pages, then up.
+    for (let i = 0; i < 5; i++) {
+      const before = await indicatorPage();
+      const after = await interactionLatency(
+        () => $("[data-testid=pdf-next]").click(),
+        async () => (await indicatorPage()) === before + 1,
+      );
+      report.pdf.pageTurnLatencyMs.push(after);
+    }
+    for (let i = 0; i < 3; i++) {
+      const before = await indicatorPage();
+      const after = await interactionLatency(
+        () => $("[data-testid=pdf-prev]").click(),
+        async () => (await indicatorPage()) === before - 1,
+      );
+      report.pdf.pageTurnLatencyMs.push(after);
+    }
+
+    // Zoom in/out: each step relayouts and re-renders the window; the
+    // observable effect is the zoom label (geometry streams in after). The
+    // buttons disable at the ends of the zoom ladder — stop there.
+    const zoomSteps = async (direction: "in" | "out"): Promise<void> => {
+      for (let i = 0; i < 2; i++) {
+        const button = await $(`[data-testid=pdf-zoom-${direction}]`);
+        if ((await button.getAttribute("disabled")) !== null) break;
+        const before = await textOf("pdf-zoom-level");
+        const after = await interactionLatency(
+          () => button.click(),
+          async () => (await textOf("pdf-zoom-level")) !== before,
+        );
+        report.pdf.zoomLatencyMs.push(after);
+      }
+    };
+    await zoomSteps("in");
+    await zoomSteps("out");
+
+    // Large-document navigation: long scroll jumps across a third of the
+    // document — the virtualization + eviction path under displacement.
+    const jumpTargets = [
+      startPage,
+      Math.max(1, startPage - 30),
+      Math.min(total, startPage + 30),
+      startPage,
+    ];
+    for (let i = 1; i < jumpTargets.length; i++) {
+      const target = jumpTargets[i]!;
+      const after = await interactionLatency(
+        () => scrollToSlot(target),
+        async () => (await indicatorPage()) === target,
+      );
+      report.pdf.bigJumpLatencyMs.push(after);
+    }
+
+    console.log(
+      `[bench] ${summarize("pdf page-turn latency", frameStats(report.pdf.pageTurnLatencyMs))}`,
+    );
+    console.log(`[bench] ${summarize("pdf zoom latency", frameStats(report.pdf.zoomLatencyMs))}`);
+    console.log(
+      `[bench] ${summarize("pdf big-jump nav latency", frameStats(report.pdf.bigJumpLatencyMs))}`,
+    );
+
+    await returnToLibrary();
+  });
+
+  it("epub: chapter-change interaction latency", async function () {
+    this.timeout(BENCH_TEST_TIMEOUT_MS);
+
+    const openStart = Date.now();
+    await openInReader(benchBookTitles.epub);
+    await browser.waitUntil(
+      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
+      { timeout: 30_000, timeoutMsg: "bench epub engine never became ready" },
+    );
+    report.epub.firstRenderLatencyMs = Date.now() - openStart;
+
+    // Chapter changes through the contents drawer: open drawer → click TOC
+    // entry → engine lands on the section. TOC entry indices are not spine
+    // section indices in a real book, so the latency is measured to a
+    // section CHANGE from the pre-click value; entries that resolve to the
+    // section we are already in are skipped, not failed.
+    const sectionNow = async () =>
+      browser.execute(
+        () =>
+          document
+            .querySelector("[data-testid=epub-reader] [data-epub-host]")
+            ?.getAttribute("data-epub-section") ?? null,
+      );
+    // Element handles go stale across drawer close/reopen cycles — query
+    // per iteration by index, up to the first 8 entries, until 3 changes
+    // have been sampled.
+    for (let index = 0; index < 8 && report.epub.chapterChangeLatencyMs.length < 3; index++) {
+      await openReaderNavigation();
+      const item = await $(`[data-testid=toc-item-${index}]`);
+      if (!(await item.isExisting())) break;
+      const before = await sectionNow();
+      const changed = await interactionLatency(
+        () => item.click(),
+        async () => (await sectionNow()) !== before,
+        10_000,
+      )
+        .then((ms) => {
+          report.epub.chapterChangeLatencyMs.push(ms);
+          return true;
+        })
+        .catch(() => false);
+      // The drawer closes itself on a successful navigation; a no-op entry
+      // leaves it open — normalize either way before the next sample.
+      if (changed) {
+        await $("[data-testid=reader-nav]")
+          .waitForExist({ reverse: true, timeout: 10_000 })
+          .catch(() => {});
+      } else {
+        await closeReaderNavigation();
+      }
+    }
+    expect(report.epub.chapterChangeLatencyMs.length).toBeGreaterThanOrEqual(3);
+    console.log(
+      `[bench] ${summarize("epub chapter-change latency", frameStats(report.epub.chapterChangeLatencyMs))}`,
+    );
+
+    await returnToLibrary();
+  });
+
   it("epub: scrolled-flow scrollbar-drag frame timing from mid-book", async function () {
     this.timeout(BENCH_TEST_TIMEOUT_MS);
 
@@ -551,5 +845,6 @@ describe("reader performance benchmark", () => {
 
   after(() => {
     writeReport();
+    appendTrend();
   });
 });

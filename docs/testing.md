@@ -103,14 +103,37 @@ desktop session, safe from SSH/CI/agent environments. `just
 test-e2e-headed` runs the same suites on your visible display for
 debugging.
 
-Stack: `wdio-electron-service` launches the unpackaged app (the electron
-binary from `e2e/node_modules` pointed at the built
-`electron/dist/main.cjs`) and manages a chromedriver matching the
-Electron version. The service's own chromedriver downloader hangs, so
-`scripts/fetch-chromedriver.sh` provides a version-matched binary instead
-(`just fetch-chromedriver`, cached under `.build/chromedriver/`); the
-capability pins it via `wdio:chromedriverOptions`. Driver ports are probed
-and auto-allocated — never hardcode 4444/4445 in specs.
+Stack: `@wdio/electron-service` (the first-party, scoped successor of the
+community `wdio-electron-service`; the unscoped name is deprecated) launches
+the unpackaged app (the electron binary from `e2e/node_modules` pointed at
+the built `electron/dist/main.cjs`) and manages a chromedriver matching the
+Electron version. Driver **resolution** is service-managed: the service
+derives the Electron version from the installed `electron` package and the
+matching Chrome-for-Testing build id. Only the **download** goes through the
+repo's deterministic fetcher (`e2e/setup/fetch-chromedriver.mjs`) into a
+pinned, gitignored cache (`.build/chromedriver-cache/`), because wdio-utils'
+own `@puppeteer/browsers` downloader hangs on some networks and a killed
+download poisons its cache (the fetcher + the `onPrepare` pruner make the
+setup self-healing — see `docs/build.md` for the full story). WebdriverIO
+stays on the current 9.x line — a WebdriverIO 10 does not exist yet; the
+service's own versioning (10.x) is independent. Driver ports are probed and
+auto-allocated — never hardcode 4444/4445 in specs.
+
+Version determinism is logged and checked at startup (see
+`e2e/setup/versions.ts`): every run writes the Electron, Chromium, chromedriver,
+WebdriverIO, and service versions into the run banner and
+`artifacts/e2e/<runId>/environment.json`, and a worker-side sanity check
+fails with a clear error when the chromedriver that actually connected does
+not match the Chromium build the installed Electron maps to. Do not silence
+that check to make a run pass — fix the driver resolution instead.
+
+The worker `before` hook also runs an **isolation gate**: it verifies
+`TEST_DATABASE_PATH` points at this run's scratch dir and that the sidecar
+actually wrote the schema there before any test executes. This exists
+because wdio logs launcher-hook errors and then CONTINUES the run — without
+the gate, a broken `onPrepare` would silently test against the real user
+library. If the gate fires, fix the launcher failure; never bypass the
+gate.
 
 Two Chromium-only traps are pinned in the harness: the app launches with
 `--ozone-platform=x11` (a Wayland desktop is reachable through the
@@ -138,14 +161,28 @@ Two isolated invocations per run:
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
    library; the app imports them on startup. Runs `books.e2e.ts` (library
-   navigation: cards, stats, EPUB detail, PDF reader shell) and
-   `pdf-reader.e2e.ts` (continuous-reader scenarios: fit-width canvas
-   geometry, scroll-driven page tracking, bounded canvas count while
-   scrolling a 100-page document with eviction, deep-zoom position
-   preservation, mixed page sizes, outline navigation, the bounded
+   navigation: cards, stats, EPUB detail, PDF reader shell),
+   `engine-smoke.e2e.ts` (fast deterministic proof that each renderer
+   initialized end to end: engine ready → metadata/geometry → visible
+   content → location/progression; PDF adds worker-asset reachability,
+   page navigation, zoom — fails quickly and clearly when an engine or
+   asset breaks) and `pdf-reader.e2e.ts` (continuous-reader scenarios:
+   fit-width canvas geometry, scroll-driven page tracking, bounded canvas
+   count while scrolling a 100-page document with eviction, deep-zoom
+   position preservation, mixed page sizes, outline navigation, the bounded
    virtualized thumbnails sidebar with current-page synchronization, the
    reopen-restore persistence acceptance test, the worker-asset check, and
    bitmap-cache budget assertions after the scroll-oscillation stress) and
+   `epub-reader.e2e.ts` (chapter navigation, arrow-key page turns, MathML,
+   appearance preferences, the reopen-restore acceptance test, in-book
+   search, and the exact-locator persistence regression: the engine's CFI
+   is captured before close and must come back identical on reopen) and
+   `progress-migration.e2e.ts` (seeds the scratch database with
+   reading-progress rows in the previous app's format — canonical foliate
+   CFI + chapter href + percent, and PDF page rows — and asserts the same
+   LOGICAL location restores: beginning, chapter boundary, late book, a
+   stale row degrading to a defined state, the PDF page; mid-chapter
+   offsets and multi-structure corpora stay in the Rust tier) and
    `reader-lifecycle.e2e.ts` (document-type switching, rapid repeated
    open/close, close-while-rendering recovery, rapid navigation
    convergence, window-resize re-anchoring, and memory-bound assertions)
@@ -157,23 +194,53 @@ Two isolated invocations per run:
    add and remove a book through the card context menu, mark a book
    finished, delete the collection).
 
+Two more invocations exist beyond the default pair:
+
+- **hidpi** (`just test-e2e-hidpi`) — the seeded reader scenarios against
+  an app forced to `devicePixelRatio` 2 (`E2E_DEVICE_SCALE_FACTOR` →
+  `--force-device-scale-factor`): the doubled backing stores, the PERF-1
+  caps at the high-DPI reference condition, and a rapid page-turn sweep
+  staying inside the render budget. Xvfb cannot emulate refresh rates
+  above 60 Hz — the dpr dimension is what this configuration guards.
+- **release flavor** (`just test-e2e-release`) — empty + seeded against the
+  RELEASE sidecar binary via `TUXBOOKS_SIDECAR` (the packaged-app resource
+  resolution path; full electron-builder packaging lands in migration
+  phase 5, docs/electron-migration.md). A build that works from the source
+  tree but loses its sidecar/resources in production form fails here.
+
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.
 
 ### Benchmark suite (headed, opt-in)
 
-`just bench-reader [WxH]` runs `bench-reader.e2e.ts` — the one suite that
-MEASURES timing instead of asserting structure. It is excluded from
+`just bench-reader [WxH]` runs `bench-reader.e2e.ts` — the suite that
+MEASURES instead of asserting structure. It is excluded from
 `test:empty`/`test:seeded` and from CI by policy (headless timings are
 unreliable; `docs/performance.md` — E2E asserts deterministic attributes
-only), runs **headed on the real display with the window maximized**
-(explicit `WxH` overrides), and seeds only the real-book fixtures in
-`tests/fixtures/books/EBooks/Agents/`. Both scenarios start mid-book. The
-PDF scenario walks pages collecting `data-pdf-render-ms` (p50/p95
-reported); then both readers get a **synthetic scrollbar drag** —
-continuous scroll deltas per ~16 ms tick — while a rAF sampler records
-frame intervals, the direct measure of scroll unsmoothness. Results land
-in `artifacts/e2e/<runId>/bench-results.json` plus a stdout summary.
+only), runs headed on the real display with the window maximized (explicit
+`WxH` overrides; sizing goes through the renderer's `window.resizeTo`
+because chromedriver ≥ 152 removed the CDP endpoint behind the WebDriver
+window commands), and seeds the real-book fixtures in
+`tests/fixtures/books/EBooks/Agents/` (missing fixtures are skipped with a
+notice). Both scenarios start mid-book. Measured, per reader:
+
+- frame-time p50/p95/max while a synthetic scrollbar drag runs (continuous
+  scroll deltas per ~16 ms tick) and while idle — plus the dropped-frame
+  share over 16.7/32/50 ms, so a regression shows up as "95% → 82% of
+  frames under 16.7 ms", not as "rendering completed";
+- PDF page-walk render→blit latency (`data-pdf-render-ms`, p50/p95);
+- interaction latency (automation-visible click → observable effect):
+  rapid page turns, zoom in/out steps, large-document scroll jumps, and
+  EPUB chapter changes through the contents drawer;
+- first-render latency (launch → first rendered page);
+- live canvas memory where measurable (PERF-4 bound), bitmap-cache
+  occupancy after the oscillation (PERF-3), buffer caps (PERF-1).
+
+Deterministic budget assertions still hold in this suite — they are
+policy, not timing: PERF-1/3/4. Timing results land in
+`artifacts/e2e/<runId>/bench-results.json`, and one summary line per run
+is appended to `bench-trend.jsonl` for run-over-run drift comparison.
+Timing thresholds are opt-in (`BENCH_ENFORCE_P95_MS`) — never CI policy.
 
 ### Headless on Linux (Xvfb)
 
@@ -207,11 +274,26 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
   and SIGKILLs a wedged launcher. Each phase is additionally bounded by
   `timeout --kill-after=15 300` in the justfile, so `just test-e2e` always
   terminates and always returns a meaningful exit code.
-- Failed tests capture a screenshot into `artifacts/e2e/<runId>/`
-  (gitignored, pruned after 7 days) next to the per-run driver logs.
-  Backend and frontend console logs are forwarded into those logs.
+- Failed tests capture a screenshot AND a `failure-<runId>-<test>.json`
+  metadata record (suite, test, error + stack, full stack-version record,
+  connected chromedriver) into `artifacts/e2e/<runId>/` (gitignored,
+  pruned after 7 days) next to the per-run driver logs. Every run writes
+  `environment.json` (Electron, Chromium mapping, chromedriver,
+  WebdriverIO, service versions, phase, app args) — a failed E2E test can
+  be diagnosed from the artifacts alone. The service captures Electron
+  main-process and renderer console output into the wdio logs
+  (`captureMainProcessLogs` / `captureRendererLogs`); under
+  `TUXBOOKS_DEBUG_IPC=1` the app additionally appends bridge/protocol/
+  event traces to per-run files in `/tmp`.
 - Do not run two E2E invocations concurrently on the same machine: the
   stale-process sweep intentionally kills matching app/driver processes.
+
+Known environment note: `library-sync` and `reader-lifecycle` pass in
+isolation and on developer hardware, but can time out as the last heavy
+suites of a full seeded phase on constrained CI/sandbox machines (app
+instances slower than the 30s view waits). The failure artifacts above are
+the diagnostic path; do not loosen the waits to make a constrained machine
+pass.
 
 ## Test data rules
 
