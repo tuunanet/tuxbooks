@@ -453,6 +453,10 @@ figcaption {
   background: var(--accent);
   box-shadow: 0 0 12px rgba(232, 160, 76, 0.6);
 }
+.milestone--next::before {
+  border-color: var(--accent);
+  background: var(--bg);
+}
 
 .mile-status {
   display: inline-block;
@@ -475,6 +479,11 @@ figcaption {
 .milestone--now .mile-status {
   color: var(--accent-strong);
   border-color: rgba(232, 160, 76, 0.45);
+}
+.milestone--next .mile-status {
+  color: var(--accent-strong);
+  border-color: rgba(232, 160, 76, 0.45);
+  border-style: dashed;
 }
 
 .mile h3 {

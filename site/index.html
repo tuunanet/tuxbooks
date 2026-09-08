@@ -226,102 +226,38 @@
         <div class="wrap wrap--narrow">
           <h2>Roadmap</h2>
           <p class="section-lede">
-            TuxBooks grows one coherent step at a time, newest first. The full plan lives in
+            Newest first. The detailed history of milestones 1&ndash;11 lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
             <li class="mile milestone--now">
               <span class="mile-status">Current</span>
-              <h3>Milestone 11 &middot; Installable releases</h3>
+              <h3>Milestone 12 &middot; A snappier frontend</h3>
               <p>
-                Ready-to-install Linux packages: a .deb for Ubuntu and a portable AppImage for
-                everything else, built and published automatically for every release.
+                We are rapidly iterating on faster, snappier frontends, and the current iteration is
+                the most promising one yet: an Electron shell with the Readium EPUB engine and MuPDF
+                for PDFs, over the same Rust core that powers your library today. The goal is a
+                library and readers that feel instant &mdash; with your books, details, and reading
+                progress carried over untouched.
+              </p>
+            </li>
+            <li class="mile milestone--next">
+              <span class="mile-status">Next</span>
+              <h3>Milestone 13 &middot; Installable releases for the new stack</h3>
+              <p>
+                Once the new frontend lands, installable releases follow it: a .deb for Ubuntu and a
+                portable AppImage for everything else, built and published automatically for every
+                release.
               </p>
             </li>
             <li class="mile milestone--done">
               <span class="mile-status">Shipped</span>
-              <h3>Milestone 10 &middot; Collections &amp; library polish</h3>
+              <h3>Milestones 1&ndash;11 &middot; The first-generation app</h3>
               <p>
-                Collections, In Progress and Finished sections, adding books by file or folder,
-                finding a book on disk from the app, and a window that reopens where you left it.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 9 &middot; Speed &amp; stability</h3>
-              <p>
-                Flipping pages quickly, jumping between chapters, and reading very large books all
-                stay smooth and reliable.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 8 &middot; One consistent reading experience</h3>
-              <p>
-                Both readers now behave the same way: progress, navigation, and search work
-                identically whether your book is EPUB or PDF.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 7 &middot; Fix your book details</h3>
-              <p>
-                Correct wrong titles, authors, series, and covers from inside the app. Your original
-                files are never modified, and you can always reset to what the file says.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 6 &middot; Bookmarks, highlights &amp; notes</h3>
-              <p>
-                Bookmark pages, highlight passages in color, and attach notes &mdash; in both EPUB
-                and PDF. Everything is still there when you come back.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 5 &middot; Search</h3>
-              <p>
-                Search your entire library from anywhere, and search inside the book you are reading
-                &mdash; EPUB and PDF alike.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 4 &middot; Cover art</h3>
-              <p>
-                Every book gets its cover &mdash; taken from the EPUB or rendered from the PDF's
-                first page &mdash; so the shelf looks like a shelf.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 3 &middot; The shelf stays in sync</h3>
-              <p>
-                Add, move, rename, or delete book files and the library follows &mdash; without
-                losing your progress or details.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 2 &middot; PDF navigation</h3>
-              <p>Page thumbnails and a clickable outline keep long PDFs easy to navigate.</p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestone 1 &middot; EPUB reader</h3>
-              <p>
-                A real EPUB reading experience: chapters, a table of contents, adjustable fonts and
-                themes &mdash; and books reopen exactly where you stopped.
-              </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Foundation</h3>
-              <p>
-                The beginning: a native Linux app with your own book library &mdash; import a folder
-                of books, browse it with covers and details, and read PDFs with smooth scrolling and
-                zoom.
+                A complete local-first library: the bookshelf with covers and collections, EPUB and
+                PDF readers that remember your place, library-wide and in-book search, bookmarks,
+                highlights and notes, metadata curation, and installable Linux packages. Every one
+                of these features carries into the new frontend as it lands.
               </p>
             </li>
           </ol>
