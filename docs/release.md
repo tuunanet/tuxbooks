@@ -27,14 +27,15 @@ pre-releases).
 
 ## The packaging gate
 
-`just package-check` builds the deb and runs `scripts/check-deb.sh`, which
-verifies control metadata (package name, exact version match, description),
-extracts the payload and checks the Electron binary + sidecar + PDFium
-resource, desktop entry (structure plus `desktop-file-validate` when
-installed), and hicolor icons. CI's build job runs the same script after
-bundling; `just ci` includes it. A packaging regression fails the build
-like any other test. The Electron path must not reintroduce a webkit2gtk
-runtime dependency.
+`scripts/check-deb.sh` is the packaging gate: it verifies the built deb's
+control metadata (package name, exact version match, description), the
+extracted payload (Electron binary + sidecar + PDFium resource), the
+desktop entry (structure plus `desktop-file-validate` when installed), and
+hicolor icons. During the Electron migration CI's build job runs
+`just build` only — the gate is not wired into CI or the justfile until
+Electron packaging lands (docs/electron-migration.md), when a packaging
+regression again fails the build like any other test. The Electron path
+must not reintroduce a webkit2gtk runtime dependency.
 
 ## Cutting a release
 
@@ -51,7 +52,7 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
    reuse a tag — a bad build is fixed in the next version.
 4. The release workflow then runs two jobs:
    - **verify** — Rust + frontend unit/integration tests and the headless
-     real-binary E2E suites (same gates as `just ci`), so a tag never
+     real-binary E2E suites (`just test`, `just test-e2e`), so a tag never
      publishes what has not been proven;
    - **publish** — refuses to run unless the tag exactly matches the
      version in the packaging manifest, builds deb + AppImage, writes

@@ -138,7 +138,7 @@ yet).
 - Responsive: grid `auto-fill`/`minmax` columns for 1280×800 → large desktop,
   sidebar minimum width, reader max line width.
 - A11y pass: focus-visible, accessible names, dialog/menu semantics, contrast.
-- Full gate: `just ci`.
+- Full gate: `just check` plus `just test-e2e`.
 
 ## Decision points
 

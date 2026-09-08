@@ -70,9 +70,9 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
-      # Same gates `just ci` runs before a build: unit/integration tests
-      # (Rust + frontend) and the real-binary headless E2E suites. A tag
-      # never publishes what main has not proven.
+      # Same gates CI's check jobs run before a build: unit/integration
+      # tests (Rust + frontend) and the real-binary headless E2E suites. A
+      # tag never publishes what main has not proven.
       - name: Unit and integration tests
         run: |
           pnpm install --frozen-lockfile

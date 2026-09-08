@@ -243,11 +243,12 @@ and real desktop E2E.
   AppImage, writes SHA256SUMS.txt over both, and publishes a pre-release
   with install instructions. The deb gained real bundle metadata
   (publisher, copyright, short/long descriptions) in tauri.conf.json, and
-  packaging is under automated test: `just package-check` builds the deb and
-  scripts/check-deb.sh asserts control metadata vs the config, the desktop
-  entry (structure + desktop-file-validate), hicolor icons, the bundled
-  PDFium resource, and the webkit2gtk runtime dependency — CI's build job
-  runs the same gate. AppImage bundling resolves GTK dev pkg-config data at
+  packaging is under automated test: scripts/check-deb.sh asserts control
+  metadata vs the config, the desktop entry (structure +
+  desktop-file-validate), hicolor icons, the bundled PDFium resource, and
+  the webkit2gtk runtime dependency; CI's build job ran the same gate
+  (unwired during the Electron migration — docs/release.md). AppImage
+  bundling resolves GTK dev pkg-config data at
   bundle time (librsvg2-dev), so it is a CI artifact; locally it needs the
   full dev package set (`just build-appimage`) and the deb-only default
   keeps `just build` working on the no-sudo machine. Operations live in
@@ -260,7 +261,7 @@ and real desktop E2E.
 
 Milestone 11 (release and distribution) is implemented: tag-gated,
 test-gated release automation producing a deb and an AppImage with
-checksums, a packaging gate under `just package-check`, and the release
+checksums, a packaging gate (scripts/check-deb.sh), and the release
 operating manual in docs/release.md — the first tag is deliberately
 deferred until after the planned post-milestone fixes.
 
