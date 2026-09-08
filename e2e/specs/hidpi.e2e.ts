@@ -1,4 +1,7 @@
+import { expect, test } from "../fixtures/electron-app.js";
+
 import {
+  firstPdfCanvas,
   canvasIsNonBlank,
   fitFactor,
   maxSingleBitmapBytes,
@@ -30,29 +33,29 @@ import {
 
 const RENDER_BUDGET_LIMIT = 15;
 
-describe("tuxbooks high-DPI configuration (devicePixelRatio 2)", () => {
-  it("launches with the forced scale factor", async () => {
-    const dpr = await browser.execute(() => window.devicePixelRatio);
+test.describe("tuxbooks high-DPI configuration (devicePixelRatio 2)", () => {
+  test("launches with the forced scale factor", async ({ page }) => {
+    const dpr = await page.evaluate(() => window.devicePixelRatio);
     expect(dpr).toBe(2);
   });
 
-  it("renders PDF pages at the doubled backing store within the buffer caps", async () => {
-    await openInReader("A Minimal Manual (PDF)");
-    const canvas = await $("[data-testid=pdf-canvas]");
-    await canvas.waitForExist({ timeout: 30000 });
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+  test("renders PDF pages at the doubled backing store within the buffer caps", async ({
+    page,
+  }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    const canvas = firstPdfCanvas(page);
+    await canvas.waitFor({ state: "attached", timeout: 30000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
-      timeoutMsg: "hidpi: minimal PDF never reported its page count",
     });
 
     // Geometry mirrors the default-run contract, times dpr 2.
-    const dpr = await browser.execute(() => window.devicePixelRatio);
-    const fit = await fitFactor();
-    await browser.waitUntil(
-      async () => Number(await canvas.getAttribute("width")) === Math.floor(612 * fit * dpr),
-      { timeout: 30000, timeoutMsg: "hidpi: page 1 never rendered at fit width × 2" },
-    );
-    expect(await canvasIsNonBlank(1)).toBe(true);
+    const dpr = await page.evaluate(() => window.devicePixelRatio);
+    const fit = await fitFactor(page);
+    await expect
+      .poll(async () => Number(await canvas.getAttribute("width")), { timeout: 30000 })
+      .toBe(Math.floor(612 * fit * dpr));
+    expect(await canvasIsNonBlank(page, 1)).toBe(true);
 
     // PERF-1 at the high-DPI reference condition: the backing store stays
     // inside the pixel and dimension caps.
@@ -67,60 +70,50 @@ describe("tuxbooks high-DPI configuration (devicePixelRatio 2)", () => {
     ).toBeLessThanOrEqual(8192);
 
     // Zoom still works at dpr 2 and respects the caps.
-    await $("[data-testid=pdf-zoom-in]").click();
-    await browser.waitUntil(async () => (await textOf("pdf-zoom-level")).includes("150%"), {
-      timeout: 30000,
-      timeoutMsg: "hidpi: zoom in never applied",
-    });
-    await browser.waitUntil(
-      async () => Number(await canvas.getAttribute("width")) > Math.floor(612 * fit * dpr),
-      { timeout: 30000, timeoutMsg: "hidpi: zoom never re-rendered a larger buffer" },
-    );
+    await page.getByTestId("pdf-zoom-in").click();
+    await expect(page.getByTestId("pdf-zoom-level")).toContainText("150%", { timeout: 30000 });
+    await expect
+      .poll(async () => Number(await canvas.getAttribute("width")), { timeout: 30000 })
+      .toBeGreaterThan(Math.floor(612 * fit * dpr));
     const zoomedPx =
       Number(await canvas.getAttribute("width")) * Number(await canvas.getAttribute("height"));
     expect(zoomedPx).toBeLessThanOrEqual(2 ** 25);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("survives rapid page transitions in a large document at dpr 2", async () => {
-    await openInReader("A Large Fixture (PDF)");
-    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
-    await browser.waitUntil(
-      async () => /Page \d+ of 100/.test(await textOf("pdf-page-indicator")),
-      {
-        timeout: 30000,
-        timeoutMsg: "hidpi: large fixture never reported its page count",
-      },
-    );
+  test("survives rapid page transitions in a large document at dpr 2", async ({ page }) => {
+    await openInReader(page, "A Large Fixture (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 100", {
+      timeout: 30000,
+    });
 
     // Rapid down/up sweep across a third of the document: every stop must
     // render, and the active canvas set must stay bounded the whole time.
     const stops = [10, 25, 40, 55, 40, 25, 10];
-    for (const page of stops) {
-      await scrollToSlot(page);
-      await waitForRendered(page, 60000);
-      expect(await renderedCount()).toBeLessThan(RENDER_BUDGET_LIMIT);
+    for (const page_number of stops) {
+      await scrollToSlot(page, page_number);
+      await waitForRendered(page, page_number, 60000);
+      expect(await renderedCount(page)).toBeLessThan(RENDER_BUDGET_LIMIT);
     }
-    const memory = await pdfSurfaceMemory();
-    const onePage = await maxSingleBitmapBytes(1);
+    const memory = await pdfSurfaceMemory(page);
+    const onePage = await maxSingleBitmapBytes(page, 1);
     expect(memory.pageCanvases).toBeLessThanOrEqual(8);
     expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePage);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("initializes the EPUB engine and reports progression at dpr 2", async () => {
-    await openInReader("A Minimal Book (EPUB)");
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30000, timeoutMsg: "hidpi: epub engine never became ready" },
-    );
-    await browser.waitUntil(async () => /^(100|[1-9]?\d)%$/.test(await textOf("reader-position")), {
-      timeout: 30000,
-      timeoutMsg: "hidpi: epub progression never reported a percentage",
-    });
-    expect(await $("[data-testid=epub-error]").isExisting()).toBe(false);
-    await returnToLibrary();
+  test("initializes the EPUB engine and reports progression at dpr 2", async ({ page }) => {
+    await openInReader(page, "A Minimal Book (EPUB)");
+    const host = page.locator("div[data-epub-host]");
+    await host.waitFor({ state: "attached", timeout: 30000 });
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect
+      .poll(() => textOf(page, "reader-position"), { timeout: 30000 })
+      .toMatch(/^(100|[1-9]?\d)%$/);
+    await expect(page.getByTestId("epub-error")).toHaveCount(0);
+    await returnToLibrary(page);
   });
 });

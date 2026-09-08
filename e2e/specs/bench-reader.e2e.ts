@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { expect, test, type Page } from "../fixtures/electron-app.js";
+
 import {
   bitmapCacheUsage,
   closeReaderNavigation,
@@ -12,6 +14,7 @@ import {
   scrollToSlot,
   textOf,
   waitForRendered,
+  firstPdfCanvas,
 } from "./helpers.js";
 import { artifactsDir } from "../setup/environment.js";
 import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
@@ -33,7 +36,9 @@ import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
  * performs — not discrete page turns, which bypass the continuous-scroll
  * path where the jank lives. While the drag runs, a rAF sampler records
  * frame intervals: main-thread stalls (raster, layout, React commits) show
- * up directly as long frames.
+ * up directly as long frames. All measurement runs browser-side; Playwright
+ * is only the input/automation layer and its API time is never counted as
+ * reader performance.
  *
  * Deterministic budget assertions still hold here — they are policy, not
  * timing: PERF-1 buffer caps, PERF-3 cache occupancy after an oscillation,
@@ -45,7 +50,7 @@ const DRAG_FRAMES = 240;
 const PDF_DRAG_PX_PER_FRAME = 48;
 const EPUB_DRAG_PX_PER_FRAME = 40;
 
-/** wdio.conf's mocha timeout (120 s) is too tight for a measured walk. */
+/** The config's per-test bound is too tight for a measured walk. */
 const BENCH_TEST_TIMEOUT_MS = 900_000;
 
 interface DragResult {
@@ -171,21 +176,23 @@ function summarize(label: string, stats?: FrameStats | null): string {
 /**
  * Interaction latency: automation-visible time from a reader interaction
  * (click) to its observable effect (indicator/state change). Includes the
- * WebDriver round trip — consistent across runs, so it is comparable
+ * automation round trip — consistent across runs, so it is comparable
  * run-over-run in the trend file, not a pure app figure.
  */
 async function interactionLatency(
+  page: Page,
   action: () => Promise<void>,
   effect: () => Promise<boolean>,
   timeoutMs = 30_000,
 ): Promise<number> {
   const start = Date.now();
   await action();
-  await browser.waitUntil(effect, {
-    timeout: timeoutMs,
-    timeoutMsg: "interaction never took effect",
-  });
-  return Date.now() - start;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await effect()) return Date.now() - start;
+    await page.waitForTimeout(50);
+  }
+  throw new Error("interaction never took effect");
 }
 
 /**
@@ -276,8 +283,8 @@ function writeReport(): void {
  * all deterministic DOM attributes on the reading surface (docs/epub.md
  * testability contract), so the probe survives engine swaps. Read-only.
  */
-const epubPositionProbe = (): Promise<string> =>
-  browser.execute(() => {
+const epubPositionProbe = (page: Page): Promise<string> =>
+  page.evaluate(() => {
     const percent = document.querySelector("[data-testid=reader-position]")?.textContent ?? "";
     const host = document.querySelector("[data-epub-host]");
     const reader = document.querySelector("[data-testid=epub-reader]");
@@ -298,19 +305,15 @@ const epubPositionProbe = (): Promise<string> =>
  * continuously. A drag stalled at a section end turns to the next section
  * through the window-level page-turn shortcut, like a reader crossing into
  * it.
- *
- * Serialized-callback constraint (see pdfSurfaceMemory in helpers.ts): no
- * named function bindings inside — the transpiler's `__name` retention
- * helpers do not exist in the page realm. One flat interval tick does
- * everything; each tick schedules exactly one anonymous rAF sample.
  */
 const dragScroll = (
+  page: Page,
   format: "pdf" | "epub",
   maxFrames: number,
   pxPerFrame: number,
 ): Promise<DragResult> =>
-  browser.execute(
-    async (fmt, max, px) => {
+  page.evaluate(
+    async ({ fmt, max, px }) => {
       const container = document.querySelector("[data-testid=reader-content]");
       const epubScroll = (): { el: Element | null; pos: number } => {
         for (const frame of document.querySelectorAll<HTMLIFrameElement>(
@@ -337,7 +340,7 @@ const dragScroll = (
       let stalls = 0;
       let lastPos = fmt === "epub" ? epubScroll().pos : 0;
       let jumps = 0;
-      const distance = await new Promise<number>((resolve) => {
+      await new Promise<number>((resolve) => {
         // Sampler at 8 ms: registration must be faster than the frame clock
         // or a 16 ms tick beats against 16.7 ms frames and biases deltas to
         // double intervals. Duplicate same-frame registrations are filtered
@@ -405,9 +408,7 @@ const dragScroll = (
         sectionJumps: jumps,
       };
     },
-    format,
-    maxFrames,
-    pxPerFrame,
+    { fmt: format, max: maxFrames, px: pxPerFrame },
   );
 
 /**
@@ -420,8 +421,8 @@ const dragScroll = (
  * interval beats against 16.7 ms frames and lands some ticks in the same
  * frame, biasing deltas to double intervals.
  */
-const sampleIdleFrames = (maxFrames: number): Promise<number[]> =>
-  browser.execute(async (max) => {
+const sampleIdleFrames = (page: Page, maxFrames: number): Promise<number[]> =>
+  page.evaluate(async (max) => {
     const stamps: number[] = [];
     let last = performance.now();
     let count = 0;
@@ -443,47 +444,56 @@ const sampleIdleFrames = (maxFrames: number): Promise<number[]> =>
     return stamps;
   }, maxFrames);
 
-describe("reader performance benchmark", () => {
-  before(async () => {
-    report.environment.userAgent = await browser.execute(() => navigator.userAgent);
-    report.environment.devicePixelRatio = await browser.execute(() => window.devicePixelRatio);
-    // Reference conditions are a maximized window (docs/performance.md); an
-    // explicit `just bench-reader WxH` argument overrides for targeted
-    // geometries. The applied size is what the report records. Sizing goes
-    // through the renderer's window.resizeTo — chromedriver ≥ 152 removed
-    // the CDP endpoint both the maximize shortcut and the W3C window-rect
-    // command used, while Electron's renderer resize keeps working.
+test.describe("reader performance benchmark", () => {
+  /**
+   * Reference conditions are a maximized window (docs/performance.md); an
+   * explicit `just bench-reader WxH` argument overrides for targeted
+   * geometries. The applied size is what the report records. Sizing goes
+   * through the renderer's window.resizeTo — the real OS window is what
+   * the reader lays out against. Idempotent; called at each scenario start.
+   */
+  async function prepareBenchEnvironment(page: Page): Promise<void> {
+    report.environment.userAgent = await page.evaluate(() => navigator.userAgent);
+    report.environment.devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
     const requested = process.env.BENCH_WINDOW_SIZE ?? "";
     const match = /^(\d+)x(\d+)$/.exec(requested);
     if (match) {
-      await browser.execute((w, h) => window.resizeTo(w, h), Number(match[1]), Number(match[2]));
+      await page.evaluate(
+        ([w, h]) => window.resizeTo(w!, h!),
+        [Number(match[1]), Number(match[2])],
+      );
     } else {
-      await browser.execute(() =>
+      await page.evaluate(() =>
         window.resizeTo(window.screen.availWidth, window.screen.availHeight),
       );
     }
-    await browser.waitUntil(
-      async () => {
-        // getWindowSize also routes through the removed CDP endpoint — read
-        // the applied size from the renderer.
-        const size = await browser.execute(() => ({
-          width: window.innerWidth,
-          height: window.outerHeight,
-        }));
+    await expect
+      .poll(async () => {
         const target = match
           ? { width: Number(match[1]), height: Number(match[2]) }
-          : await browser.execute(() => ({
+          : await page.evaluate(() => ({
               width: window.screen.availWidth,
               height: window.screen.availHeight,
             }));
-        return (
-          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 8
-        );
-      },
-      { timeout: 10_000, timeoutMsg: "bench window never reached its requested size" },
-    );
-    // The applied size from the renderer (same reason as above).
-    const applied = await browser.execute(() => ({
+        // Re-issue the resize each sample: the renderer-applied size can
+        // lag the request, and a window that drifted back to its default
+        // geometry must be re-driven, not just awaited.
+        await page.evaluate(([w, h]) => window.resizeTo(w!, h!), [target.width, target.height]);
+        await page.waitForTimeout(200);
+        const size = await page.evaluate(() => ({
+          width: window.innerWidth,
+          height: window.outerHeight,
+        }));
+        const ok =
+          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 8;
+        if (!ok) {
+          console.log(`[diag] size=${JSON.stringify(size)} target=${JSON.stringify(target)}`);
+        }
+        return ok;
+      })
+      .toBe(true);
+    // The applied size from the renderer.
+    const applied = await page.evaluate(() => ({
       width: window.innerWidth,
       height: window.outerHeight,
     }));
@@ -491,26 +501,26 @@ describe("reader performance benchmark", () => {
     console.log(
       `[bench] window ${applied.width}x${applied.height} dpr ${report.environment.devicePixelRatio}`,
     );
-  });
+  }
 
-  it("pdf: page-walk render→blit latency from mid-book with budget checks", async function () {
-    if (!existsSync(benchPdfFixture)) {
-      this.skip(); // gitignored real-book fixture absent on this machine
-    }
-    this.timeout(BENCH_TEST_TIMEOUT_MS);
+  test("pdf: page-walk render→blit latency from mid-book with budget checks", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
+    test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");
+
+    await prepareBenchEnvironment(page);
 
     // First-render latency: launch-to-first-page on the real-book fixture
     // (open + engine init + first page bitmap) — the cold-open cost a
     // reader feels when opening a book.
     const firstRenderStart = Date.now();
-    await openInReader(benchBookTitles.pdf);
-    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30_000 });
+    await openInReader(page, benchBookTitles.pdf);
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
     try {
-      await waitForRendered(1, 90_000);
+      await waitForRendered(page, 1, 90_000);
     } catch (err) {
       // Diagnose from artifacts: which page is the reader actually on, and
       // what state are the first slots in?
-      const probe = await browser.execute(() => ({
+      const probe = await page.evaluate(() => ({
         indicator: document.querySelector("[data-testid=pdf-page-indicator]")?.textContent ?? "",
         slots: Array.from(document.querySelectorAll("[data-pdf-slot]"))
           .slice(0, 5)
@@ -523,29 +533,28 @@ describe("reader performance benchmark", () => {
       throw err;
     }
     report.pdf.firstRenderLatencyMs = Date.now() - firstRenderStart;
-    await browser.waitUntil(
-      async () => /Page \d+ of \d+/.test(await textOf("pdf-page-indicator")),
-      { timeout: 30_000, timeoutMsg: "bench pdf never reported its page count" },
-    );
-    report.environment.pdfRenderInfo = await browser.execute(
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of", {
+      timeout: 30_000,
+    });
+    report.environment.pdfRenderInfo = await page.evaluate(
       () =>
         document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-render-info") ??
         null,
     );
 
-    const total = Number((await textOf("pdf-page-indicator")).match(/of (\d+)/)![1]);
+    const total = Number((await textOf(page, "pdf-page-indicator")).match(/of (\d+)/)![1]);
     // Walk from the middle of the book: front matter and the ToC are the
     // least representative pages in the document.
     const startPage = Math.max(1, Math.floor(total / 2));
     report.pdf.startPage = startPage;
-    await scrollToSlot(startPage);
-    await waitForRendered(startPage, 60_000);
+    await scrollToSlot(page, startPage);
+    await waitForRendered(page, startPage, 60_000);
 
     const walkTo = Math.min(startPage + PDF_WALK_PAGES, total);
-    for (let page = startPage; page <= walkTo; page++) {
-      await scrollToSlot(page);
-      await waitForRendered(page, 60_000);
-      const sample = await browser.execute((target) => {
+    for (let pageNumber = startPage; pageNumber <= walkTo; pageNumber++) {
+      await scrollToSlot(page, pageNumber);
+      await waitForRendered(page, pageNumber, 60_000);
+      const sample = await page.evaluate((target) => {
         const canvas = document.querySelector(
           `[data-testid=pdf-canvas][data-pdf-page="${target}"]`,
         ) as HTMLCanvasElement | null;
@@ -559,10 +568,14 @@ describe("reader performance benchmark", () => {
           bufferPx: canvas.width * canvas.height,
           maxSide: Math.max(canvas.width, canvas.height),
         };
-      }, page);
+      }, pageNumber);
       if (sample && sample.ms >= 0) {
         report.pdf.renderMs.push(sample.ms);
-        report.pdf.buffers.push({ page, bufferPx: sample.bufferPx, maxSide: sample.maxSide });
+        report.pdf.buffers.push({
+          page: pageNumber,
+          bufferPx: sample.bufferPx,
+          maxSide: sample.maxSide,
+        });
       }
     }
 
@@ -575,8 +588,8 @@ describe("reader performance benchmark", () => {
 
     // PERF-4 (derived from slot/canvas state): live canvases within the
     // count cap and the per-window byte bound.
-    const memory = await pdfSurfaceMemory();
-    const onePage = await maxSingleBitmapBytes(1);
+    const memory = await pdfSurfaceMemory(page);
+    const onePage = await maxSingleBitmapBytes(page, 1);
     report.pdf.liveCanvases = {
       count: memory.pageCanvases,
       bytes: memory.pageBytes,
@@ -588,33 +601,34 @@ describe("reader performance benchmark", () => {
     // PERF-3 (deterministic attribute): one down-up oscillation must
     // retain ≥ 2 buffers in the bitmap cache.
     const down = Math.min(walkTo + 1, total);
-    await scrollToSlot(down);
-    await waitForRendered(down, 60_000);
-    await scrollToSlot(walkTo);
-    await waitForRendered(walkTo, 60_000);
-    const cache = await bitmapCacheUsage();
+    await scrollToSlot(page, down);
+    await waitForRendered(page, down, 60_000);
+    await scrollToSlot(page, walkTo);
+    await waitForRendered(page, walkTo, 60_000);
+    const cache = await bitmapCacheUsage(page);
     report.pdf.cacheAfterOscillation = cache;
     expect(cache).not.toBeNull();
     expect(cache!.entries).toBeGreaterThanOrEqual(2);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("pdf: scrollbar-drag frame timing through mid-book content", async function () {
-    this.timeout(BENCH_TEST_TIMEOUT_MS);
+  test("pdf: scrollbar-drag frame timing through mid-book content", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
 
-    await openInReader(benchBookTitles.pdf);
-    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30_000 });
-    await browser.waitUntil(
-      async () => /Page \d+ of \d+/.test(await textOf("pdf-page-indicator")),
-      { timeout: 30_000, timeoutMsg: "bench pdf never reported its page count" },
-    );
-    const total = Number((await textOf("pdf-page-indicator")).match(/of (\d+)/)![1]);
-    await scrollToSlot(Math.max(1, Math.floor(total / 2)));
-    await waitForRendered(Math.max(1, Math.floor(total / 2)), 60_000);
+    await prepareBenchEnvironment(page);
 
-    const drag = await dragScroll("pdf", DRAG_FRAMES, PDF_DRAG_PX_PER_FRAME);
-    const idle = await sampleIdleFrames(60);
+    await openInReader(page, benchBookTitles.pdf);
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of", {
+      timeout: 30_000,
+    });
+    const total = Number((await textOf(page, "pdf-page-indicator")).match(/of (\d+)/)![1]);
+    await scrollToSlot(page, Math.max(1, Math.floor(total / 2)));
+    await waitForRendered(page, Math.max(1, Math.floor(total / 2)), 60_000);
+
+    const drag = await dragScroll(page, "pdf", DRAG_FRAMES, PDF_DRAG_PX_PER_FRAME);
+    const idle = await sampleIdleFrames(page, 60);
     report.pdf.idle = frameStats(idle);
     report.pdf.drag = {
       ...frameStats(drag.frames),
@@ -625,35 +639,35 @@ describe("reader performance benchmark", () => {
     expect(drag.frames.length).toBeGreaterThan(DRAG_FRAMES / 2);
     expect(drag.distancePx).toBeGreaterThan(0);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("pdf: rapid page-turn and zoom interaction latency", async function () {
-    if (!existsSync(benchPdfFixture)) {
-      this.skip(); // gitignored real-book fixture absent on this machine
-    }
-    this.timeout(BENCH_TEST_TIMEOUT_MS);
+  test("pdf: rapid page-turn and zoom interaction latency", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
+    test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");
 
-    await openInReader(benchBookTitles.pdf);
-    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30_000 });
-    await browser.waitUntil(
-      async () => /Page \d+ of \d+/.test(await textOf("pdf-page-indicator")),
-      { timeout: 30_000, timeoutMsg: "bench pdf never reported its page count" },
-    );
-    const total = Number((await textOf("pdf-page-indicator")).match(/of (\d+)/)![1]);
+    await prepareBenchEnvironment(page);
+
+    await openInReader(page, benchBookTitles.pdf);
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of", {
+      timeout: 30_000,
+    });
+    const total = Number((await textOf(page, "pdf-page-indicator")).match(/of (\d+)/)![1]);
     const startPage = Math.max(1, Math.floor(total / 2));
-    await scrollToSlot(startPage);
-    await waitForRendered(startPage, 60_000);
+    await scrollToSlot(page, startPage);
+    await waitForRendered(page, startPage, 60_000);
 
     const indicatorPage = async () =>
-      Number((await textOf("pdf-page-indicator")).match(/Page (\d+)/)?.[1]);
+      Number((await textOf(page, "pdf-page-indicator")).match(/Page (\d+)/)?.[1]);
 
     // Rapid page turning: the toolbar's next/prev buttons, one sample each —
     // the interaction a reader repeats most. Turn down five pages, then up.
     for (let i = 0; i < 5; i++) {
       const before = await indicatorPage();
       const after = await interactionLatency(
-        () => $("[data-testid=pdf-next]").click(),
+        page,
+        () => page.getByTestId("pdf-next").click(),
         async () => (await indicatorPage()) === before + 1,
       );
       report.pdf.pageTurnLatencyMs.push(after);
@@ -661,7 +675,8 @@ describe("reader performance benchmark", () => {
     for (let i = 0; i < 3; i++) {
       const before = await indicatorPage();
       const after = await interactionLatency(
-        () => $("[data-testid=pdf-prev]").click(),
+        page,
+        () => page.getByTestId("pdf-prev").click(),
         async () => (await indicatorPage()) === before - 1,
       );
       report.pdf.pageTurnLatencyMs.push(after);
@@ -672,12 +687,13 @@ describe("reader performance benchmark", () => {
     // buttons disable at the ends of the zoom ladder — stop there.
     const zoomSteps = async (direction: "in" | "out"): Promise<void> => {
       for (let i = 0; i < 2; i++) {
-        const button = await $(`[data-testid=pdf-zoom-${direction}]`);
+        const button = page.getByTestId(`pdf-zoom-${direction}`);
         if ((await button.getAttribute("disabled")) !== null) break;
-        const before = await textOf("pdf-zoom-level");
+        const before = await textOf(page, "pdf-zoom-level");
         const after = await interactionLatency(
+          page,
           () => button.click(),
-          async () => (await textOf("pdf-zoom-level")) !== before,
+          async () => (await textOf(page, "pdf-zoom-level")) !== before,
         );
         report.pdf.zoomLatencyMs.push(after);
       }
@@ -696,7 +712,8 @@ describe("reader performance benchmark", () => {
     for (let i = 1; i < jumpTargets.length; i++) {
       const target = jumpTargets[i]!;
       const after = await interactionLatency(
-        () => scrollToSlot(target),
+        page,
+        () => scrollToSlot(page, target),
         async () => (await indicatorPage()) === target,
       );
       report.pdf.bigJumpLatencyMs.push(after);
@@ -710,18 +727,19 @@ describe("reader performance benchmark", () => {
       `[bench] ${summarize("pdf big-jump nav latency", frameStats(report.pdf.bigJumpLatencyMs))}`,
     );
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("epub: chapter-change interaction latency", async function () {
-    this.timeout(BENCH_TEST_TIMEOUT_MS);
+  test("epub: chapter-change interaction latency", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
+
+    await prepareBenchEnvironment(page);
 
     const openStart = Date.now();
-    await openInReader(benchBookTitles.epub);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30_000, timeoutMsg: "bench epub engine never became ready" },
-    );
+    await openInReader(page, benchBookTitles.epub);
+    const host = page.locator("div[data-epub-host]");
+    await host.waitFor({ state: "attached", timeout: 30_000 });
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30_000 });
     report.epub.firstRenderLatencyMs = Date.now() - openStart;
 
     // Chapter changes through the contents drawer: open drawer → click TOC
@@ -730,21 +748,21 @@ describe("reader performance benchmark", () => {
     // section CHANGE from the pre-click value; entries that resolve to the
     // section we are already in are skipped, not failed.
     const sectionNow = async () =>
-      browser.execute(
+      page.evaluate(
         () =>
           document
             .querySelector("[data-testid=epub-reader] [data-epub-host]")
             ?.getAttribute("data-epub-section") ?? null,
       );
-    // Element handles go stale across drawer close/reopen cycles — query
-    // per iteration by index, up to the first 8 entries, until 3 changes
-    // have been sampled.
+    // Query per iteration by index, up to the first 8 entries, until 3
+    // changes have been sampled.
     for (let index = 0; index < 8 && report.epub.chapterChangeLatencyMs.length < 3; index++) {
-      await openReaderNavigation();
-      const item = await $(`[data-testid=toc-item-${index}]`);
-      if (!(await item.isExisting())) break;
+      await openReaderNavigation(page);
+      const item = page.getByTestId(`toc-item-${index}`);
+      if ((await item.count()) === 0) break;
       const before = await sectionNow();
       const changed = await interactionLatency(
+        page,
         () => item.click(),
         async () => (await sectionNow()) !== before,
         10_000,
@@ -757,11 +775,12 @@ describe("reader performance benchmark", () => {
       // The drawer closes itself on a successful navigation; a no-op entry
       // leaves it open — normalize either way before the next sample.
       if (changed) {
-        await $("[data-testid=reader-nav]")
-          .waitForExist({ reverse: true, timeout: 10_000 })
+        await page
+          .getByTestId("reader-nav")
+          .waitFor({ state: "detached", timeout: 10_000 })
           .catch(() => {});
       } else {
-        await closeReaderNavigation();
+        await closeReaderNavigation(page);
       }
     }
     expect(report.epub.chapterChangeLatencyMs.length).toBeGreaterThanOrEqual(3);
@@ -769,45 +788,53 @@ describe("reader performance benchmark", () => {
       `[bench] ${summarize("epub chapter-change latency", frameStats(report.epub.chapterChangeLatencyMs))}`,
     );
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("epub: scrolled-flow scrollbar-drag frame timing from mid-book", async function () {
-    this.timeout(BENCH_TEST_TIMEOUT_MS);
+  test("epub: scrolled-flow scrollbar-drag frame timing from mid-book", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
 
-    await openInReader(benchBookTitles.epub);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30_000, timeoutMsg: "bench epub engine never became ready" },
-    );
+    await prepareBenchEnvironment(page);
+
+    await openInReader(page, benchBookTitles.epub);
+    const host = page.locator("div[data-epub-host]");
+    await host.waitFor({ state: "attached", timeout: 30_000 });
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30_000 });
 
     // Continuous layout: fresh sessions default to paginated (the
     // preference is not persisted), and this suite measures scrolling.
-    await $("[data-testid=appearance-trigger]").click();
-    await $("[data-testid=appearance-content]").waitForDisplayed({ timeout: 10_000 });
-    const layoutItems = await $$("[data-testid=pref-layout] button");
-    expect(layoutItems).toHaveLength(2);
-    const label = await browser.execute(
-      (element) => (element as HTMLElement).textContent,
-      layoutItems[1] as unknown as HTMLElement,
-    );
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 10_000 });
+    const layoutItems = page.locator('[data-testid="pref-layout"] button');
+    expect(await layoutItems.count()).toBe(2);
+    const label = await layoutItems.nth(1).textContent();
     expect(label).toBe("Scrolling");
-    await layoutItems[1].click();
-    await browser.keys(["Escape"]);
-    // The flow lands on the reader surface as a pinned attribute
-    // (docs/epub.md testability contract).
-    await browser.waitUntil(async () => (await epubPositionProbe()).endsWith("|scrolled"), {
-      timeout: 10_000,
-      timeoutMsg: "epub never switched to scrolled flow",
-    });
+    // The popover's enter/exit animation can swallow the layout click —
+    // re-drive it until the flow lands on the reader surface as a pinned
+    // attribute (docs/epub.md testability contract).
+    let applied = false;
+    for (let attempt = 0; attempt < 3 && !applied; attempt++) {
+      await layoutItems.nth(1).click();
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if ((await epubPositionProbe(page)).endsWith("|scrolling")) {
+          applied = true;
+          break;
+        }
+        await page.waitForTimeout(250);
+      }
+    }
+    expect(applied).toBe(true);
+    await page.keyboard.press("Escape");
 
     // PERF-12: the scrolled reading surface must be measure-capped.
     // Deterministic DOM attribute — timing assertions stay out of E2E.
-    await browser.waitUntil(async () => await $("div[data-epub-measure=capped]").isExisting(), {
-      timeout: 10_000,
-      timeoutMsg: "scrolled reading surface was not measure-capped (PERF-12)",
-    });
-    report.epub.measure = await browser.execute(
+    await expect
+      .poll(async () => (await page.locator("div[data-epub-measure=capped]").count()) > 0, {
+        timeout: 10_000,
+      })
+      .toBe(true);
+    report.epub.measure = await page.evaluate(
       () => document.querySelector<HTMLElement>("[data-epub-measure]")?.style.maxWidth ?? "",
     );
 
@@ -816,15 +843,14 @@ describe("reader performance benchmark", () => {
     // and the ToC are the least representative content. The pre-jump probe
     // is captured first so "changed" is measured against where the restored
     // session had put us.
-    const beforeJump = await epubPositionProbe();
-    await browser.keys("End");
-    await browser.waitUntil(async () => (await epubPositionProbe()) !== beforeJump, {
-      timeout: 10_000,
-      timeoutMsg: "epub never landed on the deep-book position",
-    });
+    const beforeJump = await epubPositionProbe(page);
+    await page.keyboard.press("End");
+    await expect
+      .poll(async () => (await epubPositionProbe(page)) !== beforeJump, { timeout: 10_000 })
+      .toBe(true);
 
-    const drag = await dragScroll("epub", DRAG_FRAMES, EPUB_DRAG_PX_PER_FRAME);
-    const idle = await sampleIdleFrames(60);
+    const drag = await dragScroll(page, "epub", DRAG_FRAMES, EPUB_DRAG_PX_PER_FRAME);
+    const idle = await sampleIdleFrames(page, 60);
     report.epub.idle = frameStats(idle);
     report.epub.drag = {
       ...frameStats(drag.frames),
@@ -834,10 +860,10 @@ describe("reader performance benchmark", () => {
     };
     expect(drag.frames.length).toBeGreaterThan(DRAG_FRAMES / 2);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  after(() => {
+  test.afterAll(() => {
     writeReport();
     appendTrend();
   });

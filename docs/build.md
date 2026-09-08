@@ -25,23 +25,13 @@ precondition. The Electron main process locates the sidecar binary
 (dev: target dir; packaged: bundled resource) — keep that resolution in
 one place in main.
 
-## Chromedriver for E2E
+## E2E runtime
 
-`@wdio/electron-service` resolves the chromedriver automatically: it reads
-the installed Electron version from `e2e/package.json` (via `node_modules`)
-and derives the matching Chrome-for-Testing build id. Only the **download**
-is performed by the repo's own deterministic fetcher
-(`e2e/setup/fetch-chromedriver.mjs`, wired as `just fetch-chromedriver` and
-auto-run by `wdio.conf.ts` when the cache entry is missing): wdio-utils'
-built-in downloader (`@puppeteer/browsers` 2.13.x) hangs on some networks —
-its install promise never settles, and a killed run leaves a poisoned cache
-("the browser folder exists but the executable is missing"). The fetcher
-lands the same artifact in the same cache layout
-(`.build/chromedriver-cache/`, gitignored, pinned per build id), so
-wdio-utils finds a complete entry and skips its downloader entirely.
-A startup sanity check (`e2e/setup/versions.ts`, `docs/testing.md`) fails
-fast when the connected driver's major does not match the installed
-Electron's Chromium mapping.
+There is no external browser driver to install: Playwright's Electron
+launcher (`e2e/fixtures/electron-app.ts`) spawns the `electron` binary from
+`e2e/node_modules` pointed at the built `electron/dist/main.cjs` and
+attaches to it directly. The only runtime dependency is the OS-level
+`xvfb` package for headless Linux runs (see docs/testing.md).
 
 ## PDFium shared library (PDF covers)
 

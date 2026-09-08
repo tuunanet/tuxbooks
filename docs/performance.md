@@ -77,8 +77,8 @@ Re-run the relevant verifications when editing:
   after a scripted scroll oscillation.
 - **Bench suite (headed, explicit):** `just bench-reader [WxH]` runs the
   `bench-reader.e2e.ts` suite on the real display, window maximized
-  (renderer-side `window.resizeTo` — chromedriver ≥ 152 removed the CDP
-  endpoint behind the WebDriver window commands). It collects: PDF
+  (renderer-side `window.resizeTo` sizes the real OS window the reader
+  lays out against). It collects: PDF
   page-walk `data-pdf-render-ms` (PERF-1/3/4 budget checks asserted),
   synthetic scrollbar drags on both readers with a rAF frame-interval
   sampler (p50/p95/max frame time and the dropped-frame share over

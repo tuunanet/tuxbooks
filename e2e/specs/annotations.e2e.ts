@@ -1,6 +1,8 @@
+import { expect, test, type Page } from "../fixtures/electron-app.js";
+
 import {
-  clickRetryingStale,
   closeReaderNavigation,
+  openReaderTab,
   openInReader,
   openReaderNavigation,
   returnToLibrary,
@@ -17,33 +19,36 @@ import {
  * everything from SQLite, so this exercises the persistence contract end
  * to end).
  */
-describe("reading annotations", () => {
-  it("creates a PDF highlight from a selection, attaches a note, and revisits both after reopen", async () => {
-    await openInReader("A Minimal Manual (PDF)");
+test.describe("reading annotations", () => {
+  test("creates a PDF highlight from a selection, attaches a note, and revisits both after reopen", async ({
+    page,
+  }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
 
     // Deterministic anchor: page 1 rendered, with its selectable text layer
     // (the spans render asynchronously after the container mounts). The
     // reader restores the book's saved position before the surface mounts,
     // so wait for the document slots before scrolling — scrollToSlot
     // no-ops while the reader is still loading.
-    await browser.waitUntil(async () => (await slotStates()).length > 0, {
-      timeout: 30000,
-      timeoutMsg: "pdf slots never appeared",
-    });
-    await scrollToSlot(1);
-    await waitForRendered(1, 60000);
-    await browser.waitUntil(
-      async () =>
-        browser.execute(() => {
-          const layer = document.querySelector('[data-pdf-text-layer="1"]');
-          return layer !== null && layer.querySelectorAll("span").length > 0;
-        }),
-      { timeout: 30000, timeoutMsg: "page 1 text layer spans never rendered" },
-    );
+    await expect
+      .poll(async () => (await slotStates(page)).length, { timeout: 30000 })
+      .toBeGreaterThan(0);
+    await scrollToSlot(page, 1);
+    await waitForRendered(page, 1, 60000);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const layer = document.querySelector('[data-pdf-text-layer="1"]');
+            return layer !== null && layer.querySelectorAll("span").length > 0;
+          }),
+        { timeout: 30000 },
+      )
+      .toBe(true);
 
     // Select the page's text through its text layer and release the pointer,
     // so the reader captures the selection the same way a mouse drag ends.
-    await browser.execute(() => {
+    await page.evaluate(() => {
       const layer = document.querySelector('[data-pdf-text-layer="1"]');
       const spans = layer ? Array.from(layer.querySelectorAll("span")) : [];
       if (spans.length === 0) return;
@@ -51,120 +56,115 @@ describe("reading annotations", () => {
       range.setStartBefore(spans[0]!);
       range.setEndAfter(spans[spans.length - 1]!);
       const selection = window.getSelection();
+      if (!selection) return;
       selection.removeAllRanges();
       selection.addRange(range);
       document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
 
-    await $("[data-testid=selection-toolbar]").waitForDisplayed({ timeout: 10000 });
-    await $("[data-testid=highlight-color-yellow]").click();
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("highlight-color-yellow").click();
 
-    // The stored highlight's overlay draws on the page right away.
-    await $("[data-pdf-highlight]").waitForExist({ timeout: 10000 });
+    // The stored highlight's overlay draws on the page right away (one
+    // overlay per selection rectangle — multi-line selections make several).
+    await page
+      .locator("[data-pdf-highlight]")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
 
     // Attach a note through the drawer's Highlights tab.
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-highlights]").click();
-    await $("[data-testid=nav-highlight-0]").waitForDisplayed({ timeout: 10000 });
-    await $("[data-testid=nav-highlight-note-0]").click();
-    await $("[data-testid=annotation-note-input]").setValue("check this later");
-    await $("[data-testid=annotation-note-save]").click();
-    await browser.waitUntil(
-      async () => (await textOf("nav-highlight-0")).includes("check this later"),
-      { timeout: 10000, timeoutMsg: "note never appeared on the highlight" },
-    );
-    await closeReaderNavigation();
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
+    await page.getByTestId("nav-highlight-note-0").click();
+    await page.getByTestId("annotation-note-input").fill("check this later");
+    await page.getByTestId("annotation-note-save").click();
+    await expect(page.getByTestId("nav-highlight-0")).toContainText("check this later", {
+      timeout: 10000,
+    });
+    await closeReaderNavigation(page);
 
     // Bookmark the page as well, then leave; the debounced progress save
     // plus the unmount flush persist everything.
-    await clickRetryingStale("[data-testid=reader-bookmark]");
-    await browser.waitUntil(
-      async () =>
-        (await $("[data-testid=reader-bookmark]").getAttribute("aria-pressed")) === "true",
-      { timeout: 10000, timeoutMsg: "bookmark was never placed" },
-    );
-    await returnToLibrary();
+    await page.getByTestId("reader-bookmark").click();
+    await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
+      timeout: 10000,
+    });
+    await returnToLibrary(page);
 
     // Reopen: highlight, note, and bookmark all come back from the database.
-    await openInReader("A Minimal Manual (PDF)");
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-highlights]").click();
-    await $("[data-testid=nav-highlight-0]").waitForDisplayed({ timeout: 30000 });
-    await browser.waitUntil(
-      async () => (await textOf("nav-highlight-0")).includes("check this later"),
-      { timeout: 10000, timeoutMsg: "note was not restored on reopen" },
-    );
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
+    await expect(page.getByTestId("nav-highlight-0")).toContainText("check this later", {
+      timeout: 10000,
+    });
 
     // Revisit: jumping to the highlight lands on page 1 with the overlay drawn.
-    await $("[data-testid=nav-highlight-jump-0]").click();
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 1 of 3", {
+    await page.getByTestId("nav-highlight-jump-0").click();
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
-      timeoutMsg: "highlight jump never reached page 1",
     });
-    await waitForRendered(1);
-    await $("[data-pdf-highlight]").waitForExist({ timeout: 10000 });
+    await waitForRendered(page, 1);
+    // A highlight draws one overlay per selection rectangle (multi-line
+    // selections produce several) — any overlay present is the contract.
+    await page
+      .locator("[data-pdf-highlight]")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
 
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-bookmarks]").click();
-    await $("[data-testid=nav-bookmark-0]").waitForDisplayed({ timeout: 10000 });
-    expect(await textOf("nav-bookmark-0")).toMatch(/Page \d+/);
-    await closeReaderNavigation();
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
+    expect(await textOf(page, "nav-bookmark-0")).toMatch(/Page \d+/);
+    await closeReaderNavigation(page);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("keeps an EPUB bookmark across close and reopen", async () => {
-    const epubReady = () =>
-      browser.waitUntil(
-        async () =>
-          browser.execute(
-            () =>
-              document
-                .querySelector("[data-testid=epub-reader]")
-                ?.getAttribute("data-epub-state") === "ready",
-          ),
-        { timeout: 30000, timeoutMsg: "epub reader never became ready" },
-      );
+  test("keeps an EPUB bookmark across close and reopen", async ({ page }) => {
+    const epubReady = (page: Page) =>
+      expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+        timeout: 30000,
+      });
 
-    await openInReader("A Minimal Book (EPUB)");
-    await epubReady();
+    await openInReader(page, "A Minimal Book (EPUB)");
+    await epubReady(page);
 
-    await clickRetryingStale("[data-testid=reader-bookmark]");
-    await browser.waitUntil(
-      async () =>
-        (await $("[data-testid=reader-bookmark]").getAttribute("aria-pressed")) === "true",
-      { timeout: 10000, timeoutMsg: "bookmark was never placed" },
-    );
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-bookmarks]").click();
-    await $("[data-testid=nav-bookmark-0]").waitForDisplayed({ timeout: 10000 });
-    await closeReaderNavigation();
+    await page.getByTestId("reader-bookmark").click();
+    await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
+      timeout: 10000,
+    });
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
+    await closeReaderNavigation(page);
 
-    await returnToLibrary();
-    await openInReader("A Minimal Book (EPUB)");
-    await epubReady();
+    await returnToLibrary(page);
+    await openInReader(page, "A Minimal Book (EPUB)");
+    await epubReady(page);
 
     // Reopening restores the same position, so the stored bookmark lights
     // the toolbar button up again.
-    await browser.waitUntil(
-      async () =>
-        (await $("[data-testid=reader-bookmark]").getAttribute("aria-pressed")) === "true",
-      { timeout: 30000, timeoutMsg: "stored bookmark not reflected after reopen" },
-    );
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-bookmarks]").click();
-    await $("[data-testid=nav-bookmark-0]").waitForDisplayed({ timeout: 10000 });
-    await closeReaderNavigation();
+    await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
+      timeout: 30000,
+    });
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
+    await closeReaderNavigation(page);
 
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("truncates long bookmark labels and keeps the row actions inside the drawer", async () => {
+  test("truncates long bookmark labels and keeps the row actions inside the drawer", async ({
+    page,
+  }) => {
     // Created before the reader opens, so the drawer's initial load has it.
     const marker = "very-long-chapter-href-".padEnd(180, "x");
-    const created = await browser.execute(async (marker) => {
-      const books = await window.tuxbooks!.invoke("list_books");
+    const created = (await page.evaluate(async (marker) => {
+      const books = (await window.tuxbooks!.invoke("list_books")) as {
+        id: number;
+        format: string;
+      }[];
       const epub = books.find((book) => book.format === "epub");
+      if (!epub) throw new Error("no epub book in the scratch library");
       return window.tuxbooks!.invoke("create_annotation", {
         bookId: epub.id,
         annotation: {
@@ -173,27 +173,20 @@ describe("reading annotations", () => {
           chapterHref: marker,
         },
       });
-    }, marker);
+    }, marker)) as { id: number };
 
-    await openInReader("A Minimal Book (EPUB)");
-    await browser.waitUntil(
-      async () =>
-        browser.execute(
-          () =>
-            document.querySelector("[data-testid=epub-reader]")?.getAttribute("data-epub-state") ===
-            "ready",
-        ),
-      { timeout: 30000, timeoutMsg: "epub reader never became ready" },
-    );
+    await openInReader(page, "A Minimal Book (EPUB)");
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+      timeout: 30000,
+    });
 
-    await openReaderNavigation();
-    await $("[data-testid=nav-tab-bookmarks]").click();
-    await $("[data-testid=nav-bookmark-0]").waitForDisplayed({ timeout: 10000 });
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
 
     // The bookmark's spine href is far longer than the drawer: its label
     // must ellipsize instead of stretching the row past the sheet edge
     // (regression: the delete button disappeared off-sheet on wide rows).
-    const rowChecks = await browser.execute((marker) => {
+    const rowChecks = await page.evaluate((marker) => {
       const rows = Array.from(
         document.querySelectorAll<HTMLDivElement>("[data-testid^=nav-bookmark-]"),
       ).filter(
@@ -222,10 +215,10 @@ describe("reading annotations", () => {
     expect(rowChecks.labelTruncated).toBe(true);
     expect(rowChecks.rowInsideSheet).toBe(true);
 
-    await browser.execute(async (id) => {
+    await page.evaluate(async (id) => {
       await window.tuxbooks!.invoke("delete_annotation", { id });
     }, created.id);
-    await closeReaderNavigation();
-    await returnToLibrary();
+    await closeReaderNavigation(page);
+    await returnToLibrary(page);
   });
 });

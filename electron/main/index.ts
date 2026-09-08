@@ -589,9 +589,8 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 }
 
 app.whenReady().then(() => {
-  // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to the
-  // per-run userData dir — chromedriver swallows process stdout, so E2E
-  // diagnosis needs this on disk (artifacts keep the scratch config).
+  // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
+  // per-run file, so E2E diagnosis works from CI artifacts alone.
   const debugLogPath =
     process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
       ? `/tmp/tuxbooks-main-debug-${process.env.E2E_RUN_ID}.log`

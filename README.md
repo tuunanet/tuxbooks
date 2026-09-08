@@ -10,8 +10,8 @@ progress, and provides EPUB and PDF reading experiences.
 - **Desktop:** Electron (Chromium shell) with a Rust sidecar (tokio, serde,
   sqlx/SQLite, thiserror, proptest) speaking JSON-RPC over stdio
 - **Frontend:** React 19, TypeScript (strict), Vite, Tailwind CSS 4, shadcn/ui
-- **Testing:** Vitest + React Testing Library, WebdriverIO +
-  `@wdio/electron-service`, cargo test
+- **Testing:** Vitest + React Testing Library, Playwright Test
+  (Playwright's Electron API), cargo test
 - **Tooling:** pnpm, just, rustfmt, clippy, ESLint, Prettier, GitHub Actions
 
 ## Install
@@ -59,9 +59,6 @@ Individual pieces: `pnpm --filter frontend test`,
 `cargo test --manifest-path src-tauri/Cargo.toml`.
 
 E2E needs the `xvfb` package (`sudo apt install xvfb` on Debian/Ubuntu).
-The Electron chromedriver is resolved by `@wdio/electron-service` and
-downloaded into a local cache by the repo's deterministic fetcher
-(`just fetch-chromedriver`, auto-run when the cache entry is missing).
 `just test-e2e` is safe to run from SSH, CI, or anywhere without a desktop
 session. See [docs/testing.md](docs/testing.md).
 
@@ -72,7 +69,7 @@ frontend/          React app (presentation only)
 electron/          Electron main + preload (bundled TypeScript)
 src-tauri/         Rust sidecar: rpc, commands, domain, services, repository, db, epub
 src-tauri/migrations/  SQLx migrations (embedded, run automatically)
-e2e/               WebdriverIO suites, environment bootstrap, watchdog
+e2e/               Playwright suites, environment bootstrap, watchdog
 tests/fixtures/    committed test data (books/minimal.epub, books/minimal.pdf)
 artifacts/e2e/     E2E failure artifacts (screenshots, logs; gitignored)
 docs/              architecture, database, epub, pdf, testing, migration

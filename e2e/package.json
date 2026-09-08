@@ -5,20 +5,16 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "test:empty": "wdio run wdio.conf.ts --spec ./specs/library.e2e.ts",
-    "test:seeded": "wdio run wdio.conf.ts --spec ./specs/books.e2e.ts --spec ./specs/engine-smoke.e2e.ts --spec ./specs/pdf-reader.e2e.ts --spec ./specs/epub-reader.e2e.ts --spec ./specs/progress-migration.e2e.ts --spec ./specs/annotations.e2e.ts --spec ./specs/library-sync.e2e.ts --spec ./specs/reader-lifecycle.e2e.ts --spec ./specs/metadata.e2e.ts --spec ./specs/collections.e2e.ts",
-    "test:hidpi": "wdio run wdio.conf.ts --spec ./specs/hidpi.e2e.ts",
-    "test:bench": "wdio run wdio.conf.ts --spec ./specs/bench-reader.e2e.ts"
+    "test:empty": "playwright test --project=empty",
+    "test:seeded": "playwright test --project=seeded",
+    "test:hidpi": "playwright test --project=hidpi",
+    "test:bench": "playwright test --project=bench"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.10.0",
-    "@wdio/cli": "^9.31.0",
-    "@wdio/electron-service": "^10.3.0",
-    "@wdio/local-runner": "^9.31.0",
-    "@wdio/mocha-framework": "^9.31.0",
-    "@wdio/spec-reporter": "^9.31.0",
     "electron": "^44.2.0",
-    "tslib": "^2.8.1",
-    "webdriverio": "^9.31.0"
+    "playwright": "^1.63.0",
+    "tslib": "^2.8.1"
   }
 }

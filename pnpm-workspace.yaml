@@ -8,10 +8,3 @@ onlyBuiltDependencies:
   - esbuild
   # electron's postinstall downloads the runtime binary for the platform.
   - electron
-
-# Explicitly not built: transitive webdriverio driver managers (via
-# @wdio/utils). E2E drives the app through tauri-driver, never a browser
-# driver, so their driver downloads would be dead weight.
-ignoredBuiltDependencies:
-  - edgedriver
-  - geckodriver

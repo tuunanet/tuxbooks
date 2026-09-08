@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { expect, test, type Page } from "../fixtures/electron-app.js";
+
 import { openInReader, returnToLibrary, textOf } from "./helpers.js";
 
 /**
@@ -23,11 +25,6 @@ import { openInReader, returnToLibrary, textOf } from "./helpers.js";
  * are pinned by the Rust-level progress-migration fixtures (docs/epub.md,
  * `src-tauri/tests`), which run the full corpus per `cargo test`.
  */
-
-interface SeededBook {
-  id: number;
-  title: string;
-}
 
 /** Captured foliate CFIs for minimal.epub (see file comment). */
 const OLD_FOLIATE_CFI = {
@@ -88,76 +85,62 @@ function seedProgress(
   ).run(bookId, row.chapterHref, row.cfi, row.pageNumber, row.percent);
 }
 
-describe("tuxbooks reading-progress migration (foliate rows)", () => {
+/** Waits until the EPUB engine reports ready and the given spine section. */
+async function waitForEpubSection(page: Page, section: string): Promise<void> {
+  const host = page.locator("div[data-epub-host]");
+  await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+  await expect(host).toHaveAttribute("data-epub-section", section, { timeout: 30000 });
+}
+
+test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   let db: DatabaseSync;
   let epubId: number;
   let pdfId: number;
 
-  before(() => {
+  test.beforeAll(() => {
     db = scratchDatabase();
     epubId = bookIdByTitle(db, EPUB_TITLE);
     pdfId = bookIdByTitle(db, PDF_TITLE);
   });
 
-  it("restores the beginning of the book from an old foliate row", async () => {
+  test("restores the beginning of the book from an old foliate row", async ({ page }) => {
     seedProgress(db, epubId, {
       cfi: OLD_FOLIATE_CFI.beginning,
       chapterHref: "chapter1.xhtml",
       pageNumber: null,
       percent: 0,
     });
-    await openInReader(`${EPUB_TITLE} (EPUB)`);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30000, timeoutMsg: "epub engine never became ready" },
-    );
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "0",
-      { timeout: 30000, timeoutMsg: "old 'beginning' row never restored to the first section" },
-    );
-    expect(parseInt(await textOf("reader-position"), 10)).toBeLessThan(60);
-    await returnToLibrary();
+    await openInReader(page, `${EPUB_TITLE} (EPUB)`);
+    await waitForEpubSection(page, "0");
+    expect(parseInt(await textOf(page, "reader-position"), 10)).toBeLessThan(60);
+    await returnToLibrary(page);
   });
 
-  it("restores a chapter boundary (section start) from an old foliate row", async () => {
+  test("restores a chapter boundary (section start) from an old foliate row", async ({ page }) => {
     seedProgress(db, epubId, {
       cfi: OLD_FOLIATE_CFI.chapterTwo,
       chapterHref: "chapter2.xhtml",
       pageNumber: null,
       percent: 40,
     });
-    await openInReader(`${EPUB_TITLE} (EPUB)`);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30000, timeoutMsg: "epub engine never became ready" },
-    );
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "1",
-      { timeout: 30000, timeoutMsg: "old chapter-two row never restored to section 1" },
-    );
-    await returnToLibrary();
+    await openInReader(page, `${EPUB_TITLE} (EPUB)`);
+    await waitForEpubSection(page, "1");
+    await returnToLibrary(page);
   });
 
-  it("restores a late-book position from an old foliate row", async () => {
+  test("restores a late-book position from an old foliate row", async ({ page }) => {
     seedProgress(db, epubId, {
       cfi: OLD_FOLIATE_CFI.chapterThree,
       chapterHref: "chapter3.xhtml",
       pageNumber: null,
       percent: 92,
     });
-    await openInReader(`${EPUB_TITLE} (EPUB)`);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30000, timeoutMsg: "epub engine never became ready" },
-    );
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "2",
-      { timeout: 30000, timeoutMsg: "old chapter-three row never restored to the last section" },
-    );
-    await returnToLibrary();
+    await openInReader(page, `${EPUB_TITLE} (EPUB)`);
+    await waitForEpubSection(page, "2");
+    await returnToLibrary(page);
   });
 
-  it("degrades a stale foliate row to the beginning without crashing", async () => {
+  test("degrades a stale foliate row to the beginning without crashing", async ({ page }) => {
     // A CFI pointing at a nonexistent spine entry plus a chapter href that
     // matches no spine item: every locator tier of the migration adapter's
     // fallback hierarchy (docs/epub.md) fails validation against the actual
@@ -170,21 +153,14 @@ describe("tuxbooks reading-progress migration (foliate rows)", () => {
       pageNumber: null,
       percent: 50,
     });
-    await openInReader(`${EPUB_TITLE} (EPUB)`);
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
-      { timeout: 30000, timeoutMsg: "stale row left the reader in no defined state" },
-    );
-    await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "0",
-      { timeout: 30000, timeoutMsg: "stale row did not degrade to the beginning" },
-    );
+    await openInReader(page, `${EPUB_TITLE} (EPUB)`);
+    await waitForEpubSection(page, "0");
     // A real position change (page turn) flushes the debounced save and
     // lands the migration markers: the converted row carries the Readium
     // locator + engine/schema markers while the original foliate locator
     // survives as provenance (docs/epub.md).
-    await browser.keys("ArrowRight");
-    await browser.pause(1500);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(1500);
     const migrated = db
       .prepare(
         "SELECT engine, schema_version, locator, cfi, chapter_href FROM reading_progress WHERE book_id = ?",
@@ -202,25 +178,24 @@ describe("tuxbooks reading-progress migration (foliate rows)", () => {
     // Original data preserved beside the converted locator.
     expect(migrated.cfi).toBe("epubcfi(/6/999!/4/2/1:0)");
     expect(migrated.chapter_href).toBe("gone.xhtml");
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  it("restores the PDF page from an old page-number row", async () => {
+  test("restores the PDF page from an old page-number row", async ({ page }) => {
     seedProgress(db, pdfId, {
       cfi: null,
       chapterHref: null,
       pageNumber: 3,
       percent: 100,
     });
-    await openInReader(`${PDF_TITLE} (PDF)`);
-    await browser.waitUntil(async () => (await textOf("pdf-page-indicator")) === "Page 3 of 3", {
+    await openInReader(page, `${PDF_TITLE} (PDF)`);
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
       timeout: 30000,
-      timeoutMsg: "old PDF page row never restored to page 3",
     });
-    await returnToLibrary();
+    await returnToLibrary(page);
   });
 
-  after(() => {
+  test.afterAll(() => {
     // Clean up this suite's DB writes so later specs in the phase see the
     // state they expect (no spec may assume fresh state, but leaving seeded
     // rows behind would spread restore side effects across every reader).

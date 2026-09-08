@@ -83,63 +83,57 @@ build-debug:
     node scripts/build-electron.mjs
     cargo build --manifest-path src-tauri/Cargo.toml
 
-# E2E runs the real Electron app against WebdriverIO. Headless by default:
-# on Linux each phase runs under a private Xvfb. Unsetting WAYLAND_DISPLAY
-# alone is NOT enough on Wayland desktops — Chromium still finds the
-# compositor socket in XDG_RUNTIME_DIR — so ELECTRON_OZONE_PLATFORM_HINT=x11
-# pins the app to the virtual X display (same mechanism as the old
-# GDK_BACKEND=x11 for WebKitGTK). timeout is the last-resort guard so an
-# agent invocation always terminates; E2E_XVFB marks the watchdog to sweep
-# the phase's private Xvfb if teardown is killed.
+# E2E runs the real Electron app against Playwright (Playwright's Electron
+# launcher spawns the local electron binary pointed at the built main
+# bundle). Headless by default: on Linux each phase runs under a private
+# Xvfb. Unsetting WAYLAND_DISPLAY alone is NOT enough on Wayland desktops —
+# Chromium still finds the compositor socket in XDG_RUNTIME_DIR — so
+# ELECTRON_OZONE_PLATFORM_HINT=x11 pins the app to the virtual X display
+# (the launch fixture additionally passes --ozone-platform=x11). timeout is
+# the last-resort guard so an agent invocation always terminates; E2E_XVFB
+# marks the watchdog to sweep the phase's private Xvfb if teardown is killed.
 _e2e_timeout := if os() == "linux" { "timeout --kill-after=15 600" } else { "" }
 _x11 := if os() == "linux" { "env -u WAYLAND_DISPLAY ELECTRON_OZONE_PLATFORM_HINT=x11" } else { "" }
 _headless := if os() == "linux" { _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum" } else { "" }
 
-# Fetch the chromedriver matching the app's Electron version into the pinned
-# service-managed cache (.build/chromedriver-cache, gitignored). Resolution
-# is automatic (electron -> chromium build id); only the download is done by
-# the deterministic fetcher because wdio-utils' own downloader hangs on some
-# networks (docs/testing.md). Idempotent: wdio.conf.ts also runs it when the
-# cache entry is missing.
-fetch-chromedriver:
-    node e2e/setup/fetch-chromedriver.mjs
-
-test-e2e: build-debug fetch-chromedriver
+test-e2e: build-debug
     just test-e2e-empty
     just test-e2e-seeded
 
-test-e2e-empty: fetch-chromedriver
+test-e2e-empty:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
 
-test-e2e-seeded: fetch-chromedriver
+test-e2e-seeded:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
 # High-DPI configuration (docs/performance.md reference conditions name dpr
 # 2.0): the seeded reader scenarios against an app forced to
 # devicePixelRatio 2 via E2E_DEVICE_SCALE_FACTOR → --force-device-scale-factor.
-test-e2e-hidpi: build-debug fetch-chromedriver
+test-e2e-hidpi: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=hidpi E2E_SEED_LIBRARY=1 E2E_DEVICE_SCALE_FACTOR=2 pnpm --filter e2e test:hidpi
 
 # Production-form build: same renderer/Electron bundles, but the RELEASE
 # sidecar binary through TUXBOOKS_SIDECAR (the packaged-app resource
 # resolution path; full electron-builder packaging lands in migration
 # phase 5 — docs/electron-migration.md).
-_release_sidecar := "{{root}}/src-tauri/target/release/tuxbooks"
+# just does not interpolate {{root}} inside variable assignments — build the
+# path with string concatenation so the override is a real binary path.
+_release_sidecar := justfile_directory() + "/src-tauri/target/release/tuxbooks"
 
-test-e2e-release: build-debug fetch-chromedriver
+test-e2e-release: build-debug
     cargo build --manifest-path src-tauri/Cargo.toml --release
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:empty
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:seeded
 
 # Same suites on the developer's real display, for visual debugging.
-test-e2e-headed: build-debug fetch-chromedriver
+test-e2e-headed: build-debug
     just test-e2e-headed-empty
     just test-e2e-headed-seeded
 
-test-e2e-headed-empty: fetch-chromedriver
+test-e2e-headed-empty:
     {{_x11}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
 
-test-e2e-headed-seeded: fetch-chromedriver
+test-e2e-headed-seeded:
     {{_x11}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
 # Reader performance benchmark (docs/performance.md "How to measure"):
@@ -151,7 +145,7 @@ test-e2e-headed-seeded: fetch-chromedriver
 # from CI by policy).
 _bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
 
-bench-reader WINDOW_SIZE="": build-debug fetch-chromedriver
+bench-reader WINDOW_SIZE="": build-debug
     {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
 
 # Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
@@ -206,6 +200,7 @@ format-check-frontend:
 typecheck:
     pnpm --filter frontend typecheck
     pnpm exec tsc -p electron --noEmit
+    pnpm --filter e2e exec tsc -p . --noEmit
 
 # Full local validation. The streams are independent toolchains, so they run
 # concurrently (wall time = the slowest stream, usually rust). Cargo work

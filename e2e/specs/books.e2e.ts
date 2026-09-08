@@ -1,4 +1,7 @@
+import { expect, test } from "../fixtures/electron-app.js";
+
 import {
+  firstPdfCanvas,
   openBookDetail,
   openInReader,
   returnToLibrary,
@@ -6,75 +9,75 @@ import {
   waitForLibraryView,
 } from "./helpers.js";
 
-describe("tuxbooks library navigation", () => {
+test.describe("tuxbooks library navigation", () => {
   // Test B — the library shows the seeded fixtures with the sidebar up.
   // The seed carries four books: the original EPUB/PDF pair plus the large
   // (100-page) and mixed-size PDF fixtures used by the reader suites.
-  it("shows All Books with the seeded fixture books", async () => {
-    await waitForLibraryView();
+  test("shows All Books with the seeded fixture books", async ({ page }) => {
+    await waitForLibraryView(page);
 
-    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
-    await expect($("button=All Books")).toBeDisplayed();
+    await expect(page.locator('[aria-label="Library sidebar"]')).toBeVisible();
+    await expect(page.getByRole("button", { name: "All Books" })).toBeVisible();
 
-    const cards = await $$("[data-testid=book-card]");
+    const cards = await page.getByTestId("book-card").all();
     expect(cards.length).toBe(4);
 
-    const cardTexts = await browser.execute(() => {
-      return Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]")).map(
-        (card) => card.textContent ?? "",
-      );
-    });
-    const allText = cardTexts.join("\n");
+    const allText = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]"))
+        .map((card) => card.textContent ?? "")
+        .join("\n"),
+    );
     expect(allText).toContain("A Minimal Book");
     expect(allText).toContain("A Minimal Manual");
     expect(allText).toContain("A Large Fixture");
     expect(allText).toContain("Odd Sizes");
 
-    await expect(await textOf("library-stats")).toContain("4 books");
+    expect(await textOf(page, "library-stats")).toContain("4 books");
   });
 
   // Test C — detail view with title and format for the EPUB fixture.
-  it("opens the EPUB detail view showing title and format", async () => {
-    await openBookDetail("A Minimal Book (EPUB)");
+  test("opens the EPUB detail view showing title and format", async ({ page }) => {
+    await openBookDetail(page, "A Minimal Book (EPUB)");
 
-    await expect(await textOf("detail-title")).toContain("A Minimal Book");
-    await expect(await textOf("detail-facts")).toContain("EPUB");
+    expect(await textOf(page, "detail-title")).toContain("A Minimal Book");
+    expect(await textOf(page, "detail-facts")).toContain("EPUB");
 
-    await $("[data-testid=detail-back]").click();
-    await waitForLibraryView();
+    await page.getByTestId("detail-back").click();
+    await waitForLibraryView(page);
   });
 
   // Test D — the PDF fixture opens the reader shell: toolbar visible,
-  // library sidebar gone, and the real PDF.js canvas rendered.
-  it("opens the PDF in the reader shell with the sidebar hidden", async () => {
-    await openInReader("A Minimal Manual (PDF)");
+  // library sidebar gone, and the real engine canvas rendered.
+  test("opens the PDF in the reader shell with the sidebar hidden", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
 
-    await expect(await textOf("reader-title")).toContain("A Minimal Manual");
-    await $("[data-testid=pdf-canvas]").waitForExist({ timeout: 30000 });
-    await expect($("[data-testid=reader-back]")).toBeDisplayed();
-    await expect($("[data-testid=sidebar]")).not.toExist();
+    expect(await textOf(page, "reader-title")).toContain("A Minimal Manual");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await expect(page.getByTestId("reader-back")).toBeVisible();
+    await expect(page.getByTestId("sidebar")).toHaveCount(0);
 
-    await returnToLibrary();
-    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
+    await returnToLibrary(page);
+    await expect(page.locator('[aria-label="Library sidebar"]')).toBeVisible();
   });
 
   // Milestone 5 — library search: the global search field queries the
   // backend FTS index; picking a hit (Enter) opens its detail view and
   // clears the query.
-  it("finds books through the global search and opens the picked hit", async () => {
-    await waitForLibraryView();
+  test("finds books through the global search and opens the picked hit", async ({ page }) => {
+    await waitForLibraryView(page);
 
-    const input = await $("[data-testid=global-search]");
+    const input = page.getByTestId("global-search");
     await input.click();
-    await input.setValue("minimal");
-    await $("[data-testid=global-search-result]").waitForDisplayed({ timeout: 30000 });
-    await expect($("[data-testid=global-search-result]")).toBeDisplayed();
+    await input.fill("minimal");
+    // Both minimal fixtures match "minimal"; the ranked first hit opens.
+    const result = page.getByTestId("global-search-result").first();
+    await expect(result).toBeVisible({ timeout: 30000 });
 
-    await browser.keys("Enter");
-    await $("[data-testid=book-detail]").waitForDisplayed({ timeout: 30000 });
-    await expect($("[data-testid=global-search]")).toHaveValue("");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("book-detail")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId("global-search")).toHaveValue("");
 
-    await $("[data-testid=detail-back]").click();
-    await waitForLibraryView();
+    await page.getByTestId("detail-back").click();
+    await waitForLibraryView(page);
   });
 });

@@ -62,7 +62,7 @@ export class Sidecar {
     }
     this.stopped = false;
     // Under E2E diagnostics the sidecar's stderr goes to a per-instance file
-    // (the inherited stderr would be swallowed by chromedriver).
+    // (clearer than interleaving it with the app's own output).
     const debugLogPath =
       process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
         ? `/tmp/tuxbooks-sidecar-${process.pid}-${process.env.E2E_RUN_ID}.log`

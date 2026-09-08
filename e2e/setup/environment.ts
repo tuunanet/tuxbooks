@@ -4,24 +4,26 @@
  * the failure-artifact directory. Nothing here ever touches a real user
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
-import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+import { sweepProcesses } from "./sweep.mjs";
+
 import {
   benchEpubFixture,
   benchPdfFixture,
+  electronDistPath,
   epubFixture,
   largePdfFixture,
   mixedPdfFixture,
   pdfFixture,
-  processTargets,
   repoRoot,
+  sidecarBinaryPath,
 } from "./fixtures.js";
 
-/** Unique per invocation; the launcher sets it and workers inherit it. */
+/** Unique per invocation; the launcher (or playwright.config) sets it. */
 process.env.E2E_RUN_ID ??= `${process.env.E2E_PHASE ?? "run"}-${new Date()
   .toISOString()
   .replace(/[:.]/g, "-")}-${process.pid.toString(36)}`;
@@ -39,20 +41,15 @@ export const configDir = path.join(scratchDir, "config");
 
 export function killStaleProcesses(): void {
   // A crashed run can leave the app tree (including the dist's crashpad
-  // helper), its sidecar, chromedriver, or orphaned wdio workers alive. All
-  // would interfere with the next run: a leftover app grabs the new
-  // automation session, a leftover driver holds ports, a leftover worker
-  // holds a dead session. SIGKILL, not the default SIGTERM — these are
-  // wedged leftovers, and the sweep must not depend on a wedged process
-  // honoring TERM. Runs happen before the service spawns anything fresh, so
-  // this is safe.
-  for (const target of processTargets) {
-    try {
-      execFileSync("pkill", ["-9", "-f", target]);
-    } catch {
-      // pkill exits non-zero when nothing matched — that is the good case.
-    }
-  }
+  // helper) or its sidecar alive. Both would interfere with the next run: a
+  // leftover app holds the single-instance lock, a leftover sidecar keeps
+  // watching the old library. SIGKILL — these are wedged leftovers, and the
+  // sweep must not depend on a wedged process honoring TERM. The sweep
+  // matches by /proc/<pid>/exe (setup/sweep.mjs), so a process that merely
+  // mentions a target path in its argv — a recipe shell carrying
+  // TUXBOOKS_SIDECAR=<path> — is never caught. Runs happen before anything
+  // spawns fresh, so this is safe.
+  sweepProcesses({ electronDist: electronDistPath, sidecar: sidecarBinaryPath });
 }
 
 /**
@@ -107,6 +104,11 @@ function pruneOldArtifacts(): void {
   }
 }
 
+/**
+ * Prepare the isolated scratch environment for one invocation. Playwright's
+ * globalSetup calls this exactly once per run; workers inherit the
+ * environment through process.env (re-set here and in the launch fixture).
+ */
 export function prepareEnvironment(seeded: boolean): void {
   killStaleProcesses();
   pruneOldArtifacts();
@@ -142,16 +144,16 @@ export function prepareEnvironment(seeded: boolean): void {
     }
   }
 
-  // The app (spawned by tauri-driver) inherits these; production paths are
-  // unaffected. Set before the service spawns the driver (config onPrepare
-  // hooks run before service onPrepare hooks).
+  // The app (spawned by the Playwright Electron launcher) inherits these;
+  // production paths are unaffected. Set before the fixture launches the
+  // app — and re-asserted there so a worker restart can never lose them.
   process.env.TEST_DATABASE_PATH = databasePath;
   process.env.TEST_LIBRARY_PATH = libraryDir;
-  // Same isolation rule for the app-config dir: the window-state plugin
-  // would otherwise restore (and overwrite!) the real user's saved window
-  // geometry, making every window-derived expectation depend on whatever
-  // size the developer's last real session saved. A fresh config dir means
-  // the window starts at the tauri.conf.json default, deterministically.
+  // Same isolation rule for the app-config dir: window-state restore would
+  // otherwise read (and overwrite!) the real user's saved window geometry,
+  // making every window-derived expectation depend on whatever size the
+  // developer's last real session saved. A fresh config dir means the
+  // window starts at the Electron main default, deterministically.
   process.env.XDG_CONFIG_HOME = configDir;
 }
 
@@ -161,9 +163,13 @@ export function teardownEnvironment(): void {
 
 /**
  * Arms the detached teardown watchdog (see setup/watchdog.mjs): it sweeps
- * this run's processes the moment the launcher dies — however it dies. The
- * config arms it in onPrepare (before anything spawns, covering aborts) and
- * again in onComplete (belt and braces; a second watcher is harmless).
+ * this run's processes the moment the Playwright process dies — however it
+ * dies. Playwright's own teardown closes the launched app; the watchdog
+ * covers the paths Playwright cannot guarantee: an aborted/killed runner
+ * (Ctrl+C at the wrong moment, OOM, segfault) never reaches globalTeardown,
+ * and the sweep fires the moment the parent disappears. The sweep only
+ * kills processes that predate the watchdog, so the next phase's processes
+ * are safe.
  */
 export function armTeardownWatchdog(): void {
   const watchdog = path.join(repoRoot, "e2e", "setup", "watchdog.mjs");
@@ -171,9 +177,10 @@ export function armTeardownWatchdog(): void {
   // Xvfb of this phase, which the watchdog reaps if the launcher dies
   // before xvfb-run could clean up. Headed runs pass no display.
   const display = process.env.E2E_XVFB === "1" ? (process.env.DISPLAY ?? "") : "";
+  const targets = [electronDistPath, sidecarBinaryPath];
   const child = spawn(
     process.execPath,
-    [watchdog, String(process.pid), scratchDir, processTargets.join("\u001f"), display],
+    [watchdog, String(process.pid), scratchDir, targets.join("\u001f"), display],
     { detached: true, stdio: "ignore" },
   );
   child.unref();

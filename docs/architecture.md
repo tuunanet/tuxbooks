@@ -176,6 +176,6 @@ reconciliations reach the UI live.
 1. Rust unit + property tests (`cargo test`, per-module `#[cfg(test)]`)
 2. Rust integration test (fixture → scan → DB → search slice)
 3. Vitest + React Testing Library with a mocked IPC bridge (`frontend/tests/`)
-4. WebdriverIO E2E against the real Electron binary (`e2e/`)
+4. Playwright E2E against the real Electron binary (`e2e/`)
 
 See [testing.md](testing.md).
