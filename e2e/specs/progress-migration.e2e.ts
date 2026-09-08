@@ -71,13 +71,19 @@ function seedProgress(
 ): void {
   db.prepare(
     `INSERT INTO reading_progress
-       (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent)
-     VALUES (?, ?, ?, NULL, ?, NULL, ?)
+       (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent,
+        locator, progression, locations, engine, schema_version)
+     VALUES (?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL)
      ON CONFLICT(book_id) DO UPDATE SET
        chapter_href = excluded.chapter_href,
        cfi = excluded.cfi,
        page_number = excluded.page_number,
        progress_percent = excluded.progress_percent,
+       locator = NULL,
+       progression = NULL,
+       locations = NULL,
+       engine = NULL,
+       schema_version = NULL,
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   ).run(bookId, row.chapterHref, row.cfi, row.pageNumber, row.percent);
 }
@@ -151,14 +157,13 @@ describe("tuxbooks reading-progress migration (foliate rows)", () => {
     await returnToLibrary();
   });
 
-  it("degrades a stale foliate row to a defined state without crashing", async () => {
-    // A CFI pointing at a nonexistent spine entry: the old row must not
-    // strand the reader mid-document or crash it. Today the reader surfaces
-    // a defined state — restore-to-start or, when the engine rejects the
-    // locator outright, the reader's error surface (never a blank window).
-    // The migration adapter (phase 3) replaces the error path with the
-    // documented fallback hierarchy — docs/electron-migration.md — and this
-    // test tightens to assert section 0 then.
+  it("degrades a stale foliate row to the beginning without crashing", async () => {
+    // A CFI pointing at a nonexistent spine entry plus a chapter href that
+    // matches no spine item: every locator tier of the migration adapter's
+    // fallback hierarchy (docs/epub.md) fails validation against the actual
+    // EPUB. A locator-bearing row never falls back to its stale percentage
+    // — that would silently jump into a different file — so the adapter
+    // degrades to the beginning (section 0), and the reader stays usable.
     seedProgress(db, epubId, {
       cfi: "epubcfi(/6/999!/4/2/1:0)",
       chapterHref: "gone.xhtml",
@@ -166,22 +171,37 @@ describe("tuxbooks reading-progress migration (foliate rows)", () => {
       percent: 50,
     });
     await openInReader(`${EPUB_TITLE} (EPUB)`);
-    // Either outcome must arrive on its own; a race-free or-composite.
     await browser.waitUntil(
-      async () =>
-        (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready" ||
-        (await $("[data-testid=epub-error]").isExisting()),
+      async () => (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready",
       { timeout: 30000, timeoutMsg: "stale row left the reader in no defined state" },
     );
-    const reachedReady =
-      (await $("div[data-epub-host]").getAttribute("data-epub-state")) === "ready";
-    if (reachedReady) {
-      await browser.waitUntil(
-        async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "0",
-        { timeout: 30000, timeoutMsg: "stale row restored neither to the beginning" },
-      );
-    }
-    // The shell survived either way: the library is reachable again.
+    await browser.waitUntil(
+      async () => (await $("div[data-epub-host]").getAttribute("data-epub-section")) === "0",
+      { timeout: 30000, timeoutMsg: "stale row did not degrade to the beginning" },
+    );
+    // A real position change (page turn) flushes the debounced save and
+    // lands the migration markers: the converted row carries the Readium
+    // locator + engine/schema markers while the original foliate locator
+    // survives as provenance (docs/epub.md).
+    await browser.keys("ArrowRight");
+    await browser.pause(1500);
+    const migrated = db
+      .prepare(
+        "SELECT engine, schema_version, locator, cfi, chapter_href FROM reading_progress WHERE book_id = ?",
+      )
+      .get(epubId) as {
+      engine: string | null;
+      schema_version: number | null;
+      locator: string | null;
+      cfi: string | null;
+      chapter_href: string | null;
+    };
+    expect(migrated.engine).toBe("readium");
+    expect(migrated.schema_version).toBe(2);
+    expect(migrated.locator).toContain("chapter");
+    // Original data preserved beside the converted locator.
+    expect(migrated.cfi).toBe("epubcfi(/6/999!/4/2/1:0)");
+    expect(migrated.chapter_href).toBe("gone.xhtml");
     await returnToLibrary();
   });
 

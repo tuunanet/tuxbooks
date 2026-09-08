@@ -68,7 +68,7 @@ fn read_mimetype<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<(), EpubErro
     Ok(())
 }
 
-fn parse_container_xml(bytes: &[u8]) -> Result<String, EpubError> {
+pub(crate) fn parse_container_xml(bytes: &[u8]) -> Result<String, EpubError> {
     let xml =
         String::from_utf8(bytes.to_vec()).map_err(|e| EpubError::ContainerXml(e.to_string()))?;
     let mut reader = Reader::from_str(&xml);
@@ -134,7 +134,7 @@ fn extract_cover<R: Read + Seek>(
     }
 }
 
-fn read_entry<R: Read + Seek>(
+pub(crate) fn read_entry<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, EpubError> {
@@ -153,7 +153,7 @@ fn read_entry<R: Read + Seek>(
 }
 
 /// Resolve an href (relative to the OPF, possibly percent-encoded) to a ZIP entry name.
-fn resolve_zip_path(opf_path: &str, href: &str) -> String {
+pub(crate) fn resolve_zip_path(opf_path: &str, href: &str) -> String {
     let decoded = percent_decode(href);
     if decoded.starts_with('/') {
         return normalize_path(&decoded);
@@ -165,7 +165,7 @@ fn resolve_zip_path(opf_path: &str, href: &str) -> String {
     normalize_path(&format!("{dir}{decoded}"))
 }
 
-fn normalize_path(path: &str) -> String {
+pub(crate) fn normalize_path(path: &str) -> String {
     let mut segments: Vec<&str> = Vec::new();
     for segment in path.split('/') {
         match segment {
@@ -179,7 +179,7 @@ fn normalize_path(path: &str) -> String {
     segments.join("/")
 }
 
-fn percent_decode(input: &str) -> String {
+pub(crate) fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

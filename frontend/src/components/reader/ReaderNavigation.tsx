@@ -7,11 +7,11 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { EpubTocItem } from "@/lib/epub/epubEngine";
+import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationPatch } from "@/types/domain";
 import type { Book } from "@/types/domain";
-import type { ReaderJump } from "./readerModel";
+import { epubHrefJump, type ReaderJump } from "./readerModel";
 import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
 import { ReaderSearchTab } from "./ReaderSearchTab";
 import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
@@ -112,7 +112,7 @@ export function ReaderNavigation({
   };
 
   const jumpToChapter = (href: string) => {
-    jump({ format: "epub", locator: href });
+    jump(epubHrefJump(href));
   };
 
   const jumpToOutlinePage = (page: number) => {

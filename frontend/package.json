@@ -15,6 +15,11 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
+    "@readium/css": "2.0.5",
+    "@readium/decorator": "1.0.2",
+    "@readium/navigator": "2.8.2",
+    "@readium/navigator-html-injectables": "2.6.3",
+    "@readium/shared": "2.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.2.5",

@@ -6,7 +6,7 @@ import {
   annotationRects,
   byKind,
   highlightCssColor,
-  isBookmarkAtCfi,
+  isBookmarkAtLocator,
   isBookmarkAtPage,
   normalizeRect,
 } from "@/components/reader/annotationModel";
@@ -28,8 +28,8 @@ describe("annotationModel", () => {
 
     expect(byKind(all, "bookmark")).toEqual([bookmarkCfi, bookmarkPage]);
     expect(byKind(all, "highlight")).toEqual([highlight]);
-    expect(isBookmarkAtCfi(bookmarkCfi, "epubcfi(/6/2)")).toBe(true);
-    expect(isBookmarkAtCfi(bookmarkPage, "epubcfi(/6/2)")).toBe(false);
+    expect(isBookmarkAtLocator(bookmarkCfi, "epubcfi(/6/2)")).toBe(true);
+    expect(isBookmarkAtLocator(bookmarkPage, "epubcfi(/6/2)")).toBe(false);
     expect(isBookmarkAtPage(bookmarkPage, 3)).toBe(true);
     expect(isBookmarkAtPage(bookmarkPage, 4)).toBe(false);
     expect(annotationRects(highlight)).toEqual(highlight.rects);

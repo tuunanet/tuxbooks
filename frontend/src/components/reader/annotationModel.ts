@@ -35,9 +35,9 @@ export function annotationRects(annotation: Annotation): AnnotationRect[] {
   return annotation.rects ?? [];
 }
 
-/** True when the annotation is a bookmark placed exactly at `cfi`. */
-export function isBookmarkAtCfi(annotation: Annotation, cfi: string): boolean {
-  return annotation.kind === "bookmark" && annotation.cfi === cfi;
+/** True when the annotation is a bookmark placed exactly at `locator`. */
+export function isBookmarkAtLocator(annotation: Annotation, locator: string): boolean {
+  return annotation.kind === "bookmark" && annotation.cfi === locator;
 }
 
 /** True when the annotation is a bookmark placed exactly at `page`. */

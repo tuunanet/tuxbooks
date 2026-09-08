@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@/lib/epub/epubEngine", async () => {
-  const { makeFakeEpubModule } = await import("./mocks/epubEngine");
-  return makeFakeEpubModule();
+vi.mock("@/lib/epub/readiumEngine", async () => {
+  const { makeFakeReadiumModule } = await import("./mocks/readiumEngine");
+  return makeFakeReadiumModule();
 });
 
 import App from "@/App";

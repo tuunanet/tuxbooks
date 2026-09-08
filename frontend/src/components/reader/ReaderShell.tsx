@@ -27,7 +27,7 @@ import {
   type ReaderPosition,
 } from "./readerModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
-import type { EpubTocItem } from "@/lib/epub/epubEngine";
+import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationInput } from "@/types/domain";
 import { EpubReader } from "./EpubReader";

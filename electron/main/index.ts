@@ -37,6 +37,8 @@ const SIDECAR_METHODS = new Set([
   "save_reading_progress",
   "mark_book_finished",
   "get_book_bytes",
+  "get_epub_session",
+  "get_book_resource",
   "list_collections",
   "create_collection",
   "delete_collection",
@@ -60,6 +62,21 @@ if (!app.requestSingleInstanceLock()) {
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "tuxbooks",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+  {
+    // The built renderer's own origin. A standard, secure scheme — not
+    // file:// — because opaque file origins leak into blob: child frames
+    // (the reader engines' sandboxed section documents), whose postMessage
+    // then fails with "Invalid target origin 'null'". app:// keeps the page
+    // and its blob frames same-origin.
+    scheme: "app",
     privileges: {
       standard: true,
       secure: true,
@@ -122,6 +139,65 @@ function parseRange(header: string | null): { start?: number; end?: number } | n
   };
 }
 
+/** Root of the built renderer bundle, served as `app://bundle/...`. */
+const APP_ORIGIN = "app://bundle";
+
+function rendererDistDir(): string {
+  return path.join(__dirname, "../../frontend/dist");
+}
+
+const APP_MIME_BY_EXTENSION: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".map": "application/json",
+  ".txt": "text/plain",
+};
+
+/**
+ * Serve the built renderer over the `app` scheme: `app://bundle/<path>`
+ * maps onto the dist directory, unknown paths fall back to index.html (the
+ * renderer is a single page). Registered next to `tuxbooks://` in main.
+ */
+function registerAppProtocol(): void {
+  const dist = rendererDistDir();
+  protocol.handle("app", (request) => {
+    const url = new URL(request.url);
+    if (url.host !== "bundle") {
+      return new Response("not found", { status: 404 });
+    }
+    const relative = decodeURIComponent(url.pathname.slice(1));
+    const resolved = path.resolve(dist, relative);
+    let filePath = resolved;
+    if (relative === "" || (!resolved.startsWith(dist + path.sep) && resolved !== dist)) {
+      filePath = path.join(dist, "index.html");
+    } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      // SPA fallback: the renderer owns its routing state-side.
+      filePath = path.join(dist, "index.html");
+    }
+    const mime =
+      APP_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+    const body = fs.readFileSync(filePath);
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": mime, "content-length": String(body.length) },
+    });
+  });
+}
+
 function registerProtocol(sidecar: Sidecar): void {
   const covers = coversDir();
   const debug = process.env.TUXBOOKS_DEBUG_IPC === "1";
@@ -136,62 +212,22 @@ function registerProtocol(sidecar: Sidecar): void {
 
     // tuxbooks://book/<id>?format=epub|pdf — a stored book's source bytes
     // (Range-capable: the reader engines seek into large documents).
+    // tuxbooks://book/<id>/<encoded member path> — one EPUB ZIP member
+    // (chapter document, image, stylesheet, font) for the Readium
+    // navigator, which resolves sub-resources against the publication base
+    // URL. The member path is percent-encoded exactly like the manifest's
+    // hrefs; it is decoded once here before the sidecar lookup.
     if (url.host === "book") {
-      const bookId = Number.parseInt(url.pathname.slice(1), 10);
+      const rest = url.pathname.slice(1);
+      const slash = rest.indexOf("/");
+      const bookId = Number.parseInt(slash === -1 ? rest : rest.slice(0, slash), 10);
       if (!Number.isInteger(bookId) || bookId <= 0) {
         return new Response("invalid book id", { status: 400 });
       }
-      const range = parseRange(request.headers.get("range"));
-      try {
-        if (range && range.start !== undefined) {
-          const end = range.end ?? Number.MAX_SAFE_INTEGER;
-          if (end < range.start) {
-            return new Response("invalid range", { status: 416 });
-          }
-          const result = (await sidecar.call("get_book_bytes", {
-            bookId,
-            offset: range.start,
-            length: end - range.start + 1,
-          })) as { data: string; offset: number; total: number };
-          if (range.start >= result.total) {
-            return new Response("range not satisfiable", {
-              status: 416,
-              headers: { "content-range": `bytes */${result.total}`, ...cors },
-            });
-          }
-          const bytes = Buffer.from(result.data, "base64");
-          return new Response(bytes, {
-            status: 206,
-            headers: {
-              "content-type": bookMime(url.searchParams.get("format")),
-              "content-length": String(bytes.length),
-              "content-range": `bytes ${result.offset}-${result.offset + bytes.length - 1}/${result.total}`,
-              "accept-ranges": "bytes",
-              ...cors,
-            },
-          });
-        }
-        const result = (await sidecar.call("get_book_bytes", { bookId })) as {
-          data: string;
-          total: number;
-        };
-        const bytes = Buffer.from(result.data, "base64");
-        return new Response(bytes, {
-          status: 200,
-          headers: {
-            "content-type": bookMime(url.searchParams.get("format")),
-            "content-length": String(bytes.length),
-            "accept-ranges": "bytes",
-            ...cors,
-          },
-        });
-      } catch (error) {
-        if (error instanceof RpcFailure) {
-          return new Response(error.message, { status: 404, headers: cors });
-        }
-        console.error("[tuxbooks://book] failed:", error);
-        return new Response("internal error", { status: 500, headers: cors });
+      if (slash === -1) {
+        return serveBookBytes(url, sidecar, bookId, request);
       }
+      return serveBookResource(sidecar, bookId, decodeURIComponent(rest.slice(slash + 1)), request);
     }
 
     // tuxbooks://cover/<url-encoded absolute path> — extracted cover art.
@@ -219,6 +255,123 @@ function registerProtocol(sidecar: Sidecar): void {
 
     return new Response("not found", { status: 404 });
   });
+}
+
+/** `tuxbooks://book/<id>` — a stored book's whole source file (Range-capable). */
+async function serveBookBytes(
+  url: URL,
+  sidecar: Sidecar,
+  bookId: number,
+  request: Request,
+): Promise<Response> {
+  const cors = { "access-control-allow-origin": "*" };
+  const range = parseRange(request.headers.get("range"));
+  try {
+    if (range && range.start !== undefined) {
+      const end = range.end ?? Number.MAX_SAFE_INTEGER;
+      if (end < range.start) {
+        return new Response("invalid range", { status: 416 });
+      }
+      const result = (await sidecar.call("get_book_bytes", {
+        bookId,
+        offset: range.start,
+        length: end - range.start + 1,
+      })) as { data: string; offset: number; total: number };
+      if (range.start >= result.total) {
+        return new Response("range not satisfiable", {
+          status: 416,
+          headers: { "content-range": `bytes */${result.total}`, ...cors },
+        });
+      }
+      const bytes = Buffer.from(result.data, "base64");
+      return new Response(bytes, {
+        status: 206,
+        headers: {
+          "content-type": bookMime(url.searchParams.get("format")),
+          "content-length": String(bytes.length),
+          "content-range": `bytes ${result.offset}-${result.offset + bytes.length - 1}/${result.total}`,
+          "accept-ranges": "bytes",
+          ...cors,
+        },
+      });
+    }
+    const result = (await sidecar.call("get_book_bytes", { bookId })) as {
+      data: string;
+      total: number;
+    };
+    const bytes = Buffer.from(result.data, "base64");
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "content-type": bookMime(url.searchParams.get("format")),
+        "content-length": String(bytes.length),
+        "accept-ranges": "bytes",
+        ...cors,
+      },
+    });
+  } catch (error) {
+    if (error instanceof RpcFailure) {
+      return new Response(error.message, { status: 404, headers: cors });
+    }
+    console.error("[tuxbooks://book] failed:", error);
+    return new Response("internal error", { status: 500, headers: cors });
+  }
+}
+
+/**
+ * `tuxbooks://book/<id>/<member>` — one EPUB ZIP member, decoded and
+ * extracted by the sidecar. Ranges slice the decoded member (member entries
+ * decompress whole); 404 maps from a failed lookup, 416 from a bad range.
+ */
+async function serveBookResource(
+  sidecar: Sidecar,
+  bookId: number,
+  member: string,
+  request: Request,
+): Promise<Response> {
+  const cors = { "access-control-allow-origin": "*" };
+  if (member.length === 0) {
+    return new Response("missing resource path", { status: 400 });
+  }
+  const range = parseRange(request.headers.get("range"));
+  if (range && range.start !== undefined && range.end !== undefined && range.end < range.start) {
+    return new Response("invalid range", { status: 416 });
+  }
+  try {
+    const result = (await sidecar.call("get_book_resource", {
+      bookId,
+      path: member,
+      offset: range?.start,
+      length:
+        range?.start !== undefined
+          ? (range.end ?? Number.MAX_SAFE_INTEGER) - range.start + 1
+          : undefined,
+    })) as { data: string; offset: number; total: number; mediaType: string };
+    if (range?.start !== undefined && range.start >= result.total) {
+      return new Response("range not satisfiable", {
+        status: 416,
+        headers: { "content-range": `bytes */${result.total}`, ...cors },
+      });
+    }
+    const bytes = Buffer.from(result.data, "base64");
+    const headers: Record<string, string> = {
+      "content-type": result.mediaType,
+      "content-length": String(bytes.length),
+      "accept-ranges": "bytes",
+      ...cors,
+    };
+    if (range?.start !== undefined) {
+      headers["content-range"] =
+        `bytes ${result.offset}-${result.offset + bytes.length - 1}/${result.total}`;
+    }
+    return new Response(bytes, { status: range?.start !== undefined ? 206 : 200, headers });
+  } catch (error) {
+    if (error instanceof RpcFailure) {
+      return new Response(error.message, { status: 404, headers: cors });
+    }
+    console.error("[tuxbooks://book] resource failed:", error);
+    return new Response("internal error", { status: 500, headers: cors });
+  }
 }
 
 interface WindowState {
@@ -301,7 +454,8 @@ function createWindow(
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    if (url !== DEV_SERVER_URL && !url.startsWith("file://")) {
+    const built = url === `${APP_ORIGIN}/index.html` || url.startsWith(`${APP_ORIGIN}/assets/`);
+    if (url !== DEV_SERVER_URL && !built && !url.startsWith("file://")) {
       event.preventDefault();
       if (url.startsWith("http://") || url.startsWith("https://")) {
         void shell.openExternal(url);
@@ -310,11 +464,12 @@ function createWindow(
   });
 
   // Dev server only when explicitly requested (just dev); everything else —
-  // packaged builds and the E2E runs — loads the built renderer from disk.
+  // packaged builds and the E2E runs — loads the built renderer from disk
+  // through the app:// scheme (a real origin; see registerAppProtocol).
   if (process.env.VITE_DEV_SERVER_URL !== undefined) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    void window.loadFile(path.join(__dirname, "../../frontend/dist/index.html"));
+    void window.loadURL(`${APP_ORIGIN}/index.html`);
   }
 
   // Dev boot check: the renderer must mount the app shell, or a broken
@@ -460,6 +615,7 @@ app.whenReady().then(() => {
     }
   };
   const sidecar = new Sidecar(locateSidecar(process.resourcesPath), forward);
+  registerAppProtocol();
   registerProtocol(sidecar);
   registerIpc(sidecar, debugLog);
   // The window opens only after the sidecar is healthy: the renderer's very

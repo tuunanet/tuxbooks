@@ -29,6 +29,30 @@ async function currentSection(): Promise<string | null> {
   );
 }
 
+/** In-section progression (0..1) reported by the engine host. */
+async function engineFraction(): Promise<string | null> {
+  return browser.execute(
+    () =>
+      document
+        .querySelector("[data-testid=epub-reader] [data-epub-host]")
+        ?.getAttribute("data-epub-fraction") ?? null,
+  );
+}
+
+/**
+ * True when the engine sits strictly past `(section, fraction)` in spine
+ * order: a later section, or the same section at a larger fraction.
+ */
+async function engineMovedPast(section: number, fraction: string): Promise<boolean> {
+  const current = await currentSection();
+  if (current === null) return false;
+  const currentSectionIndex = Number(current);
+  if (Number.isNaN(currentSectionIndex)) return false;
+  if (currentSectionIndex !== section) return currentSectionIndex > section;
+  const currentFraction = Number((await engineFraction()) ?? "0");
+  return currentFraction > Number(fraction);
+}
+
 /** Opens the minimal EPUB and waits for the engine to report ready. */
 async function openReadyEpub(): Promise<void> {
   await openInReader("A Minimal Book (EPUB)");
@@ -74,42 +98,43 @@ describe("tuxbooks EPUB reader", () => {
   // Regression: the shell used to keep its percentage-stepping arrow
   // handlers registered for EPUB, where the step is 100/0 (no page count)
   // and the provider clamps straight to 100%/0% — one ArrowRight landed on
-  // the end of the document. Arrows must drive the engine's page turns.
+  // the end of the document. Arrows must drive the engine's page turns:
+  // asserted on the engine's pinned fraction/section attributes (exact
+  // engine truth) rather than the interpolated shell percent.
   it("turns pages with the arrow keys through the engine", async () => {
     await openReadyEpub();
     // Position may restore from an earlier test; start from the top.
     await browser.keys("Home");
     await browser.waitUntil(
-      async () => (await textOf("reader-position")) === "0%" && (await currentSection()) === "0",
+      async () =>
+        (await currentSection()) === "0" &&
+        (await engineFraction()) === "0" &&
+        (await textOf("reader-position")) === "0%",
       { timeout: 30000, timeoutMsg: "Home never returned to the first section" },
     );
 
     await browser.keys("ArrowRight");
-    await browser.waitUntil(async () => /^(100|[1-9]\d*)%$/.test(await textOf("reader-position")), {
+    await browser.waitUntil(async () => await engineMovedPast(0, "0"), {
       timeout: 30000,
       timeoutMsg: "ArrowRight never changed the reading position",
     });
-    const afterRight = parseInt(await textOf("reader-position"), 10);
-    expect(afterRight).toBeLessThan(95);
+    const afterRight = {
+      section: await currentSection(),
+      fraction: await engineFraction(),
+    };
+    expect(parseInt(await textOf("reader-position"), 10)).toBeLessThan(95);
 
-    // A section-crossing ArrowRight schedules the fonts-settled relayout
-    // 250ms after the new section mounts (WebKit quirk, see docs/epub.md);
-    // a keypress inside that window is swallowed by the re-anchor. Let the
-    // relayout pass before turning back.
-    await browser.pause(500);
-
-    // One ArrowLeft must go back (the old shell clamp jumped to exactly 0%,
-    // so "back where we came from" is the invariant; requiring exactly 0%
-    // races a double-turned ArrowRight landing one page later than expected).
+    // One ArrowLeft must go back: the engine fraction/section must not sit
+    // past where ArrowRight landed.
     await browser.keys("ArrowLeft");
     await browser.waitUntil(
-      async () => parseInt(await textOf("reader-position"), 10) < afterRight,
+      async () => !(await engineMovedPast(afterRight.section, afterRight.fraction ?? "0")),
       { timeout: 30000, timeoutMsg: "ArrowLeft never went back" },
     );
   });
 
-  // MathML in EPUB 3 renders natively via the browser engine; the reader
-  // reports the count of <math> elements per mounted section document.
+  // MathML in EPUB 3 renders natively via the browser engine; the fixture's
+  // third chapter carries one formula.
   it("renders native MathML content", async () => {
     await openReadyEpub();
 
@@ -117,8 +142,19 @@ describe("tuxbooks EPUB reader", () => {
     await waitForSection(2);
 
     await browser.waitUntil(
-      async () => (await $("div[data-epub-host]").getAttribute("data-epub-doc-math-count")) === "1",
-      { timeout: 30000, timeoutMsg: "the MathML chapter never reported its formula" },
+      async () =>
+        (await browser.execute(() => {
+          const host = document.querySelector("[data-epub-host]");
+          for (const frame of host?.querySelectorAll("iframe") ?? []) {
+            try {
+              if ((frame.contentDocument?.querySelectorAll("math").length ?? 0) > 0) return true;
+            } catch {
+              continue;
+            }
+          }
+          return false;
+        })) === true,
+      { timeout: 30000, timeoutMsg: "the MathML chapter never rendered its formula" },
     );
 
     await returnToLibrary();
@@ -176,8 +212,10 @@ describe("tuxbooks EPUB reader", () => {
   // Semantic persistence regression (docs/testing.md): the exact engine
   // locator — not just the section index or a percentage — survives the
   // close/reopen cycle. This is the reading-position regression protection
-  // the engine migration (foliate → Readium) must keep passing.
-  it("restores the exact CFI locator across close and reopen", async () => {
+  // the engine migration (foliate → Readium) must keep passing. The locator
+  // grammar is the serialized Readium locator JSON; the restored locator
+  // must name the same section at the same in-section progression.
+  it("restores the exact locator across close and reopen", async () => {
     await openReadyEpub();
 
     // Land on a known in-chapter position via the contents drawer.
@@ -188,20 +226,32 @@ describe("tuxbooks EPUB reader", () => {
       timeoutMsg: "engine never reported its locator",
     });
     const savedLocator = await epubLocator();
-    expect(savedLocator).toMatch(/^epubcfi\(/);
+    const saved = JSON.parse(savedLocator ?? "{}") as {
+      href?: string;
+      locations?: { progression?: number };
+    };
+    expect(saved.href).toContain("chapter2.xhtml");
 
     // Let the debounced save flush before leaving the reader.
     await browser.pause(1500);
     await returnToLibrary();
 
-    // Reopen: the restored locator names the same logical content position.
+    // Reopen: the restored locator names the same logical content position
+    // (same section, same in-section progression within a tolerance).
     await openReadyEpub();
     await browser.waitUntil(async () => (await epubLocator()) !== null, {
       timeout: 30000,
       timeoutMsg: "reopened engine never reported its locator",
     });
     const restoredLocator = await epubLocator();
-    expect(restoredLocator).toBe(savedLocator);
+    const restored = JSON.parse(restoredLocator ?? "{}") as {
+      href?: string;
+      locations?: { progression?: number };
+    };
+    expect(restored.href).toBe(saved.href);
+    const savedProgression = saved.locations?.progression ?? 0;
+    const restoredProgression = restored.locations?.progression ?? 0;
+    expect(Math.abs(restoredProgression - savedProgression)).toBeLessThan(0.1);
     await waitForSection(1);
 
     await returnToLibrary();

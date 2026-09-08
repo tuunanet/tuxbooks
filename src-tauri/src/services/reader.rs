@@ -3,9 +3,9 @@
 
 use sqlx::SqlitePool;
 
+use crate::domain::book::BookFormat;
 use crate::error::AppError;
 use crate::repository::books;
-
 /// Load the raw bytes of a stored book's source file.
 ///
 /// Byte access is controlled through the database: callers only ever name a
@@ -16,6 +16,50 @@ pub async fn load_book_file(pool: &SqlitePool, book_id: i64) -> Result<Vec<u8>, 
         .ok_or(AppError::NotFound)?;
     let bytes = tokio::fs::read(&book.path).await?;
     Ok(bytes)
+}
+
+/// Build the EPUB reading session (Readium manifest + positions list) for a
+/// stored book. Called when the reader opens an EPUB; the renderer consumes
+/// the two documents over the `tuxbooks://` protocol like any Readium webpub.
+pub async fn load_epub_session(
+    pool: &SqlitePool,
+    book_id: i64,
+) -> Result<crate::epub::EpubReadingSession, AppError> {
+    let book = epub_book(pool, book_id).await?;
+    crate::epub::build_session(std::path::Path::new(&book.path)).map_err(epub_error)
+}
+
+/// Extract one EPUB ZIP member by (decoded, normalized) path, with its
+/// media type. Backs per-resource requests on the `tuxbooks://` protocol:
+/// chapter documents, images, stylesheets, and fonts referenced by the
+/// reading session's manifest.
+pub async fn load_book_resource(
+    pool: &SqlitePool,
+    book_id: i64,
+    resource: &str,
+) -> Result<(Vec<u8>, &'static str), AppError> {
+    let book = epub_book(pool, book_id).await?;
+    let bytes = crate::epub::read_member(std::path::Path::new(&book.path), resource)
+        .map_err(epub_error)?
+        .ok_or(AppError::NotFound)?;
+    let media_type = crate::epub::guess_member_media_type(resource);
+    Ok((bytes, media_type))
+}
+
+async fn epub_book(pool: &SqlitePool, book_id: i64) -> Result<crate::domain::Book, AppError> {
+    let book = books::get_book(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if BookFormat::from_path(&book.path) != BookFormat::Epub {
+        return Err(AppError::InvalidInput(format!(
+            "book {book_id} is not an EPUB"
+        )));
+    }
+    Ok(book)
+}
+
+fn epub_error(error: crate::epub::EpubError) -> AppError {
+    AppError::InvalidInput(error.to_string())
 }
 
 /// Load a byte range of a stored book's source file, with the file's total

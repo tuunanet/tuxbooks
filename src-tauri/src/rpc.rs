@@ -179,6 +179,15 @@ struct BookBytesArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BookResourceArgs {
+    book_id: i64,
+    path: String,
+    offset: Option<u64>,
+    length: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SaveProgressArgs {
     book_id: i64,
     progress: commands::progress::ProgressInput,
@@ -284,6 +293,16 @@ async fn dispatch(
             let p: BookBytesArgs = parse_params(params)?;
             Ok(call!(commands::reader::get_book_bytes(
                 state, p.book_id, p.offset, p.length
+            )))
+        }
+        "get_epub_session" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::reader::get_epub_session(state, p.book_id)))
+        }
+        "get_book_resource" => {
+            let p: BookResourceArgs = parse_params(params)?;
+            Ok(call!(commands::reader::get_book_resource(
+                state, p.book_id, &p.path, p.offset, p.length
             )))
         }
         "list_collections" => Ok(call!(commands::collections::list_collections(state))),

@@ -46,6 +46,8 @@ pub struct OpfPackage {
     pub manifest: HashMap<String, ManifestItem>,
     /// Spine itemref ids in reading order.
     pub spine: Vec<String>,
+    /// The spine's `toc` attribute: the manifest id of the EPUB 2 NCX.
+    pub spine_toc: Option<String>,
     /// EPUB2 `<meta name="cover" content="...">` item id, if present.
     pub legacy_cover_id: Option<String>,
 }
@@ -58,6 +60,7 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
     let mut metadata = EpubMetadata::default();
     let mut manifest: HashMap<String, ManifestItem> = HashMap::new();
     let mut spine = Vec::new();
+    let mut spine_toc: Option<String> = None;
     let mut legacy_cover_id = None;
     let mut series_index_raw: Option<String> = None;
 
@@ -73,6 +76,9 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                 let local = local_name(e.name().into_inner());
                 match (section.as_deref(), local) {
                     (None, "metadata") | (None, "manifest") | (None, "spine") => {
+                        if local == "spine" {
+                            spine_toc = attribute(&e.attributes(), "toc");
+                        }
                         section = Some(local.to_string());
                     }
                     (Some("metadata"), "title")
@@ -182,6 +188,7 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
         metadata,
         manifest,
         spine,
+        spine_toc,
         legacy_cover_id,
     })
 }

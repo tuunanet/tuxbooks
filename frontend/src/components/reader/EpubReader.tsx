@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
   EPUB_SCROLLED_SURFACE_MAX_PX,
-  EpubViewHandle,
-  epubAppearanceCss,
   epubThemeBackground,
   type EpubFlow,
   type EpubRelocateDetail,
   type EpubSectionProgress,
   type EpubTocItem,
-} from "@/lib/epub/epubEngine";
+  type ReadiumEpubHandle,
+} from "@/lib/epub/readiumEngine";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
 import { highlightCssColor, isHighlightColor } from "./annotationModel";
 import {
   epubProgressPayload,
-  parseEpubProgress,
   type EpubLocator,
   type ReaderAdapter,
   type ReaderPosition,
@@ -30,7 +28,7 @@ interface EpubReaderProps {
   /** TOC of the opened book, reported once the engine has it. */
   onTocLoad?: (toc: EpubTocItem[]) => void;
   /**
-   * Reports the engine's latest position (CFI + spine href) on every
+   * Reports the engine's latest position (locator + spine href) on every
    * relocate — the exact position a bookmark would be placed at. Event
    * callbacks, not effects: relocates already drive a render.
    */
@@ -57,24 +55,23 @@ const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown",
 
 /**
  * Upper bound on the engine's restore-to-saved-locator step (a stale saved
- * CFI can leave foliate's init promise unsettled). Generous against the
+ * locator can leave the engine's load unsettled). Generous against the
  * healthy path (sub-second); tight enough that a wedged restore degrades to
  * a start-of-book open instead of a blank reader.
  */
 const EPUB_RESTORE_TIMEOUT_MS = 10_000;
 
 /**
- * EPUB reading surface and the shell's EPUB adapter, powered by the
- * foliate-js engine (see `lib/epub/epubEngine.ts`). Initialization follows
- * the PDF reader's lifecycle: DOCUMENT_READY → POSITION_RESTORED →
- * INTERACTIVE, so a reader never flashes the start of the book before
- * jumping to the restored CFI.
+ * EPUB reading surface and the shell's EPUB adapter, powered by the Readium
+ * engine (see `lib/epub/readiumEngine.ts`). Initialization follows the PDF
+ * reader's lifecycle: DOCUMENT_READY → POSITION_RESTORED → INTERACTIVE, so
+ * a reader never flashes the start of the book before jumping to the
+ * restored locator.
  *
- * Progress mapping: the engine does not report byte sizes, so the shell's
- * coarse position (0–100) is derived from the spine position
- * (`(current + in-section fraction) / total`), and outside position changes
- * (bookmarks, Home/End) map back onto the nearest spine section — the CFI
- * stays the exact locator either way.
+ * Progress mapping: the engine reports the locator's totalProgression, so
+ * the shell's coarse position (0–100) is the book fraction directly, and
+ * outside position changes (bookmarks, Home/End) map back onto the nearest
+ * position — the locator stays the exact locator either way.
  */
 export function EpubReader({
   book,
@@ -91,7 +88,6 @@ export function EpubReader({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const reportedFractionRef = useRef<number | null>(null);
   const currentSectionRef = useRef<EpubSectionProgress | null>(null);
-  const mathCountsRef = useRef(new Map<number, number>());
   const [locator, setLocator] = useState<EpubLocator | null>(null);
   const { status, handle, error } = useEpubDocument(book.id);
   const onPositionChangeRef = useRef(onPositionChange);
@@ -99,110 +95,78 @@ export function EpubReader({
     onPositionChangeRef.current = onPositionChange;
   });
 
-  // Shell-level progress from spine position; the engine's in-section page
-  // fraction refines it where the engine reports one.
-  const overallPercent = (section: EpubSectionProgress, inSection: number): number => {
-    const total = section.total > 0 ? section.total : 1;
-    return ((section.current + inSection) / total) * 100;
-  };
-
-  const syncMathCount = useCallback((view: EpubViewHandle, section: EpubSectionProgress) => {
-    view.host.dataset.epubDocMathCount = String(mathCountsRef.current.get(section.current) ?? 0);
-  }, []);
-
   const handleRelocate = useCallback(
-    (view: EpubViewHandle, detail: EpubRelocateDetail) => {
+    (view: ReadiumEpubHandle, detail: EpubRelocateDetail) => {
       currentSectionRef.current = detail.section;
-      // Shell-level refinement: the paginated renderer's fraction is
-      // page-based per section and swings past 1 on short sections, so it
-      // is only trusted in scrolled flow; paginated progress moves in
-      // chapter steps. The CFI stays the exact locator either way.
-      const inSection =
-        preferences.layout === "scrolling" && Number.isFinite(detail.fraction)
-          ? Math.min(Math.max(detail.fraction, 0), 1)
-          : 0;
-      const overall = overallPercent(detail.section, inSection);
-      reportedFractionRef.current = overall / 100;
-      view.host.dataset.epubSection = String(detail.section.current);
-      view.host.dataset.epubSectionTotal = String(detail.section.total);
+      const overall = detail.totalProgression * 100;
+      reportedFractionRef.current = detail.totalProgression;
+      view.hostElement.dataset.epubSection = String(detail.section.current);
+      view.hostElement.dataset.epubSectionTotal = String(detail.section.total);
       // The exact locator the persistence layer would save right now
-      // (docs/epub.md stable attributes): E2E reads it for the CFI
+      // (docs/epub.md stable attributes): E2E reads it for the locator
       // round-trip regression test instead of inferring position from
       // page-level state.
-      view.host.dataset.epubLocator = detail.cfi;
-      syncMathCount(view, detail.section);
-      const chapterHref = view.getSectionHref(detail.section.current) ?? null;
-      setLocator({ cfi: detail.cfi, chapterHref });
+      view.hostElement.dataset.epubLocator = detail.locator;
+      const chapterHref = view.getSectionHref(detail.section.current);
+      setLocator({ locator: detail.locator, chapterHref });
       // Bookmarks read this state; it must hold the exact locator a
       // bookmark placed right now would persist.
-      onPositionChangeRef.current?.({ format: "epub", cfi: detail.cfi, chapterHref });
+      onPositionChangeRef.current?.({ format: "epub", locator: detail.locator, chapterHref });
       setPosition(overall);
     },
-    [setPosition, syncMathCount, preferences.layout],
+    [setPosition],
   );
 
   // Relocate → shell position + persistence locator; also flips the host's
-  // E2E state attributes to "ready" (the first relocate follows init).
+  // E2E state attributes to "ready". The ready flip must wait for the
+  // restore to settle (restoredRef below): the engine's first relocate can
+  // report the initial position while the restored locator's frame update
+  // is still in flight — a "ready" reader would then visibly jump when the
+  // restore lands, and E2E navigation keys pressed in that window race the
+  // restore (the frame pool's per-href in-flight update can re-apply the
+  // restored locator over an early user navigation).
+  const restoredRef = useRef(false);
   useEffect(() => {
     if (!handle) return;
     return handle.onRelocate((detail) => {
-      handle.host.dataset.epubState = "ready";
-      handle.host.dataset.epubFraction = String(detail.fraction);
+      if (restoredRef.current) handle.hostElement.dataset.epubState = "ready";
+      handle.hostElement.dataset.epubFraction = String(detail.fraction);
       handleRelocate(handle, detail);
     });
   }, [handle, handleRelocate]);
 
   // Text selections inside a section document become highlight candidates:
-  // the range is kept (not copied to pixels) so creation translates it to a
-  // canonical CFI at the moment the user picks a color.
-  const pendingSelectionRef = useRef<{ doc: Document; range: Range; text: string } | null>(null);
+  // the engine hands over the selection (with the live DOM range from its
+  // same-origin frame), kept so creation translates it to a canonical
+  // locator at the moment the user picks a color.
   const onSelectionChangeRef = useRef(onSelectionChange);
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
   });
-  const captureSelectionOnPointerUp = useCallback((doc: Document) => {
-    doc.addEventListener("pointerup", () => {
-      window.setTimeout(() => {
-        const selection = doc.getSelection();
-        const text = selection?.toString().replace(/\s+/g, " ").trim() ?? "";
-        if (!selection || selection.isCollapsed || selection.rangeCount === 0 || text === "") {
-          pendingSelectionRef.current = null;
-          onSelectionChangeRef.current?.(null);
-          return;
-        }
-        pendingSelectionRef.current = {
-          doc,
-          range: selection.getRangeAt(0).cloneRange(),
-          text,
-        };
-        onSelectionChangeRef.current?.({ text });
-      }, 0);
-    });
-  }, []);
-
-  // Section documents: record MathML presence per spine section (E2E
-  // attribute reflects the current section), forward navigation keys —
-  // iframe key events never reach the window registry — schedule a
-  // relayout once the section's fonts have settled (the engine's deferred
-  // re-expand can otherwise collapse a section to zero width; see
-  // EpubViewHandle.relayout), and capture text selections for highlights.
   useEffect(() => {
     if (!handle) return;
-    return handle.onLoad(({ index, doc }) => {
-      mathCountsRef.current.set(index, doc.querySelectorAll("math").length);
-      const section = currentSectionRef.current;
-      if (section) syncMathCount(handle, section);
-      forwardSectionKeys(doc, (key) => {
-        if (key === "arrowright" || key === "space" || key === "pagedown") void handle.next();
-        else if (key === "arrowleft" || key === "pageup") void handle.prev();
-      });
-      scheduleFontsSettledRelayout(doc, () => handle.relayout());
-      captureSelectionOnPointerUp(doc);
+    return handle.onSelection((selection) => {
+      onSelectionChangeRef.current?.(selection.text === "" ? null : { text: selection.text });
     });
-  }, [handle, syncMathCount, captureSelectionOnPointerUp]);
+  }, [handle]);
+
+  // Section documents: forward navigation keys — iframe key events never
+  // reach the window registry.
+  useEffect(() => {
+    if (!handle) return;
+    return handle.onLoad(({ doc }) => {
+      forwardSectionKeys(doc, (key) => {
+        const turn = (move: Promise<void>): void => {
+          move.catch(() => {});
+        };
+        if (key === "arrowright" || key === "space" || key === "pagedown") turn(handle.next());
+        else if (key === "arrowleft" || key === "pageup") turn(handle.prev());
+      });
+    });
+  }, [handle]);
 
   // External links must not navigate the reading surface; the engine's
-  // default window.open is cancelled by this subscription's existence.
+  // handleLocator interception is cancelled by this subscription's existence.
   useEffect(() => {
     if (!handle) return;
     return handle.onExternalLink((href) => {
@@ -210,40 +174,61 @@ export function EpubReader({
     });
   }, [handle]);
 
+  // Restore path: the record passes through untouched; the engine seam
+  // resolves Readium rows directly and migrates foliate rows through the
+  // versioned adapter's fallback hierarchy (docs/epub.md).
+  const [hostMounted, setHostMounted] = useState(false);
   const [restored, setRestored] = useState(false);
-  useReaderProgress<EpubLocator>({
+  useReaderProgress<EpubSavedState>({
     bookId: book.id,
-    enabled: status === "ready",
+    enabled: status === "ready" && hostMounted,
     current: locator,
     position,
-    parseRestored: (record) => {
-      const cfi = parseEpubProgress(record);
-      return cfi === null ? null : { cfi, chapterHref: null };
-    },
+    parseRestored: (record) => (record === null ? null : { record }),
     onRestored: useCallback(
-      (saved: EpubLocator | null) => {
+      (saved: EpubSavedState | null) => {
+        const record = saved !== null && "record" in saved ? saved.record : null;
         if (handle) {
-          // A stale saved locator can make the engine's init never settle
-          // (observed with a CFI past the end of the spine) — bound it and
-          // fall back to the start of the book instead of wedging the
-          // reader on a blank loading surface. A late-settling init is
-          // harmless: the engine jumps only to a valid location.
+          // A stale saved locator can make the engine's load never settle
+          // — bound it and fall back to the start of the book instead of
+          // wedging the reader on a blank loading surface. A late-settling
+          // load is harmless: the engine jumps only to a valid location.
           void Promise.race([
-            handle.init(saved?.cfi ?? null),
+            handle
+              .init(record)
+              .then(() => {
+                restoredRef.current = true;
+              })
+              .catch(() => {}),
             new Promise<void>((resolve) => window.setTimeout(resolve, EPUB_RESTORE_TIMEOUT_MS)),
-          ]).finally(() => setRestored(true));
+          ]).finally(() => {
+            // A wedged restore degrades to ready-at-start: the reader must
+            // never stay locked on the loading surface. The engine's own
+            // locator resolution is untouched by this flag — it only gates
+            // the E2E ready attribute (see the relocate subscription).
+            restoredRef.current = true;
+            if (currentSectionRef.current !== null) {
+              // The restore's own relocate already landed during init; the
+              // reader is at its position — flip ready now (no further
+              // relocate will fire on its own).
+              handle.hostElement.dataset.epubState = "ready";
+            }
+            setRestored(true);
+          });
         } else {
+          restoredRef.current = true;
           setRestored(true);
         }
       },
       [handle],
     ),
-    savePayload: epubProgressPayload,
+    savePayload: (current, value) =>
+      "record" in current ? { progressPercent: value } : epubProgressPayload(current, value),
   });
   const interactive = status === "ready" && restored;
 
   // Mount the engine's host element exactly once per opened handle and
-  // report the TOC (available as soon as the book is parsed).
+  // report the TOC (available as soon as the publication is built).
   const onTocLoadRef = useRef(onTocLoad);
   useEffect(() => {
     onTocLoadRef.current = onTocLoad;
@@ -251,34 +236,34 @@ export function EpubReader({
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !handle) return;
-    const host = handle.host;
+    const host = handle.hostElement;
     container.appendChild(host);
+    setHostMounted(true);
     onTocLoadRef.current?.(handle.getToc());
     return () => {
       host.remove();
+      setHostMounted(false);
     };
   }, [handle]);
 
-  // Reflow layout (flow attribute) — applied as soon as the renderer exists
+  // Reflow layout (flow preference) — applied as soon as the renderer exists
   // and on every layout preference change.
   useEffect(() => {
     if (!handle) return;
     const flow: EpubFlow = preferences.layout === "scrolling" ? "scrolled" : "paginated";
-    handle.setFlow(flow);
+    handle.setFlow(flow).catch(() => {});
   }, [handle, preferences.layout, interactive]);
 
-  // User appearance stylesheet, applied to every section document by the
-  // engine's setStyles (and re-applied by the engine per section load).
+  // User appearance (font size, family override, line spacing, theme colors)
+  // through the engine's Preferences API.
   useEffect(() => {
     if (!handle) return;
-    handle.setAppearance(
-      epubAppearanceCss({
-        fontSize: preferences.fontSize,
-        lineHeight: preferences.lineHeight,
-        fontFamily: preferences.fontFamily,
-        theme: preferences.theme,
-      }),
-    );
+    void handle.setAppearance({
+      fontSize: preferences.fontSize,
+      lineHeight: preferences.lineHeight,
+      fontFamily: preferences.fontFamily,
+      theme: preferences.theme,
+    });
   }, [
     handle,
     preferences.fontSize,
@@ -289,12 +274,11 @@ export function EpubReader({
   ]);
 
   // Outside position changes (bookmarks, Home/End, progress bar) map onto
-  // the nearest spine section; engine-driven changes are skipped via the
+  // the nearest book position; engine-driven changes are skipped via the
   // reported-progress echo guard, mirroring the PDF reader's scroll-report
   // loop guard. Only actual position changes map back — the interactive
   // flip itself must not re-jump an engine that init has already positioned
-  // (restored CFI or start). Before the first relocate there is no section
-  // count to map onto.
+  // (restored locator or start).
   const previousPositionRef = useRef(0);
   useEffect(() => {
     if (!interactive || !handle) return;
@@ -302,22 +286,19 @@ export function EpubReader({
     previousPositionRef.current = position;
     const reported = reportedFractionRef.current;
     if (reported !== null && Math.abs(position - reported * 100) < 0.5) return;
-    const section = currentSectionRef.current;
-    if (!section || section.total <= 0) return;
-    const index = Math.min(
-      section.total - 1,
-      Math.max(0, Math.floor((position / 100) * section.total)),
-    );
-    void handle.goTo(index);
+    handle.goToTotalProgression(position / 100).catch(() => {});
   }, [interactive, handle, position]);
 
   // Window-level page navigation; registered after the shell's handlers, so
   // while an EPUB is open these combos drive the engine, not percentage steps.
-  useShortcut("arrowright", () => void handle?.next());
-  useShortcut("space", () => void handle?.next());
-  useShortcut("arrowleft", () => void handle?.prev());
-  useShortcut("pagedown", () => void handle?.next());
-  useShortcut("pageup", () => void handle?.prev());
+  const turnPages = (move: Promise<void> | undefined): void => {
+    move?.catch(() => {});
+  };
+  useShortcut("arrowright", () => turnPages(handle?.next()));
+  useShortcut("space", () => turnPages(handle?.next()));
+  useShortcut("arrowleft", () => turnPages(handle?.prev()));
+  useShortcut("pagedown", () => turnPages(handle?.next()));
+  useShortcut("pageup", () => turnPages(handle?.prev()));
 
   // In-book search runs on the engine and streams matches up to the shell;
   // callbacks reach the shell through refs so re-renders never re-register
@@ -330,9 +311,9 @@ export function EpubReader({
   });
 
   // Draw highlights through the engine and keep them in step with the
-  // persisted list (created in the tabs, deleted, recolored). The engine
-  // re-adds a section's highlights whenever that section remounts, so this
-  // only has to move the diff since the last commit.
+  // persisted list (created in the tabs, deleted, recolored). The navigator
+  // re-applies group decorations to mounted frames, so this only has to
+  // move the diff since the last commit.
   const drawnHighlightsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (!handle) return;
@@ -340,28 +321,29 @@ export function EpubReader({
     for (const highlight of highlights) {
       if (highlight.cfi !== null) next.set(highlight.cfi, highlight.color ?? "");
     }
-    for (const [cfi, color] of next) {
-      if (drawnHighlightsRef.current.get(cfi) !== color) {
-        handle.addHighlight(cfi, highlightCssColor(color));
+    for (const [locator, color] of next) {
+      if (drawnHighlightsRef.current.get(locator) !== color) {
+        handle.addHighlight(locator, highlightCssColor(color));
       }
     }
-    for (const cfi of drawnHighlightsRef.current.keys()) {
-      if (!next.has(cfi)) handle.removeHighlight(cfi);
+    for (const locator of drawnHighlightsRef.current.keys()) {
+      if (!next.has(locator)) handle.removeHighlight(locator);
     }
     drawnHighlightsRef.current = next;
   }, [handle, highlights]);
 
   // The shell's selection toolbar drives highlight creation through this
-  // controller; the reader owns the selection → CFI translation.
+  // controller; the reader owns the selection → locator translation.
   const onCreateHighlightRef = useRef(onCreateHighlight);
   useEffect(() => {
     onCreateHighlightRef.current = onCreateHighlight;
   });
 
   // The shell adapter: one object covering jumps (TOC hrefs, bookmark and
-  // search CFIs — the engine accepts both), search, and highlight creation.
-  // Registered only while a handle is open, so a switched book can never be
-  // driven through a stale engine.
+  // search locators — the engine accepts all, migrating legacy foliate CFIs
+  // on the fly), search, and highlight creation. Registered only while a
+  // handle is open, so a switched book can never be driven through a stale
+  // engine.
   useEffect(() => {
     if (!adapterRef) return;
     if (!handle) {
@@ -386,7 +368,7 @@ export function EpubReader({
               onSearchGroupRef.current?.(book.id, {
                 label,
                 matches: section.subitems.map((match) => ({
-                  cfi: match.cfi,
+                  locator: match.locator,
                   page: null,
                   excerpt: match.excerpt,
                 })),
@@ -399,25 +381,20 @@ export function EpubReader({
       },
       annotations: {
         createHighlight: (color) => {
-          const pending = pendingSelectionRef.current;
-          if (!pending) return;
-          const located = handle.getCfiFromRange(pending.doc, pending.range);
-          pending.doc.getSelection()?.removeAllRanges();
-          pendingSelectionRef.current = null;
+          const located = handle.getLocatorFromSelection();
+          handle.clearSelection();
           onSelectionChangeRef.current?.(null);
           if (!located) return;
           onCreateHighlightRef.current?.({
             kind: "highlight",
-            cfi: located.cfi,
+            cfi: located.locator,
             chapterHref: located.href,
-            text: pending.text,
+            text: located.text,
             color: isHighlightColor(color) ? color : null,
           });
         },
         clearSelection: () => {
-          const pending = pendingSelectionRef.current;
-          if (pending) pending.doc.getSelection()?.removeAllRanges();
-          pendingSelectionRef.current = null;
+          handle.clearSelection();
           onSelectionChangeRef.current?.(null);
         },
       },
@@ -443,11 +420,11 @@ export function EpubReader({
   }
 
   // Bounded measure (PERF-12, docs/performance.md): in scrolled flow the
-  // paginator's section iframe spans the full host width, so the container
+  // navigator's section iframe spans the full host width, so the container
   // caps it and centers the column; paginated flow keeps the engine's own
-  // grid cap (~two 720px columns) and no app-side cap. The root bridges the
-  // engine's theme background so the area beside the capped column is
-  // seamless with the reading surface in every theme.
+  // grid cap and no app-side cap. The root bridges the engine's theme
+  // background so the area beside the capped column is seamless with the
+  // reading surface in every theme.
   const scrolled = preferences.layout === "scrolling";
   return (
     <div
@@ -478,28 +455,11 @@ export function EpubReader({
 }
 
 /**
- * Wait until the section document's fonts have settled (bounded), then run
- * `relayout` once. A no-op when the document exposes no FontFaceSet.
+ * The persistence-hook state for the EPUB reader: either the live locator
+ * (what saves persist) or a restore envelope wrapping the fetched record
+ * (what the engine seam resolves).
  */
-function scheduleFontsSettledRelayout(doc: Document, relayout: () => void): void {
-  const fonts = doc.fonts;
-  if (!fonts) return;
-  if (fonts.status === "loaded") {
-    // One deferred pass covers layout that settles after the load event.
-    window.setTimeout(relayout, 250);
-    return;
-  }
-  let tries = 0;
-  const poll = () => {
-    if (fonts.status === "loaded" || tries >= 30) {
-      relayout();
-      return;
-    }
-    tries += 1;
-    window.setTimeout(poll, 100);
-  };
-  window.setTimeout(poll, 100);
-}
+type EpubSavedState = EpubLocator | { record: Parameters<ReadiumEpubHandle["init"]>[0] };
 
 /**
  * Forward keys that happen while focus is inside a section document to the

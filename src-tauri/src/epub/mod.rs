@@ -1,8 +1,10 @@
 pub mod metadata;
 pub mod parser;
+pub mod session;
 
 pub use metadata::EpubMetadata;
 pub use parser::{parse_epub, CoverImage, EpubBook};
+pub use session::{build_session, guess_member_media_type, read_member, EpubReadingSession};
 
 /// Errors that can occur while opening or parsing an EPUB file.
 #[derive(Debug, thiserror::Error)]

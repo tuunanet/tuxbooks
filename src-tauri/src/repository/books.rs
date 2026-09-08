@@ -450,6 +450,7 @@ mod tests {
                 page_number: None,
                 scroll_offset: None,
                 progress_percent: Some(12.5),
+                ..Default::default()
             },
         )
         .await
@@ -585,6 +586,7 @@ mod tests {
                 page_number: None,
                 scroll_offset: None,
                 progress_percent: Some(40.0),
+                ..Default::default()
             },
         )
         .await

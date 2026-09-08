@@ -271,30 +271,20 @@ function writeReport(): void {
 }
 
 /**
- * Position change probe for the EPUB phase. The shell percent is
- * integer-grained, so the probe also reads the vendored paginator's current
- * in-section page: `foliate-view` keeps its renderer as a JS property, and
- * this probe runs in the same JS realm, so closed shadow roots don't hide
- * it. Read-only — the paginator itself is never reconfigured (PERF-7).
+ * Position change probe for the EPUB phase: shell percent, the engine's
+ * pinned in-section fraction/section attributes, and the flow layout —
+ * all deterministic DOM attributes on the reading surface (docs/epub.md
+ * testability contract), so the probe survives engine swaps. Read-only.
  */
 const epubPositionProbe = (): Promise<string> =>
   browser.execute(() => {
     const percent = document.querySelector("[data-testid=reader-position]")?.textContent ?? "";
-    try {
-      const view = document.querySelector("[data-epub-host] foliate-view") as
-        | (Element & {
-            renderer?: {
-              page?: number;
-              start?: number;
-              getAttribute?: (name: string) => string | null;
-            };
-          })
-        | null;
-      const renderer = view?.renderer;
-      return `${percent}|${renderer?.page ?? "?"}|${renderer?.start ?? "?"}|${renderer?.getAttribute?.("flow") ?? "?"}`;
-    } catch {
-      return percent;
-    }
+    const host = document.querySelector("[data-epub-host]");
+    const reader = document.querySelector("[data-testid=epub-reader]");
+    const fraction = host?.getAttribute("data-epub-fraction") ?? "?";
+    const section = host?.getAttribute("data-epub-section") ?? "?";
+    const flow = reader?.getAttribute("data-layout") ?? "?";
+    return `${percent}|${fraction}|${section}|${flow}`;
   });
 
 /**
@@ -302,12 +292,12 @@ const epubPositionProbe = (): Promise<string> =>
  * tick — the same mutation a dragged scrollbar performs — while single-shot
  * rAF samples record frame cadence (main-thread stalls surface as long
  * deltas between consecutive frame timestamps). PDF drives the shell's
- * scroll container directly. EPUB scrolled flow re-anchors every tick via
- * the paginator's public `scrollToAnchor(fraction)`, which assigns the raw
- * scroll offset and lets foliate's expansion pipeline follow the drag —
- * `scrollBy` alone is clamped to the already-laid-out window (±1 viewport)
- * and would degenerate into discrete section turns. A drag stalled at a
- * section end turns to the next section, like a reader crossing into it.
+ * scroll container directly. EPUB scrolled flow drives whichever element
+ * actually scrolls — the section frame's inner scrolling document in the
+ * Readium engine — assigning raw scroll offsets so the drag follows content
+ * continuously. A drag stalled at a section end turns to the next section
+ * through the window-level page-turn shortcut, like a reader crossing into
+ * it.
  *
  * Serialized-callback constraint (see pdfSurfaceMemory in helpers.ts): no
  * named function bindings inside — the transpiler's `__name` retention
@@ -322,17 +312,22 @@ const dragScroll = (
   browser.execute(
     async (fmt, max, px) => {
       const container = document.querySelector("[data-testid=reader-content]");
-      const view = document.querySelector("[data-epub-host] foliate-view") as
-        | (Element & {
-            renderer?: {
-              scrollToAnchor?: (anchor: number) => Promise<void>;
-              next?: () => void;
-              start?: number;
-              viewSize?: number;
-            };
-          })
-        | null;
-      const renderer = fmt === "epub" ? (view?.renderer ?? null) : null;
+      const epubScroll = (): { el: Element | null; pos: number } => {
+        for (const frame of document.querySelectorAll<HTMLIFrameElement>(
+          "[data-epub-host] iframe",
+        )) {
+          try {
+            const doc = frame.contentDocument;
+            const scroller = doc?.scrollingElement ?? null;
+            if (doc && scroller && scroller.scrollHeight > scroller.clientHeight + 4) {
+              return { el: scroller, pos: scroller.scrollTop };
+            }
+          } catch {
+            continue;
+          }
+        }
+        return { el: null, pos: 0 };
+      };
       const startedAt = performance.now();
       const stamps: number[] = [];
       const renderMs: number[] = [];
@@ -340,7 +335,7 @@ const dragScroll = (
       let last = startedAt;
       let count = 0;
       let stalls = 0;
-      let lastPos = renderer?.start ?? 0;
+      let lastPos = fmt === "epub" ? epubScroll().pos : 0;
       let jumps = 0;
       const distance = await new Promise<number>((resolve) => {
         // Sampler at 8 ms: registration must be faster than the frame clock
@@ -370,24 +365,28 @@ const dragScroll = (
               });
             }
           } else {
-            const pos = renderer?.start ?? 0;
-            if (Math.abs(pos - lastPos) < 1) {
+            const scroller = epubScroll();
+            if (scroller.el === null || Math.abs(scroller.pos - lastPos) < 1) {
               stalls += 1;
-              if (stalls >= 12 && renderer?.next) {
-                renderer.next();
+              if (stalls >= 12) {
+                // Section end: turn through the window-level page-turn
+                // shortcut (the engine owns these combos while an EPUB is
+                // open).
+                window.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+                );
                 jumps += 1;
                 stalls = 0;
               }
             } else {
               stalls = 0;
-              distancePx += Math.abs(pos - lastPos);
-              lastPos = pos;
+              distancePx += Math.abs(scroller.pos - lastPos);
+              lastPos = scroller.pos;
             }
-            const viewSize = renderer?.viewSize ?? 0;
-            if (viewSize > 0) {
-              // Fraction of the section: raw offset assignment, unclamped —
-              // foliate expands the rendered window to follow the drag.
-              renderer?.scrollToAnchor?.((pos + px) / viewSize);
+            const el = scroller.el;
+            if (el) {
+              // Raw offset assignment, unclamped: the drag follows content.
+              el.scrollTop = scroller.pos + px;
             }
           }
           count += 1;
@@ -795,8 +794,8 @@ describe("reader performance benchmark", () => {
     expect(label).toBe("Scrolling");
     await layoutItems[1].click();
     await browser.keys(["Escape"]);
-    // The flow lands on the renderer as an attribute (same-realm probe —
-    // the shadow root is closed).
+    // The flow lands on the reader surface as a pinned attribute
+    // (docs/epub.md testability contract).
     await browser.waitUntil(async () => (await epubPositionProbe()).endsWith("|scrolled"), {
       timeout: 10_000,
       timeoutMsg: "epub never switched to scrolled flow",
@@ -812,21 +811,16 @@ describe("reader performance benchmark", () => {
       () => document.querySelector<HTMLElement>("[data-epub-measure]")?.style.maxWidth ?? "",
     );
 
-    // Jump to the middle of the book through the engine's own fraction
-    // navigation: front matter and the ToC are the least representative
-    // content, and in scrolled flow the engine (not the shell container)
-    // owns scrolling. The pre-jump probe is captured first: goToFraction
-    // scrolls synchronously through the engine, so "changed" is measured
-    // against where the restored session had put us.
+    // Jump deep into the book through the shell's End shortcut (the shell
+    // maps the position onto the engine's nearest position): front matter
+    // and the ToC are the least representative content. The pre-jump probe
+    // is captured first so "changed" is measured against where the restored
+    // session had put us.
     const beforeJump = await epubPositionProbe();
-    await browser.execute(async () => {
-      const view = document.querySelector("[data-epub-host] foliate-view") as
-        (Element & { goToFraction?: (frac: number) => Promise<void> }) | null;
-      await view?.goToFraction?.(0.5);
-    });
+    await browser.keys("End");
     await browser.waitUntil(async () => (await epubPositionProbe()) !== beforeJump, {
       timeout: 10_000,
-      timeoutMsg: "epub never landed on the mid-book position",
+      timeoutMsg: "epub never landed on the deep-book position",
     });
 
     const drag = await dragScroll("epub", DRAG_FRAMES, EPUB_DRAG_PX_PER_FRAME);

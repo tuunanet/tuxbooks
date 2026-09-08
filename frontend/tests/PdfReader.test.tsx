@@ -1169,7 +1169,9 @@ describe("PdfReader in-book search", () => {
     await waitFor(() => expect(groups).toHaveLength(2));
     expect(groups[0]).toEqual({
       label: "Page 1",
-      matches: [{ cfi: null, page: 1, excerpt: { pre: "alpha ", match: "beta", post: " gamma" } }],
+      matches: [
+        { locator: null, page: 1, excerpt: { pre: "alpha ", match: "beta", post: " gamma" } },
+      ],
     });
     expect(groups[1]?.label).toBe("Page 2");
     await waitFor(() => expect(done).toBe(true));

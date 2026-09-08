@@ -1,7 +1,7 @@
 import type { Annotation, ReadingProgressInput, ReadingProgressRecord } from "@/types/domain";
 import {
-  isBookmarkAtCfi,
   isBookmarkAtPage,
+  isBookmarkAtLocator,
   type ReaderAnnotationController,
 } from "./annotationModel";
 import type { ReaderSearchController, ReaderSearchMatch } from "./searchModel";
@@ -12,17 +12,25 @@ import type { ReaderSearchController, ReaderSearchMatch } from "./searchModel";
  * current book, progress, navigation entry points, bookmark placement, and
  * the search/annotation drawers; each format reader implements this contract
  * on top of its own engine without the engines sharing an abstraction.
+ *
+ * EPUB locator grammar (phase 3, docs/epub.md): the canonical locator is
+ * the serialized Readium `Locator` JSON. Legacy foliate CFIs (progress
+ * rows, stored annotations from before the engine swap) convert through
+ * `lib/epub/progressMigration.ts` inside the engine seam at restore/jump
+ * time — the shell and the Rust rows never need to know.
  */
 
-/** Canonical EPUB locator: CFI plus the spine href of its section. */
+/** Canonical EPUB locator: serialized Readium locator JSON + spine href. */
 export interface EpubLocator {
-  cfi: string;
+  /** The serialized Readium locator the engine can navigate to. */
+  locator: string;
+  /** Spine href of the locator's section (labels, annotation provenance). */
   chapterHref: string | null;
 }
 
 /**
  * Where the open book is right now, in the document's own coordinates.
- * EPUB locates a canonical CFI (+ spine href for labels); PDF a 1-based
+ * EPUB locates a canonical locator (+ spine href for labels); PDF a 1-based
  * page (+ the reading anchor's in-page fraction). Exactly one format's
  * fields exist — the union is the format check.
  */
@@ -34,8 +42,9 @@ export type PdfReaderPosition = Extract<ReaderPosition, { format: "pdf" }>;
 
 /**
  * A navigation destination. EPUB targets use the engine's own locator
- * grammar (a canonical CFI or a spine href — TOC entries carry hrefs,
- * bookmarks and search matches CFIs); PDF targets are 1-based pages.
+ * grammar (a serialized Readium locator — TOC entries, bookmarks, and
+ * search matches share it; legacy foliate CFIs are migrated on the fly);
+ * PDF targets are 1-based pages.
  */
 export type ReaderJump = { format: "epub"; locator: string } | { format: "pdf"; page: number };
 
@@ -56,14 +65,14 @@ export interface ReaderAdapter {
 /** True when the annotation is a bookmark placed exactly at `position`. */
 export function isBookmarkAtPosition(annotation: Annotation, position: ReaderPosition): boolean {
   return position.format === "epub"
-    ? isBookmarkAtCfi(annotation, position.cfi)
+    ? isBookmarkAtLocator(annotation, position.locator)
     : isBookmarkAtPage(annotation, position.page);
 }
 
 /** The annotation input that persists a bookmark at `position`. */
 export function bookmarkInputFor(position: ReaderPosition) {
   if (position.format === "epub") {
-    return { kind: "bookmark" as const, cfi: position.cfi, chapterHref: position.chapterHref };
+    return { kind: "bookmark" as const, cfi: position.locator, chapterHref: position.chapterHref };
   }
   return {
     kind: "bookmark" as const,
@@ -79,9 +88,18 @@ export function jumpToAnnotation(annotation: Annotation): ReaderJump | null {
   return null;
 }
 
+/**
+ * Navigation target for a spine/TOC href: a minimal href locator the engine
+ * resolves to that section's start (a `#fragment` rides along as the
+ * locator's fragment location).
+ */
+export function epubHrefJump(href: string): ReaderJump {
+  return { format: "epub", locator: JSON.stringify({ href }) };
+}
+
 /** Navigation target for an in-book search match, or null when unlocatable. */
 export function jumpToSearchMatch(match: ReaderSearchMatch): ReaderJump | null {
-  if (match.cfi !== null) return { format: "epub", locator: match.cfi };
+  if (match.locator !== null) return { format: "epub", locator: match.locator };
   if (match.page !== null) return { format: "pdf", page: match.page };
   return null;
 }
@@ -89,17 +107,62 @@ export function jumpToSearchMatch(match: ReaderSearchMatch): ReaderJump | null {
 /**
  * Progress persistence mapping. The stored row is format-specific; each
  * reader validates/serializes through these pure helpers so the shared
- * persistence hook stays format-blind.
+ * persistence hook stays format-blind. Restore is engine-owned: the record
+ * passes through untouched and the engine seam resolves it (Readium rows
+ * deserialize directly, foliate rows convert through the migration
+ * adapter's fallback hierarchy — docs/epub.md).
  */
 
-/** The saved EPUB CFI, or null when absent or not a canonical CFI. */
-export function parseEpubProgress(record: ReadingProgressRecord | null): string | null {
-  const cfi = record?.cfi;
-  return typeof cfi === "string" && cfi.startsWith("epubcfi(") ? cfi : null;
+/**
+ * The persisted EPUB row validates into a restore record as-is, or null
+ * when the row is not for this format (a PDF row). Resolution — including
+ * the foliate→Readium migration — happens in the engine seam.
+ */
+export function parseEpubProgress(
+  record: ReadingProgressRecord | null,
+): ReadingProgressRecord | null {
+  if (record === null) return null;
+  const hasEpubLocator =
+    (record.locator !== null && record.locator.trim() !== "") ||
+    (record.cfi !== null && record.cfi.trim() !== "") ||
+    (record.chapterHref !== null && record.chapterHref.trim() !== "");
+  return hasEpubLocator ? record : null;
 }
 
+/** Schema version the Readium reader writes into converted progress rows. */
+export const EPUB_PROGRESS_SCHEMA_VERSION = 2;
+
+/** The locations JSON extracted from a serialized locator (or null). */
+function locationsJson(locator: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(locator);
+    if (parsed !== null && typeof parsed === "object") {
+      const locations = (parsed as { locations?: unknown }).locations;
+      if (locations !== undefined) return JSON.stringify(locations);
+    }
+  } catch {
+    // A locator that fails to parse was already rejected by the engine.
+  }
+  return null;
+}
+
+/**
+ * The wire payload for a Readium-era save: the canonical locator plus its
+ * coarse totalProgression (`position` is the shell's 0–100 percent) and the
+ * engine/schema markers that make the migration idempotent. The foliate-era
+ * columns (`cfi`, `chapterHref`) are intentionally absent — the service
+ * preserves them as provenance.
+ */
 export function epubProgressPayload(locator: EpubLocator, position: number): ReadingProgressInput {
-  return { cfi: locator.cfi, chapterHref: locator.chapterHref, progressPercent: position };
+  const progression = Math.min(Math.max(position / 100, 0), 1);
+  return {
+    locator: locator.locator,
+    progression,
+    locations: locationsJson(locator.locator),
+    engine: "readium",
+    schemaVersion: EPUB_PROGRESS_SCHEMA_VERSION,
+    progressPercent: position,
+  };
 }
 
 /** The saved 1-based PDF page, or null when absent or out of range. */

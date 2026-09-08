@@ -165,6 +165,16 @@ export function getBookBytes(bookId: number, format: BookFormat): Promise<ArrayB
   return tuxbooks().fetchBookBytes(bookId, format);
 }
 
+/**
+ * The Readium reading session for a stored EPUB, parsed server-side: the
+ * webpub manifest and the positions list, both already deserialized JSON.
+ * The navigator's document/image resources load over `tuxbooks://` per
+ * resource afterwards.
+ */
+export function getEpubSession(bookId: number): Promise<{ manifest: unknown; positions: unknown }> {
+  return invoke("get_epub_session", { bookId });
+}
+
 /** Load the stored reading position for a book, if any. */
 export function getReadingProgress(bookId: number): Promise<ReadingProgressRecord | null> {
   return invoke("get_reading_progress", { bookId });

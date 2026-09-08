@@ -6,8 +6,10 @@ use crate::repository::reading_progress::{get_progress, mark_finished, upsert_pr
 use crate::AppState;
 
 /// Wire shape of a reading-progress update. Fields are optional so each
-/// format writes only what it tracks (EPUB: chapter href + CFI; PDF: page
-/// number); `progress_percent` is the coarse shell position.
+/// format writes only what it tracks (EPUB: Readium locator columns, with
+/// `cfi`/`chapterHref` kept as foliate-era provenance; PDF: page number);
+/// `progressPercent` is the coarse shell position. The engine-locator
+/// columns are preserved server-side when a save omits them.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressInput {
@@ -17,6 +19,11 @@ pub struct ProgressInput {
     pub page_number: Option<i64>,
     pub scroll_offset: Option<f64>,
     pub progress_percent: Option<f64>,
+    pub locator: Option<String>,
+    pub progression: Option<f64>,
+    pub locations: Option<String>,
+    pub engine: Option<String>,
+    pub schema_version: Option<i64>,
 }
 
 impl From<ProgressInput> for ProgressUpdate {
@@ -28,6 +35,11 @@ impl From<ProgressInput> for ProgressUpdate {
             page_number: input.page_number,
             scroll_offset: input.scroll_offset,
             progress_percent: input.progress_percent,
+            locator: input.locator,
+            progression: input.progression,
+            locations: input.locations,
+            engine: input.engine,
+            schema_version: input.schema_version,
         }
     }
 }

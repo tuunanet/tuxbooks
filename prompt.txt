@@ -1,0 +1,341 @@
+Transform the TuxBooks application from its current Tauri + WebKitGTK + foliate-js architecture to an Electron + Chromium architecture using Readium for EPUB rendering and MuPDF.js/WASM for PDF rendering.
+
+## Target architecture
+
+```text
+Electron / Chromium
+        │
+        ├── React application
+        │
+        ├── Readium TS Toolkit
+        │      └── EPUB
+        │
+        └── MuPDF.js / WASM
+               └── PDF
+```
+
+The goal is to make Chromium the sole desktop web runtime and replace the current EPUB/PDF rendering architecture with dedicated, high-performance rendering engines.
+
+## Primary migration requirements
+
+### 1. Replace Tauri with Electron
+
+Remove the Tauri runtime as the application's desktop shell.
+
+Build the desktop application around Electron with a conventional:
+
+* Electron main process
+* preload layer with a minimal, explicitly defined API
+* React renderer process running inside Chromium
+
+Preserve the existing separation between privileged filesystem/native operations and the renderer. Do not expose Node.js directly to the React renderer.
+
+Use secure Electron defaults:
+
+* `contextIsolation: true`
+* `nodeIntegration: false`
+* restrictive IPC surface
+* no unnecessary remote/native APIs exposed to renderer code
+
+Do not simply reproduce the Tauri API layer one-for-one without evaluating whether the Electron architecture can be cleaner.
+
+### 2. Remove foliate-js completely
+
+Remove the foliate-js dependency and all foliate-specific EPUB code.
+
+Do not leave foliate-js as a fallback unless there is a temporary migration branch or clearly isolated compatibility shim that is required during implementation. The final architecture must use Readium for EPUB.
+
+Search the entire repository for:
+
+* foliate-js
+* foliate
+* foliate-specific adapters
+* foliate-specific DOM/navigation assumptions
+* obsolete EPUB renderer abstractions
+
+Delete or replace them rather than leaving dead code behind.
+
+### 3. Adopt Readium TS Toolkit for EPUB
+
+Use the Readium TypeScript stack as the EPUB engine.
+
+The implementation should separate:
+
+* publication/package parsing
+* EPUB resource loading
+* navigator state
+* pagination/scrolling
+* locations/progression
+* selection
+* navigation
+* bookmarks/highlights where applicable
+
+Do not build another EPUB renderer on top of ordinary React components. React should own the surrounding application UI; Readium should own EPUB publication rendering/navigation.
+
+Investigate the current Readium TS Toolkit/Web Navigator APIs and use the appropriate current APIs rather than relying on obsolete examples or old repository versions.
+
+Use Readium CSS where appropriate instead of recreating EPUB typography and pagination behavior manually.
+
+The EPUB renderer must work with TuxBooks' local-file architecture. Design a secure resource-loading mechanism that allows Readium to access locally stored EPUB resources without requiring an insecure arbitrary local HTTP server.
+
+### 4. Adopt MuPDF.js / WASM for PDF
+
+Replace the current PDF rendering path with MuPDF.js/WASM.
+
+The PDF architecture should be approximately:
+
+```text
+React UI
+   │
+PDF reader abstraction
+   │
+MuPDF.js
+   │
+WebAssembly
+   │
+Chromium
+```
+
+Keep the PDF engine isolated behind a reader abstraction so that the rest of the application does not depend directly on MuPDF APIs.
+
+Prioritize smooth scrolling, zooming and page navigation.
+
+Do not render an entire large PDF into the DOM at once. Use virtualization/lazy rendering where appropriate and keep expensive rendering work out of the critical UI thread when the chosen MuPDF.js integration permits worker-based processing.
+
+Investigate the current MuPDF.js distribution and determine the most appropriate browser/Electron integration rather than assuming a specific package layout from old examples.
+
+### 5. Preserve the existing application functionality
+
+The migration is architectural, not a redesign.
+
+Preserve existing functionality wherever possible, including:
+
+* library/book management
+* opening local books
+* recent books
+* reading position
+* navigation
+* zoom
+* page/scroll modes
+* metadata
+* settings
+* keyboard shortcuts
+* window behavior
+* existing React UI
+* existing Rust functionality only where it remains genuinely useful
+
+However, do not preserve Rust/Tauri layers merely for compatibility if their responsibility is now better handled by Electron's main process or preload API.
+
+### 6. Re-evaluate the Rust layer
+
+Do not blindly port the Tauri Rust backend into Electron.
+
+Inventory the current Rust code and classify each responsibility as:
+
+1. still required and worth retaining,
+2. replaceable by Electron/Node APIs,
+3. replaceable by browser APIs,
+4. specific to Tauri and therefore removable.
+
+The end state should minimize native complexity while retaining performance and security.
+
+If some existing Rust functionality provides a meaningful performance or filesystem advantage, document why it remains and integrate it intentionally rather than accidentally carrying over the old architecture.
+
+### 7. Introduce a clean reader abstraction
+
+Create a format-independent reader boundary, conceptually:
+
+```text
+Reader
+├── EpubReader
+│     └── Readium
+└── PdfReader
+      └── MuPDF.js
+```
+
+The application UI should interact with this abstraction for operations such as:
+
+* open
+* close
+* next/previous page
+* navigation
+* progression
+* current location
+* zoom
+* reading mode
+* selection
+* document metadata
+
+Do not leak Readium or MuPDF-specific objects throughout unrelated React components.
+
+This should make the architecture easy to extend later with additional formats.
+
+## Performance requirements
+
+Performance is a first-class goal.
+
+The target is a reader that feels like a native desktop application on a high-refresh-rate display.
+
+Pay particular attention to:
+
+* 60 FPS scrolling
+* smooth page transitions
+* smooth zooming
+* avoiding unnecessary React renders
+* minimizing layout thrashing
+* virtualization
+* lazy loading
+* memory usage for large EPUBs/PDFs
+* keeping expensive parsing/rendering operations outside the UI-critical path
+* efficient communication between Electron main/preload/renderer processes
+* avoiding unnecessary IPC for operations that can safely stay inside Chromium
+
+Do not optimize based only on synthetic startup benchmarks. Test actual interaction:
+
+* rapid page turns
+* continuous scrolling
+* zooming in/out
+* very large EPUBs
+* EPUBs with complex CSS
+* EPUBs containing large images
+* large PDFs
+* PDFs with many pages
+* high-DPI displays
+* high-refresh-rate displays
+
+## Engineering process
+
+Before making major changes:
+
+1. Inspect the complete current repository architecture.
+2. Identify the current Tauri, WebKitGTK, foliate-js and PDF.js integration points.
+3. Inspect the current package manager, build system, TypeScript configuration and React architecture.
+4. Inspect existing tests and fixtures, especially EPUB/PDF fixtures.
+5. Inspect the current filesystem and book-loading abstractions.
+6. Determine the current versions of all relevant dependencies.
+7. Check the current official Readium TS Toolkit/Web documentation and current MuPDF.js documentation/API before implementing.
+
+Do not rely on stale knowledge when the current API can be inspected from the repository/package metadata/documentation.
+
+## Migration strategy
+
+Prefer a staged migration that keeps the project buildable.
+
+Suggested phases:
+
+### Phase 1 — Architecture inventory
+
+Document:
+
+```text
+Current:
+Tauri
+  ↓
+WebKitGTK
+  ↓
+React
+  ↓
+foliate-js
+  ↓
+EPUB
+
+Current PDF:
+...
+```
+
+Identify every dependency and integration point that must change.
+
+### Phase 2 — Electron shell
+
+Introduce Electron and get the existing React application running inside Chromium before replacing the readers.
+
+At this point the application should have a functional Electron main/preload/renderer architecture.
+
+### Phase 3 — Readium EPUB implementation
+
+Implement the Readium-based EPUB reader behind the new reader abstraction.
+
+Migrate reading-position/navigation behavior carefully.
+
+### Phase 4 — MuPDF PDF implementation
+
+Implement the MuPDF.js/WASM PDF reader behind the same abstraction.
+
+### Phase 5 — Remove obsolete stack
+
+Remove:
+
+* Tauri
+* WebKitGTK-specific code
+* foliate-js
+* obsolete Rust/Tauri integration
+* obsolete build configuration
+* obsolete dependencies
+
+Do not leave multiple competing rendering paths in the final application.
+
+### Phase 6 — Performance pass
+
+Profile the resulting application and fix actual bottlenecks.
+
+Measure at minimum:
+
+* startup time
+* first-render latency
+* page navigation latency
+* scrolling smoothness
+* zoom smoothness
+* memory consumption
+* large-document behavior
+
+## Important constraints
+
+Do not rewrite the entire application unnecessarily.
+
+Do not replace functioning React UI components merely for stylistic reasons.
+
+Do not introduce a second UI framework.
+
+Do not use an iframe-based architecture unless it is required by the Readium implementation.
+
+Do not create a custom EPUB pagination engine when Readium already provides the functionality.
+
+Do not assume Chromium automatically guarantees good performance; profile the actual application.
+
+Do not treat Electron merely as "Tauri but with Node." Design the process boundaries deliberately.
+
+## Definition of done
+
+The migration is complete when:
+
+```text
+Electron
+   │
+   └── Chromium
+        │
+        └── React
+             ├── Readium TS Toolkit → EPUB
+             └── MuPDF.js/WASM     → PDF
+```
+
+is the effective production architecture.
+
+There should be no production dependency on:
+
+* Tauri
+* WebKitGTK
+* foliate-js
+
+The application should open both EPUB and PDF files reliably, preserve core reading functionality, and demonstrate smooth interactive performance on realistic large documents.
+
+At the end, provide:
+
+1. a concise summary of the new architecture,
+2. a list of removed dependencies,
+3. a list of major new dependencies,
+4. any remaining native/Rust components and why they remain,
+5. performance measurements or observations,
+6. known limitations or migration compromises,
+7. tests run and their results.
+
+Do not merely make the project compile. Validate the reader behavior end-to-end.

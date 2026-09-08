@@ -86,7 +86,7 @@ export function usePdfSearch({
             totalMatches += excerpts.length;
             onGroupRef.current?.(bookId, {
               label: `Page ${page}`,
-              matches: excerpts.map((excerpt) => ({ cfi: null, page, excerpt })),
+              matches: excerpts.map((excerpt) => ({ locator: null, page, excerpt })),
             });
           }
           if (totalMatches >= MAX_TOTAL_MATCHES) break;

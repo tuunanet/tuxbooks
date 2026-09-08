@@ -157,6 +157,7 @@ async fn add_progress(pool: &SqlitePool, book_id: i64, offset: i64) {
             page_number: None,
             scroll_offset: None,
             progress_percent: Some(25.0),
+            ..Default::default()
         },
     )
     .await
