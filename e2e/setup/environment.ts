@@ -38,15 +38,48 @@ export const databasePath = path.join(scratchDir, "tuxbooks.db");
 export const configDir = path.join(scratchDir, "config");
 
 export function killStaleProcesses(): void {
-  // A crashed run can leave the app, its sidecar, or chromedriver alive. All
+  // A crashed run can leave the app tree (including the dist's crashpad
+  // helper), its sidecar, chromedriver, or orphaned wdio workers alive. All
   // would interfere with the next run: a leftover app grabs the new
-  // automation session, a leftover driver holds ports. Runs happen before
-  // the service spawns anything fresh, so this is safe.
+  // automation session, a leftover driver holds ports, a leftover worker
+  // holds a dead session. SIGKILL, not the default SIGTERM — these are
+  // wedged leftovers, and the sweep must not depend on a wedged process
+  // honoring TERM. Runs happen before the service spawns anything fresh, so
+  // this is safe.
   for (const target of processTargets) {
     try {
-      execFileSync("pkill", ["-f", target]);
+      execFileSync("pkill", ["-9", "-f", target]);
     } catch {
       // pkill exits non-zero when nothing matched — that is the good case.
+    }
+  }
+}
+
+/**
+ * Scratch dirs older than this cannot belong to a live run (a phase is
+ * bounded at 600s by the justfile timeout): only a machine crash or a kill
+ * that lands before the watchdog arms can leave one behind. The age cutoff
+ * keeps concurrent-run collisions (already forbidden) impossible.
+ */
+const SCRATCH_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+function pruneOldScratchDirs(): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(os.tmpdir());
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - SCRATCH_RETENTION_MS;
+  for (const entry of entries) {
+    if (!entry.startsWith("tuxbooks-e2e-")) continue;
+    const dir = path.join(os.tmpdir(), entry);
+    try {
+      if (statSync(dir).mtimeMs < cutoff) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // Unreadable or already-gone entry — leave it alone.
     }
   }
 }
@@ -77,6 +110,7 @@ function pruneOldArtifacts(): void {
 export function prepareEnvironment(seeded: boolean): void {
   killStaleProcesses();
   pruneOldArtifacts();
+  pruneOldScratchDirs();
 
   rmSync(scratchDir, { recursive: true, force: true });
   mkdirSync(libraryDir, { recursive: true });

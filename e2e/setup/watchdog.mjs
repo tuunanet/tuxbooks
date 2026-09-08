@@ -4,8 +4,9 @@
  *
  * Contract: when the launcher process dies for ANY reason — normal exit,
  * Ctrl+C, or an automation tool killing the whole pipeline mid-run — sweep
- * this run's leftover processes (app tree, Rust sidecar, chromedriver, and
- * the phase's private Xvfb) and remove the scratch dir. An interrupted run
+ * this run's leftover processes (the Electron app tree with its dist
+ * helpers, Rust sidecar, chromedriver, orphaned wdio workers, and the
+ * phase's private Xvfb) and remove the scratch dir. An interrupted run
  * therefore cannot leak windows or processes.
  *
  * Sweeping at parent-death is safe for back-to-back phases (`just test-e2e`

@@ -23,11 +23,14 @@ each bound.
 | E2E teardown               | watchdog (`e2e/setup/watchdog.mjs`), see below     |
 | CI jobs                    | `timeout-minutes` per job in `.github/workflows`   |
 
-The E2E watchdog reaps the app, driver, and Chromium processes left by a
-wedged run; it only kills processes that predate the watchdog, so the next
-phase's processes are never caught by the previous phase's teardown.
-`onPrepare` additionally sweeps stale app/driver processes so a crashed run
-cannot poison the next one.
+The E2E watchdog reaps the app tree (including Chromium's helper
+processes from the Electron dist), sidecar, chromedriver, orphaned wdio
+workers, and the phase's private Xvfb left by a wedged run; it only kills
+processes that predate the watchdog, so the next phase's processes are
+never caught by the previous phase's teardown. `onPrepare` additionally
+SIGKILLs stale app/helper/driver/worker processes so a crashed run
+cannot poison the next one, and prunes scratch dirs older than 24h
+(left behind only by a machine crash or a kill before the watchdog arms).
 
 ## Parallelism
 
@@ -281,15 +284,19 @@ Everything lives in `e2e/setup/` (`environment.ts` single bootstrap,
   and seeded fixtures. Nothing ever reads a real user library; production
   app-data paths are only used when `TEST_DATABASE_PATH`/`TEST_LIBRARY_PATH`
   are unset.
-- `onPrepare` kills stale app/driver processes left by crashed runs — a
-  leftover app would grab the new automation session. Driver ports are
-  probed and picked free by the service, so stale listeners cannot
-  collide.
+- `onPrepare` SIGKILLs stale processes left by crashed runs — the Electron
+  app tree and its dist helpers (matched via the dist directory, so
+  `chrome_crashpad_handler` is covered too), the sidecar, chromedriver, and
+  orphaned wdio workers (matched via `@wdio/local-runner`'s run.js — never
+  the launcher, whose onPrepare would kill itself). A leftover app would
+  grab the new automation session. Driver ports are probed and picked free
+  by the service, so stale listeners cannot collide.
 - The app can outlive the driver; the detached watchdog (`watchdog.mjs`,
   armed in `onComplete`) reaps leftover processes once the run finishes
   and SIGKILLs a wedged launcher. Each phase is additionally bounded by
-  `timeout --kill-after=15 300` in the justfile, so `just test-e2e` always
-  terminates and always returns a meaningful exit code.
+  `timeout --kill-after=15 600` in the justfile, so `just test-e2e` always
+  terminates and always returns a meaningful exit code. Scratch dirs
+  (`/tmp/tuxbooks-e2e-*`) older than 24h are pruned on the next run.
 - Failed tests capture a screenshot AND a `failure-<runId>-<test>.json`
   metadata record (suite, test, error + stack, full stack-version record,
   connected chromedriver) into `artifacts/e2e/<runId>/` (gitignored,
