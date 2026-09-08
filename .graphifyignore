@@ -1,0 +1,42 @@
+# Dependencies & lockfiles
+node_modules/
+pnpm-lock.yaml
+
+# Build outputs
+target/
+src-tauri/target/
+frontend/dist/
+electron/dist/
+.build/
+*.tsbuildinfo
+
+# Generated / vendored artifacts
+src-tauri/gen/schemas/
+src-tauri/pdfium/
+artifacts/
+coverage/
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Test scratch space
+e2e/.tmp/
+.e2e-tmp/
+
+# Real user test library (never part of the repo)
+tests/fixtures/books/EBooks/
+
+# Graphify's own output
+graphify-out/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Tooling state
+.tavily/
