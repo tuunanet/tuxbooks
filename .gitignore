@@ -54,3 +54,4 @@ electron/dist/
 graphify-out/cost.json
 graphify-out/cache/
 graphify-out/2*/
+graphify-out/graph.html
