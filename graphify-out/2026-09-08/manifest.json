@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "frontend/src/lib/epub/readiumEngine.ts": {
-    "mtime": 1788851144.2876737,
-    "seen": 1788851270.1122057,
-    "ast_hash": "d2913aae6a5400b84c04bc6f3a687e54",
+    "mtime": 1788851283.4982147,
+    "seen": 1788851305.7922077,
+    "ast_hash": "ac2c1d6138fcf46706f7acc770914472",
     "semantic_hash": ""
   },
   "frontend/src/lib/fixtures.ts": {
@@ -2223,6 +2223,60 @@
     "mtime": 1788351339.7402492,
     "seen": 1788851270.1128016,
     "ast_hash": "8b2942383b8d279d59af47aa547b0aeb",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0001_init.sql": {
+    "mtime": 1788791861.8184726,
+    "seen": 1788851305.792345,
+    "ast_hash": "82ecc2ea7121e543b5607d19d8195c9e",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0002_books_fts.sql": {
+    "mtime": 1788791861.8184726,
+    "seen": 1788851305.7923517,
+    "ast_hash": "c7d8b908623d6e559dea0d3de3621a41",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0003_reading_progress_page.sql": {
+    "mtime": 1788791861.8184726,
+    "seen": 1788851305.792358,
+    "ast_hash": "b36fe6b58b7b37d0c87b24d2947f032b",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0004_reading_progress_cfi.sql": {
+    "mtime": 1788791861.8194726,
+    "seen": 1788851305.7923613,
+    "ast_hash": "71e8feb86ceebf692c96d23994d396fa",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0005_library_sync.sql": {
+    "mtime": 1788791861.8194726,
+    "seen": 1788851305.792365,
+    "ast_hash": "7b39570a0a7b61ab0f96181bb445a9fe",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0006_books_fts_extended.sql": {
+    "mtime": 1788791861.8194726,
+    "seen": 1788851305.7923684,
+    "ast_hash": "341deba080ee23d262c562f180a50b23",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0007_annotations.sql": {
+    "mtime": 1788791861.8204725,
+    "seen": 1788851305.7923722,
+    "ast_hash": "52152369917e6555a9f2fe8c70da717e",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0008_metadata_curation.sql": {
+    "mtime": 1788791861.8204725,
+    "seen": 1788851305.7923784,
+    "ast_hash": "af216de6c7e6c09cfef265681da924c9",
+    "semantic_hash": ""
+  },
+  "src-tauri/migrations/0009_reading_progress_readium.sql": {
+    "mtime": 1788848331.2974987,
+    "seen": 1788851305.7923818,
+    "ast_hash": "b0511606f57d9a8d2b95d317083044fa",
     "semantic_hash": ""
   }
 }

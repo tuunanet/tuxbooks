@@ -1,53 +1,53 @@
 # Graph Report - tuxbooks  (2026-09-08)
 
 ## Corpus Check
-- 309 files · ~637,964 words
+- 306 files · ~527,564 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 9199 nodes · 20724 edges · 331 communities (225 shown, 90 thin omitted)
+- 9186 nodes · 20712 edges · 334 communities (222 shown, 96 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 342 edges (avg confidence: 0.83)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `70b926f1`
+- Built from commit: `9217a9d0`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - pdf.worker.mjs
-- XFAObject
+- getStringOption
 - ConfigNamespace
 - Dict
 - .add
 - cn
 - StringObject
-- shadow
+- .get
 - AnnotationEditorUIManager
 - AnnotationEditor
 - DrawingEditor
-- PdfReader.tsx
+- PdfDocumentView.tsx
 - pdf.mjs
-- .add
+- warn
 - .push
 - AppShell.tsx
 - .success
-- ReaderShell.tsx
+- PdfReader.tsx
 - .getOperatorList
 - ContentObject
-- .getObj
-- EpubReader.tsx
-- CFFParser
+- FormatError
+- epub/epubEngine.ts
+- .add
 - makeBrotliDecode
-- Stream
+- .checkAndRepair
 - lib/bridge.ts
-- warn
+- IccColorSpace
 - services/annotations.rs
 - AnnotationEditorLayer
 - .convert
 - XhtmlObject
 - PDFPageProxy
-- TemplateNamespace
+- XFAObject
 - Comment
 - StampEditor
 - BasePDFStreamReader
@@ -57,16 +57,16 @@
 - .setupMessageHandler
 - CanvasGraphics
 - LibraryView.tsx
-- PdfReader.test.tsx
+- intersectionObserver.ts
 - book_importer.rs
-- EditorAnnotationElement
+- .render
 - CanvasDependencyTracker
 - FontInfo
 - .remove
 - AnnotationStorage
-- .constructor
-- .isEmpty
-- library_scanner.rs
+- calculateSHA512
+- .get
+- pdf/parser.rs
 - ReadiumEpubHandle
 - repository/books.rs
 - session.rs
@@ -80,10 +80,10 @@
 - rpc.rs
 - readiumEngine.ts
 - PDFDocumentProxy
-- .restore
-- .get
+- Option01
+- Annotation
 - find
-- OpenJPEG
+- JBig2
 - setup/fixtures.ts
 - frontend/package.json
 - epubcfi.js
@@ -97,11 +97,11 @@
 - CanvasNestedDependencyTracker
 - .compileGlyph
 - PopupElement
-- .nextChar
-- library_sync.rs
-- index.ts
+- .getToken
 - library_watcher.rs
-- unreachable
+- index.ts
+- ReaderNavigation.tsx
+- BaseCanvasFactory
 - Glyph
 - Reconciler
 - package.json
@@ -111,23 +111,23 @@
 - epub.js
 - $
 - DOMFilterFactory
-- CMap
+- library_scanner.rs
 - bundle
 - mobi.js
-- .has
-- parse
+- .put
+- info
 - epub/metadata.rs
 - tts.js
-- FontInfo
+- assert
 - FontFaceObject
 - SimpleDOMNode
 - view.js
 - KF8
-- .getByte
-- .createDocumentHandler
+- MessageHandler
+- getPdfManager
 - What You Must Do When Invoked
 - repository/collections.rs
-- WidgetAnnotation
+- FontInfo
 - Documentation
 - XMLParserBase
 - vendor/zip.js
@@ -138,17 +138,17 @@
 - JpegImage
 - ColorSpace
 - compilerOptions
-- commands/annotations.rs
+- .bind
 - 4K scrolling performance — implementation plan
 - components.json
 - FixedLayout
 - ColorPicker
-- .getPattern
-- OptionalContentConfig
+- InkDrawOutliner
+- warn
 - LabCS
-- StructTreeRoot
+- dependencies
 - progressMigration.ts
-- LibraryWatcher
+- .wrap
 - EpubReader.test.tsx
 - .constructor
 - fb2.js
@@ -158,7 +158,7 @@
 - getTextRegionHuffmanTables
 - commands/books.rs
 - MOBI
-- .createPatternCanvas
+- OpenJPEG
 - Util
 - ChunkedStream
 - Util
@@ -170,8 +170,8 @@
 - FreeDrawOutliner
 - XmlObject
 - .readBit
-- FormatError
-- book.rs
+- .constructor
+- NewBook
 - Stages
 - 4K scrolling performance — investigation handover
 - MOBI6
@@ -181,26 +181,26 @@
 - artwork_cache.rs
 - Rendering
 - Overlayer
-- .exec
+- getFilenameFromContentDispositionHeader
 - ColorConverters
-- TextLayer
+- .exec
 - Outline
-- .get
+- .process
 - Binder
 - Builder
 - ColorConverters
-- get_reading_progress
+- BasePDFStream
 - services/reader.rs
 - Tables
 - EPUB
 - Loader
-- shortcuts.ts
+- pdfRenderPolicy.test.ts
 - bench-reader.e2e.ts
 - compilerOptions
 - View
 - CanvasExtraState
 - HighlightOutline
-- PDFImage
+- CFFDict
 - AGENTS.md
 - Testing
 - metadata.e2e.ts
@@ -214,16 +214,16 @@
 - Coding standards
 - .#goTo
 - SectionProgress
-- calculateSHA512
+- IdentityCMap
 - CalRGBCS
-- info
+- XhtmlNamespace
 - y
 - commands/reader.rs
 - Reader rendering (Readium TS Toolkit)
 - TuxbooksApi
 - BasePDFStreamReader
 - Datasets
-- warn
+- TextMeasure
 - XFAAttribute
 - extended_epub.rs
 - Architecture
@@ -267,7 +267,7 @@
 - realistic_library_imports_every_book_file
 - epub-reader.e2e.ts
 - progress-migration.e2e.ts
-- BaseException
+- Subform
 - AnnotationBorderStyle
 - ve
 - graphify reference: query, path, explain
@@ -283,23 +283,23 @@
 - quote-image.js
 - epubcfi-tests.js
 - FoliateView
-- .handlePositionChanged
+- .parseXml
 - signature_Signature
 - Stylesheet
 - CursorAutohider
 - .prettierrc.json
-- EPUB fixture corpus
+- Button
 - Coverage gate
 - Confirming comment for WebKit bug 315997
 - .render
 - GlobalColorSpaceCache
-- BaseFilterFactory
-- AlternateCS
+- SimpleXMLParser
+- PostScriptParser
 - graphify reference: add a URL and watch a folder
 - graphify reference: commit hook and native CLAUDE.md integration
 - graphify reference: incremental update and cluster-only
 - coverage-gate.mjs
-- Conformance fixtures (Tier C)
+- PostScriptToken
 - preload.ts
 - Qe
 - opencode.json
@@ -309,7 +309,7 @@
 - check-deb.sh
 - dev-env.sh
 - main.rs
-- Extended fixtures (Tier B)
+- Area
 - brand/README.md
 - extraction-spec.md
 - fetch-pdfium.sh
@@ -319,17 +319,20 @@
 - domain/library.rs
 - tuxbooks
 - library_locations.rs
-- .getLocatorFromSelection
-- DeviceGrayCS
-- DeviceCmykCS
-- DeviceRgbCS
-- MockIntersectionObserver
-- CalGrayCS
+- Br
+- LocalPdfManager
+- xdp_Xdp
+- Body
+- Html
+- I
 - Color
-- .consumeSearch
+- P
 - 0002_books_fts.sql
 - 0005_library_sync.sql
 - 0006_books_fts_extended.sql
+- $root
+- Span
+- Sub
 
 ## God Nodes (most connected - your core abstractions)
 1. `XFAObject` - 217 edges
@@ -346,159 +349,159 @@
 ## Surprising Connections (you probably didn't know these)
 - `openReadyEpub()` --calls--> `openInReader()`  [EXTRACTED]
   e2e/specs/epub-reader.e2e.ts → e2e/specs/helpers.ts
-- `PdfReader()` --indirect_call--> `pdfProgressPayload()`  [INFERRED]
-  frontend/src/components/reader/pdf/PdfReader.tsx → frontend/src/components/reader/readerModel.ts
-- `SheetOverlay()` --calls--> `cn()`  [EXTRACTED]
-  frontend/src/components/ui/sheet.tsx → frontend/src/lib/utils.ts
-- `SheetFooter()` --calls--> `cn()`  [EXTRACTED]
-  frontend/src/components/ui/sheet.tsx → frontend/src/lib/utils.ts
-- `LibraryWatcher` --implements--> `Debug`  [EXTRACTED]
-  src-tauri/src/services/library_watcher.rs → frontend/src/lib/epub/foliate-js/vendor/pdfjs/pdf.worker.mjs
+- `GlobalSearchShortcut()` --calls--> `useShortcut()`  [EXTRACTED]
+  frontend/src/components/layout/AppShell.tsx → frontend/src/lib/shortcuts.ts
+- `SidebarProps` --references--> `LibrarySection`  [EXTRACTED]
+  frontend/src/components/layout/Sidebar.tsx → frontend/src/state/appState.ts
+- `ItemButton()` --calls--> `cn()`  [EXTRACTED]
+  frontend/src/components/layout/Sidebar.tsx → frontend/src/lib/utils.ts
+- `TocRow` --references--> `EpubTocItem`  [EXTRACTED]
+  frontend/src/components/reader/ReaderNavigation.tsx → frontend/src/lib/epub/epubEngine.ts
 
 ## Import Cycles
 - 2-file cycle: `src-tauri/src/epub/metadata.rs -> src-tauri/src/epub/mod.rs -> src-tauri/src/epub/metadata.rs`
 - 2-file cycle: `src-tauri/src/epub/mod.rs -> src-tauri/src/epub/session.rs -> src-tauri/src/epub/mod.rs`
 
-## Communities (331 total, 90 thin omitted)
+## Communities (334 total, 96 thin omitted)
 
 ### Community 0 - "pdf.worker.mjs"
 Cohesion: 0.01
-Nodes (318): $acceptWhitespace, $addHTML, AnnotationActionEventType, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag (+310 more)
+Nodes (316): $acceptWhitespace, $addHTML, AnnotationActionEventType, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag (+308 more)
 
-### Community 1 - "XFAObject"
-Cohesion: 0.01
-Nodes (48): Acrobat, Agent, CalendarSymbols, Common, Config, config_FontInfo, ConnectionSet, CurrencySymbols (+40 more)
+### Community 1 - "getStringOption"
+Cohesion: 0.02
+Nodes (39): Agent, CalendarSymbols, CurrencySymbol, CurrencySymbols, $data, DatePattern, DatePatterns, Day (+31 more)
 
 ### Community 2 - "ConfigNamespace"
 Cohesion: 0.01
-Nodes (79): Acrobat7, ADBE_JSConsole, ADBE_JSDebugger, AddSilentPrint, AddViewerPreferences, _attributes, AutoSave, Cache (+71 more)
+Nodes (79): Acrobat, Acrobat7, ADBE_JSConsole, ADBE_JSDebugger, _attributes, AutoSave, BatchOutput, Cache (+71 more)
 
 ### Community 3 - "Dict"
-Cohesion: 0.06
-Nodes (17): Dict, FakeUnicodeFont, FreeTextAnnotation, getModificationDate(), getPdfColor(), getTrailerDict(), incrementalUpdate(), InkAnnotation (+9 more)
+Cohesion: 0.04
+Nodes (40): ButtonWidgetAnnotation, CaretAnnotation, ChoiceWidgetAnnotation, CircleAnnotation, Dict, ErrorFont, escapeString(), FakeUnicodeFont (+32 more)
 
 ### Community 4 - ".add"
 Cohesion: 0.03
-Nodes (27): AltText, AnnotationElement, bindEvents(), CaretAnnotationElement, CheckboxWidgetAnnotationElement, ChoiceWidgetAnnotationElement, CircleAnnotationElement, FileAttachmentAnnotationElement (+19 more)
+Nodes (30): AnnotationElement, AnnotationElementFactory, bindEvents(), CaretAnnotationElement, CheckboxWidgetAnnotationElement, ChoiceWidgetAnnotationElement, CircleAnnotationElement, FileAttachmentAnnotationElement (+22 more)
 
 ### Community 5 - "cn"
 Cohesion: 0.03
-Nodes (114): BookCard(), BookCardProps, InteractiveBookProps, progressPercentOf(), BookContextMenu(), BookCover(), BookCoverProps, BookListItemProps (+106 more)
+Nodes (127): BookCard(), BookCardProps, InteractiveBookProps, progressPercentOf(), BookContextMenu(), BookContextMenuProps, BookCover(), BookCoverProps (+119 more)
 
 ### Community 6 - "StringObject"
-Cohesion: 0.01
-Nodes (54): Amd, AppearanceFilter, Base, Certificate, config_Picture, connection_set_Uri, ConnectionSetNamespace, Creator (+46 more)
+Cohesion: 0.02
+Nodes (43): Amd, AppearanceFilter, Base, Certificate, config_Picture, connection_set_Uri, ConnectionSet, ConnectionSetNamespace (+35 more)
 
-### Community 7 - "shadow"
-Cohesion: 0.04
-Nodes (17): Catalog, appendIfJavaScriptDict(), FeatureTest, fetchDest(), fetchRemoteDest(), FileAttachmentAnnotation, FileSpec, LocalFunctionCache (+9 more)
+### Community 7 - ".get"
+Cohesion: 0.03
+Nodes (37): Catalog, appendIfJavaScriptDict(), addPageDict(), addPageError(), pagesBeforeRef(), parseNestedOrder(), parseOnOff(), parseOrder() (+29 more)
 
 ### Community 10 - "DrawingEditor"
 Cohesion: 0.03
 Nodes (8): DrawingEditor, DrawingOptions, DrawLayer, DrawnSignatureOptions, HighlightEditor, InkDrawingOptions, SignatureEditor, SignatureOptions
 
-### Community 11 - "PdfReader.tsx"
-Cohesion: 0.04
-Nodes (84): normalizeRect(), useFitWidthScale(), PdfDocumentSnapshot, PdfDocumentState, PdfDocumentStatus, usePdfDocument(), GeometryState, PdfGeometry (+76 more)
+### Community 11 - "PdfDocumentView.tsx"
+Cohesion: 0.05
+Nodes (54): useFitWidthScale(), GeometryState, PdfGeometry, PdfAnchorInfo, PdfScrollTrackingOptions, READING_ANCHOR_RATIO, usePdfScrollTracking(), PdfVirtualization (+46 more)
 
 ### Community 12 - "pdf.mjs"
 Cohesion: 0.02
-Nodes (82): AnnotationActionEventType, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationElementFactory, AnnotationFieldFlag, AnnotationFlag, AnnotationMode (+74 more)
+Nodes (85): AnnotationActionEventType, AnnotationBorderStyleType, AnnotationEditorParamsType, AnnotationEditorType, AnnotationFieldFlag, AnnotationFlag, AnnotationMode, AnnotationReplyType (+77 more)
 
-### Community 13 - ".add"
-Cohesion: 0.07
-Nodes (10): adjustMapping(), AnnotationFactory, compileGlyf(), lineTo(), moveTo(), quadraticCurveTo(), hasGlyph(), getNewAnnotationsMap() (+2 more)
+### Community 13 - "warn"
+Cohesion: 0.05
+Nodes (15): AnnotationFactory, DocumentData, fetchBinaryData(), getFontNameToFileMap, getNewAnnotationsMap(), JpxImage, makeArr(), normalizeBlendMode() (+7 more)
 
 ### Community 14 - ".push"
 Cohesion: 0.05
-Nodes (29): addChildren(), buildHuffmanTable(), parseNestedOrder(), parseOnOff(), parseOrder(), parseRBGroups(), compileType3Glyph(), computeIDs() (+21 more)
+Nodes (38): addChildren(), buildHuffmanTable(), compileType3Glyph(), computeIDs(), computeMD5(), createDataNode(), createDefaultAppearance(), encodeToXmlString() (+30 more)
 
 ### Community 15 - "AppShell.tsx"
-Cohesion: 0.07
-Nodes (56): App(), AppShell(), AppShellProps, Sidebar(), AppAction, AppDispatchContext, AppState, AppStateContext (+48 more)
+Cohesion: 0.05
+Nodes (75): App(), BookDetail(), CollectionDialog(), AppShell(), AppShellProps, GlobalSearchShortcut(), Shell(), ItemButton() (+67 more)
 
 ### Community 16 - ".success"
-Cohesion: 0.02
-Nodes (47): applyAssist(), Area, ariaLabel(), Border, Caption, CheckButton, checkDimensions(), ChoiceList (+39 more)
-
-### Community 17 - "ReaderShell.tsx"
 Cohesion: 0.05
-Nodes (58): annotationRects(), byKind(), DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_COLORS, HighlightColor, highlightCssColor(), PdfHighlightOverlay(), PDF_PLACEHOLDER_PAGE_COUNT (+50 more)
+Nodes (36): applyAssist(), ariaLabel(), Caption, CheckButton, checkDimensions(), ChoiceList, computeBbox(), Corner (+28 more)
+
+### Community 17 - "PdfReader.tsx"
+Cohesion: 0.04
+Nodes (96): annotationRects(), byKind(), DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_COLORS, HighlightColor, highlightCssColor(), isBookmarkAtCfi(), isBookmarkAtPage() (+88 more)
 
 ### Community 18 - ".getOperatorList"
-Cohesion: 0.05
-Nodes (29): addCachedImageOps(), EvalState, getFamilyName(), getFontSubstitution(), getQuadPoints(), getStandardFontName(), getTilingPatternIR(), getTransformMatrix() (+21 more)
+Cohesion: 0.04
+Nodes (28): addCachedImageOps(), BaseLocalCache, BaseShading, CMapFactory, DummyShading, EvalState, getEncoding(), getSymbolsFonts (+20 more)
 
 ### Community 19 - "ContentObject"
 Cohesion: 0.02
-Nodes (23): AlwaysEmbed, BehaviorOverride, BooleanElement, ContentObject, DateElement, DateTime, Decimal, DefaultTypeface (+15 more)
+Nodes (24): AlwaysEmbed, BehaviorOverride, BooleanElement, ContentObject, DateElement, DateTime, DateTimeSymbols, Decimal (+16 more)
 
-### Community 20 - ".getObj"
+### Community 20 - "FormatError"
 Cohesion: 0.06
-Nodes (28): BaseException, CMapFactory, createBuiltInCMap(), expectInt(), expectString(), extendCMap(), InvalidPDFException, isCmd() (+20 more)
+Nodes (29): BaseException, CipherTransform, Cmd, createBuiltInCMap(), expectInt(), expectString(), extendCMap(), FormatError (+21 more)
 
-### Community 21 - "EpubReader.tsx"
-Cohesion: 0.04
-Nodes (60): isBookmarkAtCfi(), isBookmarkAtPage(), isHighlightColor(), ReaderAnnotationController, EpubDocumentSnapshot, EpubDocumentState, EpubDocumentStatus, useEpubDocument() (+52 more)
+### Community 21 - "epub/epubEngine.ts"
+Cohesion: 0.05
+Nodes (24): EpubDocumentSnapshot, EpubDocumentState, EpubDocumentStatus, asString(), EPUB_FONT_FAMILIES, EPUB_MIME_TYPE, EPUB_SCROLLED_SURFACE_MAX_PX, EpubAppearance (+16 more)
 
-### Community 22 - "CFFParser"
-Cohesion: 0.06
-Nodes (15): CFFCharset, CFFDict, CFFFDSelect, CFFHeader, CFFParser, parseFloatOperand(), parseOperand(), readSupplement() (+7 more)
+### Community 22 - ".add"
+Cohesion: 0.08
+Nodes (19): AppearanceStreamEvaluator, CFFFDSelect, CFFParser, parseFloatOperand(), parseOperand(), readSupplement(), compileCharString(), bezierCurveTo() (+11 more)
 
 ### Community 23 - "makeBrotliDecode"
 Cohesion: 0.06
 Nodes (66): GlobalImageCache, makeBrotliDecode(), attachDictionaryChunk(), buildHuffmanTable(), bytesToNibbles(), calculateDistanceAlphabetLimit(), calculateDistanceAlphabetSize(), calculateDistanceLut() (+58 more)
 
-### Community 24 - "Stream"
-Cohesion: 0.04
-Nodes (17): Ascii85Stream, AsciiHexStream, BrotliDecode, BrotliStream, CCITTFaxStream, DecodeStream, DecryptStream, getEexecBlock() (+9 more)
+### Community 24 - ".checkAndRepair"
+Cohesion: 0.02
+Nodes (58): adjustMapping(), Ascii85Stream, AsciiHexStream, BrotliDecode, BrotliStream, bytesToString(), CCITTFaxStream, DecodeStream (+50 more)
 
 ### Community 25 - "lib/bridge.ts"
 Cohesion: 0.06
-Nodes (74): BookContextMenuProps, CreateResult, DropZoneOverlay(), EmptyLibraryState(), ImportStatus(), LibraryHeader(), PROGRESS_SAVE_DEBOUNCE_MS, ReaderProgressOptions (+66 more)
+Nodes (72): DropZoneOverlay(), EmptyLibraryState(), ImportStatus(), LibraryHeader(), PROGRESS_SAVE_DEBOUNCE_MS, ReaderProgressOptions, useReaderProgress(), AnnotationSnapshot (+64 more)
 
-### Community 26 - "warn"
-Cohesion: 0.06
-Nodes (33): addPageError(), CFF, CFFFont, fetchBinaryData(), checkInvalidFunctions(), foldTTTable(), readCmapTable(), readNameTable() (+25 more)
+### Community 26 - "IccColorSpace"
+Cohesion: 0.12
+Nodes (4): CmykICCBasedCS, ColorSpaceUtils, fetchSync(), IccColorSpace
 
 ### Community 27 - "services/annotations.rs"
-Cohesion: 0.07
-Nodes (64): AnnotationRect, Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation, Option, String (+56 more)
+Cohesion: 0.05
+Nodes (82): AnnotationRect, AnnotationDto, AnnotationInput, AnnotationPatchInput, AnnotationRect, create_annotation(), delete_annotation(), list_annotations() (+74 more)
 
 ### Community 29 - ".convert"
-Cohesion: 0.04
-Nodes (39): adjustTrueTypeToUnicode(), adjustType1ToUnicode(), adjustWidths(), amendFallbackToUnicode(), applyStandardFontGlyphMap(), buildToFontChar(), createCmapTable(), createNameTable() (+31 more)
+Cohesion: 0.03
+Nodes (47): adjustTrueTypeToUnicode(), adjustType1ToUnicode(), adjustWidths(), amendFallbackToUnicode(), applyStandardFontGlyphMap(), buildToFontChar(), CFF, CFFFont (+39 more)
 
 ### Community 30 - "XhtmlObject"
-Cohesion: 0.04
-Nodes (21): A, B, Body, Br, Button, checkStyle(), fixURL(), Html (+13 more)
+Cohesion: 0.17
+Nodes (4): B, checkStyle(), Ul, XhtmlObject
 
 ### Community 31 - "PDFPageProxy"
-Cohesion: 0.05
-Nodes (9): AbortException, getReadableStream(), InternalRenderTask, makeObj(), PDFPageProxy, operatorListChanged(), RenderTask, XfaText (+1 more)
+Cohesion: 0.04
+Nodes (11): AbortException, getReadableStream(), getXfaPageViewport(), InternalRenderTask, makeObj(), PageViewport, PDFPageProxy, operatorListChanged() (+3 more)
 
-### Community 32 - "TemplateNamespace"
+### Community 32 - "XFAObject"
 Cohesion: 0.01
-Nodes (66): Arc, Assist, Barcode, BatchOutput, Bind, BindItems, Bookend, Break (+58 more)
+Nodes (71): Arc, Assist, Barcode, Bind, BindItems, Bookend, Border, Break (+63 more)
 
 ### Community 33 - "Comment"
 Cohesion: 0.04
 Nodes (5): Comment, EditorToolbar, FloatingToolbar, stopEvent(), TouchManager
 
 ### Community 34 - "StampEditor"
-Cohesion: 0.07
-Nodes (3): ImageManager, OutputScale, StampEditor
+Cohesion: 0.05
+Nodes (4): AltText, ImageManager, OutputScale, StampEditor
 
 ### Community 35 - "BasePDFStreamReader"
-Cohesion: 0.05
-Nodes (16): BasePDFStreamReader, createResponseError(), ensureResponseOrigin(), ensureResponseStatus(), extractFilenameFromHeader(), fetch_stream_getArrayBuffer(), getResponseOrigin(), isPdfFile() (+8 more)
+Cohesion: 0.04
+Nodes (19): BasePDFStreamRangeReader, BasePDFStreamReader, createResponseError(), ensureResponseOrigin(), ensureResponseStatus(), extractFilenameFromHeader(), fetch_stream_getArrayBuffer(), fetchUrl() (+11 more)
 
 ### Community 36 - "services/metadata.rs"
 Cohesion: 0.14
 Nodes (51): apply_source_metadata(), blank_title_is_rejected(), clean_list(), clean_optional(), clean_required(), clear_book_cover_override(), clearing_a_field_explicitly_overrides_it_to_empty(), cover_override_wins_and_survives_reimport() (+43 more)
 
 ### Community 37 - "ExclGroup"
-Cohesion: 0.10
+Cohesion: 0.11
 Nodes (4): ExclGroup, Image, $setValue, Value
 
 ### Community 38 - "EventEmitter"
@@ -506,20 +509,28 @@ Cohesion: 0.11
 Nodes (38): ImportReport, import_paths(), reconnect_book(), AppState, Book, Result, String, Vec (+30 more)
 
 ### Community 39 - ".setupMessageHandler"
-Cohesion: 0.04
-Nodes (20): dataObj(), endRequests(), fetchData(), fetchUrl(), FontPathInfo, getDocument(), getFactoryUrlProp(), getModificationDate() (+12 more)
+Cohesion: 0.05
+Nodes (17): applyOpacity(), BaseException, dataObj(), endRequests(), FontPathInfo, FormatError, InvalidPDFException, MathClamp() (+9 more)
+
+### Community 40 - "CanvasGraphics"
+Cohesion: 0.05
+Nodes (11): CanvasGraphics, copyCtxState(), drawImageAtIntegerCoords(), getCurrentTransform(), getCurrentTransformInverse(), getImageSmoothingEnabled(), mirrorContextOperations(), putBinaryImageData() (+3 more)
 
 ### Community 41 - "LibraryView.tsx"
-Cohesion: 0.10
-Nodes (37): BookDetail(), formatDate(), BookListItem(), Shell(), SidebarProps, EmptyCollectionState(), LibraryHeaderProps, columnCount() (+29 more)
+Cohesion: 0.12
+Nodes (25): BookListItem(), EmptyCollectionState(), LibraryHeaderProps, columnCount(), LibraryView(), LibraryViewProps, NoSearchResultsState(), NoSearchResultsStateProps (+17 more)
 
-### Community 42 - "PdfReader.test.tsx"
-Cohesion: 0.08
-Nodes (28): estimatePageSizes(), makeDomRect(), scrollTo(), stubScrollGeometry(), fireIntersection(), installMockIntersectionObserver(), intersectionObservers(), resetIntersectionObservers() (+20 more)
+### Community 42 - "intersectionObserver.ts"
+Cohesion: 0.13
+Nodes (9): fireIntersection(), installMockIntersectionObserver(), intersectionObservers(), MockIntersectionObserver, resetIntersectionObservers(), firePreload(), fireVisible(), firePreload() (+1 more)
 
 ### Community 43 - "book_importer.rs"
-Cohesion: 0.13
-Nodes (46): init_pool(), init_pool_is_deterministic_and_idempotent(), Path, Result, SqlitePool, run_migrations(), schema_contains_all_core_tables(), bump() (+38 more)
+Cohesion: 0.10
+Nodes (56): ProgressUpdate, init_pool(), init_pool_is_deterministic_and_idempotent(), Path, Result, SqlitePool, run_migrations(), schema_contains_all_core_tables() (+48 more)
+
+### Community 44 - ".render"
+Cohesion: 0.06
+Nodes (7): AnnotationLayer, BaseSVGFactory, DOMSVGFactory, EditorAnnotationElement, InkAnnotationElement, makeArr(), setLayerDimensions()
 
 ### Community 45 - "CanvasDependencyTracker"
 Cohesion: 0.05
@@ -529,25 +540,29 @@ Nodes (4): BBoxReader, CanvasDependencyTracker, ensureDebugMetadata(), expandBBo
 Cohesion: 0.07
 Nodes (4): assert(), CssFontInfo, FontInfo, SystemFontInfo
 
-### Community 49 - ".constructor"
-Cohesion: 0.07
-Nodes (14): AES128Cipher, AES256Cipher, AESBaseCipher, ARCFourCipher, calculateMD5(), calculateSHA384(), CipherTransformFactory, isArrayEqual() (+6 more)
-
-### Community 50 - ".isEmpty"
+### Community 48 - "AnnotationStorage"
 Cohesion: 0.05
-Nodes (6): BasicColorPicker, ColorManager, FakeEditor, getColorValues(), getRGB(), InkEditor
+Nodes (5): AnnotationStorage, BasicColorPicker, InkEditor, MurmurHash3_64, PrintAnnotationStorage
 
-### Community 51 - "library_scanner.rs"
+### Community 49 - "calculateSHA512"
 Cohesion: 0.07
-Nodes (63): Document, Object, PdfError, Error, String, build_pdf(), decode_pdf_string(), empty_title_field_falls_back_to_file_name() (+55 more)
+Nodes (20): AES128Cipher, AES256Cipher, AESBaseCipher, ARCFourCipher, calculateMD5(), calculateSHA384(), calculateSHA512(), ch() (+12 more)
+
+### Community 50 - ".get"
+Cohesion: 0.07
+Nodes (6): ColorManager, FakeEditor, getColorValues(), getRGB(), LinkAnnotationElement, makeMap()
+
+### Community 51 - "pdf/parser.rs"
+Cohesion: 0.10
+Nodes (39): Document, Object, PdfError, Error, String, build_pdf(), decode_pdf_string(), empty_title_field_falls_back_to_file_name() (+31 more)
 
 ### Community 52 - "ReadiumEpubHandle"
-Cohesion: 0.10
-Nodes (4): ProgressSource, clamp01(), highlightTint(), ReadiumEpubHandle
+Cohesion: 0.07
+Nodes (6): ProgressSource, asString(), clamp01(), highlightTint(), ReadiumEpubHandle, serializeLocator()
 
 ### Community 53 - "repository/books.rs"
 Cohesion: 0.17
-Nodes (39): NewBook, count_books(), delete_book(), delete_cascades_to_reading_progress(), duplicate_path_violates_unique_constraint(), empty_title_is_rejected_by_check_constraint(), find_books_with_size(), find_id_by_path() (+31 more)
+Nodes (38): count_books(), delete_book(), delete_cascades_to_reading_progress(), duplicate_path_violates_unique_constraint(), empty_title_is_rejected_by_check_constraint(), find_books_with_size(), find_id_by_path(), get_book() (+30 more)
 
 ### Community 54 - "session.rs"
 Cohesion: 0.12
@@ -558,12 +573,12 @@ Cohesion: 0.13
 Nodes (38): MigrateError, add_book_to_collection(), create_collection(), delete_collection(), list_collections(), remove_book_from_collection(), AppState, CollectionSummary (+30 more)
 
 ### Community 56 - ".getTextContent"
-Cohesion: 0.05
-Nodes (29): AppearanceStreamEvaluator, BaseLocalCache, CmykICCBasedCS, ColorSpaceUtils, DefaultAppearanceEvaluator, EvaluatorPreprocessor, fetchSync(), IccColorSpace (+21 more)
+Cohesion: 0.09
+Nodes (19): DefaultAppearanceEvaluator, EvaluatorPreprocessor, Intersector, normalizeUnicode(), addFakeSpaces(), appendEOL(), applyInverseRotation(), buildTextContentItem() (+11 more)
 
 ### Community 57 - "unreachable"
-Cohesion: 0.06
-Nodes (11): addHex(), BasePDFStreamRangeReader, BaseStream, BinaryCMapReader, BinaryCMapStream, hexToInt(), hexToStr(), IdentityCMap (+3 more)
+Cohesion: 0.07
+Nodes (4): BasePdfManager, BaseStream, Pattern, unreachable()
 
 ### Community 58 - "foliate-js/package.json"
 Cohesion: 0.05
@@ -586,24 +601,20 @@ Cohesion: 0.09
 Nodes (33): BookBytesArgs, BookIdArgs, BookResourceArgs, CollectionIdArgs, CollectionMemberArgs, CoverArgs, delete_collection_takes_the_bridge_wire_param(), dispatch() (+25 more)
 
 ### Community 63 - "readiumEngine.ts"
-Cohesion: 0.08
-Nodes (22): buildPositions(), EPUB_FONT_FAMILIES, EPUB_MIME_TYPE, EPUB_SCROLLED_SURFACE_MAX_PX, EpubAppearance, EpubFlow, EpubFontFamily, EpubLoadDetail (+14 more)
+Cohesion: 0.07
+Nodes (28): SerializedLocator, buildPositions(), EPUB_FONT_FAMILIES, EPUB_MIME_TYPE, EPUB_SCROLLED_SURFACE_MAX_PX, EpubAppearance, EpubFlow, EpubFontFamily (+20 more)
 
-### Community 65 - ".restore"
-Cohesion: 0.16
-Nodes (7): drawImageAtIntegerCoords(), getCurrentTransform(), getCurrentTransformInverse(), getImageSmoothingEnabled(), mirrorContextOperations(), putBinaryImageData(), putBinaryImageMask()
-
-### Community 66 - ".get"
-Cohesion: 0.05
-Nodes (21): Annotation, CaretAnnotation, CircleAnnotation, collectActions(), generateFont(), getInheritableProperty(), getPdfColorArray(), getRgbColor() (+13 more)
+### Community 65 - "Option01"
+Cohesion: 0.03
+Nodes (20): AddSilentPrint, AddViewerPreferences, Change, CompressLogicalStructure, config_Encrypt, ContentCopy, DocumentAssembly, Embed (+12 more)
 
 ### Community 67 - "find"
 Cohesion: 0.07
 Nodes (13): find(), FontFinder, fonts_getMetrics(), FontSelector, getCurrentPara(), makeObj(), PageSet, selectFont() (+5 more)
 
-### Community 68 - "OpenJPEG"
-Cohesion: 0.08
-Nodes (19): JBig2(), createWasm(), receiveInstance(), postRun(), preRun(), run(), doRun(), OpenJPEG() (+11 more)
+### Community 68 - "JBig2"
+Cohesion: 0.13
+Nodes (11): JBig2(), postRun(), preRun(), run(), doRun(), abort(), initRuntime(), postRun() (+3 more)
 
 ### Community 69 - "setup/fixtures.ts"
 Cohesion: 0.09
@@ -618,8 +629,8 @@ Cohesion: 0.13
 Nodes (33): buildRange(), collapse(), compare(), concatArrays(), escapeCFI(), fake, findIndices(), findTokens() (+25 more)
 
 ### Community 72 - "shadow"
-Cohesion: 0.07
-Nodes (6): ColorScheme, FeatureTest, getXfaPageViewport(), KeyboardManager, PageViewport, shadow()
+Cohesion: 0.16
+Nodes (3): ColorScheme, FeatureTest, shadow()
 
 ### Community 73 - "WorkerTransport"
 Cohesion: 0.07
@@ -642,28 +653,24 @@ Cohesion: 0.09
 Nodes (11): concatTypedArray(), decode, decodeBase64Number(), decoder, DictdDict, DictdIndex, DictZip, Index (+3 more)
 
 ### Community 80 - ".compileGlyph"
-Cohesion: 0.09
-Nodes (11): Commands, CompiledFont, FontRendererFactory, getSubroutineBias(), lookupCmap(), parseCff(), parseGlyfTable(), buildPath() (+3 more)
+Cohesion: 0.10
+Nodes (10): Commands, CompiledFont, FontRendererFactory, getSubroutineBias(), lookupCmap(), parseCff(), parseGlyfTable(), buildPath() (+2 more)
 
-### Community 82 - ".nextChar"
-Cohesion: 0.15
-Nodes (6): decrypt(), decryptAscii(), isHexDigit(), isSpecial(), PostScriptLexer, Type1Parser
-
-### Community 83 - "library_sync.rs"
-Cohesion: 0.18
-Nodes (26): LibraryChange, add_progress(), book_id_stored(), corrupt_file_is_skipped_and_imports_once_fixed(), created_file_is_imported_with_file_snapshot(), deleted_file_marks_book_unavailable_and_preserves_progress(), directory_rename_relinks_all_contained_books(), duplicate_and_rapid_events_reconcile_to_a_stable_state() (+18 more)
+### Community 83 - "library_watcher.rs"
+Cohesion: 0.06
+Nodes (68): Duration, EventKind, FnOnce, Formatter, Debug, LibraryChange, Mutex, RecommendedWatcher (+60 more)
 
 ### Community 84 - "index.ts"
 Cohesion: 0.13
 Nodes (21): bookMime(), COVER_MIME_BY_EXTENSION, coverMime(), coversDir(), createWindow(), DEFAULT_STATE, loadWindowState(), parseRange() (+13 more)
 
-### Community 85 - "library_watcher.rs"
-Cohesion: 0.15
-Nodes (27): EventKind, PathChange, access_and_unknown_events_are_ignored(), classify_event(), close_write_is_a_modification(), create(), duplicate_events_collapse_into_one_change(), event() (+19 more)
+### Community 85 - "ReaderNavigation.tsx"
+Cohesion: 0.12
+Nodes (20): COLOR_ORDER, ReaderAnnotationList(), ReaderAnnotationListProps, flattenOutline(), flattenToc(), OutlineRow, ReaderNavigation(), ReaderNavTab (+12 more)
 
-### Community 86 - "unreachable"
-Cohesion: 0.06
-Nodes (8): BaseCanvasFactory, BasePDFStreamRangeReader, BaseSVGFactory, DOMCanvasFactory, DOMSVGFactory, NodeCanvasFactory, PDFDataTransportStreamRangeReader, unreachable()
+### Community 86 - "BaseCanvasFactory"
+Cohesion: 0.20
+Nodes (3): BaseCanvasFactory, DOMCanvasFactory, NodeCanvasFactory
 
 ### Community 87 - "Glyph"
 Cohesion: 0.07
@@ -671,7 +678,7 @@ Nodes (7): CompositeGlyph, Contour, FontPathInfo, GlyfTable, Glyph, GlyphHeader,
 
 ### Community 88 - "Reconciler"
 Cohesion: 0.18
-Nodes (17): Handle, OnChange, file_stats(), is_book_extension(), is_book_path(), LibraryChange, Reconciler, reconnect_book() (+9 more)
+Nodes (18): Handle, OnChange, file_stats(), is_book_extension(), is_book_path(), LibraryChange, PathChange, Reconciler (+10 more)
 
 ### Community 89 - "package.json"
 Cohesion: 0.06
@@ -686,8 +693,8 @@ Cohesion: 0.07
 Nodes (29): devDependencies, electron, tslib, @types/node, @wdio/cli, @wdio/electron-service, @wdio/local-runner, @wdio/mocha-framework (+21 more)
 
 ### Community 92 - "repository/reading_progress.rs"
-Cohesion: 0.18
-Nodes (27): ProgressUpdate, engine_locator_columns_roundtrip(), get_progress(), mark_finished(), mark_finished_creates_row_for_unread_book(), mark_finished_sets_100_and_preserves_position(), missing_book_violates_foreign_key(), out_of_range_percent_is_invalid_input() (+19 more)
+Cohesion: 0.14
+Nodes (29): get_reading_progress(), mark_book_finished(), ProgressInput, ProgressUpdate, AppState, From, Option, Result (+21 more)
 
 ### Community 93 - "epub.js"
 Cohesion: 0.11
@@ -697,9 +704,13 @@ Nodes (26): camel(), deobfuscate(), deobfuscators(), getAttributes(), getDisplay
 Cohesion: 0.12
 Nodes (19): $, dropTarget, formatContributor(), formatLanguageMap(), formatOneContributor(), getCSS(), listFormat, open() (+11 more)
 
-### Community 96 - "CMap"
-Cohesion: 0.11
-Nodes (3): CMap, convertCidString(), getVerticalPresentationForm
+### Community 95 - "DOMFilterFactory"
+Cohesion: 0.14
+Nodes (3): BaseFilterFactory, DOMFilterFactory, NodeFilterFactory
+
+### Community 96 - "library_scanner.rs"
+Cohesion: 0.20
+Nodes (24): BookParseError, directories_named_like_epub_files_are_ignored(), empty_directory_yields_no_entries(), entries_are_sorted_by_path(), extension_match_is_case_insensitive(), file_as_root_is_not_a_directory(), finds_epub_in_nested_directories_and_ignores_other_files(), has_book_extension() (+16 more)
 
 ### Community 97 - "bundle"
 Cohesion: 0.07
@@ -709,13 +720,9 @@ Nodes (28): app, security, windows, withGlobalTauri, enable, scope, build, befor
 Cohesion: 0.09
 Nodes (25): CDIC_HEADER, countBitsSet(), countUnsetEnd(), decoder, EXTH_HEADER, EXTH_RECORD_TYPE, FDST_HEADER, FONT_HEADER (+17 more)
 
-### Community 99 - ".has"
-Cohesion: 0.07
-Nodes (11): addPageDict(), pagesBeforeRef(), _collectJS(), getParentToUpdate(), isDict(), isName(), isRefsEqual(), makeArr() (+3 more)
-
-### Community 100 - "parse"
-Cohesion: 0.11
-Nodes (10): compileCharString(), bezierCurveTo(), lineTo(), moveTo(), parse(), IndexedCS, MathClamp(), PDFFunction (+2 more)
+### Community 100 - "info"
+Cohesion: 0.13
+Nodes (7): CCITTFaxDecoder, info(), LocalFunctionCache, PDFFunction, PDFFunctionFactory, PostScriptEvaluator, toNumberArray()
 
 ### Community 101 - "epub/metadata.rs"
 Cohesion: 0.19
@@ -725,17 +732,13 @@ Nodes (25): Attributes, BytesStart, HashMap, attribute(), calibre_series_fields_
 Cohesion: 0.12
 Nodes (11): blockTags, fragmentToSSML(), getAlphabet(), getBlocks(), getFragmentWithMarks(), getLang(), getSegmenter(), ListIterator (+3 more)
 
-### Community 103 - "FontInfo"
-Cohesion: 0.07
-Nodes (5): assert(), CssFontInfo, FontInfo, SystemFontInfo, toRomanNumerals()
-
-### Community 104 - "FontFaceObject"
-Cohesion: 0.06
-Nodes (5): FontFaceObject, FontLoader, isFontReady(), completeRequest(), string32()
+### Community 103 - "assert"
+Cohesion: 0.10
+Nodes (4): assert(), CssFontInfo, SystemFontInfo, toRomanNumerals()
 
 ### Community 105 - "SimpleDOMNode"
-Cohesion: 0.09
-Nodes (9): DatasetReader, DatasetXMLParser, decodeString(), isWhitespaceString(), parseXFAPath(), enqueueChunk(), SimpleDOMNode, SimpleXMLParser (+1 more)
+Cohesion: 0.20
+Nodes (3): isWhitespaceString(), enqueueChunk(), SimpleDOMNode
 
 ### Community 106 - "view.js"
 Cohesion: 0.13
@@ -745,33 +748,25 @@ Nodes (15): textWalker(), fetchFile(), getFileEntries(), isCBZ(), isFB2(), isFBZ
 Cohesion: 0.13
 Nodes (7): concatTypedArray(), concatTypedArray3(), getFragmentSelector(), KF8, parsePosURI(), parseResourceURI(), replaceSeries()
 
-### Community 108 - ".getByte"
-Cohesion: 0.10
-Nodes (15): bytesToString(), CipherTransform, findBlock(), getFontFileType(), getHeaderBlock(), getInlineImageCacheKey(), getUuid(), isCFFFile() (+7 more)
+### Community 108 - "MessageHandler"
+Cohesion: 0.13
+Nodes (7): AbortException, MessageHandler, ResponseException, setVerbosityLevel(), UnknownErrorException, WorkerMessageHandler, wrapReason()
 
-### Community 109 - ".createDocumentHandler"
-Cohesion: 0.04
-Nodes (25): AbortException, arrayBuffersToBytes(), BasePdfManager, BasePDFStream, getVerbosityLevel(), LocalPdfManager, MessageHandler, NetworkPdfManager (+17 more)
+### Community 109 - "getPdfManager"
+Cohesion: 0.15
+Nodes (11): NetworkPdfManager, ensureNotTerminated(), finishWorkerTask(), getPdfManager(), loadDocument(), setupDoc(), onFailure(), onSuccess() (+3 more)
 
 ### Community 110 - "What You Must Do When Invoked"
 Cohesion: 0.08
 Nodes (24): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+16 more)
 
 ### Community 111 - "repository/collections.rs"
-Cohesion: 0.22
-Nodes (24): add_book_to_collection(), count_collections(), create_and_count(), create_collection(), delete_collection(), delete_collection_removes_grouping_but_not_books(), duplicate_names_are_rejected(), empty_name_is_invalid() (+16 more)
-
-### Community 112 - "WidgetAnnotation"
-Cohesion: 0.11
-Nodes (8): ButtonWidgetAnnotation, ChoiceWidgetAnnotation, ErrorFont, escapeString(), numberToString(), parseDefaultAppearance(), TextWidgetAnnotation, WidgetAnnotation
+Cohesion: 0.16
+Nodes (30): Collection, CollectionSummary, NewCollection, String, Utc, Vec, add_book_to_collection(), count_collections() (+22 more)
 
 ### Community 113 - "Documentation"
 Cohesion: 0.08
 Nodes (23): Archived Files, Basic Usage, Current Status, Demo, Documentation, EPUB CFI, foliate-js, Generating Images for Quotes (+15 more)
-
-### Community 114 - "XMLParserBase"
-Cohesion: 0.13
-Nodes (3): XFAParser, XMLParserBase, skipWs()
 
 ### Community 115 - "vendor/zip.js"
 Cohesion: 0.09
@@ -782,20 +777,24 @@ Cohesion: 0.16
 Nodes (20): build_fts_query(), empty_query_is_invalid_input(), finds_books_by_description(), finds_books_by_isbn_and_by_file_name(), finds_books_by_publisher(), finds_books_by_title(), match_syntax_is_never_injected_through_user_input(), multi_term_query_requires_every_term() (+12 more)
 
 ### Community 117 - "devDependencies"
-Cohesion: 0.05
-Nodes (40): dependencies, class-variance-authority, clsx, cn, @fontsource-variable/geist, lucide-react, pdfjs-dist, radix-ui (+32 more)
+Cohesion: 0.09
+Nodes (23): devDependencies, eslint, @eslint/js, eslint-plugin-react-hooks, eslint-plugin-react-refresh, globals, jsdom, shadcn (+15 more)
 
-### Community 119 - "PagesMapper"
-Cohesion: 0.14
-Nodes (3): applyOpacity(), MathClamp(), PagesMapper
+### Community 120 - "JpegImage"
+Cohesion: 0.20
+Nodes (3): grayToRGBA(), JpegImage, resizeRgbImage()
+
+### Community 121 - "ColorSpace"
+Cohesion: 0.07
+Nodes (6): AlternateCS, ColorSpace, DeviceGrayCS, DeviceRgbCS, isDefaultDecodeHelper(), PatternCS
 
 ### Community 122 - "compilerOptions"
 Cohesion: 0.09
 Nodes (22): compilerOptions, baseUrl, isolatedModules, jsx, lib, module, moduleDetection, moduleResolution (+14 more)
 
-### Community 123 - "commands/annotations.rs"
-Cohesion: 0.20
-Nodes (18): AnnotationDto, AnnotationInput, AnnotationPatchInput, AnnotationRect, create_annotation(), delete_annotation(), list_annotations(), RectInput (+10 more)
+### Community 123 - ".bind"
+Cohesion: 0.16
+Nodes (4): FontLoader, isFontReady(), completeRequest(), string32()
 
 ### Community 124 - "4K scrolling performance — implementation plan"
 Cohesion: 0.09
@@ -809,25 +808,29 @@ Nodes (21): aliases, components, hooks, lib, ui, utils, iconLibrary, menuAccent 
 Cohesion: 0.18
 Nodes (4): FixedLayout, getViewport(), parseViewport(), TODO: index, overlayer
 
-### Community 129 - "OptionalContentConfig"
-Cohesion: 0.15
-Nodes (3): MurmurHash3_64, OptionalContentConfig, OptionalContentGroup
+### Community 129 - "warn"
+Cohesion: 0.11
+Nodes (6): info(), makePathFromDrawOPS(), OptionalContentConfig, OptionalContentGroup, StatTimer, warn()
 
-### Community 131 - "StructTreeRoot"
-Cohesion: 0.13
-Nodes (3): StructElementNode, StructTreePage, StructTreeRoot
+### Community 130 - "LabCS"
+Cohesion: 0.11
+Nodes (3): CalGrayCS, DeviceCmykCS, LabCS
+
+### Community 131 - "dependencies"
+Cohesion: 0.12
+Nodes (17): dependencies, class-variance-authority, clsx, cn, @fontsource-variable/geist, lucide-react, pdfjs-dist, radix-ui (+9 more)
 
 ### Community 132 - "progressMigration.ts"
 Cohesion: 0.17
 Nodes (20): CfiStep, convertCfiStructure(), convertExact(), convertFoliateRow(), convertSpineElement(), convertSpineProgression(), cssPath(), elementChildren() (+12 more)
 
-### Community 133 - "LibraryWatcher"
-Cohesion: 0.11
-Nodes (16): Duration, FnOnce, Formatter, Debug, Mutex, RecommendedWatcher, flush(), LibraryWatcher (+8 more)
+### Community 133 - ".wrap"
+Cohesion: 0.15
+Nodes (4): CFFCharset, CFFHeader, CFFStrings, Type1Font
 
 ### Community 134 - "EpubReader.test.tsx"
-Cohesion: 0.11
-Nodes (23): EpubRelocateDetail, EpubSearchCallbacks, ReaderProvider(), DEFAULT_READER_PREFERENCES, ReaderContext, ReaderFontFamily, ReaderLayout, ReaderPreferences (+15 more)
+Cohesion: 0.07
+Nodes (34): EpubRelocateDetail, EpubSearchCallbacks, BARE_MODIFIER_KEYS, comboFromEvent(), ShortcutContext, ShortcutHandler, ShortcutRegistry, ReaderProvider() (+26 more)
 
 ### Community 135 - ".constructor"
 Cohesion: 0.13
@@ -838,31 +841,35 @@ Cohesion: 0.16
 Nodes (13): BODY, FB2Converter, getElementText(), makeFB2(), MIME, normalizeWhitespace(), NS, parseXML() (+5 more)
 
 ### Community 139 - ".fill"
-Cohesion: 0.17
-Nodes (4): convertBlackAndWhiteToRGBA(), convertRGBToRGBA(), convertToRGBA(), ImageResizer
+Cohesion: 0.12
+Nodes (6): convertBlackAndWhiteToRGBA(), convertRGBToRGBA(), convertToRGBA(), ImageResizer, PDFImage, resizeImageMask()
 
 ### Community 140 - "getTextRegionHuffmanTables"
-Cohesion: 0.18
-Nodes (8): decodeTablesSegment(), getCustomHuffmanTable(), getStandardTable(), getSymbolDictionaryHuffmanTables(), getTextRegionHuffmanTables(), HuffmanLine, HuffmanTable, HuffmanTreeNode
+Cohesion: 0.15
+Nodes (11): decodeBlock(), decodeMcu(), decodeTablesSegment(), getBlockBufferOffset(), getCustomHuffmanTable(), getStandardTable(), getSymbolDictionaryHuffmanTables(), getTextRegionHuffmanTables() (+3 more)
 
 ### Community 141 - "commands/books.rs"
-Cohesion: 0.16
-Nodes (17): LibraryStats, get_library_stats(), list_books(), remove_book(), AppState, Book, Result, SearchHit (+9 more)
+Cohesion: 0.26
+Nodes (11): LibraryStats, get_library_stats(), list_books(), remove_book(), AppState, Book, Result, SearchHit (+3 more)
 
 ### Community 142 - "MOBI"
 Cohesion: 0.14
 Nodes (6): getString(), getVarLenFromEnd(), isMOBI(), MOBI, PDB, unescapeHTML()
 
+### Community 143 - "OpenJPEG"
+Cohesion: 0.16
+Nodes (8): createWasm(), receiveInstance(), OpenJPEG(), assignWasmExports(), createWasm(), receiveInstance(), getWasmImports(), updateMemoryViews()
+
 ### Community 145 - "ChunkedStream"
-Cohesion: 0.10
-Nodes (3): ChunkedStream, ChunkedStreamManager, MissingDataException
+Cohesion: 0.09
+Nodes (4): arrayBuffersToBytes(), ChunkedStream, ChunkedStreamManager, MissingDataException
 
 ### Community 149 - ".getEntriesGenerator"
 Cohesion: 0.20
 Nodes (14): Bt(), Ct(), et, o(), It(), jt(), kt, Lt() (+6 more)
 
 ### Community 150 - "CFFCompiler"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (3): CFFCompiler, CFFIndex, CFFOffsetTracker
 
 ### Community 152 - "FreeDrawOutliner"
@@ -870,16 +877,12 @@ Cohesion: 0.23
 Nodes (3): FreeDrawOutliner, FreeHighlightOutline, FreeHighlightOutliner
 
 ### Community 154 - ".readBit"
-Cohesion: 0.13
-Nodes (16): ContextCache, decodeBitmap(), decodeBitmapTemplate0(), decodeHalftoneRegion(), decodeIAID(), decodeInteger(), readBits(), decodePatternDictionary() (+8 more)
+Cohesion: 0.12
+Nodes (17): ContextCache, decodeBitmap(), decodeBitmapTemplate0(), decodeHalftoneRegion(), decodeIAID(), decodeInteger(), readBits(), decodeMMRBitmap() (+9 more)
 
-### Community 155 - "FormatError"
-Cohesion: 0.11
-Nodes (7): BaseShading, DummyShading, FlateStream, FormatError, MeshShading, MeshStreamReader, RadialAxialShading
-
-### Community 156 - "book.rs"
-Cohesion: 0.13
-Nodes (15): Book, book_serializes_with_camel_case_keys(), BookFormat, Error, Ok, Option, Result, Self (+7 more)
+### Community 156 - "NewBook"
+Cohesion: 0.14
+Nodes (16): Book, book_serializes_with_camel_case_keys(), BookFormat, NewBook, Error, Ok, Option, Result (+8 more)
 
 ### Community 157 - "Stages"
 Cohesion: 0.12
@@ -898,8 +901,8 @@ Cohesion: 0.16
 Nodes (14): animate(), bisectNode(), easeOutQuad(), getBoundingClientRect(), getVisibleRange(), lerp(), makeRange(), TODO: it should probably allow elements that do not contain text (+6 more)
 
 ### Community 162 - "decodeScan"
-Cohesion: 0.14
-Nodes (23): buildComponentData(), decodeScan(), decodeACFirst(), decodeACSuccessive(), decodeBaseline(), decodeBlock(), decodeDCFirst(), decodeDCSuccessive() (+15 more)
+Cohesion: 0.16
+Nodes (20): buildComponentData(), decodeScan(), decodeACFirst(), decodeACSuccessive(), decodeBaseline(), decodeDCFirst(), decodeDCSuccessive(), decodeHuffman() (+12 more)
 
 ### Community 163 - "artwork_cache.rs"
 Cohesion: 0.28
@@ -909,21 +912,17 @@ Nodes (15): cover_files(), make_covers_dir(), Option, Path, PathBuf, Result, Sql
 Cohesion: 0.13
 Nodes (14): Behavior, Continuous reader architecture (`frontend/src/components/reader/pdf/`), Error handling, Import mapping, In-book search, Outline, PDF layer, Public API (+6 more)
 
-### Community 166 - ".exec"
-Cohesion: 0.20
+### Community 166 - "getFilenameFromContentDispositionHeader"
+Cohesion: 0.46
 Nodes (8): getFilenameFromContentDispositionHeader(), fixupEncoding(), rfc2047decode(), rfc2231getparam(), rfc2616unquote(), rfc5987decode(), textdecode(), toParamRegExp()
 
 ### Community 167 - "ColorConverters"
-Cohesion: 0.18
-Nodes (3): ColorConverters, makeColorComp(), scaleAndClamp()
+Cohesion: 0.14
+Nodes (5): ColorConverters, getModificationDate(), hexNumbers, makeColorComp(), scaleAndClamp()
 
-### Community 168 - "TextLayer"
-Cohesion: 0.12
-Nodes (4): AnnotationLayer, makeArr(), setLayerDimensions(), TextLayer
-
-### Community 170 - ".get"
-Cohesion: 0.16
-Nodes (3): LinkAnnotationElement, makeMap(), PushButtonWidgetAnnotationElement
+### Community 170 - ".process"
+Cohesion: 0.22
+Nodes (6): addHex(), BinaryCMapReader, BinaryCMapStream, hexToInt(), hexToStr(), incHex()
 
 ### Community 172 - "Builder"
 Cohesion: 0.15
@@ -933,9 +932,9 @@ Nodes (3): Builder, Empty, UnknownNamespace
 Cohesion: 0.18
 Nodes (3): ColorConverters, makeColorComp(), scaleAndClamp()
 
-### Community 174 - "get_reading_progress"
-Cohesion: 0.23
-Nodes (12): get_reading_progress(), mark_book_finished(), ProgressInput, ProgressUpdate, AppState, From, Option, Result (+4 more)
+### Community 174 - "BasePDFStream"
+Cohesion: 0.13
+Nodes (4): BasePDFStream, BasePDFStreamRangeReader, PDFWorkerStream, PDFWorkerStreamRangeReader
 
 ### Community 175 - "services/reader.rs"
 Cohesion: 0.31
@@ -953,9 +952,9 @@ Nodes (3): EPUB, getPageSpread(), resolveURL()
 Cohesion: 0.29
 Nodes (3): Loader, pathRelative(), replaceSeries()
 
-### Community 179 - "shortcuts.ts"
-Cohesion: 0.22
-Nodes (11): GlobalSearchShortcut(), BARE_MODIFIER_KEYS, comboFromEvent(), ShortcutContext, ShortcutHandler, ShortcutRegistry, useShortcut(), isEditableTarget() (+3 more)
+### Community 179 - "pdfRenderPolicy.test.ts"
+Cohesion: 0.24
+Nodes (10): MAX_ACTIVE_CANVAS_BYTES, MAX_RENDER_DIMENSION, MAX_RENDER_PIXELS, MAX_RENDER_PIXELS_HARD, RenderRatioOptions, CONTENT_1080P, CONTENT_4K, fitWidth() (+2 more)
 
 ### Community 180 - "bench-reader.e2e.ts"
 Cohesion: 0.19
@@ -964,6 +963,14 @@ Nodes (8): appendTrend(), BenchReport, DragResult, FrameStats, percentile(), rep
 ### Community 181 - "compilerOptions"
 Cohesion: 0.15
 Nodes (12): compilerOptions, lib, module, moduleResolution, noEmit, noFallthroughCasesInSwitch, noUnusedLocals, skipLibCheck (+4 more)
+
+### Community 183 - "CanvasExtraState"
+Cohesion: 0.08
+Nodes (8): applyBoundingBox(), BaseShadingPattern, CachedCanvases, CanvasExtraState, DummyShadingPattern, getShadingPattern(), MeshShadingPattern, RadialAxialShadingPattern
+
+### Community 185 - "CFFDict"
+Cohesion: 0.22
+Nodes (3): CFFDict, CFFPrivateDict, CFFTopDict
 
 ### Community 186 - "AGENTS.md"
 Cohesion: 0.17
@@ -1009,13 +1016,13 @@ Nodes (10): Coding standards, Comments, Commits, Dependencies, Do not over-engin
 Cohesion: 0.24
 Nodes (4): assignIDs(), flatten(), SectionProgress, TOCProgress
 
-### Community 199 - "calculateSHA512"
-Cohesion: 0.32
-Nodes (8): calculateSHA512(), ch(), littleSigma(), littleSigmaPrime(), maj(), sigma(), sigmaPrime(), Word64
+### Community 200 - "CalRGBCS"
+Cohesion: 0.18
+Nodes (3): CalRGBCS, IndexedCS, MathClamp()
 
-### Community 201 - "info"
-Cohesion: 0.31
-Nodes (4): CCITTFaxDecoder, decodeMMRBitmap(), info(), recoverGlyphName()
+### Community 201 - "XhtmlNamespace"
+Cohesion: 0.18
+Nodes (4): Li, Ol, Sup, XhtmlNamespace
 
 ### Community 202 - "y"
 Cohesion: 0.22
@@ -1032,10 +1039,6 @@ Nodes (10): Annotations, Engine seam, In-book search, Position locator, Progress
 ### Community 207 - "Datasets"
 Cohesion: 0.20
 Nodes (3): Datasets, datasets_Data, DatasetsNamespace
-
-### Community 208 - "warn"
-Cohesion: 0.18
-Nodes (4): copyCtxState(), info(), makePathFromDrawOPS(), warn()
 
 ### Community 210 - "extended_epub.rs"
 Cohesion: 0.33
@@ -1173,10 +1176,6 @@ Nodes (6): BookMetadata, MetadataFields, MetadataOverridden, Option, String, Vec
 Cohesion: 0.43
 Nodes (6): count_book_files(), realistic_library(), realistic_library_imports_every_book_file(), Option, Path, PathBuf
 
-### Community 254 - "BaseException"
-Cohesion: 0.15
-Nodes (7): BaseException, FormatError, InvalidPDFException, PasswordException, RenderingCancelledException, ResponseException, UnknownErrorException
-
 ### Community 256 - "ve"
 Cohesion: 0.33
 Nodes (3): te(), ve, p()
@@ -1221,9 +1220,9 @@ Nodes (3): fit(), getBlob(), TODO: lang, vertical writing
 Cohesion: 0.40
 Nodes (4): printWidth, semi, singleQuote, trailingComma
 
-### Community 275 - "EPUB fixture corpus"
-Cohesion: 0.40
-Nodes (5): EPUB fixture corpus, Generation and validation, Layout, Licensing, Parser-facing contract
+### Community 275 - "Button"
+Cohesion: 0.22
+Nodes (4): A, Button, fixURL(), recoverJsURL()
 
 ### Community 276 - "Coverage gate"
 Cohesion: 0.50
@@ -1249,37 +1248,29 @@ Nodes (3): For --cluster-only, For --update (incremental re-extraction), graphif
 Cohesion: 0.50
 Nodes (3): byModule, cov, MODULES
 
-### Community 286 - "Conformance fixtures (Tier C)"
-Cohesion: 0.50
-Nodes (3): Conformance fixtures (Tier C), How it will work, W3C EPUB tests (candidate, not yet pinned)
-
 ### Community 316 - "library_locations.rs"
 Cohesion: 0.36
 Nodes (6): add_location(), list_locations(), Result, SqlitePool, String, Vec
 
-### Community 317 - ".getLocatorFromSelection"
-Cohesion: 0.29
-Nodes (4): SerializedLocator, serializeBuiltLocator(), textAfterRange(), textBeforeRange()
-
 ## Knowledge Gaps
-- **1038 isolated node(s):** `$schema`, `plugin`, `printWidth`, `semi`, `singleQuote` (+1033 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2856 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **90 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **1031 isolated node(s):** `$schema`, `plugin`, `printWidth`, `semi`, `singleQuote` (+1026 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 2847 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **96 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `TemplateNamespace` connect `TemplateNamespace` to `pdf.worker.mjs`, `XFAObject`, `find`, `Dict`, `ExclGroup`, `StringObject`, `AnnotationEditor`, `.fill`, `.createDocumentHandler`, `.success`, `ContentObject`, `XhtmlObject`?**
-  _High betweenness centrality (0.134) - this node is a cross-community bridge._
-- **Why does `AnnotationEditor` connect `AnnotationEditor` to `Comment`, `StampEditor`, `.add`, `.exec`, `shadow`, `AnnotationEditorUIManager`, `DrawingEditor`, `pdf.mjs`, `EditorAnnotationElement`, `.remove`, `AnnotationStorage`, `.isEmpty`, `unreachable`, `AnnotationEditorLayer`?**
-  _High betweenness centrality (0.118) - this node is a cross-community bridge._
-- **Why does `Debug` connect `LibraryWatcher` to `pdf.worker.mjs`, `XFAObject`?**
-  _High betweenness centrality (0.115) - this node is a cross-community bridge._
+- **Why does `TemplateNamespace` connect `XFAObject` to `pdf.worker.mjs`, `getStringOption`, `ConfigNamespace`, `find`, `Dict`, `ExclGroup`, `StringObject`, `Area`, `AnnotationEditor`, `.fill`, `getPdfManager`, `.success`, `Button`, `ContentObject`, `Subform`?**
+  _High betweenness centrality (0.137) - this node is a cross-community bridge._
+- **Why does `Debug` connect `library_watcher.rs` to `pdf.worker.mjs`, `XFAObject`?**
+  _High betweenness centrality (0.125) - this node is a cross-community bridge._
+- **Why does `LibraryWatcher` connect `library_watcher.rs` to `EventEmitter`?**
+  _High betweenness centrality (0.124) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `warn()` (e.g. with `.decode()` and `.decode()`) actually correct?**
   _`warn()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `$schema`, `plugin`, `printWidth` to the rest of the system?**
-  _1038 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _1031 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `pdf.worker.mjs` be split into smaller, more focused modules?**
-  _Cohesion score 0.006842619745845552 - nodes in this community are weakly interconnected._
-- **Should `XFAObject` be split into smaller, more focused modules?**
-  _Cohesion score 0.012841003031138054 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.006865309992449915 - nodes in this community are weakly interconnected._
+- **Should `getStringOption` be split into smaller, more focused modules?**
+  _Cohesion score 0.021992358587270524 - nodes in this community are weakly interconnected._

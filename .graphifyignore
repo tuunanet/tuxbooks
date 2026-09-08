@@ -29,6 +29,15 @@ e2e/.tmp/
 # Real user test library (never part of the repo)
 tests/fixtures/books/EBooks/
 
+# Generated test fixtures (regenerable binaries, not knowledge)
+tests/fixtures/
+
+# Binary images: app icons, brand logos, fixture EPUB assets
+*.png
+
+# Belt-and-braces: workspace node_modules (also gitignored)
+.opencode/node_modules/
+
 # Graphify's own output
 graphify-out/
 
