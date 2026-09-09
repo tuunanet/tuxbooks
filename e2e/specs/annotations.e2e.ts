@@ -39,6 +39,64 @@ async function selectPageOneText(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Selects a deterministic passage inside the EPUB's mounted section frame
+ * and releases the pointer, so the engine reports the selection the same
+ * way a mouse drag ends. Polls until the section frame is mounted (it loads
+ * asynchronously after the reader opens).
+ */
+async function selectEpubSectionText(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const frame = document.querySelector("iframe.readium-navigator-iframe");
+          if (!(frame instanceof HTMLIFrameElement)) return false;
+          const doc = frame.contentDocument;
+          const win = frame.contentWindow;
+          if (!doc || !win) return false;
+          const paragraph = Array.from(doc.querySelectorAll("p")).find((candidate) =>
+            (candidate.textContent ?? "").includes("first chapter"),
+          );
+          const node = paragraph?.firstChild;
+          if (!node) return false;
+          const range = doc.createRange();
+          range.setStart(node, 0);
+          range.setEnd(node, Math.min((node.textContent ?? "").length, 24));
+          const selection = win.getSelection();
+          if (!selection) return false;
+          selection.removeAllRanges();
+          selection.addRange(range);
+          doc.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+          return selection.toString().length > 0;
+        }),
+      { timeout: 30000 },
+    )
+    .toBe(true);
+}
+
+/**
+ * True when a stored highlight is actually painted inside a mounted section
+ * frame — either through the CSS Custom Highlight API (Chromium's default
+ * path) or the toolkit's shadow-DOM overlay fallback.
+ */
+async function epubHighlightPainted(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    for (const frame of document.querySelectorAll("iframe.readium-navigator-iframe")) {
+      if (!(frame instanceof HTMLIFrameElement)) continue;
+      const win = frame.contentWindow;
+      if (!win) continue;
+      const css = win as unknown as { CSS?: { highlights?: Map<string, unknown> } };
+      if ((css.CSS?.highlights?.size ?? 0) > 0) return true;
+      const overlay = frame.contentDocument?.querySelector(
+        '[data-group="highlights"] [data-highlight-id]',
+      );
+      if (overlay !== null && overlay !== undefined) return true;
+    }
+    return false;
+  });
+}
+
 test.describe("reading annotations", () => {
   test("creates a PDF highlight from a selection, attaches a note, and revisits both after reopen", async ({
     page,
@@ -125,6 +183,77 @@ test.describe("reading annotations", () => {
     expect(await textOf(page, "nav-bookmark-0")).toMatch(/Page \d+/);
     await closeReaderNavigation(page);
 
+    await returnToLibrary(page);
+  });
+
+  test("creates an EPUB highlight from a selection and paints it again after reopen and jump", async ({
+    page,
+  }) => {
+    // Order independence: earlier specs in the shared scratch library may
+    // have left highlights on this book — clear them through the bridge
+    // before the reader loads its annotation list.
+    await page.evaluate(async () => {
+      const books = (await window.tuxbooks!.invoke("list_books")) as {
+        id: number;
+        format: string;
+      }[];
+      const epub = books.find((book) => book.format === "epub");
+      if (!epub) throw new Error("no epub book in the scratch library");
+      const annotations = (await window.tuxbooks!.invoke("list_annotations", {
+        bookId: epub.id,
+      })) as { id: number; kind: string }[];
+      for (const annotation of annotations) {
+        if (annotation.kind === "highlight") {
+          await window.tuxbooks!.invoke("delete_annotation", { id: annotation.id });
+        }
+      }
+    });
+
+    await openInReader(page, "A Minimal Book (EPUB)");
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+      timeout: 30000,
+    });
+
+    // Select the fixture's deterministic passage and pick yellow.
+    await selectEpubSectionText(page);
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("highlight-color-yellow").click();
+
+    // The highlight paints right away, in-session.
+    await expect(page.locator("[data-epub-host]")).toHaveAttribute("data-epub-highlights", "1", {
+      timeout: 10000,
+    });
+    await expect.poll(() => epubHighlightPainted(page), { timeout: 10000 }).toBe(true);
+
+    await returnToLibrary(page);
+
+    // Reopen: the stored highlight must paint again with no interaction.
+    // Regression: highlights present before the navigator existed were
+    // queued but never applied once the engine finished loading, so they
+    // stayed invisible for the whole session.
+    await openInReader(page, "A Minimal Book (EPUB)");
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+      timeout: 30000,
+    });
+    const host = page.locator("[data-epub-host]");
+    await expect(host).toHaveAttribute("data-epub-highlights", "1", { timeout: 30000 });
+    await expect.poll(() => epubHighlightPainted(page), { timeout: 30000 }).toBe(true);
+
+    // Jump from the drawer: the row's destination is the painted highlight.
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
+    await page.getByTestId("nav-highlight-jump-0").click();
+    await expect(host).toHaveAttribute("data-epub-highlights", "1", { timeout: 30000 });
+    await expect.poll(() => epubHighlightPainted(page), { timeout: 30000 }).toBe(true);
+
+    // Remove the highlight through the drawer: the reader drops it live
+    // (nothing left behind for the specs that share this library).
+    await openReaderNavigation(page);
+    await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
+    await page.getByTestId("nav-highlight-delete-0").click();
+    await expect(host).toHaveAttribute("data-epub-highlights", "0", { timeout: 10000 });
+
+    await closeReaderNavigation(page);
     await returnToLibrary(page);
   });
 
