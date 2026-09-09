@@ -4,8 +4,8 @@
 //! (scripts/fetch-ebook-fixtures.py, sha256-verified manifest — see
 //! docs/free-ebook-fixtures.md): it lives at `tests/fixtures/books/EBooks`
 //! (files gitignored) or wherever `REALISTIC_LIBRARY_PATH` points. The test
-//! skips with a notice when the path is absent, so CI and fresh clones stay
-//! green.
+//! skips with a notice when no book files are found, so CI and fresh clones
+//! stay green.
 
 use std::path::{Path, PathBuf};
 
@@ -14,8 +14,9 @@ use tuxbooks_lib::services::book_importer::import_directory;
 use tuxbooks_lib::services::library_scanner::scan_directory;
 use tuxbooks_lib::services::search::search_books;
 
-/// Resolves the realistic library location, or `None` when the user has not
-/// placed one on this machine.
+/// Resolves the realistic library location, or `None` when no corpus is
+/// present on this machine (missing path, or an empty checkout like CI where
+/// only `manifest.json` is tracked).
 fn realistic_library() -> Option<PathBuf> {
     let from_env = std::env::var("REALISTIC_LIBRARY_PATH")
         .ok()
@@ -23,7 +24,7 @@ fn realistic_library() -> Option<PathBuf> {
     let path = from_env.map(PathBuf::from).unwrap_or_else(|| {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/books/EBooks")
     });
-    path.is_dir().then_some(path)
+    (path.is_dir() && count_book_files(&path) > 0).then_some(path)
 }
 
 /// Every .epub/.pdf file on disk (recursive), the size the import must account for.

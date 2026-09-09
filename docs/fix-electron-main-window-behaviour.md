@@ -5,7 +5,7 @@
 
 This plan addresses the current desktop-shell issues visible in the supplied screenshots and the corresponding Electron implementation. The goal is to make TuxBooks behave like a normal polished desktop application before adding further reader/library features.
 
-The current Electron main process already has explicit window-state persistence and creates the `BrowserWindow` with `show: false`, a `1100 × 720` default, and persisted `x/y/width/height/maximized` state.  The renderer sidebar currently displays lowercase `tuxbooks`.  Electron packaging already contains a complete TuxBooks icon set under `build/icons`, and electron-builder already points Linux packaging at that icon directory.
+The current Electron main process already has explicit window-state persistence and creates the `BrowserWindow` with `show: false`, a `1100 × 720` default, and persisted `x/y/width/height/maximized` state. The renderer sidebar currently displays lowercase `tuxbooks`. Electron packaging already contains a complete TuxBooks icon set under `build/icons`, and electron-builder already points Linux packaging at that icon directory.
 
 ---
 
@@ -33,13 +33,13 @@ Do **not** solve this by building a custom HTML/CSS title bar.
 
 The current application already uses a normal framed Electron `BrowserWindow`, which is exactly what we want for standard Linux desktop behavior. The native frame should remain responsible for:
 
-* title bar
-* minimize
-* maximize/restore
-* close
-* native drag behavior
-* native window resizing
-* compositor/window-manager integration
+- title bar
+- minimize
+- maximize/restore
+- close
+- native drag behavior
+- native window resizing
+- compositor/window-manager integration
 
 Electron explicitly exposes native `BrowserWindow` properties such as `title`, `icon`, `width`, `height`, `minWidth`, `minHeight`, and `center`. ([GitHub][1])
 
@@ -71,9 +71,9 @@ The Electron API explicitly distinguishes the native window title from the web-p
 
 When the application is running:
 
-* the Linux title bar says `TuxBooks`
-* no visible native window title says `tuxbooks`
-* opening a reader must not change the title unexpectedly unless a future feature intentionally introduces document titles
+- the Linux title bar says `TuxBooks`
+- no visible native window title says `tuxbooks`
+- opening a reader must not change the title unexpectedly unless a future feature intentionally introduces document titles
 
 ---
 
@@ -281,16 +281,16 @@ The expected behavior should be:
 
 ### Normal window
 
-* cursor at left/right/top/bottom borders → resize cursor
-* cursor at corners → diagonal resize cursor
-* drag border → window resizes
-* drag corner → width and height change together
+- cursor at left/right/top/bottom borders → resize cursor
+- cursor at corners → diagonal resize cursor
+- drag border → window resizes
+- drag corner → width and height change together
 
 ### Maximized window
 
-* borders are not resize handles
-* native maximize/restore control restores the window
-* after restore, resize handles immediately work again
+- borders are not resize handles
+- native maximize/restore control restores the window
+- after restore, resize handles immediately work again
 
 ### Maximize → restore sequence
 
@@ -325,14 +325,14 @@ The current `BrowserWindow` does not intentionally disable resizing, so the agen
 Investigate:
 
 ```ts
-resizable
-maximizable
-minimizable
-fullscreen
-fullscreenable
-frame
-titleBarStyle
-titleBarOverlay
+resizable;
+maximizable;
+minimizable;
+fullscreen;
+fullscreenable;
+frame;
+titleBarStyle;
+titleBarOverlay;
 ```
 
 and verify there is no CSS/renderer element accidentally intercepting native window-edge interaction.
@@ -358,12 +358,12 @@ or another empirically justified value.
 
 The agent should test the minimum dimensions against:
 
-* library view
-* sidebar
-* book detail
-* reader
-* settings
-* dialogs/overlays
+- library view
+- sidebar
+- book detail
+- reader
+- settings
+- dialogs/overlays
 
 The application must never reach a state where the main UI becomes unusable because the native window can be shrunk too far.
 
@@ -374,13 +374,13 @@ The application must never reach a state where the main UI becomes unusable beca
 The existing startup intentionally uses:
 
 ```ts
-show: false
+show: false;
 ```
 
 and waits for:
 
 ```ts
-ready-to-show
+ready - to - show;
 ```
 
 before showing the window. That behavior should be retained because it avoids displaying an obviously incomplete window.
@@ -455,9 +455,9 @@ function appIconPath(): string {
 
 The helper should work in:
 
-* development
-* packaged Linux build
-* Playwright/E2E test environment
+- development
+- packaged Linux build
+- Playwright/E2E test environment
 
 The resulting configuration should be conceptually:
 
@@ -519,11 +519,11 @@ The agent should verify that changing `productName` does not unintentionally alt
 
 A packaged Linux build should show **TuxBooks** consistently in:
 
-* window title
-* desktop/application launcher
-* application/taskbar representation
-* package metadata where human-readable
-* application icon
+- window title
+- desktop/application launcher
+- application/taskbar representation
+- package metadata where human-readable
+- application icon
 
 The agent should inspect at least:
 
@@ -646,13 +646,13 @@ Also test with the actual desktop environment used for development, including Wa
 
 Do **not**:
 
-* build a custom title bar
-* create JavaScript resize handles
-* implement custom maximize/restore buttons
-* manipulate window dimensions from React
-* introduce a window-management library
-* add platform-specific hacks before reproducing the problem
-* rename technical identifiers unnecessarily
+- build a custom title bar
+- create JavaScript resize handles
+- implement custom maximize/restore buttons
+- manipulate window dimensions from React
+- introduce a window-management library
+- add platform-specific hacks before reproducing the problem
+- rename technical identifiers unnecessarily
 
 The desired end state is a small amount of correct Electron configuration backed by native window-manager behavior.
 
