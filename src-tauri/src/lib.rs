@@ -128,37 +128,49 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         debounce: Duration::from_millis(600),
     })?;
 
-    // Incremental startup reconciliation: watched locations are
-    // diffed against the database (only new/changed files parse), so
-    // events missed while the app was closed are caught up here.
+    // Incremental startup reconciliation: watched locations are diffed
+    // against the database (only new/changed files parse), so events missed
+    // while the app was closed are caught up here. Registration of the
+    // watched roots stays synchronous — the method table going live must
+    // never outrun the watcher (a file added in that window would go unseen
+    // until an unrelated event). The diff walk itself is background work:
+    // the UI consumes `library-changed` events live, so catch-up does not
+    // need to block `service ready` (and with it, the whole window).
     let locations = crate::repository::library_locations::list_locations(&pool).await?;
-    for location in locations {
-        let root = Path::new(&location);
-        // Errors are logged inside; a missing location skips cleanly.
-        let _ignored = reconciler.reconcile_location(root).await;
-        watcher.watch(root);
+    for location in &locations {
+        watcher.watch(Path::new(location));
     }
 
     // The test library is registered like a user import so E2E can
     // exercise live synchronization against a real watched root.
+    let mut catchup_roots = locations;
     if let Ok(library_root) = std::env::var("TEST_LIBRARY_PATH") {
         if !library_root.is_empty() {
             crate::repository::library_locations::add_location(&pool, &library_root).await?;
-            let _ignored = reconciler
-                .reconcile_location(Path::new(&library_root))
-                .await;
             watcher.watch(Path::new(&library_root));
+            catchup_roots.push(library_root);
         }
     }
 
-    // Artwork-cache GC (milestone 4): content-addressed covers stop
-    // being referenced when their source changes or their book is
-    // removed; unreferenced files are swept once at startup.
-    match services::artwork_cache::sweep_unreferenced_covers(&pool, &covers_dir(&db_path)).await {
-        Ok(0) => {}
-        Ok(removed) => eprintln!("swept {removed} unreferenced cover file(s)"),
-        Err(err) => eprintln!("cover sweep failed: {err}"),
-    }
+    // Artwork-cache GC (milestone 4): content-addressed covers stop being
+    // referenced when their source changes or their book is removed;
+    // unreferenced files are swept once at startup, after the catch-up walk
+    // (a new book's cover file exists before its row commits — sweeping
+    // first could race an in-flight import).
+    let reconciler = reconciler.clone();
+    let reconciler_pool = pool.clone();
+    let covers = covers_dir(&db_path);
+    tokio::spawn(async move {
+        for root in catchup_roots {
+            // Errors are logged inside; a missing location skips cleanly.
+            let _ignored = reconciler.reconcile_location(Path::new(&root)).await;
+        }
+        match services::artwork_cache::sweep_unreferenced_covers(&reconciler_pool, &covers).await {
+            Ok(0) => {}
+            Ok(removed) => eprintln!("swept {removed} unreferenced cover file(s)"),
+            Err(err) => eprintln!("cover sweep failed: {err}"),
+        }
+    });
 
     Ok(AppState {
         db: pool,

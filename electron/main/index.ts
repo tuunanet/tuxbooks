@@ -13,6 +13,13 @@ import { locateSidecar, RpcFailure, Sidecar, SidecarError } from "./sidecar";
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:1420";
 
+// Startup segment timing (dev diagnosis): where the boot latency sits —
+// Electron init, sidecar readiness, or the renderer's first mount.
+const BOOT_START = performance.now();
+const bootElapsed = (label: string): void => {
+  console.log(`[startup] ${label} +${Math.round(performance.now() - BOOT_START)}ms`);
+};
+
 // CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
 
 /**
@@ -525,6 +532,7 @@ function createWindow(
           return;
         }
         console.log("[boot] renderer mounted");
+        bootElapsed("renderer mounted");
         if (state.probe !== undefined) {
           console.log(`[boot] tuxbooks://book/1 -> ${state.probe}`);
         }
@@ -599,6 +607,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 }
 
 app.whenReady().then(() => {
+  bootElapsed("app ready");
   // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
   // per-run file, so E2E diagnosis works from CI artifacts alone.
   const debugLogPath =
@@ -637,6 +646,7 @@ app.whenReady().then(() => {
   sidecar
     .start()
     .then(() => {
+      bootElapsed("sidecar healthy");
       debugLog("sidecar healthy; creating window");
       createWindow(sidecar, forward);
     })

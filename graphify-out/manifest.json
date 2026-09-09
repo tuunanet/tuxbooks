@@ -1470,9 +1470,9 @@
     "semantic_hash": ""
   },
   "docs/electron-migration.md": {
-    "mtime": 1788920746.9514894,
-    "seen": 1788920762.4562511,
-    "ast_hash": "e1b5c77b8013e0c240fc1cbf8262b2c4",
+    "mtime": 1788920764.4199827,
+    "seen": 1788920946.085699,
+    "ast_hash": "3add2829b3a295f8f9a4fb4b42f8a70e",
     "semantic_hash": ""
   },
   "docs/epub.md": {
@@ -1488,9 +1488,9 @@
     "semantic_hash": ""
   },
   "docs/performance.md": {
-    "mtime": 1788920621.2969685,
-    "seen": 1788920762.4562578,
-    "ast_hash": "1acda59753fbd7bbe39ef222b455bcc4",
+    "mtime": 1788920764.4903815,
+    "seen": 1788920946.0857053,
+    "ast_hash": "a85c4db20997b92f0c49da1ab0e56073",
     "semantic_hash": ""
   },
   "docs/plans/performance-4k-plan.md": {
