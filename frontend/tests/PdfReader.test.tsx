@@ -345,8 +345,11 @@ describe("PdfReader book switching", () => {
 
     // The previous document is destroyed the moment the book changes, and
     // its reading surface leaves instead of lingering while the next loads.
+    // Assert the loading surface synchronously: the mocked open resolves on
+    // a microtask, and awaiting findBy first lets it swap loading out for
+    // the next canvas, detaching the node before the membership check runs.
     expect(closeDocumentMock).toHaveBeenCalledWith(docA);
-    expect(await screen.findByTestId("pdf-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-loading")).toBeInTheDocument();
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
     expect(openDocumentMock).toHaveBeenNthCalledWith(2, 8, "pdf");
