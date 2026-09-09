@@ -156,7 +156,9 @@ highlight by locator, re-applied when the engine mounts a section.
 Creation runs through real text selections (the selection's canonical
 locator is requested from the engine; the pending selection is kept as a
 cloned `Range`, never pixels). Bookmarks persist the current relocate
-locator.
+locator. The shared selection toolbar creates highlights only — EPUB
+selections never target an existing highlight, so recolor and removal stay
+in the navigation drawer.
 
 ### Security
 

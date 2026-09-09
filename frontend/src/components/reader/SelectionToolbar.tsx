@@ -1,25 +1,37 @@
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { HIGHLIGHT_COLORS, type HighlightColor } from "./annotationModel";
+import {
+  HIGHLIGHT_COLORS,
+  type HighlightAction,
+  type HighlightColor,
+  type ReaderSelection,
+} from "./annotationModel";
 
 const COLOR_ORDER: HighlightColor[] = ["yellow", "green", "blue", "red", "purple"];
 
 interface SelectionToolbarProps {
-  /** The live selection's text; null when nothing is selected. */
-  selection: { text: string } | null;
-  /** Creates a persistent highlight in the chosen color. */
-  onCreate: (color: HighlightColor) => void;
-  /** Dismisses the selection without creating anything. */
+  /** The live selection or clicked highlight; null when nothing is active. */
+  selection: ReaderSelection | null;
+  /**
+   * Applies a highlight action: a color choice creates from a fresh
+   * selection or recolors the targeted highlight, `remove` deletes the
+   * targeted highlight annotation.
+   */
+  onAction: (action: HighlightAction) => void;
+  /** Dismisses the selection without changing anything. */
   onDismiss: () => void;
 }
 
 /**
  * Floating actions for a text selection in the reading surface: one swatch
- * per highlight color. The active reader owns the selection itself; this
- * bar only offers the choice of color and reports it back.
+ * per highlight color, plus — when the selection or click targets an
+ * existing highlight — a distinct Remove action that deletes the
+ * annotation. The active reader owns the selection itself; this bar only
+ * reports the chosen action back.
  */
-export function SelectionToolbar({ selection, onCreate, onDismiss }: SelectionToolbarProps) {
+export function SelectionToolbar({ selection, onAction, onDismiss }: SelectionToolbarProps) {
   if (!selection) return null;
+  const editing = selection.highlightId !== null;
   return (
     <div
       data-testid="selection-toolbar"
@@ -38,13 +50,26 @@ export function SelectionToolbar({ selection, onCreate, onDismiss }: SelectionTo
           key={color}
           type="button"
           data-testid={`highlight-color-${color}`}
-          aria-label={`Highlight in ${color}`}
-          title={`Highlight in ${color}`}
-          onClick={() => onCreate(color)}
+          aria-label={editing ? `Change highlight to ${color}` : `Highlight in ${color}`}
+          title={editing ? `Change highlight to ${color}` : `Highlight in ${color}`}
+          onClick={() => onAction({ type: "setColor", color })}
           className="size-5 shrink-0 rounded-full border border-black/20 outline-none hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
           style={{ background: HIGHLIGHT_COLORS[color] }}
         />
       ))}
+      {editing && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          data-testid="highlight-remove"
+          aria-label="Remove highlight"
+          title="Remove highlight"
+          className="text-destructive hover:text-destructive"
+          onClick={() => onAction({ type: "remove" })}
+        >
+          <Trash2 />
+        </Button>
+      )}
       <Button variant="ghost" size="icon-sm" aria-label="Dismiss selection" onClick={onDismiss}>
         <X />
       </Button>

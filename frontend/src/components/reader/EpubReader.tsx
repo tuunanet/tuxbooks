@@ -10,7 +10,7 @@ import {
 } from "@/lib/epub/readiumEngine";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
-import { highlightCssColor, isHighlightColor } from "./annotationModel";
+import { highlightCssColor, isHighlightColor, type ReaderSelection } from "./annotationModel";
 import {
   epubProgressPayload,
   type EpubLocator,
@@ -46,8 +46,12 @@ interface EpubReaderProps {
   highlights?: Annotation[];
   /** Persists a highlight created from a text selection. */
   onCreateHighlight?: (input: AnnotationInput) => void;
-  /** Reports the current selection's text; null when nothing is selected. */
-  onSelectionChange?: (selection: { text: string } | null) => void;
+  /**
+   * Reports the current selection's text; null when nothing is selected.
+   * EPUB selections never target an existing highlight from the toolbar —
+   * highlight editing lives in the navigation drawer.
+   */
+  onSelectionChange?: (selection: ReaderSelection | null) => void;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
@@ -146,7 +150,9 @@ export function EpubReader({
   useEffect(() => {
     if (!handle) return;
     return handle.onSelection((selection) => {
-      onSelectionChangeRef.current?.(selection.text === "" ? null : { text: selection.text });
+      onSelectionChangeRef.current?.(
+        selection.text === "" ? null : { text: selection.text, highlightId: null },
+      );
     });
   }, [handle]);
 

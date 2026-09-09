@@ -3,7 +3,13 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
-import { isHighlightColor, normalizeRect } from "../annotationModel";
+import {
+  isHighlightColor,
+  highlightAtPoint,
+  highlightForSelection,
+  normalizeRect,
+  type ReaderSelection,
+} from "../annotationModel";
 import {
   parsePdfProgress,
   pdfProgressPayload,
@@ -96,8 +102,12 @@ interface PdfReaderProps {
   highlights?: Annotation[];
   /** Persists a highlight created from a text selection. */
   onCreateHighlight?: (input: AnnotationInput) => void;
-  /** Reports the current selection's text; null when nothing is selected. */
-  onSelectionChange?: (selection: { text: string } | null) => void;
+  /**
+   * Reports the current selection — or a plain click on an existing
+   * highlight — with the highlight it targets, if any; null when nothing
+   * is active.
+   */
+  onSelectionChange?: (selection: ReaderSelection | null) => void;
 }
 
 /**
@@ -264,11 +274,32 @@ export function PdfReader({
     onDone: onSearchDone ?? (() => {}),
   });
 
+  // Persisted highlights grouped by page, kept reachable for the selection
+  // handler through a ref: the handler must resolve highlight overlap
+  // against the live list without re-registering its listeners (which
+  // would drop a pending selection mid-creation).
+  const highlightsByPage = useMemo(() => {
+    const byPage = new Map<number, Annotation[]>();
+    for (const highlight of highlights) {
+      if (highlight.pageNumber === null) continue;
+      const list = byPage.get(highlight.pageNumber) ?? [];
+      list.push(highlight);
+      byPage.set(highlight.pageNumber, list);
+    }
+    return byPage;
+  }, [highlights]);
+  const highlightsByPageRef = useRef(highlightsByPage);
+  useEffect(() => {
+    highlightsByPageRef.current = highlightsByPage;
+  });
+
   // Text selections on the text layers become highlight candidates. Page,
   // text, and normalized rects are all captured as soon as the selection
   // settles — a click on the toolbar's color swatch collapses the native
   // selection, so creation must not depend on it. Rects are normalized to
-  // page space, which keeps them valid across later scroll and zoom.
+  // page space, which keeps them valid across later scroll and zoom. A
+  // collapsed pointer (plain click) instead resolves the highlight under
+  // the pointer, so the toolbar can recolor or remove an existing one.
   const pendingSelectionRef = useRef<{
     page: number;
     text: string;
@@ -290,16 +321,47 @@ export function PdfReader({
       ) {
         return;
       }
+      // The event's target and pointer position survive the deferral; the
+      // selection itself must be read after it settles.
+      const clickTarget = event.target instanceof Element ? event.target : null;
+      const pointer = event as Partial<PointerEvent>;
+      const clickX = typeof pointer.clientX === "number" ? pointer.clientX : 0;
+      const clickY = typeof pointer.clientY === "number" ? pointer.clientY : 0;
       window.setTimeout(() => {
         const selection = window.getSelection();
-        const text = selection?.toString().replace(/\s+/g, " ").trim() ?? "";
-        if (
-          !selection ||
-          selection.isCollapsed ||
-          selection.rangeCount === 0 ||
-          text === "" ||
-          !pdfDocument
-        ) {
+        if (!selection || selection.rangeCount === 0 || !pdfDocument) {
+          pendingSelectionRef.current = null;
+          onSelectionChangeRef.current?.(null);
+          return;
+        }
+        if (selection.isCollapsed) {
+          // Plain click: address the existing highlight under the pointer,
+          // if any, so the toolbar offers recolor and removal for it.
+          pendingSelectionRef.current = null;
+          const slot = clickTarget?.closest("[data-pdf-slot]") ?? null;
+          const page = Number(slot?.getAttribute("data-pdf-slot"));
+          const slotRect = slot?.getBoundingClientRect();
+          const clicked =
+            slot &&
+            slotRect &&
+            Number.isInteger(page) &&
+            page >= 1 &&
+            slotRect.width > 0 &&
+            slotRect.height > 0
+              ? highlightAtPoint(
+                  highlightsByPageRef.current.get(page) ?? [],
+                  page,
+                  (clickX - slotRect.left) / slotRect.width,
+                  (clickY - slotRect.top) / slotRect.height,
+                )
+              : null;
+          onSelectionChangeRef.current?.(
+            clicked === null ? null : { text: clicked.text ?? "", highlightId: clicked.id },
+          );
+          return;
+        }
+        const text = selection.toString().replace(/\s+/g, " ").trim();
+        if (text === "") {
           pendingSelectionRef.current = null;
           onSelectionChangeRef.current?.(null);
           return;
@@ -327,7 +389,14 @@ export function PdfReader({
           return;
         }
         pendingSelectionRef.current = { page, text, rects };
-        onSelectionChangeRef.current?.({ text });
+        // Re-selecting highlighted text addresses that highlight (largest
+        // overlap) instead of stacking a new one on top.
+        const targeted = highlightForSelection(
+          highlightsByPageRef.current.get(page) ?? [],
+          page,
+          rects,
+        );
+        onSelectionChangeRef.current?.({ text, highlightId: targeted?.id ?? null });
       }, 0);
     };
     document.addEventListener("pointerup", readSelection);
@@ -388,17 +457,6 @@ export function PdfReader({
       adapterRef.current = null;
     };
   }, [adapterRef, pdfDocument, searchController]);
-
-  const highlightsByPage = useMemo(() => {
-    const byPage = new Map<number, Annotation[]>();
-    for (const highlight of highlights) {
-      if (highlight.pageNumber === null) continue;
-      const list = byPage.get(highlight.pageNumber) ?? [];
-      list.push(highlight);
-      byPage.set(highlight.pageNumber, list);
-    }
-    return byPage;
-  }, [highlights]);
 
   const slots = useMemo(
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Annotation } from "@/types/domain";
 
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
@@ -616,5 +617,197 @@ describe("Reader book switching", () => {
     expect(fakeEpubHandles).toHaveLength(1);
     expect(fakeEpubHandles[0]!.close).toHaveBeenCalledTimes(1);
     expect(fakeEpubHandles[0]!.hostElement.isConnected).toBe(false);
+  });
+});
+
+describe("Reader highlight toolbar", () => {
+  const SELECTION_RECT = { x: 0.125, y: 0.125, width: 0.25, height: 0.0625 };
+  let selectionSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  afterEach(() => {
+    selectionSpy?.mockRestore();
+    selectionSpy = null;
+  });
+
+  function renderPdfShell({
+    highlights = [],
+    createResponse = makeAnnotation(),
+    updateResponse = null,
+  }: {
+    highlights?: Annotation[];
+    createResponse?: Annotation | null;
+    updateResponse?: Annotation | null;
+  } = {}) {
+    vi.mocked(openPdfDocumentFromBook).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocumentFromBook>>,
+    );
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [
+        makeBook({
+          id: 1,
+          format: "pdf",
+          path: "/tmp/library/minimal.pdf",
+          title: "A Minimal PDF",
+        }),
+      ],
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: highlights,
+      create_annotation: createResponse,
+      update_annotation: updateResponse,
+      delete_annotation: true,
+    });
+    return render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+          metadataEditorBookId: null,
+        }}
+      />,
+    );
+  }
+
+  /**
+   * Stubs page 1's slot geometry and returns dispatchers for a drag-made
+   * selection and a plain click on the page, both read back through a
+   * mocked window.getSelection like the real reader does after pointerup.
+   */
+  async function stubPageOnePointer() {
+    await screen.findByTestId("pdf-canvas");
+    const pageSlot = document.querySelector('[data-pdf-slot="1"]') as HTMLElement;
+    pageSlot.getBoundingClientRect = () => new DOMRect(0, 0, 512, 512);
+    const anchor = document.createElement("span");
+    pageSlot.appendChild(anchor);
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+    const dragSelection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => "selected words",
+      getRangeAt: () => ({ getClientRects: () => [new DOMRect(64, 64, 128, 32)] }),
+      removeAllRanges: vi.fn(),
+    };
+    const collapsedSelection = {
+      isCollapsed: true,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => "",
+      removeAllRanges: vi.fn(),
+    };
+    selectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue(dragSelection as unknown as Selection);
+    return {
+      async drag() {
+        selectionSpy!.mockReturnValue(dragSelection as unknown as Selection);
+        fireEvent.pointerUp(anchor);
+        await tick();
+      },
+      async click(x: number, y: number) {
+        selectionSpy!.mockReturnValue(collapsedSelection as unknown as Selection);
+        fireEvent.pointerUp(anchor, { clientX: x, clientY: y });
+        await tick();
+      },
+    };
+  }
+
+  it("creates a highlight from a fresh selection and removes it from the palette", async () => {
+    renderPdfShell({
+      createResponse: makeAnnotation({
+        id: 4,
+        kind: "highlight",
+        pageNumber: 1,
+        color: "yellow",
+        text: "selected words",
+        rects: [SELECTION_RECT],
+      }),
+    });
+    const pointer = await stubPageOnePointer();
+
+    // A fresh selection has no highlight to target: swatches create.
+    await pointer.drag();
+    expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
+    expect(screen.queryByTestId("highlight-remove")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("highlight-color-yellow"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("create_annotation", {
+        bookId: 1,
+        annotation: {
+          kind: "highlight",
+          pageNumber: 1,
+          rects: [SELECTION_RECT],
+          text: "selected words",
+          color: "yellow",
+        },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
+
+    // Selecting the highlighted text again targets it: the palette now
+    // offers Remove, which deletes the annotation itself.
+    await pointer.drag();
+    expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("highlight-remove"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 4 }));
+    await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
+
+    // The text is selectable again and no highlight is targeted.
+    await pointer.drag();
+    expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
+    expect(screen.queryByTestId("highlight-remove")).not.toBeInTheDocument();
+  });
+
+  it("recolors an existing highlight instead of stacking a new one", async () => {
+    const stored = makeAnnotation({
+      id: 7,
+      kind: "highlight",
+      pageNumber: 1,
+      color: "yellow",
+      text: "selected words",
+      rects: [SELECTION_RECT],
+    });
+    renderPdfShell({ highlights: [stored], updateResponse: { ...stored, color: "blue" } });
+    const pointer = await stubPageOnePointer();
+
+    await pointer.drag();
+    expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
+    expect(screen.getByTestId("highlight-remove")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("highlight-color-blue"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 7,
+        patch: { color: "blue" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
+  });
+
+  it("removes an existing highlight addressed by a plain click", async () => {
+    const stored = makeAnnotation({
+      id: 9,
+      kind: "highlight",
+      pageNumber: 1,
+      color: "blue",
+      text: "the stored words",
+      rects: [{ x: 0, y: 0, width: 0.5, height: 0.5 }],
+    });
+    renderPdfShell({ highlights: [stored] });
+    const pointer = await stubPageOnePointer();
+
+    // A click inside the highlight's rect opens the palette onto it.
+    await pointer.click(64, 64);
+    expect(await screen.findByTestId("selection-toolbar")).toHaveTextContent("the stored words");
+    fireEvent.click(screen.getByTestId("highlight-remove"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 9 }));
+    await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
+
+    // A click on unhighlighted page space reports no target.
+    await pointer.click(480, 480);
+    await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
   });
 });

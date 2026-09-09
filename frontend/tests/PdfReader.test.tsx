@@ -21,6 +21,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 });
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
+import type { ReaderSelection } from "@/components/reader/annotationModel";
 import type { ReaderAdapter } from "@/components/reader/readerModel";
 import {
   closePdfDocument,
@@ -76,7 +77,7 @@ interface PdfReaderProps {
   onSearchDone?: (bookId: number) => void;
   highlights?: Annotation[];
   onCreateHighlight?: (input: Record<string, unknown>) => void;
-  onSelectionChange?: (selection: { text: string } | null) => void;
+  onSelectionChange?: (selection: ReaderSelection | null) => void;
 }
 
 function renderPdfReader(props: PdfReaderProps = {}) {
@@ -1395,7 +1396,10 @@ describe("PdfReader text layer and highlights", () => {
     // The selection is captured on pointerup (deferred one tick).
     fireEvent.pointerUp(document);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "selected words" });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      text: "selected words",
+      highlightId: null,
+    });
 
     adapterRef.current!.annotations.createHighlight("green");
     expect(onCreateHighlight).toHaveBeenCalledWith({
@@ -1406,6 +1410,92 @@ describe("PdfReader text layer and highlights", () => {
       color: "green",
     });
     expect(fakeSelection.removeAllRanges).toHaveBeenCalled();
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+    selectionSpy.mockRestore();
+  });
+
+  it("reports an existing highlight the selection overlaps", async () => {
+    mockLoadedDocument();
+    const onSelectionChange = vi.fn();
+    renderPdfReader({
+      onSelectionChange,
+      highlights: [
+        makeAnnotation({
+          id: 11,
+          pageNumber: 1,
+          color: "yellow",
+          rects: [{ x: 0.1, y: 0.1, width: 0.4, height: 0.2 }],
+        }),
+      ],
+    });
+    await screen.findByTestId("pdf-canvas");
+
+    const pageSlot = slot(1) as HTMLElement;
+    const anchor = document.createElement("span");
+    pageSlot.appendChild(anchor);
+    pageSlot.getBoundingClientRect = () => new DOMRect(0, 0, 512, 512);
+    const fakeSelection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => "selected words",
+      getRangeAt: () => ({ getClientRects: () => [new DOMRect(64, 64, 128, 32)] }),
+    };
+    const selectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue(fakeSelection as unknown as Selection);
+
+    fireEvent.pointerUp(document);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The selection rects (normalized 0.125..0.375) intersect the stored
+    // highlight, so the toolbar edits it instead of stacking a new one.
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "selected words", highlightId: 11 });
+    selectionSpy.mockRestore();
+  });
+
+  it("reports a clicked highlight and misses outside every highlight", async () => {
+    mockLoadedDocument();
+    const onSelectionChange = vi.fn();
+    renderPdfReader({
+      onSelectionChange,
+      highlights: [
+        makeAnnotation({
+          id: 11,
+          pageNumber: 1,
+          color: "blue",
+          text: "the stored words",
+          rects: [{ x: 0, y: 0, width: 0.5, height: 0.5 }],
+        }),
+      ],
+    });
+    await screen.findByTestId("pdf-canvas");
+
+    const pageSlot = slot(1) as HTMLElement;
+    const anchor = document.createElement("span");
+    pageSlot.appendChild(anchor);
+    pageSlot.getBoundingClientRect = () => new DOMRect(0, 0, 512, 512);
+    const collapsed = {
+      isCollapsed: true,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => "",
+    };
+    const selectionSpy = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue(collapsed as unknown as Selection);
+
+    // A plain click inside the highlight's rect addresses it: the toolbar
+    // can then recolor or remove the annotation.
+    fireEvent.pointerUp(anchor, { clientX: 64, clientY: 64 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      text: "the stored words",
+      highlightId: 11,
+    });
+
+    onSelectionChange.mockClear();
+    fireEvent.pointerUp(anchor, { clientX: 480, clientY: 480 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSelectionChange).toHaveBeenLastCalledWith(null);
     selectionSpy.mockRestore();
   });

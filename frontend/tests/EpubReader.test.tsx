@@ -620,10 +620,14 @@ describe("EpubReader highlights and selection", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // The engine reports the selection text; the shell surfaces it.
+    // The engine reports the selection text; the shell surfaces it. EPUB
+    // selections never target an existing highlight from the toolbar.
     handle.emitSelection("a quoted passage");
     await waitFor(() =>
-      expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "a quoted passage" }),
+      expect(onSelectionChange).toHaveBeenLastCalledWith({
+        text: "a quoted passage",
+        highlightId: null,
+      }),
     );
 
     adapterRef.current!.annotations.createHighlight("yellow");
