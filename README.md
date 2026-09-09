@@ -5,6 +5,8 @@ desktop shell). Point it at a folder of EPUB and PDF files; it indexes
 metadata and covers into a local SQLite database, keeps collections and reading
 progress, and provides EPUB and PDF reading experiences.
 
+![TuxBooks in action — the library bookshelf with covers, collections, and reading progress](docs/images/tuxbooks.png)
+
 ## Stack
 
 - **Desktop:** Electron (Chromium shell) with a Rust sidecar (tokio, serde,
