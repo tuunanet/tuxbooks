@@ -90,9 +90,12 @@ build: fetch-pdfium
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs
 # it first. Default targets: deb + rpm + AppImage (docs/release.md); a
 # target list argument narrows the run (e.g. `just package deb`). The rpm
-# needs the `rpm` package (rpmbuild) installed.
+# needs the `rpm` package (rpmbuild) installed. `--publish never`: this
+# recipe only builds artifacts — electron-builder 26 otherwise publishes
+# implicitly on CI push builds (which needs GH_TOKEN); release.yml cuts the
+# release itself via `gh release create`.
 package TARGETS="deb rpm AppImage": build
-    pnpm exec electron-builder --linux {{TARGETS}}
+    pnpm exec electron-builder --linux {{TARGETS}} --publish never
 
 # Packaging regression gate (docs/release.md): verifies the deb built by
 # `just package` — control metadata, payload (Electron + sidecar + PDFium),
