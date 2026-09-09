@@ -6,7 +6,11 @@
  *
  * Protocol: request `{ id, method, params }`, response
  * `{ id, ok: true, result }` / `{ id, ok: false, error }`. Render responses
- * transfer an ImageBitmap; the open request transfers the PDF bytes.
+ * transfer an ImageBitmap. Open accepts either transferred PDF bytes or a
+ * `bookUrl` (`tuxbooks://book/<id>`), which is opened through a
+ * random-access `mupdf.Stream` whose reads become HTTP Range requests —
+ * so a document opens (and page 1 renders) long before the whole file has
+ * crossed the bridge.
  *
  * The library is imported lazily on the first `open`: the emscripten glue
  * resolves its `mupdf-wasm.wasm` through `Module.locateFile` at import time,
@@ -19,8 +23,11 @@ type WorkerRequest =
   | {
       id: number;
       method: "open";
-      params: { wasmUrl: string; data: ArrayBuffer; offset: number; length: number };
+      params:
+        | { wasmUrl: string; data: ArrayBuffer; offset: number; length: number }
+        | { wasmUrl: string; bookUrl: string };
     }
+  | { id: number; method: "prewarm"; params: { wasmUrl: string } }
   | { id: number; method: "pageSize"; params: { page: number } }
   | { id: number; method: "render"; params: { page: number; width: number; height: number } }
   | { id: number; method: "text"; params: { page: number } }
@@ -49,6 +56,129 @@ async function ensureEngine(wasmUrl: string): Promise<MupdfModule> {
     mupdf = await import("mupdf");
   }
   return mupdf;
+}
+
+/**
+ * Default read-ahead chunk for range-backed documents (1 MiB). MuPDF reads
+ * the xref trail, page tree, and page 1 content from scattered offsets; a
+ * chunk cache turns those scatter reads into a handful of range requests
+ * instead of one per object.
+ */
+const STREAM_CHUNK_BYTES = 1024 * 1024;
+/** Bounded chunk cache (≈64 MiB): enough locality, never unbounded growth. */
+const STREAM_MAX_CACHED_CHUNKS = 64;
+
+/**
+ * Random-access adapter over `tuxbooks://book/<id>` for `mupdf.Stream`.
+ * MuPDF's stream callbacks are synchronous, so reads use synchronous XHR —
+ * legal (and only legal) inside a worker — and block this worker exactly
+ * like the synchronous rasterization it interleaves with. Each miss fetches
+ * one `STREAM_CHUNK_BYTES` range from the sidecar through the Electron
+ * protocol handler; `fileSize()` reads the total out of a one-byte range's
+ * `content-range` header.
+ */
+class RangeStreamHandle {
+  private readonly chunks = new Map<number, ArrayBuffer>();
+  private size: number | null = null;
+
+  constructor(
+    private readonly bookUrl: string,
+    private readonly chunkBytes = STREAM_CHUNK_BYTES,
+  ) {}
+
+  fileSize(): number {
+    if (this.size === null) {
+      // A 1-byte range returns 206 with `content-range: bytes 0-0/TOTAL`;
+      // parse the total out of it without ever fetching the file.
+      const response = this.request("bytes=0-0");
+      if (response.status === 206) {
+        const total = /\/(\d+)$/.exec(response.headers["content-range"] ?? "")?.[1];
+        if (!total) throw new Error("range response missing content-range total");
+        this.size = Number(total);
+      } else if (response.status === 200) {
+        // Range-unaware response: the body is the whole file.
+        this.size = response.body.byteLength;
+        if (response.body.byteLength > 0) {
+          this.chunks.set(0, response.body);
+        }
+      } else {
+        throw new Error(`failed to stat ${this.bookUrl}: ${response.status}`);
+      }
+    }
+    return this.size;
+  }
+
+  read(memory: Uint8Array, offset: number, length: number, position: number): number {
+    const total = this.fileSize();
+    if (position >= total) return 0;
+    const end = Math.min(position + length, total);
+    let cursor = position;
+    while (cursor < end) {
+      const chunkIndex = Math.floor(cursor / this.chunkBytes);
+      const chunk = new Uint8Array(this.chunk(chunkIndex, total));
+      const chunkStart = chunkIndex * this.chunkBytes;
+      const from = cursor - chunkStart;
+      const count = Math.min(end - cursor, chunk.length - from);
+      memory.set(chunk.subarray(from, from + count), offset + (cursor - position));
+      cursor += count;
+    }
+    return end - position;
+  }
+
+  close(): void {
+    this.chunks.clear();
+  }
+
+  private chunk(chunkIndex: number, total: number): ArrayBuffer {
+    const cached = this.chunks.get(chunkIndex);
+    if (cached) {
+      // Refresh for LRU order (Map iteration is insertion-ordered).
+      this.chunks.delete(chunkIndex);
+      this.chunks.set(chunkIndex, cached);
+      return cached;
+    }
+    const start = chunkIndex * this.chunkBytes;
+    const end = Math.min(start + this.chunkBytes, total) - 1;
+    const response = this.request(`bytes=${start}-${end}`);
+    let body: ArrayBuffer;
+    if (response.status === 206) {
+      body = response.body;
+    } else if (response.status === 200) {
+      // Range-unaware response: the body is the whole file; slice it.
+      body = response.body.slice(start, end + 1);
+    } else {
+      throw new Error(`failed to read ${this.bookUrl}@${start}-${end}: ${response.status}`);
+    }
+    this.chunks.set(chunkIndex, body);
+    while (this.chunks.size > STREAM_MAX_CACHED_CHUNKS) {
+      const oldest = this.chunks.keys().next().value;
+      if (oldest === undefined) break;
+      this.chunks.delete(oldest);
+    }
+    return body;
+  }
+
+  private request(range: string): {
+    status: number;
+    body: ArrayBuffer;
+    headers: Record<string, string>;
+  } {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", this.bookUrl, false);
+    xhr.setRequestHeader("Range", range);
+    xhr.responseType = "arraybuffer";
+    xhr.send(null);
+    const headers: Record<string, string> = {};
+    for (const name of ["content-range"]) {
+      const value = xhr.getResponseHeader(name);
+      if (value !== null) headers[name] = value;
+    }
+    return {
+      status: xhr.status,
+      body: (xhr.response as ArrayBuffer | null) ?? new ArrayBuffer(0),
+      headers,
+    };
+  }
 }
 
 /** One structured-text line, in page units (points); `y` is the baseline. */
@@ -101,21 +231,32 @@ function extractLines(doc: MupdfDocument, page: number): TextLine[] {
 }
 
 const methods = {
-  async open({
-    wasmUrl,
-    data,
-    offset,
-    length,
-  }: {
+  async prewarm({ wasmUrl }: { wasmUrl: string }): Promise<{ ready: boolean }> {
+    // Engine load only: no document, no allocation, no rasterization.
+    await ensureEngine(wasmUrl);
+    return { ready: true };
+  },
+
+  async open(params: {
     wasmUrl: string;
-    data: ArrayBuffer;
-    offset: number;
-    length: number;
+    data?: ArrayBuffer;
+    offset?: number;
+    length?: number;
+    bookUrl?: string;
   }): Promise<{ pageCount: number }> {
-    const mod = await ensureEngine(wasmUrl);
+    const mod = await ensureEngine(params.wasmUrl);
     document?.destroy();
-    const view = new Uint8Array(data, offset, length);
-    document = mod.Document.openDocument(view, "application/pdf");
+    if (params.bookUrl !== undefined) {
+      // Range-backed open: MuPDF pulls only the ranges it needs (xref trail
+      // first, page 1 content next) straight off tuxbooks://.
+      const handle = new RangeStreamHandle(params.bookUrl);
+      document = mod.Document.openDocument(new mod.Stream(handle), "application/pdf");
+    } else {
+      const data = params.data;
+      if (data === undefined) throw new Error("open requires data or bookUrl");
+      const view = new Uint8Array(data, params.offset, params.length);
+      document = mod.Document.openDocument(view, "application/pdf");
+    }
     return { pageCount: document.countPages() };
   },
 

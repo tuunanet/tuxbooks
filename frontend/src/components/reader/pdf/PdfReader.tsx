@@ -27,6 +27,7 @@ import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfToolbar } from "./PdfToolbar";
 import { PdfBitmapCache } from "./pdfBitmapCache";
+import { pdfOpenState, pdfOpenTiming } from "./pdfOpenTelemetry";
 import {
   MAX_ACTIVE_CANVAS_BYTES,
   capByBytes,
@@ -133,6 +134,8 @@ export function PdfReader({
     document: pdfDocument,
     pageCount,
     error,
+    openMs,
+    openStartedAt,
   } = usePdfDocument(book.id, onDocumentLoad);
   const { sizes, measurePages } = usePdfGeometry(pdfDocument, pageCount);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
@@ -192,6 +195,14 @@ export function PdfReader({
   // the saved position has been applied, so a reader never flashes page 1
   // before jumping to the restored location.
   const [restored, setRestored] = useState(false);
+  // Open-timeline bookkeeping (docs/performance.md PDF-open telemetry): the
+  // hook records the open anchor in its commit effect; the first rendered
+  // page is "first useful page"; the interactive timestamp derives from the
+  // restore callback below. All measurements happen in event callbacks or
+  // pure derivations — never during render or in effects.
+  const [firstPaintMs, setFirstPaintMs] = useState<number | null>(null);
+  const [restoredAtMs, setRestoredAtMs] = useState<number | null>(null);
+  const [firstPaintedPage, setFirstPaintedPage] = useState<number | null>(null);
   useReaderProgress<number>({
     bookId: book.id,
     enabled: layoutReady,
@@ -204,8 +215,9 @@ export function PdfReader({
           setPosition(pageToPosition(savedPage, effectivePageCount));
         }
         setRestored(true);
+        setRestoredAtMs(performance.now() - (openStartedAt ?? performance.now()));
       },
-      [effectivePageCount, setPosition],
+      [effectivePageCount, openStartedAt, setPosition],
     ),
     savePayload: pdfProgressPayload,
   });
@@ -214,13 +226,21 @@ export function PdfReader({
   // Outline resolution is engine-side (the document is already parsed);
   // failures degrade to an empty outline, never a reader error. The ref
   // indirection keeps the effect on the document alone, and the cancelled
-  // flag stops a superseded load from reporting.
+  // flag stops a superseded load from reporting. Outline work is explicitly
+  // below first paint (§ first-page priority): the request is sent only
+  // after the first page has rendered, so it can never occupy the MuPDF
+  // worker ahead of page 1. The ref guard keeps the one-shot behavior while
+  // `hasFirstPaint` gates the effect.
   const onOutlineLoadRef = useRef(onOutlineLoad);
   useEffect(() => {
     onOutlineLoadRef.current = onOutlineLoad;
   });
+  const hasFirstPaint = renderedPages.size > 0;
+  const outlineDocumentRef = useRef<typeof pdfDocument>(null);
   useEffect(() => {
-    if (!pdfDocument) return;
+    if (!pdfDocument || !hasFirstPaint) return;
+    if (outlineDocumentRef.current === pdfDocument) return;
+    outlineDocumentRef.current = pdfDocument;
     let cancelled = false;
     getPdfOutline(pdfDocument)
       .then((outline) => {
@@ -232,7 +252,7 @@ export function PdfReader({
     return () => {
       cancelled = true;
     };
-  }, [pdfDocument]);
+  }, [pdfDocument, hasFirstPaint]);
 
   // In-book search: extracts page text through the engine seam and streams
   // matches up to the shell. Consumed by the shell adapter below; a running
@@ -594,6 +614,49 @@ export function PdfReader({
     });
   }, []);
 
+  // Open-timeline measurement: the first rendered page is "first useful
+  // page" (its timestamp lands here); restore time is captured in the
+  // onRestored callback above.
+  const handlePageRenderedTelemetried = useCallback(
+    (pageNumber: number) => {
+      setFirstPaintedPage((current) => current ?? pageNumber);
+      setFirstPaintMs((current) => {
+        if (current !== null) return current;
+        return performance.now() - (openStartedAt ?? performance.now());
+      });
+      handlePageRendered(pageNumber);
+    },
+    [handlePageRendered, openStartedAt],
+  );
+  const interactiveMs = useMemo(() => {
+    if (restoredAtMs === null || firstPaintMs === null) return null;
+    return Math.max(restoredAtMs, firstPaintMs);
+  }, [restoredAtMs, firstPaintMs]);
+
+  // Deterministic PDF-open telemetry attributes (docs/performance.md):
+  // state machine + compact timing string, present on every reader surface
+  // (error, loading, interactive) so a stuck open names its own stage.
+  const openState = pdfOpenState({
+    status,
+    hasDocument: pdfDocument !== null,
+    layoutReady,
+    restored,
+    hasFirstPaint: renderedPages.size > 0,
+  });
+  const openTiming = pdfOpenTiming({
+    bytes: "range",
+    openMs,
+    firstPaintMs,
+    interactiveMs,
+  });
+  const openTelemetry = {
+    "data-pdf-open-state": openState,
+    "data-pdf-open-ms": openMs !== null ? String(Math.round(openMs)) : undefined,
+    "data-pdf-first-paint-ms": firstPaintMs !== null ? String(Math.round(firstPaintMs)) : undefined,
+    "data-pdf-first-page": firstPaintedPage !== null ? String(firstPaintedPage) : undefined,
+    "data-pdf-open-timing": openTiming,
+  } as const;
+
   const handlePageError = useCallback((pageNumber: number, renderError: unknown) => {
     setFailedPages((current) => {
       if (current.has(pageNumber)) return current;
@@ -650,6 +713,7 @@ export function PdfReader({
       <div
         data-testid="pdf-reader"
         data-pdf-engine-state="error"
+        {...openTelemetry}
         className="mx-auto max-w-3xl px-6 py-8"
       >
         <p
@@ -674,6 +738,7 @@ export function PdfReader({
         data-pdf-engine-state={
           layoutReady ? "layout-ready" : status === "ready" ? "document-parsed" : "document-loading"
         }
+        {...openTelemetry}
         className="mx-auto max-w-3xl px-6 py-8"
       >
         <p data-testid="pdf-loading" className="text-center text-sm text-muted-foreground">
@@ -690,6 +755,7 @@ export function PdfReader({
       data-pdf-engine-state="interactive"
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
+      {...openTelemetry}
       className="flex flex-col items-stretch px-6 py-4"
     >
       <PdfToolbar
@@ -712,7 +778,8 @@ export function PdfReader({
         renderedPages={renderedPages}
         failedPages={failedPages}
         bitmapCache={bitmapCache}
-        onPageRendered={handlePageRendered}
+        previewAnchorRender={renderedPages.size === 0}
+        onPageRendered={handlePageRenderedTelemetried}
         onPageError={handlePageError}
         registerSlot={registerSlot}
         registerAnchorSlot={registerActiveSlot}

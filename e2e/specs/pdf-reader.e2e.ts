@@ -71,6 +71,23 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // § PDF-open telemetry: the deterministic, state-only half of the open
+  // timeline. The state machine must reach "interactive" through the
+  // range-backed open (bytes=range); timing segments are recorded but only
+  // their shape is asserted — thresholds live in the manual bench
+  // (docs/performance.md), never in headless CI.
+  test("publishes the PDF-open state timeline attributes", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    const root = page.getByTestId("pdf-reader");
+    await expect(root).toHaveAttribute("data-pdf-open-state", "interactive", { timeout: 30000 });
+    const timing = await root.getAttribute("data-pdf-open-timing");
+    expect(timing).toMatch(/^bytes=range;/);
+    await expect(root).toHaveAttribute("data-pdf-open-ms", /^\d+$/);
+    await expect(root).toHaveAttribute("data-pdf-first-paint-ms", /^\d+$/);
+    await expect(root).toHaveAttribute("data-pdf-first-page", /^\d+$/);
+    await returnToLibrary(page);
+  });
+
   test("tracks the current page while scrolling continuously", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });

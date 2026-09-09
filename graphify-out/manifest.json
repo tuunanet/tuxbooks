@@ -114,9 +114,9 @@
     "semantic_hash": ""
   },
   "e2e/specs/pdf-reader.e2e.ts": {
-    "mtime": 1788874662.1901371,
-    "seen": 1788878431.2621512,
-    "ast_hash": "dc4a2fc239a6a4c22f8bd7dbf6a2d9dd",
+    "mtime": 1788928375.447493,
+    "seen": 1788929917.2843456,
+    "ast_hash": "474401fa8b9c2c3729180bdaa866e864",
     "semantic_hash": ""
   },
   "e2e/specs/progress-migration.e2e.ts": {
@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "electron/main/index.ts": {
-    "mtime": 1788924253.1489308,
-    "seen": 1788925803.2854855,
-    "ast_hash": "37270f66cc8856a953cc104cc93ea28f",
+    "mtime": 1788929228.736695,
+    "seen": 1788929917.284355,
+    "ast_hash": "fa61d693dba01eb087244b902bf401fb",
     "semantic_hash": ""
   },
   "electron/main/sidecar.ts": {
@@ -222,9 +222,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/layout/AppShell.tsx": {
-    "mtime": 1788613434.8955047,
-    "seen": 1788851270.1119194,
-    "ast_hash": "c3aaed153f0181e034c135cf8d469b4e",
+    "mtime": 1788928401.012389,
+    "seen": 1788929917.2843761,
+    "ast_hash": "990c79346755124bc4212fa1db0dcf99",
     "semantic_hash": ""
   },
   "frontend/src/components/layout/Sidebar.tsx": {
@@ -336,9 +336,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfDocumentView.tsx": {
-    "mtime": 1788916465.5939825,
-    "seen": 1788920762.4559338,
-    "ast_hash": "1f5d1ad952bc931fa8fe4152a9fd4f2a",
+    "mtime": 1788927899.8824298,
+    "seen": 1788929917.2844005,
+    "ast_hash": "6135c0e0b075458a130f67bb8b17e26c",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfHighlightOverlay.tsx": {
@@ -348,9 +348,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfPageCanvas.tsx": {
-    "mtime": 1788916465.593719,
-    "seen": 1788920762.4559402,
-    "ast_hash": "90ff16190db38910b4a7a9f31062cbe4",
+    "mtime": 1788927876.531525,
+    "seen": 1788929917.2844048,
+    "ast_hash": "e64434a2a89218a4233931d86ef83d3a",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfPageSlot.tsx": {
@@ -366,9 +366,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfReader.tsx": {
-    "mtime": 1788916465.5944731,
-    "seen": 1788920762.455947,
-    "ast_hash": "e3c31ed386300de1d31c8404f2c94852",
+    "mtime": 1788929229.3060157,
+    "seen": 1788929917.2844098,
+    "ast_hash": "2af670b9604e5ded173dbded5b892ca2",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfSidebar.tsx": {
@@ -390,9 +390,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/hooks/usePdfDocument.ts": {
-    "mtime": 1788880589.8144698,
-    "seen": 1788920762.4559557,
-    "ast_hash": "dd49e87e3b85ef3938e572dd07446945",
+    "mtime": 1788929752.214886,
+    "seen": 1788929917.2844162,
+    "ast_hash": "c40417b0d51c9737737826a05c9e416f",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/hooks/usePdfGeometry.ts": {
@@ -666,9 +666,9 @@
     "semantic_hash": ""
   },
   "frontend/src/lib/pdf/pdfEngine.ts": {
-    "mtime": 1788919992.6925993,
-    "seen": 1788920762.4560313,
-    "ast_hash": "8a62f484a907fb438e1fc8f3d4516571",
+    "mtime": 1788929538.813755,
+    "seen": 1788929917.2844772,
+    "ast_hash": "a68f42dfc917a9bb383df69634eb5f70",
     "semantic_hash": ""
   },
   "frontend/src/lib/pdf/pdfOutline.ts": {
@@ -822,9 +822,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/PdfReader.test.tsx": {
-    "mtime": 1788853768.0473495,
-    "seen": 1788856101.3903682,
-    "ast_hash": "534429f9f247b665f57f45b3e82ac130",
+    "mtime": 1788929839.7125297,
+    "seen": 1788929917.2845054,
+    "ast_hash": "bb03b605ee47b907be24e7e9505e64ff",
     "semantic_hash": ""
   },
   "frontend/tests/PdfSidebar.test.tsx": {
@@ -840,9 +840,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/ReaderShell.test.tsx": {
-    "mtime": 1788853768.2024662,
-    "seen": 1788856101.3903754,
-    "ast_hash": "bbf07cfe9d4e79b8ef5d6f0f2b94f7bc",
+    "mtime": 1788929200.1131346,
+    "seen": 1788929917.2845101,
+    "ast_hash": "62d1d5a5840d680b229ef857e5d4c2f4",
     "semantic_hash": ""
   },
   "frontend/tests/SettingsShell.test.tsx": {
@@ -900,9 +900,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/mocks/pdfEngine.ts": {
-    "mtime": 1788239618.96752,
-    "seen": 1788851270.1123147,
-    "ast_hash": "30d02abfd6608daec6eac395859ffb12",
+    "mtime": 1788929738.6349413,
+    "seen": 1788929917.2845216,
+    "ast_hash": "c46646cbf706e449ed0b695a911569dd",
     "semantic_hash": ""
   },
   "frontend/tests/pdfBitmapCache.test.ts": {
@@ -1469,12 +1469,6 @@
     "ast_hash": "b651bc3196535fc3faf76dff613e1379",
     "semantic_hash": ""
   },
-  "docs/electron-migration.md": {
-    "mtime": 1788920764.4199827,
-    "seen": 1788920946.085699,
-    "ast_hash": "3add2829b3a295f8f9a4fb4b42f8a70e",
-    "semantic_hash": ""
-  },
   "docs/epub.md": {
     "mtime": 1788794426.409683,
     "seen": 1788851270.1125622,
@@ -1482,15 +1476,15 @@
     "semantic_hash": ""
   },
   "docs/pdf.md": {
-    "mtime": 1788917141.74886,
-    "seen": 1788920762.4562552,
-    "ast_hash": "7ec254c6590cb401a6b8c559f9b97e8b",
+    "mtime": 1788929367.1654541,
+    "seen": 1788929917.2846527,
+    "ast_hash": "841f7b0a9136359117204bf87f5e2165",
     "semantic_hash": ""
   },
   "docs/performance.md": {
-    "mtime": 1788920764.4903815,
-    "seen": 1788920946.0857053,
-    "ast_hash": "a85c4db20997b92f0c49da1ab0e56073",
+    "mtime": 1788929837.0835793,
+    "seen": 1788929917.2846556,
+    "ast_hash": "31179a1e6a0c89a6c514ca854153eb6c",
     "semantic_hash": ""
   },
   "docs/plans/performance-4k-plan.md": {
@@ -1680,9 +1674,9 @@
     "semantic_hash": ""
   },
   "frontend/src/lib/pdf/mupdfWorker.ts": {
-    "mtime": 1788919992.6685994,
-    "seen": 1788920762.456028,
-    "ast_hash": "a482c719fb6f94649e74a00e03adc494",
+    "mtime": 1788929229.9100132,
+    "seen": 1788929917.2844744,
+    "ast_hash": "8d17a430b95e849ccac7218cbf6902ca",
     "semantic_hash": ""
   },
   "electron-builder.yml": {
@@ -1695,6 +1689,24 @@
     "mtime": 1788925710.0013485,
     "seen": 1788925803.2857966,
     "ast_hash": "2c8ddac6510661d441ebfa9a58b64828",
+    "semantic_hash": ""
+  },
+  "frontend/src/components/reader/pdf/pdfOpenTelemetry.ts": {
+    "mtime": 1788927786.677891,
+    "seen": 1788929917.2844262,
+    "ast_hash": "9895f79a35071129575528d4b55dcf0c",
+    "semantic_hash": ""
+  },
+  "frontend/tests/pdfOpenTelemetry.test.ts": {
+    "mtime": 1788929230.3777742,
+    "seen": 1788929917.284528,
+    "ast_hash": "a948474c2dec109c187f020ea7ebbf37",
+    "semantic_hash": ""
+  },
+  "docs/pdf-performance-improvement.md": {
+    "mtime": 1788929227.8675306,
+    "seen": 1788929917.28465,
+    "ast_hash": "675153689a8fc70fc61e6385af7c4e44",
     "semantic_hash": ""
   }
 }

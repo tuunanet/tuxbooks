@@ -7,6 +7,9 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
   return {
     openPdfDocument: vi.fn(),
+    openPdfDocumentFromBook: vi.fn(),
+    prewarmPdfEngine: vi.fn(async () => {}),
+    cancelPdfPrewarm: vi.fn(),
     closePdfDocument: vi.fn(async () => {}),
     getPdfOutline: vi.fn(async () => []),
     getPdfPageText: vi.fn(async () => ""),
@@ -23,7 +26,7 @@ import {
   closePdfDocument,
   getPdfOutline,
   getPdfPageText,
-  openPdfDocument,
+  openPdfDocumentFromBook,
   renderPdfTextLayer,
 } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
@@ -33,13 +36,13 @@ import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
-import { fetchBookBytesMock, invokeMock, mockInvoke } from "./mocks/bridge";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 
-const openDocumentMock = vi.mocked(openPdfDocument);
+const openDocumentMock = vi.mocked(openPdfDocumentFromBook);
 const closeDocumentMock = vi.mocked(closePdfDocument);
 
-type EngineDocument = Awaited<ReturnType<typeof openPdfDocument>>;
+type EngineDocument = Awaited<ReturnType<typeof openPdfDocumentFromBook>>;
 
 /** Fire a visibility change on the hook's visible-viewport observer. */
 function fireVisible(element: Element, isIntersecting: boolean): void {
@@ -144,7 +147,7 @@ afterEach(() => {
 });
 
 describe("PdfReader loading", () => {
-  it("fetches the book bytes and renders page one at 100%", async () => {
+  it("opens the document through the range-backed engine seam and renders page one at 100%", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
@@ -154,10 +157,10 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    expect(fetchBookBytesMock).toHaveBeenCalledWith(7, "pdf");
+    // The open path is range-backed: the book id and format go straight to
+    // the engine; no whole-file byte fetch happens on the critical path.
     expect(openDocumentMock).toHaveBeenCalledTimes(1);
-    const [firstCall] = openDocumentMock.mock.calls;
-    expect(firstCall?.[0]).toBeInstanceOf(Uint8Array);
+    expect(openDocumentMock).toHaveBeenCalledWith(7, "pdf");
     expect(doc.getPage).toHaveBeenCalledWith(1);
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
 
@@ -248,8 +251,8 @@ describe("PdfReader loading", () => {
     expect(onDocumentLoad).toHaveBeenCalledWith(3);
   });
 
-  it("shows an honest error when the bytes cannot be loaded", async () => {
-    fetchBookBytesMock.mockRejectedValueOnce(new Error("file went away"));
+  it("shows an honest error when the document cannot be opened", async () => {
+    openDocumentMock.mockRejectedValueOnce(new Error("file went away"));
 
     renderPdfReader();
 
@@ -271,6 +274,49 @@ describe("PdfReader loading", () => {
     view.unmount();
 
     expect(closeDocumentMock).toHaveBeenCalledWith(doc);
+  });
+
+  it("re-opens the document on unexpected worker failure", async () => {
+    const doc = makeFakePdfDocument(3);
+    const recovered = makeFakePdfDocument(3);
+    openDocumentMock
+      .mockResolvedValueOnce(doc as unknown as EngineDocument)
+      .mockResolvedValueOnce(recovered as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    expect(openDocumentMock).toHaveBeenCalledTimes(1);
+
+    // The worker dies underneath a loaded reader: the dead handle is
+    // destroyed and the document re-opens from its range-backed source.
+    doc.failWorker();
+    await waitFor(() => expect(closeDocumentMock).toHaveBeenCalledWith(doc));
+    await waitFor(() => expect(openDocumentMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+  });
+
+  it("gives up after a second worker failure instead of looping", async () => {
+    const first = makeFakePdfDocument(3);
+    const second = makeFakePdfDocument(3);
+    openDocumentMock
+      .mockResolvedValueOnce(first as unknown as EngineDocument)
+      .mockResolvedValueOnce(second as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+
+    first.failWorker();
+    await waitFor(() => expect(openDocumentMock).toHaveBeenCalledTimes(2));
+    second.failWorker();
+    expect(await screen.findByTestId("pdf-error")).toHaveTextContent(
+      "PDF worker failed and could not be recovered",
+    );
   });
 });
 
@@ -303,8 +349,7 @@ describe("PdfReader book switching", () => {
     expect(await screen.findByTestId("pdf-loading")).toBeInTheDocument();
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
-    expect(fetchBookBytesMock).toHaveBeenCalledWith(8, "pdf");
-    expect(openDocumentMock).toHaveBeenCalledTimes(2);
+    expect(openDocumentMock).toHaveBeenNthCalledWith(2, 8, "pdf");
     expect(closeDocumentMock).toHaveBeenCalledTimes(1);
   });
 
@@ -386,8 +431,68 @@ describe("PdfReader outline and thumbnails", () => {
     const onOutlineLoad = vi.fn();
     await renderLoadedReader({ onOutlineLoad });
 
-    expect(getPdfOutline).toHaveBeenCalledWith(expect.objectContaining({ numPages: 3 }));
+    // The outline request waits for the first rendered page (§ first-page
+    // priority), so it can land a beat after the canvas mounts.
+    await waitFor(() =>
+      expect(getPdfOutline).toHaveBeenCalledWith(expect.objectContaining({ numPages: 3 })),
+    );
     await waitFor(() => expect(onOutlineLoad).toHaveBeenCalledWith(outline));
+  });
+
+  it("never requests the outline ahead of the first rendered page", async () => {
+    const onOutlineLoad = vi.fn();
+    let resolveDocument: (value: EngineDocument) => void = () => {};
+    openDocumentMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDocument = resolve as (value: EngineDocument) => void;
+      }) as never,
+    );
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    renderPdfReader({ onOutlineLoad });
+    await screen.findByTestId("pdf-loading");
+
+    // § first-page priority: outline work must not occupy the MuPDF worker
+    // before page 1 has rendered.
+    expect(getPdfOutline).not.toHaveBeenCalled();
+
+    resolveDocument(makeFakePdfDocument(3) as unknown as EngineDocument);
+    await screen.findByTestId("pdf-canvas");
+    await waitFor(() => expect(getPdfOutline).toHaveBeenCalled());
+  });
+
+  it("publishes the PDF-open timeline attributes", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    renderPdfReader();
+    // While the document is still opening the state names that stage.
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute(
+      "data-pdf-open-state",
+      "document-opening",
+    );
+
+    await screen.findByTestId("pdf-canvas");
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-reader")).toHaveAttribute(
+        "data-pdf-open-state",
+        "interactive",
+      ),
+    );
+    const root = screen.getByTestId("pdf-reader");
+    expect(root).toHaveAttribute("data-pdf-open-state", "interactive");
+    expect(root.getAttribute("data-pdf-open-timing")).toMatch(
+      /^bytes=range;open=\d+;firstPaint=\d+;interactive=\d+$/,
+    );
+    expect(root.getAttribute("data-pdf-open-ms")).toMatch(/^\d+$/);
+    expect(root.getAttribute("data-pdf-first-paint-ms")).toMatch(/^\d+$/);
+    expect(root).toHaveAttribute("data-pdf-first-page", "1");
   });
 
   it("degrades outline failures to an empty outline", async () => {

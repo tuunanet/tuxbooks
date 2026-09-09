@@ -1,71 +1,97 @@
 # Graph Report - tuxbooks  (2026-09-09)
 
 ## Corpus Check
-- 275 files · ~192,748 words
+- 277 files · ~200,682 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2681 nodes · 6087 edges · 151 communities (119 shown, 21 thin omitted)
+- 2768 nodes · 6199 edges · 176 communities (134 shown, 31 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 123 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `91b5dfa2`
+- Built from commit: `0ad2ad45`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- BookDetail.tsx
-- react
+- mockInvoke
+- BookMetadataDialog.tsx
 - library_sync.rs
 - EpubReader.test.tsx
 - Handover: Fix `just dev` Startup Latency and Process Lifecycle
 - cn
-- pdf/pdfEngine.ts
-- test
-- books
-- vitest
-- shortcuts.ts
-- get_reading_progress
-- PdfDocumentView.tsx
-- rpc.rs
 - EpubError
+- test
+- EventEmitter
+- AppShell.tsx
+- shortcuts.ts
+- artwork_cache.rs
+- Annotation
+- rpc.rs
+- lib.rs
 - mocks/bridge.ts
 - PdfReader.tsx
-- EpubReader.tsx
-- button.tsx
+- ReaderShell.tsx
+- pdf-performance-improvement.md
 - mupdfWorker.ts
+- pdfOpenTelemetry.ts
+- repository/collections.rs
 - TuxbooksApi
-- Collection
-- library_locations.rs
-- AppShell.tsx
+- .handlePositionChanged
+- Sidebar.tsx
 - lib/bridge.ts
+- pdf/pdfEngine.ts
 - services/annotations.rs
+- dispatch
+- utils.ts
+- ImportProvider.tsx
+- SettingsShell.tsx
 - ReaderAppearance.tsx
+- vite.config.ts
+- react
 - services/metadata.rs
+- ReaderNavigation.tsx
+- PdfBitmapCache
 - LibraryView.tsx
 - PdfReader.test.tsx
 - book_importer.rs
+- commands/library.rs
+- 18. PDF test matrix
+- RangeStreamHandle
+- PDF layer
+- 44. Acceptance criteria
+- “First readable page without waiting for the entire PDF”
 - ReadiumEpubHandle
 - repository/books.rs
 - session.rs
 - repository/metadata.rs
+- 39. Playwright requirements
+- .constructor
+- 15. Do not confuse PDF-open latency with the existing `just dev` startup problem
 - parse_epub
+- 5. First investigation: determine what MuPDF can consume incrementally
 - make-epub-fixtures.py
+- Handover: Make PDF Reading Start Immediately and Keep the Electron Reader Stable
 - epub/readiumEngine.ts
+- 34. Second implementation milestone
+- 35. Third implementation milestone
+- 36. Fourth implementation milestone
+- 37. Fifth implementation milestone
+- 38. Sixth implementation milestone
 - environment.ts
 - frontend/package.json
+- 6. Second major issue: MuPDF/WASM is cold-started on first PDF open
+- 7. Third major optimization: make first paint intentionally cheaper than final-quality paint
 - helpers.ts
 - library_watcher.rs
 - index.ts
 - package.json
 - e2e/package.json
 - repository/reading_progress.rs
-- ReaderShell.tsx
 - library_scanner.rs
 - epub/metadata.rs
 - What You Must Do When Invoked
-- repository/collections.rs
 - search.rs
 - devDependencies
 - compilerOptions
@@ -100,7 +126,6 @@
 - graphify reference: extra exports and benchmark
 - epub_corpus.rs
 - Build and dev environment
-- Electron migration plan
 - Performance budgets and metrics
 - scripts
 - TuxBooks
@@ -127,7 +152,7 @@
 - Milestone 5 — Search
 - ReadingProgress
 - .prettierrc.json
-- PdfSidebar.test.tsx
+- intersectionObserver.ts
 - Coverage gate
 - Confirming comment for WebKit bug 315997
 - graphify reference: add a URL and watch a folder
@@ -159,160 +184,220 @@
 ## God Nodes (most connected - your core abstractions)
 1. `AppError` - 149 edges
 2. `cn()` - 101 edges
-3. `react` - 66 edges
+3. `react` - 67 edges
 4. `ReadiumEpubHandle` - 57 edges
-5. `vitest` - 35 edges
+5. `vitest` - 36 edges
 6. `init_pool()` - 32 edges
 7. `import_directory()` - 31 edges
-8. `PdfReader()` - 27 edges
+8. `PdfReader()` - 29 edges
 9. `invoke()` - 27 edges
 10. `mockInvoke()` - 27 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `openReadyEpub()` --calls--> `openInReader()`  [EXTRACTED]
-  e2e/specs/epub-reader.e2e.ts → e2e/specs/helpers.ts
-- `GlobalSearchShortcut()` --calls--> `useShortcut()`  [EXTRACTED]
-  frontend/src/components/layout/AppShell.tsx → frontend/src/lib/shortcuts.ts
+- `SidebarProps` --references--> `LibrarySection`  [EXTRACTED]
+  frontend/src/components/layout/Sidebar.tsx → frontend/src/state/appState.ts
+- `AnnotationSnapshot` --references--> `Annotation`  [EXTRACTED]
+  frontend/src/hooks/useAnnotations.ts → frontend/src/types/domain.ts
+- `DialogOverlay()` --calls--> `cn()`  [EXTRACTED]
+  frontend/src/components/ui/dialog.tsx → frontend/src/lib/utils.ts
+- `Harness()` --calls--> `useShortcut()`  [EXTRACTED]
+  frontend/tests/shortcuts.test.tsx → frontend/src/lib/shortcuts.ts
 - `ItemButton()` --calls--> `cn()`  [EXTRACTED]
   frontend/src/components/layout/Sidebar.tsx → frontend/src/lib/utils.ts
-- `PdfReader()` --indirect_call--> `pdfProgressPayload()`  [INFERRED]
-  frontend/src/components/reader/pdf/PdfReader.tsx → frontend/src/components/reader/readerModel.ts
-- `SearchProps` --references--> `ReaderAdapter`  [EXTRACTED]
-  frontend/tests/EpubReader.test.tsx → frontend/src/components/reader/readerModel.ts
 
 ## Import Cycles
-- 2-file cycle: `src-tauri/src/epub/metadata.rs -> src-tauri/src/epub/mod.rs -> src-tauri/src/epub/metadata.rs`
 - 2-file cycle: `src-tauri/src/epub/mod.rs -> src-tauri/src/epub/session.rs -> src-tauri/src/epub/mod.rs`
+- 2-file cycle: `src-tauri/src/epub/metadata.rs -> src-tauri/src/epub/mod.rs -> src-tauri/src/epub/metadata.rs`
 
-## Communities (151 total, 21 thin omitted)
+## Communities (176 total, 31 thin omitted)
 
-### Community 0 - "BookDetail.tsx"
-Cohesion: 0.14
-Nodes (21): BookCard(), BookCardProps, InteractiveBookProps, progressPercentOf(), BookContextMenu(), BookContextMenuProps, BookCover(), BookCoverProps (+13 more)
+### Community 0 - "mockInvoke"
+Cohesion: 0.17
+Nodes (12): renderDetail(), effective, nothingOverridden, renderDialog(), source, view, renderDialog(), withData() (+4 more)
 
-### Community 1 - "react"
-Cohesion: 0.10
-Nodes (25): BookMetadataDialog(), BookMetadataDialogProps, fromForm(), MetadataFormState, toForm(), CollectionDialogProps, SECTION_ROWS, SECTIONS (+17 more)
+### Community 1 - "BookMetadataDialog.tsx"
+Cohesion: 0.12
+Nodes (19): BookMetadataDialog(), BookMetadataDialogProps, fromForm(), MetadataFormState, toForm(), CollectionDialogProps, Dialog(), DialogContent() (+11 more)
 
 ### Community 2 - "library_sync.rs"
 Cohesion: 0.18
 Nodes (27): LibraryChange, add_progress(), book_id_stored(), corrupt_file_is_skipped_and_imports_once_fixed(), created_file_is_imported_with_file_snapshot(), deleted_file_marks_book_unavailable_and_preserves_progress(), directory_rename_relinks_all_contained_books(), duplicate_and_rapid_events_reconcile_to_a_stable_state() (+19 more)
 
 ### Community 3 - "EpubReader.test.tsx"
-Cohesion: 0.09
-Nodes (29): EpubRelocateDetail, EpubSearchCallbacks, ReaderProvider(), DEFAULT_READER_PREFERENCES, ReaderContext, ReaderFontFamily, ReaderLayout, ReaderPreferences (+21 more)
+Cohesion: 0.12
+Nodes (21): EpubRelocateDetail, EpubSearchCallbacks, ReaderProvider(), ReaderPreferences, fakeHandleOrThrow(), makeBookShim(), mockHappyPath(), renderReader() (+13 more)
 
 ### Community 4 - "Handover: Fix `just dev` Startup Latency and Process Lifecycle"
 Cohesion: 0.06
 Nodes (30): 10. Instrument the complete startup path, 11. Specifically investigate Electron `ready-to-show`, 12. Investigate the Electron / Wayland path, 13. Investigate the sidecar independently, 14. Add a background catch-up summary, 15. Investigate the remaining renderer latency, 16. Keep Vite dependency optimization separate, 17. Required tests (+22 more)
 
 ### Community 5 - "cn"
-Cohesion: 0.05
-Nodes (53): Card(), CardAction(), CardContent(), CardDescription(), CardFooter(), CardHeader(), CardTitle(), ContextMenu() (+45 more)
-
-### Community 6 - "pdf/pdfEngine.ts"
 Cohesion: 0.07
-Nodes (27): PdfDocumentSnapshot, PdfDocumentState, PdfDocumentStatus, usePdfDocument(), usePdfSearch(), UsePdfSearchOptions, PdfPageTextLayer(), PdfPageTextLayerProps (+19 more)
+Nodes (47): Card(), CardAction(), CardContent(), CardDescription(), CardFooter(), CardHeader(), CardTitle(), ContextMenu() (+39 more)
+
+### Community 6 - "EpubError"
+Cohesion: 0.27
+Nodes (12): Attributes, attribute(), local_name(), EpubError, Error, String, parse_container_xml(), detect_fixed_layout() (+4 more)
 
 ### Community 7 - "test"
 Cohesion: 0.16
 Nodes (8): test, seededBookTitles, ensureLibrary(), openBookDetail(), returnToLibrary(), waitForLibraryView(), seededEpub, OLD_FOLIATE_CFI
 
-### Community 8 - "books"
-Cohesion: 0.21
-Nodes (12): book_collections, books, collections, reading_progress, annotations, authors, book_authors, book_metadata_overrides (+4 more)
+### Community 8 - "EventEmitter"
+Cohesion: 0.26
+Nodes (17): clear_book_cover_override(), emit_changed(), get_book_metadata(), reset_book_metadata(), AppState, Book, BookMetadata, MetadataFields (+9 more)
 
-### Community 9 - "vitest"
-Cohesion: 0.16
-Nodes (19): App(), AppShell(), AppStateProvider(), ImportProvider(), toMessage(), LibraryDataProvider(), renderDialog(), withData() (+11 more)
+### Community 9 - "AppShell.tsx"
+Cohesion: 0.15
+Nodes (23): App(), AppShell(), AppShellProps, AppAction, AppDispatchContext, AppState, AppStateContext, appStateReducer() (+15 more)
 
 ### Community 10 - "shortcuts.ts"
-Cohesion: 0.24
-Nodes (10): BARE_MODIFIER_KEYS, comboFromEvent(), ShortcutContext, ShortcutHandler, ShortcutRegistry, useShortcut(), isEditableTarget(), ShortcutProvider() (+2 more)
-
-### Community 11 - "get_reading_progress"
 Cohesion: 0.23
-Nodes (12): get_reading_progress(), mark_book_finished(), ProgressInput, ProgressUpdate, AppState, From, Option, Result (+4 more)
+Nodes (9): BARE_MODIFIER_KEYS, comboFromEvent(), ShortcutContext, ShortcutHandler, ShortcutRegistry, isEditableTarget(), ShortcutProvider(), onKeyDown() (+1 more)
 
-### Community 12 - "PdfDocumentView.tsx"
+### Community 11 - "artwork_cache.rs"
+Cohesion: 0.28
+Nodes (15): cover_files(), make_covers_dir(), Option, Path, PathBuf, Result, SqlitePool, String (+7 more)
+
+### Community 12 - "Annotation"
 Cohesion: 0.13
-Nodes (11): PdfScrollTrackingOptions, bitmapBytes(), PdfBitmap, PdfBitmapCache, PdfDocumentView(), PdfDocumentViewProps, LayoutSlot, PdfPageCanvasProps (+3 more)
+Nodes (16): annotationRects(), highlightCssColor(), PdfScrollTrackingOptions, PdfDocumentView(), PdfDocumentViewProps, PdfHighlightOverlay(), LayoutSlot, PdfPageLifecycle (+8 more)
 
 ### Community 13 - "rpc.rs"
-Cohesion: 0.05
-Nodes (74): ImportReport, import_paths(), reconnect_book(), AppState, Book, Result, String, Vec (+66 more)
+Cohesion: 0.11
+Nodes (27): BookBytesArgs, BookIdArgs, BookResourceArgs, CollectionIdArgs, CollectionMemberArgs, CoverArgs, delete_collection_takes_the_bridge_wire_param(), handle_line() (+19 more)
 
-### Community 14 - "EpubError"
-Cohesion: 0.27
-Nodes (12): Attributes, attribute(), local_name(), EpubError, Error, String, parse_container_xml(), detect_fixed_layout() (+4 more)
+### Community 14 - "lib.rs"
+Cohesion: 0.16
+Nodes (22): ImportReport, import_paths(), reconnect_book(), AppState, Book, Result, String, Vec (+14 more)
 
 ### Community 15 - "mocks/bridge.ts"
-Cohesion: 0.11
-Nodes (27): renderDetail(), effective, nothingOverridden, renderDialog(), source, view, dragDrop(), dragEnter() (+19 more)
+Cohesion: 0.16
+Nodes (17): dragDrop(), dragEnter(), makeDragEvent(), emitBridgeEvent(), EventListener, fetchBookBytesMock, installTuxbooksMock(), invokeMock (+9 more)
 
 ### Community 16 - "PdfReader.tsx"
-Cohesion: 0.11
-Nodes (32): useFitWidthScale(), GeometryState, PdfGeometry, usePdfGeometry(), PdfAnchorInfo, READING_ANCHOR_RATIO, setScrollTop(), usePdfScrollTracking() (+24 more)
-
-### Community 17 - "EpubReader.tsx"
-Cohesion: 0.09
-Nodes (33): annotationRects(), DEFAULT_HIGHLIGHT_COLOR, highlightCssColor(), isBookmarkAtLocator(), isBookmarkAtPage(), isHighlightColor(), normalizeRect(), ReaderAnnotationController (+25 more)
-
-### Community 18 - "button.tsx"
 Cohesion: 0.10
-Nodes (27): DropZoneOverlay(), EmptyLibraryState(), ImportStatus(), LibraryHeader(), NoSearchResultsState(), NoSearchResultsStateProps, HIGHLIGHT_COLORS, HighlightColor (+19 more)
+Nodes (36): isHighlightColor(), normalizeRect(), useFitWidthScale(), GeometryState, PdfGeometry, usePdfGeometry(), PdfAnchorInfo, READING_ANCHOR_RATIO (+28 more)
+
+### Community 17 - "ReaderShell.tsx"
+Cohesion: 0.07
+Nodes (50): GlobalSearchShortcut(), byKind(), DEFAULT_HIGHLIGHT_COLOR, isBookmarkAtLocator(), isBookmarkAtPage(), ReaderAnnotationController, EpubReader(), EpubReaderProps (+42 more)
+
+### Community 18 - "pdf-performance-improvement.md"
+Cohesion: 0.06
+Nodes (31): 10. Do not render the PDF text layer on the critical path, 11. The worker should become a priority-aware PDF scheduler, 12. Current raster path contains an avoidable pixel conversion chain, 13. Cache policy is good; make it more useful for instant reopen, 14. Geometry should stay lazy, 16. New PDF performance telemetry, 17. Add an explicit “first useful page” benchmark, 19. Measure transport separately from MuPDF (+23 more)
 
 ### Community 19 - "mupdfWorker.ts"
-Cohesion: 0.18
+Cohesion: 0.20
 Nodes (8): ensureEngine(), methods, MupdfDocument, MupdfModule, TextLine, WorkerRequest, WorkerResponse, mupdf
 
-### Community 21 - "Collection"
-Cohesion: 0.29
-Nodes (8): LibraryStats, Collection, CollectionSummary, NewCollection, DateTime, String, Utc, Vec
+### Community 20 - "pdfOpenTelemetry.ts"
+Cohesion: 0.43
+Nodes (5): PdfDocumentStatus, pdfOpenState, PdfOpenStateInput, pdfOpenTiming(), PdfOpenTimingParts
 
-### Community 22 - "library_locations.rs"
-Cohesion: 0.36
-Nodes (6): add_location(), list_locations(), Result, SqlitePool, String, Vec
+### Community 21 - "repository/collections.rs"
+Cohesion: 0.07
+Nodes (47): LibraryStats, Book, book_serializes_with_camel_case_keys(), BookFormat, DateTime, Error, Ok, Option (+39 more)
 
-### Community 24 - "AppShell.tsx"
-Cohesion: 0.19
-Nodes (15): BookDetail(), AppShellProps, GlobalSearchShortcut(), Shell(), AppAction, AppDispatchContext, AppState, AppStateContext (+7 more)
+### Community 23 - ".handlePositionChanged"
+Cohesion: 0.16
+Nodes (3): asString(), clamp01(), serializeLocator()
+
+### Community 24 - "Sidebar.tsx"
+Cohesion: 0.22
+Nodes (8): CollectionDialog(), ItemButton(), ItemButtonProps, LIBRARY_ITEMS, Sidebar(), SidebarProps, sameSection(), SmartSectionId
 
 ### Community 25 - "lib/bridge.ts"
 Cohesion: 0.08
-Nodes (55): PROGRESS_SAVE_DEBOUNCE_MS, ReaderProgressOptions, AnnotationSnapshot, useAnnotations(), toMessage(), useBookActions(), LoadedView, toMessage() (+47 more)
+Nodes (53): PROGRESS_SAVE_DEBOUNCE_MS, ReaderProgressOptions, useReaderProgress(), AnnotationSnapshot, useAnnotations(), LoadedView, toMessage(), useBookMetadata() (+45 more)
+
+### Community 26 - "pdf/pdfEngine.ts"
+Cohesion: 0.09
+Nodes (28): PdfEnginePrewarm(), PdfDocumentSnapshot, PdfDocumentState, usePdfDocument(), usePdfSearch(), UsePdfSearchOptions, ReaderSearchGroup, cancelPdfPrewarm() (+20 more)
 
 ### Community 27 - "services/annotations.rs"
 Cohesion: 0.07
 Nodes (65): AnnotationRect, Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation, DateTime, Option (+57 more)
 
+### Community 28 - "dispatch"
+Cohesion: 0.27
+Nodes (8): dispatch(), parse_params(), RpcError, From, Result, Self, Value, T
+
+### Community 29 - "utils.ts"
+Cohesion: 0.15
+Nodes (21): BookCard(), BookCardProps, InteractiveBookProps, progressPercentOf(), BookContextMenu(), BookContextMenuProps, BookCover(), BookCoverProps (+13 more)
+
+### Community 30 - "ImportProvider.tsx"
+Cohesion: 0.20
+Nodes (15): DropZoneOverlay(), EmptyLibraryState(), LibraryHeader(), importPaths(), pathForFile(), pickBookFiles(), pickDirectory(), tuxbooks() (+7 more)
+
+### Community 31 - "SettingsShell.tsx"
+Cohesion: 0.29
+Nodes (6): SECTION_ROWS, SECTIONS, SettingsNavigation(), SettingsRow, SettingsSectionId, SettingsShell()
+
 ### Community 32 - "ReaderAppearance.tsx"
-Cohesion: 0.09
-Nodes (28): FONT_FAMILY_OPTIONS, LAYOUT_OPTIONS, ReaderAppearance(), THEME_OPTIONS, GlobalSearch(), splitSnippet(), Popover(), PopoverAnchor() (+20 more)
+Cohesion: 0.10
+Nodes (25): FONT_FAMILY_OPTIONS, LAYOUT_OPTIONS, THEME_OPTIONS, GlobalSearch(), splitSnippet(), Popover(), PopoverAnchor(), PopoverContent() (+17 more)
+
+### Community 33 - "vite.config.ts"
+Cohesion: 0.40
+Nodes (4): mupdfWasmUrl, wasmFile, @tailwindcss/vite, @vitejs/plugin-react
+
+### Community 35 - "react"
+Cohesion: 0.15
+Nodes (16): ImportStatus(), HIGHLIGHT_COLORS, HighlightColor, PdfToolbar(), PdfToolbarProps, COLOR_ORDER, ReaderAnnotationListProps, COLOR_ORDER (+8 more)
 
 ### Community 36 - "services/metadata.rs"
 Cohesion: 0.14
 Nodes (51): apply_source_metadata(), blank_title_is_rejected(), clean_list(), clean_optional(), clean_required(), clear_book_cover_override(), clearing_a_field_explicitly_overrides_it_to_empty(), cover_override_wins_and_survives_reimport() (+43 more)
 
+### Community 38 - "ReaderNavigation.tsx"
+Cohesion: 0.11
+Nodes (25): epubHrefJump(), ReaderJump, flattenOutline(), flattenToc(), OutlineRow, ReaderNavigation(), ReaderNavigationProps, ReaderNavTab (+17 more)
+
+### Community 40 - "PdfBitmapCache"
+Cohesion: 0.20
+Nodes (4): bitmapBytes(), PdfBitmap, PdfBitmapCache, PdfPageCanvasProps
+
 ### Community 41 - "LibraryView.tsx"
-Cohesion: 0.09
-Nodes (36): CollectionDialog(), ItemButton(), ItemButtonProps, LIBRARY_ITEMS, Sidebar(), SidebarProps, EmptyCollectionState(), LibraryHeaderProps (+28 more)
+Cohesion: 0.10
+Nodes (36): BookDetail(), formatDate(), Shell(), EmptyCollectionState(), LibraryHeaderProps, columnCount(), LibraryView(), LibraryViewProps (+28 more)
 
 ### Community 42 - "PdfReader.test.tsx"
-Cohesion: 0.13
-Nodes (15): openPdfDocument(), PdfPage, makeAnnotation(), makeDomRect(), scrollTo(), stubScrollGeometry(), closeDocumentMock, EngineDocument (+7 more)
+Cohesion: 0.09
+Nodes (28): PdfPage, makeAnnotation(), makeDomRect(), scrollTo(), stubScrollGeometry(), fireIntersection(), intersectionObservers(), FakePdfDocument (+20 more)
 
 ### Community 43 - "book_importer.rs"
 Cohesion: 0.09
-Nodes (63): ProgressUpdate, init_pool(), init_pool_is_deterministic_and_idempotent(), Path, Result, SqlitePool, run_migrations(), schema_contains_all_core_tables() (+55 more)
+Nodes (62): ProgressUpdate, init_pool(), init_pool_is_deterministic_and_idempotent(), Path, Result, SqlitePool, run_migrations(), schema_contains_all_core_tables() (+54 more)
+
+### Community 46 - "commands/library.rs"
+Cohesion: 0.31
+Nodes (6): add_location(), list_locations(), Result, SqlitePool, String, Vec
+
+### Community 47 - "18. PDF test matrix"
+Cohesion: 0.29
+Nodes (7): 18. PDF test matrix, Huge file size with relatively simple pages, Image-heavy PDF, Large scanned document, Large text PDF, Mixed-page-size PDF, Small text PDF
+
+### Community 49 - "PDF layer"
+Cohesion: 0.33
+Nodes (5): Behavior, Error handling, Import mapping, PDF layer, Public API
+
+### Community 50 - "44. Acceptance criteria"
+Cohesion: 0.40
+Nodes (5): 44. Acceptance criteria, Instant PDF opening, Regression protection, Rendering, Stability
+
+### Community 51 - "“First readable page without waiting for the entire PDF”"
+Cohesion: 0.50
+Nodes (4): 33. First implementation milestone, Fallback, “First readable page without waiting for the entire PDF”, Preferred
 
 ### Community 52 - "ReadiumEpubHandle"
-Cohesion: 0.07
-Nodes (6): asString(), clamp01(), highlightTint(), ReadiumEpubHandle, serializeLocator(), ReadingProgressRecord
+Cohesion: 0.09
+Nodes (3): highlightTint(), ReadiumEpubHandle, ReadingProgressRecord
 
 ### Community 53 - "repository/books.rs"
-Cohesion: 0.07
-Nodes (71): Book, book_serializes_with_camel_case_keys(), BookFormat, NewBook, DateTime, Error, Ok, Option (+63 more)
+Cohesion: 0.15
+Nodes (41): NewBook, String, Vec, count_books(), delete_book(), delete_cascades_to_reading_progress(), duplicate_path_violates_unique_constraint(), empty_title_is_rejected_by_check_constraint() (+33 more)
 
 ### Community 54 - "session.rs"
 Cohesion: 0.14
@@ -322,17 +407,29 @@ Nodes (33): books_without_toc_documents_read_without_a_toc(), build_manifest_jso
 Cohesion: 0.27
 Nodes (21): apply_effective(), clear_overrides(), EffectiveValues, ensure_series(), get_overrides(), get_source_metadata(), json_list(), list_book_authors() (+13 more)
 
+### Community 56 - "39. Playwright requirements"
+Cohesion: 0.50
+Nodes (4): 39. Playwright requirements, Add a first-paint benchmark, Add stress cases, Required assertions
+
+### Community 58 - "15. Do not confuse PDF-open latency with the existing `just dev` startup problem"
+Cohesion: 0.67
+Nodes (3): 15. Do not confuse PDF-open latency with the existing `just dev` startup problem, A. App startup, B. PDF open
+
 ### Community 59 - "parse_epub"
 Cohesion: 0.17
 Nodes (28): empty_zip_reports_missing_mimetype(), mimetype_not_first_entry_reports_missing_mimetype(), missing_container_xml_reports_missing_container(), not_a_zip_reports_zip_error(), wrong_mimetype_reports_invalid_mimetype(), container_without_rootfile_reports_no_rootfile(), CoverImage, EpubBook (+20 more)
+
+### Community 60 - "5. First investigation: determine what MuPDF can consume incrementally"
+Cohesion: 0.67
+Nodes (3): 5. First investigation: determine what MuPDF can consume incrementally, If MuPDF.js cannot perform random-access streaming, Preferred architecture
 
 ### Community 61 - "make-epub-fixtures.py"
 Cohesion: 0.08
 Nodes (30): build_all(), build_valid(), chapter_paragraph(), check(), emit_manifest(), main(), make(), _minimal_entries() (+22 more)
 
 ### Community 63 - "epub/readiumEngine.ts"
-Cohesion: 0.07
-Nodes (25): SerializedLocator, buildPositions(), EPUB_FONT_FAMILIES, EPUB_MIME_TYPE, EPUB_SCROLLED_SURFACE_MAX_PX, EpubAppearance, EpubFlow, EpubFontFamily (+17 more)
+Cohesion: 0.08
+Nodes (23): SerializedLocator, EPUB_FONT_FAMILIES, EPUB_MIME_TYPE, EPUB_SCROLLED_SURFACE_MAX_PX, EpubAppearance, EpubFlow, EpubFontFamily, EpubLoadDetail (+15 more)
 
 ### Community 69 - "environment.ts"
 Cohesion: 0.14
@@ -340,7 +437,7 @@ Nodes (18): killStaleProcesses(), libraryDir, prepareEnvironment(), pruneOldArti
 
 ### Community 70 - "frontend/package.json"
 Cohesion: 0.07
-Nodes (32): @types/node, typescript, license, name, private, type, version, mupdfWasmUrl (+24 more)
+Nodes (29): @types/node, typescript, license, name, private, type, version, clsx (+21 more)
 
 ### Community 77 - "helpers.ts"
 Cohesion: 0.17
@@ -348,11 +445,11 @@ Nodes (28): bitmapCacheUsage(), canvasIsNonBlank(), clickUntilEffect(), closeRea
 
 ### Community 83 - "library_watcher.rs"
 Cohesion: 0.06
-Nodes (64): Debug, Duration, Event, EventKind, FnOnce, Formatter, Handle, Mutex (+56 more)
+Nodes (65): Debug, Duration, Event, EventKind, FnOnce, Formatter, Handle, Mutex (+57 more)
 
 ### Community 84 - "index.ts"
-Cohesion: 0.11
-Nodes (26): APP_MIME_BY_EXTENSION, bookMime(), BOOT_START, bootElapsed(), COVER_MIME_BY_EXTENSION, coverMime(), coversDir(), createWindow() (+18 more)
+Cohesion: 0.10
+Nodes (27): APP_MIME_BY_EXTENSION, bookMime(), BOOT_START, bootElapsed(), COVER_MIME_BY_EXTENSION, coverMime(), coversDir(), createWindow() (+19 more)
 
 ### Community 89 - "package.json"
 Cohesion: 0.06
@@ -363,12 +460,8 @@ Cohesion: 0.10
 Nodes (20): devDependencies, electron, playwright, @playwright/test, tslib, @types/node, electron, @types/node (+12 more)
 
 ### Community 92 - "repository/reading_progress.rs"
-Cohesion: 0.31
-Nodes (17): engine_locator_columns_roundtrip(), get_progress(), mark_finished(), mark_finished_creates_row_for_unread_book(), mark_finished_sets_100_and_preserves_position(), missing_book_violates_foreign_key(), out_of_range_percent_is_invalid_input(), out_of_range_progression_is_invalid_input() (+9 more)
-
-### Community 94 - "ReaderShell.tsx"
-Cohesion: 0.10
-Nodes (35): byKind(), EpubReaderProps, PdfReaderProps, PDF_PLACEHOLDER_PAGE_COUNT, ReaderAnnotationList(), ReaderAnnotationListProps, bookmarkInputFor(), epubHrefJump() (+27 more)
+Cohesion: 0.09
+Nodes (41): book_collections, books, collections, reading_progress, annotations, authors, book_authors, book_metadata_overrides (+33 more)
 
 ### Community 96 - "library_scanner.rs"
 Cohesion: 0.07
@@ -381,10 +474,6 @@ Nodes (23): BytesStart, HashMap, calibre_series_fields_are_optional_and_tolerant
 ### Community 110 - "What You Must Do When Invoked"
 Cohesion: 0.08
 Nodes (24): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+16 more)
-
-### Community 111 - "repository/collections.rs"
-Cohesion: 0.22
-Nodes (24): add_book_to_collection(), count_collections(), create_and_count(), create_collection(), delete_collection(), delete_collection_removes_grouping_but_not_books(), duplicate_names_are_rejected(), empty_name_is_invalid() (+16 more)
 
 ### Community 116 - "search.rs"
 Cohesion: 0.16
@@ -415,7 +504,7 @@ Cohesion: 0.12
 Nodes (17): dependencies, class-variance-authority, clsx, cn, @fontsource-variable/geist, lucide-react, mupdf, radix-ui (+9 more)
 
 ### Community 132 - "progressMigration.ts"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (22): CfiStep, convertCfiStructure(), convertExact(), convertFoliateRow(), convertSpineElement(), convertSpineProgression(), cssPath(), elementChildren() (+14 more)
 
 ### Community 133 - "compilerOptions"
@@ -435,12 +524,12 @@ Cohesion: 0.12
 Nodes (15): 4K scrolling performance — investigation handover, Environment-1 — Silent slow paths in the GPU stack, EPUB-1 — Paginated turns rasterize viewport-sized CSS columns, EPUB-2 — Scrolled flow: whole-section iframe layers, Executive summary, External evidence, How to reproduce / measure, PDF-1 — No canvas resolution cap (primary) (+7 more)
 
 ### Community 164 - "Rendering"
-Cohesion: 0.13
-Nodes (14): Behavior, Continuous reader architecture (`frontend/src/components/reader/pdf/`), Error handling, Import mapping, In-book search, Outline, PDF layer, Public API (+6 more)
+Cohesion: 0.17
+Nodes (12): Continuous reader architecture (`frontend/src/components/reader/pdf/`), Engine prewarm, In-book search, Open-timeline telemetry (state, not timing), Opening (range-backed, never whole-file), Outline, Reading position persistence, Rendering (+4 more)
 
 ### Community 168 - "PdfPageCanvas.tsx"
-Cohesion: 0.16
-Nodes (17): blit(), PdfPageCanvas(), capByBytes(), effectiveRenderRatio(), MAX_ACTIVE_CANVAS_BYTES, MAX_RENDER_DIMENSION, MAX_RENDER_PIXELS, MAX_RENDER_PIXELS_HARD (+9 more)
+Cohesion: 0.15
+Nodes (18): blit(), CancelledRender, PdfPageCanvas(), capByBytes(), effectiveRenderRatio(), MAX_ACTIVE_CANVAS_BYTES, MAX_RENDER_DIMENSION, MAX_RENDER_PIXELS (+10 more)
 
 ### Community 175 - "services/reader.rs"
 Cohesion: 0.31
@@ -521,10 +610,6 @@ Nodes (8): core_corpus_stays_small(), corpus_root(), malformed_core_fixtures_are
 ### Community 221 - "Build and dev environment"
 Cohesion: 0.25
 Nodes (7): Build and dev environment, Commands, Debug-build performance, E2E runtime, Electron bundles, Packaging (electron-builder), PDFium shared library (PDF covers)
-
-### Community 222 - "Electron migration plan"
-Cohesion: 0.18
-Nodes (11): Electron migration plan, Phase 1 decisions and state (2026-09-07), Phase 4 decisions and state (2026-09-09), Phase 5 removals and packaging (2026-09-09), Phase 6 state (2026-09-09), Reading-progress migration (user data, must survive), Removal checklist (phase 5), Resource protocol (+3 more)
 
 ### Community 223 - "Performance budgets and metrics"
 Cohesion: 0.25
@@ -630,9 +715,9 @@ Nodes (6): ProgressUpdate, ReadingProgress, DateTime, Option, String, Utc
 Cohesion: 0.40
 Nodes (4): printWidth, semi, singleQuote, trailingComma
 
-### Community 275 - "PdfSidebar.test.tsx"
-Cohesion: 0.09
-Nodes (18): estimatePageSizes(), fireIntersection(), installMockIntersectionObserver(), intersectionObservers(), MockIntersectionObserver, resetIntersectionObservers(), FakePdfDocument, makeFakePdfDocument() (+10 more)
+### Community 275 - "intersectionObserver.ts"
+Cohesion: 0.16
+Nodes (3): installMockIntersectionObserver(), MockIntersectionObserver, resetIntersectionObservers()
 
 ### Community 276 - "Coverage gate"
 Cohesion: 0.50
@@ -663,24 +748,24 @@ Cohesion: 0.40
 Nodes (4): EpubDocumentSnapshot, EpubDocumentState, EpubDocumentStatus, useEpubDocument()
 
 ## Knowledge Gaps
-- **629 isolated node(s):** `$schema`, `plugin`, `printWidth`, `semi`, `singleQuote` (+624 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 926 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **681 isolated node(s):** `1. Objective`, `2. Current branch architecture`, `3. Primary diagnosis: the PDF is loaded completely before MuPDF opens it`, `4. Important discovery: range support already exists`, `Preferred architecture` (+676 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 982 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **31 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `AppError` connect `AppError` to `library_scanner.rs`, `services/metadata.rs`, `services/annotations.rs`, `get_reading_progress`, `commands/reader.rs`, `rpc.rs`, `book_importer.rs`, `commands/books.rs`, `EpubError`, `repository/collections.rs`, `services/reader.rs`, `library_watcher.rs`, `search.rs`, `repository/books.rs`, `library_locations.rs`, `repository/metadata.rs`, `commands/annotations.rs`, `repository/reading_progress.rs`?**
-  _High betweenness centrality (0.084) - this node is a cross-community bridge._
-- **Why does `react` connect `react` to `BookDetail.tsx`, `EpubReader.test.tsx`, `cn`, `pdf/pdfEngine.ts`, `vitest`, `shortcuts.ts`, `PdfDocumentView.tsx`, `PdfReader.tsx`, `EpubReader.tsx`, `button.tsx`, `PdfSidebar.test.tsx`, `AppShell.tsx`, `lib/bridge.ts`, `ReaderAppearance.tsx`, `useEpubDocument.ts`, `LibraryView.tsx`, `PdfPageCanvas.tsx`, `PdfReader.test.tsx`, `frontend/package.json`, `ReaderShell.tsx`?**
-  _High betweenness centrality (0.036) - this node is a cross-community bridge._
-- **Why does `ReadiumEpubHandle` connect `ReadiumEpubHandle` to `EpubReader.test.tsx`, `progressMigration.ts`, `useEpubDocument.ts`, `EpubReader.tsx`, `epub/readiumEngine.ts`?**
-  _High betweenness centrality (0.028) - this node is a cross-community bridge._
-- **What connects `$schema`, `plugin`, `printWidth` to the rest of the system?**
-  _629 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `BookDetail.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.1402116402116402 - nodes in this community are weakly interconnected._
-- **Should `react` be split into smaller, more focused modules?**
-  _Cohesion score 0.1021021021021021 - nodes in this community are weakly interconnected._
+- **Why does `AppError` connect `AppError` to `EpubError`, `EventEmitter`, `artwork_cache.rs`, `rpc.rs`, `lib.rs`, `repository/collections.rs`, `services/annotations.rs`, `dispatch`, `services/metadata.rs`, `book_importer.rs`, `commands/library.rs`, `services/reader.rs`, `repository/books.rs`, `repository/metadata.rs`, `commands/reader.rs`, `commands/books.rs`, `library_watcher.rs`, `repository/reading_progress.rs`, `library_scanner.rs`, `search.rs`, `commands/annotations.rs`?**
+  _High betweenness centrality (0.110) - this node is a cross-community bridge._
+- **Why does `EpubError` connect `EpubError` to `library_scanner.rs`, `AppError`, `epub/metadata.rs`, `services/reader.rs`, `session.rs`, `parse_epub`?**
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
+- **Why does `react` connect `react` to `BookMetadataDialog.tsx`, `EpubReader.test.tsx`, `cn`, `AppShell.tsx`, `shortcuts.ts`, `Annotation`, `PdfReader.tsx`, `ReaderShell.tsx`, `Sidebar.tsx`, `lib/bridge.ts`, `pdf/pdfEngine.ts`, `utils.ts`, `ImportProvider.tsx`, `SettingsShell.tsx`, `ReaderAppearance.tsx`, `ReaderNavigation.tsx`, `useEpubDocument.ts`, `LibraryView.tsx`, `PdfPageCanvas.tsx`, `PdfReader.test.tsx`, `frontend/package.json`?**
+  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+- **What connects `1. Objective`, `2. Current branch architecture`, `3. Primary diagnosis: the PDF is loaded completely before MuPDF opens it` to the rest of the system?**
+  _681 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `BookMetadataDialog.tsx` be split into smaller, more focused modules?**
+  _Cohesion score 0.12315270935960591 - nodes in this community are weakly interconnected._
 - **Should `EpubReader.test.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.09243697478991597 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.12433862433862433 - nodes in this community are weakly interconnected._
+- **Should `Handover: Fix `just dev` Startup Latency and Process Lifecycle` be split into smaller, more focused modules?**
+  _Cohesion score 0.06451612903225806 - nodes in this community are weakly interconnected._

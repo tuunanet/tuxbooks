@@ -447,6 +447,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
   });
 
   window.webContents.on("did-finish-load", () => bootElapsed("renderer did-finish-load"));
+  window.webContents.on("render-process-gone", (_event, details) => logRenderProcessGone(details));
   window.once("ready-to-show", () => {
     bootElapsed("ready-to-show");
     if (state.maximized) window.maximize();
@@ -681,3 +682,29 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   app.quit();
 });
+
+/**
+ * Process-failure diagnostics (§ GPU/renderer gone): GPU and renderer
+ * process deaths are logged with Electron's own classification — type,
+ * reason, exit code — plus the environment needed to correlate a crash
+ * (versions, GPU feature status). Diagnostics only: a GPU-process exit is
+ * recovered by Chromium itself; never reload() from these events.
+ */
+app.on("child-process-gone", (_event, details) => {
+  if (details.type !== "GPU") return;
+  console.error(
+    `[electron] GPU process gone: reason=${details.reason} exitCode=${details.exitCode}` +
+      ` name=${details.name ?? "n/a"} serviceName=${details.serviceName ?? "n/a"}` +
+      ` electron=${process.versions.electron} chromium=${process.versions.chrome}` +
+      ` gpu=${JSON.stringify(app.getGPUFeatureStatus())}`,
+  );
+});
+
+// Renderer deaths are fatal to the page but distinct from GPU failures;
+// Electron restarts nothing here, so the log must carry the failure mode.
+function logRenderProcessGone(details: Electron.RenderProcessGoneDetails): void {
+  console.error(
+    `[electron] renderer gone: reason=${details.reason} exitCode=${details.exitCode}` +
+      ` electron=${process.versions.electron} chromium=${process.versions.chrome}`,
+  );
+}

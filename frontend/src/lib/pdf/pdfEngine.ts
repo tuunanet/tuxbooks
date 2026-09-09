@@ -2,6 +2,7 @@ import workerUrl from "./mupdfWorker?worker&url";
 import wasmUrlRaw from "virtual:mupdf-wasm-url";
 import { normalizePdfOutline, type PdfOutlineItem, type RawPdfOutline } from "./pdfOutline";
 import { assemblePageText, type PdfTextItem } from "./pdfSearch";
+import type { BookFormat } from "@/types/domain";
 
 /**
  * The single seam between the app and the MuPDF.js/WASM engine. Components
@@ -79,6 +80,8 @@ class WorkerClient {
   private worker: Worker;
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
+  private failureListeners = new Set<() => void>();
+  private failed = false;
 
   constructor() {
     this.worker = new Worker(workerUrl, { type: "module" });
@@ -91,12 +94,33 @@ class WorkerClient {
       else pending.reject(new Error(response.error ?? "MuPDF worker failure"));
     };
     this.worker.onerror = (event) => {
+      // A dead worker is a diagnostic failure, not cancellation: every
+      // pending request rejects, and listeners (the document owner) hear
+      // about it exactly once so recovery can start.
       const pending = [...this.pending.values()];
       this.pending.clear();
+      this.failed = true;
+      const failure = new Error(event.message || "MuPDF worker failed to load");
       for (const request of pending) {
-        request.reject(new Error(event.message || "MuPDF worker failed to load"));
+        request.reject(failure);
+      }
+      const listeners = [...this.failureListeners];
+      this.failureListeners.clear();
+      for (const listener of listeners) {
+        listener();
       }
     };
+  }
+
+  /** Registers a one-shot worker-death listener; returns the unsubscribe fn. */
+  onFailed(listener: () => void): () => void {
+    if (this.failed) {
+      // Already gone: notify without registering.
+      listener();
+      return () => {};
+    }
+    this.failureListeners.add(listener);
+    return () => this.failureListeners.delete(listener);
   }
 
   request(method: string, params: unknown, transfer: Transferable[] = []): Promise<unknown> {
@@ -175,6 +199,13 @@ export interface PdfDocument {
   getOutline(): Promise<RawPdfOutline[] | null>;
   /** Structured-text lines of one page, in page units. */
   getTextLines(pageNumber: number): Promise<EngineTextLine[]>;
+  /**
+   * Registers a one-shot listener for unexpected worker death (not
+   * cancellation, not close): the document owner uses it to re-open the
+   * document from its range-backed source. Optional so test fakes can
+   * omit it.
+   */
+  onWorkerFailed?(callback: () => void): () => void;
   /** Terminates the document's worker, freeing all WASM resources. */
   destroy(): Promise<void>;
 }
@@ -269,11 +300,71 @@ class MuPdfDocument implements PdfDocument {
 }
 
 /**
+ * Prewarmed worker state: at most one idle engine worker holds a loaded
+ * MuPDF/WASM module. The first document open adopts it instead of paying
+ * worker startup + module load + WASM fetch/compile on the open critical
+ * path. The prewarm never opens a document or rasterizes anything.
+ */
+let prewarmedClient: WorkerClient | null = null;
+let prewarmPromise: Promise<void> | null = null;
+
+/**
+ * Load the MuPDF module into a spare worker ahead of any document open.
+ * Safe to call repeatedly (single-flight); never throws into app startup —
+ * a failed prewarm just discards the spare worker, and the next open pays
+ * the cold start instead. Runs without opening a document or rasterizing.
+ */
+export function prewarmPdfEngine(): Promise<void> {
+  if (prewarmPromise) return prewarmPromise;
+  if (typeof Worker === "undefined") {
+    // Non-worker hosts (unit tests, exotic embeddings): nothing to warm.
+    return Promise.resolve();
+  }
+  const client = new WorkerClient();
+  prewarmedClient = client;
+  prewarmPromise = client
+    .request("prewarm", { wasmUrl: resolveWasmUrl() })
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      // Discard only if still the current spare; an adopted worker is owned
+      // by its document and must not be terminated here.
+      if (prewarmedClient === client) {
+        client.terminate();
+        prewarmedClient = null;
+        prewarmPromise = null;
+      }
+      throw error;
+    });
+  return prewarmPromise;
+}
+
+/**
+ * Cancel an in-flight prewarm that was never adopted (reader closed before
+ * any open, test teardown). Terminating a spare worker is free; a worker
+ * already adopted by a document is left alone.
+ */
+export function cancelPdfPrewarm(): void {
+  if (prewarmedClient) {
+    prewarmedClient.terminate();
+    prewarmedClient = null;
+  }
+  prewarmPromise = null;
+}
+
+/** Hand the spare worker to a document open, if one is warm. */
+function takePrewarmedClient(): WorkerClient | null {
+  const client = prewarmedClient;
+  prewarmedClient = null;
+  prewarmPromise = null;
+  return client;
+}
+
+/**
  * Open a PDF from in-memory bytes. The underlying buffer is transferred to
  * the document's worker, so callers must not reuse the array afterwards.
  */
 export async function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
-  const client = new WorkerClient();
+  const client = takePrewarmedClient() ?? new WorkerClient();
   try {
     const { pageCount } = (await client.request(
       "open",
@@ -285,6 +376,30 @@ export async function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
       },
       [data.buffer],
     )) as { pageCount: number };
+    return new MuPdfDocument(client, pageCount);
+  } catch (error: unknown) {
+    client.terminate();
+    throw error;
+  }
+}
+
+/**
+ * Open a stored book's PDF without ever loading the whole file into the
+ * renderer: the worker opens the document through a random-access stream
+ * over `tuxbooks://book/<id>`, and MuPDF pulls only the ranges it needs
+ * (xref trail, then page 1 content) — the full-file transfer leaves the
+ * first-page critical path entirely.
+ */
+export async function openPdfDocumentFromBook(
+  bookId: number,
+  format: BookFormat,
+): Promise<PdfDocument> {
+  const client = takePrewarmedClient() ?? new WorkerClient();
+  try {
+    const { pageCount } = (await client.request("open", {
+      wasmUrl: resolveWasmUrl(),
+      bookUrl: `tuxbooks://book/${bookId}?format=${format}`,
+    })) as { pageCount: number };
     return new MuPdfDocument(client, pageCount);
   } catch (error: unknown) {
     client.terminate();

@@ -64,26 +64,52 @@ rasterizes pages, with all engine objects and rasterization in a dedicated
 module worker (`lib/pdf/mupdfWorker.ts`) — MuPDF renders synchronously, so
 the worker keeps it off the UI thread. One worker instance serves one
 document; closing the document terminates the worker and frees the whole
-WASM heap. The worker loads lazily on the first document open. The WASM
-bundle is emitted by a small Vite plugin (`virtual:mupdf-wasm-url` in
-`vite.config.ts`) because the emscripten glue's own chunk-relative
-resolution never finds the asset in a bundled build; the main thread
-resolves the URL and passes it into the open request, where the worker
-pins it as `Module.locateFile` before the dynamic engine import.
-`frontend/src/lib/pdf/pdfEngine.ts` is the only module that touches MuPDF.
-Byte access flows through the `tuxbooks://` custom protocol (range
-requests supported) — paths never cross the boundary.
+WASM heap. The WASM bundle is emitted by a small Vite plugin
+(`virtual:mupdf-wasm-url` in `vite.config.ts`) because the emscripten
+glue's own chunk-relative resolution never finds the asset in a bundled
+build; the main thread resolves the URL and passes it into the open
+request, where the worker pins it as `Module.locateFile` before the
+dynamic engine import. `frontend/src/lib/pdf/pdfEngine.ts` is the only
+module that touches MuPDF. Byte access flows through the `tuxbooks://`
+custom protocol (range requests supported) — paths never cross the
+boundary.
+
+### Opening (range-backed, never whole-file)
+
+Documents open through the engine's **random-access stream**
+(`openPdfDocumentFromBook`): the worker wraps `tuxbooks://book/<id>` in a
+`mupdf.Stream` handle whose reads are synchronous XHR **HTTP Range
+requests** (legal only inside a worker) against the Electron protocol
+handler, which seeks/reads through the Rust sidecar. MuPDF therefore pulls
+only the ranges it needs — the xref trail first, page 1 content next — and
+the first readable page no longer waits for the whole file to cross the
+bridge. A 1 MiB read-ahead chunk cache (bounded, LRU) keeps MuPDF's
+scattered object reads from becoming one request per object. The in-memory
+`openPdfDocument(bytes)` path remains for tests and byte sources that are
+already fully resident.
+
+### Engine prewarm
+
+`prewarmPdfEngine()` loads the MuPDF module into a spare worker (no
+document, no rasterization) once the app shell has rendered and the main
+thread is idle (`AppShell`'s `PdfEnginePrewarm`); the first open adopts
+that warm worker instead of paying worker startup + WASM fetch/compile on
+the critical path. It is single-flight, disabled without a Worker
+environment, and a failed prewarm only means the next open starts cold.
 
 ### Continuous reader architecture (`frontend/src/components/reader/pdf/`)
 
 - `PdfReader.tsx` — composition root: zoom state, the initialization
   sequence (document ready → layout ready → position restored →
   interactive), and the render-set derivation.
-- `hooks/usePdfDocument` — loads bytes via the bridge/protocol; owns the
-  document lifetime (destroy on unmount/book switch). A switch also drops
+- `hooks/usePdfDocument` — opens the book through the range-backed engine
+  seam (`openPdfDocumentFromBook`); owns the document lifetime (destroy on
+  unmount/book switch). A switch also drops
   the previous document from state in that render (render-phase reset), so
   a closed document never serves a render while the next loads, and a load
   that lands after its book was superseded is destroyed, never mounted.
+  Records the open-timeline anchor + `open=` segment for the telemetry
+  attributes below.
 - `hooks/usePdfGeometry` — reserves the whole document from a page-1
   estimate, then corrects pages lazily as they approach visibility
   (`measurePages`; corrections are idempotent per document).
@@ -142,7 +168,12 @@ critical path.
    resolution (never blurrier than the layout while the hard budget
    allows), and only under zoom into the hard per-dimension budget; the
    canvas CSS size stays at the displayed size and CSS upscales beyond the
-   ratio.
+   ratio. While the very first page of a freshly opened document is
+   pending, the anchor page renders **two-stage** (`preview`): a readable
+   preview at ratio ≤ 1 blits first and the full-ratio refinement replaces
+   it in the background — the visible canvas only ever receives complete
+   bitmaps (canvas carries `data-pdf-render-quality`
+   `preview|final`).
 6. On eviction the finished bitmap moves into a per-document LRU cache
    (`pdfBitmapCache`, bounded by a 320 MB byte budget and entry count,
    keyed by render scale and effective ratio, dropped on zoom and on
@@ -164,6 +195,29 @@ virtualization, or cache policy. Startup diagnostics (PERF-11) are
 deterministic attributes on the reader element (`data-pdf-render-info`:
 dpr, content width, viewport height, fit scale; `data-pdf-render-ms` on
 each canvas: the last render→blit durations).
+
+### Open-timeline telemetry (state, not timing)
+
+The reader publishes the PDF-open path as deterministic attributes on
+every reader surface (error/loading/interactive), driven by the pure
+helpers in `pdfOpenTelemetry.ts`:
+
+- `data-pdf-open-state` —
+  `created|document-opening|document-ready|geometry-ready|first-render-start|interactive`
+  (a failed open reports `created` + the error surface);
+- `data-pdf-open-timing` —
+  `bytes=range;open=…;firstPaint=…;interactive=…`, segments omitted until
+  measured (`open` = click→document parsed, `firstPaint` = click→first
+  rendered page, `interactive` = the later of first paint and position
+  restore);
+- `data-pdf-open-ms`, `data-pdf-first-paint-ms`, `data-pdf-first-page` —
+  the individual segments as bare numbers/page.
+
+E2E asserts state values and attribute shape only; timing thresholds are
+manual-bench material (`just bench-reader`, docs/performance.md), never
+headless CI assertions. Outline work is explicitly ordered below first
+paint: the outline request is sent only after the first page has rendered,
+so it can never occupy the MuPDF worker ahead of page 1.
 
 ### Thumbnails sidebar (`PdfSidebar`)
 
@@ -262,4 +316,8 @@ the scroll tracker — a coarse page-local position, per the data model.
 The MuPDF worker is bundled and configured once in the engine. A
 main-thread fallback is the classic cause of seconds-long variable renders
 — the reader exposes `data-pdf-worker-src` and the seeded E2E verifies the
-asset is fetchable.
+asset is fetchable. One worker serves one document, so render, text
+extraction, outline, and thumbnail requests serialize inside it; the
+open-path ordering (page 1 first, then adjacent pages, then outline and
+thumbnails) is enforced on the main thread — see "Open-timeline
+telemetry" above.

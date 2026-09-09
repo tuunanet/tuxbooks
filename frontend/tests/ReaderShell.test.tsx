@@ -5,7 +5,9 @@ import userEvent from "@testing-library/user-event";
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
   return {
-    openPdfDocument: vi.fn(),
+    openPdfDocumentFromBook: vi.fn(),
+    prewarmPdfEngine: vi.fn(async () => {}),
+    cancelPdfPrewarm: vi.fn(),
     closePdfDocument: vi.fn(async () => {}),
     getPdfOutline: vi.fn(async () => []),
     getPdfPageText: vi.fn(async () => ""),
@@ -21,12 +23,12 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 });
 
 import { AppShell } from "@/components/layout/AppShell";
-import { getPdfOutline, openPdfDocument } from "@/lib/pdf/pdfEngine";
+import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { makeAnnotation, makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { lastFakeHandle, fakeEpubHandles, FAKE_LOCATOR } from "./mocks/readiumEngine";
-import { fetchBookBytesMock, invokeMock, mockInvoke } from "./mocks/bridge";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 beforeEach(() => {
   fakeEpubHandles.length = 0;
@@ -43,8 +45,8 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
           title: "A Minimal PDF",
         });
   if (bookFormat === "pdf") {
-    vi.mocked(openPdfDocument).mockResolvedValue(
-      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocument>>,
+    vi.mocked(openPdfDocumentFromBook).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocumentFromBook>>,
     );
   }
   invokeMock.mockClear();
@@ -396,7 +398,7 @@ describe("ReaderNavigation", () => {
     await openNavigation();
     expect(await screen.findByTestId("nav-pages")).toBeInTheDocument();
     expect(screen.getByTestId("nav-page-3")).toBeInTheDocument();
-    expect(fetchBookBytesMock).toHaveBeenCalledWith(1, "pdf");
+    expect(vi.mocked(openPdfDocumentFromBook)).toHaveBeenCalledWith(1, "pdf");
 
     await userEvent.click(screen.getByTestId("nav-page-2"));
     expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
@@ -559,8 +561,8 @@ describe("Reader book switching", () => {
       title: "A Minimal PDF",
     });
     vi.mocked(getPdfOutline).mockResolvedValue([{ title: "Part One", page: 1, items: [] }]);
-    vi.mocked(openPdfDocument).mockResolvedValue(
-      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocument>>,
+    vi.mocked(openPdfDocumentFromBook).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocumentFromBook>>,
     );
     invokeMock.mockClear();
     mockInvoke({

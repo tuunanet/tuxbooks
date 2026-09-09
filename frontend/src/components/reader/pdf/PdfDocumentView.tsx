@@ -25,6 +25,12 @@ interface PdfDocumentViewProps {
   failedPages: ReadonlySet<number>;
   /** Shared per-document cache of finished page bitmaps. */
   bitmapCache?: PdfBitmapCache | null;
+  /**
+   * Two-stage first paint for the anchor page while no page has rendered
+   * yet (§ first readable page): readable preview first, background
+   * refinement after.
+   */
+  previewAnchorRender?: boolean;
   onPageRendered: (pageNumber: number) => void;
   onPageError: (pageNumber: number, error: unknown) => void;
   registerSlot: (pageNumber: number, element: HTMLDivElement | null) => void;
@@ -55,6 +61,7 @@ export function PdfDocumentView({
   renderedPages,
   failedPages,
   bitmapCache = null,
+  previewAnchorRender = false,
   onPageRendered,
   onPageError,
   registerSlot,
@@ -125,6 +132,7 @@ export function PdfDocumentView({
                     width={slot.width}
                     height={slot.height}
                     scale={scale}
+                    preview={previewAnchorRender && slot.pageNumber === anchorPage}
                     bitmapCache={bitmapCache}
                     onPageRendered={onPageRendered}
                     onPageError={onPageError}
