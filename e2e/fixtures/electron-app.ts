@@ -72,7 +72,13 @@ function patchEnvironmentRecord(patch: Record<string, unknown>): void {
   }
 }
 
-async function launchElectronApp(): Promise<ElectronApplication> {
+/**
+ * Launch one isolated app instance. Exported for the desktop-shell suite's
+ * relaunch scenario, which manages a second app lifecycle inside a test
+ * (ElectronApplication.close() is idempotent, so the worker teardown's
+ * close on an already-closed app is a no-op).
+ */
+export async function launchElectronApp(): Promise<ElectronApplication> {
   // Isolation gate (docs/testing.md): the scratch database must belong to
   // this run before the app ever launches. A fixture-level failure stops
   // the worker — there is no WDIO-style "log the hook error and continue"

@@ -23,15 +23,42 @@ PDFium resource. Releases are marked pre-release until 1.0, and the site
 links to the releases list (not `/releases/latest`, which ignores
 pre-releases).
 
+### Desktop identity (branding vs technical identifiers)
+
+Human-facing identity is **TuxBooks** everywhere it is displayed: the
+electron-builder `productName` (package metadata, desktop-entry `Name`),
+the native window title, and the sidebar heading. Technical identifiers
+stay the stable `tuxbooks` and must not be renamed casually — they anchor
+install paths, persisted data, protocol registration, and upgrade
+behavior:
+
+| Identifier                                | Where                               |
+| ----------------------------------------- | ----------------------------------- |
+| `com.tuxbooks.app`                        | appId, data dir under XDG data home |
+| `tuxbooks` (executable, `executableName`) | `/opt/TuxBooks/tuxbooks`, WM class  |
+| `tuxbooks.desktop` / `Icon=tuxbooks`      | desktop entry, hicolor icons        |
+| `tuxbooks://`                             | resource protocol                   |
+
+The install dir follows `productName` (`/opt/TuxBooks`); the executable
+name inside it stays `tuxbooks`. The native window/taskbar icon is decoded
+from the canonical `build/icons/` set at runtime (`appIcon()` in
+`electron/main/index.ts`; extraResources copies it to `resources/icons`
+in packaged builds). Modern Chromium no longer writes the legacy X11
+`_NET_WM_ICON` property (verified empty on dev + packaged, with a decoded
+image), so launcher/taskbar icon identity flows through the desktop entry
+(`Icon=tuxbooks` + `StartupWMClass=tuxbooks`) — which is what the
+packaging gate asserts.
+
 ## The packaging gate
 
 `scripts/check-deb.sh` is the packaging gate: it verifies the built deb's
 control metadata (package name, exact version match, description, and no
 webkit dependency), the extracted payload (Electron binary + executable
-sidecar + PDFium resource), the desktop entry (structure plus
-`desktop-file-validate` when installed), and hicolor icons. CI builds the
-deb target and runs the gate on every push; the release workflow builds the
-published deb + AppImage and runs the same gate before publishing.
+sidecar + PDFium resource + the runtime window icon), the desktop entry
+(structure, `Name=TuxBooks`, `Icon=tuxbooks`, plus `desktop-file-validate`
+when installed), and hicolor icons. CI builds the deb target and runs the
+gate on every push; the release workflow builds the published deb +
+AppImage and runs the same gate before publishing.
 
 ## Cutting a release
 

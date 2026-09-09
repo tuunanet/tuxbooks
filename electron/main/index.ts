@@ -1,4 +1,4 @@
-import { protocol, app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { protocol, app, BrowserWindow, nativeImage, ipcMain, dialog, shell } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -389,52 +389,50 @@ async function serveBookResource(
   }
 }
 
-interface WindowState {
-  width: number;
-  height: number;
-  x?: number;
-  y?: number;
-  maximized: boolean;
-}
+/**
+ * Deterministic startup geometry (docs/fix-electron-main-window-behaviour.md
+ * §6): every launch is a centered, unmaximized, useful-size window. Nothing
+ * about the window is persisted between runs, so a maximized session can
+ * never leak into the next startup.
+ */
+const WINDOW_DEFAULTS = {
+  width: 1280,
+  height: 820,
+  minWidth: 900,
+  minHeight: 600,
+} as const;
 
-const DEFAULT_STATE: WindowState = { width: 1100, height: 720, maximized: false };
-
-function windowStateFile(): string {
-  return path.join(app.getPath("userData"), "window-state.json");
-}
-
-function loadWindowState(): WindowState {
-  try {
-    const state = JSON.parse(fs.readFileSync(windowStateFile(), "utf8")) as WindowState;
-    if (typeof state.width === "number" && typeof state.height === "number") {
-      return state;
-    }
-  } catch {
-    // Missing or corrupt state falls back to defaults.
+/**
+ * The native window/taskbar icon (docs/fix-electron-main-window-behaviour.md
+ * §13). `build/icons/` is the canonical source; dev and E2E resolve it from
+ * the repo layout next to the electron bundle, packaged builds get it
+ * copied to resources/icons by electron-builder's extraResources (the asar
+ * itself carries only electron/dist + frontend/dist). The icon is decoded
+ * here rather than passed as a path: a string path can silently fail to
+ * load on Linux and leave the window iconless, so decode + isEmpty-guard.
+ */
+function appIcon(): Electron.NativeImage | undefined {
+  const candidates = ["512x512.png", "256x256.png", "128x128.png"].flatMap((size) => [
+    path.join(__dirname, "../../build/icons", size),
+    path.join(process.resourcesPath, "icons", size),
+  ]);
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    const image = nativeImage.createFromPath(file);
+    if (!image.isEmpty()) return image;
   }
-  return { ...DEFAULT_STATE };
-}
-
-function saveWindowState(window: BrowserWindow): void {
-  const state: WindowState = {
-    ...window.getBounds(),
-    maximized: window.isMaximized(),
-  };
-  try {
-    fs.writeFileSync(windowStateFile(), JSON.stringify(state));
-  } catch (error) {
-    console.error("failed to save window state:", error);
-  }
+  return undefined;
 }
 
 function createWindow(forward: (name: string, payload: unknown) => void): BrowserWindow {
-  const state = loadWindowState();
   const window = new BrowserWindow({
-    width: state.width,
-    height: state.height,
-    x: state.x,
-    y: state.y,
-    title: "tuxbooks",
+    ...WINDOW_DEFAULTS,
+    center: true,
+    title: "TuxBooks",
+    resizable: true,
+    maximizable: true,
+    minimizable: true,
+    icon: appIcon(),
     show: false,
     backgroundColor: "#0b0b0f",
     webPreferences: {
@@ -450,16 +448,9 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
   window.webContents.on("render-process-gone", (_event, details) => logRenderProcessGone(details));
   window.once("ready-to-show", () => {
     bootElapsed("ready-to-show");
-    if (state.maximized) window.maximize();
-    else window.show();
+    window.show();
     bootElapsed("window shown");
   });
-
-  // Window size/position survive restarts (formerly the window-state plugin).
-  const persist = (): void => saveWindowState(window);
-  window.on("close", persist);
-  window.on("maximize", persist);
-  window.on("unmaximize", persist);
 
   // In-page links never spawn extra Chromium windows; http(s) links go to
   // the system browser, everything else is dropped.

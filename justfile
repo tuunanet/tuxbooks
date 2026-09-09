@@ -153,10 +153,27 @@ _headless := if os() == "linux" { _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum"
 
 test-e2e: build-debug
     just test-e2e-empty
+    just test-e2e-shell
     just test-e2e-seeded
 
 test-e2e-empty:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
+
+# Desktop-shell suite (docs/fix-electron-main-window-behaviour.md §17):
+# native window lifecycle, branding, and the repeated-launch policy. A
+# 1920x1080 virtual screen gives the default 1280x820 window real centering
+# headroom (xvfb-run's 1280x1024 default would hug the left/right edges).
+# True maximize/restore needs a window manager — bare Xvfb has none, so
+# those scenarios skip here and run under test-e2e-headed-shell.
+_shell_headless := _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24'"
+
+test-e2e-shell: build-debug
+    {{_shell_headless}} {{_e2e_timeout}} env E2E_PHASE=shell E2E_SEED_LIBRARY= pnpm --filter e2e test:shell
+
+# Same suite on the real desktop (the developer's WM participates): the
+# maximize/restore/resize scenarios run for real instead of skipping.
+test-e2e-headed-shell: build-debug
+    {{_x11}} {{_e2e_timeout}} env E2E_PHASE=shell E2E_SEED_LIBRARY= pnpm --filter e2e test:shell
 
 test-e2e-seeded:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded

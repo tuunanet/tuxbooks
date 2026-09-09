@@ -166,11 +166,24 @@ The app inherits the runner's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set before the first Electron launch
 (globalSetup; the fixture re-asserts them) — keep that ordering.
 
-Two isolated invocations per run:
+Three isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
-2. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
+2. **shell** (`test:shell`) — fresh scratch env; the desktop-shell
+   regression suite (`desktop-shell.e2e.ts`,
+   docs/fix-electron-main-window-behaviour.md §17): native window title +
+   sidebar branding, deterministic startup geometry (centered, unmaximized,
+   1280×820), min-size clamping, resize after a maximize/restore cycle, icon
+   resolution, and the repeated-launch policy (relaunch after a maximized
+   session must open the default window — the removed window-state
+   persistence guard). Own phase because the relaunch scenario closes and
+   relaunches the app, which must not share a worker with other suites.
+   True maximize/restore is an EWMH round-trip with the window manager:
+   bare Xvfb has none (maximize is a no-op there — probed), so those two
+   scenarios skip headlessly and run under `just test-e2e-headed-shell` on
+   a real desktop.
+3. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
    library; the app imports them on startup. Runs `books.e2e.ts` (library
@@ -207,7 +220,7 @@ Two isolated invocations per run:
    add and remove a book through the card context menu, mark a book
    finished, delete the collection).
 
-Two more invocations exist beyond the default pair:
+Two more invocations exist beyond the default trio:
 
 - **hidpi** (`just test-e2e-hidpi`) — the seeded reader scenarios against
   an app forced to `devicePixelRatio` 2 (`E2E_DEVICE_SCALE_FACTOR` →
@@ -233,8 +246,8 @@ unreliable; `docs/performance.md` — E2E asserts deterministic attributes
 only), runs headed on the real display with the window maximized (explicit
 `WxH` overrides; sizing goes through the renderer's `window.resizeTo`
 because the real OS window is what the reader lays out against), and
-seeds the real-book fixtures in
-`tests/fixtures/books/EBooks/Agents/` (missing fixtures are skipped with a
+seeds the free-corpus fixtures (`just fetch-ebooks`) from
+`tests/fixtures/books/EBooks/` (missing fixtures are skipped with a
 notice). Both scenarios start mid-book. Measured, per reader:
 
 - frame-time p50/p95/max while a synthetic scrollbar drag runs (continuous
@@ -319,11 +332,15 @@ pass.
   `minimal.pdf` (3 pages), `large.pdf` (100 pages with a nested outline,
   virtualization + outline-navigation proof), `mixed.pdf` (six MediaBoxes,
   per-page geometry).
-- Exception: `tests/fixtures/books/EBooks/` holds a real user-created
-  library (real copyrighted files). It is gitignored and must never be
-  committed. `sidecar/tests/realistic_library.rs` runs against it and
-  skips itself when the directory is absent; `REALISTIC_LIBRARY_PATH`
-  overrides its location.
+- Free ebook corpus: `tests/fixtures/books/EBooks/` holds freely licensed
+  sample books (IDPF EPUB 3 samples, py-pdf sample-files — CC-BY-SA, ~11 MB).
+  Download with `just fetch-ebooks` (network, explicit — never part of
+  `just check`/`just test`); the committed `manifest.json` pins every file's
+  URL + sha256 + size and `just check-ebooks` verifies the corpus offline
+  (docs/free-ebook-fixtures.md). Only `manifest.json` is committed; tests that
+  use the corpus (`sidecar/tests/realistic_library.rs`, bench-reader seeding)
+  skip with a notice when it is absent; `REALISTIC_LIBRARY_PATH` overrides
+  its location.
 - `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` / `REALISTIC_LIBRARY_PATH`
   are the only override hooks; production code resolves the OS app-data
   dir when the first two are unset.

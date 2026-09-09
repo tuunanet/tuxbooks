@@ -3,7 +3,7 @@
 # version), and the packaging gate (scripts/check-deb.sh) carry over from the
 # Tauri era; only the build internals changed.
 appId: com.tuxbooks.app
-productName: tuxbooks
+productName: TuxBooks
 copyright: GPL-3.0-or-later
 
 directories:
@@ -25,6 +25,10 @@ extraResources:
     to: sidecar/tuxbooks
   - from: sidecar/pdfium/libpdfium.so
     to: sidecar/libpdfium.so
+  # The native window/taskbar icon at runtime (electron/main/index.ts
+  # appIconPath): the canonical build/icons set copied out of the asar.
+  - from: build/icons
+    to: icons
 
 linux:
   category: Utility
@@ -32,6 +36,10 @@ linux:
   vendor: tuxbooks
   description: Local-first ebook library and reader
   synopsis: Local-first ebook library and reader
+  # The human-facing name is TuxBooks; the executable (and with it the
+  # /opt/tuxbooks install layout and desktop Exec path) stays the stable
+  # technical identifier (docs/fix-electron-main-window-behaviour.md §4).
+  executableName: tuxbooks
   target:
     - deb
     - rpm
