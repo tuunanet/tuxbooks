@@ -26,21 +26,48 @@ dev:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{root}}"
+    # Port probes must try BOTH stacks: Vite binds localhost through
+    # getaddrinfo and on IPv6-first machines lands on [::1] only — probing
+    # 127.0.0.1 alone then never connects, and the wait loop below spun the
+    # full 120x0.5s = 60s before Electron even launched (the reported ~30s
+    # "stuck" startup; docs/dev-startup-latency.md).
+    port_open() {
+        (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null && { exec 3>&- 3<&-; return 0; }
+        (exec 3<>/dev/tcp/::1/1420) 2>/dev/null && { exec 3>&- 3<&-; return 0; }
+        return 1
+    }
     # A stale dev server (crashed run, leftover terminal) holds the port and
     # Vite would die with a cryptic bind error — fail with the fix instead.
-    if (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null; then
+    if port_open; then
         echo "dev: port 1420 is already in use — stop the other tuxbooks dev server first." >&2
         exit 1
     fi
     cargo build --manifest-path src-tauri/Cargo.toml
     node scripts/build-electron.mjs
-    pnpm --filter frontend dev &
+    # setsid makes Vite a process-group leader: cleanup kills the whole group
+    # (pnpm + node + vite), not just the direct PID — descendants survive a
+    # plain `kill $pid` and hold port 1420, which is what forced the old
+    # `fuser -k 1420/tcp` workaround (docs/dev-startup-latency.md §8).
+    setsid pnpm --filter frontend dev &
     vite_pid=$!
-    trap 'kill $vite_pid 2>/dev/null || true' EXIT
+    cleanup() {
+        trap - EXIT INT TERM
+        kill -TERM -- -"$vite_pid" 2>/dev/null || true
+        # Bounded wait for the group to die, then escalate: the port must be
+        # released by the time this recipe exits, on Electron exit, Ctrl+C,
+        # or external termination alike.
+        for _ in $(seq 1 20); do
+            kill -0 -- -"$vite_pid" 2>/dev/null || return 0
+            sleep 0.1
+        done
+        kill -KILL -- -"$vite_pid" 2>/dev/null || true
+        wait "$vite_pid" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+    trap 'cleanup; exit 130' INT TERM
     # Wait for the Vite server (port 1420, strictPort) before opening the shell.
     for _ in $(seq 1 120); do
-        if (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null; then
-            exec 3>&- 3<&- || true
+        if port_open; then
             break
         fi
         sleep 0.5

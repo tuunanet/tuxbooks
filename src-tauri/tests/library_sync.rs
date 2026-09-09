@@ -499,23 +499,26 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
     // Two files land before reconciliation knows about them.
     env.write_book("a.epub", "Startup A");
     env.write_book("b.epub", "Startup B");
-    let changes = env
+    let report = env
         .reconciler
         .reconcile_location(&env.library)
         .await
         .unwrap();
-    assert_eq!(changes, 2);
+    assert_eq!(report.changes, 2);
+    assert_eq!(report.imported, 2);
+    assert_eq!(report.failed, 0);
     assert_eq!(env.count().await, 2);
 
     // A file deleted while the app was "off" becomes unavailable; the
     // survivor is untouched (no re-import, no availability churn).
     std::fs::remove_file(env.path("a.epub")).unwrap();
-    let changes = env
+    let report = env
         .reconciler
         .reconcile_location(&env.library)
         .await
         .unwrap();
-    assert_eq!(changes, 1);
+    assert_eq!(report.changes, 1);
+    assert_eq!(report.updated, 1);
     let survivor = book_repo::get_book_by_path(&env.pool, &env.path("b.epub").to_string_lossy())
         .await
         .unwrap()
@@ -524,19 +527,20 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
 
     // A file added while the app was "off" is imported on the next pass.
     env.write_book("c.epub", "Startup C");
-    let changes = env
+    let report = env
         .reconciler
         .reconcile_location(&env.library)
         .await
         .unwrap();
-    assert_eq!(changes, 1);
+    assert_eq!(report.changes, 1);
+    assert_eq!(report.imported, 1);
     assert_eq!(env.count().await, 3);
 
     // Reconciliation is idempotent: an unchanged library makes no changes.
-    let changes = env
+    let report = env
         .reconciler
         .reconcile_location(&env.library)
         .await
         .unwrap();
-    assert_eq!(changes, 0);
+    assert_eq!(report.changes, 0);
 }

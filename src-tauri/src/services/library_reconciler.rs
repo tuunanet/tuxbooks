@@ -55,6 +55,34 @@ pub enum PathChange {
 
 type OnChange = Box<dyn Fn(&LibraryChange) + Send + Sync>;
 
+/// How a single import attempt ended, so callers (the watcher, the startup
+/// catch-up summary) can count outcomes instead of guessing from logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportOutcome {
+    /// The upsert newly inserted a book row.
+    Imported,
+    /// An existing row was refreshed or relinked.
+    Updated,
+    /// The file did not parse (still being written, or not an ebook).
+    Skipped,
+    /// A real failure (database, cover IO) after the bounded retries.
+    Failed,
+}
+
+/// Per-location result of [`Reconciler::reconcile_location`]: accurate
+/// counts for the startup catch-up summary — never derived from logs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReconcileReport {
+    /// Newly inserted book rows.
+    pub imported: u64,
+    /// Refreshed, relinked, or newly unavailable rows.
+    pub updated: u64,
+    /// Import attempts that failed after their bounded retries.
+    pub failed: u64,
+    /// Total filesystem-to-database transitions (the previous return value).
+    pub changes: u64,
+}
+
 /// Applies filesystem observations to the library database.
 pub struct Reconciler {
     pool: SqlitePool,
@@ -119,7 +147,7 @@ impl Reconciler {
     /// A file appeared. Parse failures are almost always "still being
     /// written" — retry once, then leave the file alone and wait for the
     /// next modify event. Unknown formats are silently ignored.
-    pub async fn import_created(&self, path: &Path) {
+    pub async fn import_created(&self, path: &Path) -> ImportOutcome {
         // Database errors are transient here by construction: another live
         // reconciler (a not-yet-reaped sidecar of a previous app instance)
         // can win the race to insert the same row, and the loser's upsert
@@ -133,7 +161,11 @@ impl Reconciler {
                     self.emit(LibraryChange::Changed {
                         book: Box::new(outcome.book),
                     });
-                    return;
+                    return if outcome.inserted {
+                        ImportOutcome::Imported
+                    } else {
+                        ImportOutcome::Updated
+                    };
                 }
                 Ok(None) => {
                     // Not parseable *yet* — give in-flight writers one extra
@@ -142,7 +174,7 @@ impl Reconciler {
                         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                         continue;
                     }
-                    return;
+                    return ImportOutcome::Skipped;
                 }
                 Err(err) => {
                     if attempt + 1 < attempts {
@@ -150,10 +182,11 @@ impl Reconciler {
                         continue;
                     }
                     eprintln!("reconciler: import failed for {}: {err}", path.display());
-                    return;
+                    return ImportOutcome::Failed;
                 }
             }
         }
+        ImportOutcome::Failed
     }
 
     /// A file changed. Re-parse only when the file snapshot actually differs
@@ -301,7 +334,7 @@ impl Reconciler {
     /// diff against the database that imports new files, refreshes changed
     /// ones (snapshot check first — unchanged files are never re-parsed),
     /// and marks rows whose files vanished. Returns the number of changes.
-    pub async fn reconcile_location(&self, root: &Path) -> Result<u64, AppError> {
+    pub async fn reconcile_location(&self, root: &Path) -> Result<ReconcileReport, AppError> {
         let files = match crate::services::library_scanner::list_book_files(root) {
             Ok(files) => files,
             // A temporarily unmounted location must not wipe the library:
@@ -311,7 +344,7 @@ impl Reconciler {
                     "reconciler: location {} not readable, skipping: {err}",
                     root.display()
                 );
-                return Ok(0);
+                return Ok(ReconcileReport::default());
             }
         };
 
@@ -322,7 +355,7 @@ impl Reconciler {
             .map(|book| (book.path.clone(), book))
             .collect();
 
-        let mut changes: u64 = 0;
+        let mut report = ReconcileReport::default();
         for file in files {
             let file_str = file.to_string_lossy().into_owned();
             let needs_import = match known.remove(&file_str) {
@@ -342,11 +375,20 @@ impl Reconciler {
             // the same name and size instead of importing a duplicate —
             // this is what keeps identity through moves the watcher missed.
             if self.relink_if_move(&file).await {
-                changes += 1;
+                report.updated += 1;
+                report.changes += 1;
                 continue;
             }
-            self.import_created(&file).await;
-            changes += 1;
+            let outcome = self.import_created(&file).await;
+            match outcome {
+                ImportOutcome::Imported => report.imported += 1,
+                ImportOutcome::Updated => report.updated += 1,
+                ImportOutcome::Failed => report.failed += 1,
+                ImportOutcome::Skipped => {}
+            }
+            if outcome != ImportOutcome::Skipped {
+                report.changes += 1;
+            }
         }
 
         // Whatever is left in `known` has no file on disk anymore.
@@ -359,11 +401,12 @@ impl Reconciler {
                     self.emit(LibraryChange::Changed {
                         book: Box::new(updated),
                     });
-                    changes += 1;
+                    report.updated += 1;
+                    report.changes += 1;
                 }
             }
         }
-        Ok(changes)
+        Ok(report)
     }
 
     /// Reconcile every registered watched location. Used after anomaly

@@ -156,20 +156,38 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
     // referenced when their source changes or their book is removed;
     // unreferenced files are swept once at startup, after the catch-up walk
     // (a new book's cover file exists before its row commits — sweeping
-    // first could race an in-flight import).
+    // first could race an in-flight import). One summary line — never
+    // per-file noise — with counts the reconciler reported accurately.
     let reconciler = reconciler.clone();
     let reconciler_pool = pool.clone();
     let covers = covers_dir(&db_path);
     tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut report = services::library_reconciler::ReconcileReport::default();
         for root in catchup_roots {
             // Errors are logged inside; a missing location skips cleanly.
-            let _ignored = reconciler.reconcile_location(Path::new(&root)).await;
+            match reconciler.reconcile_location(Path::new(&root)).await {
+                Ok(passed) => {
+                    report.imported += passed.imported;
+                    report.updated += passed.updated;
+                    report.failed += passed.failed;
+                    report.changes += passed.changes;
+                }
+                Err(err) => eprintln!("reconciler: catch-up failed: {err}"),
+            }
         }
         match services::artwork_cache::sweep_unreferenced_covers(&reconciler_pool, &covers).await {
             Ok(0) => {}
             Ok(removed) => eprintln!("swept {removed} unreferenced cover file(s)"),
             Err(err) => eprintln!("cover sweep failed: {err}"),
         }
+        eprintln!(
+            "[startup] catch-up complete imported={} updated={} failed={} duration={}ms",
+            report.imported,
+            report.updated,
+            report.failed,
+            started.elapsed().as_millis()
+        );
     });
 
     Ok(AppState {

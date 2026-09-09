@@ -15,10 +15,17 @@ const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:1420
 
 // Startup segment timing (dev diagnosis): where the boot latency sits —
 // Electron init, sidecar readiness, or the renderer's first mount.
+// performance.now() is monotonic with the process start, so every segment
+// reads against one origin; never wall-clock differences.
 const BOOT_START = performance.now();
 const bootElapsed = (label: string): void => {
   console.log(`[startup] ${label} +${Math.round(performance.now() - BOOT_START)}ms`);
 };
+// Anchor segment: bundle evaluation itself (module graph + protocol setup).
+// The gap between this and "app ready" is Chromium's platform init (GPU,
+// compositor, fontconfig, high-DPI) on the developer machine (PERF-11:
+// measure, never work around unmeasured).
+bootElapsed("electron process");
 
 // CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
 
@@ -420,10 +427,7 @@ function saveWindowState(window: BrowserWindow): void {
   }
 }
 
-function createWindow(
-  sidecar: Sidecar,
-  forward: (name: string, payload: unknown) => void,
-): BrowserWindow {
+function createWindow(forward: (name: string, payload: unknown) => void): BrowserWindow {
   const state = loadWindowState();
   const window = new BrowserWindow({
     width: state.width,
@@ -442,9 +446,12 @@ function createWindow(
     },
   });
 
+  window.webContents.on("did-finish-load", () => bootElapsed("renderer did-finish-load"));
   window.once("ready-to-show", () => {
+    bootElapsed("ready-to-show");
     if (state.maximized) window.maximize();
     else window.show();
+    bootElapsed("window shown");
   });
 
   // Window size/position survive restarts (formerly the window-state plugin).
@@ -474,9 +481,18 @@ function createWindow(
   // Dev server only when explicitly requested (just dev); everything else —
   // packaged builds and the E2E runs — loads the built renderer from disk
   // through the app:// scheme (a real origin; see registerAppProtocol).
+  bootElapsed("browser window created");
+  // Loader lifecycle segments (§11): did-finish-load → ready-to-show hides
+  // the first-paint gap on Linux/Wayland; these labels split loadURL into
+  // did-start-loading, dom-ready, did-finish-load, ready-to-show so the
+  // slow segment is identified, not guessed.
+  window.webContents.on("did-start-loading", () => bootElapsed("renderer did-start-loading"));
+  window.webContents.on("dom-ready", () => bootElapsed("renderer dom-ready"));
   if (process.env.VITE_DEV_SERVER_URL !== undefined) {
+    bootElapsed("renderer load started");
     void window.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
+    bootElapsed("renderer load started");
     void window.loadURL(`${APP_ORIGIN}/index.html`);
   }
 
@@ -538,10 +554,6 @@ function createWindow(
         }
       })
       .catch((error: unknown) => console.error("[boot] check failed:", error));
-  });
-
-  void sidecar.start().catch((error) => {
-    console.error("[sidecar] initial start failed:", error);
   });
 
   return window;
@@ -642,13 +654,14 @@ app.whenReady().then(() => {
   // races those registrations (a file added in that window is never picked
   // up until an unrelated event). The Tauri shell guaranteed this ordering;
   // keep it.
+  bootElapsed("sidecar start");
   debugLog("app starting sidecar");
   sidecar
     .start()
     .then(() => {
       bootElapsed("sidecar healthy");
       debugLog("sidecar healthy; creating window");
-      createWindow(sidecar, forward);
+      createWindow(forward);
     })
     .catch((error) => {
       console.error("[sidecar] startup failed:", error);

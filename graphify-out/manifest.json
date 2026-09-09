@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "electron/main/index.ts": {
-    "mtime": 1788915808.9715424,
-    "seen": 1788920762.4558768,
-    "ast_hash": "c7bd203d4d87a5344ab01f9a75003737",
+    "mtime": 1788924253.1489308,
+    "seen": 1788925803.2854855,
+    "ast_hash": "37270f66cc8856a953cc104cc93ea28f",
     "semantic_hash": ""
   },
   "electron/main/sidecar.ts": {
@@ -1170,9 +1170,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/lib.rs": {
-    "mtime": 1788916610.7009995,
-    "seen": 1788920762.4561577,
-    "ast_hash": "f76287f17b635669bdb7f9e18096c9e9",
+    "mtime": 1788924084.5749674,
+    "seen": 1788925803.2857254,
+    "ast_hash": "1953857c119e9672d45dcbd1c931216d",
     "semantic_hash": ""
   },
   "src-tauri/src/main.rs": {
@@ -1266,9 +1266,9 @@
     "semantic_hash": ""
   },
   "src-tauri/src/services/library_reconciler.rs": {
-    "mtime": 1788813468.6090062,
-    "seen": 1788851270.1124659,
-    "ast_hash": "87cb69efc9440ac099d392ee1a5e7f38",
+    "mtime": 1788924439.2537866,
+    "seen": 1788925803.2857463,
+    "ast_hash": "c7a82bb6cb27d72a29409ff5d71129bb",
     "semantic_hash": ""
   },
   "src-tauri/src/services/library_scanner.rs": {
@@ -1320,9 +1320,9 @@
     "semantic_hash": ""
   },
   "src-tauri/tests/library_sync.rs": {
-    "mtime": 1788856704.065114,
-    "seen": 1788866529.4744115,
-    "ast_hash": "25b6b91aa9c074045c47af5c95515be9",
+    "mtime": 1788924118.4887588,
+    "seen": 1788925803.2857587,
+    "ast_hash": "7a739f058804b3b6211de9594a1d8266",
     "semantic_hash": ""
   },
   "src-tauri/tests/realistic_library.rs": {
@@ -1689,6 +1689,12 @@
     "mtime": 1788915506.5673647,
     "seen": 1788920762.4562736,
     "ast_hash": "8bee0ea2b0f56ae14b676e5d2602298f",
+    "semantic_hash": ""
+  },
+  "docs/dev-startup-latency.md": {
+    "mtime": 1788925710.0013485,
+    "seen": 1788925803.2857966,
+    "ast_hash": "2c8ddac6510661d441ebfa9a58b64828",
     "semantic_hash": ""
   }
 }
