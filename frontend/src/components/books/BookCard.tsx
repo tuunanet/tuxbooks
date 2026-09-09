@@ -99,11 +99,9 @@ export function BookCard({
                 !book.available && "opacity-40 grayscale",
               )}
             />
-            {book.format === "pdf" && (
-              <Badge variant="secondary" className="absolute top-1.5 right-1.5">
-                PDF
-              </Badge>
-            )}
+            <Badge variant="secondary" className="absolute top-1.5 right-1.5">
+              {book.format.toUpperCase()}
+            </Badge>
             {!book.available && (
               <Badge variant="destructive" className="absolute top-1.5 left-1.5">
                 Missing

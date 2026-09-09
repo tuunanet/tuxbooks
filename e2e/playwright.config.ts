@@ -6,6 +6,9 @@
  *
  *   empty   — library.e2e.ts (app shell, sidebar, empty state, settings)
  *   seeded  — all application suites against the seeded scratch library
+ *   shell   — desktop-shell.e2e.ts: native window lifecycle + branding
+ *             (own phase: the relaunch scenario closes and relaunches the
+ *             app, which must not share a worker with other suites)
  *   hidpi   — seeded reader scenarios at devicePixelRatio 2
  *   bench   — the opt-in, headed performance benchmark (never CI)
  *
@@ -23,7 +26,12 @@ import { artifactsDir } from "./setup/environment.js";
 const ci = Boolean(process.env.CI);
 
 /** Project spec filters: which spec files each phase runs. */
-const SEEDED_EXCLUDE = ["library.e2e.ts", "hidpi.e2e.ts", "bench-reader.e2e.ts"];
+const SEEDED_EXCLUDE = [
+  "library.e2e.ts",
+  "desktop-shell.e2e.ts",
+  "hidpi.e2e.ts",
+  "bench-reader.e2e.ts",
+];
 
 function project(testMatch: string[], ignore: string[] = []) {
   return {
@@ -67,6 +75,7 @@ export default defineConfig({
 
   projects: [
     { name: "empty", ...project(["library.e2e.ts"]) },
+    { name: "shell", ...project(["desktop-shell.e2e.ts"]) },
     { name: "seeded", ...project(["*.e2e.ts"], SEEDED_EXCLUDE) },
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts"]) },

@@ -18,12 +18,12 @@ describe("BookCard", () => {
     expect(screen.getByText("Unknown author")).toBeInTheDocument();
   });
 
-  it("shows a format badge for PDFs only", () => {
+  it("shows a format badge for both PDF and EPUB books", () => {
     const { rerender } = render(<BookCard book={makeBook({ format: "pdf" })} collections={[]} />);
     expect(screen.getByText("PDF")).toBeInTheDocument();
 
     rerender(<BookCard book={makeBook({ format: "epub" })} collections={[]} />);
-    expect(screen.queryByText("PDF")).not.toBeInTheDocument();
+    expect(screen.getByText("EPUB")).toBeInTheDocument();
   });
 
   it("shows a reading progress bar only when the book has progress", () => {

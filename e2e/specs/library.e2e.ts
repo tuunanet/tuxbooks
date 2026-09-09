@@ -15,7 +15,7 @@ test.describe("tuxbooks app shell", () => {
     await expect(page.locator('[aria-label="Library sidebar"]')).toBeVisible();
     await expect(page.locator('[aria-label="Library navigation"]')).toBeVisible();
     const title = await page.title();
-    expect(title.toLowerCase()).toContain("tuxbooks");
+    expect(title).toBe("TuxBooks");
   });
 
   test("shows the empty library state when no books are imported", async ({ page }) => {

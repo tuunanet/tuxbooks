@@ -27,6 +27,7 @@ export function BookListItem({
   onMarkFinished,
   onReveal,
 }: BookListItemProps) {
+  const percent = book.progressPercent;
   return (
     <div className="flex items-center gap-2">
       <BookContextMenu
@@ -72,16 +73,28 @@ export function BookListItem({
               {book.author ?? "Unknown author"}
             </p>
           </div>
-          {book.format === "pdf" && <Badge variant="secondary">PDF</Badge>}
+          {/* Dedicated end-of-row columns (fixed widths so every row
+              aligns): the book type tag, then reading progress — an inline
+              bar half the grid card's width for books being read, status
+              text otherwise. */}
+          <div className="w-16 shrink-0">
+            <Badge variant="secondary">{book.format.toUpperCase()}</Badge>
+          </div>
           {!book.available && <Badge variant="destructive">Missing</Badge>}
-          {book.progressPercent !== null && (
-            <Progress
-              value={book.progressPercent}
-              aria-label={`Reading progress: ${Math.round(book.progressPercent)}%`}
-              title={`${Math.round(book.progressPercent)}% read`}
-              className="w-24 shrink-0"
-            />
-          )}
+          <div className="w-[72px] shrink-0 text-right text-xs text-muted-foreground">
+            {percent === null || percent <= 0 ? (
+              <span className="whitespace-nowrap">Not started</span>
+            ) : percent >= 100 ? (
+              <span className="whitespace-nowrap">Finished</span>
+            ) : (
+              <Progress
+                value={percent}
+                aria-label={`Reading progress: ${Math.round(percent)}%`}
+                title={`${Math.round(percent)}% read`}
+                className="w-full"
+              />
+            )}
+          </div>
         </button>
       </BookContextMenu>
       {!book.available && (

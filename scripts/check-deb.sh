@@ -50,19 +50,29 @@ esac
 [ -n "$description" ] || fail "empty package description"
 
 # --- payload ----------------------------------------------------------------
+# The install dir follows electron-builder productName (TuxBooks, human-
+# facing); the executable, desktop filename, icon name, and WM class stay
+# the stable technical identifier tuxbooks (executableName in
+# electron-builder.yml — docs/fix-electron-main-window-behaviour.md §4/§15).
 payload="$(mktemp -d)"
 trap 'rm -rf "$payload"' EXIT
 dpkg-deb -x "$deb" "$payload"
 
-[ -x "$payload/opt/tuxbooks/tuxbooks" ] || fail "opt/tuxbooks/tuxbooks missing or not executable"
-[ -x "$payload/opt/tuxbooks/resources/sidecar/tuxbooks" ] ||
+[ -x "$payload/opt/TuxBooks/tuxbooks" ] || fail "opt/TuxBooks/tuxbooks missing or not executable"
+[ -x "$payload/opt/TuxBooks/resources/sidecar/tuxbooks" ] ||
   fail "bundled sidecar missing or not executable (resources/sidecar/tuxbooks)"
-[ -f "$payload/opt/tuxbooks/resources/sidecar/libpdfium.so" ] ||
+[ -f "$payload/opt/TuxBooks/resources/sidecar/libpdfium.so" ] ||
   fail "bundled PDFium resource missing (resources/sidecar/libpdfium.so)"
+# The native window/taskbar icon at runtime (electron/main/index.ts
+# appIconPath resolves resources/icons in packaged builds).
+[ -f "$payload/opt/TuxBooks/resources/icons/512x512.png" ] ||
+  fail "bundled window icon missing (resources/icons/512x512.png)"
 
 desktop="$payload/usr/share/applications/tuxbooks.desktop"
 [ -f "$desktop" ] || fail "desktop entry missing (usr/share/applications/tuxbooks.desktop)"
 grep -q '^Exec=' "$desktop" || fail "desktop entry has no Exec line"
+grep -q '^Name=TuxBooks' "$desktop" ||
+  fail "desktop entry Name is not TuxBooks (launcher identity)"
 grep -q '^Icon=tuxbooks' "$desktop" || fail "desktop entry has no Icon=tuxbooks"
 grep -q '^Type=Application' "$desktop" || fail "desktop entry is not Type=Application"
 grep -q '^Terminal=false' "$desktop" || fail "desktop entry does not set Terminal=false"

@@ -149,11 +149,11 @@ export function prepareEnvironment(seeded: boolean): void {
   // app — and re-asserted there so a worker restart can never lose them.
   process.env.TEST_DATABASE_PATH = databasePath;
   process.env.TEST_LIBRARY_PATH = libraryDir;
-  // Same isolation rule for the app-config dir: window-state restore would
-  // otherwise read (and overwrite!) the real user's saved window geometry,
-  // making every window-derived expectation depend on whatever size the
-  // developer's last real session saved. A fresh config dir means the
-  // window starts at the Electron main default, deterministically.
+  // Same isolation rule for the app-config dir: the app's Electron userData
+  // (Chromium caches, crashpad state) must never touch the real user's
+  // config, and window-derived expectations stay independent of whatever
+  // the developer's real desktop sessions left behind. A fresh config dir
+  // means the window starts at the Electron main default, deterministically.
   process.env.XDG_CONFIG_HOME = configDir;
 }
 
