@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Instructions for coding agents working in this repository. Verified commands
-only — run them, don't assume.
+only — run them, don't assume. Each layer's non-obvious gotchas live in its
+doc under `docs/` — read the relevant doc before touching that layer.
 
 ## Keep this file compact
 
@@ -21,7 +22,7 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
   `docs/architecture.md`.
 - Electron `main`/`preload` are plumbing only; the renderer never sees
   Node.js. The Rust sidecar (`src-tauri/`) owns DB, filesystem, scanner,
-  and metadata, talking JSON-RPC over stdio: `docs/electron-migration.md`.
+  and metadata.
 - Reader engines are behind single-module seams — EPUB: only
   `frontend/src/lib/epub/readiumEngine.ts` imports Readium; PDF: only
   `frontend/src/lib/pdf/pdfEngine.ts` imports MuPDF; components use the
@@ -65,26 +66,6 @@ headless) and always terminates with failure artifacts left behind — the
 full contract, isolation gate, and opt-in flavors are in `docs/testing.md`.
 Never run two E2E invocations concurrently.
 
-## Non-obvious gotchas
-
-Each has bitten before (or is a known trap of the new stack). The details
-live with the layer they bite — read the relevant doc before touching it:
-
-- Electron security defaults are non-negotiable; no arbitrary
-  `ipcRenderer` passthrough — `docs/electron-migration.md`.
-- Sidecar lifecycle: survives renderer reload, shut down on quit, no
-  orphaned processes — `docs/electron-migration.md`.
-- Book bytes/covers flow through the scoped `tuxbooks://` protocol, never
-  an arbitrary local HTTP server — `docs/architecture.md`.
-- Database: runtime-query SQLx only, embedded numbered migrations, FTS5
-  triggers move with `books` columns — `docs/database.md`.
-- Reading progress is user data: locators migrate through the versioned,
-  idempotent adapter; never reset or destructively rewrite progress rows
-  — `docs/epub.md`, `docs/database.md`.
-- Testing rules (real library/DB never touched, coverage gate, fixtures,
-  no coverage-filler tests) — `docs/testing.md`.
-- Performance budgets are gates, not suggestions — `docs/performance.md`.
-
 ## Conventions
 
 Coding standards — Rust errors/DTOs, frontend rules, dependency policy:
@@ -98,8 +79,6 @@ Read the one that fits the task; each is short.
 - `docs/STANDARDS.md` — coding standards.
 - `docs/architecture.md` — module boundaries, process model, frontend
   structure.
-- `docs/electron-migration.md` — the migration plan, phase status, and
-  sidecar/IPC design.
 - `docs/build.md` — build flavors, dev environment.
 - `docs/database.md` — schema, migrations, FTS5.
 - `docs/epub.md` / `docs/pdf.md` — reader layer contracts (Readium /

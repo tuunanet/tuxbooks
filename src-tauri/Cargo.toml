@@ -9,7 +9,7 @@ rust-version = "1.82"
 
 # See docs/architecture.md for the module layout contract. This crate is the
 # native service binary: the Electron main process spawns it and talks
-# JSON-RPC over stdio (docs/electron-migration.md).
+# JSON-RPC over stdio.
 [lib]
 name = "tuxbooks_lib"
 crate-type = ["rlib"]

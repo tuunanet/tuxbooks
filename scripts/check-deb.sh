@@ -5,7 +5,7 @@
 # the desktop entry must be valid, the hicolor icons must be installed, and
 # the bundled sidecar + PDFium resource must be present (docs/release.md).
 # Unlike the Tauri-era payload, the Electron deb must NOT depend on
-# libwebkit2gtk (docs/electron-migration.md removal checklist).
+# libwebkit2gtk.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

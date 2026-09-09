@@ -1410,9 +1410,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1788917195.9655745,
-    "seen": 1788920762.4562314,
-    "ast_hash": "73390987dea9321b6a0dea707a4cf155",
+    "mtime": 1788930560.7025235,
+    "seen": 1788930641.8548715,
+    "ast_hash": "c884e02005ee50af5f7e544b5a0b3d91",
     "semantic_hash": ""
   },
   "LICENSE.md": {
@@ -1685,12 +1685,6 @@
     "ast_hash": "8bee0ea2b0f56ae14b676e5d2602298f",
     "semantic_hash": ""
   },
-  "docs/dev-startup-latency.md": {
-    "mtime": 1788925710.0013485,
-    "seen": 1788925803.2857966,
-    "ast_hash": "2c8ddac6510661d441ebfa9a58b64828",
-    "semantic_hash": ""
-  },
   "frontend/src/components/reader/pdf/pdfOpenTelemetry.ts": {
     "mtime": 1788927786.677891,
     "seen": 1788929917.2844262,
@@ -1701,12 +1695,6 @@
     "mtime": 1788929230.3777742,
     "seen": 1788929917.284528,
     "ast_hash": "a948474c2dec109c187f020ea7ebbf37",
-    "semantic_hash": ""
-  },
-  "docs/pdf-performance-improvement.md": {
-    "mtime": 1788929227.8675306,
-    "seen": 1788929917.28465,
-    "ast_hash": "675153689a8fc70fc61e6385af7c4e44",
     "semantic_hash": ""
   }
 }

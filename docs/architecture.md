@@ -5,8 +5,7 @@ server, no cloud sync, and no network dependency: Chromium (via Electron) is
 the sole desktop web runtime; a native Rust service owns the database and
 the filesystem; Readium and MuPDF.js render books.
 
-**Migration state:** the Electron migration is complete. Historical phase
-decisions live in [electron-migration.md](electron-migration.md); this doc
+**Migration state:** the Electron migration is complete; this doc
 describes the current contract.
 
 ## Process and boundary
@@ -40,6 +39,17 @@ describes the current contract.
   `tuxbooks://` custom protocol (range requests supported, granted to the
   app's origin only) — never an arbitrary local HTTP server; paths never
   cross into the renderer.
+
+## Gotchas
+
+Each has bitten before (or is a known trap of the Electron stack):
+
+- Electron security defaults are non-negotiable; no arbitrary
+  `ipcRenderer` passthrough — the preload exposes only the enumerated
+  `window.tuxbooks` API, consumed solely by `lib/bridge.ts`.
+- Sidecar lifecycle: the sidecar survives a renderer reload and is shut
+  down on quit — no orphaned processes. E2E arms `PR_SET_PDEATHSIG` on the
+  sidecar for the same reason; see [testing.md](testing.md).
 
 ## Rust module contract
 

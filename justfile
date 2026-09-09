@@ -155,8 +155,7 @@ test-e2e-hidpi: build-debug
 
 # Production-form build: same renderer/Electron bundles, but the RELEASE
 # sidecar binary through TUXBOOKS_SIDECAR (the packaged-app resource
-# resolution path; full electron-builder packaging lands in migration
-# phase 5 — docs/electron-migration.md).
+# resolution path; see docs/release.md for packaging).
 # just does not interpolate {{root}} inside variable assignments — build the
 # path with string concatenation so the override is a real binary path.
 _release_sidecar := justfile_directory() + "/src-tauri/target/release/tuxbooks"

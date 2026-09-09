@@ -107,8 +107,8 @@ convert; never reset or destructively rewrite progress rows.
 
 ### Progress migration (foliate → Readium)
 
-Stored progress is user data. The migration adapter (see
-[electron-migration.md](electron-migration.md)) converts existing foliate
+Stored progress is user data. The migration adapter
+(`frontend/src/lib/epub/progressMigration.ts`) converts existing foliate
 rows (`cfi` + `chapter_href` + `progress_percent`, migration `0004`) into
 Readium locators, validated against the actual EPUB:
 

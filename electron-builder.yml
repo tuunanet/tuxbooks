@@ -1,4 +1,4 @@
-# Electron packaging (docs/release.md, docs/electron-migration.md).
+# Electron packaging (docs/release.md).
 # The deb/rpm/AppImage artifact set, the version source of truth (package.json
 # version), and the packaging gate (scripts/check-deb.sh) carry over from the
 # Tauri era; only the build internals changed.

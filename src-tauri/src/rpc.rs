@@ -1,5 +1,5 @@
 //! JSON-RPC 2.0 over stdio: the IPC boundary between the Electron main
-//! process and the native service (docs/electron-migration.md).
+//! process and the native service (docs/architecture.md).
 //!
 //! Framing is newline-delimited JSON. Clients send request objects
 //! (`{jsonrpc, id, method, params}`); the service answers per request with

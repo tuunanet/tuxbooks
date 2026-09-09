@@ -61,8 +61,7 @@ watchdog arms).
   varied spine structures, large chapters, reflowable + fixed-layout,
   malformed/stale locators, missing EPUB files, older-version records —
   each asserted to land the Readium reader at the same **logical**
-  location (small pagination drift allowed). See
-  [epub.md](epub.md), [electron-migration.md](electron-migration.md).
+  location (small pagination drift allowed). See [epub.md](epub.md).
 - `src-tauri/tests/library_sync.rs` drives the real `notify` watcher
   against a real database in tempdirs. These tests need the tokio runtime
   to be multi-threaded (`#[tokio::test(flavor = "multi_thread")]`):
@@ -218,9 +217,9 @@ Two more invocations exist beyond the default pair:
   above 60 Hz — the dpr dimension is what this configuration guards.
 - **release flavor** (`just test-e2e-release`) — empty + seeded against the
   RELEASE sidecar binary via `TUXBOOKS_SIDECAR` (the packaged-app resource
-  resolution path; full electron-builder packaging lands in migration
-  phase 5, docs/electron-migration.md). A build that works from the source
-  tree but loses its sidecar/resources in production form fails here.
+  resolution path; packaging is documented in [release.md](release.md)). A
+  build that works from the source tree but loses its sidecar/resources in
+  production form fails here.
 
 Scroll interactions drive the reader's scroll container (`reader-content`)
 with offsets derived from live slot geometry — never hard-coded pixels.

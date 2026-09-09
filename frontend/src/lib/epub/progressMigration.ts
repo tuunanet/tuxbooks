@@ -1,6 +1,6 @@
 /**
- * Foliate → Readium reading-progress migration (docs/epub.md, phase 3 of
- * docs/electron-migration.md). Stored progress is user data: rows written
+ * Foliate → Readium reading-progress migration (docs/epub.md). Stored
+ * progress is user data: rows written
  * by the foliate engine (`cfi` + `chapterHref` + coarse `progressPercent`,
  * migration 0004) are converted into Readium locators, validated against
  * the actual EPUB, without ever resetting or destructively rewriting the
@@ -11,7 +11,7 @@
  * selectors, or fragment ids — never EPUB CFI — so the foliate CFI is
  * parsed here and rebuilt into the locator grammar the engine understands.
  *
- * Fallback hierarchy (docs/electron-migration.md):
+ * Fallback hierarchy (docs/epub.md):
  *   exact location → CFI structure → spine+element/offset →
  *   spine+progression → book percentage → beginning.
  * A locator-bearing row that fails every locator tier degrades to the

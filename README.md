@@ -72,7 +72,7 @@ src-tauri/migrations/  SQLx migrations (embedded, run automatically)
 e2e/               Playwright suites, environment bootstrap, watchdog
 tests/fixtures/    committed test data (books/minimal.epub, books/minimal.pdf)
 artifacts/e2e/     E2E failure artifacts (screenshots, logs; gitignored)
-docs/              architecture, database, epub, pdf, testing, migration
+docs/              architecture, database, epub, pdf, testing, performance
 scripts/           fixture/icon generators, build and fetch helpers, env helper
 ```
 
@@ -80,9 +80,7 @@ scripts/           fixture/icon generators, build and fetch helpers, env helper
 
 Start with [docs/architecture.md](docs/architecture.md), then
 [docs/database.md](docs/database.md), [docs/epub.md](docs/epub.md), and
-[docs/testing.md](docs/testing.md). While the Electron + Readium + MuPDF
-migration is in flight, [docs/electron-migration.md](docs/electron-migration.md)
-is the authority on stack state and phase status. Agents: read `AGENTS.md`
+[docs/testing.md](docs/testing.md). Agents: read `AGENTS.md`
 first.
 
 ## License

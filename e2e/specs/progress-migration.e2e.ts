@@ -7,7 +7,7 @@ import { openInReader, returnToLibrary, textOf } from "./helpers.js";
 /**
  * Reading-progress migration E2E (docs/testing.md): stored progress is
  * user data that must survive the engine migration (foliate → Readium,
- * docs/electron-migration.md). This suite seeds the scratch database with
+ * docs/epub.md). This suite seeds the scratch database with
  * progress rows in the format the previous (foliate/WebKitGTK) app wrote —
  * a canonical CFI plus chapter href and coarse percent — and asserts the
  * reader restores the SAME LOGICAL LOCATION (spine section), never a page

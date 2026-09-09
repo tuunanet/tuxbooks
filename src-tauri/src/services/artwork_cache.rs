@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn sweep_on_missing_dir_sweeps_nothing() {
         // A fresh database has no covers directory yet; startup must not
-        // surface that as an error (docs/electron-migration.md phase 1).
+        // surface that as an error.
         let tmp = tempfile::tempdir().unwrap();
         let pool = setup(tmp.path()).await;
         let removed = sweep_unreferenced_covers(&pool, &tmp.path().join("nope"))

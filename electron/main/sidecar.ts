@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * The Rust sidecar (docs/electron-migration.md): a JSON-RPC-over-stdio
+ * The Rust sidecar (docs/architecture.md): a JSON-RPC-over-stdio
  * service owned by the Electron main process. Spawned at startup,
  * health-checked with `ping`, restarted with backoff on unexpected exit,
  * and killed on app quit. It deliberately survives renderer reloads —
