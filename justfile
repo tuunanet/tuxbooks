@@ -20,6 +20,17 @@ fetch-pdfium:
 check-epub-fixtures:
     python3 scripts/make-epub-fixtures.py --check
 
+# Download the free ebook fixture corpus (tests/fixtures/books/EBooks/, ~11 MB).
+# Idempotent: downloads only files missing from or failing the sha256 manifest
+# (docs/free-ebook-fixtures.md). Not part of `just check`/`just test` — needs
+# network; tests that use the corpus skip when it is absent.
+fetch-ebooks:
+    python3 scripts/fetch-ebook-fixtures.py
+
+# Verify the free ebook corpus against its manifest (no network, no download).
+check-ebooks:
+    python3 scripts/fetch-ebook-fixtures.py --check
+
 # Launch the app in development mode: Vite dev server (hot reload for the
 # renderer), the Rust sidecar (debug build), and the Electron shell.
 dev:

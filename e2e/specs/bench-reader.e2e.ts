@@ -27,8 +27,9 @@ import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
  * and headless timings are unreliable). Run it explicitly and headed:
  * `just bench-reader` maximizes the window on the real display (reference
  * conditions; an explicit `WxH` argument overrides), and it seeds the
- * real-book Agents fixtures, whose image-laden pages make latency
- * measurement meaningful. Both walks start mid-book so the samples cover
+ * free-corpus fixtures (just fetch-ebooks), whose 117-page PDF and
+ * image-laden EPUB make latency measurement meaningful. Both walks start
+ * mid-book so the samples cover
  * real content rather than front matter and the ToC.
  *
  * The scroll scenario is a synthetic scrollbar drag: continuous scroll

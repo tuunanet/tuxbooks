@@ -43,10 +43,12 @@ export const seededBookTitles = {
 } as const;
 
 /**
- * Real-book fixtures for the performance benchmark suite only
- * (`just bench-reader`): image-laden pages and heavy EPUB sections make
- * render/turn latency measurement meaningful in a way the synthetic
- * fixtures deliberately are not. Never seeded by the CI phases.
+ * Free-corpus fixtures for the performance benchmark suite only
+ * (`just bench-reader`, `just fetch-ebooks`): a 117-page PDF and an
+ * image-laden EPUB make render/turn latency measurement meaningful in a way
+ * the synthetic fixtures deliberately are not. Never seeded by the CI phases;
+ * verified against tests/fixtures/books/EBooks/manifest.json.
+ * (docs/free-ebook-fixtures.md)
  */
 export const benchPdfFixture = path.join(
   repoRoot,
@@ -54,8 +56,8 @@ export const benchPdfFixture = path.join(
   "fixtures",
   "books",
   "EBooks",
-  "Agents",
-  "AI_Agents_and_Applications.pdf",
+  "Papers",
+  "GeoTopo.pdf",
 );
 export const benchEpubFixture = path.join(
   repoRoot,
@@ -63,12 +65,12 @@ export const benchEpubFixture = path.join(
   "fixtures",
   "books",
   "EBooks",
-  "Agents",
-  "AI_Agents_and_Applications.epub",
+  "EPUB Samples",
+  "page-blanche.epub",
 );
 
-/** Cards expose `aria-label="{title} ({FORMAT})"`; both books share a title. */
+/** Cards expose `aria-label="{title} ({FORMAT})"`; titles come from file metadata. */
 export const benchBookTitles = {
-  pdf: "AI Agents and Applications (PDF)",
-  epub: "AI Agents and Applications (EPUB)",
+  pdf: "Geometrie und Topologie (PDF)",
+  epub: "Page Blanche (EPUB)",
 } as const;

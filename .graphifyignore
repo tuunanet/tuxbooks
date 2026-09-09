@@ -1,51 +1,7 @@
-# Dependencies & lockfiles
-node_modules/
-pnpm-lock.yaml
-
-# Build outputs
-target/
-sidecar/target/
-frontend/dist/
-electron/dist/
-.build/
-*.tsbuildinfo
-
-# Generated / vendored artifacts
-sidecar/pdfium/
-artifacts/
-coverage/
-dist-packages/
-
-# Databases
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Test scratch space
-e2e/.tmp/
-.e2e-tmp/
-
-# Real user test library (never part of the repo)
-tests/fixtures/books/EBooks/
-
-# Generated test fixtures (regenerable binaries, not knowledge)
-tests/fixtures/
-
-# Binary images: app icons, brand logos, fixture EPUB assets
-*.png
-
-# Belt-and-braces: workspace node_modules (also gitignored)
-.opencode/node_modules/
-
-# Graphify's own output
-graphify-out/
-
-# Editor / OS
-.idea/
-.vscode/
-.DS_Store
-*.swp
-
-# Tooling state
-.tavily/
+# Free ebook fixture corpus — downloaded by `just fetch-ebooks`, verified
+# against tests/fixtures/books/EBooks/manifest.json. Large binary books have
+# no code/doc value for the knowledge graph (docs/free-ebook-fixtures.md).
+tests/fixtures/books/EBooks/*.epub
+tests/fixtures/books/EBooks/*.pdf
+tests/fixtures/books/EBooks/**/*.epub
+tests/fixtures/books/EBooks/**/*.pdf

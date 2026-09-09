@@ -1,9 +1,11 @@
-//! Integration test against the realistic user-created library.
+//! Integration test against the free ebook fixture corpus.
 //!
-//! The library contains real copyrighted books, so it is never committed: it
-//! lives at `tests/fixtures/books/EBooks` (gitignored) or wherever
-//! `REALISTIC_LIBRARY_PATH` points. The test skips with a notice when the
-//! path is absent, so CI and fresh clones stay green.
+//! The corpus is downloaded by `just fetch-ebooks`
+//! (scripts/fetch-ebook-fixtures.py, sha256-verified manifest — see
+//! docs/free-ebook-fixtures.md): it lives at `tests/fixtures/books/EBooks`
+//! (files gitignored) or wherever `REALISTIC_LIBRARY_PATH` points. The test
+//! skips with a notice when the path is absent, so CI and fresh clones stay
+//! green.
 
 use std::path::{Path, PathBuf};
 
