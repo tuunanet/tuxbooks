@@ -2,14 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { initialAppState, type LibrarySection } from "@/state/appState";
-import { mockInvoke } from "./mocks/tauri";
+import { mockInvoke } from "./mocks/bridge";
 
 function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
   mockInvoke({

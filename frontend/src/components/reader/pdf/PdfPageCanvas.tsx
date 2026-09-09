@@ -13,8 +13,16 @@ interface PdfPageCanvasProps {
    */
   width: number;
   height: number;
-  /** PDF.js render scale (displayed pixels / page units). */
+  /** Render scale (displayed pixels / page units). */
   scale: number;
+  /**
+   * Two-stage first paint: render a readable preview at ratio ≤ 1, blit it,
+   * then refine to the full effective ratio in the background (§ first
+   * readable page). Only worth passing while the very first page of a
+   * freshly opened document is pending — every later render should just be
+   * final quality.
+   */
+  preview?: boolean;
   /**
    * Shared per-document bitmap cache (§ rendering policy). A hit blits the
    * retained bitmap synchronously — no engine work; a completed render
@@ -44,6 +52,13 @@ function blit(
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
 }
 
+/** Internal control-flow marker: the instance was superseded mid-render. */
+class CancelledRender extends Error {
+  constructor() {
+    super("superseded before blit");
+  }
+}
+
 /** How many recent render durations the diagnostics attribute retains. */
 const RENDER_MS_SAMPLE_COUNT = 5;
 
@@ -71,6 +86,7 @@ export function PdfPageCanvas({
   width,
   height,
   scale,
+  preview = false,
   bitmapCache = null,
   testId = "pdf-canvas",
   onPageRendered,
@@ -116,32 +132,34 @@ export function PdfPageCanvas({
     const cached = bitmapCache?.get(pageNumber, scale, ratio);
     if (cached) {
       const startedAt = performance.now();
+      canvas.setAttribute("data-pdf-render-quality", "final");
       blit(canvas, cached.buffer, width, height);
       publishRenderMs(canvas, performance.now() - startedAt);
       renderedRef.current?.(pageNumber);
       return;
     }
 
-    (async () => {
-      // Stop the previous generation's work early; it renders into its own
-      // buffer, so there is no shared state to wait for.
-      taskRef.current?.cancel();
+    // Two-stage first paint: the preview tier only exists when refinement
+    // would actually change something (ratio > 1); otherwise the render is
+    // already final quality and there is nothing to preview.
+    const previewRatio = preview ? Math.min(ratio, 1) : ratio;
+    const needsRefinement = ratio - previewRatio > 1e-9;
 
+    const renderInto = async (targetRatio: number): Promise<HTMLCanvasElement> => {
       const page = await document.getPage(pageNumber);
-      // Checkpoint 1: this instance may have been superseded while getPage
+      // Checkpoint: this instance may have been superseded while getPage
       // was in flight; do not start work at all.
-      if (cancelled) return;
-
+      if (cancelled) throw new CancelledRender();
       const viewport = page.getViewport({ scale });
 
       const buffer = canvas.ownerDocument.createElement("canvas");
-      buffer.width = Math.floor(viewport.width * ratio);
-      buffer.height = Math.floor(viewport.height * ratio);
+      buffer.width = Math.floor(viewport.width * targetRatio);
+      buffer.height = Math.floor(viewport.height * targetRatio);
       const bufferContext = buffer.getContext("2d");
       if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
-      // PDF.js acquires the context from `canvas`; the transform maps
-      // viewport units onto device pixels at the (possibly capped) ratio.
+      // The transform maps viewport units onto device pixels at the
+      // (possibly capped) ratio.
       // Timed from the raster's start (the paint loop is time-sliced across
       // the await) to the blit — the user-visible render→blit latency of
       // PERF-2.
@@ -149,20 +167,43 @@ export function PdfPageCanvas({
       const task = page.render({
         canvas: buffer,
         viewport,
-        transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : undefined,
+        transform: targetRatio !== 1 ? [targetRatio, 0, 0, targetRatio, 0, 0] : undefined,
       });
       taskRef.current = task;
       await task.promise;
 
-      // Checkpoint 2: only the current generation may touch the canvas.
-      if (cancelled) return;
-      bitmapCache?.put({ pageNumber, scale, ratio, buffer });
-      blit(canvas, buffer, width, height);
+      // Checkpoint: only the current generation may touch the canvas.
+      if (cancelled) throw new CancelledRender();
       publishRenderMs(canvas, performance.now() - startedAt);
+      return buffer;
+    };
 
+    (async () => {
+      // Stop the previous generation's work early; it renders into its own
+      // buffer, so there is no shared state to wait for.
+      taskRef.current?.cancel();
+
+      const firstBuffer = await renderInto(previewRatio);
+      canvas.setAttribute("data-pdf-render-quality", needsRefinement ? "preview" : "final");
+      blit(canvas, firstBuffer, width, height);
       renderedRef.current?.(pageNumber);
+
+      if (!needsRefinement) {
+        bitmapCache?.put({ pageNumber, scale, ratio: previewRatio, buffer: firstBuffer });
+        return;
+      }
+
+      // Background refinement: a fresh buffer at the full effective ratio,
+      // atomically replacing the preview blit. The preview is cached too,
+      // so a supersession before refinement completes still avoids a
+      // re-raster on re-entry.
+      bitmapCache?.put({ pageNumber, scale, ratio: previewRatio, buffer: firstBuffer });
+      const refinedBuffer = await renderInto(ratio);
+      canvas.setAttribute("data-pdf-render-quality", "final");
+      bitmapCache?.put({ pageNumber, scale, ratio, buffer: refinedBuffer });
+      blit(canvas, refinedBuffer, width, height);
     })().catch((err: unknown) => {
-      if (cancelled || isRenderingCancelled(err)) return;
+      if (cancelled || isRenderingCancelled(err) || err instanceof CancelledRender) return;
       errorRef.current?.(pageNumber, err);
     });
 
@@ -170,7 +211,7 @@ export function PdfPageCanvas({
       cancelled = true;
       taskRef.current?.cancel();
     };
-  }, [document, pageNumber, width, height, scale, bitmapCache]);
+  }, [document, pageNumber, width, height, scale, preview, bitmapCache]);
 
   return (
     <canvas

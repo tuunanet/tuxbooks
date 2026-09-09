@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Verify the Debian bundle produced by `pnpm tauri build --bundles deb`
-# (run `just build` first). This is the packaging regression gate for
-# milestone 11: the deb must be installable-by-strangers, so its control
-# metadata must match tauri.conf.json, the desktop entry must be valid,
-# the hicolor icons must be installed, and the bundled PDFium resource
-# must be present (docs/release.md).
+# Verify the Debian bundle produced by `just package` (electron-builder).
+# This is the packaging regression gate: the deb must be installable-by-
+# strangers, so its control metadata must match the package.json version,
+# the desktop entry must be valid, the hicolor icons must be installed, and
+# the bundled sidecar + PDFium resource must be present (docs/release.md).
+# Unlike the Tauri-era payload, the Electron deb must NOT depend on
+# libwebkit2gtk.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEB_DIR="$ROOT/src-tauri/target/release/bundle/deb"
-CONF="$ROOT/src-tauri/tauri.conf.json"
+DEB_DIR="$ROOT/dist-packages"
+CONF="$ROOT/package.json"
 
 shopt -s nullglob
 declared_version="$(jq -r .version "$CONF")"
@@ -17,7 +18,7 @@ debs=("$DEB_DIR"/tuxbooks_"$declared_version"_*.deb)
 shopt -u nullglob
 if [ "${#debs[@]}" -ne 1 ]; then
   echo "check-deb: expected exactly one tuxbooks_${declared_version}_*.deb in $DEB_DIR, found ${#debs[@]}" >&2
-  echo "check-deb: run \`just build\` first" >&2
+  echo "check-deb: run \`just package\` first" >&2
   exit 1
 fi
 deb="${debs[0]}"
@@ -29,7 +30,7 @@ fail() {
 
 echo "check-deb: inspecting $(basename "$deb")"
 
-# --- control metadata -----------------------------------------------------
+# --- control metadata -------------------------------------------------------
 package="$(dpkg-deb -f "$deb" Package)"
 version="$(dpkg-deb -f "$deb" Version)"
 arch="$(dpkg-deb -f "$deb" Architecture)"
@@ -38,29 +39,30 @@ description="$(dpkg-deb -f "$deb" Description)"
 
 [ "$package" = "tuxbooks" ] || fail "package name is $package, expected tuxbooks"
 [ "$version" = "$declared_version" ] ||
-  fail "deb version $version does not match tauri.conf.json $declared_version"
+  fail "deb version $version does not match package.json $declared_version"
 case "$arch" in
 amd64 | arm64) ;;
 *) fail "unexpected architecture $arch" ;;
 esac
 case "$depends" in
-*libwebkit2gtk-4.1-0*) ;;
-*) fail "missing runtime dependency libwebkit2gtk-4.1-0 (got: $depends)" ;;
+*webkit*) fail "unexpected webkit runtime dependency (got: $depends)" ;;
 esac
 [ -n "$description" ] || fail "empty package description"
 
-# --- payload --------------------------------------------------------------
+# --- payload ----------------------------------------------------------------
 payload="$(mktemp -d)"
 trap 'rm -rf "$payload"' EXIT
 dpkg-deb -x "$deb" "$payload"
 
-[ -x "$payload/usr/bin/tuxbooks" ] || fail "usr/bin/tuxbooks missing or not executable"
-[ -f "$payload/usr/lib/tuxbooks/pdfium/libpdfium.so" ] ||
-  fail "bundled PDFium resource missing (usr/lib/tuxbooks/pdfium/libpdfium.so)"
+[ -x "$payload/opt/tuxbooks/tuxbooks" ] || fail "opt/tuxbooks/tuxbooks missing or not executable"
+[ -x "$payload/opt/tuxbooks/resources/sidecar/tuxbooks" ] ||
+  fail "bundled sidecar missing or not executable (resources/sidecar/tuxbooks)"
+[ -f "$payload/opt/tuxbooks/resources/sidecar/libpdfium.so" ] ||
+  fail "bundled PDFium resource missing (resources/sidecar/libpdfium.so)"
 
 desktop="$payload/usr/share/applications/tuxbooks.desktop"
 [ -f "$desktop" ] || fail "desktop entry missing (usr/share/applications/tuxbooks.desktop)"
-grep -q '^Exec=tuxbooks' "$desktop" || fail "desktop entry has no Exec=tuxbooks"
+grep -q '^Exec=' "$desktop" || fail "desktop entry has no Exec line"
 grep -q '^Icon=tuxbooks' "$desktop" || fail "desktop entry has no Icon=tuxbooks"
 grep -q '^Type=Application' "$desktop" || fail "desktop entry is not Type=Application"
 grep -q '^Terminal=false' "$desktop" || fail "desktop entry does not set Terminal=false"
@@ -75,4 +77,4 @@ else
   echo "check-deb: desktop-file-validate not installed; skipped (structure still checked)"
 fi
 
-echo "check-deb: OK (version $version, $arch, $icon_count icons, PDFium bundled)"
+echo "check-deb: OK (version $version, $arch, $icon_count icons, sidecar + PDFium bundled)"

@@ -1,7 +1,7 @@
 # Database
 
 SQLite (bundled, via SQLx) at a single file path. Migrations live in
-`src-tauri/migrations/` and are embedded at compile time with
+`sidecar/migrations/` and are embedded at compile time with
 `sqlx::migrate!`; they run automatically in `db::connection::init_pool`,
 so a clean database always converges to the current schema. Add numbered
 `.sql` files; never create schema procedurally at runtime.
@@ -72,6 +72,14 @@ writes the format-specific locators it tracks; `progress_percent` is the
 coarse shell position that backs the library's "In Progress" /
 "Finished" sections, and `mark_finished` (milestone 10) sets it to 100
 without disturbing the stored locators.
+
+Progress rows are user data and are migrated, never reset, when the
+rendering engine changes (foliate → Readium, see `docs/epub.md`). The migration is versioned and idempotent:
+a schema/engine version marks which rows have been converted, the original
+locator values are preserved until the new ones are validated, and a
+per-book completion marker prevents re-running. New columns for the
+migration are added by an embedded numbered migration, like any schema
+change.
 
 ### annotations
 

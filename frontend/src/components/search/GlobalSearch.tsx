@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { searchLibrary } from "@/lib/tauri";
+import { searchLibrary } from "@/lib/bridge";
 import { useAppDispatch } from "@/state/appState";
 import type { SearchHit } from "@/types/domain";
 import { splitSnippet } from "./snippet";

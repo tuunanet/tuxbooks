@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { pickBookFiles, pickDirectory } from "@/lib/tauri";
+import { pickBookFiles, pickDirectory } from "@/lib/bridge";
 import { useImport } from "@/state/importState";
 import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./sections";
 

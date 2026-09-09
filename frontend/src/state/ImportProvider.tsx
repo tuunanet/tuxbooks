@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { importPaths as importPathsCommand } from "@/lib/tauri";
+import { importPaths as importPathsCommand } from "@/lib/bridge";
 import { useLibrary } from "@/hooks/useLibrary";
 import {
   ImportContext,

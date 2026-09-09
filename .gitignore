@@ -4,7 +4,7 @@ frontend/dist/
 *.tsbuildinfo
 
 # Rust
-src-tauri/target/
+sidecar/target/
 target/
 
 # Databases / generated artifacts
@@ -41,10 +41,20 @@ coverage/
 # Tests that use it skip automatically when the path is absent.
 tests/fixtures/books/EBooks/
 
-# Tauri-generated capability schemas (regenerated on build)
-src-tauri/gen/schemas/
+# Electron packaging output (electron-builder.yml directories.output)
+dist-packages/
 
 # Fetched PDFium shared library for cover extraction (scripts/fetch-pdfium.sh)
-src-tauri/pdfium/
+sidecar/pdfium/
 
 *.swp
+electron/dist/
+
+# graphify local-only outputs (git has no trailing comments on pattern lines)
+graphify-out/cost.json
+graphify-out/cache/
+graphify-out/2*/
+graphify-out/graph.html
+
+# Kate editor swap files
+*.kate-swp

@@ -29,25 +29,16 @@ const report = "target/llvm-cov/coverage.json";
 mkdirSync("target/llvm-cov", { recursive: true });
 execFileSync(
   "cargo",
-  [
-    "llvm-cov",
-    "--manifest-path",
-    "src-tauri/Cargo.toml",
-    "--features",
-    "custom-protocol",
-    "--json",
-    "--output-path",
-    report,
-  ],
+  ["llvm-cov", "--manifest-path", "sidecar/Cargo.toml", "--json", "--output-path", report],
   { stdio: "inherit" },
 );
 
 const cov = JSON.parse(readFileSync(report, "utf8"));
 const byModule = {};
 for (const f of cov.data[0].files) {
-  const idx = f.filename.indexOf("/src-tauri/src/");
+  const idx = f.filename.indexOf("/sidecar/src/");
   if (idx === -1) continue;
-  const rel = f.filename.slice(idx + "/src-tauri/src/".length);
+  const rel = f.filename.slice(idx + "/sidecar/src/".length);
   const module = rel.includes("/") ? rel.split("/")[0] : null;
   if (!module || !(module in MODULES)) continue;
   byModule[module] ??= { covered: 0, total: 0 };

@@ -1,19 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { useAnnotations } from "@/hooks/useAnnotations";
 import {
   annotationRects,
   byKind,
   highlightCssColor,
-  isBookmarkAtCfi,
+  isBookmarkAtLocator,
   isBookmarkAtPage,
   normalizeRect,
 } from "@/components/reader/annotationModel";
 import { makeAnnotation } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 describe("annotationModel", () => {
   it("maps stored color names to CSS colors with a yellow fallback", () => {
@@ -30,8 +28,8 @@ describe("annotationModel", () => {
 
     expect(byKind(all, "bookmark")).toEqual([bookmarkCfi, bookmarkPage]);
     expect(byKind(all, "highlight")).toEqual([highlight]);
-    expect(isBookmarkAtCfi(bookmarkCfi, "epubcfi(/6/2)")).toBe(true);
-    expect(isBookmarkAtCfi(bookmarkPage, "epubcfi(/6/2)")).toBe(false);
+    expect(isBookmarkAtLocator(bookmarkCfi, "epubcfi(/6/2)")).toBe(true);
+    expect(isBookmarkAtLocator(bookmarkPage, "epubcfi(/6/2)")).toBe(false);
     expect(isBookmarkAtPage(bookmarkPage, 3)).toBe(true);
     expect(isBookmarkAtPage(bookmarkPage, 4)).toBe(false);
     expect(annotationRects(highlight)).toEqual(highlight.rects);

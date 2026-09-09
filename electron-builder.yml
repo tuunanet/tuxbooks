@@ -1,0 +1,45 @@
+# Electron packaging (docs/release.md).
+# The deb/rpm/AppImage artifact set, the version source of truth (package.json
+# version), and the packaging gate (scripts/check-deb.sh) carry over from the
+# Tauri era; only the build internals changed.
+appId: com.tuxbooks.app
+productName: tuxbooks
+copyright: GPL-3.0-or-later
+
+directories:
+  output: dist-packages
+  buildResources: build
+
+# The renderer is loaded from app.asar (frontend/dist) and the main/preload
+# bundles sit in app.asar/electron/dist; main resolves both relative to its
+# own __dirname. The sidecar is a real process: it must live outside the
+# asar in extraResources, next to the PDFium library it probes at startup
+# (sidecar/src/lib.rs pdfium_library_dirs includes the binary's directory).
+files:
+  - electron/dist/**
+  - frontend/dist/**
+  - package.json
+
+extraResources:
+  - from: sidecar/target/release/tuxbooks
+    to: sidecar/tuxbooks
+  - from: sidecar/pdfium/libpdfium.so
+    to: sidecar/libpdfium.so
+
+linux:
+  category: Utility
+  maintainer: Tuomo Tuunanen <47913151+tuunanet@users.noreply.github.com>
+  vendor: tuxbooks
+  description: Local-first ebook library and reader
+  synopsis: Local-first ebook library and reader
+  target:
+    - deb
+    - rpm
+    - AppImage
+  icon: build/icons/
+  desktop:
+    entry:
+      Type: Application
+      Terminal: false
+      Categories: Office;Viewer;Literature;
+      Keywords: ebook;epub;pdf;library;reader;

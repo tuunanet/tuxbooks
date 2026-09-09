@@ -8,7 +8,7 @@ import {
   type Book,
   type CollectionSummary,
   type LibraryStats,
-} from "@/lib/tauri";
+} from "@/lib/bridge";
 
 export interface LibraryState {
   stats: LibraryStats | null;

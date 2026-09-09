@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getReadingProgress, saveReadingProgress } from "@/lib/tauri";
+import { getReadingProgress, saveReadingProgress } from "@/lib/bridge";
 import type { ReadingProgressInput, ReadingProgressRecord } from "@/types/domain";
 
 /** How long position changes are coalesced before hitting SQLite. */

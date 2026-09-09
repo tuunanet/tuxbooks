@@ -24,7 +24,7 @@ devicePixelRatio 1.0 and 2.0, letter PDF page at fit-width zoom 100%
 
 ### Step 0.1 — Reader diagnostics (PERF-11, PERF-2 signal)
 
-- Files: `PdfReader.tsx`, `PdfPageCanvas.tsx`, `src-tauri` main setup.
+- Files: `PdfReader.tsx`, `PdfPageCanvas.tsx`, `sidecar` main setup.
 - Add a mount-time effect on the reader that writes one deterministic
   attribute, e.g. `data-pdf-render-info="dpr:1.5;w:3816;h:2136;scale:6.2"`.
 - Log WebKitGTK version (`navigator.userAgent`) and whether

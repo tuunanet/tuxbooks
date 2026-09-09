@@ -14,6 +14,10 @@ export interface FakePdfDocument {
   releaseRender: (pageNumber: number) => void;
   /** Page numbers whose held render task was cancelled. */
   cancelledPages: number[];
+  /** Fires the engine's one-shot worker-death listeners (recovery path). */
+  failWorker: () => void;
+  /** Registered by the engine seam (`PdfDocument.onWorkerFailed`). */
+  onWorkerFailed: ReturnType<typeof vi.fn>;
 }
 
 export interface PageSizeSpec {
@@ -32,12 +36,23 @@ export function makeFakePdfDocument(
   const attempts = new Map<number, number>();
   const releaseFns = new Map<number, () => void>();
   const cancelledPages: number[] = [];
+  const workerFailureListeners: Array<() => void> = [];
   const doc: FakePdfDocument = {
     numPages: pageCount,
     getPage: vi.fn(),
     scales,
     releaseRender: (pageNumber) => releaseFns.get(pageNumber)?.(),
     cancelledPages,
+    failWorker: () => {
+      for (const listener of workerFailureListeners.splice(0)) listener();
+    },
+    onWorkerFailed: vi.fn((callback: () => void) => {
+      workerFailureListeners.push(callback);
+      return () => {
+        const index = workerFailureListeners.indexOf(callback);
+        if (index !== -1) workerFailureListeners.splice(index, 1);
+      };
+    }),
   };
   const pages = new Map();
   doc.getPage.mockImplementation(async (number: number) => {

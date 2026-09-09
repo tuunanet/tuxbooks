@@ -1,7 +1,8 @@
 /**
  * Format-agnostic in-book search state shared by the reader shell and the
  * navigation drawer. A match carries exactly one locator: EPUB matches
- * point at a CFI the engine can jump to, PDF matches at a 1-based page.
+ * point at a serialized locator the engine can jump to, PDF matches at a
+ * 1-based page.
  */
 export interface ReaderSearchExcerpt {
   pre: string;
@@ -11,7 +12,7 @@ export interface ReaderSearchExcerpt {
 
 export interface ReaderSearchMatch {
   /** EPUB locator the engine navigates to; null for PDF matches. */
-  cfi: string | null;
+  locator: string | null;
   /** 1-based PDF page; null for EPUB matches. */
   page: number | null;
   excerpt: ReaderSearchExcerpt;

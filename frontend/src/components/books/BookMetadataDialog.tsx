@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
-import { coverFileUrl, pickCoverImage } from "@/lib/tauri";
+import { coverFileUrl, pickCoverImage } from "@/lib/bridge";
 import type { BookMetadata, MetadataFields } from "@/types/domain";
 
 /** Text-only mirror of `MetadataFields` for controlled inputs. */

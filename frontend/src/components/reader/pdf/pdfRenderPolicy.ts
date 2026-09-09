@@ -1,5 +1,5 @@
 /**
- * Pure PDF render-policy math — no React, no DOM, no PDF.js. The reader
+ * Pure PDF render-policy math — no React, no DOM, no engine. The reader
  * rasterizes each page into an offscreen buffer at `displayed CSS size ×
  * effective ratio`; this module decides that ratio, and the render window's
  * byte budget.
@@ -10,7 +10,8 @@
  * `MAX_RENDER_PIXELS` (2²⁴) tier first, then to CSS resolution, and only
  * digs into the hard budget under zoom. Beyond the ratio the canvas CSS
  * size stays at the displayed size and CSS upscales — the same policy as
- * the official PDF.js viewer's `maxCanvasPixels`. At common window sizes
+ * the PDF.js viewer's `maxCanvasPixels` (the cap the budgets were pinned
+ * against). At common window sizes
  * the ratio equals dpr and the caps are inert.
  *
  * Live-canvas policy (PERF-4, docs/performance.md): the pages allowed to

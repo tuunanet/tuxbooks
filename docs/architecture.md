@@ -1,75 +1,101 @@
 # Architecture
 
-tuxbooks is a local-first desktop ebook library manager built with Tauri 2.
-There is no backend server, no cloud sync, and no network dependency: the
-Rust process owns the database and the filesystem; the webview renders.
+tuxbooks is a local-first desktop ebook library manager. There is no backend
+server, no cloud sync, and no network dependency: Chromium (via Electron) is
+the sole desktop web runtime; a native Rust service owns the database and
+the filesystem; Readium and MuPDF.js render books.
+
+**Migration state:** the Electron migration is complete; this doc
+describes the current contract.
 
 ## Process and boundary
 
 ```
-┌──────────────────────────── Tauri app ────────────────────────────┐
-│  WebView (frontend/)                Rust process (src-tauri/)     │
-│  React + TypeScript + Vite          Tauri runtime (tokio)         │
-│                                     │                             │
-│  invoke("cmd", args) ────────────►  commands/  (IPC boundary)     │
-│  typed Promise result  ◄──────────  services/ (application ops)   │
-│                                     ├─ repository/ (SQL)          │
-│                                     ├─ epub/ (parsing)            │
-│                                     ├─ pdf/ (parsing)             │
-│                                     └─ db/ (SQLite + migrations)  │
-└───────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────── Electron ──────────────────────────┐
+│  Renderer (frontend/)              Main process (electron/main/)    │
+│  React + TypeScript + Vite         window, dialogs/shell            │
+│                                    ├─ tuxbooks:// protocol handler  │
+│  window.tuxbooks (preload) ─────►  ├─ spawns + proxies the Rust     │
+│  typed Promise result ◄─────────   │   sidecar (JSON-RPC, stdio)    │
+│                                    └─ resource byte serving         │
+│                                                                       │
+│  Rust sidecar (native service)                                        │
+│  ├─ services/ (application ops)   ├─ repository/ (SQL)                │
+│  ├─ epub/ (parsing)               ├─ pdf/ (parsing)                   │
+│  └─ db/ (SQLite + migrations)                                         │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-- The frontend never touches SQL, the filesystem, or ZIP archives.
-- Rust never renders UI. Tauri commands only translate IPC payloads into
-  service calls; they contain no business logic.
+- The renderer never touches Node.js (`nodeIntegration: false`),
+  SQL, the filesystem, or ZIP archives. `electron/preload/` exposes a
+  minimal, explicitly enumerated `window.tuxbooks`; the renderer's only
+  consumer is `lib/bridge.ts`.
+- The main process owns plumbing only: window lifecycle, dialogs/shell,
+  the `tuxbooks://` protocol, sidecar spawn/health/restart/teardown. No
+  business logic.
+- The Rust sidecar never renders UI. Its method table only translates
+  JSON-RPC payloads into service calls.
+- Book bytes, covers, and EPUB resources flow through the scoped
+  `tuxbooks://` custom protocol (range requests supported, granted to the
+  app's origin only) — never an arbitrary local HTTP server; paths never
+  cross into the renderer.
+
+## Gotchas
+
+Each has bitten before (or is a known trap of the Electron stack):
+
+- Electron security defaults are non-negotiable; no arbitrary
+  `ipcRenderer` passthrough — the preload exposes only the enumerated
+  `window.tuxbooks` API, consumed solely by `lib/bridge.ts`.
+- Sidecar lifecycle: the sidecar survives a renderer reload and is shut
+  down on quit — no orphaned processes. E2E arms `PR_SET_PDEATHSIG` on the
+  sidecar for the same reason; see [testing.md](testing.md).
 
 ## Rust module contract
 
-| Module        | May depend on                               | Must never import |
-| ------------- | ------------------------------------------- | ----------------- |
-| `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri             |
-| `epub/`       | std, zip, quick-xml                         | tauri, sqlx       |
-| `pdf/`        | std, lopdf                                  | tauri, sqlx       |
-| `db/`         | sqlx, migrations                            | tauri             |
-| `repository/` | sqlx, domain                                | tauri, epub, pdf  |
-| `services/`   | domain, repository, epub, pdf, db           | tauri             |
-| `commands/`   | services, domain, `State<AppState>`         | sqlx details      |
+| Module        | May depend on                               | Must never import     |
+| ------------- | ------------------------------------------- | --------------------- |
+| `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri, electron glue  |
+| `epub/`       | std, zip, quick-xml                         | tauri, sqlx, electron |
+| `pdf/`        | std, lopdf                                  | tauri, sqlx, electron |
+| `db/`         | sqlx, migrations                            | tauri, electron       |
+| `repository/` | sqlx, domain                                | tauri, epub, pdf      |
+| `services/`   | domain, repository, epub, pdf, db           | tauri, electron       |
+| method table  | services, domain                            | sqlx details          |
 
-`lib.rs` owns wiring: it resolves the database path (see
-[testing.md](testing.md) for the `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`
-overrides), initializes the pool, registers managed state, and registers
-commands. `main.rs` only calls `tuxbooks_lib::run()`.
+Wiring (sidecar startup, pool init, method registration, IPC channel)
+lives in the service binary's entry; `TEST_DATABASE_PATH` /
+`TEST_LIBRARY_PATH` overrides are honored there (see
+[testing.md](testing.md)).
 
 Domain types derive `sqlx::FromRow` and `serde::Serialize` for pragmatism;
-the rule that matters is: no domain file imports `tauri`.
+the rule that matters is: no domain file imports a runtime crate.
 
 ## Database layer
 
-SQLite via SQLx with embedded migrations (`src-tauri/migrations/`), run
+SQLite via SQLx with embedded migrations (`sidecar/migrations/`), run
 deterministically by `db::connection::init_pool`. All queries are runtime
 SQL (`sqlx::query`), not compile-time checked macros, so builds never
 require a live database. See [database.md](database.md).
 
 ## EPUB layer
 
-`epub/` parses EPUB containers (ZIP + OPF XML) into a plain `EpubBook`
-value. It is Tauri- and database-independent and unit-tested against
-`tests/fixtures/books/minimal.epub`. See [epub.md](epub.md).
+Import-time parsing stays in Rust (`epub/`, ZIP + OPF XML into a plain
+`EpubBook`). Reader rendering belongs to **Readium TS Toolkit** in the
+renderer, behind the single-module seam `lib/epub/readiumEngine.ts` —
+publication parsing, navigator state, pagination, locators, selection, and
+navigation are Readium's; React owns only the surrounding UI. EPUB
+resources load through `tuxbooks://`. See [epub.md](epub.md).
 
 ## PDF layer
 
-`pdf/` extracts bibliographic metadata (title/author/subject) from PDF
-files via `lopdf` and rasterizes page 1 to a PNG cover at import time via
-`pdfium-render` (`pdf/render.rs`), probing for the PDFium shared library
-fetched by `scripts/fetch-pdfium.sh` (see [build.md](build.md)); when the
-library is absent, PDFs import without covers. Reader rendering happens in
-the frontend as a continuous, virtualized reader: the
-`get_book_bytes` command serves a book's file bytes (`services/reader.rs`)
-and PDF.js rasterizes pages to canvases (`frontend/src/lib/pdf/pdfEngine.ts`
-is the only PDF.js import site; the `components/reader/pdf/` modules own
-layout, virtualization, the render queue, and persistence — see
-[pdf.md](pdf.md)).
+Import-time metadata stays in Rust (`pdf/` via `lopdf`; page-1 cover
+rasterization via `pdfium-render` — retained unless MuPDF in the renderer
+provably replaces it, see [pdf.md](pdf.md)). Reader rendering belongs to
+**MuPDF.js/WASM** in the renderer behind `lib/pdf/pdfEngine.ts` (the only
+MuPDF import site); `components/reader/pdf/` owns layout, virtualization,
+the render queue, and persistence. Byte access flows through
+`tuxbooks://`. See [pdf.md](pdf.md).
 
 ## Services
 
@@ -78,71 +104,37 @@ layout, virtualization, the render queue, and persistence — see
   `list_book_files` for a parse-free listing used by reconciliation).
 - `book_importer`: scan → upsert into `books` (keyed by path) → extract
   covers into the artwork cache next to the database (EPUB packages; PDF
-  page 1 via PDFium, best effort). Idempotent on re-scan. Takes a per-book
-  progress callback; the `scan_library` command forwards it as
-  `import-progress` events so the UI shows books and covers while the scan
-  runs. `import_file` is the single-file primitive the watcher reuses.
+  page 1 via PDFium, best effort). Idempotent on re-scan. Progress streams
+  to the UI as `import-progress` notifications on the IPC channel.
 - `artwork_cache`: content-addressed cover storage (`covers/<fnv1a>.<ext>`
   next to the database — stable, version-independent keys; identical bytes
-  share one file, moves and re-imports are cache hits, atomic writes).
-  `sweep_unreferenced_covers` is the invalidation step: files no
-  `books.cover_path` row references (changed source, removed book, stale
-  temps) are collected at startup and after book removal. Indeterminate
-  PDF extraction (PDFium unavailable/render error) never strips an
-  existing cover; a definite EPUB cover removal does.
-- `library_reconciler`: turns filesystem observations into minimal database
-  transitions (milestone 3). Path truth: every book file in a watched
-  location has exactly one available row; vanished files flip
-  `available = 0` (never delete); renames/moves relink rows by id so
-  progress and collections survive. Also owns startup/periodic
-  reconciliation of watched locations and the explicit `reconnect_book`
-  flow. Emits `LibraryChange` through a callback — the only Tauri-free
-  seam; `lib.rs` wires it to the `library-changed` IPC event.
-- `library_watcher`: `notify`-based watching of the registered
-  `library_locations` roots (recursive), with a quiet-period debounce,
-  rename pairing that survives window boundaries, and a reconciliation
-  sweep after lost-destination moves or backend rescan requests. One
-  reconciler thread; never blocks the app. Runs only for watched roots.
-- `reader`: controlled file-byte access for the reading engines — resolves a
-  book id to its stored path via the repository and reads it; paths never
-  cross the IPC boundary.
-- `search`: library full-text search (milestone 5). Sanitizes the raw user
-  query into FTS5 MATCH syntax (quoted prefix phrases, ANDed) and queries
-  `books_fts` through `repository::books::search_fts`; hits carry the book
-  id, title, author, and an auto-column snippet. Exposed as the
-  `search_books` command behind the global search box (Ctrl/Cmd+K).
-- `annotations`: persistent reading annotations (milestone 6). Validates
-  that every annotation names a document position (EPUB CFI or 1-based PDF
-  page, optional page fraction inside the page), that EPUB highlights quote
-  their selected text, and that PDF highlight geometry decodes to rects
-  normalized to page space (0..1); CRUD passes through
-  `repository::annotations`. Exposed as the `list_annotations` /
-  `create_annotation` / `update_annotation` / `delete_annotation` commands;
-  note and color edits go through `update_annotation`.
-- `metadata`: library curation (milestone 7). Owns the three-layer merge —
-  `book_source_metadata` (file truth, written by the importer/reconnect),
-  `book_metadata_overrides` (user truth), and the effective `books`
-  columns — plus the normalized authors/subjects/series entities
-  (`repository::metadata`). Edits follow the minimal-override rule (a value
-  equal to the source clears its override; an emptied field is an explicit
-  clear), reset restores the untouched source snapshot, and cover overrides
-  are copied into the artwork cache. Source files are never rewritten.
-  Exposed as `get_book_metadata` / `update_book_metadata` /
-  `reset_book_metadata` / `set_book_cover` / `clear_book_cover_override`;
-  every mutation emits `library-changed`.
+  share one file, atomic writes). `sweep_unreferenced_covers` runs at
+  startup and after book removal.
+- `library_reconciler`: path truth — every book file in a watched location
+  has exactly one available row; vanished files flip `available = 0` (never
+  delete); renames/moves relink rows by id so progress and collections
+  survive. Emits `LibraryChange` through a callback; wiring forwards it as
+  the `library-changed` notification.
+- `library_watcher`: `notify`-based watching of registered
+  `library_locations` roots with a quiet-period debounce and rename
+  pairing; one reconciler thread, never blocks the app.
+- `reader`: controlled file-byte access — resolves a book id to its stored
+  path via the repository and answers byte (range) requests for the
+  `tuxbooks://` protocol handler; paths never cross the IPC boundary.
+- `search`: library full-text search; sanitizes the raw user query into
+  FTS5 MATCH syntax and queries `books_fts` (Ctrl/Cmd+K global search).
+- `annotations`: persistent bookmarks/highlights; validates locators
+  (EPUB CFI or 1-based PDF page + normalized geometry) and passes CRUD
+  through `repository::annotations`.
+- `metadata`: library curation — three-layer merge (`book_source_metadata`
+  file truth, `book_metadata_overrides` user truth, effective `books`
+  columns) plus normalized authors/subjects/series entities. Source files
+  are never rewritten.
 
-Collection and progress plumbing (milestone 10) stays in thin command +
-repository layers: `list_collections` / `create_collection` /
-`delete_collection` / `add_book_to_collection` /
-`remove_book_from_collection` over `repository::collections` (summaries
-carry member book ids so one call feeds the sidebar, the collection
-sections, and the context menus), and `mark_book_finished` over
-`repository::reading_progress` (sets `progress_percent = 100` while keeping
-the stored position). `list_books` LEFT JOINs `reading_progress`, so the
-shared book payload carries `progress_percent` / `progress_updated_at`.
-`import_paths` accepts a mixed batch of files and folders: folders go
-through `import_directory` and register a watched location exactly like
-`scan_library`; plain files go through `import_file` and stay unwatched.
+Collection and progress plumbing stays in thin method + repository layers:
+collections CRUD over `repository::collections`; `mark_book_finished` over
+`repository::reading_progress` (`progress_percent = 100`, stored locators
+untouched). `list_books` LEFT JOINs `reading_progress`.
 
 ## Frontend structure
 
@@ -150,60 +142,49 @@ through `import_directory` and register a watched location exactly like
 frontend/src/
     types/domain.ts       TS mirrors of the Rust domain models (wire format)
     state/                app shell state (library/detail/reader) + providers
-    lib/tauri.ts          typed invoke wrappers + plugin APIs (the only Tauri import site)
+    lib/bridge.ts         the only window.tuxbooks consumer (typed wrappers)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/fixtures.ts       realistic sample books for tests/previews
-    lib/pdf/pdfEngine.ts  the only PDF.js import site (worker setup + open/close)
-    hooks/useLibrary.ts   shared library data loading (`useLibraryData` + `useLibrary`;
-                          books + collections, one shared copy)
-    hooks/useAnnotations.ts  persistent annotations of the open reader book
-    hooks/useBookMetadata.ts  curation view + metadata edits for the editor
-    hooks/useBookActions.ts   locate/remove/mark-finished book actions
-    hooks/useCollectionActions.ts  collection create/delete/membership actions
+    lib/epub/readiumEngine.ts  the only Readium import site (EPUB seam)
+    lib/pdf/pdfEngine.ts  the only MuPDF.js import site (PDF seam)
+    hooks/                useLibrary, useAnnotations, useBookMetadata,
+                          useBookActions, useCollectionActions
     components/
         layout/           AppShell, Sidebar
-        library/          LibraryView, header, empty states, import UX, section helpers
-        books/            BookCard, BookListItem, BookDetail, book context menu,
-                          BookMetadataDialog (milestone 7 edit form, global overlay)
-        search/           GlobalSearch (Ctrl/Cmd+K, backend FTS) + snippet splitting
-        reader/           ReaderShell — the unified reader model (milestone 8):
-                          it owns current book, progress, navigation entry
+        library/          LibraryView, header, empty states, import UX
+        books/            BookCard, BookListItem, BookDetail, metadata dialog
+        search/           GlobalSearch (Ctrl/Cmd+K, backend FTS)
+        reader/           ReaderShell — the format-agnostic reader model:
+                          owns current book, progress, navigation entry
                           points, bookmark placement, in-book search state,
-                          and the selection toolbar, while the open format
-                          reader registers its `ReaderAdapter` (`readerModel`)
-                          for jumps, search, and highlight creation; one
-                          shared persistence core (`useReaderProgress`),
-                          shared searchModel + annotationModel, EPUB reader,
-                          pdf/ continuous PDF reader (layout math,
-                          virtualization, render queue, scroll tracking,
-                          thumbnails sidebar, outline — see pdf.md),
-                          ReaderNavigation with the in-book Search, Bookmarks,
-                          and Highlights tabs, selection toolbar, and
-                          annotation list tabs
-        collections/      CollectionDialog (creation shell, not backend-wired yet)
-        settings/         SettingsShell with presentational sections
+                          and the selection toolbar. The open format reader
+                          registers its `ReaderAdapter` (`readerModel.ts`)
+                          for jumps, search, and highlight creation. EPUB
+                          reader (Readium) and pdf/ continuous PDF reader
+                          (MuPDF; layout math, virtualization, render queue,
+                          thumbnails, outline) implement the same seam.
+                          ReaderNavigation holds the Search, Bookmarks, and
+                          Highlights tabs.
+        collections/      CollectionDialog
+        settings/         SettingsShell
         ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
 
 UI primitives come from shadcn/ui (`pnpm dlx shadcn add ...`; icons from
 `lucide-react`) — do not hand-roll equivalents. The `@/` alias maps to
-`frontend/src/`. Business logic lives in Rust. React components render state
-and call the typed wrappers in `lib/tauri.ts`; no component invokes raw
-commands. `LibraryDataProvider` owns the fetched library data so the library
-view, global search, and import flows share one copy; `ImportProvider` runs
-`scan_library` for picked folders and drag-dropped paths, while the provider
-patches its book list from `import-progress` events so imports stream in.
-The same provider listens to `library-changed` events, so watcher
-reconciliations (new/updated/relinked books, missing files, removals) reach
-the UI live without polling. Missing-file recovery UI (Locate File /
-Remove) lives on the book card, list row, detail view, and context menu,
-driven by `hooks/useBookActions.ts`.
+`frontend/src/`. Business logic lives in Rust; readers own rendering;
+React components render state and call the typed wrappers in
+`lib/bridge.ts`; no component touches raw IPC, Readium, or MuPDF objects.
+`LibraryDataProvider` owns the fetched library data (shared by the library
+view, global search, and import flows); `ImportProvider` streams
+`import-progress` events and listens to `library-changed` so watcher
+reconciliations reach the UI live.
 
 ## Testing layers
 
 1. Rust unit + property tests (`cargo test`, per-module `#[cfg(test)]`)
-2. Rust integration test (`src-tauri/tests/vertical_slice.rs`)
-3. Vitest + React Testing Library with a mocked Tauri IPC (`frontend/tests/`)
-4. WebdriverIO E2E against the built binary (`e2e/`)
+2. Rust integration test (fixture → scan → DB → search slice)
+3. Vitest + React Testing Library with a mocked IPC bridge (`frontend/tests/`)
+4. Playwright E2E against the real Electron binary (`e2e/`)
 
 See [testing.md](testing.md).

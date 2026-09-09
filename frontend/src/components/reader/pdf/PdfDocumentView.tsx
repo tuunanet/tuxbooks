@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties, type Ref } from "react";
+import { useMemo, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
@@ -19,12 +19,18 @@ interface PdfDocumentViewProps {
   renderPages: number[];
   /** The page the reading position names; its slot is the scroll target. */
   anchorPage: number;
-  /** PDF.js render scale for the canvases. */
+  /** Render scale for the canvases. */
   scale: number;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
   /** Shared per-document cache of finished page bitmaps. */
   bitmapCache?: PdfBitmapCache | null;
+  /**
+   * Two-stage first paint for the anchor page while no page has rendered
+   * yet (§ first readable page): readable preview first, background
+   * refinement after.
+   */
+  previewAnchorRender?: boolean;
   onPageRendered: (pageNumber: number) => void;
   onPageError: (pageNumber: number, error: unknown) => void;
   registerSlot: (pageNumber: number, element: HTMLDivElement | null) => void;
@@ -41,20 +47,6 @@ interface PdfDocumentViewProps {
 }
 
 /**
- * CSS custom properties the PDF.js text layer expects on its ancestor
- * (`--scale-factor` = the render scale in CSS px per page unit; see
- * pdfTextLayer.css).
- */
-const scaleCssProperties = (scale: number): CSSProperties =>
-  ({
-    "--scale-factor": scale,
-    "--user-unit": 1,
-    "--total-scale-factor": "calc(var(--scale-factor) * var(--user-unit))",
-    "--scale-round-x": "1px",
-    "--scale-round-y": "1px",
-  }) as CSSProperties;
-
-/**
  * The virtualized continuous document surface: one lightweight slot per page
  * (the whole document reserves its space up front) with canvases only on the
  * bounded render set. Slot geometry comes from the layout layer; DOM flow
@@ -69,6 +61,7 @@ export function PdfDocumentView({
   renderedPages,
   failedPages,
   bitmapCache = null,
+  previewAnchorRender = false,
   onPageRendered,
   onPageError,
   registerSlot,
@@ -85,7 +78,12 @@ export function PdfDocumentView({
     <div
       ref={contentAreaRef}
       data-testid="pdf-content-area"
-      className="flex min-h-0 w-full justify-center overflow-x-auto"
+      // No self-scrolling: the shell scroller (reader-content) owns both
+      // axes. An overflow here gives the area its own scrollbars, whose
+      // width feeds back into useFitWidthScale's measurement — the fit
+      // scale then oscillates and re-anchoring yanks the viewport
+      // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
+      className="flex min-h-0 w-full justify-center"
     >
       <div
         ref={documentRef}
@@ -127,16 +125,14 @@ export function PdfDocumentView({
                 // painted effects on the canvas would be re-composited every
                 // frame. Text/highlight overlays are positioned in this same
                 // wrapper, so the 1px border inset applies to all equally.
-                <div
-                  className="relative overflow-hidden rounded-sm border bg-white"
-                  style={scaleCssProperties(scale)}
-                >
+                <div className="relative overflow-hidden rounded-sm border bg-white">
                   <PdfPageCanvas
                     document={document}
                     pageNumber={slot.pageNumber}
                     width={slot.width}
                     height={slot.height}
                     scale={scale}
+                    preview={previewAnchorRender && slot.pageNumber === anchorPage}
                     bitmapCache={bitmapCache}
                     onPageRendered={onPageRendered}
                     onPageError={onPageError}

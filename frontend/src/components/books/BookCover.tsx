@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { coverFileUrl } from "@/lib/tauri";
+import { coverFileUrl } from "@/lib/bridge";
 import type { Book } from "@/types/domain";
 
 interface BookCoverProps {
@@ -10,8 +10,8 @@ interface BookCoverProps {
 }
 
 /**
- * Cover art: the real extracted cover through the Tauri asset protocol
- * (decision D2) when the book has one, otherwise gradient placeholder art.
+ * Cover art: the real extracted cover through the `tuxbooks://` protocol
+ * when the book has one, otherwise gradient placeholder art.
  * A failed load (e.g. missing file, plain Vite preview) falls back to the
  * placeholder instead of showing a broken image.
  */

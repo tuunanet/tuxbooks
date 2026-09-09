@@ -27,11 +27,42 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
 - Do not add decorative emoji, generic summaries, marketing language, or ceremonial comment banners.
 - Do not rename or reformat unrelated code.
 
+## Rust
+
+- Errors via `thiserror` enums; no `anyhow` at layer boundaries.
+- Wire DTOs serialize `camelCase` — JSON-RPC payloads and the preload
+  bridge alike.
+- Business logic lives in `domain/`/`services/`; SQL only in
+  `repository/` (module table in [architecture.md](architecture.md)).
+- `epub/` and `domain/` stay independent of any runtime (Electron, Tauri).
+
 ## Frontend
 
 - No synchronous `setState` inside effects (lint rule
   `react-hooks/set-state-in-effect`): do state updates after an `await`
   (see `frontend/src/hooks/useLibrary.ts` for the pattern).
+- TypeScript is strict; `any` is banned via lint rule.
+- Do not suppress lints globally. A targeted `eslint-disable` needs a
+  reason comment (the shadcn `*Variants` exports in `components/ui/` are
+  the known cases).
+- Components grouped by feature under `src/components/`; the only files
+  allowed to talk to the outside world are `src/lib/bridge.ts` (IPC via
+  the preload API) and the two engine seams
+  (`lib/epub/readiumEngine.ts`, `lib/pdf/pdfEngine.ts`) —
+  [architecture.md](architecture.md).
+
+## Dependencies
+
+- No new dependency (Rust crate or npm package) without a clear, stated
+  reason.
+- Reader engines are deliberate choices: Readium TS Toolkit (EPUB) and
+  MuPDF.js (PDF). Do not add competing engines or renderers alongside
+  them.
+- UI primitives come from shadcn/ui (`pnpm dlx shadcn add <component>`;
+  config in `frontend/components.json`); icons from `lucide-react` — do
+  not hand-roll SVG icons or primitive replacements.
+- Local-first desktop app, SQLite only: no network services, Docker,
+  PostgreSQL, Redis, or backend server.
 
 ## User interface
 

@@ -1,21 +1,27 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Mock } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@/lib/epub/epubEngine", async () => {
-  const { makeFakeEpubModule } = await import("./mocks/epubEngine");
-  return makeFakeEpubModule();
+vi.mock("@/lib/epub/readiumEngine", async () => {
+  const { makeFakeReadiumModule } = await import("./mocks/readiumEngine");
+  return makeFakeReadiumModule();
 });
 
 import { EpubReader } from "@/components/reader/EpubReader";
-import type { ReaderAdapter } from "@/components/reader/readerModel";
+import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
+import { epubHrefJump, type ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { useReader, type ReaderPreferences } from "@/state/readerState";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
-import { emitSearchResults, fakeEpubHandles, lastFakeHandle } from "./mocks/epubEngine";
+import { mockInvoke } from "./mocks/bridge";
+import {
+  createFakeHandle,
+  emitSearchResults,
+  fakeEpubHandles,
+  lastFakeHandle,
+  FAKE_LOCATOR,
+} from "./mocks/readiumEngine";
 import { makeAnnotation } from "./factories";
 import type { Annotation } from "@/types/domain";
 
@@ -27,6 +33,11 @@ const SAVED_PROGRESS = {
   pageNumber: null,
   scrollOffset: null,
   progressPercent: 55,
+  locator: null,
+  progression: null,
+  locations: null,
+  engine: null,
+  schemaVersion: null,
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -35,6 +46,7 @@ function renderReader(props: { onTocLoad?: (toc: unknown[]) => void; bookId?: nu
     <ShortcutProvider>
       <ReaderProvider>
         <EpubReader
+          key={props.bookId ?? 1}
           book={{ ...makeBookShim(), id: props.bookId ?? 1 }}
           onTocLoad={props.onTocLoad}
         />
@@ -47,7 +59,11 @@ function renderReader(props: { onTocLoad?: (toc: unknown[]) => void; bookId?: nu
       view.rerender(
         <ShortcutProvider>
           <ReaderProvider>
-            <EpubReader book={{ ...makeBookShim(), id: bookId }} onTocLoad={props.onTocLoad} />
+            <EpubReader
+              key={bookId}
+              book={{ ...makeBookShim(), id: bookId }}
+              onTocLoad={props.onTocLoad}
+            />
           </ReaderProvider>
         </ShortcutProvider>,
       );
@@ -87,10 +103,17 @@ function makeBookShim() {
 
 function mockHappyPath(saved: typeof SAVED_PROGRESS | null) {
   mockInvoke({
-    get_book_bytes: new ArrayBuffer(16),
     get_reading_progress: saved,
     save_reading_progress: null,
   });
+}
+
+/**
+ * The mocked engine's static open (the async boundary `useEpubDocument`
+ * awaits). Handles it creates land in `fakeEpubHandles`.
+ */
+function engineOpen(): Mock {
+  return (ReadiumEpubHandle as unknown as { open: Mock }).open;
 }
 
 /**
@@ -124,9 +147,10 @@ async function clickProbe(label: string): Promise<void> {
 describe("EpubReader lifecycle", () => {
   beforeEach(() => {
     fakeEpubHandles.length = 0;
+    engineOpen().mockClear();
   });
 
-  it("loads the document, mounts the engine host, and becomes ready", async () => {
+  it("opens the publication, mounts the engine host, and becomes ready", async () => {
     mockHappyPath(null);
     const onTocLoad = vi.fn();
 
@@ -134,113 +158,109 @@ describe("EpubReader lifecycle", () => {
     expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "loading");
     expect(screen.getByTestId("epub-loading")).toBeInTheDocument();
 
-    const handle = await waitFor(() => {
-      const current = fakeHandleOrThrow();
-      return current;
-    });
-    expect(handle.open).toHaveBeenCalledTimes(1);
+    await waitFor(fakeHandleOrThrow);
+    expect(engineOpen()).toHaveBeenCalledWith(1);
+    const handle = lastFakeHandle();
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
     expect(handle.init).toHaveBeenCalledWith(null);
-    expect(handle.host.isConnected).toBe(true);
+    expect(handle.hostElement.isConnected).toBe(true);
     expect(onTocLoad).toHaveBeenCalledWith([
       { label: "Chapter One", href: "chapter1.xhtml", subitems: [] },
       { label: "Chapter Two", href: "chapter2.xhtml", subitems: [] },
     ]);
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 1 });
   });
 
-  it("restores the saved CFI through engine init", async () => {
+  it("restores the saved record through engine init (the seam migrates foliate rows)", async () => {
     mockHappyPath(SAVED_PROGRESS);
 
     renderReader();
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
     await waitFor(() => expect(handle.init).toHaveBeenCalled());
-    expect(handle.init).toHaveBeenCalledWith("epubcfi(/6/4!/4/2,/1:0,/1:42)");
+    expect(handle.init).toHaveBeenCalledWith(SAVED_PROGRESS);
     expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready");
   });
 
-  it("renders an honest error when the bytes cannot be loaded", async () => {
+  it("renders an honest error when the session cannot be opened", async () => {
     mockInvoke({
-      get_book_bytes: new Error("file went away"),
       get_reading_progress: null,
       save_reading_progress: null,
     });
+    engineOpen().mockRejectedValueOnce(new Error("session failed"));
 
     renderReader();
     expect(await screen.findByTestId("epub-error")).toHaveTextContent(
-      "This EPUB could not be opened: file went away",
+      "This EPUB could not be opened: session failed",
     );
   });
 
   it("closes the engine when the reader unmounts", async () => {
     mockHappyPath(null);
     const { unmount } = renderReader();
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
     await screen.findByTestId("epub-reader");
 
     unmount();
-    expect(handle.close).toHaveBeenCalledTimes(1);
-    expect(handle.host.isConnected).toBe(false);
+    await waitFor(() => expect(handle.close).toHaveBeenCalledTimes(1));
+    expect(handle.hostElement.isConnected).toBe(false);
   });
 
   it("closes the previous engine and mounts a fresh one when the book changes", async () => {
     mockHappyPath(null);
 
     const view = renderReader({ bookId: 1 });
-    const first = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const first = lastFakeHandle();
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
-    expect(first.host.isConnected).toBe(true);
+    expect(first.hostElement.isConnected).toBe(true);
 
     view.rerenderBook(2);
-    const second = await waitFor(() => {
-      expect(fakeEpubHandles.length).toBe(2);
-      return fakeEpubHandles[1]!;
-    });
+    await waitFor(() => expect(fakeEpubHandles.length).toBe(2));
+    const second = fakeEpubHandles[1]!;
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
     // The old engine is closed and its host is detached; the new book's
     // host is the one connected to the document.
-    expect(first.close).toHaveBeenCalledTimes(1);
-    expect(first.host.isConnected).toBe(false);
-    expect(second.open).toHaveBeenCalledTimes(1);
-    expect(second.host.isConnected).toBe(true);
-    expect(invokeMock).toHaveBeenCalledWith("get_book_bytes", { bookId: 2 });
+    await waitFor(() => expect(first.close).toHaveBeenCalledTimes(1));
+    expect(first.hostElement.isConnected).toBe(false);
+    expect(second.init).toHaveBeenCalledTimes(1);
+    expect(second.hostElement.isConnected).toBe(true);
   });
 
   it("closes an open that finishes after the book changed", async () => {
     mockHappyPath(null);
 
-    const view = renderReader({ bookId: 1 });
-    const first = await waitFor(fakeHandleOrThrow);
-    let resolveFirstOpen: () => void = () => {};
-    first.open.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (resolveFirstOpen = resolve)),
+    let resolveFirstOpen: (handle: unknown) => void = () => {};
+    engineOpen().mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstOpen = resolve;
+        }),
     );
 
+    const view = renderReader({ bookId: 1 });
     view.rerenderBook(2);
-    const second = await waitFor(() => {
-      expect(fakeEpubHandles.length).toBe(2);
-      return fakeEpubHandles[1]!;
-    });
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
+    const second = lastFakeHandle();
 
-    // The first book's engine was superseded mid-open: its host must leave
-    // the document immediately (state reset on switch), not linger until
-    // the second book's engine arrives.
-    expect(first.host.isConnected).toBe(false);
-
-    resolveFirstOpen();
-    await waitFor(() => expect(first.close).toHaveBeenCalledTimes(1));
-    expect(first.host.isConnected).toBe(false);
-    expect(second.host.isConnected).toBe(true);
+    // The first book's engine was superseded mid-open: its gated open, once
+    // resolved, closes the orphaned handle instead of mounting it, and the
+    // second book's reader is untouched.
+    const orphan = createFakeHandle();
+    expect(orphan.hostElement.isConnected).toBe(false);
+    resolveFirstOpen(orphan);
+    await waitFor(() => expect(orphan.close).toHaveBeenCalledTimes(1));
+    expect(second.close).not.toHaveBeenCalled();
+    expect(second.hostElement.isConnected).toBe(true);
     expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready");
   });
 });
@@ -250,14 +270,20 @@ describe("EpubReader appearance and navigation", () => {
     fakeEpubHandles.length = 0;
   });
 
-  it("applies the default flow and appearance stylesheet when ready", async () => {
+  it("applies the default flow and appearance through the engine preferences", async () => {
     mockHappyPath(null);
 
     renderReader();
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
     await waitFor(() => expect(handle.setFlow).toHaveBeenCalled());
     expect(handle.setFlow).toHaveBeenCalledWith("paginated");
-    expect(handle.setAppearance).toHaveBeenCalledWith("css:light:17:1.6");
+    expect(handle.setAppearance).toHaveBeenCalledWith({
+      fontSize: 17,
+      lineHeight: 1.6,
+      fontFamily: null,
+      theme: "light",
+    });
   });
 
   it("leaves the paginated reading surface uncapped (engine grid bounds it)", async () => {
@@ -271,8 +297,8 @@ describe("EpubReader appearance and navigation", () => {
     const surface = screen.getByTestId("epub-reader").querySelector("[data-epub-measure]");
     expect(surface).not.toBeNull();
     expect(surface).toHaveAttribute("data-epub-measure", "full");
-    // No app-side width cap in paginated flow — the vendored paginator's
-    // grid already bounds the section iframe (~two 720px columns).
+    // No app-side width cap in paginated flow — the engine's grid already
+    // bounds the section iframe (~two 720px columns).
     expect((surface as HTMLElement).style.maxWidth).toBe("");
   });
 
@@ -339,8 +365,9 @@ describe("EpubReader appearance and navigation", () => {
     );
     const handle = lastFakeHandle();
 
-    adapterRef.current?.jump({ format: "epub", locator: "chapter2.xhtml" });
-    expect(handle.goTo).toHaveBeenCalledWith("chapter2.xhtml");
+    const tocJump = epubHrefJump("chapter2.xhtml");
+    adapterRef.current?.jump(tocJump);
+    expect(handle.goTo).toHaveBeenCalledWith(JSON.stringify({ href: "chapter2.xhtml" }));
     // The EPUB adapter ignores other formats' jump targets.
     adapterRef.current?.jump({ format: "pdf", page: 3 });
     expect(handle.goTo).toHaveBeenCalledTimes(1);
@@ -357,26 +384,29 @@ describe("EpubReader appearance and navigation", () => {
         </ReaderProvider>
       </ShortcutProvider>,
     );
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
     await screen.findByTestId("epub-reader");
 
     handle.emitRelocate({
-      cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)",
+      locator: FAKE_LOCATOR.section2,
       fraction: 0.55,
       section: { current: 1, total: 2 },
+      totalProgression: 0.55,
     });
-    await waitFor(() => expect(handle.host.dataset.epubState).toBe("ready"));
-    expect(handle.host.dataset.epubSection).toBe("1");
-    expect(handle.host.dataset.epubFraction).toBe("0.55");
+    await waitFor(() => expect(handle.hostElement.dataset.epubState).toBe("ready"));
+    expect(handle.hostElement.dataset.epubSection).toBe("1");
+    expect(handle.hostElement.dataset.epubFraction).toBe("0.55");
+    expect(handle.hostElement.dataset.epubLocator).toBe(FAKE_LOCATOR.section2);
     expect(onPositionChange).toHaveBeenLastCalledWith({
       format: "epub",
-      cfi: "epubcfi(/6/4!/4/2,/1:0,/1:42)",
+      locator: FAKE_LOCATOR.section2,
       chapterHref: "chapter2.xhtml",
     });
 
     // The engine-reported position must not be fed back into the engine
-    // (the echo guard skips the section round-trip).
-    expect(handle.goTo).not.toHaveBeenCalledWith(1);
+    // (the echo guard skips the position round-trip).
+    expect(handle.goTo).not.toHaveBeenCalled();
   });
 });
 
@@ -430,7 +460,7 @@ describe("EpubReader in-book search", () => {
         label: "Chapter One",
         subitems: [
           {
-            cfi: "epubcfi(/6/2!/4/2,/1:0,/1:8)",
+            locator: FAKE_LOCATOR.section1,
             excerpt: { pre: "The ", match: "mole", post: " was digging" },
           },
         ],
@@ -443,7 +473,7 @@ describe("EpubReader in-book search", () => {
         label: "Chapter One",
         matches: [
           {
-            cfi: "epubcfi(/6/2!/4/2,/1:0,/1:8)",
+            locator: FAKE_LOCATOR.section1,
             page: null,
             excerpt: { pre: "The ", match: "mole", post: " was digging" },
           },
@@ -505,6 +535,7 @@ describe("EpubReader in-book search", () => {
 });
 
 function fakeHandleOrThrow() {
+  lastFakeHandle();
   return lastFakeHandle();
 }
 
@@ -541,20 +572,21 @@ describe("EpubReader highlights and selection", () => {
     const highlights = [
       makeAnnotation({
         id: 1,
-        cfi: "epubcfi(/6/2!/4/2,/1:0,/1:4)",
+        cfi: FAKE_LOCATOR.section1,
         color: "green",
         pageNumber: null,
         rects: null,
       }),
     ];
     const { rerender } = renderWithHighlights({ highlights });
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
 
     await waitFor(() =>
-      expect(handle.addHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)", "#4ade80"),
+      expect(handle.addHighlight).toHaveBeenCalledWith(FAKE_LOCATOR.section1, "#4ade80"),
     );
 
-    // Recoloring redraws the same CFI with the new color; removing clears it.
+    // Recoloring redraws the same locator with the new color; removing clears it.
     const recolored = [{ ...highlights[0]!, color: "blue" }];
     rerender(
       <ShortcutProvider>
@@ -564,7 +596,7 @@ describe("EpubReader highlights and selection", () => {
       </ShortcutProvider>,
     );
     await waitFor(() =>
-      expect(handle.addHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)", "#60a5fa"),
+      expect(handle.addHighlight).toHaveBeenCalledWith(FAKE_LOCATOR.section1, "#60a5fa"),
     );
 
     rerender(
@@ -574,59 +606,36 @@ describe("EpubReader highlights and selection", () => {
         </ReaderProvider>
       </ShortcutProvider>,
     );
-    await waitFor(() =>
-      expect(handle.removeHighlight).toHaveBeenCalledWith("epubcfi(/6/2!/4/2,/1:0,/1:4)"),
-    );
+    await waitFor(() => expect(handle.removeHighlight).toHaveBeenCalledWith(FAKE_LOCATOR.section1));
   });
 
-  it("creates a highlight from a section text selection", async () => {
+  it("creates a highlight from a selection the engine reports", async () => {
     const onCreateHighlight = vi.fn();
     const onSelectionChange = vi.fn();
     const adapterRef: { current: ReaderAdapter | null } = { current: null };
     renderWithHighlights({ onCreateHighlight, onSelectionChange, adapterRef });
-    const handle = await waitFor(fakeHandleOrThrow);
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // Capture the section document the component's load handler sees.
-    const emitted: Document[] = [];
-    handle.onLoad(({ doc }) => emitted.push(doc));
-    handle.emitLoad({ index: 0, doc: document.implementation.createHTMLDocument() });
-    const sectionDoc = emitted[0];
-    if (!sectionDoc) throw new Error("no section document emitted");
-
-    // The component stores range.cloneRange(); hand back a marker we can
-    // assert on.
-    const clonedRange = {} as unknown as Range;
-    const fakeRange = { cloneRange: () => clonedRange } as unknown as Range;
-    const fakeSelection = {
-      isCollapsed: false,
-      rangeCount: 1,
-      toString: () => "a quoted passage",
-      getRangeAt: () => fakeRange,
-      removeAllRanges: vi.fn(),
-    };
-    const selectionSpy = vi
-      .spyOn(sectionDoc, "getSelection")
-      .mockReturnValue(fakeSelection as unknown as Selection);
-
-    // Selections are captured on pointerup, deferred one tick.
-    sectionDoc.dispatchEvent(new Event("pointerup", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "a quoted passage" });
+    // The engine reports the selection text; the shell surfaces it.
+    handle.emitSelection("a quoted passage");
+    await waitFor(() =>
+      expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "a quoted passage" }),
+    );
 
     adapterRef.current!.annotations.createHighlight("yellow");
-    expect(handle.getCfiFromRange).toHaveBeenCalledWith(sectionDoc, clonedRange);
     expect(onCreateHighlight).toHaveBeenCalledWith({
       kind: "highlight",
-      cfi: "epubcfi(/6/2!/4/2,/1:0,/1:4)",
+      cfi: FAKE_LOCATOR.selection,
       chapterHref: "chapter1.xhtml",
       text: "a quoted passage",
       color: "yellow",
     });
-    expect(fakeSelection.removeAllRanges).toHaveBeenCalled();
+    // The selection is cleared on creation (engine + shell state).
+    expect(handle.clearSelection).toHaveBeenCalledTimes(1);
     expect(onSelectionChange).toHaveBeenLastCalledWith(null);
-    selectionSpy.mockRestore();
   });
 });

@@ -5,7 +5,7 @@ import {
   deleteCollection,
   removeBookFromCollection,
   type CollectionSummary,
-} from "@/lib/tauri";
+} from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
 
 function toMessage(err: unknown): string {

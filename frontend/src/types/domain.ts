@@ -1,5 +1,5 @@
 /**
- * Frontend domain types mirroring the Rust domain models (src-tauri/src/domain).
+ * Frontend domain types mirroring the Rust domain models (sidecar/src/domain).
  * IPC DTOs serialize camelCase; these interfaces match that wire format.
  */
 
@@ -122,8 +122,11 @@ export interface ImportReport {
 
 /**
  * Wire shape of a stored reading position (mirrors `domain::ReadingProgress`).
- * Fields are format-specific: EPUB locates a chapter href plus a CFI, PDF a
- * page number.
+ * Fields are format-specific: EPUB locates a Readium locator (`locator` +
+ * `locations` JSON written by the Readium reader; `cfi`/`chapterHref` keep
+ * the foliate-era locator as provenance until the migration adapter has
+ * converted the row), PDF a page number. `engine`/`schemaVersion` mark the
+ * conversion state of the row.
  */
 export interface ReadingProgressRecord {
   bookId: number;
@@ -133,6 +136,11 @@ export interface ReadingProgressRecord {
   pageNumber: number | null;
   scrollOffset: number | null;
   progressPercent: number | null;
+  locator: string | null;
+  progression: number | null;
+  locations: string | null;
+  engine: string | null;
+  schemaVersion: number | null;
   updatedAt: string;
 }
 
@@ -144,6 +152,11 @@ export interface ReadingProgressInput {
   pageNumber?: number | null;
   scrollOffset?: number | null;
   progressPercent?: number | null;
+  locator?: string | null;
+  progression?: number | null;
+  locations?: string | null;
+  engine?: string | null;
+  schemaVersion?: number | null;
 }
 
 /**

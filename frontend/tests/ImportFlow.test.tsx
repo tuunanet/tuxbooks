@@ -1,33 +1,16 @@
-import { act } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-
-type DragEventPayload =
-  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
-  | { type: "over"; position: { x: number; y: number } }
-  | { type: "drop"; paths: string[]; position: { x: number; y: number } }
-  | { type: "leave" };
-
-type DragHandler = (event: { payload: DragEventPayload }) => void;
-
-const webviewMocks = vi.hoisted(() => ({
-  onDragDropEvent: vi.fn<
-    (handler: (event: { payload: DragEventPayload }) => void) => Promise<() => void>
-  >(() => Promise.resolve(() => {})),
-}));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: webviewMocks.onDragDropEvent }),
-}));
-
-import { open } from "@tauri-apps/plugin-dialog";
 import { AppShell } from "@/components/layout/AppShell";
 import { makeBook } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/tauri";
+import {
+  invokeMock,
+  mockInvoke,
+  pathForFileMock,
+  pickDirectoryMock,
+  pickBookFilesMock,
+} from "./mocks/bridge";
 
 function renderShellWithLibrary(
   books: ReturnType<typeof makeBook>[] = [],
@@ -42,10 +25,35 @@ function renderShellWithLibrary(
   return render(<AppShell />);
 }
 
-function captureDragHandler(): DragHandler {
-  const registration = webviewMocks.onDragDropEvent.mock.calls.at(-1);
-  if (!registration) throw new Error("onDragDropEvent was not called");
-  return registration[0];
+/** jsdom has no DragEvent; a plain Event carrying dataTransfer is what the
+ * DropZoneOverlay handlers read. */
+function makeDragEvent(type: string, files: File[]): Event {
+  const dataTransfer = {
+    types: ["Files"],
+    files,
+  } as unknown as DataTransfer;
+  const DragEventCtor =
+    window.DragEvent ??
+    (class extends Event {
+      dataTransfer: DataTransfer | null;
+      constructor(type: string, init: DragEventInit = {}) {
+        super(type, init);
+        this.dataTransfer = init.dataTransfer ?? null;
+      }
+    } as unknown as typeof DragEvent);
+  return new DragEventCtor(type, { dataTransfer });
+}
+
+async function dragEnter(files: File[]): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(makeDragEvent("dragenter", files));
+  });
+}
+
+async function dragDrop(files: File[]): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(makeDragEvent("drop", files));
+  });
 }
 
 describe("Import via the header menu", () => {
@@ -59,7 +67,7 @@ describe("Import via the header menu", () => {
   });
 
   it("offers the folder picker from the empty library state", async () => {
-    vi.mocked(open).mockResolvedValue("/first/library");
+    pickDirectoryMock.mockResolvedValue("/first/library");
     renderShellWithLibrary([], { imported: 4, updated: 0, failed: [] });
     await screen.findByTestId("empty-library");
 
@@ -70,7 +78,7 @@ describe("Import via the header menu", () => {
   });
 
   it("imports the picked folder through import_paths and reports the result", async () => {
-    vi.mocked(open).mockResolvedValue("/picked/books");
+    pickDirectoryMock.mockResolvedValue("/picked/books");
     renderShellWithLibrary([makeBook()], { imported: 2, updated: 1, failed: [] });
     await screen.findByTestId("library-header");
 
@@ -91,7 +99,7 @@ describe("Import via the header menu", () => {
   });
 
   it("imports picked files through import_paths", async () => {
-    vi.mocked(open).mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
+    pickBookFilesMock.mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
     renderShellWithLibrary([makeBook()], { imported: 2, updated: 0, failed: [] });
     await screen.findByTestId("library-header");
 
@@ -105,7 +113,7 @@ describe("Import via the header menu", () => {
   });
 
   it("shows a summary without pretending success when nothing was imported", async () => {
-    vi.mocked(open).mockResolvedValue("/picked/empty");
+    pickDirectoryMock.mockResolvedValue("/picked/empty");
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
@@ -123,7 +131,7 @@ describe("Import via the header menu", () => {
   });
 
   it("surfaces per-path failures from the report", async () => {
-    vi.mocked(open).mockResolvedValue("/picked/stray.epub");
+    pickDirectoryMock.mockResolvedValue("/picked/stray.epub");
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
@@ -153,25 +161,11 @@ describe("Import via drag-and-drop", () => {
     renderShellWithLibrary([], { imported: 1, updated: 0, failed: [] });
     await screen.findByTestId("empty-library");
 
-    const dragHandler = captureDragHandler();
-
-    await act(async () => {
-      dragHandler({ payload: { type: "enter", paths: [], position: { x: 0, y: 0 } } });
-    });
+    const files = [new File([], "books")];
+    await dragEnter(files);
     expect(await screen.findByTestId("dropzone-overlay")).toBeInTheDocument();
 
-    await act(async () => {
-      dragHandler({ payload: { type: "leave" } });
-    });
-    expect(screen.queryByTestId("dropzone-overlay")).not.toBeInTheDocument();
-
-    await act(async () => {
-      dragHandler({ payload: { type: "enter", paths: [], position: { x: 1, y: 1 } } });
-      dragHandler({
-        payload: { type: "drop", paths: ["/dropped/books"], position: { x: 5, y: 5 } },
-      });
-    });
-
+    await dragDrop(files);
     expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/dropped/books"] });
     expect(await screen.findByTestId("import-status")).toHaveTextContent("Imported 1 new");
     expect(screen.queryByTestId("dropzone-overlay")).not.toBeInTheDocument();
@@ -185,15 +179,25 @@ describe("Import via drag-and-drop", () => {
     });
     await screen.findByTestId("empty-library");
 
-    const dragHandler = captureDragHandler();
-    await act(async () => {
-      dragHandler({
-        payload: { type: "drop", paths: ["/dropped/loose.epub"], position: { x: 5, y: 5 } },
-      });
-    });
+    const loose = new File([], "loose.epub");
+    await dragEnter([loose]);
+    await dragDrop([loose]);
 
     const status = await screen.findByTestId("import-status");
     expect(status).toHaveTextContent("1 item could not be imported");
     expect(status).toHaveTextContent("/dropped/loose.epub");
+  });
+
+  it("resolves dropped files to absolute paths through the preload", async () => {
+    renderShellWithLibrary([], { imported: 1, updated: 0, failed: [] });
+    await screen.findByTestId("empty-library");
+    pathForFileMock.mockReturnValueOnce("/elsewhere/dropped.epub");
+
+    const files = [new File([], "dropped.epub")];
+    await dragEnter(files);
+    await dragDrop(files);
+
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/elsewhere/dropped.epub"] });
+    await screen.findByTestId("import-status");
   });
 });

@@ -30,8 +30,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: actionlint
         run: |
@@ -44,8 +42,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - uses: pnpm/action-setup@v5
 
@@ -63,8 +59,9 @@ jobs:
       - name: ESLint
         run: pnpm --filter frontend lint
 
+      # Frontend + Electron main/preload (electron/tsconfig.json).
       - name: TypeScript
-        run: pnpm --filter frontend typecheck
+        run: pnpm typecheck
 
       - name: Vitest
         run: pnpm --filter frontend test:ci
@@ -75,15 +72,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       # Fails fast when a large or non-deterministic fixture sneaked into the
       # committed corpus (docs/testing.md). No network access needed.
       - name: EPUB fixture guardrails
         run: python3 scripts/make-epub-fixtures.py --check
-
-      - uses: ./.github/actions/setup-tauri-deps
 
       - uses: pnpm/action-setup@v5
 
@@ -99,40 +92,30 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: sidecar
 
-      - name: Build frontend (needed to embed assets)
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter frontend build
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Fetch PDFium (PDF cover tests)
         run: bash scripts/fetch-pdfium.sh
 
       - name: rustfmt
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+        run: cargo fmt --manifest-path sidecar/Cargo.toml --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Tests
-        # Same feature set as `just test-rust` so the binary keeps the
-        # build-debug feature set (see docs/build.md).
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features custom-protocol
+        run: cargo test --manifest-path sidecar/Cargo.toml
 
-  e2e:
-    name: E2E (WebdriverIO + Tauri WebDriver)
+  build:
+    name: Release build (Electron shell + sidecar)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/setup-tauri-deps
-        with:
-          packages: libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev xvfb webkit2gtk-driver
 
       - uses: pnpm/action-setup@v5
 
@@ -140,71 +123,28 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar
 
       - name: Install just
         uses: extractions/setup-just@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
-
-      - name: Build frontend + debug app (embedded assets)
+      - name: Build (renderer + Electron bundles + release sidecar)
         run: |
           pnpm install --frozen-lockfile
-          just build-debug
+          just build
 
-      # Headless by design: `just test-e2e` wraps each phase in
-      # `xvfb-run --auto-servernum` on Linux (no desktop session needed).
-      - name: E2E (headless)
-        run: just test-e2e
-
-      - name: Upload E2E failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: e2e-artifacts
-          path: artifacts/e2e
-          if-no-files-found: ignore
-
-  build:
-    name: Release build (Tauri bundle)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    needs: [frontend, rust]
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/setup-tauri-deps
-
-      - uses: pnpm/action-setup@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Fetch PDFium (bundled app resource)
-        run: bash scripts/fetch-pdfium.sh
-
-      - name: Build Debian bundle
+      # Packaging gate (docs/release.md): a packaging regression fails the
+      # build like any other test. CI verifies the deb target; the rpm needs
+      # rpmbuild and the AppImage needs APPIMAGE_EXTRACT_AND_RUN, both wired
+      # into the release workflow's full `just package` run.
+      - name: Package deb + packaging gate
         run: |
-          pnpm install --frozen-lockfile
-          pnpm tauri build --bundles deb
-
-      - name: Verify Debian bundle
-        run: bash scripts/check-deb.sh
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
+          just package deb
+          just check-deb

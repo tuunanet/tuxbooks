@@ -22,12 +22,12 @@ const WITH_RESULTS: ReaderSearchState = {
       label: "Chapter One",
       matches: [
         {
-          cfi: "epubcfi(/6/2!/4/2)",
+          locator: "epubcfi(/6/2!/4/2)",
           page: null,
           excerpt: { pre: "down by the ", match: "river", post: " they sat" },
         },
         {
-          cfi: "epubcfi(/6/2!/4/4)",
+          locator: "epubcfi(/6/2!/4/4)",
           page: null,
           excerpt: { pre: "the ", match: "river", post: " bent" },
         },
@@ -37,7 +37,7 @@ const WITH_RESULTS: ReaderSearchState = {
       label: "Page 4",
       matches: [
         {
-          cfi: null,
+          locator: null,
           page: 4,
           excerpt: { pre: "along the ", match: "river", post: " bank" },
         },

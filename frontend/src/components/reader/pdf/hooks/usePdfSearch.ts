@@ -23,7 +23,7 @@ interface UsePdfSearchOptions {
  * engine seam (`getPdfPageText`), matches it with the pure pdfSearch
  * helpers, and streams one group per page with matches up to the shell.
  *
- * Pages are extracted sequentially (PDF.js serializes work in the worker
+ * Pages are extracted sequentially (the MuPDF worker serializes work
  * anyway) and each page's text is cached for the document's lifetime, so a
  * refined query re-searches without re-parsing. A new query supersedes the
  * running one via a generation token; `cancel()` does the same on demand.
@@ -86,7 +86,7 @@ export function usePdfSearch({
             totalMatches += excerpts.length;
             onGroupRef.current?.(bookId, {
               label: `Page ${page}`,
-              matches: excerpts.map((excerpt) => ({ cfi: null, page, excerpt })),
+              matches: excerpts.map((excerpt) => ({ locator: null, page, excerpt })),
             });
           }
           if (totalMatches >= MAX_TOTAL_MATCHES) break;

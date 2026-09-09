@@ -1,0 +1,62 @@
+[package]
+name = "tuxbooks"
+version = "0.0.1"
+description = "Local-first ebook library manager"
+authors = ["tuxbooks"]
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.82"
+
+# See docs/architecture.md for the module layout contract. This crate is the
+# native service binary: the Electron main process spawns it and talks
+# JSON-RPC over stdio.
+[lib]
+name = "tuxbooks_lib"
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "migrate"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "process"] }
+thiserror = "2"
+anyhow = "1"
+walkdir = "2"
+# Filesystem watching for library reconciliation (ROADMAP milestone 3):
+# inotify events are debounced and reconciled incrementally by
+# services/library_watcher.rs; there is no other way to keep the library in
+# sync without full rescans.
+notify = "8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
+# PDF metadata via a pure-Rust object reader (no rendering engine).
+lopdf = "0.44"
+# PDF cover extraction: rasterizes page 1 at import time. pdfium-render is
+# bindings-only; the PDFium shared library is fetched by
+# scripts/fetch-pdfium.sh and probed at runtime (see docs/build.md).
+pdfium-render = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Book bytes cross the JSON-RPC stdio channel to the Electron main process
+# (tuxbooks:// protocol handler) as base64 — the only encoding the JSON
+# framing supports.
+base64 = "0.22"
+# Parent-death signal for the service (PR_SET_PDEATHSIG): when the Electron
+# main process is killed hard, the kernel reaps the sidecar immediately
+# instead of leaving it watching the library against the next instance.
+libc = "0.2"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
+# Debug builds compile dependencies optimized. Unoptimized lopdf/image/png
+# made a 25-PDF import take ~15s in dev (vs ~3s release); tuxbooks' own code
+# stays unoptimized for fast iteration and debuggability.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

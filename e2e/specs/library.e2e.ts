@@ -1,28 +1,33 @@
-describe("tuxbooks app shell", () => {
+import { expect, test } from "../fixtures/electron-app.js";
+
+/**
+ * Empty-library suite (docs/testing.md phase "empty"): the real desktop
+ * window launches and shows the application shell, the empty-library state,
+ * and Settings navigation. This is also the Playwright harness smoke: a
+ * launch + BrowserWindow + React query proves the fixture end to end.
+ */
+test.describe("tuxbooks app shell", () => {
   // Test A — the real desktop window launches headlessly and shows the
   // application shell.
-  it("launches the native window and shows the application shell", async () => {
-    const shell = await $("[data-testid=app-shell]");
-    await shell.waitForDisplayed({ timeout: 30000 });
+  test("launches the native window and shows the application shell", async ({ page }) => {
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
 
-    await expect($('[aria-label="Library sidebar"]')).toBeDisplayed();
-    await expect($('[aria-label="Library navigation"]')).toBeDisplayed();
-    const title = await browser.getTitle();
+    await expect(page.locator('[aria-label="Library sidebar"]')).toBeVisible();
+    await expect(page.locator('[aria-label="Library navigation"]')).toBeVisible();
+    const title = await page.title();
     expect(title.toLowerCase()).toContain("tuxbooks");
   });
 
-  it("shows the empty library state when no books are imported", async () => {
-    await expect($("[data-testid=empty-library]")).toBeDisplayed();
-    await expect($("[data-testid=library-view]")).not.toExist();
+  test("shows the empty library state when no books are imported", async ({ page }) => {
+    await expect(page.getByTestId("empty-library")).toBeVisible();
+    await expect(page.getByTestId("library-view")).toHaveCount(0);
   });
 
-  it("navigates to settings and back to the library", async () => {
-    const settingsButton = await $("button=Settings");
-    await settingsButton.click();
-    await expect($("[data-testid=settings-view]")).toBeDisplayed();
+  test("navigates to settings and back to the library", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
 
-    const allBooksButton = await $("button=All Books");
-    await allBooksButton.click();
-    await expect($("[data-testid=empty-library]")).toBeDisplayed();
+    await page.getByRole("button", { name: "All Books" }).click();
+    await expect(page.getByTestId("empty-library")).toBeVisible();
   });
 });

@@ -4,23 +4,26 @@
  * the failure-artifact directory. Nothing here ever touches a real user
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
-import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
+import { sweepProcesses } from "./sweep.mjs";
+
 import {
   benchEpubFixture,
   benchPdfFixture,
+  electronDistPath,
   epubFixture,
   largePdfFixture,
   mixedPdfFixture,
   pdfFixture,
   repoRoot,
+  sidecarBinaryPath,
 } from "./fixtures.js";
 
-/** Unique per invocation; the launcher sets it and workers inherit it. */
+/** Unique per invocation; the launcher (or playwright.config) sets it. */
 process.env.E2E_RUN_ID ??= `${process.env.E2E_PHASE ?? "run"}-${new Date()
   .toISOString()
   .replace(/[:.]/g, "-")}-${process.pid.toString(36)}`;
@@ -36,16 +39,44 @@ export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
 export const configDir = path.join(scratchDir, "config");
 
-export function killStaleProcesses(appBinary: string): void {
-  // A crashed run can leave the app (which outlives tauri-driver) or the
-  // driver itself alive. Both would interfere with the next run: a leftover
-  // app grabs the new automation session, a leftover driver holds ports.
-  // Runs happen before the service spawns anything fresh, so this is safe.
-  for (const target of [appBinary, "tauri-driver"]) {
+export function killStaleProcesses(): void {
+  // A crashed run can leave the app tree (including the dist's crashpad
+  // helper) or its sidecar alive. Both would interfere with the next run: a
+  // leftover app holds the single-instance lock, a leftover sidecar keeps
+  // watching the old library. SIGKILL — these are wedged leftovers, and the
+  // sweep must not depend on a wedged process honoring TERM. The sweep
+  // matches by /proc/<pid>/exe (setup/sweep.mjs), so a process that merely
+  // mentions a target path in its argv — a recipe shell carrying
+  // TUXBOOKS_SIDECAR=<path> — is never caught. Runs happen before anything
+  // spawns fresh, so this is safe.
+  sweepProcesses({ electronDist: electronDistPath, sidecar: sidecarBinaryPath });
+}
+
+/**
+ * Scratch dirs older than this cannot belong to a live run (a phase is
+ * bounded at 600s by the justfile timeout): only a machine crash or a kill
+ * that lands before the watchdog arms can leave one behind. The age cutoff
+ * keeps concurrent-run collisions (already forbidden) impossible.
+ */
+const SCRATCH_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+function pruneOldScratchDirs(): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(os.tmpdir());
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - SCRATCH_RETENTION_MS;
+  for (const entry of entries) {
+    if (!entry.startsWith("tuxbooks-e2e-")) continue;
+    const dir = path.join(os.tmpdir(), entry);
     try {
-      execFileSync("pkill", ["-f", target]);
+      if (statSync(dir).mtimeMs < cutoff) {
+        rmSync(dir, { recursive: true, force: true });
+      }
     } catch {
-      // pkill exits non-zero when nothing matched — that is the good case.
+      // Unreadable or already-gone entry — leave it alone.
     }
   }
 }
@@ -73,9 +104,15 @@ function pruneOldArtifacts(): void {
   }
 }
 
-export function prepareEnvironment(appBinary: string, seeded: boolean): void {
-  killStaleProcesses(appBinary);
+/**
+ * Prepare the isolated scratch environment for one invocation. Playwright's
+ * globalSetup calls this exactly once per run; workers inherit the
+ * environment through process.env (re-set here and in the launch fixture).
+ */
+export function prepareEnvironment(seeded: boolean): void {
+  killStaleProcesses();
   pruneOldArtifacts();
+  pruneOldScratchDirs();
 
   rmSync(scratchDir, { recursive: true, force: true });
   mkdirSync(libraryDir, { recursive: true });
@@ -91,22 +128,32 @@ export function prepareEnvironment(appBinary: string, seeded: boolean): void {
 
   // The benchmark phase (just bench-reader) seeds only the real-book
   // fixtures: the suite measures render/turn latency, and the synthetic
-  // fixtures would dilute it.
+  // fixtures would dilute it. The fixtures are gitignored real files — a
+  // machine missing one benches the formats it has (the bench suite skips
+  // its missing-fixture scenarios with a notice).
   if (process.env.E2E_PHASE === "bench") {
-    copyFileSync(benchPdfFixture, path.join(libraryDir, "AI_Agents_and_Applications.pdf"));
-    copyFileSync(benchEpubFixture, path.join(libraryDir, "AI_Agents_and_Applications.epub"));
+    for (const [source, name] of [
+      [benchPdfFixture, "AI_Agents_and_Applications.pdf"],
+      [benchEpubFixture, "AI_Agents_and_Applications.epub"],
+    ] as const) {
+      if (existsSync(source)) {
+        copyFileSync(source, path.join(libraryDir, name));
+      } else {
+        console.warn(`[e2e] bench fixture missing, skipping: ${source}`);
+      }
+    }
   }
 
-  // The app (spawned by tauri-driver) inherits these; production paths are
-  // unaffected. Set before the service spawns the driver (config onPrepare
-  // hooks run before service onPrepare hooks).
+  // The app (spawned by the Playwright Electron launcher) inherits these;
+  // production paths are unaffected. Set before the fixture launches the
+  // app — and re-asserted there so a worker restart can never lose them.
   process.env.TEST_DATABASE_PATH = databasePath;
   process.env.TEST_LIBRARY_PATH = libraryDir;
-  // Same isolation rule for the app-config dir: the window-state plugin
-  // would otherwise restore (and overwrite!) the real user's saved window
-  // geometry, making every window-derived expectation depend on whatever
-  // size the developer's last real session saved. A fresh config dir means
-  // the window starts at the tauri.conf.json default, deterministically.
+  // Same isolation rule for the app-config dir: window-state restore would
+  // otherwise read (and overwrite!) the real user's saved window geometry,
+  // making every window-derived expectation depend on whatever size the
+  // developer's last real session saved. A fresh config dir means the
+  // window starts at the Electron main default, deterministically.
   process.env.XDG_CONFIG_HOME = configDir;
 }
 
@@ -115,19 +162,25 @@ export function teardownEnvironment(): void {
 }
 
 /**
- * Arms the detached teardown watchdog (see setup/watchdog.mjs). Must be
- * called from the config's onComplete: user hooks run before the service
- * tears the driver down, so the watchdog is in place either way.
+ * Arms the detached teardown watchdog (see setup/watchdog.mjs): it sweeps
+ * this run's processes the moment the Playwright process dies — however it
+ * dies. Playwright's own teardown closes the launched app; the watchdog
+ * covers the paths Playwright cannot guarantee: an aborted/killed runner
+ * (Ctrl+C at the wrong moment, OOM, segfault) never reaches globalTeardown,
+ * and the sweep fires the moment the parent disappears. The sweep only
+ * kills processes that predate the watchdog, so the next phase's processes
+ * are safe.
  */
-export function armTeardownWatchdog(appBinaryPath: string): void {
+export function armTeardownWatchdog(): void {
   const watchdog = path.join(repoRoot, "e2e", "setup", "watchdog.mjs");
   // E2E_XVFB=1 marks the headless wrapper: DISPLAY then names the private
-  // Xvfb of this phase, which the watchdog reaps if `timeout` SIGKILLs
-  // xvfb-run before it could clean up. Headed runs pass no display.
+  // Xvfb of this phase, which the watchdog reaps if the launcher dies
+  // before xvfb-run could clean up. Headed runs pass no display.
   const display = process.env.E2E_XVFB === "1" ? (process.env.DISPLAY ?? "") : "";
+  const targets = [electronDistPath, sidecarBinaryPath];
   const child = spawn(
     process.execPath,
-    [watchdog, String(process.pid), "45000", scratchDir, appBinaryPath, display],
+    [watchdog, String(process.pid), scratchDir, targets.join("\u001f"), display],
     { detached: true, stdio: "ignore" },
   );
   child.unref();

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BookDetail } from "@/components/books/BookDetail";
 import { BookMetadataDialog } from "@/components/books/BookMetadataDialog";
 import { LibraryView } from "@/components/library/LibraryView";
@@ -6,6 +7,7 @@ import { ImportStatus } from "@/components/library/ImportStatus";
 import { ReaderShell } from "@/components/reader/ReaderShell";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { prewarmPdfEngine } from "@/lib/pdf/pdfEngine";
 import { useShortcut } from "@/lib/shortcuts";
 import { useAppDispatch, useAppState, type AppState } from "@/state/appState";
 import { AppStateProvider } from "@/state/AppStateProvider";
@@ -20,6 +22,35 @@ function GlobalSearchShortcut() {
   useShortcut("mod+k", () => {
     document.querySelector<HTMLElement>('[data-shortcut="global-search"]')?.focus();
   });
+  return null;
+}
+
+/**
+ * MuPDF engine prewarm (§ warm engine): once the shell has rendered and the
+ * main thread goes idle, load the MuPDF module into a spare worker so the
+ * first PDF open skips worker startup + WASM fetch/compile. Never opens a
+ * document or rasterizes; a failed prewarm only means the next open pays
+ * the cold start. Deliberately NOT cancelled on unmount — the reader view
+ * replaces this shell exactly when a prewarmed worker is most valuable.
+ */
+function PdfEnginePrewarm() {
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(
+        () => {
+          void prewarmPdfEngine().catch(() => {
+            // Diagnostics only; the open path falls back to a cold worker.
+          });
+        },
+        { timeout: 3000 },
+      );
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timer = window.setTimeout(() => {
+      void prewarmPdfEngine().catch(() => {});
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
   return null;
 }
 
@@ -94,6 +125,7 @@ export function AppShell({ initialState }: AppShellProps) {
     <AppStateProvider initialState={initialState}>
       <ShortcutProvider>
         <GlobalSearchShortcut />
+        <PdfEnginePrewarm />
         <LibraryDataProvider>
           <ImportProvider>
             <Shell />
