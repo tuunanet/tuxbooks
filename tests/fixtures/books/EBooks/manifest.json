@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "books": [
+    {
+      "file": "EPUB Samples/childrens-literature.epub",
+      "url": "https://github.com/IDPF/epub3-samples/releases/download/20230704/childrens-literature.epub",
+      "sha256": "191d14d07bcaefde647e494256f73d789f265c8edc46c404320641b23c86b76a",
+      "sizeBytes": 161291,
+      "license": "CC-BY-SA 3.0",
+      "source": "IDPF/epub3-samples"
+    },
+    {
+      "file": "EPUB Samples/page-blanche.epub",
+      "url": "https://github.com/IDPF/epub3-samples/releases/download/20230704/page-blanche.epub",
+      "sha256": "d2efb562f17d43cef50578d4d67dd7fd991f8f254b6f5a7c28bde7461ea783eb",
+      "sizeBytes": 3136922,
+      "license": "CC-BY-SA 3.0",
+      "source": "IDPF/epub3-samples"
+    },
+    {
+      "file": "EPUB Samples/figure-gallery-bindings.epub",
+      "url": "https://github.com/IDPF/epub3-samples/releases/download/20230704/figure-gallery-bindings.epub",
+      "sha256": "2cfbf16c36e814052db66dd203a66c45fa6b3922389c13aba40390ef23061b2b",
+      "sizeBytes": 434907,
+      "license": "CC-BY-SA 3.0",
+      "source": "IDPF/epub3-samples"
+    },
+    {
+      "file": "EPUB Samples/epub30-spec.epub",
+      "url": "https://github.com/IDPF/epub3-samples/releases/download/20230704/epub30-spec.epub",
+      "sha256": "def6a7a1d2302689c77d7c04585f9eb2da825a7ef546888cfe2f5fbba92d51ce",
+      "sizeBytes": 227821,
+      "license": "CC-BY-SA 3.0",
+      "source": "IDPF/epub3-samples"
+    },
+    {
+      "file": "EPUB Samples/moby-dick.epub",
+      "url": "https://github.com/IDPF/epub3-samples/releases/download/20230704/moby-dick.epub",
+      "sha256": "81bc079841a38e91a02a7776d04786a2fc311cfd300064e9fc533ce7c54cf7b4",
+      "sizeBytes": 1628868,
+      "license": "CC-BY-SA 3.0",
+      "source": "IDPF/epub3-samples"
+    },
+    {
+      "file": "PDF Samples/pdflatex-outline.pdf",
+      "url": "https://raw.githubusercontent.com/py-pdf/sample-files/main/006-pdflatex-outline/pdflatex-outline.pdf",
+      "sha256": "17b5a4dac75613b82749c7538fc93991a385a5d419cc9832fdba24c1726a031a",
+      "sizeBytes": 48722,
+      "license": "CC-BY-SA 4.0",
+      "source": "py-pdf/sample-files"
+    },
+    {
+      "file": "PDF Samples/cropped-rotated-scaled.pdf",
+      "url": "https://raw.githubusercontent.com/py-pdf/sample-files/main/027-cropped-rotated-scaled/cropped-rotated-scaled.pdf",
+      "sha256": "cc195eac510b81123de4f55ac9f8185f2120975a7b75a106460b98615737aacd",
+      "sizeBytes": 272039,
+      "license": "CC-BY-SA 4.0",
+      "source": "py-pdf/sample-files"
+    },
+    {
+      "file": "Papers/GeoTopo.pdf",
+      "url": "https://raw.githubusercontent.com/py-pdf/sample-files/main/009-pdflatex-geotopo/GeoTopo.pdf",
+      "sha256": "a0b9242aef9b5a2c4850160cc9aaf64f5c7b8be705d6872ae28aebf5ab512540",
+      "sizeBytes": 5321132,
+      "license": "CC-BY-SA 4.0",
+      "source": "py-pdf/sample-files"
+    }
+  ]
+}
