@@ -452,6 +452,25 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
 
   window.webContents.on("did-finish-load", () => bootElapsed("renderer did-finish-load"));
   window.webContents.on("render-process-gone", (_event, details) => logRenderProcessGone(details));
+
+  // Dev-only DevTools access (the dev server runs only via `just dev`):
+  // with the application menu gone, the stock Ctrl+Shift+I accelerator no
+  // longer exists, so the toggle keys are intercepted before the page sees
+  // them. Everything else passes through untouched.
+  if (process.env.VITE_DEV_SERVER_URL !== undefined) {
+    window.webContents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return;
+      const key = input.key.toLowerCase();
+      const devtoolsToggle = key === "f12" || (input.control && input.shift && key === "i");
+      if (!devtoolsToggle) return;
+      event.preventDefault();
+      if (window.webContents.isDevToolsOpened()) {
+        window.webContents.closeDevTools();
+      } else {
+        window.webContents.openDevTools();
+      }
+    });
+  }
   window.once("ready-to-show", () => {
     bootElapsed("ready-to-show");
     window.show();

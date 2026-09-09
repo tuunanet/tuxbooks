@@ -1188,9 +1188,9 @@
     "semantic_hash": ""
   },
   "electron/main/index.ts": {
-    "mtime": 1788950462.310275,
-    "seen": 1788950698.575854,
-    "ast_hash": "3f0b544a8967c986567301a6498c006b",
+    "mtime": 1788951042.4219484,
+    "seen": 1788951310.2256322,
+    "ast_hash": "b9017c0e83dcb9c5f7394384d55fd25a",
     "semantic_hash": ""
   },
   "electron/main/sidecar.ts": {
