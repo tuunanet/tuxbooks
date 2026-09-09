@@ -19,6 +19,15 @@ static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
 /// the loser's teardown would then destroy the winner's `FPDF_InitLibrary`.
 static BIND_LOCK: Mutex<()> = Mutex::new(());
 
+/// Serializes every PDFium call on the render path. pdfium-render's
+/// `thread_safe` marshaller wraps only a subset of the FPDF surface —
+/// `FPDF_RenderPageBitmap` itself is unguarded — so concurrent renders can
+/// race inside PDFium and segfault the process (observed as a flaky CI
+/// test-binary SIGSEGV when two cover renders overlapped). Cover renders
+/// are milliseconds; serializing them costs nothing measurable and also
+/// makes concurrent imports safe.
+static RENDER_LOCK: Mutex<()> = Mutex::new(());
+
 /// Rasterize page 1 of the PDF at `path` into PNG bytes for use as a
 /// library cover. Returns `Ok(None)` when no PDFium dynamic library can be
 /// loaded from `library_dirs` or the system loader: covers are best-effort
@@ -29,6 +38,11 @@ pub fn render_first_page_cover(
     path: &Path,
     library_dirs: &[PathBuf],
 ) -> Result<Option<Vec<u8>>, PdfError> {
+    // Held across load, render, and the document's drop so no other thread
+    // interleaves a PDFium call anywhere in the sequence (RENDER_LOCK).
+    let _serial = RENDER_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(pdfium) = pdfium(library_dirs) else {
         return Ok(None);
     };
