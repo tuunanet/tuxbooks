@@ -1,4 +1,4 @@
-import { protocol, app, BrowserWindow, nativeImage, ipcMain, dialog, shell } from "electron";
+import { protocol, app, BrowserWindow, Menu, nativeImage, ipcMain, dialog, shell } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -68,6 +68,12 @@ const SIDECAR_METHODS = new Set([
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+
+// No application menu: the renderer owns every interaction, and the
+// Electron default bar (File/Edit/View/Window — reload, devtools, close
+// accelerators) has no place in a shipped desktop app. Removes the bar
+// from every window before any exists.
+Menu.setApplicationMenu(null);
 
 // Registered before app ready so the privileged flags apply to every
 // subsequent navigation and fetch. corsEnabled matters: the renderer origin

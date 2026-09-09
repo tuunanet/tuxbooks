@@ -126,9 +126,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookCard.tsx": {
-    "mtime": 1788612920.9551709,
-    "seen": 1788851270.1118999,
-    "ast_hash": "1e4cd4037b87c2b577c197244e95a6ea",
+    "mtime": 1788947851.654745,
+    "seen": 1788950271.1029055,
+    "ast_hash": "2834f11cbf44828a84acc6868a2c77ec",
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookContextMenu.tsx": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookListItem.tsx": {
-    "mtime": 1788612403.2118566,
-    "seen": 1788851270.1119106,
-    "ast_hash": "07aa620546aaccb1c0f2af6610c430dc",
+    "mtime": 1788949910.3924885,
+    "seen": 1788950271.1029134,
+    "ast_hash": "9a23796a66c142ce7fd6862169417f32",
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookMetadataDialog.tsx": {
@@ -696,9 +696,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/BookCard.test.tsx": {
-    "mtime": 1788613805.720581,
-    "seen": 1788851270.112254,
-    "ast_hash": "1d2e49615995ddea39dcef357c2da5aa",
+    "mtime": 1788947896.265566,
+    "seen": 1788950271.1030283,
+    "ast_hash": "c7bf91cc1b995d3745c7c26eca79ebd4",
     "semantic_hash": ""
   },
   "frontend/tests/BookDetail.test.tsx": {
@@ -1188,9 +1188,9 @@
     "semantic_hash": ""
   },
   "electron/main/index.ts": {
-    "mtime": 1788945926.2434669,
-    "seen": 1788946721.1321087,
-    "ast_hash": "7503e5a22df5e34d6015c874b61fdacf",
+    "mtime": 1788950462.310275,
+    "seen": 1788950698.575854,
+    "ast_hash": "3f0b544a8967c986567301a6498c006b",
     "semantic_hash": ""
   },
   "electron/main/sidecar.ts": {
@@ -1452,8 +1452,8 @@
     "semantic_hash": ""
   },
   "sidecar/src/epub/session.rs": {
-    "mtime": 1788934051.5805488,
-    "seen": 1788935524.2508166,
+    "mtime": 1788948913.6014862,
+    "seen": 1788950271.1031132,
     "ast_hash": "b8da1a90f5a9b04e44c104df12c12c3f",
     "semantic_hash": ""
   },
@@ -1809,6 +1809,12 @@
     "mtime": 1788946582.5728347,
     "seen": 1788946721.1320784,
     "ast_hash": "379f5cc9ef422a5619e0268b8609d45a",
+    "semantic_hash": ""
+  },
+  "frontend/tests/BookListItem.test.tsx": {
+    "mtime": 1788949475.1112342,
+    "seen": 1788950271.103033,
+    "ast_hash": "fe27c11244f541b39d01b3c35aff5b8e",
     "semantic_hash": ""
   }
 }
