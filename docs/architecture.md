@@ -5,10 +5,9 @@ server, no cloud sync, and no network dependency: Chromium (via Electron) is
 the sole desktop web runtime; a native Rust service owns the database and
 the filesystem; Readium and MuPDF.js render books.
 
-**Migration state:** branch `web-reader-prototype-1` is mid-migration from
-Tauri 2 + WebKitGTK. Until a phase completes in
-[electron-migration.md](electron-migration.md), some code still reflects the
-old stack. This doc describes the target contract.
+**Migration state:** the Electron migration is complete. Historical phase
+decisions live in [electron-migration.md](electron-migration.md); this doc
+describes the current contract.
 
 ## Process and boundary
 

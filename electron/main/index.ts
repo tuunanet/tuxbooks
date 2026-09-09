@@ -163,6 +163,7 @@ const APP_MIME_BY_EXTENSION: Record<string, string> = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".otf": "font/otf",
+  ".wasm": "application/wasm",
   ".map": "application/json",
   ".txt": "text/plain",
 };
@@ -478,7 +479,16 @@ function createWindow(
   // additionally fetches one book through the tuxbooks:// protocol and
   // logs the byte count (protocol + sidecar byte path end-to-end).
   window.webContents.on("did-finish-load", () => {
-    if (app.isPackaged && process.env.VITE_DEV_SERVER_URL === undefined) return;
+    // Packaged runs skip the check except when TUXBOOKS_BOOT_PROBE=1 opts
+    // in: the probe doubles as the packaged-build smoke test (an asar/path
+    // regression would fail here before any human notices).
+    if (
+      app.isPackaged &&
+      process.env.TUXBOOKS_BOOT_PROBE !== "1" &&
+      process.env.VITE_DEV_SERVER_URL === undefined
+    ) {
+      return;
+    }
     const probe =
       process.env.TUXBOOKS_BOOT_PROBE === "1"
         ? `Promise.all([

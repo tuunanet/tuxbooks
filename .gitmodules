@@ -1,3 +1,0 @@
-[submodule "frontend/src/lib/epub/foliate-js"]
-	path = frontend/src/lib/epub/foliate-js
-	url = https://github.com/johnfactotum/foliate-js.git

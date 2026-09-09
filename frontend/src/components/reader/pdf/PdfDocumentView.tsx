@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties, type Ref } from "react";
+import { useMemo, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
 import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
@@ -19,7 +19,7 @@ interface PdfDocumentViewProps {
   renderPages: number[];
   /** The page the reading position names; its slot is the scroll target. */
   anchorPage: number;
-  /** PDF.js render scale for the canvases. */
+  /** Render scale for the canvases. */
   scale: number;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
@@ -39,20 +39,6 @@ interface PdfDocumentViewProps {
   /** Persisted highlights by page number; drawn over rendered pages. */
   highlightsByPage?: Map<number, Annotation[]>;
 }
-
-/**
- * CSS custom properties the PDF.js text layer expects on its ancestor
- * (`--scale-factor` = the render scale in CSS px per page unit; see
- * pdfTextLayer.css).
- */
-const scaleCssProperties = (scale: number): CSSProperties =>
-  ({
-    "--scale-factor": scale,
-    "--user-unit": 1,
-    "--total-scale-factor": "calc(var(--scale-factor) * var(--user-unit))",
-    "--scale-round-x": "1px",
-    "--scale-round-y": "1px",
-  }) as CSSProperties;
 
 /**
  * The virtualized continuous document surface: one lightweight slot per page
@@ -132,10 +118,7 @@ export function PdfDocumentView({
                 // painted effects on the canvas would be re-composited every
                 // frame. Text/highlight overlays are positioned in this same
                 // wrapper, so the 1px border inset applies to all equally.
-                <div
-                  className="relative overflow-hidden rounded-sm border bg-white"
-                  style={scaleCssProperties(scale)}
-                >
+                <div className="relative overflow-hidden rounded-sm border bg-white">
                   <PdfPageCanvas
                     document={document}
                     pageNumber={slot.pageNumber}

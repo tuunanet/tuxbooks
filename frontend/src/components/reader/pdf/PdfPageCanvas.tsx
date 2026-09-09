@@ -13,7 +13,7 @@ interface PdfPageCanvasProps {
    */
   width: number;
   height: number;
-  /** PDF.js render scale (displayed pixels / page units). */
+  /** Render scale (displayed pixels / page units). */
   scale: number;
   /**
    * Shared per-document bitmap cache (§ rendering policy). A hit blits the
@@ -140,8 +140,8 @@ export function PdfPageCanvas({
       const bufferContext = buffer.getContext("2d");
       if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
-      // PDF.js acquires the context from `canvas`; the transform maps
-      // viewport units onto device pixels at the (possibly capped) ratio.
+      // The transform maps viewport units onto device pixels at the
+      // (possibly capped) ratio.
       // Timed from the raster's start (the paint loop is time-sliced across
       // the await) to the blit — the user-visible render→blit latency of
       // PERF-2.

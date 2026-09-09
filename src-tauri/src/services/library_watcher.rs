@@ -12,7 +12,7 @@
 //!   straddle windows still pair up.
 //! - batching is fs-truth based: duplicate create/delete noise collapses
 //!   because reconciliation always compares against what is actually on disk.
-//! - this module must not import Tauri; UI notification happens through the
+//! - this module must not import a UI runtime; UI notification happens through the
 //!   reconciler's change callback (wired to IPC in `lib.rs`).
 
 use std::path::{Path, PathBuf};

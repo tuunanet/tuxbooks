@@ -1,16 +1,13 @@
 node_modules
 dist
+dist-packages
 src-tauri/target
-src-tauri/gen
 pnpm-lock.yaml
 e2e/.tmp
 *.png
 *.ico
 *.icns
 LICENSE.md
-
-# vendored third-party code (pinned foliate-js submodule) — never reformat
-frontend/src/lib/epub/foliate-js
 
 # EPUB fixture corpus: source trees + READMEs are generated/script-owned and
 # must stay byte-stable for the determinism check (just make-epub-fixtures)

@@ -16,7 +16,7 @@ pub struct PdfMetadata {
     pub description: Option<String>,
 }
 
-/// Tauri- and database-independent representation of a parsed PDF.
+/// Runtime- and database-independent representation of a parsed PDF.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PdfBook {
     pub metadata: PdfMetadata,

@@ -1,0 +1,16 @@
+/*
+ * Sizing for the Readium navigator's section iframes. The toolkit creates
+ * `.readium-navigator-iframe` elements with position:absolute (frame
+ * FrameManager) but no dimensions — without this rule they stay at the HTML
+ * default 300x150 and the book renders as a small block in the top-left
+ * corner. Reflowable frames fill the container; fixed-layout frames set
+ * their own inline px size (inline styles beat this rule — no !important),
+ * so FXL scaling is untouched.
+ */
+
+.readium-navigator-iframe {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}

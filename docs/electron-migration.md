@@ -8,15 +8,15 @@ describe the target contract.
 
 ## Status
 
-| Phase | Scope                                                    | Status                                                                                                                                                                                                                                                               |
-| ----- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Architecture inventory, progress-format inspection       | done                                                                                                                                                                                                                                                                 |
-| 1     | Electron shell + Rust sidecar bridge (library works)     | done — sidecar, shell, bridge, `tuxbooks://`, and the E2E suites all green on Playwright Test + Playwright's Electron API (worker-scoped app fixture with the isolation gate, startup version record, teardown watchdog); packaging (electron-builder) still pending |
-| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | planned                                                                                                                                                                                                                                                              |
-| 3     | Readium EPUB reader + foliate→Readium progress migration | planned                                                                                                                                                                                                                                                              |
-| 4     | MuPDF.js/WASM PDF reader                                 | planned                                                                                                                                                                                                                                                              |
-| 5     | Remove Tauri/foliate/PDF.js remnants                     | planned — CI release pipeline guarded off                                                                                                                                                                                                                            |
-| 6     | Performance pass + full validation                       | planned                                                                                                                                                                                                                                                              |
+| Phase | Scope                                                    | Status                                                                                                                                                                                                                                                                                  |
+| ----- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Architecture inventory, progress-format inspection       | done                                                                                                                                                                                                                                                                                    |
+| 1     | Electron shell + Rust sidecar bridge (library works)     | done — sidecar, shell, bridge, `tuxbooks://`, Playwright E2E, and electron-builder packaging                                                                                                                                                                                            |
+| 2     | Format-agnostic `Reader` abstraction (`readerModel.ts`)  | done — landed in `f30fc85`                                                                                                                                                                                                                                                              |
+| 3     | Readium EPUB reader + foliate→Readium progress migration | done — landed in `f30fc85`, with migration `0009` and versioned/idempotent adapter                                                                                                                                                                                                      |
+| 4     | MuPDF.js/WASM PDF reader                                 | done — worker-backed MuPDF rendering, structured-text selection/search, outline, virtualization, and HiDPI E2E                                                                                                                                                                          |
+| 5     | Remove Tauri/foliate/PDF.js remnants                     | done — removed submodule/config/runtime wiring; electron-builder deb/rpm/AppImage packaging + CI release pipeline                                                                                                                                                                       |
+| 6     | Performance pass + full validation                       | done — deterministic budget gates (PERF-1/3/4 unit tests, hidpi E2E) + `just check` + empty/seeded/release E2E; Chromium/MuPDF re-baseline recorded in docs/performance.md PERF-2 (p95 176.5 ms at 2643×1405 dpr 1.45; true-reference dpr-1/2 enforcement pending a bench dpr override) |
 
 Update this table as phases land.
 
@@ -49,10 +49,57 @@ stream`. corsEnabled is load-bearing — Chromium refuses cross-origin
 - Boot diagnostics (dev only): main logs `[boot] renderer mounted` or a
   loud failure; `TUXBOOKS_BOOT_PROBE=1` fetches book 1 through the
   protocol; `TUXBOOKS_DEBUG_IPC=1` logs bridge calls and protocol hits.
-- Not yet done in phase 1: packaging (electron-builder; the CI release
-  workflow is guarded off — `just test-e2e-release` covers the release
-  sidecar path in the meantime), PDFium resource probing for packaged
-  builds.
+- Packaging and packaged PDFium probing landed in phase 5: electron-builder
+  places the release sidecar and `libpdfium.so` together in
+  `resources/sidecar`; `just package`, `just check-deb`, and the tag release
+  workflow are the shipping path.
+
+### Phase 4 decisions and state (2026-09-09)
+
+- MuPDF.js 1.28.x (`mupdf` npm) behind `lib/pdf/pdfEngine.ts`. A
+  per-document module worker (`mupdfWorker.ts`) owns every engine object —
+  MuPDF rasterizes synchronously, so the worker keeps it off the UI thread;
+  closing the document terminates the worker and frees the WASM heap.
+  Renders transfer an `ImageBitmap`; outline pages arrive 0-based and are
+  normalized to 1-based in `pdfOutline.ts`.
+- The WASM bundle ships through a small Vite plugin
+  (`virtual:mupdf-wasm-url`): the emscripten glue's chunk-relative
+  resolution never finds the asset in a bundled build, so the main thread
+  resolves the URL and the worker pins it as `Module.locateFile` before the
+  dynamic import. The worker chunk needs `worker.format: "es"`.
+- Page-geometry seam keeps the old viewport shape (`getViewport({scale})`,
+  render transform ratio), so layout, virtualization, and cache policy
+  carried over unchanged. Served `.wasm` responses need
+  `application/wasm` MIME in the `app://` handler table.
+
+### Phase 5 removals and packaging (2026-09-09)
+
+- Removed: the foliate-js submodule (with `.gitmodules` and its vendored
+  pdfjs copy), `tauri.conf.json`, capabilities/gen, the WebKitGTK dev-env
+  plumbing (`scripts/dev-env.sh`), the `setup-tauri-deps` action, the
+  release workflow's migration-guard job, and the Tauri icon tree.
+- Packaging: electron-builder (`electron-builder.yml`) with
+  `just package` / `just check-deb`; sidecar binary + `libpdfium.so` ship
+  together in `resources/sidecar`. CI's build job runs the deb target +
+  gate on every push; the release workflow builds and gates the published
+  deb + AppImage (rpm stays a local target — it needs rpmbuild).
+- Kept: the `src-tauri/` crate name/path (phase-1 decision), PDFium
+  import-time covers (decision recorded in docs/pdf.md), and the foliate
+  references inside the progress-migration fixtures/tests (intentional:
+  they pin user-data compatibility).
+
+### Phase 6 state (2026-09-09)
+
+- UAT-found EPUB surface bug: the toolkit mounts
+  `.readium-navigator-iframe` with `position: absolute` but no dimensions —
+  sizing it is host-app work. `readiumEngine.css` fills the navigator
+  container; a new geometry assertion in `epub-reader.e2e.ts` pins it (a
+  lost stylesheet renders the book as a 300×150 top-left block while every
+  state attribute stays honest).
+- Bench harness: maximize tolerance widened for WM title-bar decorations
+  (a stable ~28 px shortfall on GNOME).
+- Chromium/MuPDF performance re-baseline recorded in docs/performance.md
+  (PERF-2); deterministic budget gates all hold.
 
 ## Target process model
 

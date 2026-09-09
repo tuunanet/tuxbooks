@@ -59,6 +59,20 @@ build: fetch-pdfium
     node scripts/build-electron.mjs
     cargo build --manifest-path src-tauri/Cargo.toml --release
 
+# Package the distributable Linux bundles with electron-builder
+# (electron-builder.yml). Requires `just build` artifacts — the recipe runs
+# it first. Default targets: deb + rpm + AppImage (docs/release.md); a
+# target list argument narrows the run (e.g. `just package deb`). The rpm
+# needs the `rpm` package (rpmbuild) installed.
+package TARGETS="deb rpm AppImage": build
+    pnpm exec electron-builder --linux {{TARGETS}}
+
+# Packaging regression gate (docs/release.md): verifies the deb built by
+# `just package` — control metadata, payload (Electron + sidecar + PDFium),
+# desktop entry, and hicolor icons.
+check-deb:
+    bash scripts/check-deb.sh
+
 # Unit tests: rust + frontend, concurrently (different toolchains — cargo
 # and node never contend). fetch-pdfium first so PDF cover tests exercise a
 # real render, not a skip.

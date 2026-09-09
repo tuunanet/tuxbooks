@@ -16,7 +16,7 @@ pub struct CoverImage {
     pub data: Vec<u8>,
 }
 
-/// Tauri- and database-independent representation of a parsed EPUB.
+/// Runtime- and database-independent representation of a parsed EPUB.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpubBook {
     pub metadata: super::EpubMetadata,

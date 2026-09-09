@@ -30,8 +30,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: actionlint
         run: |
@@ -44,8 +42,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - uses: pnpm/action-setup@v5
 
@@ -76,8 +72,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       # Fails fast when a large or non-deterministic fixture sneaked into the
       # committed corpus (docs/testing.md). No network access needed.
@@ -122,8 +116,6 @@ jobs:
     needs: [frontend, rust]
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - uses: pnpm/action-setup@v5
 
@@ -146,3 +138,13 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           just build
+
+      # Packaging gate (docs/release.md): a packaging regression fails the
+      # build like any other test. CI verifies the deb target; the rpm needs
+      # rpmbuild and the AppImage needs APPIMAGE_EXTRACT_AND_RUN, both wired
+      # into the release workflow's full `just package` run.
+      - name: Package deb + packaging gate
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
+          just package deb
+          just check-deb

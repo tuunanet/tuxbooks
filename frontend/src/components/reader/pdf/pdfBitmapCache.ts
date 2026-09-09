@@ -1,7 +1,7 @@
 /**
  * LRU cache of rendered page bitmaps for the PDF reader (§ rendering
  * policy). A canvas that leaves the virtualization window is unmounted and
- * its pixels die with it; scrolling back used to re-run the full PDF.js
+ * its pixels die with it; scrolling back used to re-run the full page
  * raster — brutally visible on heavy pages (full-bleed covers), where every
  * oscillation re-paid the whole render before the next page could start.
  * Evicted canvases now stash their offscreen buffer here, and re-entry
@@ -32,7 +32,7 @@ const DEFAULT_MAX_ENTRIES = 8;
 
 export interface PdfBitmap {
   readonly pageNumber: number;
-  /** The PDF.js render scale the buffer was rasterized at. */
+  /** The render scale the buffer was rasterized at. */
   readonly scale: number;
   /**
    * The effective render ratio (pdfRenderPolicy) the buffer was rasterized

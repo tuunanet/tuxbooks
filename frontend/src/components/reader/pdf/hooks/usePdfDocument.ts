@@ -16,7 +16,7 @@ interface PdfDocumentSnapshot extends PdfDocumentState {
 }
 
 /**
- * Loads a book's bytes through `get_book_bytes` and opens the PDF.js
+ * Loads a book's bytes through `get_book_bytes` and opens the MuPDF
  * document. The hook owns the document lifetime: switching books or
  * unmounting destroys the document, and a load that finishes after its
  * effect was superseded never touches React state.
@@ -52,7 +52,8 @@ export function usePdfDocument(
     (async () => {
       try {
         const bytes = await getBookBytes(bookId, "pdf");
-        // PDF.js transfers the buffer to its worker; it is not reused here.
+        // The engine transfers the buffer to its worker; it is not reused
+        // here.
         loaded = await openPdfDocument(new Uint8Array(bytes));
         if (cancelled) {
           await closePdfDocument(loaded);

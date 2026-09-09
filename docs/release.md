@@ -4,20 +4,18 @@ TuxBooks ships as native Linux packages built by CI from immutable `v*`
 tags. This doc is the operating manual: what the artifacts are, how a
 release is cut, and what is deliberately deferred.
 
-**Migration state:** branch `web-reader-prototype-1` replaces the Tauri
-bundler with an Electron packaging path (electron-builder or equivalent —
-decide at migration phase 1 and record it here). The artifact set and the
-packaging-gate philosophy are unchanged; the build internals below update
-as phases land.
+**Packaging:** Electron packaging uses `electron-builder`
+(`electron-builder.yml`). The artifact set and packaging-gate philosophy
+are unchanged from the earlier releases.
 
 ## Artifacts
 
-| Artifact                            | Built by               | Purpose                                                            |
-| ----------------------------------- | ---------------------- | ------------------------------------------------------------------ |
-| `tuxbooks_<version>_amd64.deb`      | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`   |
-| `tuxbooks_<version>_amd64.AppImage` | release workflow (tag) | Portable single-file build for other Linux setups, no installation |
-| `SHA256SUMS.txt`                    | release workflow (tag) | Checksums for both artifacts                                       |
-| deb + rpm                           | `just build` (local)   | Local packaging verification; rpm is not published                 |
+| Artifact                       | Built by               | Purpose                                                            |
+| ------------------------------ | ---------------------- | ------------------------------------------------------------------ |
+| `tuxbooks_<version>_amd64.deb` | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`   |
+| `tuxbooks-<version>.AppImage`  | release workflow (tag) | Portable single-file build for other Linux setups, no installation |
+| `SHA256SUMS.txt`               | release workflow (tag) | Checksums for both artifacts                                       |
+| deb + rpm + AppImage           | `just package` (local) | Local packaging verification; rpm is not published                 |
 
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
@@ -28,25 +26,22 @@ pre-releases).
 ## The packaging gate
 
 `scripts/check-deb.sh` is the packaging gate: it verifies the built deb's
-control metadata (package name, exact version match, description), the
-extracted payload (Electron binary + sidecar + PDFium resource), the
-desktop entry (structure plus `desktop-file-validate` when installed), and
-hicolor icons. During the Electron migration CI's build job runs
-`just build` only — the gate is not wired into CI or the justfile until
-Electron packaging lands (docs/electron-migration.md), when a packaging
-regression again fails the build like any other test. The Electron path
-must not reintroduce a webkit2gtk runtime dependency.
+control metadata (package name, exact version match, description, and no
+webkit dependency), the extracted payload (Electron binary + executable
+sidecar + PDFium resource), the desktop entry (structure plus
+`desktop-file-validate` when installed), and hicolor icons. CI builds the
+deb target and runs the gate on every push; the release workflow builds the
+published deb + AppImage and runs the same gate before publishing.
 
 ## Cutting a release
 
 Per the versioning policy in ROADMAP.md (pre-1.0: patch bumps for early
 releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
 
-1. Bump the version in **one normal commit on main**: the packaging
-   manifest(s) (electron-builder config replacing `tauri.conf.json` as the
-   source of truth), the Rust crate's `Cargo.toml`/`Cargo.lock`,
-   `package.json`, `frontend/package.json`, and the homepage version badge
-   in `site/index.html` when the headline version changes.
+1. Bump the version in **one normal commit on main**: root `package.json`
+   (the electron-builder source of truth), the Rust crate's
+   `Cargo.toml`/`Cargo.lock`, `frontend/package.json`, and the homepage
+   version badge in `site/index.html` when the headline version changes.
 2. Let CI go green on that commit.
 3. Tag it: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. Never move or
    reuse a tag — a bad build is fixed in the next version.
@@ -61,10 +56,9 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
 
 ## AppImage specifics
 
-Electron AppImages bundle the whole runtime (Electron + Chromium + Node);
-the linuxdeploy GTK plugin of the Tauri era is not needed. Build with the
-standard electron-builder AppImage target with `APPIMAGE_EXTRACT_AND_RUN=1`
-so no FUSE is required at build time (users need FUSE or an extract-run
+Electron AppImages bundle the whole runtime (Electron + Chromium + Node).
+electron-builder creates them without FUSE; users need FUSE or an
+extract-run environment only to _execute_ the AppImage.
 environment only to _execute_ the AppImage).
 
 ## Deliberate deferrals

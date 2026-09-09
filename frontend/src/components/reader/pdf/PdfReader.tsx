@@ -51,16 +51,13 @@ const DEFAULT_ZOOM_INDEX = 2;
 const MAX_ACTIVE_CANVASES = 8;
 
 /**
- * Upper bound on page renders started but not yet completed. PDF.js v6 runs
- * every render's paint loop as a time-sliced task on the main thread and
- * produces each page's operator list independently in the worker (verified
- * against mozilla/pdf.js v6: InternalRenderTask forbids only same-canvas
- * concurrency; CanvasGraphics.executeOperatorList yields between slices), so
- * two in-flight renders pipeline — page N paints while page N+1 parses and
- * decodes — instead of page N+1 waiting for N's entire raster. This is what
- * keeps the page after a heavy cover from starving: it starts immediately,
- * not "after page 1 finishes". Two is the sweet spot: the pipeline stays
- * full without interleaving many paint loops on the UI thread.
+ * Upper bound on page renders started but not yet completed. MuPDF
+ * rasterizes synchronously inside the document's worker, so renders
+ * serialize there; two requests in flight keep the queue fed — page N+1 is
+ * queued while page N rasterizes — instead of waiting for a fully drained
+ * queue between pages. This keeps the page after a heavy cover from
+ * starving: its render is already pending, not sent "after page 1
+ * finishes".
  */
 const MAX_CONCURRENT_RENDERS = 2;
 
@@ -388,9 +385,9 @@ export function PdfReader({
     [sizes, scale],
   );
 
-  // Rendering policy, modeled on the official PDF.js viewer's
-  // PDFRenderingQueue (pdfjs-dist web/pdf_viewer.mjs), adjusted for what
-  // PDF.js v6 actually parallelizes — see MAX_CONCURRENT_RENDERS below:
+  // Rendering policy, modeled on the classic viewer render queues,
+  // adjusted for what the MuPDF worker actually parallelizes — see
+  // MAX_CONCURRENT_RENDERS below:
   //
   //   1. up to MAX_CONCURRENT_RENDERS renders run at a time (started in
   //      priority order, completed/cancelled ones free their slot);

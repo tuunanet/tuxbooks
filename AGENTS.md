@@ -10,14 +10,13 @@ files it refers to; before adding anything here, check whether an existing
 doc in `docs/` is the right home for it. If no suitable `.md` exists, create
 one in `docs/` and refer to it from the appropriate section — do not inline.
 
-## Branch state: stack migration
+## Branch state: Electron stack
 
-Branch `web-reader-prototype-1` migrates the app from Tauri + WebKitGTK +
-foliate-js/PDF.js to **Electron + Readium (EPUB) + MuPDF.js/WASM (PDF)**,
-keeping the Rust core as a first-class native service. Until a phase
-completes, some code still reflects the old stack — see
-`docs/electron-migration.md` for the phase plan and what is current. Do not
-add new foliate-js, PDF.js, or Tauri-coupled code while migrating.
+The Electron migration is complete: the app uses **Electron + Readium
+(EPUB) + MuPDF.js/WASM (PDF)** with the Rust core as a first-class native
+service. `docs/electron-migration.md` records the completed phases. Do not
+add Tauri, foliate-js, or PDF.js dependencies; legacy foliate locators stay
+only in the versioned progress migration adapter.
 
 ## What this project is
 

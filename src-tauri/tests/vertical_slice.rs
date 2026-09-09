@@ -1,5 +1,5 @@
 //! Vertical-slice integration test: fixture EPUB -> scanner -> importer -> SQLite
-//! -> repositories -> search index. Exercises the same path the Tauri commands use.
+//! -> repositories -> search index. Exercises the same path the RPC method table uses.
 
 use std::path::Path;
 use std::path::PathBuf;

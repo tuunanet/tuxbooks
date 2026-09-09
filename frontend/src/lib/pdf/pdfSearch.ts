@@ -1,10 +1,11 @@
 /**
- * Pure PDF text-search matching, unit-testable without PDF.js. The engine
- * seam (`lib/pdf/pdfEngine.ts`) extracts a page's text items; this module
- * assembles them into searchable text and finds matches with excerpts.
+ * Pure PDF text-search matching, unit-testable without the engine. The
+ * engine seam (`lib/pdf/pdfEngine.ts`) extracts a page's text lines; this
+ * module assembles them into searchable text and finds matches with
+ * excerpts.
  */
 
-/** Structural subset of PDF.js text content items the assembler needs. */
+/** Structural shape of one engine text item the assembler needs. */
 export interface PdfTextItem {
   str: string;
   hasEOL: boolean;

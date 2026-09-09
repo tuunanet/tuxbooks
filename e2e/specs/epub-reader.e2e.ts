@@ -80,6 +80,32 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect
       .poll(() => textOf(page, "reader-position"), { timeout: 30000 })
       .toMatch(/^(100|[1-9]?\d)%$/);
+
+    // The navigator's section iframes must fill the navigator container.
+    // The toolkit mounts them without dimensions; a host app that loses the
+    // sizing stylesheet renders the book as a 300x150 block in the top-left
+    // corner while every state attribute stays honest (regression).
+    const frames = await page.evaluate(() => {
+      const container = document.querySelector("[data-epub-host]")?.firstElementChild;
+      const containerRect = container?.getBoundingClientRect();
+      return [...document.querySelectorAll("iframe.readium-navigator-iframe")].map((frame) => {
+        const rect = frame.getBoundingClientRect();
+        return {
+          width: rect.width,
+          height: rect.height,
+          containerWidth: containerRect?.width ?? 0,
+          containerHeight: containerRect?.height ?? 0,
+        };
+      });
+    });
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame.containerWidth).toBeGreaterThan(0);
+      expect(frame.containerHeight).toBeGreaterThan(0);
+      expect(frame.width).toBeGreaterThan(frame.containerWidth * 0.95);
+      expect(frame.height).toBeGreaterThan(frame.containerHeight * 0.95);
+    }
+
     await returnToLibrary(page);
   });
 

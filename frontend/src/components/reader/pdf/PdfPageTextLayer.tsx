@@ -5,13 +5,13 @@ import "@/lib/pdf/pdfTextLayer.css";
 interface PdfPageTextLayerProps {
   document: PdfDocument;
   pageNumber: number;
-  /** PDF.js render scale (must match the page canvas viewport). */
+  /** Render scale (must match the page canvas). */
   scale: number;
 }
 
 /**
- * The selectable text surface of one rendered page: transparent PDF.js text
- * spans positioned over the canvas. Purely an interaction affordance — text
+ * The selectable text surface of one rendered page: transparent text spans
+ * positioned over the canvas. Purely an interaction affordance — text
  * selection for highlights — with no visuals of its own. Lives only on the
  * bounded render set (pages with canvases), so text extraction never runs
  * for distant pages.

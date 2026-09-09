@@ -67,8 +67,8 @@ fn resolve_db_path() -> PathBuf {
 }
 
 /// The per-user app-data directory. On Linux this is the XDG data home
-/// (`$XDG_DATA_HOME` or `~/.local/share`) plus the app identifier, matching
-/// the directory the Tauri shell used to provide.
+/// (`$XDG_DATA_HOME` or `~/.local/share`) plus the app identifier — the
+/// location established by the app's first releases and kept stable.
 fn app_data_dir() -> PathBuf {
     let base = std::env::var("XDG_DATA_HOME")
         .ok()

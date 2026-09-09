@@ -11,10 +11,10 @@ electron/dist/
 *.tsbuildinfo
 
 # Generated / vendored artifacts
-src-tauri/gen/schemas/
 src-tauri/pdfium/
 artifacts/
 coverage/
+dist-packages/
 
 # Databases
 *.db

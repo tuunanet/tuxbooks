@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TuxBooks is a local-first desktop ebook library and reader for Linux, built with Rust + Tauri and React + TypeScript.
+TuxBooks is a local-first desktop ebook library and reader for Linux, built with a Rust service, Electron, and React + TypeScript.
 
 The product goal is:
 
@@ -30,19 +30,19 @@ Avoid implementing many features superficially. Complete one coherent subsystem 
 
 TuxBooks currently has:
 
-- Tauri 2 desktop application
+- Electron desktop application
 - Rust backend
 - React + TypeScript + Vite frontend
 - SQLite persistence
 - Rust domain/service/repository separation
-- Tauri IPC boundaries
+- JSON-RPC stdio boundary to the Rust sidecar + enumerated preload bridge
 - local library indexing/import
 - deterministic test fixtures
 - Vitest frontend tests
 - Rust unit/integration tests
-- real Tauri/WebKitGTK E2E tests
+- real Electron E2E tests (Playwright)
 - headless Linux E2E execution
-- PDF.js integration
+- MuPDF.js/WASM integration
 - secure Rust-controlled PDF byte access
 - production-oriented continuous PDF reader
 - PDF page virtualization
@@ -53,12 +53,12 @@ TuxBooks currently has:
 - mixed-page-size PDF support
 - page-level rendering error handling
 - E2E rendering and scrolling verification
-- vendored foliate-js EPUB engine behind a single-module seam
+- Readium EPUB engine behind a single-module seam
 - production EPUB reader (chapter rendering, nested TOC, navigation)
 - paginated and scrolled EPUB flow
 - EPUB appearance controls (font size, font family, line spacing, themes)
 - EPUB CFI + spine-href position persistence and validated restoration
-- WebKit-native MathML rendering
+- native MathML rendering
 - EPUB rendering/navigation/appearance E2E, including CFI persistence
 - deterministic EPUB fixture with an EPUB 3 MathML chapter
 - PDF thumbnails sidebar with virtualized, memory-bounded rendering and
@@ -623,9 +623,10 @@ navigation to match
 
 ## PDF in-book search
 
-Investigate using PDF.js text extraction/text layer and/or a backend indexing pipeline.
-
-Do not implement a second unrelated search architecture if existing infrastructure can support it.
+Shipped: the reader engine extracts page text behind the seam (MuPDF.js
+structured text since the Electron migration; previously PDF.js). Do not
+implement a second unrelated search architecture if existing infrastructure
+can support it.
 
 ## Exit criteria
 
@@ -974,12 +975,12 @@ construction:
   beta-quality points; `1.0.0` waits for this milestone's exit criteria.
 - Every release is a new, unique version. A tag is never moved or reused; a
   bad build is fixed in the next version, never patched in place.
-- Bump before tag: the version is bumped in `tauri.conf.json` (the bundler's
-  source of truth), `Cargo.toml`, `Cargo.lock`, and both `package.json`
-  files in a normal commit on main, CI goes green, and only then is that
-  commit tagged.
+- Bump before tag: the version is bumped in `package.json` (the bundler's
+  source of truth, electron-builder.yml), `Cargo.toml`, `Cargo.lock`, and
+  `frontend/package.json` in a normal commit on main, CI goes green, and
+  only then is that commit tagged.
 - The release workflow fails unless the tag exactly matches the version in
-  `tauri.conf.json`, so a stale or reused version can never publish.
+  `package.json`, so a stale or reused version can never publish.
 - Releases are marked pre-release until 1.0; the site links to the releases
   list, not `/releases/latest`, which ignores pre-releases.
 - The homepage version badge is updated in the same bump commit when the

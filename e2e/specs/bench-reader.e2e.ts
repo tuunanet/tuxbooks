@@ -484,8 +484,13 @@ test.describe("reader performance benchmark", () => {
           width: window.innerWidth,
           height: window.outerHeight,
         }));
+        // Height tolerance is wider than width: outerHeight includes the WM
+        // title bar, and some desktops report an availHeight the granted
+        // outer size can never reach by exactly that decoration height
+        // (observed: a stable 28px shortfall). The bench needs a big,
+        // stable window — the last few title-bar pixels are immaterial.
         const ok =
-          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 8;
+          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 40;
         if (!ok) {
           console.log(`[diag] size=${JSON.stringify(size)} target=${JSON.stringify(target)}`);
         }

@@ -25,6 +25,7 @@ import { EpubNavigator, EpubPreferences } from "@readium/navigator";
 import type { Decoration } from "@readium/decorator";
 import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 
+import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
 import {
@@ -225,11 +226,14 @@ export class ReadiumEpubHandle {
 
     // The host element React mounts; the navigator renders inside a plain
     // child div (its own sizing chain, like the foliate `<foliate-view>`).
+    // The container is the containing block for the navigator's absolutely
+    // positioned section iframes (readiumEngine.css sizes them to fill it).
     this.host = document.createElement("div");
     this.host.setAttribute("data-epub-host", "");
     this.host.style.width = "100%";
     this.host.style.height = "100%";
     this.container = document.createElement("div");
+    this.container.style.position = "relative";
     this.container.style.width = "100%";
     this.container.style.height = "100%";
     this.host.appendChild(this.container);

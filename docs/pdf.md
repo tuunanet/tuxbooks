@@ -46,9 +46,11 @@ pub struct PdfMetadata {
 | page 1     | `cover_path` (rasterized to PNG by `pdf/render.rs` at import; NULL |
 |            | when the PDFium library is unavailable — placeholder art then)     |
 
-Cover rasterization stays in Rust (PDFium) unless MuPDF in the renderer
-provably replaces it at import quality/latency; re-evaluate at migration
-phase 4 and record the decision here.
+Cover rasterization stays in Rust (PDFium). Decision recorded at migration
+phase 4: MuPDF in the renderer does not replace it — renderer MuPDF
+rasterizes whole documents for the reading surface, while import-time
+covers need a per-file, no-UI rasterization in the sidecar; keeping PDFium
+avoids loading every full document during a scan for identical quality.
 
 ## Error handling
 
@@ -57,14 +59,20 @@ Per-file failures never abort an import run: the importer collects them in
 
 ## Rendering
 
-Rendering is the renderer's job: **MuPDF.js/WASM** rasterizes pages to
-canvas, with expensive work off the UI thread in the MuPDF worker. Verify
-the current npm distribution and worker API at implementation time — no
-stale package-layout assumptions. `frontend/src/lib/pdf/pdfEngine.ts` is
-the only module that touches MuPDF, loaded lazily on first document open so
-the WASM bundle stays out of the entry chunk. Byte access flows through the
-`tuxbooks://` custom protocol (range requests supported) — paths never
-cross the boundary.
+Rendering is the renderer's job: **MuPDF.js/WASM** (`mupdf` npm package)
+rasterizes pages, with all engine objects and rasterization in a dedicated
+module worker (`lib/pdf/mupdfWorker.ts`) — MuPDF renders synchronously, so
+the worker keeps it off the UI thread. One worker instance serves one
+document; closing the document terminates the worker and frees the whole
+WASM heap. The worker loads lazily on the first document open. The WASM
+bundle is emitted by a small Vite plugin (`virtual:mupdf-wasm-url` in
+`vite.config.ts`) because the emscripten glue's own chunk-relative
+resolution never finds the asset in a bundled build; the main thread
+resolves the URL and passes it into the open request, where the worker
+pins it as `Module.locateFile` before the dynamic engine import.
+`frontend/src/lib/pdf/pdfEngine.ts` is the only module that touches MuPDF.
+Byte access flows through the `tuxbooks://` custom protocol (range
+requests supported) — paths never cross the boundary.
 
 ### Continuous reader architecture (`frontend/src/components/reader/pdf/`)
 
@@ -227,10 +235,10 @@ thumbnails, outline, and restore.
 
 Rendered pages mount a text layer (`PdfPageTextLayer`, through the seam)
 over the canvas: transparent, selectable text spans — the interaction
-affordance for highlights, no visuals of its own. The layer's stylesheet
-(`lib/pdf/pdfTextLayer.css`) is engine-coupled: pin it to the bundled
-MuPDF.js version and re-extract on upgrade. Text layers exist only on the
-bounded render set, like canvases.
+affordance for highlights, no visuals of its own. The seam builds the spans
+from MuPDF structured-text lines; its stylesheet (`lib/pdf/pdfTextLayer.css`)
+is coupled to that geometry and is reviewed when MuPDF changes. Text layers
+exist only on the bounded render set, like canvases.
 
 Text selections are captured on `pointerup` (deferred one tick): the
 anchor node resolves the page through the slot's `data-pdf-slot`, the

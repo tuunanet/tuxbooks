@@ -21,30 +21,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The Tauri bundler pipeline (deb + AppImage + tauri-driver E2E) is being
-  # replaced by Electron packaging (docs/electron-migration.md). Until that
-  # lands, a tag must fail loudly instead of publishing unbuildable artifacts.
-  migration-guard:
-    name: Release pipeline unavailable (Electron migration in progress)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    steps:
-      - name: Explain and fail
-        run: |
-          echo "The release pipeline is being migrated from Tauri to Electron" >&2
-          echo "packaging (docs/electron-migration.md). Do not tag until it is" >&2
-          echo "re-implemented; see docs/release.md." >&2
-          exit 1
-
   verify:
-    needs: migration-guard
     name: Verify tag (tests + E2E)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       # xvfb is the only OS-level dependency the headless E2E suite needs
       # (docs/testing.md): Playwright launches the local Electron binary,
@@ -95,10 +77,6 @@ jobs:
     needs: [verify]
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - uses: ./.github/actions/setup-tauri-deps
 
       - uses: pnpm/action-setup@v5
 
@@ -116,7 +94,7 @@ jobs:
 
       - name: Verify the tag matches the bundled version
         run: |
-          declared="$(jq -r .version src-tauri/tauri.conf.json)"
+          declared="$(jq -r .version package.json)"
           tagged="${GITHUB_REF_NAME#v}"
           if [ "$declared" != "$tagged" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match the bundled version $declared"
@@ -125,23 +103,30 @@ jobs:
           fi
           echo "Releasing $tagged"
 
-      - name: Fetch PDFium (bundled app resource)
-        run: bash scripts/fetch-pdfium.sh
+      # The rpm needs rpmbuild; the deb and AppImage targets are
+      # self-contained. AppImage bundling runs FUSE-free via
+      # APPIMAGE_EXTRACT_AND_RUN — users need FUSE (or an extract-run
+      # environment) only to execute the AppImage.
+      - name: Install rpm tooling
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
 
       # deb for Ubuntu/Debian (primary target), AppImage for other Linux
-      # setups. rpm stays a local `just build` artifact; the site's audience
-      # is Ubuntu. linuxdeploy is fetched by the bundler; APPIMAGE bundling
-      # needs the librsvg2-dev pkg-config data (setup-tauri-deps provides it)
-      # and runs FUSE-free via APPIMAGE_EXTRACT_AND_RUN.
+      # setups. rpm stays a local `just package` artifact; the site's
+      # audience is Ubuntu. electron-builder wires the sidecar binary and
+      # the PDFium library into resources/sidecar (electron-builder.yml);
+      # the packaging gate re-verifies the payload before anything publishes.
       - name: Build Debian and AppImage bundles
         run: |
           pnpm install --frozen-lockfile
-          pnpm tauri build --bundles deb appimage
+          just package deb AppImage
+
+      - name: Packaging gate
+        run: just check-deb
 
       - name: Checksums
         run: |
-          cd src-tauri/target/release/bundle
-          sha256sum deb/tuxbooks_*.deb appimage/tuxbooks_*.AppImage > SHA256SUMS.txt
+          cd dist-packages
+          sha256sum tuxbooks_*.deb tuxbooks-*.AppImage > SHA256SUMS.txt
 
       - name: Publish GitHub release
         env:
@@ -172,6 +157,6 @@ jobs:
             --title "TuxBooks $GITHUB_REF_NAME" \
             --prerelease \
             --notes-file "$notes_file" \
-            "src-tauri/target/release/bundle/deb/tuxbooks_${version}_amd64.deb" \
-            "src-tauri/target/release/bundle/appimage/tuxbooks_${version}_amd64.AppImage" \
-            "src-tauri/target/release/bundle/SHA256SUMS.txt"
+            "dist-packages/tuxbooks_${version}_amd64.deb" \
+            "dist-packages/tuxbooks-${version}.AppImage" \
+            "dist-packages/SHA256SUMS.txt"
