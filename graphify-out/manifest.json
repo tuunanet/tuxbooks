@@ -174,9 +174,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/layout/Sidebar.tsx": {
-    "mtime": 1788943991.1052277,
-    "seen": 1788946721.1321423,
-    "ast_hash": "7cb67d702d7069d9d5161e96a179d8d3",
+    "mtime": 1788947080.9834137,
+    "seen": 1788947250.442854,
+    "ast_hash": "3837b62bf33308ea93bad69081d20e40",
     "semantic_hash": ""
   },
   "frontend/src/components/library/DropZoneOverlay.tsx": {
