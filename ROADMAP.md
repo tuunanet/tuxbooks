@@ -4,7 +4,7 @@ TuxBooks is approaching its first public release.
 
 The current focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## 🚧 Before 1.0 — Stabilize & Polish
+## 🚧 Before 0.0.1 — Stabilize & Polish
 
 The immediate goal is to squash remaining bugs and finish the smaller pieces needed for a solid first release.
 
@@ -33,7 +33,7 @@ The immediate goal is to squash remaining bugs and finish the smaller pieces nee
 * Verify packaging and installation on supported Linux environments
 * Publish the first stable release
 
-## 🌱 After 1.0
+## 🌱 After 0.0.1
 
 Once the core experience is solid, development can move toward larger features and quality-of-life improvements.
 
