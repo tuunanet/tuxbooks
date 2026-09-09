@@ -66,7 +66,7 @@ it): 100 KB per fixture, 512 KB total, 50 KB per source asset.
 
 ## Parser-facing contract
 
-`src-tauri/tests/epub_corpus.rs` runs on every `cargo test`: every valid
+`sidecar/tests/epub_corpus.rs` runs on every `cargo test`: every valid
 core fixture parses (non-empty title + spine), every malformed fixture is
 rejected, and the corpus stays small. EPUB 2 fixtures use NCX + XHTML 1.1 +
 the legacy `<meta name="cover">` convention; EPUB 3 fixtures use nav (+ NCX

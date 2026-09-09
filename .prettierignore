@@ -1,7 +1,7 @@
 node_modules
 dist
 dist-packages
-src-tauri/target
+sidecar/target
 pnpm-lock.yaml
 e2e/.tmp
 *.png

@@ -21,7 +21,7 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
   SQL only in `repository/`. Module boundaries and process model:
   `docs/architecture.md`.
 - Electron `main`/`preload` are plumbing only; the renderer never sees
-  Node.js. The Rust sidecar (`src-tauri/`) owns DB, filesystem, scanner,
+  Node.js. The Rust sidecar (`sidecar/`) owns DB, filesystem, scanner,
   and metadata.
 - Reader engines are behind single-module seams — EPUB: only
   `frontend/src/lib/epub/readiumEngine.ts` imports Readium; PDF: only

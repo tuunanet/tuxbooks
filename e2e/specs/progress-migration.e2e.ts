@@ -23,7 +23,7 @@ import { openInReader, returnToLibrary, textOf } from "./helpers.js";
  * stale/invalid rows, and the PDF page row. Mid-chapter offsets and the
  * several EPUB structures (varied spines, fixed layout, malformed corpora)
  * are pinned by the Rust-level progress-migration fixtures (docs/epub.md,
- * `src-tauri/tests`), which run the full corpus per `cargo test`.
+ * `sidecar/tests`), which run the full corpus per `cargo test`.
  */
 
 /** Captured foliate CFIs for minimal.epub (see file comment). */

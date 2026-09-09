@@ -16,12 +16,12 @@ touching a Rust module's behavior or tests.
 
 | Category            | Scope                                         | Required | Baseline (2026-09-02) |
 | ------------------- | --------------------------------------------- | -------- | --------------------- |
-| EPUB parser         | `src-tauri/src/epub/`                         | 80%      | 94.2%                 |
-| PDF parser          | `src-tauri/src/pdf/`                          | 80%      | 99.4%                 |
-| Services            | `src-tauri/src/services/`                     | 80%      | 98.5%                 |
-| Repository          | `src-tauri/src/repository/`                   | 80%      | 96.5%                 |
-| Database            | `src-tauri/src/db/`                           | 80%      | 97.0%                 |
-| Domain models       | `src-tauri/src/domain/`                       | 80%      | 100.0%                |
+| EPUB parser         | `sidecar/src/epub/`                           | 80%      | 94.2%                 |
+| PDF parser          | `sidecar/src/pdf/`                            | 80%      | 99.4%                 |
+| Services            | `sidecar/src/services/`                       | 80%      | 98.5%                 |
+| Repository          | `sidecar/src/repository/`                     | 80%      | 96.5%                 |
+| Database            | `sidecar/src/db/`                             | 80%      | 97.0%                 |
+| Domain models       | `sidecar/src/domain/`                         | 80%      | 100.0%                |
 | Library view        | `frontend/src/components/library/`            | 80%      | 98.6%                 |
 | Book cards/detail   | `frontend/src/components/books/`              | 80%      | 96.9%                 |
 | Reader (EPUB + PDF) | `frontend/src/components/reader/`             | 80%      | 95.0%                 |
@@ -42,10 +42,10 @@ Numbers drift as code changes; rerun `just coverage` for current values
 
 | What                                                        | Why it is excluded                                                                                                               |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/commands/` → sidecar method table            | IPC boundary — no business logic by contract (docs/architecture.md); every path is driven through the real app by the E2E suite. |
-| `src-tauri/src/lib.rs`                                      | Wiring (pool init, state, method registration) — boots in every E2E run.                                                         |
-| `src-tauri/src/error.rs`                                    | thiserror-derived Display/From code.                                                                                             |
-| `src-tauri/src/main.rs`, `frontend/src/main.tsx`            | Entry points.                                                                                                                    |
+| `sidecar/src/commands/` → sidecar method table              | IPC boundary — no business logic by contract (docs/architecture.md); every path is driven through the real app by the E2E suite. |
+| `sidecar/src/lib.rs`                                        | Wiring (pool init, state, method registration) — boots in every E2E run.                                                         |
+| `sidecar/src/error.rs`                                      | thiserror-derived Display/From code.                                                                                             |
+| `sidecar/src/main.rs`, `frontend/src/main.tsx`              | Entry points.                                                                                                                    |
 | `electron/main/`, `electron/preload/`                       | Process plumbing — exercised on every E2E run; no business logic by contract (docs/architecture.md).                             |
 | `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around Readium/MuPDF; real behavior covered by the E2E reader suites, unit tests mock the seam.     |
 | `frontend/src/components/ui/`                               | shadcn/ui primitives — vendored scaffolding, not app logic.                                                                      |

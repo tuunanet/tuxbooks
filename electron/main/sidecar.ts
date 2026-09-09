@@ -198,7 +198,7 @@ export function locateSidecar(resourcesPath: string): string {
   const override = process.env.TUXBOOKS_SIDECAR;
   if (override) return override;
   const devCandidates = [
-    path.join(__dirname, "../../src-tauri/target/debug/tuxbooks"),
+    path.join(__dirname, "../../sidecar/target/debug/tuxbooks"),
     path.join(__dirname, "../../target/debug/tuxbooks"),
   ];
   for (const candidate of devCandidates) {

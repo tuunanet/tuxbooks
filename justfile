@@ -10,7 +10,7 @@ make-epub-fixtures:
     python3 scripts/make-epub-fixtures.py
 
 # Fetch the PDFium shared library used for PDF cover extraction
-# (src-tauri/pdfium/, gitignored). Idempotent: skips when already present.
+# (sidecar/pdfium/, gitignored). Idempotent: skips when already present.
 # The pinned build tracks pdfium-render's default bindings (docs/build.md).
 fetch-pdfium:
     bash scripts/fetch-pdfium.sh
@@ -42,7 +42,7 @@ dev:
         echo "dev: port 1420 is already in use — stop the other tuxbooks dev server first." >&2
         exit 1
     fi
-    cargo build --manifest-path src-tauri/Cargo.toml
+    cargo build --manifest-path sidecar/Cargo.toml
     node scripts/build-electron.mjs
     # setsid makes Vite a process-group leader: cleanup kills the whole group
     # (pnpm + node + vite), not just the direct PID — descendants survive a
@@ -84,7 +84,7 @@ _test_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" 
 build: fetch-pdfium
     pnpm --filter frontend build
     node scripts/build-electron.mjs
-    cargo build --manifest-path src-tauri/Cargo.toml --release
+    cargo build --manifest-path sidecar/Cargo.toml --release
 
 # Package the distributable Linux bundles with electron-builder
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs
@@ -106,7 +106,7 @@ check-deb:
 test: test-parallel
 
 test-rust: fetch-pdfium
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml
+    {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml
 
 test-frontend:
     {{_test_timeout}} pnpm --filter frontend test:ci
@@ -122,7 +122,7 @@ test-parallel:
 build-debug:
     pnpm --filter frontend build
     node scripts/build-electron.mjs
-    cargo build --manifest-path src-tauri/Cargo.toml
+    cargo build --manifest-path sidecar/Cargo.toml
 
 # E2E runs the real Electron app against Playwright (Playwright's Electron
 # launcher spawns the local electron binary pointed at the built main
@@ -158,10 +158,10 @@ test-e2e-hidpi: build-debug
 # resolution path; see docs/release.md for packaging).
 # just does not interpolate {{root}} inside variable assignments — build the
 # path with string concatenation so the override is a real binary path.
-_release_sidecar := justfile_directory() + "/src-tauri/target/release/tuxbooks"
+_release_sidecar := justfile_directory() + "/sidecar/target/release/tuxbooks"
 
 test-e2e-release: build-debug
-    cargo build --manifest-path src-tauri/Cargo.toml --release
+    cargo build --manifest-path sidecar/Cargo.toml --release
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:empty
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:seeded
 
@@ -200,16 +200,16 @@ fetch-epub-extended:
 # Tier B: run the real-world corpus through the parser. Requires a prior
 # `just fetch-epub-extended`; skips with a notice when nothing is fetched.
 test-epub-extended:
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --test extended_epub extended::
+    {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml --test extended_epub extended::
 
 # Tier C: run the external W3C conformance corpus. Same opt-in contract.
 test-epub-conformance:
-    {{_test_timeout}} cargo test --manifest-path src-tauri/Cargo.toml --test extended_epub conformance::
+    {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml --test extended_epub conformance::
 
 lint: lint-rust lint-frontend lint-electron lint-workflows
 
 lint-rust:
-    cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+    cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 
 lint-frontend:
     pnpm --filter frontend lint
@@ -226,13 +226,13 @@ lint-workflows:
     .build/bin/actionlint
 
 format:
-    cargo fmt --manifest-path src-tauri/Cargo.toml
+    cargo fmt --manifest-path sidecar/Cargo.toml
     pnpm format
 
 format-check: format-check-rust format-check-frontend
 
 format-check-rust:
-    cargo fmt --manifest-path src-tauri/Cargo.toml --check
+    cargo fmt --manifest-path sidecar/Cargo.toml --check
 
 format-check-frontend:
     pnpm format:check

@@ -92,7 +92,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: sidecar
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -101,13 +101,13 @@ jobs:
         run: bash scripts/fetch-pdfium.sh
 
       - name: rustfmt
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+        run: cargo fmt --manifest-path sidecar/Cargo.toml --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path sidecar/Cargo.toml
 
   build:
     name: Release build (Electron shell + sidecar)
@@ -129,7 +129,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: sidecar
 
       - name: Install just
         uses: extractions/setup-just@v4

@@ -4,14 +4,14 @@ pnpm-lock.yaml
 
 # Build outputs
 target/
-src-tauri/target/
+sidecar/target/
 frontend/dist/
 electron/dist/
 .build/
 *.tsbuildinfo
 
 # Generated / vendored artifacts
-src-tauri/pdfium/
+sidecar/pdfium/
 artifacts/
 coverage/
 dist-packages/

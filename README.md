@@ -56,7 +56,7 @@ just build      # release build (renderer, Electron main/preload, sidecar binary
 | `just check`           | format-check → lint → typecheck → tests (daily driver)               |
 
 Individual pieces: `pnpm --filter frontend test`,
-`cargo test --manifest-path src-tauri/Cargo.toml`.
+`cargo test --manifest-path sidecar/Cargo.toml`.
 
 E2E needs the `xvfb` package (`sudo apt install xvfb` on Debian/Ubuntu).
 `just test-e2e` is safe to run from SSH, CI, or anywhere without a desktop
@@ -67,8 +67,8 @@ session. See [docs/testing.md](docs/testing.md).
 ```
 frontend/          React app (presentation only)
 electron/          Electron main + preload (bundled TypeScript)
-src-tauri/         Rust sidecar: rpc, commands, domain, services, repository, db, epub
-src-tauri/migrations/  SQLx migrations (embedded, run automatically)
+sidecar/         Rust sidecar: rpc, commands, domain, services, repository, db, epub
+sidecar/migrations/  SQLx migrations (embedded, run automatically)
 e2e/               Playwright suites, environment bootstrap, watchdog
 tests/fixtures/    committed test data (books/minimal.epub, books/minimal.pdf)
 artifacts/e2e/     E2E failure artifacts (screenshots, logs; gitignored)

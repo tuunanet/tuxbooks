@@ -3,7 +3,7 @@
 The renderer is a plain Vite build of `frontend/`; the Electron main and
 preload processes are bundled by `scripts/build-electron.mjs` (esbuild,
 CJS, `electron` external); the sidecar is a plain Rust binary from the
-`src-tauri/` crate — no `custom-protocol` feature, no `frontend/dist`
+`sidecar/` crate — no `custom-protocol` feature, no `frontend/dist`
 embed, no Tauri context macro. `cargo build`/`test`/`clippy` run without
 any frontend precondition.
 
@@ -37,7 +37,7 @@ the root `package.json` is the released version. Layout in every bundle:
 - `resources/sidecar/tuxbooks`: the release sidecar binary (kept outside
   the asar — it is a real process), with `libpdfium.so` next to it; the
   sidecar probes the executable's directory for PDFium
-  (`src-tauri/src/lib.rs pdfium_library_dirs`).
+  (`sidecar/src/lib.rs pdfium_library_dirs`).
 - Linux installs to `/opt/tuxbooks`, with the desktop entry at
   `usr/share/applications/tuxbooks.desktop` and hicolor icons from
   `build/icons/` (regenerate from `scripts/icon-source.png`, see
@@ -69,9 +69,9 @@ except for that probe).
 
 `pdf/render.rs` rasterizes PDF page 1 to a cover at import time using
 `pdfium-render` (bindings-only); the actual `libpdfium.so` is downloaded
-by `scripts/fetch-pdfium.sh` into `src-tauri/pdfium/` (gitignored). Probe
+by `scripts/fetch-pdfium.sh` into `sidecar/pdfium/` (gitignored). Probe
 order at runtime: `PDFIUM_LIB_DIR` → bundled resources → next to the
-executable → the dev checkout's `src-tauri/pdfium/` → the system loader.
+executable → the dev checkout's `sidecar/pdfium/` → the system loader.
 When nothing binds, imports continue without PDF covers and the cover
 tests skip. Bump `PDFIUM_BUILD` in the script when upgrading
 pdfium-render.

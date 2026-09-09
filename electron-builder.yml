@@ -14,16 +14,16 @@ directories:
 # bundles sit in app.asar/electron/dist; main resolves both relative to its
 # own __dirname. The sidecar is a real process: it must live outside the
 # asar in extraResources, next to the PDFium library it probes at startup
-# (src-tauri/src/lib.rs pdfium_library_dirs includes the binary's directory).
+# (sidecar/src/lib.rs pdfium_library_dirs includes the binary's directory).
 files:
   - electron/dist/**
   - frontend/dist/**
   - package.json
 
 extraResources:
-  - from: src-tauri/target/release/tuxbooks
+  - from: sidecar/target/release/tuxbooks
     to: sidecar/tuxbooks
-  - from: src-tauri/pdfium/libpdfium.so
+  - from: sidecar/pdfium/libpdfium.so
     to: sidecar/libpdfium.so
 
 linux:

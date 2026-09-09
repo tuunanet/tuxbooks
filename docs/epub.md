@@ -1,12 +1,12 @@
 # EPUB layer
 
 The EPUB subsystem has two halves: a small Rust parser used at import time
-(`src-tauri/src/epub/`) and the rendering engine used by the reader
+(`sidecar/src/epub/`) and the rendering engine used by the reader
 (Readium TS Toolkit, in the renderer).
 
 ## Rust import parser
 
-`src-tauri/src/epub/` is a small, dependency-light EPUB reader: `zip` +
+`sidecar/src/epub/` is a small, dependency-light EPUB reader: `zip` +
 `quick-xml` only. It has no runtime (Tauri/Electron) or SQLx imports and
 returns owned data, so parsed values are cheap to move between threads and
 layers.
@@ -183,5 +183,5 @@ links, images, i18n, malformed) regenerated with `just make-epub-fixtures`
 and validated by `just check-epub-fixtures`. See
 [the corpus README](../tests/fixtures/epub/README.md). Tests live in
 `epub/mod.rs`, `epub/metadata.rs`, `epub/parser.rs`, and
-`src-tauri/tests/epub_corpus.rs`, plus the progress-migration fixtures
+`sidecar/tests/epub_corpus.rs`, plus the progress-migration fixtures
 described above.

@@ -49,7 +49,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: sidecar
 
       # Same gates CI's check jobs run before a build: unit/integration
       # tests (Rust + frontend) and the real-binary headless E2E suites. A
@@ -90,7 +90,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: sidecar
 
       - name: Verify the tag matches the bundled version
         run: |

@@ -1,6 +1,6 @@
 # PDF layer
 
-`src-tauri/src/pdf/` is a metadata-only PDF reader built on `lopdf` (pure
+`sidecar/src/pdf/` is a metadata-only PDF reader built on `lopdf` (pure
 Rust, no rendering engine). Like `epub/`, it has no runtime (Tauri/Electron)
 or SQLx imports and returns owned data. The stated reason for the
 dependency: the scanner must index real-world PDF libraries

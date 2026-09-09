@@ -1,7 +1,7 @@
 # Database
 
 SQLite (bundled, via SQLx) at a single file path. Migrations live in
-`src-tauri/migrations/` and are embedded at compile time with
+`sidecar/migrations/` and are embedded at compile time with
 `sqlx::migrate!`; they run automatically in `db::connection::init_pool`,
 so a clean database always converges to the current schema. Add numbered
 `.sql` files; never create schema procedurally at runtime.

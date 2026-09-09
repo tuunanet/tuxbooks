@@ -52,7 +52,7 @@ watchdog arms).
 ## Rust (`cargo test`)
 
 - Tests live next to the code (`#[cfg(test)] mod tests`) plus the
-  integration tests (`src-tauri/tests/`).
+  integration tests (`sidecar/tests/`).
 - Property tests (`proptest`): `parse_epub` never panics on arbitrary
   bytes; the scanner only ever reports `*.epub` files. Keep those
   invariants intact.
@@ -62,7 +62,7 @@ watchdog arms).
   malformed/stale locators, missing EPUB files, older-version records —
   each asserted to land the Readium reader at the same **logical**
   location (small pagination drift allowed). See [epub.md](epub.md).
-- `src-tauri/tests/library_sync.rs` drives the real `notify` watcher
+- `sidecar/tests/library_sync.rs` drives the real `notify` watcher
   against a real database in tempdirs. These tests need the tokio runtime
   to be multi-threaded (`#[tokio::test(flavor = "multi_thread")]`):
   watcher threads drive sqlx work via `Handle::block_on`, which deadlocks
@@ -321,7 +321,7 @@ pass.
   per-page geometry).
 - Exception: `tests/fixtures/books/EBooks/` holds a real user-created
   library (real copyrighted files). It is gitignored and must never be
-  committed. `src-tauri/tests/realistic_library.rs` runs against it and
+  committed. `sidecar/tests/realistic_library.rs` runs against it and
   skips itself when the directory is absent; `REALISTIC_LIBRARY_PATH`
   overrides its location.
 - `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` / `REALISTIC_LIBRARY_PATH`
@@ -351,7 +351,7 @@ check` stream and a CI step. The check byte-compares a fresh generation
   (determinism), verifies manifest checksums/sizes, EPUB version identity
   (2.0 vs 3.0), malformed markers, and enforces the committed size budget
   (100 KB/fixture, 512 KB corpus) with the move-it-to-extended error
-  message. `src-tauri/tests/epub_corpus.rs` additionally pins the
+  message. `sidecar/tests/epub_corpus.rs` additionally pins the
   parser-facing contract on every `cargo test`: valid fixtures parse,
   malformed fixtures are rejected.
 - Extended/conformance: `[[dataset]]` entries in
@@ -362,7 +362,7 @@ check` stream and a CI step. The check byte-compares a fresh generation
   under `.build/fixtures/epub/` (gitignored), and skips the download when
   the cached version's checksum still matches. Entries without verified
   provenance are rejected — checksums are never invented. The first
-  version ships zero configured datasets. `src-tauri/tests/
+  version ships zero configured datasets. `sidecar/tests/
 extended_epub.rs` skips with a notice when no dataset is present.
 - If extended testing is ever added to CI, cache on
   `dataset id + version + archive_sha256` so the corpus is downloaded

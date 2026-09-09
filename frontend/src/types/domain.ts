@@ -1,5 +1,5 @@
 /**
- * Frontend domain types mirroring the Rust domain models (src-tauri/src/domain).
+ * Frontend domain types mirroring the Rust domain models (sidecar/src/domain).
  * IPC DTOs serialize camelCase; these interfaces match that wire format.
  */
 

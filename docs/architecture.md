@@ -73,7 +73,7 @@ the rule that matters is: no domain file imports a runtime crate.
 
 ## Database layer
 
-SQLite via SQLx with embedded migrations (`src-tauri/migrations/`), run
+SQLite via SQLx with embedded migrations (`sidecar/migrations/`), run
 deterministically by `db::connection::init_pool`. All queries are runtime
 SQL (`sqlx::query`), not compile-time checked macros, so builds never
 require a live database. See [database.md](database.md).

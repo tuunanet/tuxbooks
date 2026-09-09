@@ -4,7 +4,7 @@ frontend/dist/
 *.tsbuildinfo
 
 # Rust
-src-tauri/target/
+sidecar/target/
 target/
 
 # Databases / generated artifacts
@@ -45,7 +45,7 @@ tests/fixtures/books/EBooks/
 dist-packages/
 
 # Fetched PDFium shared library for cover extraction (scripts/fetch-pdfium.sh)
-src-tauri/pdfium/
+sidecar/pdfium/
 
 *.swp
 electron/dist/
