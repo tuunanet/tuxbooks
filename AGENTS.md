@@ -10,14 +10,6 @@ files it refers to; before adding anything here, check whether an existing
 doc in `docs/` is the right home for it. If no suitable `.md` exists, create
 one in `docs/` and refer to it from the appropriate section — do not inline.
 
-## Branch state: Electron stack
-
-The Electron migration is complete: the app uses **Electron + Readium
-(EPUB) + MuPDF.js/WASM (PDF)** with the Rust core as a first-class native
-service. `docs/electron-migration.md` records the completed phases. Do not
-add Tauri, foliate-js, or PDF.js dependencies; legacy foliate locators stay
-only in the versioned progress migration adapter.
-
 ## What this project is
 
 Local-first desktop ebook library (bookshelf style). **Rust is the
