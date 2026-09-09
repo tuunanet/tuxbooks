@@ -30,6 +30,71 @@ export function highlightCssColor(color: string | null | undefined): string {
   return isHighlightColor(color) ? HIGHLIGHT_COLORS[color] : HIGHLIGHT_COLORS.yellow;
 }
 
+/**
+ * A highlight operation from the selection toolbar. A color choice creates
+ * a highlight from a fresh selection or recolors the targeted one; `remove`
+ * deletes the targeted highlight annotation outright — never a transparent
+ * recolor, which would leave a dead annotation behind.
+ */
+export type HighlightAction = { type: "setColor"; color: HighlightColor } | { type: "remove" };
+
+/** A live selection (or a clicked highlight) a reader reports to the shell. */
+export interface ReaderSelection {
+  text: string;
+  /** Existing highlight the selection or click targets, if any. */
+  highlightId: number | null;
+}
+
+function intersectionArea(a: AnnotationRect, b: AnnotationRect): number {
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+/**
+ * The existing PDF highlight a text selection targets, if any: the
+ * same-page highlight with the largest total rect overlap, so re-selecting
+ * highlighted text addresses that highlight instead of stacking a new one
+ * on top of it.
+ */
+export function highlightForSelection(
+  highlights: Annotation[],
+  page: number,
+  rects: AnnotationRect[],
+): Annotation | null {
+  let best: { annotation: Annotation; area: number } | null = null;
+  for (const highlight of highlights) {
+    if (highlight.pageNumber !== page) continue;
+    let area = 0;
+    for (const rect of annotationRects(highlight)) {
+      for (const selectionRect of rects) area += intersectionArea(rect, selectionRect);
+    }
+    if (area > 0 && (best === null || area > best.area)) best = { annotation: highlight, area };
+  }
+  return best?.annotation ?? null;
+}
+
+/**
+ * The existing PDF highlight containing a normalized page-space point (a
+ * plain click on highlighted text), if any.
+ */
+export function highlightAtPoint(
+  highlights: Annotation[],
+  page: number,
+  x: number,
+  y: number,
+): Annotation | null {
+  for (const highlight of highlights) {
+    if (highlight.pageNumber !== page) continue;
+    for (const rect of annotationRects(highlight)) {
+      if (x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) {
+        return highlight;
+      }
+    }
+  }
+  return null;
+}
+
 /** The highlight rectangles to draw for one annotation (PDF only). */
 export function annotationRects(annotation: Annotation): AnnotationRect[] {
   return annotation.rects ?? [];

@@ -19,6 +19,26 @@ import {
  * everything from SQLite, so this exercises the persistence contract end
  * to end).
  */
+/**
+ * Select page 1's text-layer spans and release the pointer, so the reader
+ * captures the selection the same way a mouse drag ends.
+ */
+async function selectPageOneText(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const layer = document.querySelector('[data-pdf-text-layer="1"]');
+    const spans = layer ? Array.from(layer.querySelectorAll("span")) : [];
+    if (spans.length === 0) return;
+    const range = document.createRange();
+    range.setStartBefore(spans[0]!);
+    range.setEndAfter(spans[spans.length - 1]!);
+    const selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+}
+
 test.describe("reading annotations", () => {
   test("creates a PDF highlight from a selection, attaches a note, and revisits both after reopen", async ({
     page,
@@ -48,19 +68,7 @@ test.describe("reading annotations", () => {
 
     // Select the page's text through its text layer and release the pointer,
     // so the reader captures the selection the same way a mouse drag ends.
-    await page.evaluate(() => {
-      const layer = document.querySelector('[data-pdf-text-layer="1"]');
-      const spans = layer ? Array.from(layer.querySelectorAll("span")) : [];
-      if (spans.length === 0) return;
-      const range = document.createRange();
-      range.setStartBefore(spans[0]!);
-      range.setEndAfter(spans[spans.length - 1]!);
-      const selection = window.getSelection();
-      if (!selection) return;
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    });
+    await selectPageOneText(page);
 
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
@@ -219,6 +227,85 @@ test.describe("reading annotations", () => {
       await window.tuxbooks!.invoke("delete_annotation", { id });
     }, created.id);
     await closeReaderNavigation(page);
+    await returnToLibrary(page);
+  });
+
+  test("removes a PDF highlight from the palette and the removal persists across reopen", async ({
+    page,
+  }) => {
+    // Order independence: earlier specs in the shared scratch library may
+    // have left highlights on this book — clear them through the bridge
+    // before the reader loads its annotation list.
+    await page.evaluate(async () => {
+      const books = (await window.tuxbooks!.invoke("list_books")) as {
+        id: number;
+        format: string;
+        title: string;
+      }[];
+      const pdf = books.find((book) => book.format === "pdf" && book.title === "A Minimal Manual");
+      if (!pdf) throw new Error("A Minimal Manual is not in the scratch library");
+      const annotations = (await window.tuxbooks!.invoke("list_annotations", {
+        bookId: pdf.id,
+      })) as { id: number; kind: string }[];
+      for (const annotation of annotations) {
+        if (annotation.kind === "highlight") {
+          await window.tuxbooks!.invoke("delete_annotation", { id: annotation.id });
+        }
+      }
+    });
+
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await expect
+      .poll(async () => (await slotStates(page)).length, { timeout: 30000 })
+      .toBeGreaterThan(0);
+    await scrollToSlot(page, 1);
+    await waitForRendered(page, 1, 60000);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const layer = document.querySelector('[data-pdf-text-layer="1"]');
+            return layer !== null && layer.querySelectorAll("span").length > 0;
+          }),
+        { timeout: 30000 },
+      )
+      .toBe(true);
+    await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0);
+
+    // Create a yellow highlight from a real text-layer selection.
+    await selectPageOneText(page);
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("highlight-color-yellow").click();
+    await page
+      .locator("[data-pdf-highlight]")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+
+    // A plain click on the highlighted text addresses it: the palette
+    // offers Remove, and Remove deletes the annotation — the overlay
+    // disappears and the underlying text keeps working.
+    await page.locator('[data-pdf-text-layer="1"] span').first().click();
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("highlight-remove")).toBeVisible();
+    await page.getByTestId("highlight-remove").click();
+    await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0, { timeout: 10000 });
+    await expect(page.getByTestId("selection-toolbar")).toBeHidden({ timeout: 10000 });
+
+    // The same text is selectable again and nothing is targeted.
+    await selectPageOneText(page);
+    await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("highlight-remove")).toHaveCount(0);
+    await page.getByRole("button", { name: "Dismiss selection" }).click();
+
+    // Reopen: the removal was persisted — no highlight comes back.
+    await returnToLibrary(page);
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await expect
+      .poll(async () => (await slotStates(page)).length, { timeout: 30000 })
+      .toBeGreaterThan(0);
+    await scrollToSlot(page, 1);
+    await waitForRendered(page, 1, 60000);
+    await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0, { timeout: 10000 });
     await returnToLibrary(page);
   });
 });

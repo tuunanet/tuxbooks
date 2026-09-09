@@ -12,14 +12,14 @@
     "semantic_hash": ""
   },
   "e2e/package.json": {
-    "mtime": 1788944394.0736115,
-    "seen": 1788946721.1320357,
+    "mtime": 1788957442.4670706,
+    "seen": 1788957444.1512468,
     "ast_hash": "9a50c589d3902129a1dde03cdaf6186b",
     "semantic_hash": ""
   },
   "e2e/setup/environment.ts": {
-    "mtime": 1788944080.063871,
-    "seen": 1788946721.1320488,
+    "mtime": 1788957442.4674206,
+    "seen": 1788957444.1512563,
     "ast_hash": "f96311b388b71495232e790809f0e4a3",
     "semantic_hash": ""
   },
@@ -36,9 +36,9 @@
     "semantic_hash": ""
   },
   "e2e/specs/annotations.e2e.ts": {
-    "mtime": 1788934051.5547419,
-    "seen": 1788934052.0760336,
-    "ast_hash": "4b7b1073f0e6bad32edb1e128076d9d7",
+    "mtime": 1788959932.2846072,
+    "seen": 1788960249.3605483,
+    "ast_hash": "a1c9c8000d84370ccb2e49344cfdf360",
     "semantic_hash": ""
   },
   "e2e/specs/bench-reader.e2e.ts": {
@@ -78,8 +78,8 @@
     "semantic_hash": ""
   },
   "e2e/specs/library.e2e.ts": {
-    "mtime": 1788944433.7364526,
-    "seen": 1788946721.1320932,
+    "mtime": 1788957442.467605,
+    "seen": 1788957444.1512926,
     "ast_hash": "8c3292f3ae20428bb55cf311527067b8",
     "semantic_hash": ""
   },
@@ -126,8 +126,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookCard.tsx": {
-    "mtime": 1788947851.654745,
-    "seen": 1788950271.1029055,
+    "mtime": 1788957442.4681137,
+    "seen": 1788957444.1513252,
     "ast_hash": "2834f11cbf44828a84acc6868a2c77ec",
     "semantic_hash": ""
   },
@@ -150,8 +150,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/books/BookListItem.tsx": {
-    "mtime": 1788949910.3924885,
-    "seen": 1788950271.1029134,
+    "mtime": 1788957442.4682572,
+    "seen": 1788957444.1513338,
     "ast_hash": "9a23796a66c142ce7fd6862169417f32",
     "semantic_hash": ""
   },
@@ -174,8 +174,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/layout/Sidebar.tsx": {
-    "mtime": 1788947080.9834137,
-    "seen": 1788947250.442854,
+    "mtime": 1788957442.468372,
+    "seen": 1788957444.1513424,
     "ast_hash": "3837b62bf33308ea93bad69081d20e40",
     "semantic_hash": ""
   },
@@ -192,8 +192,8 @@
     "semantic_hash": ""
   },
   "frontend/src/components/library/EmptyLibraryState.tsx": {
-    "mtime": 1788946218.7502937,
-    "seen": 1788946721.1321497,
+    "mtime": 1788957442.4684637,
+    "seen": 1788957444.1513479,
     "ast_hash": "ee4f9bda0d34455d78180925b29dfdbc",
     "semantic_hash": ""
   },
@@ -228,9 +228,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/EpubReader.tsx": {
-    "mtime": 1788934051.5587418,
-    "seen": 1788934052.0761087,
-    "ast_hash": "0bbd7691570d30d7efbc2b907e14592d",
+    "mtime": 1788959490.8985116,
+    "seen": 1788960249.3606045,
+    "ast_hash": "a299dd2064fd5915a0040108dba701d4",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/ReaderAnnotationTabs.tsx": {
@@ -258,21 +258,21 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/ReaderShell.tsx": {
-    "mtime": 1788934051.5587418,
-    "seen": 1788934052.07612,
-    "ast_hash": "86186052e786037e1b9f5425e40eac40",
+    "mtime": 1788960099.9218838,
+    "seen": 1788960249.360612,
+    "ast_hash": "f44595950c4465cb1d8bfac111be7704",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/SelectionToolbar.tsx": {
-    "mtime": 1788580166.233316,
-    "seen": 1788851270.1119642,
-    "ast_hash": "406bd712c3cd3970999789d171d22a36",
+    "mtime": 1788959379.2119935,
+    "seen": 1788960249.360614,
+    "ast_hash": "b6cb12a4230992228881fb65d7339eb5",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/annotationModel.ts": {
-    "mtime": 1788934051.5587418,
-    "seen": 1788934052.0761237,
-    "ast_hash": "3529ab2eb4c45830daebc1dc0fb5a72e",
+    "mtime": 1788959988.0036004,
+    "seen": 1788960249.3606162,
+    "ast_hash": "438d98e74f4d20de346b8f15f5f27014",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/epub/hooks/useEpubDocument.ts": {
@@ -312,9 +312,9 @@
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfReader.tsx": {
-    "mtime": 1788934051.5597417,
-    "seen": 1788934052.0761383,
-    "ast_hash": "2af670b9604e5ded173dbded5b892ca2",
+    "mtime": 1788959988.2655811,
+    "seen": 1788960249.3606257,
+    "ast_hash": "ee318b7bb43b3f14f84bba3297d3b8f6",
     "semantic_hash": ""
   },
   "frontend/src/components/reader/pdf/PdfSidebar.tsx": {
@@ -696,8 +696,8 @@
     "semantic_hash": ""
   },
   "frontend/tests/BookCard.test.tsx": {
-    "mtime": 1788947896.265566,
-    "seen": 1788950271.1030283,
+    "mtime": 1788957442.4685757,
+    "seen": 1788957444.1515138,
     "ast_hash": "c7bf91cc1b995d3745c7c26eca79ebd4",
     "semantic_hash": ""
   },
@@ -726,9 +726,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/EpubReader.test.tsx": {
-    "mtime": 1788934051.5657418,
-    "seen": 1788934052.0762768,
-    "ast_hash": "617955d4608818853ae02eef22c8f205",
+    "mtime": 1788960082.3199599,
+    "seen": 1788960249.3607144,
+    "ast_hash": "e134ca952dbc1f8a4714d13ab558ec7f",
     "semantic_hash": ""
   },
   "frontend/tests/GlobalSearch.test.tsx": {
@@ -750,9 +750,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/PdfReader.test.tsx": {
-    "mtime": 1788935379.4612465,
-    "seen": 1788935524.2506936,
-    "ast_hash": "84c322c1a5735a043d0afbf976e360ef",
+    "mtime": 1788959989.5023603,
+    "seen": 1788960249.3607206,
+    "ast_hash": "70f4da5eb9b72e2314acecdbe5fb02c5",
     "semantic_hash": ""
   },
   "frontend/tests/PdfSidebar.test.tsx": {
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/ReaderShell.test.tsx": {
-    "mtime": 1788934051.566742,
-    "seen": 1788934052.0762925,
-    "ast_hash": "62d1d5a5840d680b229ef857e5d4c2f4",
+    "mtime": 1788959778.9802687,
+    "seen": 1788960249.360725,
+    "ast_hash": "33cd40955561bebc4f9fc7d36ba687f0",
     "semantic_hash": ""
   },
   "frontend/tests/SettingsShell.test.tsx": {
@@ -786,9 +786,9 @@
     "semantic_hash": ""
   },
   "frontend/tests/annotations.test.tsx": {
-    "mtime": 1788934051.566742,
-    "seen": 1788934052.0763004,
-    "ast_hash": "b2ebd1fc25009c24cb81de0397785971",
+    "mtime": 1788959566.127187,
+    "seen": 1788960249.3607302,
+    "ast_hash": "f71a2a212126e62ea029f5a9d85d49ac",
     "semantic_hash": ""
   },
   "frontend/tests/appState.test.ts": {
@@ -900,8 +900,8 @@
     "semantic_hash": ""
   },
   "scripts/check-deb.sh": {
-    "mtime": 1788945035.1100407,
-    "seen": 1788946721.1324172,
+    "mtime": 1788957442.4790688,
+    "seen": 1788957444.1515846,
     "ast_hash": "ff8fa7abf546d4019f6e85ab423a80de",
     "semantic_hash": ""
   },
@@ -1026,15 +1026,15 @@
     "semantic_hash": ""
   },
   "docs/epub.md": {
-    "mtime": 1788934051.5527418,
-    "seen": 1788934052.0764043,
-    "ast_hash": "6e58d37a3ee22f3ebe3af5af1dd2562e",
+    "mtime": 1788959975.443421,
+    "seen": 1788960249.360865,
+    "ast_hash": "4659147ac41bee48aadf867f5b7314db",
     "semantic_hash": ""
   },
   "docs/pdf.md": {
-    "mtime": 1788934051.5527418,
-    "seen": 1788934052.0764065,
-    "ast_hash": "d9de72672837882760df789d85a6bb6b",
+    "mtime": 1788959948.9985352,
+    "seen": 1788960249.36087,
+    "ast_hash": "c37b1da0ee9add50d5b60a25875d33fa",
     "semantic_hash": ""
   },
   "docs/performance.md": {
@@ -1056,8 +1056,8 @@
     "semantic_hash": ""
   },
   "docs/release.md": {
-    "mtime": 1788946267.6140978,
-    "seen": 1788946721.1326292,
+    "mtime": 1788957442.466717,
+    "seen": 1788957444.1517746,
     "ast_hash": "832cf65b44c4789939f092a7b8651d37",
     "semantic_hash": ""
   },
@@ -1086,14 +1086,14 @@
     "semantic_hash": ""
   },
   "docs/testing.md": {
-    "mtime": 1788946090.5718079,
-    "seen": 1788946721.132639,
+    "mtime": 1788957442.46694,
+    "seen": 1788957444.1517847,
     "ast_hash": "6241d06be5deebd504fbfeae98b5448e",
     "semantic_hash": ""
   },
   "frontend/index.html": {
-    "mtime": 1788943991.1062276,
-    "seen": 1788946721.1326458,
+    "mtime": 1788957442.467994,
+    "seen": 1788957444.1517913,
     "ast_hash": "2fbe4b524545c7b14a7b943db8e5448c",
     "semantic_hash": ""
   },
@@ -1122,14 +1122,14 @@
     "semantic_hash": ""
   },
   "e2e/fixtures/electron-app.ts": {
-    "mtime": 1788944038.3360384,
-    "seen": 1788946721.1320286,
+    "mtime": 1788957442.4670706,
+    "seen": 1788957444.1512413,
     "ast_hash": "10164975efeca99046706c042ace1934",
     "semantic_hash": ""
   },
   "e2e/playwright.config.ts": {
-    "mtime": 1788944394.1286113,
-    "seen": 1788946721.1320422,
+    "mtime": 1788957442.4673038,
+    "seen": 1788957444.151252,
     "ast_hash": "26dfecfdd21f84c8157f36f706e10eda",
     "semantic_hash": ""
   },
@@ -1188,8 +1188,8 @@
     "semantic_hash": ""
   },
   "electron/main/index.ts": {
-    "mtime": 1788951042.4219484,
-    "seen": 1788951310.2256322,
+    "mtime": 1788957442.4679039,
+    "seen": 1788957444.1513083,
     "ast_hash": "b9017c0e83dcb9c5f7394384d55fd25a",
     "semantic_hash": ""
   },
@@ -1686,8 +1686,8 @@
     "semantic_hash": ""
   },
   "electron-builder.yml": {
-    "mtime": 1788944019.8771124,
-    "seen": 1788946721.1326425,
+    "mtime": 1788957442.4676933,
+    "seen": 1788957444.151788,
     "ast_hash": "4f372718435e0c2108d8fd42ac018505",
     "semantic_hash": ""
   },
@@ -1806,15 +1806,21 @@
     "semantic_hash": ""
   },
   "e2e/specs/desktop-shell.e2e.ts": {
-    "mtime": 1788946582.5728347,
-    "seen": 1788946721.1320784,
+    "mtime": 1788957442.4675212,
+    "seen": 1788960249.3605554,
     "ast_hash": "379f5cc9ef422a5619e0268b8609d45a",
     "semantic_hash": ""
   },
   "frontend/tests/BookListItem.test.tsx": {
-    "mtime": 1788949475.1112342,
-    "seen": 1788950271.103033,
+    "mtime": 1788957442.4686432,
+    "seen": 1788960249.3607094,
     "ast_hash": "fe27c11244f541b39d01b3c35aff5b8e",
+    "semantic_hash": ""
+  },
+  "docs/images/tuxbooks.png": {
+    "mtime": 1788958958.5938082,
+    "seen": 1788960249.360897,
+    "ast_hash": "e0f044e0c67d1913b569650a753b3646",
     "semantic_hash": ""
   }
 }

@@ -5,7 +5,9 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import {
   annotationRects,
   byKind,
+  highlightAtPoint,
   highlightCssColor,
+  highlightForSelection,
   isBookmarkAtLocator,
   isBookmarkAtPage,
   normalizeRect,
@@ -46,6 +48,42 @@ describe("annotationModel", () => {
     // and extents must stay inside 0..1.
     const bleeding = normalizeRect(new DOMRect(90, 190, 800, 700), 100, 200, 400, 600);
     expect(bleeding).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+  });
+
+  it("resolves the highlight a selection overlaps, largest overlap first", () => {
+    const corner = makeAnnotation({
+      id: 1,
+      pageNumber: 2,
+      rects: [{ x: 0.8, y: 0.8, width: 0.1, height: 0.1 }],
+    });
+    const large = makeAnnotation({
+      id: 2,
+      pageNumber: 2,
+      rects: [{ x: 0, y: 0, width: 0.5, height: 0.5 }],
+    });
+    const otherPage = makeAnnotation({
+      id: 3,
+      pageNumber: 3,
+      rects: [{ x: 0, y: 0, width: 1, height: 1 }],
+    });
+    const selection = [{ x: 0.1, y: 0.1, width: 0.4, height: 0.4 }];
+
+    expect(highlightForSelection([corner, large, otherPage], 2, selection)).toBe(large);
+    expect(highlightForSelection([corner], 2, selection)).toBeNull();
+  });
+
+  it("resolves the highlight under a clicked page point", () => {
+    const highlight = makeAnnotation({
+      id: 5,
+      pageNumber: 1,
+      rects: [{ x: 0.2, y: 0.3, width: 0.4, height: 0.05 }],
+    });
+    expect(highlightAtPoint([highlight], 1, 0.3, 0.32)).toBe(highlight);
+    // Inside the rect's x span but below its bottom edge, another page, and
+    // highlight-free pages all miss.
+    expect(highlightAtPoint([highlight], 1, 0.3, 0.4)).toBeNull();
+    expect(highlightAtPoint([highlight], 2, 0.3, 0.32)).toBeNull();
+    expect(highlightAtPoint([], 1, 0.3, 0.32)).toBeNull();
   });
 });
 

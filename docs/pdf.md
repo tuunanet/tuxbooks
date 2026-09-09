@@ -302,13 +302,26 @@ accepts sub-pixel bleed), and the whole candidate — page, text, rects — is
 stored at capture time. This matters: clicking the selection toolbar's
 color swatch collapses the native selection before the click handler runs,
 so creation must not re-read the live selection (the reader's `pointerup`
-capture also ignores events originating inside the toolbar).
+capture also ignores events originating inside the toolbar). The upward
+report carries the existing highlight the selection targets, if any: the
+same-page highlight with the largest rect overlap
+(`highlightForSelection`), or the highlight under a plain click
+(`highlightAtPoint`).
 
 Persisted highlights render through `PdfHighlightOverlay`: absolutely
 positioned translucent rects in normalized page space, so they track the
 canvas at every zoom without recomputation, drawn for the open book's
 annotation list (grouped by page in PdfReader, rendered inside the page
-wrapper). Bookmarks persist the anchor page + in-page fraction reported by
+wrapper). The overlay stays pointer-transparent: a plain click resolves
+through the selection handler instead of overlay events.
+
+Existing highlights are edited from the same selection toolbar. When the
+reported target has a highlight, the toolbar switches from creating to
+editing — color swatches recolor the annotation (`update_annotation`), and
+a distinct Remove action deletes it (`delete_annotation`, the same path as
+the navigation drawer). Removal is a real deletion, never a transparent
+recolor — a dead annotation would linger in state, search, and the
+drawer. Bookmarks persist the anchor page + in-page fraction reported by
 the scroll tracker — a coarse page-local position, per the data model.
 
 ### Worker

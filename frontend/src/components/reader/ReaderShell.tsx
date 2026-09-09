@@ -16,7 +16,7 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
-import { byKind, type HighlightColor } from "./annotationModel";
+import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
 import {
   bookmarkInputFor,
   isBookmarkAtPosition,
@@ -193,10 +193,17 @@ export function ReaderShell() {
   );
 
   // Selection toolbar state, tagged with the book whose reader reported it
-  // (readers remount per book, so a stale book can never write here).
-  const [selection, setSelection] = useState<{ bookId: number; text: string } | null>(null);
-  const activeSelection =
-    selection !== null && selection.bookId === book?.id ? { text: selection.text } : null;
+  // (readers remount per book, so a stale book can never write here). The
+  // report carries the existing highlight the selection or click targets,
+  // which flips the toolbar from creating to editing.
+  const [selection, setSelection] = useState<(ReaderSelection & { bookId: number }) | null>(null);
+  const activeSelection = useMemo(
+    () =>
+      selection !== null && selection.bookId === book?.id
+        ? { text: selection.text, highlightId: selection.highlightId }
+        : null,
+    [selection, book?.id],
+  );
 
   const activePosition =
     reportedPosition !== null && reportedPosition.bookId === book?.id
@@ -225,12 +232,34 @@ export function ReaderShell() {
     },
     [create],
   );
-  const handleSelectionFrom = useCallback((id: number, text: string | null) => {
-    setSelection(text === null ? null : { bookId: id, text });
+  const handleSelectionFrom = useCallback((id: number, reported: ReaderSelection | null) => {
+    setSelection(reported === null ? null : { bookId: id, ...reported });
   }, []);
-  const handleCreateHighlightColor = useCallback((color: HighlightColor) => {
-    adapterRef.current?.annotations.createHighlight(color);
-  }, []);
+  // An existing highlight is edited in place: a color choice recolors the
+  // annotation, Remove deletes it outright — never a transparent recolor,
+  // which would leave a dead annotation behind.
+  const applyHighlightAction = useCallback(
+    (annotationId: number, action: HighlightAction) => {
+      if (action.type === "remove") void remove(annotationId);
+      else void update(annotationId, { color: action.color });
+    },
+    [remove, update],
+  );
+  const handleHighlightAction = useCallback(
+    (action: HighlightAction) => {
+      const target = activeSelection;
+      if (target === null) return;
+      if (target.highlightId !== null) {
+        applyHighlightAction(target.highlightId, action);
+        adapterRef.current?.annotations.clearSelection();
+        return;
+      }
+      if (action.type === "setColor") {
+        adapterRef.current?.annotations.createHighlight(action.color);
+      }
+    },
+    [activeSelection, applyHighlightAction],
+  );
   const handleDismissSelection = useCallback(() => {
     adapterRef.current?.annotations.clearSelection();
   }, []);
@@ -383,9 +412,7 @@ export function ReaderShell() {
               onSearchDone={finishSearchFrom}
               highlights={highlights}
               onCreateHighlight={handleCreateHighlight}
-              onSelectionChange={(sel) =>
-                handleSelectionFrom(book.id, sel === null ? null : sel.text)
-              }
+              onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
             />
           ) : (
             <PdfReader
@@ -401,9 +428,7 @@ export function ReaderShell() {
               onSearchDone={finishSearchFrom}
               highlights={highlights}
               onCreateHighlight={handleCreateHighlight}
-              onSelectionChange={(sel) =>
-                handleSelectionFrom(book.id, sel === null ? null : sel.text)
-              }
+              onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
             />
           )}
         </main>
@@ -447,7 +472,7 @@ export function ReaderShell() {
 
       <SelectionToolbar
         selection={activeSelection}
-        onCreate={handleCreateHighlightColor}
+        onAction={handleHighlightAction}
         onDismiss={handleDismissSelection}
       />
     </div>
