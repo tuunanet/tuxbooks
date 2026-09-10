@@ -1,12 +1,12 @@
 # TuxBooks Roadmap
 
-TuxBooks is approaching its first public release.
+TuxBooks shipped its first public release (0.0.1) in September 2026 and is in active pre-1.0 development.
 
 The current focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## 🚧 Before 0.0.1 — Stabilize & Polish
+## 🚧 Before 0.0.2 — Stabilize & Polish
 
-The immediate goal is to squash remaining bugs and finish the smaller pieces needed for a solid first release.
+The immediate goal is to squash remaining bugs and finish the smaller pieces needed for a solid next release.
 
 ### Core reliability
 
@@ -31,9 +31,9 @@ The immediate goal is to squash remaining bugs and finish the smaller pieces nee
 
 - Complete the remaining pre-release testing
 - Verify packaging and installation on supported Linux environments
-- Publish the first stable release
+- Publish the next release
 
-## 🌱 After 0.0.1
+## 🌱 After 0.0.2
 
 Once the core experience is solid, development can move toward larger features and quality-of-life improvements.
 
