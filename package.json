@@ -15,7 +15,8 @@
     "lint": "pnpm --filter frontend lint && tsc -p electron --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "pnpm --filter frontend typecheck && tsc -p electron --noEmit"
+    "typecheck:frontend": "tsc -p frontend --noEmit",
+    "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -23,7 +24,7 @@
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
     "prettier": "^3.6.2",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@10.34.5",
   "desktopName": "tuxbooks.desktop"

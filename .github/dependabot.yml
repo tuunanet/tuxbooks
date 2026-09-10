@@ -23,11 +23,15 @@
 # re-proven under Rolldown before vite 8 lands. Bump vite together with the
 # vitest migration, not before.
 #
-# The `typescript` ignore is the PR #28 decision: TS 7 is the typescript-go
+# The `typescript` ignore was the PR #28 decision: TS 7 is the typescript-go
 # rewrite; typescript-eslint 8.x refuses to run on it ("does not support TS
-# 7.0" — hard exit in the lint stream, PR #28). One major at a time: land 6.x
-# when typescript-eslint supports it, then evaluate 7. Widen the ignored
-# range as the toolchain catches up.
+# 7.0" — hard exit in the lint stream, PR #28). Superseded 2026-09-10 by
+# route A (docs/migrations/typescript-7.md, "Unblocking approaches"): the
+# root build compiler is typescript ^7.0.2 and flows with normal updates;
+# the frontend pins typescript@6.0.3 exactly as the typescript-eslint peer
+# (an exact pin is inert to Dependabot — do not widen it; 6.1.0 exits tse's
+# peer range). Retire the pin when typescript-eslint lands TS 7 support
+# (#10940).
 #
 # Minor+patch npm updates are grouped into one PR (the 2026-09-10 batch was
 # nine separate PRs for eight packages); majors stay individual because they
@@ -51,9 +55,6 @@ updates:
         versions: [">=4"]
       - dependency-name: "vite"
         versions: [">=8"]
-      # PR #28: TS 7 blocked by typescript-eslint (see above).
-      - dependency-name: "typescript"
-        versions: [">=7"]
       # PR #26: plugin-react 6.x peers vite ^8 only — rides the vite/vitest
       # migration.
       - dependency-name: "@vitejs/plugin-react"
