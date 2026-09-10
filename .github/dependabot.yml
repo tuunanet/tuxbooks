@@ -11,6 +11,10 @@
 # (books, layout, settings, lib, hooks) without any real coverage loss.
 # Revisit when ast-v8-to-istanbul attributes JSX-transformed statements
 # correctly — until then every vitest >= 4 PR is noise.
+#
+# The @vitest/coverage-* ignore is the same decision, other end of the
+# marriage: the provider is version-welded to vitest, so it must move in the
+# same migration (PR #21 proposed 5.0.0 against vitest 3.2.7).
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -21,6 +25,8 @@ updates:
     # range together with that decision.
     ignore:
       - dependency-name: "vitest"
+        versions: [">=4"]
+      - dependency-name: "@vitest/coverage-*"
         versions: [">=4"]
   - package-ecosystem: "github-actions"
     directory: "/"
