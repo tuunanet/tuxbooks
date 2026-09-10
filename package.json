@@ -19,7 +19,7 @@
     "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.4.1",
     "electron": "^44.2.0",
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
