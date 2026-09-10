@@ -6,6 +6,15 @@ appId: com.tuxbooks.app
 productName: TuxBooks
 copyright: GPL-3.0-or-later
 
+# The published AppImage name is pinned to the lowercase technical
+# identifier (docs/release.md artifact table, the release workflow's
+# checksums + upload globs); electron-builder's default would derive
+# `TuxBooks-<version>.AppImage` from the productName. Top-level block:
+# per-target options (like deb/rpm) are siblings of the platform
+# sections, and linux.artifactName would also rename the deb.
+appImage:
+  artifactName: tuxbooks-${version}.${ext}
+
 directories:
   output: dist-packages
   buildResources: build

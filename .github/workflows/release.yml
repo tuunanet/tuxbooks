@@ -151,8 +151,8 @@ jobs:
           Or run the portable AppImage (no installation):
 
           \`\`\`
-          chmod +x tuxbooks_${version}_amd64.AppImage
-          ./tuxbooks_${version}_amd64.AppImage
+          chmod +x tuxbooks_${version}.AppImage
+          ./tuxbooks_${version}.AppImage
           \`\`\`
 
           SHA256SUMS.txt verifies the downloads. Build from source or read the
