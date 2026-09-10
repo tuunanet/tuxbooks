@@ -121,7 +121,9 @@ jobs:
       - name: Build Debian and AppImage bundles
         run: |
           pnpm install --frozen-lockfile
-          just package deb AppImage
+          # Quoted: `package` takes one TARGETS argument; unquoted, just
+          # would read the second token as another recipe to run.
+          just package "deb AppImage"
 
       - name: Packaging gate
         run: just check-deb
