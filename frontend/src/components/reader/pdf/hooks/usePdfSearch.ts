@@ -71,7 +71,7 @@ export function usePdfSearch({
         let totalMatches = 0;
         for (let page = 1; page <= pdfDocument.numPages; page++) {
           if (generation !== generationRef.current) return;
-          let text = "";
+          let text: string;
           try {
             text = await pageText(page);
           } catch (error) {
