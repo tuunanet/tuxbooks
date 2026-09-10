@@ -55,6 +55,11 @@ body {
   max-width: 780px;
 }
 
+/* Wider container for the screenshot gallery so each shot stays large */
+.wrap--wide {
+  max-width: 1360px;
+}
+
 h1,
 h2,
 h3 {
@@ -361,8 +366,17 @@ code {
 
 .shots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
   gap: 24px;
+}
+
+/* Two-up grid: center a lone trailing screenshot in its own row */
+@media (min-width: 1032px) {
+  .shots .shot:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: calc(50% - 12px);
+  }
 }
 
 .shot {

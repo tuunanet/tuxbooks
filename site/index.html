@@ -181,11 +181,10 @@
       </section>
 
       <section class="section section--alt" id="screenshots">
-        <div class="wrap">
+        <div class="wrap wrap--wide">
           <h2>Screenshots</h2>
           <p class="section-lede">
-            Drop PNGs into <code>site/img/</code> with these names and they appear here
-            automatically.
+            Early development screenshots of TuxBooks in action.
           </p>
           <div class="shots">
             <figure class="shot">
@@ -217,6 +216,21 @@
                 <strong>img/pdf-reader.png</strong><span>The PDF reader in action</span>
               </div>
               <figcaption>The PDF reader</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="img/epub-reader.png"
+                alt="TuxBooks EPUB reader: a two-page spread with highlighted passages"
+                loading="lazy"
+                onerror="
+                  this.closest('figure').classList.add('shot--missing');
+                  this.remove();
+                "
+              />
+              <div class="shot-ph">
+                <strong>img/epub-reader.png</strong><span>The EPUB reader in action</span>
+              </div>
+              <figcaption>The EPUB reader</figcaption>
             </figure>
           </div>
         </div>

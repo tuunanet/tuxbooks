@@ -5,6 +5,7 @@ site automatically (no code changes needed):
 
 - `library.png` — the library / bookshelf view
 - `pdf-reader.png` — the PDF reader in action
+- `epub-reader.png` — the EPUB reader in action
 
 Recommendations:
 
