@@ -18,7 +18,6 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "types": [],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
