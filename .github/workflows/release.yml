@@ -34,7 +34,7 @@ jobs:
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v6
         with:
