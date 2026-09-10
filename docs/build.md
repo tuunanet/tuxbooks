@@ -20,6 +20,19 @@ any frontend precondition.
   installed; the deb and AppImage targets are self-contained.
 - `just check-deb` — the packaging gate (below).
 
+## Electron runtime binary
+
+Since electron 44, the npm package publishes no `postinstall` script, so
+`pnpm install` no longer downloads the platform runtime binary on its own
+(the old `install.js` postinstall is now the explicit `install-electron`
+bin). The root `package.json` wires a `postinstall` hook that runs
+`node node_modules/electron/install.js` to restore that behavior — it is
+idempotent (exits early when `dist/` already matches the installed
+version) and is what fresh clones, CI checkouts, and `just dev`/`just
+test-e2e` rely on. If pnpm ever reports a missing
+`node_modules/electron/dist`, run the hook manually:
+`pnpm exec install-electron`.
+
 ## Electron bundles
 
 `scripts/build-electron.mjs` produces `electron/dist/main.cjs` and

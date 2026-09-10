@@ -6,6 +6,7 @@
   "description": "Local-first ebook library manager (bookshelf style) built with Electron + React + a Rust sidecar.",
   "main": "electron/dist/main.cjs",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "dev:electron": "node scripts/build-electron.mjs && electron .",
     "build:electron": "node scripts/build-electron.mjs",
     "build": "pnpm --filter frontend build",
