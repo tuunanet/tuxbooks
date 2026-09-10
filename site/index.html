@@ -226,44 +226,70 @@
         <div class="wrap wrap--narrow">
           <h2>Roadmap</h2>
           <p class="section-lede">
-            Newest first. The detailed history of milestones 1&ndash;11 lives in
+            TuxBooks is approaching its first public release. The app already works day to day
+            &mdash; the focus now is not on adding lots of new features, but on making the existing
+            experience reliable, polished, and pleasant to use. The full roadmap lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
             <li class="mile milestone--now">
-              <span class="mile-status">Current</span>
-              <h3>Milestone 12 &middot; A snappier frontend</h3>
+              <span class="mile-status">Now &middot; Before 0.0.1</span>
+              <h3>Stabilize &amp; polish</h3>
               <p>
-                We are rapidly iterating on faster, snappier frontends, and the current iteration is
-                the most promising one yet: an Electron shell with the Readium EPUB engine and MuPDF
-                for PDFs, over the same Rust core that powers your library today. The goal is a
-                library and readers that feel instant &mdash; with your books, details, and reading
-                progress carried over untouched.
+                Squash the remaining bugs and finish the smaller pieces needed for a solid first
+                release, in four areas:
               </p>
+              <ul class="focus-grid">
+                <li>
+                  <strong>Core reliability</strong>
+                  <span>
+                    Fix remaining library, import, sync, and persistence bugs and reader
+                    edge-case crashes; keep reading progress reliable across restarts.
+                  </span>
+                </li>
+                <li>
+                  <strong>Reader polish</strong>
+                  <span>
+                    Faster, more responsive PDF and EPUB reading; smooth out navigation, search,
+                    annotation, and rendering edge cases; refine reader controls.
+                  </span>
+                </li>
+                <li>
+                  <strong>Library polish</strong>
+                  <span>
+                    Make grid, list, and detail views consistent; polish collections, metadata
+                    editing, covers, and reading-progress UI; remove rough edges and dead ends.
+                  </span>
+                </li>
+                <li>
+                  <strong>Release readiness</strong>
+                  <span>
+                    Complete pre-release testing, verify packaging and installation on supported
+                    Linux environments, and publish the first stable release.
+                  </span>
+                </li>
+              </ul>
             </li>
             <li class="mile milestone--next">
-              <span class="mile-status">Next</span>
-              <h3>Milestone 13 &middot; Installable releases for the new stack</h3>
+              <span class="mile-status">Later &middot; After 0.0.1</span>
+              <h3>What may come next</h3>
               <p>
-                Once the new frontend lands, installable releases follow it: a .deb for Ubuntu and a
-                portable AppImage for everything else, built and published automatically for every
-                release.
+                Once the core experience is solid, development can move toward larger features and
+                quality-of-life improvements &mdash; directions being explored, not commitments:
               </p>
-            </li>
-            <li class="mile milestone--done">
-              <span class="mile-status">Shipped</span>
-              <h3>Milestones 1&ndash;11 &middot; The first-generation app</h3>
-              <p>
-                A complete local-first library: the bookshelf with covers and collections, EPUB and
-                PDF readers that remember your place, library-wide and in-book search, bookmarks,
-                highlights and notes, metadata curation, and installable Linux packages. Every one
-                of these features carries into the new frontend as it lands.
-              </p>
+              <ul class="chips">
+                <li>More powerful library organization</li>
+                <li>Improved reading customization</li>
+                <li>Additional ebook formats</li>
+                <li>Better import &amp; metadata workflows</li>
+                <li>Performance improvements</li>
+                <li>Accessibility &amp; usability</li>
+              </ul>
             </li>
           </ol>
           <p class="principles">
-            Free software under GPL&#8209;3.0 &middot; Local-first &middot; Private by default
-            &middot; One milestone at a time
+            The roadmap is intentionally flexible &mdash; quality and a great reading experience
+            take priority over feature count.
           </p>
         </div>
       </section>
