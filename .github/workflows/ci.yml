@@ -20,6 +20,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# A merged PR fires both its pull_request run (head SHA) and a push run on
+# the merge commit. When the branch was current, the merge commit has the
+# exact tree the PR run already verified — re-running the whole pipeline on
+# it is pure duplicate compute. Merged-PR pushes are therefore skipped: any
+# job runs unless this is a push of a web-UI merge commit. Squash merges
+# and direct pushes never match and always run (release.yml re-verifies
+# tags with the full gate regardless).
 env:
   CARGO_TERM_COLOR: always
 
@@ -28,6 +35,7 @@ jobs:
     name: Workflows (actionlint)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
     steps:
       - uses: actions/checkout@v5
 
@@ -40,6 +48,7 @@ jobs:
     name: Frontend (lint, typecheck, test)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
     steps:
       - uses: actions/checkout@v5
 
@@ -70,6 +79,7 @@ jobs:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
     steps:
       - uses: actions/checkout@v5
 
@@ -78,13 +88,9 @@ jobs:
       - name: EPUB fixture guardrails
         run: python3 scripts/make-epub-fixtures.py --check
 
-      - uses: pnpm/action-setup@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-
+      # Pure Rust (no build.rs, no Node involvement — docs/architecture.md):
+      # no Node/pnpm setup here, only the toolchain, the cargo cache, and
+      # the PDFium shared library the PDF cover tests load.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -93,9 +99,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: sidecar
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Fetch PDFium (PDF cover tests)
         run: bash scripts/fetch-pdfium.sh
@@ -114,6 +117,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [frontend, rust]
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
     steps:
       - uses: actions/checkout@v5
 
@@ -140,11 +144,11 @@ jobs:
           just build
 
       # Packaging gate (docs/release.md): a packaging regression fails the
-      # build like any other test. CI verifies the deb target; the rpm needs
-      # rpmbuild and the AppImage needs APPIMAGE_EXTRACT_AND_RUN, both wired
-      # into the release workflow's full `just package` run.
+      # build like any other test. CI verifies the deb target — self-contained,
+      # no rpmbuild needed (only the rpm target wants it, see justfile
+      # `package`); the rpm and AppImage are wired into the release
+      # workflow's full `just package` run.
       - name: Package deb + packaging gate
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
           just package deb
           just check-deb
