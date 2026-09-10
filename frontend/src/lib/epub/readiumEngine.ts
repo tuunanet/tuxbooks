@@ -282,6 +282,13 @@ export class ReadiumEpubHandle {
     // can race the restore — see the initChain note above).
     this.initChain = this.navigatorLoad(initialLocator);
     await this.initChain;
+    // Highlights that arrived before the navigator existed (the reader's
+    // highlight diff runs as soon as the handle is open, while init is
+    // still loading) were queued in the map but never drawn — apply them
+    // now, exactly like rebuildNavigator does after its rebuild. Without
+    // this, every highlight stored before this open is invisible for the
+    // whole session, including the one a drawer jump navigates to.
+    await this.applyHighlights();
   }
 
   private async navigatorLoad(initialLocator: Locator | undefined): Promise<void> {
@@ -894,6 +901,10 @@ export class ReadiumEpubHandle {
       });
     });
     active.applyDecorations(decorations, "highlights");
+    // Testability contract (docs/epub.md): how many stored highlights are
+    // applied as decorations right now — E2E asserts highlight paint after
+    // reopen/jump through this host attribute, not engine-internal DOM.
+    this.host.dataset.epubHighlights = String(decorations.length);
   }
 
   /**

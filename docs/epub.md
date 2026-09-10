@@ -152,8 +152,11 @@ match count, per-section groups, and excerpts; picking a match calls
 ### Annotations
 
 Highlights live in the engine's overlay layer, behind the seam: add/remove
-highlight by locator, re-applied when the engine mounts a section.
-Creation runs through real text selections (the selection's canonical
+highlight by locator, re-applied when the engine mounts a section. Highlights
+queued while no navigator exists yet (stored ones, before `init` finishes
+loading) are applied by `init` as soon as the navigator is up — a reopened
+book paints its stored highlights without any interaction. Creation runs
+through real text selections (the selection's canonical
 locator is requested from the engine; the pending selection is kept as a
 cloned `Range`, never pixels). Bookmarks persist the current relocate
 locator. The shared selection toolbar creates highlights only — EPUB
@@ -171,9 +174,10 @@ The renderer has no Node.js access (`contextIsolation: true`,
 ### Testability contract
 
 Stable DOM attributes on the engine host (`data-epub-state`,
-`data-epub-section`, `data-epub-section-total`, `data-epub-fraction`) —
-keep them when refactoring; E2E asserts on them rather than engine-internal
-DOM.
+`data-epub-section`, `data-epub-section-total`, `data-epub-fraction`,
+`data-epub-highlights` — the number of stored highlights currently applied
+as decorations) — keep them when refactoring; E2E asserts on them rather
+than engine-internal DOM.
 
 ## Fixtures
 

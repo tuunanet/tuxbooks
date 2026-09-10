@@ -214,7 +214,9 @@ Three isolated invocations per run:
    convergence, window-resize re-anchoring, and memory-bound assertions)
    and `annotations.e2e.ts` (a PDF highlight created from a real
    text-layer selection, its attached note, and a bookmark on both
-   formats, each revisited after close/reopen) and `metadata.e2e.ts`
+   formats, each revisited after close/reopen — plus an EPUB highlight
+   created from a real selection and asserted to paint again after
+   reopen and after a drawer jump) and `metadata.e2e.ts`
    (edit → grid/detail/search update, source bytes untouched, reset round
    trip) and `collections.e2e.ts` (create a collection from the sidebar,
    add and remove a book through the card context menu, mark a book
