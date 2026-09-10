@@ -1,0 +1,28 @@
+# Dependabot (docs: the vitest-4 investigation is recorded on PR #12).
+#
+# Weekly npm dependency updates. GitHub-Actions updates stay enabled — the
+# workflow files are small and isolated. The Rust sidecar (sidecar/Cargo.toml)
+# is intentionally not registered here: cargo updates are taken deliberately
+# by hand, not by automation.
+#
+# The `vitest` ignore is the PR #12 decision: vitest 4's coverage instrument
+# (AST remapping, both providers) cannot attribute TSX statement coverage the
+# way v3 did, which would break the docs/coverage.md gate for five categories
+# (books, layout, settings, lib, hooks) without any real coverage loss.
+# Revisit when ast-v8-to-istanbul attributes JSX-transformed statements
+# correctly — until then every vitest >= 4 PR is noise.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # PR #12 (2026-09-10): deferred, see above. Bump the ignored version
+    # range together with that decision.
+    ignore:
+      - dependency-name: "vitest"
+        versions: [">=4"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
