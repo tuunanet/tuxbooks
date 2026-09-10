@@ -92,6 +92,9 @@ jobs:
         with:
           workspaces: sidecar
 
+      - name: Install just
+        uses: extractions/setup-just@v4
+
       - name: Verify the tag matches the bundled version
         run: |
           declared="$(jq -r .version package.json)"
