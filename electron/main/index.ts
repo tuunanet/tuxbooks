@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { locateSidecar, RpcFailure, Sidecar, SidecarError } from "./sidecar";
+import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
 
 /**
  * Electron main process (docs/architecture.md): window lifecycle, native
@@ -69,6 +70,29 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
+/**
+ * GPU-crash fallback (docs/gpu-fallback.md, issue #13): a session that lost
+ * its GPU process repeatedly leaves a marker; the next launch then runs
+ * software-rendered until a stable session clears the marker again. Must be
+ * decided here, before app ready (disableHardwareAcceleration is legal only
+ * in this window). Chromium recovers a crashed GPU process itself — this is
+ * the next-launch degradation, never an in-session action.
+ */
+const GPU_FALLBACK_DIR = appDataDir();
+const activeGpuFallback = readGpuFallbackMarker(GPU_FALLBACK_DIR);
+if (activeGpuFallback) {
+  app.disableHardwareAcceleration();
+  console.warn(
+    `[gpu-fallback] hardware acceleration disabled for this launch:` +
+      ` ${activeGpuFallback.crashes} GPU-process crashes recorded` +
+      ` (last ${activeGpuFallback.lastCrashAt}, expires ${activeGpuFallback.expiresAt};` +
+      ` docs/gpu-fallback.md)`,
+  );
+}
+// GPU-process crashes ("crashed", not the benign cleanExit/killed) seen in
+// this session; drives both the threshold check and the will-quit self-heal.
+let gpuCrashCount = 0;
+
 // No application menu: the renderer owns every interaction, and the
 // Electron default bar (File/Edit/View/Window — reload, devtools, close
 // accelerators) has no place in a shipped desktop app. Removes the bar
@@ -109,9 +133,10 @@ protocol.registerSchemesAsPrivileged([
 
 /**
  * Mirror of the sidecar's database-path resolution (TEST_* overrides first,
- * then the XDG data home). The covers directory sits next to the database.
+ * then the XDG data home). The covers directory and the GPU-fallback marker
+ * (docs/gpu-fallback.md) sit next to the database.
  */
-function coversDir(): string {
+function appDataDir(): string {
   const override = process.env.TEST_DATABASE_PATH;
   const dbPath =
     override && override.length > 0
@@ -123,7 +148,11 @@ function coversDir(): string {
           "com.tuxbooks.app",
           "tuxbooks.db",
         );
-  return path.join(path.dirname(dbPath), "covers");
+  return path.dirname(dbPath);
+}
+
+function coversDir(): string {
+  return path.join(appDataDir(), "covers");
 }
 
 function bookMime(format: string | null): string {
@@ -700,20 +729,54 @@ app.on("window-all-closed", () => {
 });
 
 /**
+ * Self-heal (docs/gpu-fallback.md): a hardware-accelerated session that ends
+ * cleanly without a single GPU crash proves the graphics stack works — clear
+ * the fallback marker so the next launch tries hardware again. A
+ * software-rendered session (fallback active) cannot prove anything about
+ * the hardware path and never clears the marker; a session with GPU crashes
+ * keeps it. Also removes stale/expired markers.
+ */
+app.on("will-quit", () => {
+  if (activeGpuFallback || gpuCrashCount > 0) return;
+  if (clearGpuFallbackMarker(GPU_FALLBACK_DIR)) {
+    console.log("[gpu-fallback] stable hardware-accelerated session; fallback cleared");
+  }
+});
+
+/**
  * Process-failure diagnostics (§ GPU/renderer gone): GPU and renderer
  * process deaths are logged with Electron's own classification — type,
  * reason, exit code — plus the environment needed to correlate a crash
  * (versions, GPU feature status). Diagnostics only: a GPU-process exit is
  * recovered by Chromium itself; never reload() from these events.
+ *
+ * The one policy exception (docs/gpu-fallback.md): repeated GPU crashes in
+ * a hardware-accelerated session arm the next-launch software-rendering
+ * fallback. No in-session action is possible (or needed) — Chromium already
+ * restarted the process.
  */
 app.on("child-process-gone", (_event, details) => {
   if (details.type !== "GPU") return;
+  if (details.reason === "crashed") gpuCrashCount += 1;
   console.error(
     `[electron] GPU process gone: reason=${details.reason} exitCode=${details.exitCode}` +
       ` name=${details.name ?? "n/a"} serviceName=${details.serviceName ?? "n/a"}` +
+      ` crashesThisSession=${gpuCrashCount}` +
       ` electron=${process.versions.electron} chromium=${process.versions.chrome}` +
       ` gpu=${JSON.stringify(app.getGPUFeatureStatus())}`,
   );
+  if (!activeGpuFallback && details.reason === "crashed") {
+    const marker = recordGpuCrashes(GPU_FALLBACK_DIR, gpuCrashCount, {
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+    });
+    if (marker) {
+      console.warn(
+        `[gpu-fallback] repeated GPU-process crashes (${gpuCrashCount});` +
+          ` the next launch runs software-rendered (docs/gpu-fallback.md)`,
+      );
+    }
+  }
 });
 
 // Renderer deaths are fatal to the page but distinct from GPU failures;

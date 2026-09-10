@@ -154,6 +154,7 @@ _headless := if os() == "linux" { _x11 + " E2E_XVFB=1 xvfb-run --auto-servernum"
 test-e2e: build-debug
     just test-e2e-empty
     just test-e2e-shell
+    just test-e2e-gpu
     just test-e2e-seeded
 
 test-e2e-empty:
@@ -177,6 +178,14 @@ test-e2e-headed-shell: build-debug
 
 test-e2e-seeded:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): the app boots
+# software-rendered when a previous session recorded repeated GPU-process
+# crashes, reading keeps working in that mode, and a stable session clears
+# the fallback again. Own phase because the scenarios relaunch the app with
+# different marker states. Seeded: the degraded-mode test opens the PDF.
+test-e2e-gpu: build-debug
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=gpu E2E_SEED_LIBRARY=1 pnpm --filter e2e test:gpu
 
 # High-DPI configuration (docs/performance.md reference conditions name dpr
 # 2.0): the seeded reader scenarios against an app forced to
