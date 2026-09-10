@@ -166,7 +166,7 @@ The app inherits the runner's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set before the first Electron launch
 (globalSetup; the fixture re-asserts them) — keep that ordering.
 
-Three isolated invocations per run:
+Four isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
@@ -183,7 +183,17 @@ Three isolated invocations per run:
    bare Xvfb has none (maximize is a no-op there — probed), so those two
    scenarios skip headlessly and run under `just test-e2e-headed-shell` on
    a real desktop.
-3. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
+3. **gpu** (`test:gpu`) — fresh scratch env with the committed fixtures;
+   the GPU-crash fallback policy (`gpu-fallback.e2e.ts`,
+   docs/gpu-fallback.md): an active fallback marker boots the app
+   software-rendered, PDF reading still works in that degraded mode, a
+   software session never clears an active marker, and a clean
+   hardware-accelerated session removes an expired one. Own phase: the
+   scenarios relaunch the app with different marker states, which must not
+   share a worker with other suites. The crash-count → arming step is
+   pinned by the policy unit tests (injecting real GPU-process crashes is
+   not possible deterministically headlessly).
+4. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
    library; the app imports them on startup. Runs `books.e2e.ts` (library
@@ -222,7 +232,7 @@ Three isolated invocations per run:
    add and remove a book through the card context menu, mark a book
    finished, delete the collection).
 
-Two more invocations exist beyond the default trio:
+Two more invocations exist beyond the default four:
 
 - **hidpi** (`just test-e2e-hidpi`) — the seeded reader scenarios against
   an app forced to `devicePixelRatio` 2 (`E2E_DEVICE_SCALE_FACTOR` →

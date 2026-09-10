@@ -31,8 +31,9 @@ describes the current contract.
   minimal, explicitly enumerated `window.tuxbooks`; the renderer's only
   consumer is `lib/bridge.ts`.
 - The main process owns plumbing only: window lifecycle, dialogs/shell,
-  the `tuxbooks://` protocol, sidecar spawn/health/restart/teardown. No
-  business logic.
+  the `tuxbooks://` protocol, sidecar spawn/health/restart/teardown, and
+  the GPU-crash fallback (`docs/gpu-fallback.md`) — the one place a
+  Chromium GPU flag is set, and only on recorded cause. No business logic.
 - The Rust sidecar never renders UI. Its method table only translates
   JSON-RPC payloads into service calls.
 - Book bytes, covers, and EPUB resources flow through the scoped

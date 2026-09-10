@@ -7,6 +7,7 @@
   "scripts": {
     "test:empty": "playwright test --project=empty",
     "test:shell": "playwright test --project=shell",
+    "test:gpu": "playwright test --project=gpu",
     "test:seeded": "playwright test --project=seeded",
     "test:hidpi": "playwright test --project=hidpi",
     "test:bench": "playwright test --project=bench"

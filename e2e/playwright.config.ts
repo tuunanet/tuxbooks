@@ -9,6 +9,9 @@
  *   shell   — desktop-shell.e2e.ts: native window lifecycle + branding
  *             (own phase: the relaunch scenario closes and relaunches the
  *             app, which must not share a worker with other suites)
+ *   gpu     — gpu-fallback.e2e.ts: the GPU-crash fallback policy
+ *             (own phase: it relaunches the app with different marker
+ *             states and must not share a worker with other suites)
  *   hidpi   — seeded reader scenarios at devicePixelRatio 2
  *   bench   — the opt-in, headed performance benchmark (never CI)
  *
@@ -29,6 +32,7 @@ const ci = Boolean(process.env.CI);
 const SEEDED_EXCLUDE = [
   "library.e2e.ts",
   "desktop-shell.e2e.ts",
+  "gpu-fallback.e2e.ts",
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
 ];
@@ -76,6 +80,7 @@ export default defineConfig({
   projects: [
     { name: "empty", ...project(["library.e2e.ts"]) },
     { name: "shell", ...project(["desktop-shell.e2e.ts"]) },
+    { name: "gpu", ...project(["gpu-fallback.e2e.ts"]) },
     { name: "seeded", ...project(["*.e2e.ts"], SEEDED_EXCLUDE) },
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts"]) },
