@@ -83,6 +83,11 @@ updates:
       interval: "weekly"
     reviewers:
       - "tuunanet"
+    # Same supply-chain floor as npm (see above): workflow-pin attacks ride
+    # moved tags (the tj-actions pattern), and these bumps are grouped
+    # wholesale — a fresh compromised release must age 30 days first.
+    cooldown:
+      default-days: 30
     groups:
       actions:
         patterns:
