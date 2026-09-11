@@ -33,6 +33,15 @@
 # peer range). Retire the pin when typescript-eslint lands TS 7 support
 # (#10940).
 #
+# The `@types/node` ignore (2026-09-10, PR #32): Node 26 types typecheck
+# ahead of the runtime — Electron 44 embeds Node 24.18.1, and electron
+# main/preload compile against these types, so a 25/26 bump would silently
+# admit Node-26-only APIs the shipped runtime does not have (CI cannot catch
+# that). The 24.x line tracks the embedded runtime; take 24.x patches
+# normally. Revisit when an Electron upgrade embeds Node >= 25 (check the
+# release notes' Node version), then lift this ignore and take the types
+# bump in the same session as the Electron bump.
+#
 # Minor+patch npm updates are grouped into one PR (the 2026-09-10 batch was
 # nine separate PRs for eight packages); majors stay individual because they
 # are exactly the ones that need scrutiny. GitHub-Actions updates are grouped
@@ -59,6 +68,10 @@ updates:
       # migration.
       - dependency-name: "@vitejs/plugin-react"
         versions: [">=6"]
+      # Types must not run ahead of Electron's embedded Node (PR #32, see
+      # above).
+      - dependency-name: "@types/node"
+        versions: [">=25"]
     groups:
       minor-and-patch:
         update-types:
