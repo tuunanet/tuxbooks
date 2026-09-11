@@ -5,6 +5,7 @@
 [![License: GPL v3](https://img.shields.io/github/license/tuunanet/tuxbooks)](LICENSE.md)
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux&logoColor=black)](docs/build.md)
 [![CodeFactor Grade](https://www.codefactor.io/repository/github/tuunanet/tuxbooks/badge)](https://www.codefactor.io/repository/github/tuunanet/tuxbooks)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tuunanet/tuxbooks/badges/coverage.json)](docs/coverage.md)
 
 A local-first, bookshelf-style desktop ebook library for Linux (Electron
 desktop shell). Point it at a folder of EPUB and PDF files; it indexes

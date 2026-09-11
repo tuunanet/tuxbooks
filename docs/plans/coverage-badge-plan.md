@@ -93,6 +93,15 @@ badge has been stable for a few weeks; do not bundle it into phase 1.
 
 ## Phases
 
+Status 2026-09-11: phases 1–2 implemented in one branch — `coverage` CI job
+(artifact + badges-branch publish on main, non-required check), badge in the
+README after the CodeFactor grade, `just coverage` emits the JSON artifact
+locally too. Verified locally before wiring: json-summary reporter
+materializes `coverage-summary.json`; badge generator outputs
+`80% (min cat Hooks) · 94% overall` on the 2026-09-11 tree. Remaining:
+phase-3 one-week watch, then flip the job to required in branch protection
+(owner settings action), and optionally phase 4 (Rust weekly job or Codecov).
+
 1. **CI runs the gate (half a session).** `coverage` job with JSON +
    text reporters, floors enforced by existing thresholds, artifact
    uploaded. Non-required check at first to observe variance.
