@@ -2,6 +2,22 @@ packages:
   - frontend
   - e2e
 
+# Supply-chain defense (2026-09-11): refuse any version younger than 30
+# days — direct AND transitive — covering both Dependabot PRs and manual
+# `pnpm add`/`update` (verified: ERR_PNPM_NO_MATURE_MATCHING_VERSION).
+minimumReleaseAge: 43200
+# Urgent-fix path. Dependabot security updates bypass its cooldown by
+# design, but a patched version is itself newly published, so installing it
+# here needs an exclude entry. Procedure (verified on the tse 8.70.0 train):
+# enumerate exact `name@version` pins for every package in the fix train —
+# transitive packages stay gated otherwise; the install error names the
+# next missing one each time. Version-pinned only: name patterns with
+# versions are rejected (ERR_PNPM_INVALID_MINIMUM_RELEASE_AGE_EXCLUDE);
+# an unpinned org pattern (`@org/*`) works but admits the whole org — use
+# only to get unstuck, then replace with pins. Each entry carries a dated
+# comment naming the advisory; remove entries once the versions age out.
+minimumReleaseAgeExclude: []
+
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:
   # esbuild's install script places its platform binary; the Vite build needs it.

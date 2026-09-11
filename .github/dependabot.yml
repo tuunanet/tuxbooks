@@ -46,12 +46,25 @@
 # nine separate PRs for eight packages); majors stay individual because they
 # are exactly the ones that need scrutiny. GitHub-Actions updates are grouped
 # wholesale — same-file, low-risk bumps.
+#
+# The `cooldown` is the supply-chain decision (2026-09-11): Dependabot's
+# default 3-day cooldown only guards against bleeding-edge releases; 30 days
+# gives the community time to detect and pull compromised versions before we
+# ever see a PR (the Shai-Hulud pattern). Security updates bypass cooldown
+# by design — that is the urgent-fix path at the Dependabot layer. The
+# install-time half of this policy is `minimumReleaseAge` in
+# pnpm-workspace.yaml (gates manual updates and transitive deps, which
+# Dependabot cannot see); its `minimumReleaseAgeExclude` is the urgent-fix
+# path there. Only a patched release of an already-vulnerable version
+# qualifies for either exclude list, never a routine bump.
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 30
     open-pull-requests-limit: 5
     reviewers:
       - "tuunanet"
