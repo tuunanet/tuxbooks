@@ -42,6 +42,15 @@ top of tools we already run strictly.
 
 ## Phases
 
+Status 2026-09-11: imported and analyzed — baseline grade **A** (badge URL
+live, HTTP 200) at commit 5a92421, pre-exclusions. Phase 3 badge merged into
+the README row the same day. Remaining: watch the post-exclusion re-analysis
+(`.codefactor.yml` on main) — the ~11 baseline issues are visible on the
+dashboard; fix real ones forward, dismiss vendor false-positives with a
+note. The issues list is a client-side SPA and not scrapeable; grade letter
+and per-commit issue counts on the public repo page are the verifiable
+signals.
+
 1. **Onboard (no badge yet).** Log in via GitHub, enable
    `tuunanet/tuxbooks`, let the first analysis run, add the exclusion file,
    re-analyze. Read every finding that isn't in an excluded path: fix real
