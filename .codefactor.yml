@@ -1,0 +1,12 @@
+# CodeFactor (docs/plans/quality-badge-plan.md) — informational grade only;
+# just check stays the authority. Exclusions follow the same philosophy as
+# the "outside the gate" table in docs/coverage.md: vendored or scaffolding
+# code must not distort a grade meant to reflect ours.
+exclude_paths:
+  # Pinned upstream foliate-js submodule, consumed as-is through the engine seam.
+  - "frontend/src/lib/epub/foliate-js/**"
+  # shadcn/ui vendored primitives.
+  - "frontend/src/components/ui/**"
+  # Prose and build output.
+  - "docs/**"
+  - "**/dist/**"
