@@ -302,4 +302,4 @@ check:
 # time: cargo-llvm-cov keeps its own target dir).
 coverage:
     node scripts/coverage-gate.mjs
-    pnpm --filter frontend exec vitest run --coverage --coverage.reporter=text-summary
+    pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary

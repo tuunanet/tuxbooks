@@ -75,6 +75,55 @@ jobs:
       - name: Vitest
         run: pnpm --filter frontend test:ci
 
+  coverage:
+    name: Coverage (frontend gate + badge)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    permissions:
+      # Publish coverage-badge.json to the badges branch — used by the main
+      # push step only (PR runs stop before publish).
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The gate is docs/coverage.md's frontend floors (coverage.thresholds
+      # in frontend/vite.config.ts): the run itself fails below any floor.
+      # json-summary feeds scripts/coverage-badge.mjs.
+      - name: Vitest with coverage
+        run: pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+
+      - name: Compute badge JSON
+        run: node scripts/coverage-badge.mjs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: frontend/coverage/
+
+      # The only write to the badges branch; PR runs never reach this.
+      - name: Publish badge JSON to badges branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges
+          git rm -rf --cached . --quiet
+          mv frontend/coverage/coverage-badge.json ./coverage.json
+          git add coverage.json
+          git commit --message "coverage badge from ${GITHUB_SHA}"
+          git push --force origin badges
+
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-24.04
