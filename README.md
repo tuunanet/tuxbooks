@@ -1,5 +1,10 @@
 # TuxBooks
 
+[![CI](https://github.com/tuunanet/tuxbooks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tuunanet/tuxbooks/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tuunanet/tuxbooks?include_prereleases&label=release)](https://github.com/tuunanet/tuxbooks/releases)
+[![License: GPL v3](https://img.shields.io/github/license/tuunanet/tuxbooks)](LICENSE.md)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux&logoColor=black)](docs/build.md)
+
 A local-first, bookshelf-style desktop ebook library for Linux (Electron
 desktop shell). Point it at a folder of EPUB and PDF files; it indexes
 metadata and covers into a local SQLite database, keeps collections and reading
