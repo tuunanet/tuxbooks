@@ -1,6 +1,6 @@
 # Code-quality badge plan (CodeFactor)
 
-Companion to `docs/coverage-badge-plan.md`. Answers: which third-party
+Companion to `docs/plans/coverage-badge-plan.md`. Answers: which third-party
 quality badge for a free OSS project — and how to adopt it without giving a
 vendor authority over our own gates.
 
@@ -77,5 +77,5 @@ top of tools we already run strictly.
 
 Making any external grade a merge gate; DeepScan as a second badge; Qlty
 adoption (revisit only if we want vendor-hosted multi-language coverage —
-it would compete with the self-hosted badge in `docs/coverage-badge-plan.md`,
+it would compete with the self-hosted badge in `docs/plans/coverage-badge-plan.md`,
 which stays the plan of record for coverage).
