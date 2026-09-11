@@ -255,7 +255,10 @@ thumbnails, and restore.
 after the layout is ready — invalid values degrade to page 1 — saves are
 debounced (1s) so scrolling never writes per event, the first armed run is
 skipped so opening a book writes nothing, and unmount flushes the final
-position. The document surface renders only after restoration, so reopening
+position. Every persisted save (including `mark_book_finished`) emits
+`library-changed` with the updated book, so the grid and list progress
+bars stay live without an app restart. The document surface renders only
+after restoration, so reopening
 never flashes page 1 before the jump. This contract lives in one shared
 hook (`useReaderProgress`) used by both readers; the PDF reader also
 registers the shell's `ReaderAdapter` (`readerModel.ts`) while its document

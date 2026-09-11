@@ -280,13 +280,13 @@ async fn dispatch(
         "save_reading_progress" => {
             let p: SaveProgressArgs = parse_params(params)?;
             Ok(call!(commands::progress::save_reading_progress(
-                state, p.book_id, p.progress
+                state, events, p.book_id, p.progress
             )))
         }
         "mark_book_finished" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::progress::mark_book_finished(
-                state, p.book_id
+                state, events, p.book_id
             )))
         }
         "get_book_bytes" => {
@@ -485,6 +485,7 @@ fn handle_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     async fn test_state(dir: &std::path::Path) -> Arc<AppState> {
         let pool = crate::db::connection::init_pool(&dir.join("t.db"))
@@ -513,6 +514,90 @@ mod tests {
 
     fn test_events() -> EventEmitter {
         EventEmitter::new(|_, _| {})
+    }
+
+    /// Everything one test captured: `(event name, serialized payload)`.
+    type FiredEvents = Vec<(&'static str, Value)>;
+
+    /// EventEmitter paired with the events it fired, for asserting what a
+    /// method pushes to the client.
+    fn capturing_events() -> (EventEmitter, Arc<Mutex<FiredEvents>>) {
+        let fired: Arc<Mutex<FiredEvents>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&fired);
+        let events = EventEmitter::new(move |name, payload| {
+            sink.lock().unwrap().push((name, payload));
+        });
+        (events, fired)
+    }
+
+    /// Seed one book row through the repository (the importer needs files on
+    /// disk); returns its id.
+    async fn seed_book(state: &AppState, title: &str) -> i64 {
+        let book = crate::domain::NewBook {
+            path: format!("/library/{title}.epub"),
+            title: title.into(),
+            subtitle: None,
+            author: Some("Author".into()),
+            authors: vec!["Author".into()],
+            subjects: Vec::new(),
+            publisher: None,
+            language: Some("en".into()),
+            isbn: None,
+            description: None,
+            cover_path: None,
+            publication_date: None,
+            series: None,
+            series_index: None,
+            file_size: 100,
+            file_mtime: 1_700_000_000,
+        };
+        crate::repository::books::insert_book(&state.db, &book)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn saving_progress_emits_library_changed_with_the_updated_book() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let id = seed_book(&state, "Progress Book").await;
+        let (events, fired) = capturing_events();
+
+        dispatch(
+            &state,
+            &events,
+            "save_reading_progress",
+            json!({"bookId": id, "progress": {"progressPercent": 42.5}}),
+        )
+        .await
+        .unwrap();
+
+        let fired = fired.lock().unwrap();
+        assert_eq!(fired.len(), 1, "one event per persisted save");
+        let (name, payload) = &fired[0];
+        assert_eq!(*name, "library-changed");
+        assert_eq!(payload["kind"], "changed");
+        assert_eq!(payload["book"]["id"], json!(id));
+        assert_eq!(payload["book"]["progressPercent"], json!(42.5));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn marking_finished_emits_library_changed_with_full_progress() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let id = seed_book(&state, "Finished Book").await;
+        let (events, fired) = capturing_events();
+
+        dispatch(&state, &events, "mark_book_finished", json!({"bookId": id}))
+            .await
+            .unwrap();
+
+        let fired = fired.lock().unwrap();
+        assert_eq!(fired.len(), 1);
+        let (name, payload) = &fired[0];
+        assert_eq!(*name, "library-changed");
+        assert_eq!(payload["kind"], "changed");
+        assert_eq!(payload["book"]["progressPercent"], json!(100.0));
     }
 
     #[tokio::test(flavor = "multi_thread")]

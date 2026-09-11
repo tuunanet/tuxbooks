@@ -1,7 +1,7 @@
+use crate::commands::emit_book_changed;
 use crate::domain::{Book, BookMetadata, MetadataFields};
 use crate::error::AppError;
 use crate::rpc::EventEmitter;
-use crate::services::library_reconciler::LibraryChange;
 use crate::services::metadata as service;
 use crate::AppState;
 
@@ -26,7 +26,7 @@ pub async fn update_book_metadata(
     form: MetadataFields,
 ) -> Result<BookMetadata, AppError> {
     let view = service::update_book_metadata(&state.db, book_id, &form).await?;
-    emit_changed(state, events, book_id).await?;
+    emit_book_changed(state, events, book_id).await?;
     Ok(view)
 }
 
@@ -38,7 +38,7 @@ pub async fn reset_book_metadata(
     book_id: i64,
 ) -> Result<BookMetadata, AppError> {
     let view = service::reset_book_metadata(&state.db, book_id).await?;
-    emit_changed(state, events, book_id).await?;
+    emit_book_changed(state, events, book_id).await?;
     Ok(view)
 }
 
@@ -53,7 +53,7 @@ pub async fn set_book_cover(
 ) -> Result<Book, AppError> {
     let covers = crate::covers_dir(&state.db_path);
     let book = service::set_book_cover(&state.db, book_id, &image_path, &covers).await?;
-    emit_changed(state, events, book_id).await?;
+    emit_book_changed(state, events, book_id).await?;
     Ok(book)
 }
 
@@ -65,24 +65,6 @@ pub async fn clear_book_cover_override(
     book_id: i64,
 ) -> Result<Book, AppError> {
     let book = service::clear_book_cover_override(&state.db, book_id).await?;
-    emit_changed(state, events, book_id).await?;
+    emit_book_changed(state, events, book_id).await?;
     Ok(book)
-}
-
-/// Metadata edits mutate the book row, so the UI updates through the same
-/// `library-changed` channel the watcher and remove/reconnect already use.
-async fn emit_changed(
-    state: &AppState,
-    events: &EventEmitter,
-    book_id: i64,
-) -> Result<(), AppError> {
-    if let Some(book) = crate::repository::books::get_book(&state.db, book_id).await? {
-        events.emit(
-            "library-changed",
-            &LibraryChange::Changed {
-                book: Box::new(book),
-            },
-        );
-    }
-    Ok(())
 }
