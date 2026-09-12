@@ -337,3 +337,18 @@ extraction, outline, and thumbnail requests serialize inside it; the
 open-path ordering (page 1 first, then adjacent pages, then outline and
 thumbnails) is enforced on the main thread — see "Open-timeline
 telemetry" above.
+
+### Appearance
+
+PDFs are fixed-layout rasters: the reader's reflow controls (font size,
+spacing, family, alignment, columns, layout, margins) apply only to EPUB
+and are not displayed for PDFs — the appearance menu offers exactly the
+theme. The theme lands on the rendered pages as a CSS filter over the
+document surface (`lib/pdf/theme.ts`, applied by `PdfDocumentView`),
+since pages cannot be recolored: Default and Light render as-is, Paper
+adds a sepia tint, Dark uses the fixed-content invert recipe
+(`invert(1) hue-rotate(180deg)`, the approach Foliate popularized),
+and High contrast combines grayscale + invert + a contrast boost. The
+recolor-only presets (Blue, Mint) have no faithful raster filter and
+remain EPUB-only. The shell chrome around the surface follows the same
+theme in both formats.
