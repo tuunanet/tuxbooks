@@ -47,6 +47,9 @@ interface PdfDocumentViewProps {
   /** CSS filter implementing the reader theme over the fixed pages
    *  (undefined = pages as-is); see lib/pdf/theme.ts. */
   themeFilter?: string;
+  /** Multiply-tint color for paper-style themes (white pages take on the
+   *  tint); undefined = no overlay. See lib/pdf/theme.ts. */
+  themeTint?: string;
 }
 
 /**
@@ -74,6 +77,7 @@ export function PdfDocumentView({
   onRetryPage,
   highlightsByPage,
   themeFilter,
+  themeTint,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -93,8 +97,19 @@ export function PdfDocumentView({
         ref={documentRef}
         data-testid="pdf-document"
         style={{ width: `${documentWidth}px`, filter: themeFilter }}
-        className="flex flex-col items-center"
+        className="relative flex flex-col items-center"
       >
+        {/* Paper-style themes multiply-tint the opaque white pages down to
+            the theme color (white × tint = tint, black stays black). The
+            overlay sits above every page and ignores the pointer. */}
+        {themeTint && (
+          <div
+            aria-hidden
+            data-testid="pdf-theme-tint"
+            className="pointer-events-none absolute inset-0 z-10"
+            style={{ backgroundColor: themeTint, mixBlendMode: "multiply" }}
+          />
+        )}
         {slots.map((slot, index) => {
           // Canvases live only on the render set, so lifecycle states stay
           // honest: a page outside the set is unloaded unless it failed —

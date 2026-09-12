@@ -346,7 +346,8 @@ and are not displayed for PDFs — the appearance menu offers exactly the
 theme. The theme lands on the rendered pages as a CSS filter over the
 document surface (`lib/pdf/theme.ts`, applied by `PdfDocumentView`),
 since pages cannot be recolored: Default and Light render as-is, Paper
-adds a sepia tint, Dark uses the fixed-content invert recipe
+multiply-tints the white pages to the theme's own paper color (a
+filter cannot darken white), Dark uses the fixed-content invert recipe
 (`invert(1) hue-rotate(180deg)`, the approach Foliate popularized),
 and High contrast combines grayscale + invert + a contrast boost. The
 recolor-only presets (Blue, Mint) have no faithful raster filter and

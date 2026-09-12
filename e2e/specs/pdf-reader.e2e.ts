@@ -109,6 +109,17 @@ test.describe("tuxbooks continuous PDF reader", () => {
       })
       .toBe("invert(1) hue-rotate(180deg)");
 
+    // Paper multiplies the white pages down to the theme's paper color —
+    // the tint overlay, not a filter (a filter cannot darken white).
+    await theme.getByText("Paper", { exact: true }).click();
+    await expect(page.getByTestId("pdf-theme-tint")).toBeAttached();
+    await expect(
+      page.getByTestId("pdf-theme-tint").evaluate((el) => el.style.mixBlendMode),
+    ).resolves.toBe("multiply");
+    await expect(page.getByTestId("pdf-document").evaluate((el) => el.style.filter)).resolves.toBe(
+      "",
+    );
+
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
     await returnToLibrary(page);
