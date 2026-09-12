@@ -1,8 +1,10 @@
 use serde::Deserialize;
 
+use crate::commands::emit_book_changed;
 use crate::domain::{ProgressUpdate, ReadingProgress};
 use crate::error::AppError;
 use crate::repository::reading_progress::{get_progress, mark_finished, upsert_progress};
+use crate::rpc::EventEmitter;
 use crate::AppState;
 
 /// Wire shape of a reading-progress update. Fields are optional so each
@@ -44,13 +46,18 @@ impl From<ProgressInput> for ProgressUpdate {
     }
 }
 
-/// Persist (upsert) where the user stopped reading a book.
+/// Persist (upsert) where the user stopped reading a book. Emits
+/// `library-changed` so the grid and list progress bars reflect the save
+/// immediately — reading progress is exposed on the book row itself, so
+/// without the event the UI stays stale until the next restart.
 pub async fn save_reading_progress(
     state: &AppState,
+    events: &EventEmitter,
     book_id: i64,
     progress: ProgressInput,
 ) -> Result<(), AppError> {
-    upsert_progress(&state.db, book_id, &progress.into()).await
+    upsert_progress(&state.db, book_id, &progress.into()).await?;
+    emit_book_changed(state, events, book_id).await
 }
 
 /// Load the stored reading position for a book, if any.
@@ -63,7 +70,13 @@ pub async fn get_reading_progress(
 
 /// Flag a book as finished (milestone 10). Sets `progress_percent = 100`
 /// while preserving the stored position, so the book lands in the
-/// "Finished" section but still resumes where reading stopped.
-pub async fn mark_book_finished(state: &AppState, book_id: i64) -> Result<(), AppError> {
-    mark_finished(&state.db, book_id).await
+/// "Finished" section but still resumes where reading stopped. Emits
+/// `library-changed` so the section change is visible immediately.
+pub async fn mark_book_finished(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<(), AppError> {
+    mark_finished(&state.db, book_id).await?;
+    emit_book_changed(state, events, book_id).await
 }

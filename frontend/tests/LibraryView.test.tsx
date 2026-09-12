@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { LibraryView } from "@/components/library/LibraryView";
@@ -9,7 +9,7 @@ import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
-import { mockInvoke } from "./mocks/bridge";
+import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
 
 function renderLibrary(section: LibrarySection = { kind: "smart", id: "all-books" }) {
   return render(
@@ -217,6 +217,59 @@ describe("LibraryView view modes", () => {
 
     await userEvent.click(screen.getByRole("radio", { name: "Grid view" }));
     expect(await screen.findByTestId("book-grid")).toBeInTheDocument();
+  });
+});
+
+describe("LibraryView reading progress synchronization", () => {
+  // Regression (issue #10): saving progress in the reader must reach the
+  // grid and list views live — the backend pushes the updated book over
+  // `library-changed` right after persisting the save.
+  it("shows the updated progress in the grid without a restart", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Alpha", progressPercent: null })],
+    });
+
+    renderLibrary();
+    await screen.findByTestId("book-grid");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+    act(() => {
+      emitBridgeEvent("library-changed", {
+        kind: "changed",
+        book: makeBook({ id: 1, title: "Alpha", progressPercent: 42 }),
+      });
+    });
+
+    expect(
+      await screen.findByRole("progressbar", { name: "Reading progress: 42%" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the updated progress in the list without a restart", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 2, title: "Beta", progressPercent: 10 })],
+    });
+
+    renderLibrary();
+    await screen.findByTestId("book-grid");
+    await userEvent.click(screen.getByRole("radio", { name: "List view" }));
+    expect(
+      await screen.findByRole("progressbar", { name: "Reading progress: 10%" }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      emitBridgeEvent("library-changed", {
+        kind: "changed",
+        book: makeBook({ id: 2, title: "Beta", progressPercent: 63 }),
+      });
+    });
+
+    expect(
+      await screen.findByRole("progressbar", { name: "Reading progress: 63%" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "Reading progress: 10%" })).toBeNull();
   });
 });
 

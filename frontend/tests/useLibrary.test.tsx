@@ -105,6 +105,31 @@ describe("useLibraryData library-changed synchronization", () => {
     await waitFor(() => expect(result.current.books).toHaveLength(0));
     expect(result.current.stats?.bookCount).toBe(0);
   });
+
+  it("reflects reading progress saved by the reader", async () => {
+    // Regression (issue #10): progress saves used to leave the library
+    // stale until a restart. The backend now pushes the updated book over
+    // `library-changed`, so the saved percent shows up live.
+    mockInvoke({
+      ...emptyLibrary,
+      list_books: [makeBook({ id: 4, title: "Slow", progressPercent: null })],
+    });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.books[0]).toMatchObject({ id: 4, progressPercent: null });
+
+    act(() => {
+      emitBridgeEvent("library-changed", {
+        kind: "changed",
+        book: makeBook({ id: 4, title: "Slow", progressPercent: 37.5 }),
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.books[0]).toMatchObject({ id: 4, progressPercent: 37.5 }),
+    );
+    expect(result.current.books).toHaveLength(1);
+  });
 });
 
 function act_emit(book: ReturnType<typeof makeBook>): void {
