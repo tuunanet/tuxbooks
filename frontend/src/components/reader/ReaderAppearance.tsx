@@ -11,10 +11,20 @@ import {
   EPUB_DEFAULT_LINE_HEIGHT,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_LETTER_SPACING_SCALE,
   EPUB_LINE_HEIGHT_SCALE,
+  EPUB_PAGE_GUTTER_SCALE_PX,
+  EPUB_PARAGRAPH_SPACING_SCALE,
+  EPUB_TEXT_ALIGNMENTS,
+  EPUB_WORD_SPACING_SCALE,
   nearestEpubFontSize,
+  nearestEpubLetterSpacing,
   nearestEpubLineHeight,
+  nearestEpubPageGutter,
+  nearestEpubParagraphSpacing,
+  nearestEpubWordSpacing,
   type EpubFontFamily,
+  type EpubTextAlignment,
 } from "@/lib/epub/appearance";
 import { useReader, type ReaderLayout, type ReaderTheme } from "@/state/readerState";
 
@@ -39,8 +49,68 @@ const FONT_FAMILY_OPTIONS: { value: EpubFontFamily; label: string }[] = [
   { value: "readable", label: "Readable" },
 ];
 
+const TEXT_ALIGN_LABELS: Record<EpubTextAlignment, string> = {
+  auto: "Auto",
+  left: "Left",
+  justify: "Justify",
+  right: "Right",
+  start: "Start",
+};
+
 /** Column counts are labeled with Roman numerals; the stored value stays numeric. */
 const COLUMN_COUNT_LABELS: Record<number, string> = { 1: "I", 2: "II", 3: "III", 4: "IV" };
+
+/**
+ * A discrete reading-system scale slider (issue #43/#45): 0 is always the
+ * publication-default sentinel ("Default" label + reset, no CSS override).
+ */
+function ScaleSliderRow(props: {
+  label: string;
+  sliderTestId: string;
+  scale: readonly number[];
+  value: number;
+  onStep: (step: number) => void;
+}) {
+  const atDefault = props.value === 0;
+  const index = props.scale.indexOf(props.value);
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between text-sm">
+        <span>{props.label}</span>
+        <span className="flex items-center gap-1">
+          <span className="tabular-nums text-muted-foreground">
+            {atDefault ? "Default" : props.value}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            data-testid={`pref-${props.sliderTestId}-reset`}
+            aria-label={`Reset ${props.label.toLowerCase()}`}
+            disabled={atDefault}
+            onClick={() => props.onStep(0)}
+          >
+            <RotateCcw />
+          </Button>
+        </span>
+      </div>
+      <Slider
+        data-testid={`pref-${props.sliderTestId}`}
+        aria-label={props.label}
+        min={0}
+        max={props.scale.length - 1}
+        step={1}
+        value={[index]}
+        onValueChange={(values) => {
+          const next = values[0];
+          const step = next !== undefined ? props.scale[next] : undefined;
+          if (step !== undefined) {
+            props.onStep(step);
+          }
+        }}
+      />
+    </div>
+  );
+}
 
 /**
  * Reading appearance: font size, line spacing, font family, theme, layout,
@@ -86,7 +156,7 @@ export function ReaderAppearance() {
       <PopoverContent
         data-testid="appearance-content"
         align="end"
-        className="w-64 gap-4"
+        className="max-h-[85vh] w-64 gap-4 overflow-y-auto"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <div>
@@ -157,6 +227,31 @@ export function ReaderAppearance() {
           />
         </div>
 
+        {/* Text-layout scales (issue #45): 0 = publication default, mapped to
+            the toolkit's "no preference" at the seam. They apply in both
+            paginated and scrolling flow. */}
+        <ScaleSliderRow
+          label="Word spacing"
+          sliderTestId="word-spacing"
+          scale={EPUB_WORD_SPACING_SCALE}
+          value={nearestEpubWordSpacing(preferences.wordSpacing)}
+          onStep={(step) => setPreferences({ wordSpacing: step })}
+        />
+        <ScaleSliderRow
+          label="Letter spacing"
+          sliderTestId="letter-spacing"
+          scale={EPUB_LETTER_SPACING_SCALE}
+          value={nearestEpubLetterSpacing(preferences.letterSpacing)}
+          onStep={(step) => setPreferences({ letterSpacing: step })}
+        />
+        <ScaleSliderRow
+          label="Paragraph spacing"
+          sliderTestId="paragraph-spacing"
+          scale={EPUB_PARAGRAPH_SPACING_SCALE}
+          value={nearestEpubParagraphSpacing(preferences.paragraphSpacing)}
+          onStep={(step) => setPreferences({ paragraphSpacing: step })}
+        />
+
         <div>
           <p className="mb-2 text-sm">Font</p>
           <ToggleGroup
@@ -185,6 +280,29 @@ export function ReaderAppearance() {
               </ToggleGroupItem>
             ))}
             <ToggleGroupItem value="default">Default</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm">Alignment</p>
+          <ToggleGroup
+            data-testid="pref-text-align"
+            type="single"
+            size="sm"
+            variant="outline"
+            spacing={0}
+            className="flex-wrap"
+            value={preferences.textAlign}
+            onValueChange={(value) =>
+              value && setPreferences({ textAlign: value as EpubTextAlignment })
+            }
+            aria-label="Text alignment"
+          >
+            {EPUB_TEXT_ALIGNMENTS.map((alignment) => (
+              <ToggleGroupItem key={alignment} value={alignment}>
+                {TEXT_ALIGN_LABELS[alignment]}
+              </ToggleGroupItem>
+            ))}
           </ToggleGroup>
         </div>
 
@@ -245,6 +363,17 @@ export function ReaderAppearance() {
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
+              {/* Page margins are pagination-scoped in the reading system
+                  (body padding applies only outside scroll flow). */}
+              <div className="mt-3">
+                <ScaleSliderRow
+                  label="Page margins"
+                  sliderTestId="page-gutter"
+                  scale={EPUB_PAGE_GUTTER_SCALE_PX}
+                  value={nearestEpubPageGutter(preferences.pageGutter)}
+                  onStep={(step) => setPreferences({ pageGutter: step })}
+                />
+              </div>
             </div>
           )}
         </div>
