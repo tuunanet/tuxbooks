@@ -1,6 +1,6 @@
 /**
  * Playwright global setup — runs once per invocation, before any worker.
- * Mirrors the old WDIO onPrepare contract (docs/testing.md): prepare the
+ * Mirrors the old WDIO onPrepare contract (docs/TESTING.md): prepare the
  * isolated scratch environment, log and record the stack versions, and arm
  * the detached teardown watchdog so an aborted run cannot leak processes.
  */

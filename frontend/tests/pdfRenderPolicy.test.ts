@@ -11,7 +11,7 @@ import {
 } from "@/components/reader/pdf/pdfRenderPolicy";
 
 /**
- * Letter page in PDF page units (the docs/performance.md reference page);
+ * Letter page in PDF page units (the docs/PERFORMANCE.md reference page);
  * `effectiveRenderRatio` takes page units + render scale.
  */
 const LETTER = { width: 612, height: 792 } as const;

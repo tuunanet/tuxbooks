@@ -190,7 +190,7 @@ with Retry; a page failure never breaks the document.
 
 This pipeline is budgeted in pixels and bytes (canvas caps, cache
 occupancy, live-canvas memory) — the contracts and their verification live
-in `docs/performance.md`. Check them before changing rendering,
+in `docs/PERFORMANCE.md`. Check them before changing rendering,
 virtualization, or cache policy. Startup diagnostics (PERF-11) are
 deterministic attributes on the reader element (`data-pdf-render-info`:
 dpr, content width, viewport height, fit scale; `data-pdf-render-ms` on
@@ -214,7 +214,7 @@ helpers in `pdfOpenTelemetry.ts`:
   the individual segments as bare numbers/page.
 
 E2E asserts state values and attribute shape only; timing thresholds are
-manual-bench material (`just bench-reader`, docs/performance.md), never
+manual-bench material (`just bench-reader`, docs/PERFORMANCE.md), never
 headless CI assertions. Outline work is explicitly ordered below first
 paint: the outline request is sent only after the first page has rendered,
 so it can never occupy the MuPDF worker ahead of page 1.

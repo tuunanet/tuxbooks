@@ -74,7 +74,7 @@ coarse shell position that backs the library's "In Progress" /
 without disturbing the stored locators.
 
 Progress rows are user data and are migrated, never reset, when the
-rendering engine changes (foliate → Readium, see `docs/epub.md`). The migration is versioned and idempotent:
+rendering engine changes (foliate → Readium, see `docs/EPUB.md`). The migration is versioned and idempotent:
 a schema/engine version marks which rows have been converted, the original
 locator values are preserved until the new ones are validated, and a
 per-book completion marker prevents re-running. New columns for the

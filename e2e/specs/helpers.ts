@@ -2,7 +2,7 @@
  * Shared helpers for the seeded-library spec files, ported to Playwright.
  * Selector strategy is unchanged: stable application-facing hooks
  * (`data-testid`, `aria-label`, documented reader-state attributes from
- * docs/epub.md + docs/pdf.md) — no private implementation reach-ins.
+ * docs/EPUB.md + docs/PDF.md) — no private implementation reach-ins.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
 
@@ -343,7 +343,7 @@ export async function epubHostCount(page: Page): Promise<number> {
 }
 
 /**
- * The engine host's stable attributes (docs/epub.md). The CFI locator is
+ * The engine host's stable attributes (docs/EPUB.md). The CFI locator is
  * what the persistence layer would save right now — the semantic location
  * probe for the round-trip and migration tests.
  */
@@ -367,7 +367,7 @@ export async function epubSectionTotal(page: Page): Promise<string | null> {
 }
 
 /**
- * The PDF reader's engine lifecycle attribute (docs/pdf.md): one of
+ * The PDF reader's engine lifecycle attribute (docs/PDF.md): one of
  * document-loading | document-parsed | layout-ready | interactive | error.
  * Failure modes name their stage instead of leaving the tests to infer from
  * a missing reader surface.

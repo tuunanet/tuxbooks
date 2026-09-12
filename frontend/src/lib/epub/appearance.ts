@@ -1,5 +1,5 @@
 /**
- * EPUB appearance mapping (docs/epub.md). The reader stores the user font
+ * EPUB appearance mapping (docs/EPUB.md). The reader stores the user font
  * size in CSS pixels, but the Readium toolkit's `EpubPreferences.fontSize`
  * is a unitless multiplier of the publication's default (1 = 100%, accepted
  * range [0.7, 4]) — a px value is silently dropped by the preferences

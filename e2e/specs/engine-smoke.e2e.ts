@@ -10,7 +10,7 @@ import {
   waitForPdfEngineState,
 } from "./helpers.js";
 /**
- * Engine smoke tests (docs/testing.md): small, fast, deterministic proofs
+ * Engine smoke tests (docs/TESTING.md): small, fast, deterministic proofs
  * that each renderer actually initialized end to end — application up,
  * document open, engine initialized, metadata/geometry available, visible
  * content rendered, location/progression available. They run before the
@@ -18,7 +18,7 @@ import {
  * clearly instead of surfacing as a dozen downstream timeouts.
  *
  * The chains are asserted through the format-agnostic reader seam (stable
- * DOM attributes, docs/epub.md + docs/pdf.md), so they keep proving the same
+ * DOM attributes, docs/EPUB.md + docs/PDF.md), so they keep proving the same
  * initialization contract when the engines are swapped (Readium, MuPDF.js).
  */
 

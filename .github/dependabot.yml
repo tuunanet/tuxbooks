@@ -7,7 +7,7 @@
 #
 # The `vitest` ignore is the PR #12 decision: vitest 4's coverage instrument
 # (AST remapping, both providers) cannot attribute TSX statement coverage the
-# way v3 did, which would break the docs/coverage.md gate for five categories
+# way v3 did, which would break the docs/COVERAGE.md gate for five categories
 # (books, layout, settings, lib, hooks) without any real coverage loss.
 # Revisit when ast-v8-to-istanbul attributes JSX-transformed statements
 # correctly — until then every vitest >= 4 PR is noise.
@@ -19,7 +19,7 @@
 # The `vite` ignore is the PR #19 decision: vite 8 cannot enter while vitest
 # 3.2.7 peers on vite ^5..^7 — pnpm keeps two Vites in the tree and tsc dies
 # on the plugin type clash (Rolldown-Vite vs Rollup-Vite). The MuPDF WASM
-# asset-emission seam (virtual:mupdf-wasm-url, docs/pdf.md) also must be
+# asset-emission seam (virtual:mupdf-wasm-url, docs/PDF.md) also must be
 # re-proven under Rolldown before vite 8 lands. Bump vite together with the
 # vitest migration, not before.
 #

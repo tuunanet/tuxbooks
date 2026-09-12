@@ -20,7 +20,7 @@ import { artifactsDir } from "../setup/environment.js";
 import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
 
 /**
- * Reader performance benchmark (docs/performance.md "How to measure").
+ * Reader performance benchmark (docs/PERFORMANCE.md "How to measure").
  *
  * This suite MEASURES and REPORTS; it does not assert timing thresholds —
  * those are manual by policy (E2E asserts deterministic attributes only,
@@ -200,7 +200,7 @@ async function interactionLatency(
  * Trend record: one JSON line per run appended to bench-trend.jsonl so
  * run-over-run drift (machine noise vs real regression) is visible without
  * any CI gate. Thresholds stay opt-in via BENCH_ENFORCE_P95_MS — CI timing
- * assertions are policy-excluded (docs/performance.md), and a threshold
+ * assertions are policy-excluded (docs/PERFORMANCE.md), and a threshold
  * that fires on machine variance is worse than none.
  */
 function appendTrend(): void {
@@ -281,7 +281,7 @@ function writeReport(): void {
 /**
  * Position change probe for the EPUB phase: shell percent, the engine's
  * pinned in-section fraction/section attributes, and the flow layout —
- * all deterministic DOM attributes on the reading surface (docs/epub.md
+ * all deterministic DOM attributes on the reading surface (docs/EPUB.md
  * testability contract), so the probe survives engine swaps. Read-only.
  */
 const epubPositionProbe = (page: Page): Promise<string> =>
@@ -447,7 +447,7 @@ const sampleIdleFrames = (page: Page, maxFrames: number): Promise<number[]> =>
 
 test.describe("reader performance benchmark", () => {
   /**
-   * Reference conditions are a maximized window (docs/performance.md); an
+   * Reference conditions are a maximized window (docs/PERFORMANCE.md); an
    * explicit `just bench-reader WxH` argument overrides for targeted
    * geometries. The applied size is what the report records. Sizing goes
    * through the renderer's window.resizeTo — the real OS window is what
@@ -817,7 +817,7 @@ test.describe("reader performance benchmark", () => {
     expect(label).toBe("Scrolling");
     // The popover's enter/exit animation can swallow the layout click —
     // re-drive it until the flow lands on the reader surface as a pinned
-    // attribute (docs/epub.md testability contract).
+    // attribute (docs/EPUB.md testability contract).
     let applied = false;
     for (let attempt = 0; attempt < 3 && !applied; attempt++) {
       await layoutItems.nth(1).click();

@@ -15,15 +15,15 @@ import {
 } from "./helpers.js";
 
 /**
- * High-DPI regression coverage (docs/testing.md): one configuration that is
+ * High-DPI regression coverage (docs/TESTING.md): one configuration that is
  * representative of a high-DPI/high-refresh desktop — the reference
- * conditions in docs/performance.md name devicePixelRatio 2.0 explicitly.
+ * conditions in docs/PERFORMANCE.md name devicePixelRatio 2.0 explicitly.
  * The hidpi phase (`just test-e2e-hidpi`) launches the app with
  * `--force-device-scale-factor=2` through E2E_DEVICE_SCALE_FACTOR, so every
  * buffer is four times the pixels of the default run.
  *
  * Assertions are deterministic attributes and geometry only (timing stays
- * out of headless E2E, docs/performance.md): the scale factor is actually
+ * out of headless E2E, docs/PERFORMANCE.md): the scale factor is actually
  * applied, pages render at the doubled backing store, the PERF-1 buffer
  * caps hold at dpr 2, a rapid page-turn sweep stays inside the render
  * budget, and the EPUB engine still initializes and reports progression.

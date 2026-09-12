@@ -3,7 +3,7 @@
 
 This is the ONLY piece of test infrastructure allowed to touch the network,
 and nothing in the default workflow calls it: `just test`, `just check`, and
-normal CI never download fixtures (docs/testing.md). It is invoked explicitly
+normal CI never download fixtures (docs/TESTING.md). It is invoked explicitly
 via `just fetch-epub-extended`.
 
 Datasets are declared in tests/fixtures/epub/fixtures.toml as:

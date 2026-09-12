@@ -1,5 +1,5 @@
 -- Initial schema for the tuxbooks library database.
--- See docs/database.md for the data model rationale.
+-- See docs/DATABASE.md for the data model rationale.
 
 PRAGMA foreign_keys = ON;
 

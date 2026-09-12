@@ -169,7 +169,7 @@ describe("progress persistence mapping", () => {
       progressPercent: 12.5,
     });
     // The foliate-era columns are intentionally absent: the service
-    // preserves them as provenance (docs/epub.md).
+    // preserves them as provenance (docs/EPUB.md).
     expect(payload).not.toHaveProperty("cfi");
     expect(payload).not.toHaveProperty("chapterHref");
     expect(pdfProgressPayload(3, 66)).toEqual({ pageNumber: 3, progressPercent: 66 });

@@ -50,7 +50,7 @@ Each has bitten before (or is a known trap of the Electron stack):
   `window.tuxbooks` API, consumed solely by `lib/bridge.ts`.
 - Sidecar lifecycle: the sidecar survives a renderer reload and is shut
   down on quit — no orphaned processes. E2E arms `PR_SET_PDEATHSIG` on the
-  sidecar for the same reason; see [testing.md](testing.md).
+  sidecar for the same reason; see [TESTING.md](TESTING.md).
 
 ## Rust module contract
 
@@ -67,7 +67,7 @@ Each has bitten before (or is a known trap of the Electron stack):
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` overrides are honored there (see
-[testing.md](testing.md)).
+[TESTING.md](TESTING.md)).
 
 Domain types derive `sqlx::FromRow` and `serde::Serialize` for pragmatism;
 the rule that matters is: no domain file imports a runtime crate.
@@ -77,7 +77,7 @@ the rule that matters is: no domain file imports a runtime crate.
 SQLite via SQLx with embedded migrations (`sidecar/migrations/`), run
 deterministically by `db::connection::init_pool`. All queries are runtime
 SQL (`sqlx::query`), not compile-time checked macros, so builds never
-require a live database. See [database.md](database.md).
+require a live database. See [DATABASE.md](DATABASE.md).
 
 ## EPUB layer
 
@@ -86,17 +86,17 @@ Import-time parsing stays in Rust (`epub/`, ZIP + OPF XML into a plain
 renderer, behind the single-module seam `lib/epub/readiumEngine.ts` —
 publication parsing, navigator state, pagination, locators, selection, and
 navigation are Readium's; React owns only the surrounding UI. EPUB
-resources load through `tuxbooks://`. See [epub.md](epub.md).
+resources load through `tuxbooks://`. See [EPUB.md](EPUB.md).
 
 ## PDF layer
 
 Import-time metadata stays in Rust (`pdf/` via `lopdf`; page-1 cover
 rasterization via `pdfium-render` — retained unless MuPDF in the renderer
-provably replaces it, see [pdf.md](pdf.md)). Reader rendering belongs to
+provably replaces it, see [PDF.md](PDF.md)). Reader rendering belongs to
 **MuPDF.js/WASM** in the renderer behind `lib/pdf/pdfEngine.ts` (the only
 MuPDF import site); `components/reader/pdf/` owns layout, virtualization,
 the render queue, and persistence. Byte access flows through
-`tuxbooks://`. See [pdf.md](pdf.md).
+`tuxbooks://`. See [PDF.md](PDF.md).
 
 ## Services
 
@@ -188,4 +188,4 @@ reconciliations reach the UI live.
 3. Vitest + React Testing Library with a mocked IPC bridge (`frontend/tests/`)
 4. Playwright E2E against the real Electron binary (`e2e/`)
 
-See [testing.md](testing.md).
+See [TESTING.md](TESTING.md).

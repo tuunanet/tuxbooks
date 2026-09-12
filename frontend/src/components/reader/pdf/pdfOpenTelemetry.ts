@@ -1,7 +1,7 @@
 /**
  * Pure PDF-open telemetry math — no React, no DOM, no engine. The reader
  * publishes the open timeline as deterministic `data-pdf-open-*` attributes
- * (docs/performance.md): a state machine over the open path, plus the
+ * (docs/PERFORMANCE.md): a state machine over the open path, plus the
  * click→document-open / click→first-paint / click→interactive segments.
  *
  * Timings are diagnostics and manual-benchmark inputs, never deterministic

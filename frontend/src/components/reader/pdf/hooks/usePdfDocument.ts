@@ -84,7 +84,7 @@ export function usePdfDocument(
     };
 
     const open = async (): Promise<void> => {
-      // The open anchor for the PDF-open telemetry (docs/performance.md):
+      // The open anchor for the PDF-open telemetry (docs/PERFORMANCE.md):
       // everything on the open path is measured from this point.
       const startedAt = performance.now();
       setOpenStartedAt(startedAt);

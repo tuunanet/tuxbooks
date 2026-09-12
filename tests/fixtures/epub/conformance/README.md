@@ -37,5 +37,5 @@ A future `[[dataset]]` entry in `tests/fixtures/epub/fixtures.toml` pins:
 
 CI note: if this ever runs in GitHub Actions, wrap it in an actions cache
 keyed on `id + version + archive_sha256` so the corpus is downloaded once,
-not per build (see `docs/testing.md`). The default CI path must never
+not per build (see `docs/TESTING.md`). The default CI path must never
 download it.

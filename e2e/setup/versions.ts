@@ -1,5 +1,5 @@
 /**
- * Version determinism for the E2E stack (docs/testing.md § versions): every
+ * Version determinism for the E2E stack (docs/TESTING.md § versions): every
  * run logs and records the Electron / Chromium / Playwright / Node
  * versions, plus the OS/runtime environment, into the run banner and the
  * run's artifacts directory — a failed E2E test must be reproducible from

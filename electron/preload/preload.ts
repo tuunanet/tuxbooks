@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 /**
- * The preload bridge (docs/architecture.md): the renderer's entire view of
+ * The preload bridge (docs/ARCHITECTURE.md): the renderer's entire view of
  * the outside world. contextIsolation is on, the sandbox is on, and this
  * surface is explicitly enumerated — no raw ipcRenderer passthrough, no
  * arbitrary method names. The renderer-side typed wrappers live in

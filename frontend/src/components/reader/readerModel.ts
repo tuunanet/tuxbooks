@@ -13,7 +13,7 @@ import type { ReaderSearchController, ReaderSearchMatch } from "./searchModel";
  * the search/annotation drawers; each format reader implements this contract
  * on top of its own engine without the engines sharing an abstraction.
  *
- * EPUB locator grammar (phase 3, docs/epub.md): the canonical locator is
+ * EPUB locator grammar (phase 3, docs/EPUB.md): the canonical locator is
  * the serialized Readium `Locator` JSON. Legacy foliate CFIs (progress
  * rows, stored annotations from before the engine swap) convert through
  * `lib/epub/progressMigration.ts` inside the engine seam at restore/jump
@@ -110,7 +110,7 @@ export function jumpToSearchMatch(match: ReaderSearchMatch): ReaderJump | null {
  * persistence hook stays format-blind. Restore is engine-owned: the record
  * passes through untouched and the engine seam resolves it (Readium rows
  * deserialize directly, foliate rows convert through the migration
- * adapter's fallback hierarchy — docs/epub.md).
+ * adapter's fallback hierarchy — docs/EPUB.md).
  */
 
 /**

@@ -18,7 +18,7 @@ machine paths, no randomness).
 --check regenerates everything into a temp dir, byte-compares it with the
 committed tree, and validates manifest checksums, EPUB version identity,
 malformed markers, and the size budget. It performs no network access; the
-core corpus is fully self-contained by design (docs/testing.md).
+core corpus is fully self-contained by design (docs/TESTING.md).
 """
 
 import argparse

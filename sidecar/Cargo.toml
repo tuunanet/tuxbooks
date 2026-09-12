@@ -7,7 +7,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 rust-version = "1.82"
 
-# See docs/architecture.md for the module layout contract. This crate is the
+# See docs/ARCHITECTURE.md for the module layout contract. This crate is the
 # native service binary: the Electron main process spawns it and talks
 # JSON-RPC over stdio.
 [lib]
@@ -34,7 +34,7 @@ quick-xml = "0.37"
 lopdf = "0.44"
 # PDF cover extraction: rasterizes page 1 at import time. pdfium-render is
 # bindings-only; the PDFium shared library is fetched by
-# scripts/fetch-pdfium.sh and probed at runtime (see docs/build.md).
+# scripts/fetch-pdfium.sh and probed at runtime (see docs/BUILD.md).
 pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Book bytes cross the JSON-RPC stdio channel to the Electron main process

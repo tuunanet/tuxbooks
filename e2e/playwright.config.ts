@@ -1,5 +1,5 @@
 /**
- * Playwright configuration for the desktop E2E suite (docs/testing.md).
+ * Playwright configuration for the desktop E2E suite (docs/TESTING.md).
  *
  * Run modes map to projects, one Electron invocation per phase, exactly
  * like the previous harness:
@@ -62,13 +62,13 @@ export default defineConfig({
   expect: { timeout: 10_000 },
 
   // Retries are a CI diagnostics aid, not a stability strategy (docs/
-  // testing.md): local runs are strict, CI gets one retry so a flaky
+  // TESTING.md): local runs are strict, CI gets one retry so a flaky
   // failure still produces a trace for investigation.
   retries: ci ? 1 : 0,
 
   outputDir: path.join(artifactsDir, "playwright-output"),
 
-  // Failure artifacts (docs/testing.md): trace + screenshot on failure,
+  // Failure artifacts (docs/TESTING.md): trace + screenshot on failure,
   // next to the console logs the launch fixture writes.
   use: {
     trace: { mode: "retain-on-failure" },

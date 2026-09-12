@@ -7,7 +7,7 @@ import { locateSidecar, RpcFailure, Sidecar, SidecarError } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
 
 /**
- * Electron main process (docs/architecture.md): window lifecycle, native
+ * Electron main process (docs/ARCHITECTURE.md): window lifecycle, native
  * dialogs/shell, the scoped `tuxbooks://` resource protocol, and the Rust
  * sidecar. Plumbing only — no business logic.
  */

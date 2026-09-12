@@ -33,7 +33,7 @@ static RENDER_LOCK: Mutex<()> = Mutex::new(());
 /// loaded from `library_dirs` or the system loader: covers are best-effort
 /// and must never fail an import. Callers pass candidate directories that
 /// may contain the platform library (see `pdfium_library_dirs` in `lib.rs`
-/// and `docs/build.md`).
+/// and `docs/BUILD.md`).
 pub fn render_first_page_cover(
     path: &Path,
     library_dirs: &[PathBuf],
@@ -133,7 +133,7 @@ mod tests {
     }
 
     /// Skip guard for tests that need a real PDFium library: absent when the
-    /// dev checkout was never fetched via `just fetch-pdfium` (docs/build.md).
+    /// dev checkout was never fetched via `just fetch-pdfium` (docs/BUILD.md).
     pub(crate) fn pdfium_is_available() -> bool {
         pdfium_available(&[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium")])
     }

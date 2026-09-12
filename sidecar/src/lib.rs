@@ -38,7 +38,7 @@ pub fn covers_dir(db_path: &Path) -> PathBuf {
 /// probe order: explicit override (`PDFIUM_LIB_DIR`), next to the executable,
 /// and the development checkout where `scripts/fetch-pdfium.sh` installs it.
 /// Absent candidates are skipped at probe time; see `pdf/render.rs` and
-/// docs/build.md.
+/// docs/BUILD.md.
 pub fn pdfium_library_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(dir) = std::env::var("PDFIUM_LIB_DIR") {

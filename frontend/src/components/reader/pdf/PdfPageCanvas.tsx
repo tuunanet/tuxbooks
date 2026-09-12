@@ -94,7 +94,7 @@ export function PdfPageCanvas({
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<PdfRenderTask | null>(null);
-  // PERF-2 signal (docs/performance.md): durations (ms) of the last renders
+  // PERF-2 signal (docs/PERFORMANCE.md): durations (ms) of the last renders
   // published as a deterministic `data-pdf-render-ms` attribute — a
   // diagnostic only, never asserted by timing in CI.
   const renderMsRef = useRef<number[]>([]);

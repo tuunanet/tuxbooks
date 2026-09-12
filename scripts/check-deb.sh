@@ -3,7 +3,7 @@
 # This is the packaging regression gate: the deb must be installable-by-
 # strangers, so its control metadata must match the package.json version,
 # the desktop entry must be valid, the hicolor icons must be installed, and
-# the bundled sidecar + PDFium resource must be present (docs/release.md).
+# the bundled sidecar + PDFium resource must be present (docs/RELEASE.md).
 # Unlike the Tauri-era payload, the Electron deb must NOT depend on
 # libwebkit2gtk.
 set -euo pipefail
