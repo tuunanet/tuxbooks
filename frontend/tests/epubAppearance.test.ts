@@ -24,6 +24,7 @@ import {
   epubTextAlignPreference,
   epubThemeColors,
   epubThemeBackground,
+  readerScrollbarColor,
   isEpubFontSizeStep,
   nearestEpubFontSize,
   nearestEpubLetterSpacing,
@@ -353,5 +354,18 @@ describe("EPUB themes (issue #46)", () => {
       expect(ratio(colors!.selectionBackground, bg)).toBeGreaterThanOrEqual(1.5);
       void theme;
     }
+  });
+});
+
+describe("readerScrollbarColor", () => {
+  it("keeps the native scrollbar only for the neutral default", () => {
+    expect(readerScrollbarColor("default")).toBeUndefined();
+  });
+
+  it("derives a translucent thumb from the theme's own text color", () => {
+    expect(readerScrollbarColor("light")).toBe("rgba(31, 35, 40, 0.4) transparent");
+    expect(readerScrollbarColor("paper")).toBe("rgba(58, 51, 42, 0.4) transparent");
+    expect(readerScrollbarColor("dark")).toBe("rgba(228, 228, 231, 0.4) transparent");
+    expect(readerScrollbarColor("contrast")).toBe("rgba(255, 255, 0, 0.4) transparent");
   });
 });

@@ -129,6 +129,16 @@ test.describe("tuxbooks continuous PDF reader", () => {
       )
       .toBe("rgb(246, 240, 228)");
 
+    // The reading surface's scrollbar thumb derives from the theme (via the
+    // --reader-scrollbar-thumb custom property feeding scrollbar-color).
+    await expect
+      .poll(
+        () =>
+          page.getByTestId("reader-content").evaluate((el) => getComputedStyle(el).scrollbarColor),
+        { timeout: 30000 },
+      )
+      .toBe("rgba(58, 51, 42, 0.4) rgba(0, 0, 0, 0)");
+
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
     await returnToLibrary(page);

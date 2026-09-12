@@ -321,6 +321,21 @@ export function epubThemeBackground(theme: EpubThemeName): string | undefined {
 }
 
 /**
+ * Scrollbar colors for the reading surface's scroller: a translucent thumb
+ * derived from the theme's own text color over a transparent track (the
+ * themed chrome shows through). Both values are required — a single-color
+ * scrollbar-color declaration is invalid. The neutral default keeps the
+ * native scrollbar; every preset themes it to match its surface.
+ */
+export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
+  const colors = epubThemeColors(theme);
+  if (!colors || !/^#[0-9a-f]{6}$/i.test(colors.text)) return undefined;
+  const value = colors.text.slice(1);
+  const channel = (offset: number) => parseInt(value.slice(offset, offset + 2), 16);
+  return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, 0.4) transparent`;
+}
+
+/**
  * Column-count targets for paginated EPUB reflow (issue #44). The selected
  * value is an explicit target, not an auto-fit hint: ReadiumCSS paginates
  * exactly N columns whenever the viewport fits N columns at the minimal
