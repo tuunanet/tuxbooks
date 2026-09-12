@@ -945,6 +945,12 @@ describe("PDF appearance menu", () => {
     expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
     expect(tint.style.mixBlendMode).toBe("multiply");
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
+
+    // The sticky toolbar takes the themed surface too — no app-white strip
+    // floating over the tinted pages.
+    expect(screen.getByTestId("pdf-prev").parentElement?.style.backgroundColor).toBe(
+      "rgb(246, 240, 228)",
+    );
   });
 });
 

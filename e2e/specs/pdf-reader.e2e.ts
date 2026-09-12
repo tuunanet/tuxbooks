@@ -110,7 +110,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
       .toBe("invert(1) hue-rotate(180deg)");
 
     // Paper multiplies the white pages down to the theme's paper color —
-    // the tint overlay, not a filter (a filter cannot darken white).
+    // the tint overlay, not a filter (a filter cannot darken white) — and
+    // the sticky toolbar takes the themed surface too (no app-white strip
+    // floating over the tinted pages).
     await theme.getByText("Paper", { exact: true }).click();
     await expect(page.getByTestId("pdf-theme-tint")).toBeAttached();
     await expect(
@@ -119,6 +121,23 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect(page.getByTestId("pdf-document").evaluate((el) => el.style.filter)).resolves.toBe(
       "",
     );
+    await expect
+      .poll(
+        () =>
+          page.getByTestId("pdf-prev").evaluate((el) => el.parentElement?.style.backgroundColor),
+        { timeout: 30000 },
+      )
+      .toBe("rgb(246, 240, 228)");
+
+    // The reading surface's scrollbar thumb derives from the theme (via the
+    // --reader-scrollbar-thumb custom property feeding scrollbar-color).
+    await expect
+      .poll(
+        () =>
+          page.getByTestId("reader-content").evaluate((el) => getComputedStyle(el).scrollbarColor),
+        { timeout: 30000 },
+      )
+      .toBe("rgba(58, 51, 42, 0.4) rgba(0, 0, 0, 0)");
 
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });

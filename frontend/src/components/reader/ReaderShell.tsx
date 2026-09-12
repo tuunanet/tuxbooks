@@ -16,6 +16,7 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
+import { readerScrollbarColor } from "@/lib/epub/appearance";
 import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
 import {
   bookmarkInputFor,
@@ -403,7 +404,12 @@ export function ReaderShell() {
           // before, once after the scrollbar appears) and every fit-scale
           // change re-anchors the viewport — long jumps land on the wrong
           // page. WebKitGTK overlay scrollbars made this invisible before.
-          className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
+          className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable] [scrollbar-color:var(--reader-scrollbar-thumb,auto)]"
+          style={
+            {
+              "--reader-scrollbar-thumb": readerScrollbarColor(preferences.theme),
+            } as React.CSSProperties
+          }
         >
           {isEpub ? (
             <EpubReader
