@@ -280,7 +280,7 @@ describe("EpubReader appearance and navigation", () => {
     expect(handle.setFlow).toHaveBeenCalledWith("paginated");
     expect(handle.setAppearance).toHaveBeenCalledWith({
       fontSize: 100,
-      lineHeight: 1.6,
+      lineHeight: 0,
       fontFamily: null,
       theme: "light",
     });

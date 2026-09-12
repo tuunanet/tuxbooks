@@ -28,7 +28,12 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
-import { epubFontSizeRatio } from "./appearance";
+import {
+  epubFontSizeRatio,
+  epubFontFamilyPreference,
+  epubLineHeightPreference,
+} from "./appearance";
+import type { EpubFontFamily } from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
   convertFoliateRow,
@@ -126,17 +131,15 @@ export function epubThemeBackground(theme: EpubThemeName): string {
 }
 
 /** Font stacks offered for user override; null means publisher styles win. */
-export const EPUB_FONT_FAMILIES = {
-  serif: 'Georgia, "Times New Roman", serif',
-  sans: 'system-ui, "Segoe UI", sans-serif',
-} as const;
-export type EpubFontFamily = keyof typeof EPUB_FONT_FAMILIES;
+export { EPUB_FONT_FAMILIES, type EpubFontFamily } from "./appearance";
 
 export interface EpubAppearance {
   /** User font size as a percent of the publication's default reading size
    *  (100% = native, Readium reading-system scale — `EPUB_FONT_SIZE_SCALE_PERCENT`);
    *  converted to Readium's unitless ratio at submission (`epubFontSizeRatio`). */
   fontSize: number;
+  /** Line height on the reading-system scale; 0 = publication default
+   *  (converted to the toolkit's "no preference" at submission). */
   lineHeight: number;
   fontFamily: EpubFontFamily | null;
   theme: EpubThemeName;
@@ -818,9 +821,12 @@ export class ReadiumEpubHandle {
    * User appearance over publisher styles, through the engine's Preferences
    * API (ReadiumCSS injects the user properties into every section frame).
    * `fontSize` arrives as a percent of the publication default and is
-   * converted to Readium's unitless ratio here — the engine contract is the
-   * unitless multiplier (accepted [0.7, 4] range; a raw px value would be
-   * silently dropped by the preferences validation).
+   * converted to Readium's unitless ratio here; a 0 line-height sentinel
+   * maps to the toolkit's "no preference" so publisher leading applies
+   * (`epubLineHeightPreference`). `fontFamily` passes the ReadiumCSS stack
+   * (`var(--RS__…Tf)` or a named typeface) that the frame resolves —
+   * ReadiumCSS applies it with `!important` plus a `revert` on `*`, which
+   * also beats publisher-embedded `@font-face` styling.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
@@ -831,9 +837,8 @@ export class ReadiumEpubHandle {
         textColor: colors.text,
         linkColor: colors.link,
         fontSize: epubFontSizeRatio(appearance.fontSize),
-        lineHeight: appearance.lineHeight,
-        fontFamily:
-          appearance.fontFamily === null ? null : EPUB_FONT_FAMILIES[appearance.fontFamily],
+        lineHeight: epubLineHeightPreference(appearance.lineHeight),
+        fontFamily: epubFontFamilyPreference(appearance.fontFamily),
       }),
     );
   }

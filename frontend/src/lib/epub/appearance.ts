@@ -1,12 +1,14 @@
 /**
- * EPUB font-size scale (docs/EPUB.md, issue #42). The reader stores the user
- * font size as a percentage of the publication's default reading size
- * (100% = native), following the Readium reading-system model — never as an
- * absolute px value. The Readium toolkit's `EpubPreferences.fontSize` is a
- * unitless multiplier of the publication default (accepted range [0.7, 4]);
- * the percent→ratio conversion happens only here, at the engine boundary.
- * This module is pure so the scale and mapping are unit-testable without
- * loading the engine.
+ * EPUB appearance mapping (docs/EPUB.md). The reader stores the user font
+ * size as a percentage of the publication's default reading size (100% =
+ * native) and the line height on a discrete reading-system scale (0 =
+ * publication default), following the Readium reading-system model — never
+ * arbitrary px/unitless values. The Readium toolkit's `EpubPreferences`
+ * takes a unitless fontSize multiplier (accepted range [0.7, 4]) and a
+ * unitless lineHeight (null = no override); the percent→ratio and
+ * 0→null conversions happen only here, at the engine boundary. This module
+ * is pure so the scales and mapping are unit-testable without loading the
+ * engine.
  */
 
 /** Readium's accepted fontSize ratio range (`fontSizeRangeConfig.range`). */
@@ -39,14 +41,81 @@ export function isEpubFontSizeStep(value: number): value is EpubFontSizeStep {
 }
 
 /**
- * Nearest supported scale step (ties round down). The slider and the state
- * only ever hold scale steps; this snaps off-scale values (e.g. from a
- * future persistence format) back onto the scale.
+ * Nearest supported font-size step (ties round down). The slider and the
+ * state only ever hold scale steps; this snaps off-scale values (e.g. from
+ * a future persistence format) back onto the scale.
  */
 export function nearestEpubFontSize(value: number): EpubFontSizeStep {
   let nearest: EpubFontSizeStep = EPUB_DEFAULT_FONT_SIZE_PERCENT;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+    const distance = Math.abs(value - step);
+    if (distance < bestDistance) {
+      nearest = step;
+      bestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * Reader font families, following the ReadiumCSS reading-system model. The
+ * ReadiumCSS stacks are `var(--RS__…Tf)` references resolved inside each
+ * section frame, so they track the reading system's per-direction stacks
+ * instead of hard-coded app CSS. Duospace and Readable use the same family
+ * names the reference implementation injects ("IA Writer Duospace",
+ * "AccessibleDfA"); until the font files ship with the app they degrade to
+ * intent-preserving fallback stacks when not installed on the system.
+ */
+export const EPUB_FONT_FAMILIES = {
+  serif: "Georgia, 'Times New Roman', serif",
+  sans: "var(--RS__sansTf)",
+  humanist: "var(--RS__humanistTf)",
+  "old-style": "var(--RS__oldStyleTf)",
+  modern: "var(--RS__modernTf)",
+  duospace:
+    '"IA Writer Duospace", "SF Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace',
+  readable: '"AccessibleDfA", Verdana, Tahoma, "Comic Sans MS", sans-serif',
+} as const;
+
+export type EpubFontFamily = keyof typeof EPUB_FONT_FAMILIES;
+
+/**
+ * Converts a reader font choice into the toolkit's fontFamily preference.
+ * Default (null) must map to null — the toolkit then writes no
+ * `--USER__fontFamily`, so publisher styling (including embedded @font-face
+ * faces) stays intact; only an explicit choice overrides it.
+ */
+export function epubFontFamilyPreference(fontFamily: EpubFontFamily | null): string | null {
+  return fontFamily === null ? null : EPUB_FONT_FAMILIES[fontFamily];
+}
+
+/**
+ * Discrete line-height scale (issue #43): the reading-system values, with
+ * 0 as the publication-default sentinel (no user override).
+ */
+export const EPUB_LINE_HEIGHT_SCALE = [0, 1, 1.125, 1.25, 1.35, 1.5, 1.65, 1.75, 2] as const;
+
+export type EpubLineHeightStep = (typeof EPUB_LINE_HEIGHT_SCALE)[number];
+
+/** The default line height: publication behavior (no override). */
+export const EPUB_DEFAULT_LINE_HEIGHT: EpubLineHeightStep = 0;
+
+/**
+ * Converts a scale step into the toolkit's lineHeight preference: the 0
+ * sentinel maps to null ("no preference", publisher line-height wins).
+ * A literal 0 must never reach the toolkit — `--USER__lineHeight: 0`
+ * computes `line-height: 0 !important` and collapses text.
+ */
+export function epubLineHeightPreference(step: number): number | null {
+  return step === 0 ? null : step;
+}
+
+/** Nearest supported line-height step (ties round down). */
+export function nearestEpubLineHeight(value: number): EpubLineHeightStep {
+  let nearest: EpubLineHeightStep = EPUB_DEFAULT_LINE_HEIGHT;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const step of EPUB_LINE_HEIGHT_SCALE) {
     const distance = Math.abs(value - step);
     if (distance < bestDistance) {
       nearest = step;

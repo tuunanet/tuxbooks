@@ -89,14 +89,21 @@ else depends on its types and the seam's handle:
 
 - `open(resourceBase)` opens the publication over `tuxbooks://`.
 - navigator attachment, pagination/scroll mode, appearance injection
-  (user stylesheet over publisher styles — font size, serif/sans override,
-  line spacing, theme colors). The UI font size is a percent of the
+  (user stylesheet over publisher styles — font size, font family, line
+  spacing, theme colors). The UI font size is a percent of the
   publication's default reading size (Readium reading-system scale: 100% =
   native, 75%–400% in `EPUB_FONT_SIZE_SCALE_PERCENT`, 100% reset); the seam
   converts it to Readium's unitless ratio (`lib/epub/appearance.ts`,
   percent ÷ 100) — the toolkit silently drops values outside its accepted
   `[0.7, 4]` range. Publication-relative only: the EPUB reader font size is
-  never modeled as px and stays separate from PDF zoom.
+  never modeled as px and stays separate from PDF zoom. Font family
+  overrides pass ReadiumCSS stacks (`var(--RS__…Tf)`) or named typefaces
+  through the preference API — ReadiumCSS applies them with `!important`
+  plus a `revert` on `*`, so they beat publisher styles including embedded
+  `@font-face` faces; Default sends `null` and leaves publisher styling
+  intact. Line height uses the discrete reading-system scale
+  (`EPUB_LINE_HEIGHT_SCALE`) with 0 = publication default, mapped to the
+  toolkit's "no preference" (never a literal 0, which would collapse text).
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
+  EPUB_DEFAULT_LINE_HEIGHT,
+  EPUB_FONT_FAMILIES,
   EPUB_FONT_RATIO_RANGE,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_LINE_HEIGHT_SCALE,
   epubFontSizeRatio,
+  epubFontFamilyPreference,
+  epubLineHeightPreference,
   isEpubFontSizeStep,
   nearestEpubFontSize,
+  nearestEpubLineHeight,
 } from "@/lib/epub/appearance";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 
@@ -96,5 +102,97 @@ describe("nearestEpubFontSize", () => {
     expect(nearestEpubFontSize(95)).toBe(100);
     expect(nearestEpubFontSize(420)).toBe(400);
     expect(nearestEpubFontSize(10)).toBe(75);
+  });
+});
+
+describe("EPUB_LINE_HEIGHT_SCALE", () => {
+  it("starts at the 0 default sentinel and reaches 2 through the reading-system values", () => {
+    expect([...EPUB_LINE_HEIGHT_SCALE]).toEqual([0, 1, 1.125, 1.25, 1.35, 1.5, 1.65, 1.75, 2]);
+  });
+
+  it("is strictly increasing", () => {
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const step of EPUB_LINE_HEIGHT_SCALE) {
+      expect(step).toBeGreaterThan(previous);
+      previous = step;
+    }
+  });
+
+  it("defaults to the publication behavior (0, no override)", () => {
+    expect(EPUB_DEFAULT_LINE_HEIGHT).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.lineHeight).toBe(EPUB_DEFAULT_LINE_HEIGHT);
+  });
+});
+
+describe("epubLineHeightPreference", () => {
+  it("maps the 0 default sentinel to the toolkit's 'no preference'", () => {
+    expect(epubLineHeightPreference(0)).toBeNull();
+  });
+
+  it("passes supported overrides through unchanged", () => {
+    for (const step of EPUB_LINE_HEIGHT_SCALE) {
+      if (step === 0) continue;
+      expect(epubLineHeightPreference(step)).toBe(step);
+    }
+  });
+});
+
+describe("nearestEpubLineHeight", () => {
+  it("keeps supported steps unchanged", () => {
+    for (const step of EPUB_LINE_HEIGHT_SCALE) {
+      expect(nearestEpubLineHeight(step)).toBe(step);
+    }
+  });
+
+  it("snaps off-scale values to the nearest step", () => {
+    expect(nearestEpubLineHeight(0.9)).toBe(1);
+    expect(nearestEpubLineHeight(1.6)).toBe(1.65);
+    expect(nearestEpubLineHeight(1.52)).toBe(1.5);
+    expect(nearestEpubLineHeight(2.4)).toBe(2);
+  });
+});
+
+describe("EPUB_FONT_FAMILIES", () => {
+  it("offers the reading-system choices, including the dyslexia-oriented typeface", () => {
+    expect(Object.keys(EPUB_FONT_FAMILIES)).toEqual([
+      "serif",
+      "sans",
+      "humanist",
+      "old-style",
+      "modern",
+      "duospace",
+      "readable",
+    ]);
+  });
+
+  it("resolves the reading-system stacks inside the frame via ReadiumCSS vars", () => {
+    expect(EPUB_FONT_FAMILIES.sans).toBe("var(--RS__sansTf)");
+    expect(EPUB_FONT_FAMILIES.humanist).toBe("var(--RS__humanistTf)");
+    expect(EPUB_FONT_FAMILIES["old-style"]).toBe("var(--RS__oldStyleTf)");
+    expect(EPUB_FONT_FAMILIES.modern).toBe("var(--RS__modernTf)");
+  });
+
+  it("uses the reference typeface names with intent-preserving fallbacks", () => {
+    // Same family names the reference implementation injects.
+    expect(EPUB_FONT_FAMILIES.duospace).toContain("IA Writer Duospace");
+    expect(EPUB_FONT_FAMILIES.readable).toContain("AccessibleDfA");
+    // Both degrade to usable stacks when the typeface is not installed.
+    for (const key of ["duospace", "readable"] as const) {
+      expect(EPUB_FONT_FAMILIES[key].split(",").length).toBeGreaterThan(1);
+    }
+  });
+});
+
+describe("epubFontFamilyPreference", () => {
+  it("maps Default to no preference, leaving publisher font styling intact", () => {
+    // The toolkit writes no --USER__fontFamily for null, so publisher
+    // styling (including embedded @font-face faces) applies untouched.
+    expect(epubFontFamilyPreference(null)).toBeNull();
+  });
+
+  it("maps every explicit choice to its reader stack", () => {
+    for (const [key, stack] of Object.entries(EPUB_FONT_FAMILIES)) {
+      expect(epubFontFamilyPreference(key as keyof typeof EPUB_FONT_FAMILIES)).toBe(stack);
+    }
   });
 });
