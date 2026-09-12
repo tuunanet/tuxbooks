@@ -937,6 +937,14 @@ describe("PDF appearance menu", () => {
     expect(screen.getByTestId("pdf-document").style.filter).toBe(
       "grayscale(1) invert(1) contrast(1.4)",
     );
+
+    // Paper multiplies the white pages down to the theme's paper color
+    // (a filter cannot darken white); the dark presets use filters only.
+    await userEvent.click(within(theme).getByRole("radio", { name: "Paper" }));
+    const tint = screen.getByTestId("pdf-theme-tint");
+    expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
+    expect(tint.style.mixBlendMode).toBe("multiply");
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("");
   });
 });
 

@@ -278,6 +278,7 @@ describe("PdfReader loading", () => {
       <ShortcutProvider>
         <ReaderProvider>
           <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PreferenceProbe label="probe-paper" patch={{ theme: "paper" }} />
           <PdfReader
             book={pdfBook}
             onDocumentLoad={() => {}}
@@ -294,6 +295,12 @@ describe("PdfReader loading", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("invert(1) hue-rotate(180deg)");
+
+    await userEvent.click(screen.getByRole("button", { name: "probe-paper" }));
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("");
+    const tint = screen.getByTestId("pdf-theme-tint");
+    expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
+    expect(tint.style.mixBlendMode).toBe("multiply");
   });
 
   it("shows an honest error when the document cannot be opened", async () => {

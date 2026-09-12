@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
-import { pdfThemeFilter } from "@/lib/pdf/theme";
+import { pdfThemeTreatment } from "@/lib/pdf/theme";
 import {
   isHighlightColor,
   highlightAtPoint,
@@ -846,7 +846,8 @@ export function PdfReader({
         contentAreaRef={contentAreaRef}
         onRetryPage={retryPage}
         highlightsByPage={highlightsByPage}
-        themeFilter={pdfThemeFilter(preferences.theme)}
+        themeFilter={pdfThemeTreatment(preferences.theme).filter}
+        themeTint={pdfThemeTreatment(preferences.theme).tint}
       />
       {sidebarHost &&
         createPortal(
