@@ -260,14 +260,15 @@ export function EpubReader({
     handle.setFlow(flow).catch(() => {});
   }, [handle, preferences.layout, interactive]);
 
-  // User appearance (font size, family override, line spacing, theme colors)
-  // through the engine's Preferences API.
+  // User appearance (font size, family override, line spacing, columns,
+  // theme colors) through the engine's Preferences API.
   useEffect(() => {
     if (!handle) return;
     void handle.setAppearance({
       fontSize: preferences.epubFontSize,
       lineHeight: preferences.lineHeight,
       fontFamily: preferences.fontFamily,
+      columnCount: preferences.columnCount,
       theme: preferences.theme,
     });
   }, [
@@ -275,6 +276,7 @@ export function EpubReader({
     preferences.epubFontSize,
     preferences.lineHeight,
     preferences.fontFamily,
+    preferences.columnCount,
     preferences.theme,
     interactive,
   ]);

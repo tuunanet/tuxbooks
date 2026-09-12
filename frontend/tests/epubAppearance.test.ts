@@ -6,8 +6,12 @@ import {
   EPUB_FONT_RATIO_RANGE,
   EPUB_FONT_SIZE_SCALE_PERCENT,
   EPUB_LINE_HEIGHT_SCALE,
+  clampEpubColumnCount,
+  EPUB_COLUMN_COUNTS,
+  EPUB_DEFAULT_COLUMN_COUNT,
   epubFontSizeRatio,
   epubFontFamilyPreference,
+  epubColumnCountPreference,
   epubLineHeightPreference,
   isEpubFontSizeStep,
   nearestEpubFontSize,
@@ -193,6 +197,40 @@ describe("epubFontFamilyPreference", () => {
   it("maps every explicit choice to its reader stack", () => {
     for (const [key, stack] of Object.entries(EPUB_FONT_FAMILIES)) {
       expect(epubFontFamilyPreference(key as keyof typeof EPUB_FONT_FAMILIES)).toBe(stack);
+    }
+  });
+});
+
+describe("EPUB column counts", () => {
+  it("offers exactly 1, 2, 3, and 4 with the two-page spread as default", () => {
+    expect([...EPUB_COLUMN_COUNTS]).toEqual([1, 2, 3, 4]);
+    expect(EPUB_DEFAULT_COLUMN_COUNT).toBe(2);
+    expect(DEFAULT_READER_PREFERENCES.columnCount).toBe(EPUB_DEFAULT_COLUMN_COUNT);
+  });
+
+  it("recognizes supported counts and clamps off-scale values", () => {
+    for (const count of EPUB_COLUMN_COUNTS) {
+      expect(clampEpubColumnCount(count)).toBe(count);
+    }
+    // Persistence robustness: stale/invalid values land on the scale.
+    expect(clampEpubColumnCount(0)).toBe(1);
+    expect(clampEpubColumnCount(-3)).toBe(1);
+    expect(clampEpubColumnCount(2.6)).toBe(3);
+    expect(clampEpubColumnCount(99)).toBe(4);
+  });
+});
+
+describe("epubColumnCountPreference", () => {
+  it("submits every explicit target for reflowable documents", () => {
+    for (const count of EPUB_COLUMN_COUNTS) {
+      expect(epubColumnCountPreference("reflowable", count)).toBe(count);
+    }
+  });
+
+  it("never sends a column count to fixed-layout publications", () => {
+    // FXL owns its pages-per-view behavior; a reflow target must not touch it.
+    for (const count of EPUB_COLUMN_COUNTS) {
+      expect(epubColumnCountPreference("fixed", count)).toBeUndefined();
     }
   });
 });

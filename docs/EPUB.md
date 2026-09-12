@@ -104,6 +104,12 @@ else depends on its types and the seam's handle:
   intact. Line height uses the discrete reading-system scale
   (`EPUB_LINE_HEIGHT_SCALE`) with 0 = publication default, mapped to the
   toolkit's "no preference" (never a literal 0, which would collapse text).
+  Column count (issue #44) is an explicit paginated target of 1–4
+  (`EPUB_COLUMN_COUNTS`, default 2 = two-page spread) submitted as
+  ReadiumCSS `--USER__colCount`: the engine paginates exactly N columns
+  whenever the viewport fits them and never auto-fits instead; scrolling
+  ignores it (stored value kept) and fixed-layout EPUBs never receive it
+  (FXL pages-per-view stays untouched).
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

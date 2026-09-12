@@ -5,6 +5,8 @@ import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  clampEpubColumnCount,
+  EPUB_COLUMN_COUNTS,
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
   EPUB_FONT_FAMILIES,
@@ -37,10 +39,14 @@ const FONT_FAMILY_OPTIONS: { value: EpubFontFamily; label: string }[] = [
   { value: "readable", label: "Readable" },
 ];
 
+/** Column counts are labeled with Roman numerals; the stored value stays numeric. */
+const COLUMN_COUNT_LABELS: Record<number, string> = { 1: "I", 2: "II", 3: "III", 4: "IV" };
+
 /**
- * Reading appearance: font size, line spacing, font family, theme, layout.
- * State lives in the reader context so the whole reading surface responds;
- * persistence is a future backend concern and is not faked here.
+ * Reading appearance: font size, line spacing, font family, theme, layout,
+ * paginated column count. State lives in the reader context so the whole
+ * reading surface responds; persistence is a future backend concern and is
+ * not faked here.
  */
 export function ReaderAppearance() {
   const { preferences, setPreferences } = useReader();
@@ -55,6 +61,10 @@ export function ReaderAppearance() {
   const lineHeight = nearestEpubLineHeight(preferences.lineHeight);
   const lineHeightIndex = EPUB_LINE_HEIGHT_SCALE.indexOf(lineHeight);
   const atDefaultLineHeight = lineHeight === EPUB_DEFAULT_LINE_HEIGHT;
+
+  // Explicit 1–4 target (issue #44); only offered for paginated reflow, and
+  // the stored value survives switching to scrolling untouched.
+  const columnCount = clampEpubColumnCount(preferences.columnCount);
 
   return (
     <Popover>
@@ -216,6 +226,27 @@ export function ReaderAppearance() {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          {preferences.layout === "paginated" && (
+            <div className="mt-2">
+              <p className="mb-2 text-sm">Columns</p>
+              <ToggleGroup
+                data-testid="pref-columns"
+                type="single"
+                size="sm"
+                variant="outline"
+                spacing={0}
+                value={String(columnCount)}
+                onValueChange={(value) => value && setPreferences({ columnCount: Number(value) })}
+                aria-label="Column count"
+              >
+                {EPUB_COLUMN_COUNTS.map((count) => (
+                  <ToggleGroupItem key={count} value={String(count)}>
+                    {COLUMN_COUNT_LABELS[count]}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

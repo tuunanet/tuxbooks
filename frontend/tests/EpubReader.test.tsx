@@ -282,6 +282,7 @@ describe("EpubReader appearance and navigation", () => {
       fontSize: 100,
       lineHeight: 0,
       fontFamily: null,
+      columnCount: 2,
       theme: "light",
     });
   });
