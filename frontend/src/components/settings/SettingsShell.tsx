@@ -38,7 +38,7 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
   reading: [
     {
       label: "Font size",
-      value: "17px default",
+      value: "100% default (75–400%)",
       hint: "Adjustable per session in the reader; saving preferences needs backend support.",
     },
     {

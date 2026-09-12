@@ -12,9 +12,20 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 /**
+ * True when the keydown originates from a focused slider thumb (the reader's
+ * appearance sliders). The slider owns its navigation keys — arrows step its
+ * value, PageUp/PageDown/Home/End move by larger steps — so a font-size
+ * change must never double as an engine page turn (issue #42).
+ */
+function isSliderTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="slider"]') !== null;
+}
+
+/**
  * Owns the single global keydown listener and dispatches matches to the most
  * recently registered handler for a combo. While the user is typing in a form
- * field, only modifier combos (e.g. Ctrl/Cmd+K) are dispatched.
+ * field or steering a slider, only modifier combos (e.g. Ctrl/Cmd+K) are
+ * dispatched.
  */
 export function ShortcutProvider({ children }: { children: ReactNode }) {
   const stacks = useRef(new Map<string, ShortcutHandler[]>());
@@ -41,7 +52,12 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
     function onKeyDown(event: KeyboardEvent) {
       const combo = comboFromEvent(event);
       if (!combo) return;
-      if (isEditableTarget(event.target) && !combo.startsWith("mod+")) return;
+      if (
+        (isEditableTarget(event.target) || isSliderTarget(event.target)) &&
+        !combo.startsWith("mod+")
+      ) {
+        return;
+      }
       const stack = stacks.current.get(combo);
       const top = stack ? stack[stack.length - 1] : undefined;
       if (top) {

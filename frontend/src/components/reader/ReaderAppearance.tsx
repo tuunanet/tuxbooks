@@ -1,9 +1,14 @@
-import { Type } from "lucide-react";
+import { RotateCcw, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  EPUB_DEFAULT_FONT_SIZE_PERCENT,
+  EPUB_FONT_SIZE_SCALE_PERCENT,
+  nearestEpubFontSize,
+} from "@/lib/epub/appearance";
 import {
   useReader,
   type ReaderFontFamily,
@@ -35,6 +40,13 @@ const FONT_FAMILY_OPTIONS: { value: ReaderFontFamily; label: string }[] = [
 export function ReaderAppearance() {
   const { preferences, setPreferences } = useReader();
 
+  // The font-size slider walks the supported Readium scale by index; the
+  // state itself holds the scale percentage, snapped so an off-scale value
+  // (e.g. a future stored preference) can never wedge the slider.
+  const fontSize = nearestEpubFontSize(preferences.epubFontSize);
+  const fontSizeIndex = EPUB_FONT_SIZE_SCALE_PERCENT.indexOf(fontSize);
+  const atDefaultFontSize = fontSize === EPUB_DEFAULT_FONT_SIZE_PERCENT;
+
   return (
     <Popover>
       <Tooltip>
@@ -61,16 +73,33 @@ export function ReaderAppearance() {
         <div>
           <div className="mb-2 flex items-center justify-between text-sm">
             <span>Font size</span>
-            <span className="tabular-nums text-muted-foreground">{preferences.fontSize}px</span>
+            <span className="flex items-center gap-1">
+              <span className="tabular-nums text-muted-foreground">{fontSize}%</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                data-testid="pref-font-size-reset"
+                aria-label="Reset font size"
+                disabled={atDefaultFontSize}
+                onClick={() => setPreferences({ epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT })}
+              >
+                <RotateCcw />
+              </Button>
+            </span>
           </div>
           <Slider
             data-testid="pref-font-size"
             aria-label="Font size"
-            min={14}
-            max={22}
+            min={0}
+            max={EPUB_FONT_SIZE_SCALE_PERCENT.length - 1}
             step={1}
-            value={[preferences.fontSize]}
-            onValueChange={(values) => setPreferences({ fontSize: values[0] })}
+            value={[fontSizeIndex]}
+            onValueChange={(values) => {
+              const index = values[0];
+              if (index !== undefined) {
+                setPreferences({ epubFontSize: EPUB_FONT_SIZE_SCALE_PERCENT[index] });
+              }
+            }}
           />
         </div>
 

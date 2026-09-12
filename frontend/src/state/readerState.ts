@@ -1,5 +1,5 @@
-import { EPUB_BASE_FONT_PX } from "@/lib/epub/appearance";
 import { createContext, useContext } from "react";
+import { EPUB_DEFAULT_FONT_SIZE_PERCENT } from "@/lib/epub/appearance";
 
 /** Visual theme of the reader surface. */
 export type ReaderTheme = "light" | "paper" | "dark";
@@ -14,7 +14,13 @@ export type ReaderFontFamily = "serif" | "sans";
  * Reader appearance preferences. UI-only state (no Rust mirror yet) —
  * consumed by the rendering engines (EPUB reflow styles, PDF zoom).
  */ export interface ReaderPreferences {
-  fontSize: number;
+  /**
+   * EPUB font size as a percentage of the publication's default reading size
+   * (100% = native; scale in `EPUB_FONT_SIZE_SCALE_PERCENT`). Publication-
+   * relative per the Readium reading-system model — never a px value — and
+   * separate from the PDF reader's zoom.
+   */
+  epubFontSize: number;
   lineHeight: number;
   fontFamily: ReaderFontFamily | null;
   theme: ReaderTheme;
@@ -22,7 +28,7 @@ export type ReaderFontFamily = "serif" | "sans";
 }
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
-  fontSize: EPUB_BASE_FONT_PX,
+  epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT,
   lineHeight: 1.6,
   fontFamily: null,
   theme: "light",

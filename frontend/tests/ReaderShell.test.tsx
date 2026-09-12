@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Annotation } from "@/types/domain";
 
@@ -528,7 +528,7 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Serif" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith({
-        fontSize: 17,
+        fontSize: 100,
         lineHeight: 1.6,
         fontFamily: "serif",
         theme: "paper",
@@ -544,11 +544,50 @@ describe("ReaderAppearance", () => {
     const content = await screen.findByTestId("appearance-content");
 
     expect(content).toHaveTextContent("Font size");
-    expect(content).toHaveTextContent("17px");
+    expect(content).toHaveTextContent("100%");
     expect(content).toHaveTextContent("Line spacing");
     expect(content).toHaveTextContent("1.6");
     expect(screen.getByLabelText("Font size")).toBeInTheDocument();
     expect(screen.getByLabelText("Line spacing")).toBeInTheDocument();
+  });
+
+  it("steps the font size along the Readium scale and resets to 100%", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    const slider = screen.getByTestId("pref-font-size");
+    // Radix handles the keydown on the thumb (role=slider), not the root.
+    const thumb = within(slider).getByRole("slider");
+    // Two steps up the scale: 100% → 112.5% → 137.5%.
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith({
+        fontSize: 137.5,
+        lineHeight: 1.6,
+        fontFamily: null,
+        theme: "light",
+      }),
+    );
+    expect(screen.getByTestId("appearance-content")).toHaveTextContent("137.5%");
+
+    // The explicit reset returns the default reading size.
+    const reset = screen.getByTestId("pref-font-size-reset");
+    expect(reset).toBeEnabled();
+    await userEvent.click(reset);
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith({
+        fontSize: 100,
+        lineHeight: 1.6,
+        fontFamily: null,
+        theme: "light",
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId("pref-font-size-reset")).toBeDisabled());
   });
 });
 

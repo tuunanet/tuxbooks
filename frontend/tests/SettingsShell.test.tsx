@@ -58,7 +58,7 @@ describe("SettingsShell", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Reading" }));
     expect(screen.getByRole("heading", { name: "Reading" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("17px default");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("100% default (75–400%)");
   });
 
   it("lists the shortcuts that actually exist today", async () => {

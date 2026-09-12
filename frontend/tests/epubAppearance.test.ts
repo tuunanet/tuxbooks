@@ -1,43 +1,100 @@
 import { describe, expect, it } from "vitest";
-import { EPUB_BASE_FONT_PX, EPUB_FONT_RATIO_RANGE, epubFontSizeRatio } from "@/lib/epub/appearance";
+import {
+  EPUB_DEFAULT_FONT_SIZE_PERCENT,
+  EPUB_FONT_RATIO_RANGE,
+  EPUB_FONT_SIZE_SCALE_PERCENT,
+  epubFontSizeRatio,
+  isEpubFontSizeStep,
+  nearestEpubFontSize,
+} from "@/lib/epub/appearance";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 
 /**
- * Font-size unit mapping between the UI (CSS px) and the Readium toolkit
+ * Font-size scale mapping between the reader state (percent of the
+ * publication's default reading size, issue #42) and the Readium toolkit
  * (unitless ratio, accepted range [0.7, 4]). A raw px value is outside the
- * accepted range and is silently dropped by the EpubPreferences validation
- * — the regression this pins (issue #40).
+ * accepted range and is silently dropped by the EpubPreferences validation —
+ * the regression this pins (issue #40), now avoided by storing a relative
+ * scale value in the first place.
  */
 
-/** The appearance slider's bounds (ReaderAppearance.tsx). */
-const SLIDER_MIN_PX = 14;
-const SLIDER_MAX_PX = 22;
+/** The Readium reference implementation's standard scale (through 250%). */
+const REFERENCE_SCALE = [75, 87.5, 100, 112.5, 137.5, 150, 162.5, 175, 200, 225, 250];
 
-describe("epubFontSizeRatio", () => {
-  it("maps the app default to Readium's 1.0 (publication native size)", () => {
-    expect(EPUB_BASE_FONT_PX).toBe(DEFAULT_READER_PREFERENCES.fontSize);
-    expect(epubFontSizeRatio(DEFAULT_READER_PREFERENCES.fontSize)).toBe(1);
+describe("EPUB_FONT_SIZE_SCALE_PERCENT", () => {
+  it("starts at the established 75% floor and reaches the 400% maximum", () => {
+    expect(EPUB_FONT_SIZE_SCALE_PERCENT[0]).toBe(75);
+    expect(EPUB_FONT_SIZE_SCALE_PERCENT.at(-1)).toBe(400);
   });
 
-  it("keeps every slider position inside Readium's accepted range", () => {
-    for (let px = SLIDER_MIN_PX; px <= SLIDER_MAX_PX; px += 1) {
-      const ratio = epubFontSizeRatio(px);
+  it("contains the reference implementation's standard intermediate steps", () => {
+    for (const step of REFERENCE_SCALE) {
+      expect(EPUB_FONT_SIZE_SCALE_PERCENT).toContain(step);
+    }
+  });
+
+  it("is strictly increasing", () => {
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+      expect(step).toBeGreaterThan(previous);
+      previous = step;
+    }
+  });
+
+  it("keeps every step inside Readium's accepted ratio range", () => {
+    for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+      const ratio = epubFontSizeRatio(step);
       expect(ratio).toBeGreaterThanOrEqual(EPUB_FONT_RATIO_RANGE[0]);
       expect(ratio).toBeLessThanOrEqual(EPUB_FONT_RATIO_RANGE[1]);
     }
   });
+});
 
-  it("converts monotonically: bigger px never yields a smaller ratio", () => {
-    for (let px = SLIDER_MIN_PX + 1; px <= SLIDER_MAX_PX; px += 1) {
-      expect(epubFontSizeRatio(px)).toBeGreaterThan(epubFontSizeRatio(px - 1));
+describe("epubFontSizeRatio", () => {
+  it("maps the default 100% to Readium's 1.0 (publication native size)", () => {
+    expect(EPUB_DEFAULT_FONT_SIZE_PERCENT).toBe(100);
+    expect(DEFAULT_READER_PREFERENCES.epubFontSize).toBe(EPUB_DEFAULT_FONT_SIZE_PERCENT);
+    expect(epubFontSizeRatio(EPUB_DEFAULT_FONT_SIZE_PERCENT)).toBe(1);
+  });
+
+  it("converts representative low/default/high values to the exact unitless ratio", () => {
+    expect(epubFontSizeRatio(75)).toBe(0.75);
+    expect(epubFontSizeRatio(100)).toBe(1);
+    expect(epubFontSizeRatio(175)).toBe(1.75);
+    expect(epubFontSizeRatio(250)).toBe(2.5);
+    expect(epubFontSizeRatio(400)).toBe(4);
+  });
+
+  it("converts monotonically: a bigger step never yields a smaller ratio", () => {
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+      expect(epubFontSizeRatio(step)).toBeGreaterThan(epubFontSizeRatio(previous));
+      previous = step;
     }
   });
 
-  it("rejects the raw px unit the conversion replaces (regression pin)", () => {
-    // Every raw slider value would be discarded by EpubPreferences' range
-    // validation — exactly the silently-dropped preference of issue #40.
-    for (let px = SLIDER_MIN_PX; px <= SLIDER_MAX_PX; px += 1) {
+  it("rejects the raw px unit the relative scale replaces (regression pin)", () => {
+    // Every value of the old 14–22 px slider would be discarded by
+    // EpubPreferences' range validation — the silently-dropped preference of
+    // issue #40 that the percent scale (issue #42) removes.
+    for (let px = 14; px <= 22; px += 1) {
       expect(px).toBeGreaterThan(EPUB_FONT_RATIO_RANGE[1]);
     }
+  });
+});
+
+describe("nearestEpubFontSize", () => {
+  it("keeps supported steps unchanged", () => {
+    for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+      expect(isEpubFontSizeStep(step)).toBe(true);
+      expect(nearestEpubFontSize(step)).toBe(step);
+    }
+  });
+
+  it("snaps off-scale values to the nearest step", () => {
+    expect(nearestEpubFontSize(80)).toBe(75);
+    expect(nearestEpubFontSize(95)).toBe(100);
+    expect(nearestEpubFontSize(420)).toBe(400);
+    expect(nearestEpubFontSize(10)).toBe(75);
   });
 });

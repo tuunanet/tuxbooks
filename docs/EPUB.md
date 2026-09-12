@@ -90,10 +90,13 @@ else depends on its types and the seam's handle:
 - `open(resourceBase)` opens the publication over `tuxbooks://`.
 - navigator attachment, pagination/scroll mode, appearance injection
   (user stylesheet over publisher styles — font size, serif/sans override,
-  line spacing, theme colors). The UI font size is CSS px; the seam
+  line spacing, theme colors). The UI font size is a percent of the
+  publication's default reading size (Readium reading-system scale: 100% =
+  native, 75%–400% in `EPUB_FONT_SIZE_SCALE_PERCENT`, 100% reset); the seam
   converts it to Readium's unitless ratio (`lib/epub/appearance.ts`,
-  17px = 1.0) — the toolkit silently drops values outside its accepted
-  `[0.7, 4]` range.
+  percent ÷ 100) — the toolkit silently drops values outside its accepted
+  `[0.7, 4]` range. Publication-relative only: the EPUB reader font size is
+  never modeled as px and stays separate from PDF zoom.
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 
@@ -141,7 +144,12 @@ Readium locators, validated against the actual EPUB:
   while an EPUB is open: the shell must not register its
   percentage-stepping/scrolling handlers for EPUB (null-combo gating in
   ReaderShell) — with no page count a shell step is 100/0 and the provider
-  clamp sends the position straight to an end of the document.
+  clamp sends the position straight to an end of the document. In
+  paginated flow an arrow turns one page; in scrolled flow the seam steps
+  one viewport of the section frame and only uses the engine's resource
+  hop at a section boundary (the toolkit's ScrollSnapper stubs
+  `go_next`/`go_prev` to false, so a raw `goForward` would skip whole
+  chapters).
 
 ### In-book search
 
