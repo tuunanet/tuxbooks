@@ -3,9 +3,9 @@
 [![CI](https://github.com/tuunanet/tuxbooks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tuunanet/tuxbooks/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/tuunanet/tuxbooks?include_prereleases&label=release)](https://github.com/tuunanet/tuxbooks/releases)
 [![License: GPL v3](https://img.shields.io/github/license/tuunanet/tuxbooks)](LICENSE.md)
-[![Platform: Linux](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux&logoColor=black)](docs/build.md)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-fcc624?logo=linux&logoColor=black)](docs/BUILD.md)
 [![CodeFactor Grade](https://www.codefactor.io/repository/github/tuunanet/tuxbooks/badge)](https://www.codefactor.io/repository/github/tuunanet/tuxbooks)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tuunanet/tuxbooks/badges/coverage.json)](docs/coverage.md)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tuunanet/tuxbooks/badges/coverage.json)](docs/COVERAGE.md)
 
 A local-first, bookshelf-style desktop ebook library for Linux (Electron
 desktop shell). Point it at a folder of EPUB and PDF files; it indexes
@@ -37,7 +37,7 @@ chmod +x tuxbooks_<version>_amd64.AppImage && ./tuxbooks_<version>_amd64.AppImag
 ```
 
 Verify downloads against `SHA256SUMS.txt` in the same release. See
-[docs/release.md](docs/release.md) for how releases are cut and packaged.
+[docs/RELEASE.md](docs/RELEASE.md) for how releases are cut and packaged.
 
 ## Getting started
 
@@ -69,7 +69,7 @@ Individual pieces: `pnpm --filter frontend test`,
 
 E2E needs the `xvfb` package (`sudo apt install xvfb` on Debian/Ubuntu).
 `just test-e2e` is safe to run from SSH, CI, or anywhere without a desktop
-session. See [docs/testing.md](docs/testing.md).
+session. See [docs/TESTING.md](docs/TESTING.md).
 
 ## Layout
 
@@ -87,9 +87,9 @@ scripts/           fixture/icon generators, build and fetch helpers, env helper
 
 ## Documentation
 
-Start with [docs/architecture.md](docs/architecture.md), then
-[docs/database.md](docs/database.md), [docs/epub.md](docs/epub.md), and
-[docs/testing.md](docs/testing.md). Agents: read `AGENTS.md`
+Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), then
+[docs/DATABASE.md](docs/DATABASE.md), [docs/EPUB.md](docs/EPUB.md), and
+[docs/TESTING.md](docs/TESTING.md). Agents: read `AGENTS.md`
 first.
 
 ## License

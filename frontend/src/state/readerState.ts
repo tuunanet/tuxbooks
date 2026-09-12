@@ -1,3 +1,4 @@
+import { EPUB_BASE_FONT_PX } from "@/lib/epub/appearance";
 import { createContext, useContext } from "react";
 
 /** Visual theme of the reader surface. */
@@ -21,7 +22,7 @@ export type ReaderFontFamily = "serif" | "sans";
 }
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
-  fontSize: 17,
+  fontSize: EPUB_BASE_FONT_PX,
   lineHeight: 1.6,
   fontFamily: null,
   theme: "light",

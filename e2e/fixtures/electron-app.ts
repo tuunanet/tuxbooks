@@ -1,6 +1,6 @@
 /**
  * The application fixture: the single owner of the Electron lifecycle
- * (docs/testing.md). Tests receive `electronApp` (main-process handle) and
+ * (docs/TESTING.md). Tests receive `electronApp` (main-process handle) and
  * `page` (the app's first BrowserWindow) — they never launch Electron
  * themselves.
  *
@@ -43,7 +43,7 @@ interface WorkerFixtures {
 const versions = stackVersions();
 
 // A high-DPI/high-refresh desktop is part of the reference conditions
-// (docs/performance.md); the hidpi phase (just test-e2e-hidpi) forces a
+// (docs/PERFORMANCE.md); the hidpi phase (just test-e2e-hidpi) forces a
 // device scale factor through this Chromium switch.
 const deviceScaleFactor = Number(process.env.E2E_DEVICE_SCALE_FACTOR ?? "");
 const appArgs = ["--no-sandbox", "--ozone-platform=x11"];
@@ -79,7 +79,7 @@ function patchEnvironmentRecord(patch: Record<string, unknown>): void {
  * close on an already-closed app is a no-op).
  */
 export async function launchElectronApp(): Promise<ElectronApplication> {
-  // Isolation gate (docs/testing.md): the scratch database must belong to
+  // Isolation gate (docs/TESTING.md): the scratch database must belong to
   // this run before the app ever launches. A fixture-level failure stops
   // the worker — there is no WDIO-style "log the hook error and continue"
   // that could silently degrade into testing the real user library.
@@ -137,7 +137,7 @@ export async function launchElectronApp(): Promise<ElectronApplication> {
     // Diagnostics only.
   }
 
-  // Isolation gate, second half (docs/testing.md): the sidecar must have
+  // Isolation gate, second half (docs/TESTING.md): the sidecar must have
   // written the schema into the scratch database before any test runs. The
   // window only appears after the sidecar is healthy, so by the time the
   // page exists the DB should be written — poll anyway, bounded.
@@ -196,7 +196,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       } catch (err) {
         console.warn(`[e2e] failure screenshot unavailable: ${err}`);
       }
-      // Failure metadata (docs/testing.md): what failed, where, and against
+      // Failure metadata (docs/TESTING.md): what failed, where, and against
       // which stack — so CI artifacts answer "React, Electron, engine, IPC,
       // or harness?" without a local reproduction. Renderer/main console
       // output and the Playwright trace sit next to this file.

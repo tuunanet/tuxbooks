@@ -15,7 +15,7 @@ way around.
   "PR #12 trap"): the gate is silent in the pipeline, checked only locally.
 - `just coverage` produces **no machine-readable artifact** — the recipe
   passes only `--coverage.reporter=text-summary`. The
-  `frontend/coverage/coverage-summary.json` path that `docs/coverage.md`
+  `frontend/coverage/coverage-summary.json` path that `docs/COVERAGE.md`
   points at does not exist after a run (verified: `find` returns nothing).
   Anything badge-shaped needs a JSON reporter first.
 - The instrument is welded to vitest majors (PRs #12/#21): any vitest bump
@@ -67,7 +67,7 @@ publishing — the badge only ever shows numbers from green runs.
    required in branch protection once stable for a week.
 3. **`README.md`**: shield endpoint badge —
    `https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tuunanet/tuxbooks/badges/coverage.json`
-4. **`docs/coverage.md`**: "Badge" section — data source, refresh cadence
+4. **`docs/COVERAGE.md`**: "Badge" section — data source, refresh cadence
    (every main push; shields caches per `maxAge`), and the rule that the
    badge shows worst-category, never overall alone.
 5. **`justfile`**: extend the `coverage` recipe to also emit the JSON
@@ -78,10 +78,10 @@ publishing — the badge only ever shows numbers from green runs.
 - **The weld rule (PR #12/#21):** a vitest/coverage-provider bump changes
   the instrument, therefore lands in the same change as any needed
   `coverage-badge.mjs`/threshold adjustments and a fresh baseline column in
-  `docs/coverage.md`. The badge pipeline must never be the thing that
+  `docs/COVERAGE.md`. The badge pipeline must never be the thing that
   quietly keeps working across an instrument change.
 - **Floors are the gate:** the badge adds visibility, not a new gate and
-  not a floor change. `docs/coverage.md` tables stay authoritative.
+  not a floor change. `docs/COVERAGE.md` tables stay authoritative.
 
 ## Rust: deliberately out of the v1 badge
 
@@ -126,6 +126,6 @@ phase-3 one-week watch, then flip the job to required in branch protection
 
 ## Out of scope
 
-Floor changes; covering the "outside the gate" list in `docs/coverage.md`;
+Floor changes; covering the "outside the gate" list in `docs/COVERAGE.md`;
 any third-party service in phases 1–3; per-category badges in the README
 (one number, worst category).

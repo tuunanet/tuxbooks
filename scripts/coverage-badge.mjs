@@ -6,7 +6,7 @@
  * overall percentage. Run after a `--coverage` run; CI publishes the output
  * to the badges branch on main pushes only, so the badge only ever shows
  * numbers from green runs (the vitest thresholds already fail the run below
- * any category floor — docs/coverage.md).
+ * any category floor — docs/COVERAGE.md).
  *
  * Usage: node scripts/coverage-badge.mjs [summaryPath] [outPath]
  *   defaults: frontend/coverage/coverage-summary.json

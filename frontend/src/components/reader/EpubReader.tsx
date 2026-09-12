@@ -107,7 +107,7 @@ export function EpubReader({
       view.hostElement.dataset.epubSection = String(detail.section.current);
       view.hostElement.dataset.epubSectionTotal = String(detail.section.total);
       // The exact locator the persistence layer would save right now
-      // (docs/epub.md stable attributes): E2E reads it for the locator
+      // (docs/EPUB.md stable attributes): E2E reads it for the locator
       // round-trip regression test instead of inferring position from
       // page-level state.
       view.hostElement.dataset.epubLocator = detail.locator;
@@ -182,7 +182,7 @@ export function EpubReader({
 
   // Restore path: the record passes through untouched; the engine seam
   // resolves Readium rows directly and migrates foliate rows through the
-  // versioned adapter's fallback hierarchy (docs/epub.md).
+  // versioned adapter's fallback hierarchy (docs/EPUB.md).
   const [hostMounted, setHostMounted] = useState(false);
   const [restored, setRestored] = useState(false);
   useReaderProgress<EpubSavedState>({
@@ -425,7 +425,7 @@ export function EpubReader({
     );
   }
 
-  // Bounded measure (PERF-12, docs/performance.md): in scrolled flow the
+  // Bounded measure (PERF-12, docs/PERFORMANCE.md): in scrolled flow the
   // navigator's section iframe spans the full host width, so the container
   // caps it and centers the column; paginated flow keeps the engine's own
   // grid cap and no app-side cap. The root bridges the engine's theme

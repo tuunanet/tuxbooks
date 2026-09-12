@@ -9,7 +9,7 @@ import path from "node:path";
  * exposing its URL through a virtual module. The package does not export
  * the file as a subpath, and the emscripten glue's own resolution (relative
  * to the worker chunk) never finds it in a bundled build — the seam passes
- * the URL to the worker explicitly (docs/pdf.md).
+ * the URL to the worker explicitly (docs/PDF.md).
  */
 const wasmFile = path.resolve(import.meta.dirname, "node_modules/mupdf/dist/mupdf-wasm.wasm");
 const mupdfWasmUrl: Plugin = {
@@ -89,7 +89,7 @@ export default defineConfig({
         "src/components/ui/**",
       ],
       reporter: ["text-summary", "html"],
-      // Quality gate (docs/coverage.md): per-category floors. Vitest fails
+      // Quality gate (docs/COVERAGE.md): per-category floors. Vitest fails
       // the run when any glob drops below its threshold.
       thresholds: {
         "src/App.tsx": { lines: 80 },

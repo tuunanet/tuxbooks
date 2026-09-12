@@ -33,7 +33,7 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
 - Wire DTOs serialize `camelCase` — JSON-RPC payloads and the preload
   bridge alike.
 - Business logic lives in `domain/`/`services/`; SQL only in
-  `repository/` (module table in [architecture.md](architecture.md)).
+  `repository/` (module table in [ARCHITECTURE.md](ARCHITECTURE.md)).
 - `epub/` and `domain/` stay independent of any runtime (Electron, Tauri).
 
 ## Frontend
@@ -49,7 +49,7 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   allowed to talk to the outside world are `src/lib/bridge.ts` (IPC via
   the preload API) and the two engine seams
   (`lib/epub/readiumEngine.ts`, `lib/pdf/pdfEngine.ts`) —
-  [architecture.md](architecture.md).
+  [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Dependencies
 

@@ -46,6 +46,7 @@ graphify-out/
 
 # Tooling state
 .tavily/
+.firecrawl/
 
 # Free ebook fixture corpus — downloaded by `just fetch-ebooks`, verified
 # against tests/fixtures/books/EBooks/manifest.json. Large binary books have

@@ -33,7 +33,7 @@ tier = "extended"
 retrieved = "2026-01-01"               # date the checksum was verified
 ```
 
-Rules (see `docs/testing.md`):
+Rules (see `docs/TESTING.md`):
 
 - One versioned archive per dataset — never a per-file download loop.
 - `archive_sha256` is the checksum of the exact archive at `source`; a

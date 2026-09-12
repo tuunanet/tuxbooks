@@ -9,7 +9,7 @@ import {
 } from "@/lib/epub/progressMigration";
 
 /**
- * Progress-migration adapter tests (docs/epub.md). The chapter documents
+ * Progress-migration adapter tests (docs/EPUB.md). The chapter documents
  * come from synthetic DOM (the adapter's ProgressSource seam), mirroring the
  * real conversion path; the end-to-end conversion against the real
  * minimal.epub fixture — including the captured foliate CFIs the old app

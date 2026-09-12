@@ -75,7 +75,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
   // timeline. The state machine must reach "interactive" through the
   // range-backed open (bytes=range); timing segments are recorded but only
   // their shape is asserted — thresholds live in the manual bench
-  // (docs/performance.md), never in headless CI.
+  // (docs/PERFORMANCE.md), never in headless CI.
   test("publishes the PDF-open state timeline attributes", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const root = page.getByTestId("pdf-reader");
@@ -213,7 +213,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
     // reported by the diagnostics attribute stays within its configured
     // budget (8 entries / 320 MiB — mirroring PdfBitmapCache's defaults;
     // sized for ≥ 2 capped 4K page buffers at BOTH reference dprs,
-    // docs/performance.md PERF-3).
+    // docs/PERFORMANCE.md PERF-3).
     const cache = await bitmapCacheUsage(page);
     expect(cache).not.toBeNull();
     expect(cache!.entries).toBeLessThanOrEqual(8);

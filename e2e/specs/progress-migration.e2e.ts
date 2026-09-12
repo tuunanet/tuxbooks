@@ -5,9 +5,9 @@ import { expect, test, type Page } from "../fixtures/electron-app.js";
 import { openInReader, returnToLibrary, textOf } from "./helpers.js";
 
 /**
- * Reading-progress migration E2E (docs/testing.md): stored progress is
+ * Reading-progress migration E2E (docs/TESTING.md): stored progress is
  * user data that must survive the engine migration (foliate → Readium,
- * docs/epub.md). This suite seeds the scratch database with
+ * docs/EPUB.md). This suite seeds the scratch database with
  * progress rows in the format the previous (foliate/WebKitGTK) app wrote —
  * a canonical CFI plus chapter href and coarse percent — and asserts the
  * reader restores the SAME LOGICAL LOCATION (spine section), never a page
@@ -22,7 +22,7 @@ import { openInReader, returnToLibrary, textOf } from "./helpers.js";
  * Coverage here is the E2E slice: beginning, chapter boundary, late book,
  * stale/invalid rows, and the PDF page row. Mid-chapter offsets and the
  * several EPUB structures (varied spines, fixed layout, malformed corpora)
- * are pinned by the Rust-level progress-migration fixtures (docs/epub.md,
+ * are pinned by the Rust-level progress-migration fixtures (docs/EPUB.md,
  * `sidecar/tests`), which run the full corpus per `cargo test`.
  */
 
@@ -143,7 +143,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   test("degrades a stale foliate row to the beginning without crashing", async ({ page }) => {
     // A CFI pointing at a nonexistent spine entry plus a chapter href that
     // matches no spine item: every locator tier of the migration adapter's
-    // fallback hierarchy (docs/epub.md) fails validation against the actual
+    // fallback hierarchy (docs/EPUB.md) fails validation against the actual
     // EPUB. A locator-bearing row never falls back to its stale percentage
     // — that would silently jump into a different file — so the adapter
     // degrades to the beginning (section 0), and the reader stays usable.
@@ -158,7 +158,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
     // A real position change (page turn) flushes the debounced save and
     // lands the migration markers: the converted row carries the Readium
     // locator + engine/schema markers while the original foliate locator
-    // survives as provenance (docs/epub.md).
+    // survives as provenance (docs/EPUB.md).
     await page.keyboard.press("ArrowRight");
     await page.waitForTimeout(1500);
     const migrated = db

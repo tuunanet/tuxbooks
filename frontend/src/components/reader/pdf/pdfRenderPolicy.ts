@@ -4,7 +4,7 @@
  * effective ratio`; this module decides that ratio, and the render window's
  * byte budget.
  *
- * Buffer policy (PERF-1, docs/performance.md): a page's backing store never
+ * Buffer policy (PERF-1, docs/PERFORMANCE.md): a page's backing store never
  * exceeds `MAX_RENDER_PIXELS_HARD` (2²⁵) in total or `MAX_RENDER_DIMENSION`
  * on a side; the ratio prefers devicePixelRatio, degrades to the preferred
  * `MAX_RENDER_PIXELS` (2²⁴) tier first, then to CSS resolution, and only
@@ -14,7 +14,7 @@
  * against). At common window sizes
  * the ratio equals dpr and the caps are inert.
  *
- * Live-canvas policy (PERF-4, docs/performance.md): the pages allowed to
+ * Live-canvas policy (PERF-4, docs/PERFORMANCE.md): the pages allowed to
  * keep a mounted canvas are bounded by bytes as well as count, using the
  * same capped ratio for the per-page estimate.
  */

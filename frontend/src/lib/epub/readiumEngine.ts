@@ -1,6 +1,6 @@
 /**
  * The single seam between the app and the Readium toolkit (`@readium/*`),
- * successor of the old foliate `lib/epub/epubEngine.ts` (docs/epub.md).
+ * successor of the old foliate `lib/epub/epubEngine.ts` (docs/EPUB.md).
  * Components depend on these re-exported types and on `ReadiumEpubHandle`
  * only — never on Readium objects — so the engine stays swappable and unit
  * tests can mock one module.
@@ -9,7 +9,7 @@
  * stored EPUB into a Readium webpub manifest + positions list, served
  * through `get_epub_session` (JSON-RPC); every document/image/stylesheet
  * the navigator touches loads per-resource over the `tuxbooks://` protocol
- * (the renderer never touches ZIP archives — docs/architecture.md).
+ * (the renderer never touches ZIP archives — docs/ARCHITECTURE.md).
  *
  * Locator grammar: the app-level EPUB locator is the serialized Readium
  * `Locator` JSON. Legacy foliate CFIs (progress rows, stored annotations)
@@ -28,6 +28,7 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
+import { epubFontSizeRatio } from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
   convertFoliateRow,
@@ -107,7 +108,7 @@ export type EpubFlow = "paginated" | "scrolled";
 
 /**
  * Inline-size cap for the reading surface in scrolled flow (PERF-12,
- * docs/performance.md). The paginated spread is capped by the engine's own
+ * docs/PERFORMANCE.md). The paginated spread is capped by the engine's own
  * grid, but its scrolled flow stretches the section frame across the full
  * host width; `EpubReader` caps its own container at this width in scrolled
  * flow only, and the shell around the cap is bridged to the engine's theme
@@ -132,6 +133,8 @@ export const EPUB_FONT_FAMILIES = {
 export type EpubFontFamily = keyof typeof EPUB_FONT_FAMILIES;
 
 export interface EpubAppearance {
+  /** User font size in CSS px (the UI unit); converted to Readium's
+   *  unitless ratio at submission (`epubFontSizeRatio`). */
   fontSize: number;
   lineHeight: number;
   fontFamily: EpubFontFamily | null;
@@ -767,6 +770,9 @@ export class ReadiumEpubHandle {
   /**
    * User appearance over publisher styles, through the engine's Preferences
    * API (ReadiumCSS injects the user properties into every section frame).
+   * `fontSize` arrives in UI px and is converted to Readium's unitless
+   * ratio here — a raw px value is outside the toolkit's accepted [0.7, 4]
+   * range and would be silently dropped by the preferences validation.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
@@ -776,7 +782,7 @@ export class ReadiumEpubHandle {
         backgroundColor: colors.background,
         textColor: colors.text,
         linkColor: colors.link,
-        fontSize: appearance.fontSize,
+        fontSize: epubFontSizeRatio(appearance.fontSize),
         lineHeight: appearance.lineHeight,
         fontFamily:
           appearance.fontFamily === null ? null : EPUB_FONT_FAMILIES[appearance.fontFamily],
@@ -901,7 +907,7 @@ export class ReadiumEpubHandle {
       });
     });
     active.applyDecorations(decorations, "highlights");
-    // Testability contract (docs/epub.md): how many stored highlights are
+    // Testability contract (docs/EPUB.md): how many stored highlights are
     // applied as decorations right now — E2E asserts highlight paint after
     // reopen/jump through this host attribute, not engine-internal DOM.
     this.host.dataset.epubHighlights = String(decorations.length);

@@ -11,7 +11,7 @@ make-epub-fixtures:
 
 # Fetch the PDFium shared library used for PDF cover extraction
 # (sidecar/pdfium/, gitignored). Idempotent: skips when already present.
-# The pinned build tracks pdfium-render's default bindings (docs/build.md).
+# The pinned build tracks pdfium-render's default bindings (docs/BUILD.md).
 fetch-pdfium:
     bash scripts/fetch-pdfium.sh
 
@@ -99,7 +99,7 @@ build: fetch-pdfium
 
 # Package the distributable Linux bundles with electron-builder
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs
-# it first. Default targets: deb + rpm + AppImage (docs/release.md); a
+# it first. Default targets: deb + rpm + AppImage (docs/RELEASE.md); a
 # target list argument narrows the run (e.g. `just package deb`). The rpm
 # needs the `rpm` package (rpmbuild) installed. `--publish never`: this
 # recipe only builds artifacts — electron-builder 26 otherwise publishes
@@ -108,7 +108,7 @@ build: fetch-pdfium
 package TARGETS="deb rpm AppImage": build
     pnpm exec electron-builder --linux {{TARGETS}} --publish never
 
-# Packaging regression gate (docs/release.md): verifies the deb built by
+# Packaging regression gate (docs/RELEASE.md): verifies the deb built by
 # `just package` — control metadata, payload (Electron + sidecar + PDFium),
 # desktop entry, and hicolor icons.
 check-deb:
@@ -187,7 +187,7 @@ test-e2e-seeded:
 test-e2e-gpu: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=gpu E2E_SEED_LIBRARY=1 pnpm --filter e2e test:gpu
 
-# High-DPI configuration (docs/performance.md reference conditions name dpr
+# High-DPI configuration (docs/PERFORMANCE.md reference conditions name dpr
 # 2.0): the seeded reader scenarios against an app forced to
 # devicePixelRatio 2 via E2E_DEVICE_SCALE_FACTOR → --force-device-scale-factor.
 test-e2e-hidpi: build-debug
@@ -195,7 +195,7 @@ test-e2e-hidpi: build-debug
 
 # Production-form build: same renderer/Electron bundles, but the RELEASE
 # sidecar binary through TUXBOOKS_SIDECAR (the packaged-app resource
-# resolution path; see docs/release.md for packaging).
+# resolution path; see docs/RELEASE.md for packaging).
 # just does not interpolate {{root}} inside variable assignments — build the
 # path with string concatenation so the override is a real binary path.
 _release_sidecar := justfile_directory() + "/sidecar/target/release/tuxbooks"
@@ -216,7 +216,7 @@ test-e2e-headed-empty:
 test-e2e-headed-seeded:
     {{_x11}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
-# Reader performance benchmark (docs/performance.md "How to measure"):
+# Reader performance benchmark (docs/PERFORMANCE.md "How to measure"):
 # MEASURES pdf render→blit and epub scrolled-flow latency on the real-book
 # Agents fixtures, starting mid-book, with the window MAXIMIZED on the real
 # display (explicit WxH argument overrides). Asserts only the deterministic
@@ -228,7 +228,7 @@ _bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { ""
 bench-reader WINDOW_SIZE="": build-debug
     {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
 
-# Opt-in large fixture tiers (docs/testing.md). Never invoked by `just test`,
+# Opt-in large fixture tiers (docs/TESTING.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.
 
 # Fetch extended/conformance EPUB datasets declared in
@@ -297,7 +297,7 @@ check:
         'workflows: just lint-workflows'
     @echo "check: OK"
 
-# Coverage gate (docs/coverage.md). Frontend thresholds are enforced by
+# Coverage gate (docs/COVERAGE.md). Frontend thresholds are enforced by
 # every vitest run; this recipe adds the Rust instrumented run (slow first
 # time: cargo-llvm-cov keeps its own target dir).
 coverage:

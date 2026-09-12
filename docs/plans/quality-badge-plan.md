@@ -34,7 +34,7 @@ top of tools we already run strictly.
     - "**/dist/**"
   ```
 
-  Same exclusion philosophy as `docs/coverage.md` ("outside the gate").
+  Same exclusion philosophy as `docs/COVERAGE.md` ("outside the gate").
 
 - Rust: expect Clippy findings in `sidecar/`; our clippy already runs
   `-D warnings`, so the delta should be near zero — verify during

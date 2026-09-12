@@ -1,6 +1,6 @@
 /**
  * The MuPDF worker: every MuPDF/WASM object lives here, and all rasterization
- * and text extraction run off the UI thread (docs/pdf.md). One worker instance
+ * and text extraction run off the UI thread (docs/PDF.md). One worker instance
  * serves one document; the main-thread side (pdfEngine.ts) terminates the
  * worker when the document closes, which frees the whole WASM heap.
  *

@@ -4,7 +4,7 @@ The readers are budgeted in **pixels and bytes, not element counts**. Every
 surface they produce scales with viewport area, and the app must stay smooth
 at a maximized 3840×2160 window — not just at the default 1100×720 size.
 
-Like the coverage gate (`docs/coverage.md`), budgets are changed only case
+Like the coverage gate (`docs/COVERAGE.md`), budgets are changed only case
 by case, with the reason recorded in the same change. Unlike coverage, not
 every budget is machine-enforced yet; the Verified-by column states what
 holds each one today, and what must hold it in a change that touches it.

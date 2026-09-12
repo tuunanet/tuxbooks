@@ -11,7 +11,7 @@
 //! - `read_member` extracts one ZIP entry by (decoded, normalized) path for
 //!   the protocol handler (chapter documents, images, stylesheets, fonts).
 //!
-//! The renderer never touches ZIP archives (docs/architecture.md); all
+//! The renderer never touches ZIP archives (docs/ARCHITECTURE.md); all
 //! publication parsing lives here, in Rust.
 
 use std::fs::File;

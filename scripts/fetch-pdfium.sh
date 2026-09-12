@@ -6,7 +6,7 @@
 # The build tag below must match the Pdfium build that pdfium-render's
 # default `pdfium_latest` feature generates bindings for (7881 for
 # pdfium-render 0.9.x). Bump both together when upgrading pdfium-render.
-# See docs/build.md.
+# See docs/BUILD.md.
 set -euo pipefail
 
 PDFIUM_BUILD="chromium/7881"

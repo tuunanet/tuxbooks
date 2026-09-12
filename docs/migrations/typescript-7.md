@@ -195,7 +195,7 @@ node scripts/build-electron.mjs
 
 The renderer bundle must be byte-comparable in structure (entry chunk size
 in the same ballpark; MuPDF WASM asset emitted — see the wasmFile plugin in
-`frontend/vite.config.ts`, docs/pdf.md).
+`frontend/vite.config.ts`, docs/PDF.md).
 
 ### 7. E2E
 
@@ -215,7 +215,7 @@ fails locally / via `just coverage`. Run it:
 just coverage
 ```
 
-Compare per-category numbers against `docs/coverage.md` baselines. If the
+Compare per-category numbers against `docs/COVERAGE.md` baselines. If the
 floors fail, first establish whether real coverage regressed or the
 instrument changed — the vitest-4 saga (PRs #12, #21) is the case study in
 not lowering floors because a measurement layer moved.
@@ -225,7 +225,7 @@ not lowering floors because a measurement layer moved.
 - `.github/dependabot.yml`: remove the `typescript >= 7` ignore entry and
   its comment block (PR #28 note). Update the comment to record the
   migration date.
-- `docs/coverage.md`: refresh the frontend baseline column if numbers
+- `docs/COVERAGE.md`: refresh the frontend baseline column if numbers
   moved (date + one-line reason in the same change, per its rules).
 
 ### 10. Review, merge, verify

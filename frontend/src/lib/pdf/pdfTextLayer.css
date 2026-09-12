@@ -3,7 +3,7 @@
  * (`renderPdfTextLayer` in lib/pdf/pdfEngine.ts): transparent spans
  * positioned in page-unit space over the page canvas, giving real text
  * selection without any visuals of their own. Pin to the bundled MuPDF.js
- * version when the layer structure changes (docs/pdf.md).
+ * version when the layer structure changes (docs/PDF.md).
  */
 
 .textLayer {

@@ -167,7 +167,7 @@ export function PdfReader({
     useFitWidthScale(referencePageWidth);
   const scale = fitScale * zoom;
 
-  // PERF-11 diagnostics (docs/performance.md): the reader publishes one
+  // PERF-11 diagnostics (docs/PERFORMANCE.md): the reader publishes one
   // deterministic attribute snapshotting the geometry that drives every
   // raster budget — device pixel ratio, content width (the fit-width
   // input), viewport height, and the layout scale. It is refreshed when
@@ -205,7 +205,7 @@ export function PdfReader({
   // the saved position has been applied, so a reader never flashes page 1
   // before jumping to the restored location.
   const [restored, setRestored] = useState(false);
-  // Open-timeline bookkeeping (docs/performance.md PDF-open telemetry): the
+  // Open-timeline bookkeeping (docs/PERFORMANCE.md PDF-open telemetry): the
   // hook records the open anchor in its commit effect; the first rendered
   // page is "first useful page"; the interactive timestamp derives from the
   // restore callback below. All measurements happen in event callbacks or
@@ -691,7 +691,7 @@ export function PdfReader({
     return Math.max(restoredAtMs, firstPaintMs);
   }, [restoredAtMs, firstPaintMs]);
 
-  // Deterministic PDF-open telemetry attributes (docs/performance.md):
+  // Deterministic PDF-open telemetry attributes (docs/PERFORMANCE.md):
   // state machine + compact timing string, present on every reader surface
   // (error, loading, interactive) so a stuck open names its own stage.
   const openState = pdfOpenState({
@@ -789,7 +789,7 @@ export function PdfReader({
     return (
       <div
         data-testid="pdf-reader"
-        // Engine lifecycle as a deterministic attribute (docs/pdf.md): a
+        // Engine lifecycle as a deterministic attribute (docs/PDF.md): a
         // stuck or failed stage names itself instead of leaving the tests to
         // infer from a missing reader. status "ready" means the document is
         // parsed (worker/document path); layout follows once sizes are known.

@@ -675,7 +675,7 @@ describe("PdfReader virtualization", () => {
     });
 
     await renderLoadedReader();
-    // Emulate the 4K reference conditions (docs/performance.md): a ~3816px
+    // Emulate the 4K reference conditions (docs/PERFORMANCE.md): a ~3816px
     // content area fits the letter page at ~6.2×, so each slot's capped
     // buffer is ~75 MB and only ~3 fit the 256 MB live-canvas budget.
     const area = screen.getByTestId("pdf-content-area");

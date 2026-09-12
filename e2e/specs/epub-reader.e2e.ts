@@ -233,7 +233,7 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Semantic persistence regression (docs/testing.md): the exact engine
+  // Semantic persistence regression (docs/TESTING.md): the exact engine
   // locator — not just the section index or a percentage — survives the
   // close/reopen cycle. This is the reading-position regression protection
   // the engine migration (foliate → Readium) must keep passing. The locator

@@ -1,5 +1,5 @@
 /**
- * The renderer's only window.tuxbooks consumer (docs/architecture.md). Every
+ * The renderer's only window.tuxbooks consumer (docs/ARCHITECTURE.md). Every
  * call to the Rust service, native picker, or protocol URL goes through the
  * typed wrappers here; components never touch the preload API directly.
  */

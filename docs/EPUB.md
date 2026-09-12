@@ -90,7 +90,10 @@ else depends on its types and the seam's handle:
 - `open(resourceBase)` opens the publication over `tuxbooks://`.
 - navigator attachment, pagination/scroll mode, appearance injection
   (user stylesheet over publisher styles — font size, serif/sans override,
-  line spacing, theme colors).
+  line spacing, theme colors). The UI font size is CSS px; the seam
+  converts it to Readium's unitless ratio (`lib/epub/appearance.ts`,
+  17px = 1.0) — the toolkit silently drops values outside its accepted
+  `[0.7, 4]` range.
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

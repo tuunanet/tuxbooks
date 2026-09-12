@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rust coverage gate (docs/coverage.md): runs cargo-llvm-cov and enforces
+ * Rust coverage gate (docs/COVERAGE.md): runs cargo-llvm-cov and enforces
  * the per-module line-coverage floors. Exits non-zero when any module is
  * below its floor. The raw report is at target/llvm-cov/coverage.json.
  *
@@ -11,7 +11,7 @@
  *
  * Commands/, lib.rs, error.rs and main.rs are outside the gate: they are
  * the IPC boundary, wiring, and entry point — all covered end to end by
- * the E2E suite (see docs/coverage.md).
+ * the E2E suite (see docs/COVERAGE.md).
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";

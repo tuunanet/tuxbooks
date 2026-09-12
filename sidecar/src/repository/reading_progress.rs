@@ -25,7 +25,7 @@ pub async fn upsert_progress(
     // The locator columns are preserved when a save does not carry them: a
     // PDF save must never clobber an EPUB locator, a Readium save must
     // never clobber the foliate-era `cfi`/`chapter_href` provenance
-    // (docs/epub.md: original data is preserved until the adapter's
+    // (docs/EPUB.md: original data is preserved until the adapter's
     // conversion is validated), and percent-only writes never touch any
     // locator. Each format writes the columns it owns on every save.
     sqlx::query(

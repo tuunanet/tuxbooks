@@ -1,7 +1,7 @@
 import { expect, test } from "../fixtures/electron-app.js";
 
 /**
- * Empty-library suite (docs/testing.md phase "empty"): the real desktop
+ * Empty-library suite (docs/TESTING.md phase "empty"): the real desktop
  * window launches and shows the application shell, the empty-library state,
  * and Settings navigation. This is also the Playwright harness smoke: a
  * launch + BrowserWindow + React query proves the fixture end to end.

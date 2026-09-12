@@ -63,7 +63,7 @@ non-empty description, **no webkit dependency**), the extracted payload
 entry (structure plus `desktop-file-validate` when installed), and
 hicolor icons. `just check-deb` after `just package`; CI's build job runs
 the deb target + gate on every push, and the release workflow gates the
-published artifacts (docs/release.md).
+published artifacts (docs/RELEASE.md).
 
 ## E2E runtime
 
@@ -71,7 +71,7 @@ There is no external browser driver to install: Playwright's Electron
 launcher (`e2e/fixtures/electron-app.ts`) spawns the `electron` binary from
 `e2e/node_modules` pointed at the built `electron/dist/main.cjs` and
 attaches to it directly. The only runtime dependency is the OS-level
-`xvfb` package for headless Linux runs (see docs/testing.md).
+`xvfb` package for headless Linux runs (see docs/TESTING.md).
 `just test-e2e-release` exercises the release sidecar path via
 `TUXBOOKS_SIDECAR`; packaged-build smoke tests run the probe:
 `TUXBOOKS_BOOT_PROBE=1 dist-packages/linux-unpacked/tuxbooks` with
@@ -92,7 +92,7 @@ pdfium-render.
 Decision (migration phase 4): MuPDF.js in the renderer does **not**
 replace this pipeline — renderer MuPDF rasterizes whole documents for the
 reader, while import-time covers need a per-file, no-UI rasterization in
-the sidecar; PDFium stays the import-time cover engine (docs/pdf.md).
+the sidecar; PDFium stays the import-time cover engine (docs/PDF.md).
 
 ## Debug-build performance
 

@@ -61,7 +61,7 @@ watchdog arms).
   varied spine structures, large chapters, reflowable + fixed-layout,
   malformed/stale locators, missing EPUB files, older-version records —
   each asserted to land the Readium reader at the same **logical**
-  location (small pagination drift allowed). See [epub.md](epub.md).
+  location (small pagination drift allowed). See [EPUB.md](EPUB.md).
 - `sidecar/tests/library_sync.rs` drives the real `notify` watcher
   against a real database in tempdirs. These tests need the tokio runtime
   to be multi-threaded (`#[tokio::test(flavor = "multi_thread")]`):
@@ -107,7 +107,7 @@ watchdog arms).
 - Add or update tests when changing behavior — meaningful behavior
   only, no coverage-filler tests. Keep the `proptest` invariants
   (parser crash-safety, scanner extension filtering) intact.
-- The coverage gate (`docs/coverage.md`) is part of the contract:
+- The coverage gate (`docs/COVERAGE.md`) is part of the contract:
   frontend floors fail any vitest run, Rust floors run via
   `just coverage`.
 - Never download copyrighted books; fixture content is original
@@ -242,7 +242,7 @@ Two more invocations exist beyond the default four:
   above 60 Hz — the dpr dimension is what this configuration guards.
 - **release flavor** (`just test-e2e-release`) — empty + seeded against the
   RELEASE sidecar binary via `TUXBOOKS_SIDECAR` (the packaged-app resource
-  resolution path; packaging is documented in [release.md](release.md)). A
+  resolution path; packaging is documented in [RELEASE.md](RELEASE.md)). A
   build that works from the source tree but loses its sidecar/resources in
   production form fails here.
 
@@ -254,7 +254,7 @@ with offsets derived from live slot geometry — never hard-coded pixels.
 `just bench-reader [WxH]` runs `bench-reader.e2e.ts` — the suite that
 MEASURES instead of asserting structure. It is excluded from
 `test:empty`/`test:seeded` and from CI by policy (headless timings are
-unreliable; `docs/performance.md` — E2E asserts deterministic attributes
+unreliable; `docs/PERFORMANCE.md` — E2E asserts deterministic attributes
 only), runs headed on the real display with the window maximized (explicit
 `WxH` overrides; sizing goes through the renderer's `window.resizeTo`
 because the real OS window is what the reader lays out against), and
@@ -357,7 +357,7 @@ pass.
   are the only override hooks; production code resolves the OS app-data
   dir when the first two are unset.
 - PDF cover tests need the PDFium shared library (`just fetch-pdfium`,
-  automatic in the justfile flows — see `docs/build.md`). When it is
+  automatic in the justfile flows — see `docs/BUILD.md`). When it is
   absent (bare `cargo test` on a fresh clone), those tests print a notice
   and skip instead of failing.
 
