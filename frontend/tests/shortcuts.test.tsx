@@ -5,7 +5,10 @@ import { comboFromEvent, useShortcut } from "@/lib/shortcuts";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 
 function fireKey(init: KeyboardEventInit, target: EventTarget = window): boolean {
-  const event = new KeyboardEvent("keydown", { cancelable: true, ...init });
+  // Real keydowns bubble to the window-level listener; the synthetic event
+  // must too (KeyboardEvent defaults to bubbles: false), or dispatching on
+  // an element target can never exercise the provider's gating.
+  const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(event);
   return event.defaultPrevented;
 }
@@ -14,13 +17,17 @@ function Harness({
   combo,
   onFire,
   editableTarget,
+  sliderTarget,
 }: {
   combo: string | null;
   onFire: () => void;
   editableTarget?: boolean;
+  sliderTarget?: boolean;
 }) {
   useShortcut(combo, onFire);
-  return editableTarget ? <input aria-label="field" data-focused /> : <p>ready</p>;
+  if (editableTarget) return <input aria-label="field" data-focused />;
+  if (sliderTarget) return <div role="slider" aria-label="sizer" tabIndex={0} data-focused />;
+  return <p>ready</p>;
 }
 
 describe("comboFromEvent", () => {
@@ -84,6 +91,32 @@ describe("ShortcutProvider", () => {
     const input = screen.getByLabelText("field");
     expect(fireKey({ key: " " }, input)).toBe(false);
     expect(onFire).not.toHaveBeenCalled();
+  });
+
+  it("ignores navigation combos while a slider owns the keys", () => {
+    const onFire = vi.fn();
+    const { rerender } = render(
+      <ShortcutProvider>
+        <Harness combo="arrowright" onFire={onFire} sliderTarget />
+      </ShortcutProvider>,
+    );
+
+    const slider = screen.getByLabelText("sizer");
+    // The appearance sliders step their value with arrows/PageUp/PageDown;
+    // a font-size change must never double as an engine page turn (#42).
+    expect(fireKey({ key: "ArrowRight" }, slider)).toBe(false);
+    expect(fireKey({ key: "PageDown" }, slider)).toBe(false);
+    expect(onFire).not.toHaveBeenCalled();
+
+    // Modifier combos still dispatch over a focused slider.
+    const onModFire = vi.fn();
+    rerender(
+      <ShortcutProvider>
+        <Harness combo="mod+k" onFire={onModFire} sliderTarget />
+      </ShortcutProvider>,
+    );
+    expect(fireKey({ key: "k", ctrlKey: true }, slider)).toBe(true);
+    expect(onModFire).toHaveBeenCalledTimes(1);
   });
 
   it("unregisters when the calling component unmounts", () => {

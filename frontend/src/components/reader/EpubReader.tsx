@@ -265,14 +265,14 @@ export function EpubReader({
   useEffect(() => {
     if (!handle) return;
     void handle.setAppearance({
-      fontSize: preferences.fontSize,
+      fontSize: preferences.epubFontSize,
       lineHeight: preferences.lineHeight,
       fontFamily: preferences.fontFamily,
       theme: preferences.theme,
     });
   }, [
     handle,
-    preferences.fontSize,
+    preferences.epubFontSize,
     preferences.lineHeight,
     preferences.fontFamily,
     preferences.theme,

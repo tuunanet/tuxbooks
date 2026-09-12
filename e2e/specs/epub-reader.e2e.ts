@@ -197,6 +197,26 @@ test.describe("tuxbooks EPUB reader", () => {
     // click by text within the group's stable test id, not by role.
     await page.getByTestId("pref-font-family").getByText("Serif", { exact: true }).click();
     await page.getByTestId("pref-theme").getByText("Paper", { exact: true }).click();
+
+    // Font size walks the Readium percent scale (issue #42). The slider owns
+    // its arrow keys, and larger text must repaginate cleanly while keeping
+    // the reading location: the reader stays ready in the same spine
+    // section. The book may open at a previously saved position (specs share
+    // the scratch library), so assert preservation, not an absolute section.
+    const fontSlider = page.getByTestId("pref-font-size").getByRole("slider");
+    const host = page.locator("div[data-epub-host]");
+    const sectionBefore = await currentSection(page);
+    await fontSlider.press("ArrowRight");
+    await fontSlider.press("ArrowRight");
+    await expect(page.getByTestId("appearance-content")).toContainText("137.5%");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
+    await fontSlider.press("ArrowLeft");
+    await fontSlider.press("ArrowLeft");
+    await expect(page.getByTestId("appearance-content")).toContainText("100%");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
+
     await page.getByTestId("pref-layout").getByText("Scrolling", { exact: true }).click();
     await expect(page.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper", {
       timeout: 30000,

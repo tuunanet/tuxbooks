@@ -133,8 +133,9 @@ export const EPUB_FONT_FAMILIES = {
 export type EpubFontFamily = keyof typeof EPUB_FONT_FAMILIES;
 
 export interface EpubAppearance {
-  /** User font size in CSS px (the UI unit); converted to Readium's
-   *  unitless ratio at submission (`epubFontSizeRatio`). */
+  /** User font size as a percent of the publication's default reading size
+   *  (100% = native, Readium reading-system scale — `EPUB_FONT_SIZE_SCALE_PERCENT`);
+   *  converted to Readium's unitless ratio at submission (`epubFontSizeRatio`). */
   fontSize: number;
   lineHeight: number;
   fontFamily: EpubFontFamily | null;
@@ -770,9 +771,10 @@ export class ReadiumEpubHandle {
   /**
    * User appearance over publisher styles, through the engine's Preferences
    * API (ReadiumCSS injects the user properties into every section frame).
-   * `fontSize` arrives in UI px and is converted to Readium's unitless
-   * ratio here — a raw px value is outside the toolkit's accepted [0.7, 4]
-   * range and would be silently dropped by the preferences validation.
+   * `fontSize` arrives as a percent of the publication default and is
+   * converted to Readium's unitless ratio here — the engine contract is the
+   * unitless multiplier (accepted [0.7, 4] range; a raw px value would be
+   * silently dropped by the preferences validation).
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
