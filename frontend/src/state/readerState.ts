@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import {
+  EPUB_DEFAULT_COLUMN_COUNT,
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
   type EpubFontFamily,
@@ -31,6 +32,12 @@ export type ReaderFontFamily = EpubFontFamily;
    */
   lineHeight: number;
   fontFamily: ReaderFontFamily | null;
+  /**
+   * EPUB column-count target for paginated reflow (1–4, issue #44): an
+   * explicit maximum the engine paginates to, never an auto-fit. Ignored by
+   * scrolling (stored value kept) and never applied to fixed-layout EPUBs.
+   */
+  columnCount: number;
   theme: ReaderTheme;
   layout: ReaderLayout;
 }
@@ -39,6 +46,7 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT,
   lineHeight: EPUB_DEFAULT_LINE_HEIGHT,
   fontFamily: null,
+  columnCount: EPUB_DEFAULT_COLUMN_COUNT,
   theme: "light",
   layout: "paginated",
 };

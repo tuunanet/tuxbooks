@@ -4,9 +4,10 @@
  * native) and the line height on a discrete reading-system scale (0 =
  * publication default), following the Readium reading-system model — never
  * arbitrary px/unitless values. The Readium toolkit's `EpubPreferences`
- * takes a unitless fontSize multiplier (accepted range [0.7, 4]) and a
- * unitless lineHeight (null = no override); the percent→ratio and
- * 0→null conversions happen only here, at the engine boundary. This module
+ * takes a unitless fontSize multiplier (accepted range [0.7, 4]), a unitless
+ * lineHeight (null = no override), and an explicit columnCount target for
+ * paginated reflow; the percent→ratio, 0→null, and fixed-layout gating
+ * conversions happen only here, at the engine boundary. This module
  * is pure so the scales and mapping are unit-testable without loading the
  * engine.
  */
@@ -123,4 +124,54 @@ export function nearestEpubLineHeight(value: number): EpubLineHeightStep {
     }
   }
   return nearest;
+}
+
+/**
+ * Column-count targets for paginated EPUB reflow (issue #44). The selected
+ * value is an explicit target, not an auto-fit hint: ReadiumCSS paginates
+ * exactly N columns whenever the viewport fits N columns at the minimal
+ * readable line length and never silently falls back to an automatic count
+ * when width exists (ReadiumCSS `paginate()`: `columnCount > 1` → N columns;
+ * `1` → exactly one column; absent → viewport-dependent auto-fit, the
+ * behavior this setting replaces).
+ */
+export const EPUB_COLUMN_COUNTS = [1, 2, 3, 4] as const;
+
+export type EpubColumnCount = (typeof EPUB_COLUMN_COUNTS)[number];
+
+/**
+ * The default column count: the two-page spread, the common reading
+ * convention. On windows too narrow for two columns the toolkit floors to
+ * what fits (one column), without changing the stored preference.
+ */
+export const EPUB_DEFAULT_COLUMN_COUNT: EpubColumnCount = 2;
+
+/** True when `value` is exactly a supported column count. */
+export function isEpubColumnCount(value: number): value is EpubColumnCount {
+  return (EPUB_COLUMN_COUNTS as readonly number[]).includes(value);
+}
+
+/**
+ * Clamps an off-scale value (e.g. from a future stored preference) onto the
+ * supported 1–4 range so a stale value can never produce an invalid target.
+ */
+export function clampEpubColumnCount(value: number): EpubColumnCount {
+  return Math.min(4, Math.max(1, Math.round(value))) as EpubColumnCount;
+}
+
+/** Publication layout reported by the engine (drives the column-count gate). */
+export type EpubDocumentLayout = "fixed" | "reflowable" | "scrolled";
+
+/**
+ * Converts the reader's column choice into the toolkit's columnCount
+ * preference. Fixed-layout publications must never receive it: FXL has its
+ * own pages-per-view behavior (`setPerPage`) that a reflow column target
+ * must not touch (issue #44). Reflowable and scrolled documents pass the
+ * value through — scrolled flow ignores it by construction.
+ */
+export function epubColumnCountPreference(
+  layout: EpubDocumentLayout,
+  columnCount: number,
+): number | undefined {
+  return layout === "fixed" ? undefined : clampEpubColumnCount(columnCount);
 }

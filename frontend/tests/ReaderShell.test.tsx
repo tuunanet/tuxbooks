@@ -531,6 +531,7 @@ describe("ReaderAppearance", () => {
         fontSize: 100,
         lineHeight: 0,
         fontFamily: "serif",
+        columnCount: 2,
         theme: "paper",
       }),
     );
@@ -571,6 +572,7 @@ describe("ReaderAppearance", () => {
         fontSize: 137.5,
         lineHeight: 0,
         fontFamily: null,
+        columnCount: 2,
         theme: "light",
       }),
     );
@@ -585,6 +587,7 @@ describe("ReaderAppearance", () => {
         fontSize: 100,
         lineHeight: 0,
         fontFamily: null,
+        columnCount: 2,
         theme: "light",
       }),
     );
@@ -608,6 +611,7 @@ describe("ReaderAppearance", () => {
         fontSize: 100,
         lineHeight: 1.125,
         fontFamily: null,
+        columnCount: 2,
         theme: "light",
       }),
     );
@@ -622,6 +626,7 @@ describe("ReaderAppearance", () => {
         fontSize: 100,
         lineHeight: 0,
         fontFamily: null,
+        columnCount: 2,
         theme: "light",
       }),
     );
@@ -657,6 +662,50 @@ describe("ReaderAppearance", () => {
         expect.objectContaining({ fontFamily: null }),
       ),
     );
+  });
+
+  it("offers 1–4 columns for paginated layout and keeps the choice while scrolling", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    // Paginated exposes exactly 1, 2, 3, and 4 as Roman numerals ("II"
+    // preselected by default); the stored value stays numeric.
+    const columns = screen.getByTestId("pref-columns");
+    expect(
+      within(columns)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["I", "II", "III", "IV"]);
+    expect(within(columns).getByRole("radio", { name: "II" })).toBeChecked();
+
+    // Every value is submitted as an explicit numeric target (never auto-fit).
+    await userEvent.click(within(columns).getByRole("radio", { name: "IV" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ columnCount: 4 }),
+      ),
+    );
+    await userEvent.click(within(columns).getByRole("radio", { name: "I" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ columnCount: 1 }),
+      ),
+    );
+
+    // Scrolling hides the control and ignores the count — the stored
+    // preference survives untouched.
+    await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
+    expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
+    expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
+
+    // Back to paginated: I (1) is still the selected target.
+    await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
+    const columnsAgain = await screen.findByTestId("pref-columns");
+    expect(within(columnsAgain).getByRole("radio", { name: "I" })).toBeChecked();
   });
 });
 

@@ -260,6 +260,74 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
+  // Issue #44: the column count is an explicit paginated target (1–4, default
+  // 2), passed through to the Readium pagination configuration as
+  // --USER__colCount on the section frames — never a viewport-dependent
+  // auto-fit. Switching repaginates in place (reader stays ready, same
+  // spine section), and scrolling ignores the count without dropping the
+  // stored preference.
+  test("targets an explicit column count in paginated flow", async ({ page }) => {
+    await openReadyEpub(page);
+    const host = page.locator("div[data-epub-host]");
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
+
+    // The preference lands on every rendered section frame as the toolkit's
+    // user column-count variable.
+    const colCountInFrame = () =>
+      page
+        .frameLocator("[data-epub-host] iframe")
+        .first()
+        .locator("html")
+        .evaluate((el) => el.style.getPropertyValue("--USER__colCount"));
+
+    const columns = page.getByTestId("pref-columns");
+    // Exactly 1–4 are offered (Roman numerals; the stored value stays
+    // numeric), with the two-page spread preselected.
+    await expect(columns.getByText("I", { exact: true })).toBeVisible();
+    await expect(columns.getByText("IV", { exact: true })).toBeVisible();
+    await expect(columns.getByText("II", { exact: true })).toHaveAttribute("data-state", "on");
+
+    const sectionBefore = await currentSection(page);
+    await columns.getByText("IV", { exact: true }).click();
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    // The target passes through exactly when the viewport can fit it at the
+    // toolkit's minimal readable line length; ReadiumCSS otherwise floors to
+    // what fits (observed capacity on this window: 3 or 4). It never falls
+    // back to an automatic count — that floor is the issue's "when
+    // sufficient width exists" qualifier, not an auto-fit.
+    await expect.poll(colCountInFrame, { timeout: 30000 }).toMatch(/^[34]$/);
+    await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
+
+    await columns.getByText("I", { exact: true }).click();
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
+    await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
+
+    // Scrolling is a continuous single column: the engine drops the column
+    // variable entirely, the control disappears, and the stored target
+    // survives the round trip back to paginated.
+    await page.getByTestId("pref-layout").getByText("Scrolling", { exact: true }).click();
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling", {
+      timeout: 30000,
+    });
+    await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("");
+    await expect(page.getByTestId("pref-columns")).not.toBeAttached();
+    await page.getByTestId("pref-layout").getByText("Paginated", { exact: true }).click();
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated", {
+      timeout: 30000,
+    });
+    // The stored target (I = 1, the last explicit choice) survives scrolling.
+    await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
+    await expect(page.getByTestId("pref-columns").getByText("I", { exact: true })).toHaveAttribute(
+      "data-state",
+      "on",
+    );
+
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
+    await returnToLibrary(page);
+  });
   // Critical acceptance test (§ persistence): the reader resumes the saved
   // CFI location after the book is closed and reopened.
   test("restores the reading position when the EPUB is reopened", async ({ page }) => {

@@ -33,7 +33,8 @@ import {
   epubFontFamilyPreference,
   epubLineHeightPreference,
 } from "./appearance";
-import type { EpubFontFamily } from "./appearance";
+import type { EpubDocumentLayout, EpubFontFamily } from "./appearance";
+import { epubColumnCountPreference } from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
   convertFoliateRow,
@@ -142,6 +143,11 @@ export interface EpubAppearance {
    *  (converted to the toolkit's "no preference" at submission). */
   lineHeight: number;
   fontFamily: EpubFontFamily | null;
+  /** Column-count target for paginated reflow (1–4, issue #44) — submitted
+   *  as ReadiumCSS `--USER__colCount` exactly as chosen (never an auto-fit).
+   *  Omitted for fixed-layout publications, whose pages-per-view must stay
+   *  untouched; meaningless (ignored) in scrolled flow. */
+  columnCount: number;
   theme: EpubThemeName;
 }
 
@@ -826,11 +832,14 @@ export class ReadiumEpubHandle {
    * (`epubLineHeightPreference`). `fontFamily` passes the ReadiumCSS stack
    * (`var(--RS__…Tf)` or a named typeface) that the frame resolves —
    * ReadiumCSS applies it with `!important` plus a `revert` on `*`, which
-   * also beats publisher-embedded `@font-face` styling.
+   * also beats publisher-embedded `@font-face` styling. `columnCount` is
+   * gated on the document layout: fixed-layout publications never receive
+   * it (`epubColumnCountPreference`), keeping FXL pages-per-view untouched.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
     const colors = THEME_COLORS[appearance.theme];
+    const layout = this.navigator.layout as EpubDocumentLayout;
     await this.navigator.submitPreferences(
       new EpubPreferences({
         backgroundColor: colors.background,
@@ -839,6 +848,7 @@ export class ReadiumEpubHandle {
         fontSize: epubFontSizeRatio(appearance.fontSize),
         lineHeight: epubLineHeightPreference(appearance.lineHeight),
         fontFamily: epubFontFamilyPreference(appearance.fontFamily),
+        columnCount: epubColumnCountPreference(layout, appearance.columnCount),
       }),
     );
   }
