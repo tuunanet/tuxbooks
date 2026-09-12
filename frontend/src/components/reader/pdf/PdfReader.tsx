@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
-import { pdfThemeTreatment } from "@/lib/pdf/theme";
+import { pdfThemeTreatment, pdfToolbarSurface } from "@/lib/pdf/theme";
 import {
   isHighlightColor,
   highlightAtPoint,
@@ -823,6 +823,7 @@ export function PdfReader({
         zoomPercent={Math.round(zoom * 100)}
         canZoomIn={zoomIndex < ZOOM_LEVELS.length - 1}
         canZoomOut={zoomIndex > 0}
+        surfaceColor={pdfToolbarSurface(preferences.theme)}
         onPrev={() => goToPage(currentPage - 1)}
         onNext={() => goToPage(currentPage + 1)}
         onZoomIn={() => changeZoom(1)}

@@ -38,6 +38,18 @@ export function pdfThemeTreatment(theme: EpubThemeName): PdfThemeTreatment {
   return PDF_THEME_TREATMENTS[theme];
 }
 
+/**
+ * Surface color for PDF chrome that floats over the pages (the sticky
+ * toolbar): the theme's own background while a treatment is active, so no
+ * unthemed app-white strip floats over tinted/inverted pages; undefined
+ * keeps the translucent app chrome for the neutral themes.
+ */
+export function pdfToolbarSurface(theme: EpubThemeName): string | undefined {
+  const treatment = PDF_THEME_TREATMENTS[theme];
+  if (!treatment.filter && !treatment.tint) return undefined;
+  return theme === "default" ? undefined : EPUB_THEME_COLORS[theme].background;
+}
+
 /** Themes offered for PDFs: only those with a faithful treatment. */
 export const PDF_THEME_CHOICES = ["default", "light", "paper", "dark", "contrast"] as const;
 

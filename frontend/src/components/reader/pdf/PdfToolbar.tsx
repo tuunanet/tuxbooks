@@ -7,6 +7,9 @@ interface PdfToolbarProps {
   zoomPercent: number;
   canZoomIn: boolean;
   canZoomOut: boolean;
+  /** Themed surface color for the sticky strip (paper tint, dark
+   *  backgrounds); undefined keeps the neutral translucent app chrome. */
+  surfaceColor?: string;
   onPrev: () => void;
   onNext: () => void;
   onZoomIn: () => void;
@@ -15,7 +18,10 @@ interface PdfToolbarProps {
 
 /**
  * PDF reader toolbar: page navigation, page indicator, and zoom. Rendered
- * sticky so the controls stay reachable while the document scrolls.
+ * sticky so the controls stay reachable while the document scrolls. With a
+ * themed surface the strip is opaque in the theme's own background — a
+ * translucent app-white strip over tinted/inverted pages reads as a white
+ * artifact (UAT feedback).
  */
 export function PdfToolbar({
   pageNumber,
@@ -23,13 +29,17 @@ export function PdfToolbar({
   zoomPercent,
   canZoomIn,
   canZoomOut,
+  surfaceColor,
   onPrev,
   onNext,
   onZoomIn,
   onZoomOut,
 }: PdfToolbarProps) {
   return (
-    <div className="sticky top-0 z-10 -mx-2 mb-3 flex items-center gap-1 bg-background/95 px-2 py-1">
+    <div
+      className="sticky top-0 z-10 -mx-2 mb-3 flex items-center gap-1 bg-background/95 px-2 py-1"
+      style={surfaceColor ? { backgroundColor: surfaceColor } : undefined}
+    >
       <Button
         variant="ghost"
         size="icon-sm"

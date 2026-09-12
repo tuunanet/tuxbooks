@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isPdfThemeChoice,
   pdfThemeTreatment,
+  pdfToolbarSurface,
   PDF_THEME_CHOICES,
   PDF_THEME_TREATMENTS,
 } from "@/lib/pdf/theme";
@@ -25,6 +26,16 @@ describe("PDF theme treatments", () => {
     // theme's paper background, shared with the EPUB palette.
     expect(pdfThemeTreatment("paper").filter).toBeUndefined();
     expect(pdfThemeTreatment("paper").tint).toBe(EPUB_THEME_COLORS.paper.background);
+  });
+
+  it("gives floating chrome a themed surface while a treatment is active", () => {
+    // The sticky toolbar must not float an app-white strip over tinted or
+    // inverted pages (UAT feedback).
+    expect(pdfToolbarSurface("default")).toBeUndefined();
+    expect(pdfToolbarSurface("light")).toBeUndefined();
+    expect(pdfToolbarSurface("paper")).toBe(EPUB_THEME_COLORS.paper.background);
+    expect(pdfToolbarSurface("dark")).toBe(EPUB_THEME_COLORS.dark.background);
+    expect(pdfToolbarSurface("contrast")).toBe(EPUB_THEME_COLORS.contrast.background);
   });
 
   it("has a treatment for exactly the themes offered to PDFs", () => {
