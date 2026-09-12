@@ -109,7 +109,20 @@ else depends on its types and the seam's handle:
   ReadiumCSS `--USER__colCount`: the engine paginates exactly N columns
   whenever the viewport fits them and never auto-fits instead; scrolling
   ignores it (stored value kept) and fixed-layout EPUBs never receive it
-  (FXL pages-per-view stays untouched).
+  (FXL pages-per-view stays untouched). The text-layout controls (issue
+  #45) use the toolkit's editor range configs as the scales — word spacing
+  rem [0, 2] step 0.125, letter spacing rem [0, 1] step 0.125, paragraph
+  spacing rem [0, 3] step 0.25 — plus the page-margin (gutter) px ladder
+  `[0, 10, 20, 30, 40, 60]` (deliberate TuxBooks choice; the toolkit gives
+  `pageGutter` no range config). Their 0 values are "publisher default"
+  sentinels mapped to the toolkit's no-preference at the seam
+  (`epubSpacingPreference`), because ReadiumCSS applies any present
+  `--USER__*` variable with `!important`; alignment works the same way
+  (`epubTextAlignPreference`): Auto = no preference, explicit choices are
+  exactly the toolkit's `TextAlignment` enum (left/justify/right/start).
+  Every value flows only through `submitPreferences`, and the toolkit
+  stores the compiled properties so newly mounted spine frames inherit
+  them.
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

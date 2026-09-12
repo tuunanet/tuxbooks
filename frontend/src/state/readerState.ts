@@ -3,7 +3,9 @@ import {
   EPUB_DEFAULT_COLUMN_COUNT,
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
+  EPUB_DEFAULT_TEXT_ALIGNMENT,
   type EpubFontFamily,
+  type EpubTextAlignment,
 } from "@/lib/epub/appearance";
 
 /** Visual theme of the reader surface. */
@@ -38,6 +40,17 @@ export type ReaderFontFamily = EpubFontFamily;
    * scrolling (stored value kept) and never applied to fixed-layout EPUBs.
    */
   columnCount: number;
+  /**
+   * EPUB reflow text-layout controls (issue #45) on the reading-system
+   * scales; 0 = publication default (no override), alignment "auto" =
+   * publisher default.
+   */
+  wordSpacing: number;
+  letterSpacing: number;
+  paragraphSpacing: number;
+  /** Page margins (gutter) in px; 0 = publication default. */
+  pageGutter: number;
+  textAlign: EpubTextAlignment;
   theme: ReaderTheme;
   layout: ReaderLayout;
 }
@@ -47,6 +60,11 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   lineHeight: EPUB_DEFAULT_LINE_HEIGHT,
   fontFamily: null,
   columnCount: EPUB_DEFAULT_COLUMN_COUNT,
+  wordSpacing: 0,
+  letterSpacing: 0,
+  paragraphSpacing: 0,
+  pageGutter: 0,
+  textAlign: EPUB_DEFAULT_TEXT_ALIGNMENT,
   theme: "light",
   layout: "paginated",
 };

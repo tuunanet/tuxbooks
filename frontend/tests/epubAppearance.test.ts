@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
+  EPUB_DEFAULT_TEXT_ALIGNMENT,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_RATIO_RANGE,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_LETTER_SPACING_SCALE,
   EPUB_LINE_HEIGHT_SCALE,
+  EPUB_PAGE_GUTTER_SCALE_PX,
+  EPUB_PARAGRAPH_SPACING_SCALE,
+  EPUB_WORD_SPACING_SCALE,
   clampEpubColumnCount,
   EPUB_COLUMN_COUNTS,
   EPUB_DEFAULT_COLUMN_COUNT,
@@ -13,9 +18,15 @@ import {
   epubFontFamilyPreference,
   epubColumnCountPreference,
   epubLineHeightPreference,
+  epubSpacingPreference,
+  epubTextAlignPreference,
   isEpubFontSizeStep,
   nearestEpubFontSize,
+  nearestEpubLetterSpacing,
   nearestEpubLineHeight,
+  nearestEpubPageGutter,
+  nearestEpubParagraphSpacing,
+  nearestEpubWordSpacing,
 } from "@/lib/epub/appearance";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 
@@ -232,5 +243,62 @@ describe("epubColumnCountPreference", () => {
     for (const count of EPUB_COLUMN_COUNTS) {
       expect(epubColumnCountPreference("fixed", count)).toBeUndefined();
     }
+  });
+});
+
+describe("EPUB text-layout scales (issue #45)", () => {
+  it("matches the toolkit range configs with 0 as the publisher-default sentinel", () => {
+    // wordSpacingRangeConfig [0,2] step 0.125; letterSpacingRangeConfig
+    // [0,1] step 0.125; paragraphSpacingRangeConfig [0,3] step 0.25.
+    expect(EPUB_WORD_SPACING_SCALE[0]).toBe(0);
+    expect(EPUB_WORD_SPACING_SCALE.at(-1)).toBe(2);
+    expect(EPUB_WORD_SPACING_SCALE[1]).toBe(0.125);
+    expect(EPUB_LETTER_SPACING_SCALE[0]).toBe(0);
+    expect(EPUB_LETTER_SPACING_SCALE.at(-1)).toBe(1);
+    expect(EPUB_LETTER_SPACING_SCALE[1]).toBe(0.125);
+    expect(EPUB_PARAGRAPH_SPACING_SCALE[0]).toBe(0);
+    expect(EPUB_PARAGRAPH_SPACING_SCALE.at(-1)).toBe(3);
+    expect(EPUB_PARAGRAPH_SPACING_SCALE[1]).toBe(0.25);
+    // Deliberate TuxBooks ladder (no toolkit config for pageGutter).
+    expect([...EPUB_PAGE_GUTTER_SCALE_PX]).toEqual([0, 10, 20, 30, 40, 60]);
+    for (const scale of [
+      EPUB_WORD_SPACING_SCALE,
+      EPUB_LETTER_SPACING_SCALE,
+      EPUB_PARAGRAPH_SPACING_SCALE,
+      EPUB_PAGE_GUTTER_SCALE_PX,
+    ]) {
+      expect(DEFAULT_READER_PREFERENCES).toBeDefined();
+      expect(scale).toContain(0);
+    }
+  });
+
+  it("maps the 0 sentinel to no preference for every spacing control", () => {
+    expect(epubSpacingPreference(0)).toBeNull();
+    expect(epubSpacingPreference(0.125)).toBe(0.125);
+    expect(epubSpacingPreference(2)).toBe(2);
+    expect(epubSpacingPreference(30)).toBe(30);
+  });
+
+  it("snaps off-scale values onto the nearest step", () => {
+    expect(nearestEpubWordSpacing(0.18)).toBe(0.125);
+    expect(nearestEpubWordSpacing(1.3)).toBe(1.25);
+    expect(nearestEpubLetterSpacing(0.6)).toBe(0.625);
+    expect(nearestEpubParagraphSpacing(1.1)).toBe(1);
+    expect(nearestEpubParagraphSpacing(4)).toBe(3);
+    expect(nearestEpubPageGutter(24)).toBe(20);
+    expect(nearestEpubPageGutter(-5)).toBe(0);
+  });
+
+  it("maps alignment Auto to no preference and explicit choices through", () => {
+    expect(epubTextAlignPreference("auto")).toBeNull();
+    expect(epubTextAlignPreference(null)).toBeNull();
+    for (const alignment of ["left", "justify", "right", "start"] as const) {
+      expect(epubTextAlignPreference(alignment)).toBe(alignment);
+    }
+    expect(DEFAULT_READER_PREFERENCES.textAlign).toBe(EPUB_DEFAULT_TEXT_ALIGNMENT);
+    expect(DEFAULT_READER_PREFERENCES.wordSpacing).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.letterSpacing).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.paragraphSpacing).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(0);
   });
 });

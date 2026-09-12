@@ -21,7 +21,7 @@
  */
 
 import { HttpFetcher, Link, Locator, Manifest, Publication } from "@readium/shared";
-import { EpubNavigator, EpubPreferences } from "@readium/navigator";
+import { EpubNavigator, EpubPreferences, TextAlignment } from "@readium/navigator";
 import type { Decoration } from "@readium/decorator";
 import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 
@@ -33,8 +33,12 @@ import {
   epubFontFamilyPreference,
   epubLineHeightPreference,
 } from "./appearance";
-import type { EpubDocumentLayout, EpubFontFamily } from "./appearance";
-import { epubColumnCountPreference } from "./appearance";
+import type { EpubDocumentLayout, EpubFontFamily, EpubTextAlignment } from "./appearance";
+import {
+  epubColumnCountPreference,
+  epubSpacingPreference,
+  epubTextAlignPreference,
+} from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
   convertFoliateRow,
@@ -134,6 +138,14 @@ export function epubThemeBackground(theme: EpubThemeName): string {
 /** Font stacks offered for user override; null means publisher styles win. */
 export { EPUB_FONT_FAMILIES, type EpubFontFamily } from "./appearance";
 
+/** Maps an explicit reader alignment onto the toolkit's string enum. */
+const EXPLICIT_TEXT_ALIGNMENTS: Record<Exclude<EpubTextAlignment, "auto">, TextAlignment> = {
+  left: TextAlignment.left,
+  justify: TextAlignment.justify,
+  right: TextAlignment.right,
+  start: TextAlignment.start,
+};
+
 export interface EpubAppearance {
   /** User font size as a percent of the publication's default reading size
    *  (100% = native, Readium reading-system scale — `EPUB_FONT_SIZE_SCALE_PERCENT`);
@@ -148,6 +160,17 @@ export interface EpubAppearance {
    *  Omitted for fixed-layout publications, whose pages-per-view must stay
    *  untouched; meaningless (ignored) in scrolled flow. */
   columnCount: number;
+  /** Text-layout controls on the reading-system scales (issue #45); the
+   *  0 sentinels map to the toolkit's "no preference" at submission
+   *  (`epubSpacingPreference`) so publisher values stay intact, and the
+   *  "auto" alignment sentinel maps to no preference
+   *  (`epubTextAlignPreference`). */
+  wordSpacing: number;
+  letterSpacing: number;
+  paragraphSpacing: number;
+  /** Page margins (gutter) in px; 0 = publication default. */
+  pageGutter: number;
+  textAlign: EpubTextAlignment;
   theme: EpubThemeName;
 }
 
@@ -249,6 +272,12 @@ export class ReadiumEpubHandle {
     this.container.style.position = "relative";
     this.container.style.width = "100%";
     this.container.style.height = "100%";
+    // The reading system sizes the paginated spread to its computed width
+    // (capped by the maximal line length), which can be narrower than the
+    // window; auto margins center it so the blank space splits evenly
+    // instead of pooling on one side. A no-op at width 100% (initial and
+    // scrolled flow).
+    this.container.style.marginInline = "auto";
     this.host.appendChild(this.container);
 
     this.toc = mapToc(this.publication.toc?.items ?? []);
@@ -835,6 +864,10 @@ export class ReadiumEpubHandle {
    * also beats publisher-embedded `@font-face` styling. `columnCount` is
    * gated on the document layout: fixed-layout publications never receive
    * it (`epubColumnCountPreference`), keeping FXL pages-per-view untouched.
+   * The text-layout scales (word/letter/paragraph spacing, page margins)
+   * and alignment map their 0/"auto" sentinels to the toolkit's "no
+   * preference" (`epubSpacingPreference`, `epubTextAlignPreference`) so the
+   * default state never injects a CSS override.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
@@ -849,6 +882,14 @@ export class ReadiumEpubHandle {
         lineHeight: epubLineHeightPreference(appearance.lineHeight),
         fontFamily: epubFontFamilyPreference(appearance.fontFamily),
         columnCount: epubColumnCountPreference(layout, appearance.columnCount),
+        wordSpacing: epubSpacingPreference(appearance.wordSpacing),
+        letterSpacing: epubSpacingPreference(appearance.letterSpacing),
+        paragraphSpacing: epubSpacingPreference(appearance.paragraphSpacing),
+        pageGutter: epubSpacingPreference(appearance.pageGutter),
+        textAlign: (() => {
+          const alignment = epubTextAlignPreference(appearance.textAlign);
+          return alignment === null ? null : EXPLICIT_TEXT_ALIGNMENTS[alignment];
+        })(),
       }),
     );
   }

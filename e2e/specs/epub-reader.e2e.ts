@@ -304,6 +304,20 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
 
+    // The computed spread is narrower than the window for one column — it
+    // must center in the reading surface instead of hugging the left edge
+    // (blank space splits evenly on both sides, issue #44 UAT).
+    const hostBox = await host.boundingBox();
+    const containerBox = await page.locator("[data-epub-host] > div").first().boundingBox();
+    expect(hostBox).not.toBeNull();
+    expect(containerBox).not.toBeNull();
+    if (hostBox && containerBox) {
+      expect(containerBox.width).toBeLessThan(hostBox.width);
+      const hostCenter = hostBox.x + hostBox.width / 2;
+      const containerCenter = containerBox.x + containerBox.width / 2;
+      expect(Math.abs(containerCenter - hostCenter)).toBeLessThan(2);
+    }
+
     // Scrolling is a continuous single column: the engine drops the column
     // variable entirely, the control disappears, and the stored target
     // survives the round trip back to paginated.
@@ -323,6 +337,73 @@ test.describe("tuxbooks EPUB reader", () => {
       "data-state",
       "on",
     );
+
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
+    await returnToLibrary(page);
+  });
+
+  // Issue #45: the text-layout controls flow through the engine's
+  // preference API onto every section frame as ReadiumCSS user variables.
+  // 0/"Auto" sentinels must inject nothing (no --USER__* variable at all).
+  test("applies text-layout controls through the engine and across sections", async ({ page }) => {
+    await openReadyEpub(page);
+    const host = page.locator("div[data-epub-host]");
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
+
+    // User variables land inline on the section frame's :root.
+    const frameVar = (name: string) =>
+      page
+        .frameLocator("[data-epub-host] iframe")
+        .first()
+        .locator("html")
+        .evaluate((el, styleName) => el.style.getPropertyValue(styleName), name);
+
+    // Word spacing (rem scale): two steps → 0.25rem, then reset removes the
+    // variable entirely (publisher default, not an injected 0 override).
+    const wordThumb = page.getByTestId("pref-word-spacing").getByRole("slider");
+    await wordThumb.press("ArrowRight");
+    await wordThumb.press("ArrowRight");
+    await expect.poll(() => frameVar("--USER__wordSpacing"), { timeout: 30000 }).toBe("0.25rem");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await page.getByTestId("pref-word-spacing-reset").click();
+    await expect.poll(() => frameVar("--USER__wordSpacing"), { timeout: 30000 }).toBe("");
+
+    // Letter spacing must survive moving through the book: ReadiumCSS
+    // stores the compiled properties, so the frame displayed after moving
+    // carries the variable whether it was kept or freshly mounted.
+    const letterThumb = page.getByTestId("pref-letter-spacing").getByRole("slider");
+    await letterThumb.press("ArrowRight");
+    await expect.poll(() => frameVar("--USER__letterSpacing"), { timeout: 30000 }).toBe("0.125rem");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
+    // Start from the top so one ArrowRight deterministically moves the
+    // engine (specs share the scratch library and its saved positions).
+    await page.keyboard.press("Home");
+    await expect
+      .poll(async () => `${await currentSection(page)}:${await engineFraction(page)}`, {
+        timeout: 30000,
+      })
+      .toBe("0:0");
+    const before = `${await currentSection(page)}:${await engineFraction(page)}`;
+    await page.keyboard.press("ArrowRight");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect
+      .poll(async () => `${await currentSection(page)}:${await engineFraction(page)}`, {
+        timeout: 30000,
+        message: "engine did not move",
+      })
+      .not.toBe(before);
+    await expect.poll(() => frameVar("--USER__letterSpacing"), { timeout: 30000 }).toBe("0.125rem");
+
+    // Alignment: Justify applies the variable; Auto removes it again.
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
+    await page.getByTestId("pref-text-align").getByText("Justify", { exact: true }).click();
+    await expect.poll(() => frameVar("--USER__textAlign"), { timeout: 30000 }).toBe("justify");
+    await page.getByTestId("pref-text-align").getByText("Auto", { exact: true }).click();
+    await expect.poll(() => frameVar("--USER__textAlign"), { timeout: 30000 }).toBe("");
 
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });

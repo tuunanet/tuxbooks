@@ -532,6 +532,11 @@ describe("ReaderAppearance", () => {
         lineHeight: 0,
         fontFamily: "serif",
         columnCount: 2,
+        wordSpacing: 0,
+        letterSpacing: 0,
+        paragraphSpacing: 0,
+        pageGutter: 0,
+        textAlign: "auto",
         theme: "paper",
       }),
     );
@@ -573,6 +578,11 @@ describe("ReaderAppearance", () => {
         lineHeight: 0,
         fontFamily: null,
         columnCount: 2,
+        wordSpacing: 0,
+        letterSpacing: 0,
+        paragraphSpacing: 0,
+        pageGutter: 0,
+        textAlign: "auto",
         theme: "light",
       }),
     );
@@ -588,6 +598,11 @@ describe("ReaderAppearance", () => {
         lineHeight: 0,
         fontFamily: null,
         columnCount: 2,
+        wordSpacing: 0,
+        letterSpacing: 0,
+        paragraphSpacing: 0,
+        pageGutter: 0,
+        textAlign: "auto",
         theme: "light",
       }),
     );
@@ -612,6 +627,11 @@ describe("ReaderAppearance", () => {
         lineHeight: 1.125,
         fontFamily: null,
         columnCount: 2,
+        wordSpacing: 0,
+        letterSpacing: 0,
+        paragraphSpacing: 0,
+        pageGutter: 0,
+        textAlign: "auto",
         theme: "light",
       }),
     );
@@ -627,6 +647,11 @@ describe("ReaderAppearance", () => {
         lineHeight: 0,
         fontFamily: null,
         columnCount: 2,
+        wordSpacing: 0,
+        letterSpacing: 0,
+        paragraphSpacing: 0,
+        pageGutter: 0,
+        textAlign: "auto",
         theme: "light",
       }),
     );
@@ -706,6 +731,129 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const columnsAgain = await screen.findByTestId("pref-columns");
     expect(within(columnsAgain).getByRole("radio", { name: "I" })).toBeChecked();
+  });
+
+  it("steps the text-layout spacing scales and resets each to publisher default", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    // Word spacing: two steps up the rem scale → 0.25, then reset to 0.
+    const wordThumb = within(screen.getByTestId("pref-word-spacing")).getByRole("slider");
+    fireEvent.keyDown(wordThumb, { key: "ArrowRight" });
+    fireEvent.keyDown(wordThumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ wordSpacing: 0.25 }),
+      ),
+    );
+    expect(screen.getByTestId("appearance-content")).toHaveTextContent("0.25");
+    await userEvent.click(screen.getByTestId("pref-word-spacing-reset"));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ wordSpacing: 0 }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("pref-word-spacing-reset")).toBeDisabled());
+
+    // Letter spacing: one step → 0.125, reset to 0.
+    const letterThumb = within(screen.getByTestId("pref-letter-spacing")).getByRole("slider");
+    fireEvent.keyDown(letterThumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ letterSpacing: 0.125 }),
+      ),
+    );
+    await userEvent.click(screen.getByTestId("pref-letter-spacing-reset"));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ letterSpacing: 0 }),
+      ),
+    );
+
+    // Paragraph spacing: one step → 0.25, reset to 0.
+    const paragraphThumb = within(screen.getByTestId("pref-paragraph-spacing")).getByRole("slider");
+    fireEvent.keyDown(paragraphThumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ paragraphSpacing: 0.25 }),
+      ),
+    );
+    await userEvent.click(screen.getByTestId("pref-paragraph-spacing-reset"));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ paragraphSpacing: 0 }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("pref-paragraph-spacing-reset")).toBeDisabled());
+  });
+
+  it("applies explicit text alignment and restores publisher default with Auto", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    // Auto is the preselected publisher default.
+    const alignment = screen.getByTestId("pref-text-align");
+    expect(within(alignment).getByRole("radio", { name: "Auto" })).toBeChecked();
+
+    await userEvent.click(within(alignment).getByRole("radio", { name: "Justify" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ textAlign: "justify" }),
+      ),
+    );
+
+    await userEvent.click(within(alignment).getByRole("radio", { name: "Right" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ textAlign: "right" }),
+      ),
+    );
+
+    // Auto restores the publication's own alignment (sentinel, no override).
+    await userEvent.click(within(alignment).getByRole("radio", { name: "Auto" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ textAlign: "auto" }),
+      ),
+    );
+  });
+
+  it("offers page margins for paginated layout and keeps the value while scrolling", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    const margins = screen.getByTestId("pref-page-gutter");
+    const thumb = within(margins).getByRole("slider");
+    // Three steps: 0 → 10px → 20px → 30px.
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ pageGutter: 30 }),
+      ),
+    );
+
+    // Scrolling hides the pagination-scoped control; the value survives.
+    await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
+    expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
+    expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
+    const marginsAgain = await screen.findByTestId("pref-page-gutter");
+    expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "3");
   });
 });
 

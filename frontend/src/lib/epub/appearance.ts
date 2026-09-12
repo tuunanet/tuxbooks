@@ -42,14 +42,14 @@ export function isEpubFontSizeStep(value: number): value is EpubFontSizeStep {
 }
 
 /**
- * Nearest supported font-size step (ties round down). The slider and the
- * state only ever hold scale steps; this snaps off-scale values (e.g. from
- * a future persistence format) back onto the scale.
+ * Nearest value from a supported scale (ties round down). Sliders and state
+ * only ever hold scale steps; this snaps off-scale values (e.g. from a
+ * future persistence format) back onto the scale.
  */
-export function nearestEpubFontSize(value: number): EpubFontSizeStep {
-  let nearest: EpubFontSizeStep = EPUB_DEFAULT_FONT_SIZE_PERCENT;
+export function nearestEpubScaleStep<T extends number>(scale: readonly T[], value: number): T {
+  let nearest: T = scale[0]!;
   let bestDistance = Number.POSITIVE_INFINITY;
-  for (const step of EPUB_FONT_SIZE_SCALE_PERCENT) {
+  for (const step of scale) {
     const distance = Math.abs(value - step);
     if (distance < bestDistance) {
       nearest = step;
@@ -57,6 +57,15 @@ export function nearestEpubFontSize(value: number): EpubFontSizeStep {
     }
   }
   return nearest;
+}
+
+/**
+ * Nearest supported font-size step (ties round down). The slider and the
+ * state only ever hold scale steps; this snaps off-scale values (e.g. from
+ * a future persistence format) back onto the scale.
+ */
+export function nearestEpubFontSize(value: number): EpubFontSizeStep {
+  return nearestEpubScaleStep(EPUB_FONT_SIZE_SCALE_PERCENT, value);
 }
 
 /**
@@ -112,18 +121,101 @@ export function epubLineHeightPreference(step: number): number | null {
   return step === 0 ? null : step;
 }
 
-/** Nearest supported line-height step (ties round down). */
+/**
+ * Nearest supported line-height step (ties round down).
+ */
 export function nearestEpubLineHeight(value: number): EpubLineHeightStep {
-  let nearest: EpubLineHeightStep = EPUB_DEFAULT_LINE_HEIGHT;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const step of EPUB_LINE_HEIGHT_SCALE) {
-    const distance = Math.abs(value - step);
-    if (distance < bestDistance) {
-      nearest = step;
-      bestDistance = distance;
-    }
-  }
-  return nearest;
+  return nearestEpubScaleStep(EPUB_LINE_HEIGHT_SCALE, value);
+}
+
+/**
+ * Converts a spacing scale step into the toolkit's preference: the 0
+ * sentinel maps to null ("no preference", publisher value wins). A literal
+ * 0 must never be sent for any `--USER__*` spacing — ReadiumCSS applies the
+ * variable with `!important`, so `0rem` would override the publication's
+ * own word/letter/paragraph spacing instead of leaving it intact.
+ */
+export function epubSpacingPreference(step: number): number | null {
+  return step === 0 ? null : step;
+}
+
+/**
+ * Word-spacing scale in rem (issue #45): the toolkit's
+ * `wordSpacingRangeConfig` ([0, 2] step 0.125). 0 = publication default.
+ */
+export const EPUB_WORD_SPACING_SCALE = [
+  0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1, 1.125, 1.25, 1.375, 1.5, 1.625, 1.75, 1.875, 2,
+] as const;
+
+/** Nearest supported word-spacing step. */
+export function nearestEpubWordSpacing(value: number): number {
+  return nearestEpubScaleStep(EPUB_WORD_SPACING_SCALE, value);
+}
+
+/**
+ * Letter-spacing scale in rem (issue #45): the toolkit's
+ * `letterSpacingRangeConfig` ([0, 1] step 0.125). 0 = publication default.
+ */
+export const EPUB_LETTER_SPACING_SCALE = [
+  0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1,
+] as const;
+
+/** Nearest supported letter-spacing step. */
+export function nearestEpubLetterSpacing(value: number): number {
+  return nearestEpubScaleStep(EPUB_LETTER_SPACING_SCALE, value);
+}
+
+/**
+ * Paragraph-spacing scale in rem (issue #45): the toolkit's
+ * `paragraphSpacingRangeConfig` ([0, 3] step 0.25). 0 = publication
+ * default.
+ */
+export const EPUB_PARAGRAPH_SPACING_SCALE = [
+  0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
+] as const;
+
+/** Nearest supported paragraph-spacing step. */
+export function nearestEpubParagraphSpacing(value: number): number {
+  return nearestEpubScaleStep(EPUB_PARAGRAPH_SPACING_SCALE, value);
+}
+
+/**
+ * Page-margin (gutter) scale in px (issue #45). The toolkit exposes no
+ * range config for `pageGutter` (unbounded non-negative px applied as body
+ * padding in paginated flow), so this ladder is a deliberate TuxBooks
+ * product decision (issue #45 contract). 0 = publication default.
+ */
+export const EPUB_PAGE_GUTTER_SCALE_PX = [0, 10, 20, 30, 40, 60] as const;
+
+/** Nearest supported page-margin step. */
+export function nearestEpubPageGutter(value: number): number {
+  return nearestEpubScaleStep(EPUB_PAGE_GUTTER_SCALE_PX, value);
+}
+
+/**
+ * Text alignment values (issue #45). "auto" is the reading-system's
+ * publisher-default state; the explicit choices are exactly the toolkit's
+ * `TextAlignment` enum. The seam maps "auto" to the toolkit's "no
+ * preference" — never the string "auto", which the toolkit would drop and
+ * whose CSS (`text-align: auto !important`) would be invalid.
+ */
+export const EPUB_TEXT_ALIGNMENTS = ["auto", "left", "justify", "right", "start"] as const;
+
+export type EpubTextAlignment = (typeof EPUB_TEXT_ALIGNMENTS)[number];
+
+/** The default alignment: publisher behavior (no override). */
+export const EPUB_DEFAULT_TEXT_ALIGNMENT: EpubTextAlignment = "auto";
+
+/**
+ * Converts a reader alignment choice into the toolkit's textAlign
+ * preference: the "auto" sentinel maps to null so publisher alignment
+ * (including centered headings etc.) stays intact; only an explicit choice
+ * overrides.
+ */
+export function epubTextAlignPreference(
+  alignment: EpubTextAlignment | null,
+): "start" | "left" | "right" | "justify" | null {
+  return alignment === null || alignment === "auto" ? null : alignment;
 }
 
 /**

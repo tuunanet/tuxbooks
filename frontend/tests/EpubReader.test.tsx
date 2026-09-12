@@ -283,6 +283,11 @@ describe("EpubReader appearance and navigation", () => {
       lineHeight: 0,
       fontFamily: null,
       columnCount: 2,
+      wordSpacing: 0,
+      letterSpacing: 0,
+      paragraphSpacing: 0,
+      pageGutter: 0,
+      textAlign: "auto",
       theme: "light",
     });
   });
