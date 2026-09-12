@@ -35,6 +35,7 @@ coverage/
 
 # Web Search outputs
 .tavily/
+.firecrawl/
 
 # Realistic user-created test library (real copyrighted books; never commit).
 # Tests that use it skip automatically when the path is absent.
