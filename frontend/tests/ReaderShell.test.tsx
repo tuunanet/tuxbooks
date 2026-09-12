@@ -529,7 +529,7 @@ describe("ReaderAppearance", () => {
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith({
         fontSize: 100,
-        lineHeight: 1.6,
+        lineHeight: 0,
         fontFamily: "serif",
         theme: "paper",
       }),
@@ -546,7 +546,8 @@ describe("ReaderAppearance", () => {
     expect(content).toHaveTextContent("Font size");
     expect(content).toHaveTextContent("100%");
     expect(content).toHaveTextContent("Line spacing");
-    expect(content).toHaveTextContent("1.6");
+    // 0 on the reading-system scale means publication default.
+    expect(content).toHaveTextContent("Default");
     expect(screen.getByLabelText("Font size")).toBeInTheDocument();
     expect(screen.getByLabelText("Line spacing")).toBeInTheDocument();
   });
@@ -568,7 +569,7 @@ describe("ReaderAppearance", () => {
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith({
         fontSize: 137.5,
-        lineHeight: 1.6,
+        lineHeight: 0,
         fontFamily: null,
         theme: "light",
       }),
@@ -582,12 +583,80 @@ describe("ReaderAppearance", () => {
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith({
         fontSize: 100,
-        lineHeight: 1.6,
+        lineHeight: 0,
         fontFamily: null,
         theme: "light",
       }),
     );
     await waitFor(() => expect(screen.getByTestId("pref-font-size-reset")).toBeDisabled());
+  });
+
+  it("steps the line spacing along the reading-system scale and resets to default", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    const thumb = within(screen.getByTestId("pref-line-height")).getByRole("slider");
+    // From the 0 (publication default) sentinel: 0 → 1 → 1.125.
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith({
+        fontSize: 100,
+        lineHeight: 1.125,
+        fontFamily: null,
+        theme: "light",
+      }),
+    );
+    expect(screen.getByTestId("appearance-content")).toHaveTextContent("1.125");
+
+    // The explicit reset returns the publication default (0 sentinel).
+    const reset = screen.getByTestId("pref-line-height-reset");
+    expect(reset).toBeEnabled();
+    await userEvent.click(reset);
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith({
+        fontSize: 100,
+        lineHeight: 0,
+        fontFamily: null,
+        theme: "light",
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId("pref-line-height-reset")).toBeDisabled());
+  });
+
+  it("offers the reading-system font families over the publisher default", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Old Style" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ fontFamily: "old-style" }),
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("radio", { name: "Readable" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ fontFamily: "readable" }),
+      ),
+    );
+
+    // Default removes the override entirely — publisher styling wins.
+    await userEvent.click(screen.getByRole("radio", { name: "Default" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ fontFamily: null }),
+      ),
+    );
   });
 });
 

@@ -6,15 +6,15 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
+  EPUB_DEFAULT_LINE_HEIGHT,
+  EPUB_FONT_FAMILIES,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_LINE_HEIGHT_SCALE,
   nearestEpubFontSize,
+  nearestEpubLineHeight,
+  type EpubFontFamily,
 } from "@/lib/epub/appearance";
-import {
-  useReader,
-  type ReaderFontFamily,
-  type ReaderLayout,
-  type ReaderTheme,
-} from "@/state/readerState";
+import { useReader, type ReaderLayout, type ReaderTheme } from "@/state/readerState";
 
 const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
   { value: "light", label: "Light" },
@@ -27,25 +27,34 @@ const LAYOUT_OPTIONS: { value: ReaderLayout; label: string }[] = [
   { value: "scrolling", label: "Scrolling" },
 ];
 
-const FONT_FAMILY_OPTIONS: { value: ReaderFontFamily; label: string }[] = [
+const FONT_FAMILY_OPTIONS: { value: EpubFontFamily; label: string }[] = [
   { value: "serif", label: "Serif" },
   { value: "sans", label: "Sans" },
+  { value: "humanist", label: "Humanist" },
+  { value: "old-style", label: "Old Style" },
+  { value: "modern", label: "Modern" },
+  { value: "duospace", label: "Duospace" },
+  { value: "readable", label: "Readable" },
 ];
 
 /**
- * Reading appearance: font size, line spacing, theme, layout. State lives in
- * the reader context so the whole reading surface responds; persistence is
- * a future backend concern and is not faked here.
+ * Reading appearance: font size, line spacing, font family, theme, layout.
+ * State lives in the reader context so the whole reading surface responds;
+ * persistence is a future backend concern and is not faked here.
  */
 export function ReaderAppearance() {
   const { preferences, setPreferences } = useReader();
 
-  // The font-size slider walks the supported Readium scale by index; the
-  // state itself holds the scale percentage, snapped so an off-scale value
-  // (e.g. a future stored preference) can never wedge the slider.
+  // The sliders walk the supported Readium scales by index; the state holds
+  // the scale values themselves, snapped so an off-scale value (e.g. a
+  // future stored preference) can never wedge a slider.
   const fontSize = nearestEpubFontSize(preferences.epubFontSize);
   const fontSizeIndex = EPUB_FONT_SIZE_SCALE_PERCENT.indexOf(fontSize);
   const atDefaultFontSize = fontSize === EPUB_DEFAULT_FONT_SIZE_PERCENT;
+
+  const lineHeight = nearestEpubLineHeight(preferences.lineHeight);
+  const lineHeightIndex = EPUB_LINE_HEIGHT_SCALE.indexOf(lineHeight);
+  const atDefaultLineHeight = lineHeight === EPUB_DEFAULT_LINE_HEIGHT;
 
   return (
     <Popover>
@@ -106,18 +115,35 @@ export function ReaderAppearance() {
         <div>
           <div className="mb-2 flex items-center justify-between text-sm">
             <span>Line spacing</span>
-            <span className="tabular-nums text-muted-foreground">
-              {preferences.lineHeight.toFixed(1)}
+            <span className="flex items-center gap-1">
+              <span className="tabular-nums text-muted-foreground">
+                {atDefaultLineHeight ? "Default" : lineHeight}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                data-testid="pref-line-height-reset"
+                aria-label="Reset line spacing"
+                disabled={atDefaultLineHeight}
+                onClick={() => setPreferences({ lineHeight: EPUB_DEFAULT_LINE_HEIGHT })}
+              >
+                <RotateCcw />
+              </Button>
             </span>
           </div>
           <Slider
             data-testid="pref-line-height"
             aria-label="Line spacing"
-            min={1.2}
-            max={2}
-            step={0.1}
-            value={[preferences.lineHeight]}
-            onValueChange={(values) => setPreferences({ lineHeight: values[0] })}
+            min={0}
+            max={EPUB_LINE_HEIGHT_SCALE.length - 1}
+            step={1}
+            value={[lineHeightIndex]}
+            onValueChange={(values) => {
+              const index = values[0];
+              if (index !== undefined) {
+                setPreferences({ lineHeight: EPUB_LINE_HEIGHT_SCALE[index] });
+              }
+            }}
           />
         </div>
 
@@ -129,11 +155,16 @@ export function ReaderAppearance() {
             size="sm"
             variant="outline"
             spacing={0}
+            className="flex-wrap"
             value={preferences.fontFamily ?? "default"}
             onValueChange={(value) =>
               setPreferences({
                 fontFamily:
-                  value === "serif" || value === "sans" ? (value as ReaderFontFamily) : null,
+                  value === "default"
+                    ? null
+                    : (value as EpubFontFamily) in EPUB_FONT_FAMILIES
+                      ? (value as EpubFontFamily)
+                      : null,
               })
             }
             aria-label="Font family"

@@ -1,5 +1,9 @@
 import { createContext, useContext } from "react";
-import { EPUB_DEFAULT_FONT_SIZE_PERCENT } from "@/lib/epub/appearance";
+import {
+  EPUB_DEFAULT_FONT_SIZE_PERCENT,
+  EPUB_DEFAULT_LINE_HEIGHT,
+  type EpubFontFamily,
+} from "@/lib/epub/appearance";
 
 /** Visual theme of the reader surface. */
 export type ReaderTheme = "light" | "paper" | "dark";
@@ -8,7 +12,7 @@ export type ReaderTheme = "light" | "paper" | "dark";
 export type ReaderLayout = "paginated" | "scrolling";
 
 /** Font family override for reflowable content; null keeps publisher styles. */
-export type ReaderFontFamily = "serif" | "sans";
+export type ReaderFontFamily = EpubFontFamily;
 
 /**
  * Reader appearance preferences. UI-only state (no Rust mirror yet) —
@@ -21,6 +25,10 @@ export type ReaderFontFamily = "serif" | "sans";
    * separate from the PDF reader's zoom.
    */
   epubFontSize: number;
+  /**
+   * EPUB line height on the reading-system scale (`EPUB_LINE_HEIGHT_SCALE`);
+   * 0 = publication default (no override).
+   */
   lineHeight: number;
   fontFamily: ReaderFontFamily | null;
   theme: ReaderTheme;
@@ -29,7 +37,7 @@ export type ReaderFontFamily = "serif" | "sans";
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT,
-  lineHeight: 1.6,
+  lineHeight: EPUB_DEFAULT_LINE_HEIGHT,
   fontFamily: null,
   theme: "light",
   layout: "paginated",
