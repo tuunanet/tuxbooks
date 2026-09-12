@@ -28,6 +28,7 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
+import { epubFontSizeRatio } from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
   convertFoliateRow,
@@ -132,6 +133,8 @@ export const EPUB_FONT_FAMILIES = {
 export type EpubFontFamily = keyof typeof EPUB_FONT_FAMILIES;
 
 export interface EpubAppearance {
+  /** User font size in CSS px (the UI unit); converted to Readium's
+   *  unitless ratio at submission (`epubFontSizeRatio`). */
   fontSize: number;
   lineHeight: number;
   fontFamily: EpubFontFamily | null;
@@ -767,6 +770,9 @@ export class ReadiumEpubHandle {
   /**
    * User appearance over publisher styles, through the engine's Preferences
    * API (ReadiumCSS injects the user properties into every section frame).
+   * `fontSize` arrives in UI px and is converted to Readium's unitless
+   * ratio here — a raw px value is outside the toolkit's accepted [0.7, 4]
+   * range and would be silently dropped by the preferences validation.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
@@ -776,7 +782,7 @@ export class ReadiumEpubHandle {
         backgroundColor: colors.background,
         textColor: colors.text,
         linkColor: colors.link,
-        fontSize: appearance.fontSize,
+        fontSize: epubFontSizeRatio(appearance.fontSize),
         lineHeight: appearance.lineHeight,
         fontFamily:
           appearance.fontFamily === null ? null : EPUB_FONT_FAMILIES[appearance.fontFamily],
