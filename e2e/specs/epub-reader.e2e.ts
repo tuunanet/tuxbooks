@@ -198,6 +198,33 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.getByTestId("pref-font-family").getByText("Serif", { exact: true }).click();
     await page.getByTestId("pref-theme").getByText("Paper", { exact: true }).click();
 
+    // The two-column layout keeps the popover free of scrollbars on the
+    // standard window (the max-height cap is a fallback for very short
+    // ones, issue #46 UAT).
+    await expect
+      .poll(() =>
+        page.getByTestId("appearance-content").evaluate((el) => ({
+          x: el.scrollWidth - el.clientWidth,
+          y: el.scrollHeight - el.clientHeight,
+        })),
+      )
+      .toEqual({ x: 0, y: 0 });
+
+    // The theme lands on section frames as user color variables (issue #46)
+    // and repagination keeps the reading location (assertion pattern from
+    // the shared-library note below).
+    const themeVar = (name: string) =>
+      page
+        .frameLocator("[data-epub-host] iframe")
+        .first()
+        .locator("html")
+        .evaluate((el, styleName) => el.style.getPropertyValue(styleName), name);
+    const sectionAtThemeSwitch = await currentSection(page);
+    await expect
+      .poll(() => themeVar("--USER__backgroundColor"), { timeout: 30000 })
+      .toBe("#f6f0e4");
+    await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionAtThemeSwitch);
+
     // Font size walks the Readium percent scale (issue #42). The slider owns
     // its arrow keys, and larger text must repaginate cleanly while keeping
     // the reading location: the reader stays ready in the same spine
@@ -257,6 +284,19 @@ test.describe("tuxbooks EPUB reader", () => {
       )
       .toBeGreaterThanOrEqual(-1);
 
+    // The theme survived moving through the book (variable still on the
+    // current frame); switching back to Default removes the variables
+    // entirely — publisher colors are restored, nothing injected (issue #46).
+    await expect
+      .poll(() => themeVar("--USER__backgroundColor"), { timeout: 30000 })
+      .toBe("#f6f0e4");
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
+    await page.getByTestId("pref-theme").getByText("Default", { exact: true }).click();
+    await expect.poll(() => themeVar("--USER__backgroundColor"), { timeout: 30000 }).toBe("");
+
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
     await returnToLibrary(page);
   });
 

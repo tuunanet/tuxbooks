@@ -45,9 +45,13 @@ import {
 } from "./searchModel";
 
 const THEME_CLASSES: Record<ReaderTheme, string> = {
+  default: "bg-background text-foreground",
   light: "bg-background text-foreground",
   paper: "bg-[#f6f0e4] text-[#3a332a]",
   dark: "bg-zinc-950 text-zinc-100",
+  contrast: "bg-black text-[#ffff00]",
+  "blue-contrast": "bg-[#181842] text-white",
+  "mint-contrast": "bg-[#c5e7cd] text-black",
 };
 
 /**
