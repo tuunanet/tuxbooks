@@ -71,6 +71,49 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // The appearance controls are reflow-only (issue #46 UAT): a fixed-layout
+  // PDF exposes exactly the theme — applied as a CSS filter over the
+  // rendered pages (the Foliate fixed-content approach) — and none of the
+  // EPUB typography/layout sections that could not act on a raster page.
+  test("exposes only the theme in the appearance menu", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    const canvas = firstPdfCanvas(page);
+    await canvas.waitFor({ state: "attached", timeout: 30000 });
+
+    await page.getByTestId("appearance-trigger").click();
+    const content = page.getByTestId("appearance-content");
+    await expect(content).toBeVisible({ timeout: 30000 });
+
+    // No reflow sections for a fixed layout.
+    await expect(page.getByTestId("pref-font-size")).not.toBeAttached();
+    await expect(page.getByTestId("pref-word-spacing")).not.toBeAttached();
+    await expect(page.getByTestId("pref-font-family")).not.toBeAttached();
+    await expect(page.getByTestId("pref-text-align")).not.toBeAttached();
+    await expect(page.getByTestId("pref-layout")).not.toBeAttached();
+    await expect(page.getByTestId("pref-columns")).not.toBeAttached();
+    await expect(page.getByTestId("pref-page-gutter")).not.toBeAttached();
+
+    // The theme group offers exactly the filter-faithful presets, and a
+    // choice lands on the document surface as a filter.
+    const theme = page.getByTestId("pref-theme");
+    await expect(theme.getByText("Default", { exact: true })).toBeVisible();
+    await expect(theme.getByText("High contrast", { exact: true })).toBeVisible();
+    await expect(theme.getByText("Blue", { exact: true })).toBeHidden();
+    await expect(page.getByTestId("pdf-document").evaluate((el) => el.style.filter)).resolves.toBe(
+      "",
+    );
+    await theme.getByText("Dark", { exact: true }).click();
+    await expect
+      .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.filter), {
+        timeout: 30000,
+      })
+      .toBe("invert(1) hue-rotate(180deg)");
+
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
+    await returnToLibrary(page);
+  });
+
   // § PDF-open telemetry: the deterministic, state-only half of the open
   // timeline. The state machine must reach "interactive" through the
   // range-backed open (bytes=range); timing segments are recorded but only

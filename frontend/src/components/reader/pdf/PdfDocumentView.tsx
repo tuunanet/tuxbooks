@@ -44,6 +44,9 @@ interface PdfDocumentViewProps {
   onRetryPage?: (pageNumber: number) => void;
   /** Persisted highlights by page number; drawn over rendered pages. */
   highlightsByPage?: Map<number, Annotation[]>;
+  /** CSS filter implementing the reader theme over the fixed pages
+   *  (undefined = pages as-is); see lib/pdf/theme.ts. */
+  themeFilter?: string;
 }
 
 /**
@@ -70,6 +73,7 @@ export function PdfDocumentView({
   contentAreaRef,
   onRetryPage,
   highlightsByPage,
+  themeFilter,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -88,7 +92,7 @@ export function PdfDocumentView({
       <div
         ref={documentRef}
         data-testid="pdf-document"
-        style={{ width: `${documentWidth}px` }}
+        style={{ width: `${documentWidth}px`, filter: themeFilter }}
         className="flex flex-col items-center"
       >
         {slots.map((slot, index) => {

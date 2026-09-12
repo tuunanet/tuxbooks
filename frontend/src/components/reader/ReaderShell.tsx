@@ -346,7 +346,7 @@ export function ReaderShell() {
           </Tooltip>
         )}
 
-        <ReaderAppearance />
+        <ReaderAppearance format={book?.format} />
 
         <Tooltip>
           <TooltipTrigger asChild>

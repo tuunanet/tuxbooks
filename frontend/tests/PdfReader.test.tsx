@@ -32,6 +32,7 @@ import {
 } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
+import { useReader, type ReaderPreferences } from "@/state/readerState";
 import { makeAnnotation, makeBook } from "./factories";
 import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
@@ -127,6 +128,16 @@ async function renderLoadedReader(
 
 function slot(pageNumber: number): HTMLElement | null {
   return document.querySelector(`[data-pdf-slot="${pageNumber}"]`);
+}
+
+/** Button that patches reader preferences through the real provider state. */
+function PreferenceProbe({ label, patch }: { label: string; patch: Partial<ReaderPreferences> }) {
+  const { setPreferences } = useReader();
+  return (
+    <button type="button" onClick={() => setPreferences(patch)}>
+      {label}
+    </button>
+  );
 }
 
 /** Page numbers of the currently mounted canvases, sorted as strings. */
@@ -250,6 +261,39 @@ describe("PdfReader loading", () => {
     await renderLoadedReader({ onDocumentLoad });
 
     expect(onDocumentLoad).toHaveBeenCalledWith(3);
+  });
+
+  it("filters the rendered pages by the reader theme", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    // Default (neutral) renders the pages as-is; Dark applies the fixed-
+    // content invert recipe (lib/pdf/theme.ts) without re-rendering.
+    const onSearchGroup = vi.fn() as never;
+    const onSelectionChange = vi.fn() as never;
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PdfReader
+            book={pdfBook}
+            onDocumentLoad={() => {}}
+            onOutlineLoad={() => {}}
+            onSearchGroup={onSearchGroup}
+            onSearchDone={() => {}}
+            onSelectionChange={onSelectionChange}
+          />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("");
+
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("invert(1) hue-rotate(180deg)");
   });
 
   it("shows an honest error when the document cannot be opened", async () => {

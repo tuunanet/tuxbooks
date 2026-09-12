@@ -876,6 +876,70 @@ describe("ReaderAppearance", () => {
   });
 });
 
+describe("PDF appearance menu", () => {
+  it("offers only the theme for fixed-layout PDFs and filters the pages", async () => {
+    vi.mocked(openPdfDocumentFromBook).mockResolvedValue(
+      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocumentFromBook>>,
+    );
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [
+        makeBook({
+          id: 1,
+          format: "pdf",
+          path: "/tmp/library/minimal.pdf",
+          title: "A Minimal PDF",
+        }),
+      ],
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [],
+    });
+    render(
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+          metadataEditorBookId: null,
+        }}
+      />,
+    );
+
+    await screen.findByTestId("pdf-canvas");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+
+    // The reflow controls cannot act on a fixed layout: theme only.
+    expect(screen.queryByTestId("pref-font-size")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-line-height")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-word-spacing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-letter-spacing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-paragraph-spacing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-font-family")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-text-align")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-layout")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
+
+    // Exactly the themes with a faithful filter mapping are offered, and a
+    // choice lands on the rendered pages as a CSS filter.
+    const theme = screen.getByTestId("pref-theme");
+    expect(
+      within(theme)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["Default", "Light", "Paper", "Dark", "High contrast"]);
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("");
+    await userEvent.click(within(theme).getByRole("radio", { name: "High contrast" }));
+    expect(screen.getByTestId("pdf-document").style.filter).toBe(
+      "grayscale(1) invert(1) contrast(1.4)",
+    );
+  });
+});
+
 describe("Reader book switching", () => {
   it("gives a switched book a fresh reader and its own navigation data", async () => {
     const epub = makeBook();
