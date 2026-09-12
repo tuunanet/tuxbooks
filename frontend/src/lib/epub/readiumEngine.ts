@@ -705,6 +705,42 @@ export class ReadiumEpubHandle {
   }
 
   /**
+   * The section frame currently under the reading position (scrolled flow
+   * mounts one frame at a time; match by spine href, fall back to the only
+   * mounted frame).
+   */
+  private scrolledFrame(): HTMLIFrameElement | null {
+    const href = this.currentLocator?.href ?? "";
+    for (const frame of this.container.querySelectorAll("iframe")) {
+      if (href !== "" && (frame.src.endsWith(href) || frame.src.endsWith(`/${href}`))) return frame;
+    }
+    return this.container.querySelector("iframe");
+  }
+
+  /**
+   * Scrolled-flow arrow navigation: one viewport of the section frame, not a
+   * chapter. The toolkit's ScrollSnapper acks `go_next`/`go_prev` false by
+   * design, so `attemptMove` (navigator goForward/goBackward) hops spine
+   * items in scrolled flow — sensible only at a section boundary. So: scroll
+   * the frame programmatically when there is room (the frame's scroll event
+   * reports progress, which surfaces as a relocate) and report whether the
+   * viewport actually moved; false leaves `move` to the engine turn, which
+   * chapter-hops exactly at the boundary.
+   */
+  private scrolledMove(direction: "forward" | "backward"): boolean {
+    if (this.flow !== "scrolled") return false;
+    const frame = this.scrolledFrame();
+    const win = frame?.contentWindow;
+    const doc = win?.document;
+    const scroller = doc?.scrollingElement ?? doc?.documentElement;
+    if (!win || !scroller) return false;
+    const before = scroller.scrollTop;
+    const viewport = win.innerHeight;
+    scroller.scrollTop = direction === "forward" ? before + viewport : before - viewport;
+    return Math.abs(scroller.scrollTop - before) > 1;
+  }
+
+  /**
    * Engine page turn with swallow-recovery. Keys pressed while the engine
    * is still settling its initial layout can be dropped by the toolkit's
    * frame comms: a dropped ack leaves the navigator's busy flag stuck and
@@ -714,12 +750,18 @@ export class ReadiumEpubHandle {
    * pressing an arrow must never lose page turns for the session. A
    * legitimate boundary (start/end of book) also produces no relocate; the
    * recovery costs a bounded delay only there.
+   *
+   * Scrolled flow moves a viewport at a time ({@link scrolledMove}) — the
+   * engine turn runs only when the viewport is already at the section
+   * boundary, where the toolkit's resource hop is the right move.
    */
   private move(direction: "forward" | "backward"): Promise<void> {
     return this.settled(async () => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const before = this.relocateCount;
-        await this.attemptMove(direction);
+        if (!this.scrolledMove(direction)) {
+          await this.attemptMove(direction);
+        }
         const deadline = Date.now() + 500;
         while (this.relocateCount === before && Date.now() < deadline) {
           await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
@@ -762,8 +804,12 @@ export class ReadiumEpubHandle {
     await this.applyHighlights();
   }
 
+  /** Current reflow layout, for flow-aware navigation (scrolledMove). */
+  private flow: EpubFlow = "paginated";
+
   /** Applies the reflow layout; no-op before `load()`. */
   async setFlow(flow: EpubFlow): Promise<void> {
+    this.flow = flow;
     if (!this.navigator) return;
     await this.navigator.submitPreferences(new EpubPreferences({ scroll: flow === "scrolled" }));
   }

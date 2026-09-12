@@ -229,6 +229,34 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
 
+    // Scrolled-flow regression pin (issue #42 UAT): the toolkit stubs
+    // go_next/go_prev in scrolled mode, which chapter-skips when the app
+    // turns pages through the navigator. The seam scrolls one viewport
+    // instead, so one ArrowRight may hold the section (fraction advanced)
+    // or hop exactly one spine item for a short chapter — never two.
+    const sectionBeforeScroll = await currentSection(page);
+    await page.keyboard.press("ArrowRight");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+    await expect
+      .poll(
+        async () => {
+          const section = await currentSection(page);
+          return section === null ? null : Number(section) - Number(sectionBeforeScroll);
+        },
+        { timeout: 30000, message: "scrolled ArrowRight skipped chapters" },
+      )
+      .toBeLessThanOrEqual(1);
+    await page.keyboard.press("ArrowLeft");
+    await expect
+      .poll(
+        async () => {
+          const section = await currentSection(page);
+          return section === null ? null : Number(section) - Number(sectionBeforeScroll);
+        },
+        { timeout: 30000, message: "scrolled ArrowLeft skipped chapters" },
+      )
+      .toBeGreaterThanOrEqual(-1);
+
     await returnToLibrary(page);
   });
 

@@ -144,7 +144,12 @@ Readium locators, validated against the actual EPUB:
   while an EPUB is open: the shell must not register its
   percentage-stepping/scrolling handlers for EPUB (null-combo gating in
   ReaderShell) — with no page count a shell step is 100/0 and the provider
-  clamp sends the position straight to an end of the document.
+  clamp sends the position straight to an end of the document. In
+  paginated flow an arrow turns one page; in scrolled flow the seam steps
+  one viewport of the section frame and only uses the engine's resource
+  hop at a section boundary (the toolkit's ScrollSnapper stubs
+  `go_next`/`go_prev` to false, so a raw `goForward` would skip whole
+  chapters).
 
 ### In-book search
 
