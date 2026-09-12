@@ -56,8 +56,22 @@ code.
 
 ### External Knowledge & Source Research
 
-- **Context7:** Use for up-to-date, version-specific documentation, API references, configuration, and usage examples for libraries, frameworks, SDKs, and tools. Prefer Context7 before relying on remembered API details.
-- **GitHits:** Use for source-level investigation of open-source dependencies: implementation details, internals, call paths, existing patterns, version changes, and behavior that is unclear or undocumented. Prefer it when debugging library/runtime behavior rather than merely learning the public API.
+Use the following tools when repository context alone is insufficient. Prefer the most specific source for the question rather than using a generic web search.
+
+* **Context7 — official/current documentation:** Use for up-to-date, version-specific documentation, API references, configuration, and usage examples for libraries, frameworks, SDKs, and tools. Prefer Context7 over remembered API details.
+
+* **GitHits — source-level investigation:** Use for open-source dependency internals, implementation details, call paths, version changes, existing patterns, and behavior that is unclear or undocumented. Prefer GitHits when debugging how a dependency actually works rather than simply learning its public API.
+
+* **Firecrawl — web research:** Use `firecrawl-search` whenever information must be obtained from the public web, including current information, technical research, GitHub issues/discussions, release information, comparisons, news, prices, or other information not available in the repository or through Context7/GitHits. Prefer official documentation, upstream repositories, and other primary sources. Do not guess when external verification is available.
+
+**Tool selection:**
+
+1. Current library/API documentation → **Context7**
+2. Dependency implementation or runtime behavior → **GitHits**
+3. General/current information or web research → **Firecrawl**
+4. If multiple sources are relevant, use them together and cross-check important technical conclusions.
+
+Do not invoke graphify merely because the question is being asked from within this repository. The question itself must concern the TuxBooks codebase.
 
 ### E2E for agents
 
@@ -91,14 +105,16 @@ Read the one that fits the task; each is short.
 
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+This project has a codebase knowledge graph in `graphify-out/`.
 
-When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+**Scope:** Use graphify **only for questions about this project's codebase, architecture, dependencies, implementation, or relationships between source files/concepts. Do not use graphify for general knowledge, web research, current information, weather, news, prices, or other questions unrelated to the codebase.
 
-Rules:
-
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+* When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+* For codebase questions, first run `graphify query "<question>"` when `graphify-out/graph.json` exists.
+* Use `graphify path "<A>" "<B>"` when investigating relationships between two entities.
+* Use `graphify explain "<concept>"` for focused investigation of a specific concept.
+* Dirty `graphify-out/` files are expected after hooks or incremental updates; do not skip graphify because the files are dirty.
+* Skip graphify when the task concerns stale or incorrect graph output, or when the user explicitly asks not to use it.
+* If `graphify-out/wiki/index.md` exists, use it for broad codebase navigation instead of raw source browsing.
+* Read `graphify-out/GRAPH_REPORT.md` only for broad architecture reviews or when `query`, `path`, or `explain` do not provide sufficient context.
+* After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
