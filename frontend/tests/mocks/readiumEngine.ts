@@ -178,13 +178,18 @@ export function makeFakeReadiumModule() {
     EPUB_FONT_FAMILIES: { serif: "serif-stack", sans: "sans-stack" },
     EPUB_SCROLLED_SURFACE_MAX_PX: 777,
     // Valid CSS colors: jsdom validates longhand values and drops duds.
+    // The neutral default bridges nothing (undefined, no inline style).
     epubThemeBackground: vi.fn(
       (theme: string) =>
         ({
+          default: undefined,
           light: "#fefefe",
           paper: "#f6f0e4",
           dark: "#0e0e10",
-        })[theme] ?? "#fefefe",
+          contrast: "#000000",
+          "blue-contrast": "#181842",
+          "mint-contrast": "#c5e7cd",
+        })[theme],
     ),
     serializeLocator: vi.fn((locator: unknown) => JSON.stringify(locator)),
     ReadiumEpubHandle: Object.assign(

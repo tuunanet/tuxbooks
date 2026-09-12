@@ -4,12 +4,14 @@ import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
   EPUB_DEFAULT_TEXT_ALIGNMENT,
+  EPUB_DEFAULT_THEME,
   type EpubFontFamily,
   type EpubTextAlignment,
+  type EpubThemeName,
 } from "@/lib/epub/appearance";
 
-/** Visual theme of the reader surface. */
-export type ReaderTheme = "light" | "paper" | "dark";
+/** Visual theme of the reader surface; "default" keeps publisher colors. */
+export type ReaderTheme = EpubThemeName;
 
 /** Paginated shows one placeholder page at a time; scrolling shows all. */
 export type ReaderLayout = "paginated" | "scrolling";
@@ -65,7 +67,7 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   paragraphSpacing: 0,
   pageGutter: 0,
   textAlign: EPUB_DEFAULT_TEXT_ALIGNMENT,
-  theme: "light",
+  theme: EPUB_DEFAULT_THEME,
   layout: "paginated",
 };
 

@@ -288,7 +288,7 @@ describe("EpubReader appearance and navigation", () => {
       paragraphSpacing: 0,
       pageGutter: 0,
       textAlign: "auto",
-      theme: "light",
+      theme: "default",
     });
   });
 
@@ -332,8 +332,10 @@ describe("EpubReader appearance and navigation", () => {
     );
 
     // Root background follows the engine's theme colors (mocked here) so
-    // the shell area beside the capped column is seamless.
-    expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("rgb(254, 254, 254)");
+    // the shell area beside the capped column is seamless — except on the
+    // neutral default theme, which bridges nothing (publisher colors own
+    // the content and the app surface shows).
+    expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("");
     await clickProbe("probe-paper");
     expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("rgb(246, 240, 228)");
   });

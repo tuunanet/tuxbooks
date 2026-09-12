@@ -517,8 +517,25 @@ describe("ReaderAppearance", () => {
     expect(content).toBeInTheDocument();
 
     // Radix toggle groups inside the popover render radio semantics.
+    // Default (publisher colors) is the preselected neutral theme.
+    const themeGroup = screen.getByTestId("pref-theme");
+    expect(within(themeGroup).getByRole("radio", { name: "Default" })).toBeChecked();
+    expect(
+      within(themeGroup)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["Default", "Light", "Paper", "Dark", "High contrast", "Blue", "Mint"]);
+
     await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
+
+    // Accessible presets apply like any other theme...
+    await userEvent.click(screen.getByRole("radio", { name: "High contrast" }));
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "contrast");
+
+    // ...and Default restores the publisher-owned colors (neutral state).
+    await userEvent.click(within(themeGroup).getByRole("radio", { name: "Default" }));
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "default");
 
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
@@ -537,7 +554,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
-        theme: "paper",
+        theme: "default",
       }),
     );
   });
@@ -583,7 +600,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
-        theme: "light",
+        theme: "default",
       }),
     );
     expect(screen.getByTestId("appearance-content")).toHaveTextContent("137.5%");
@@ -603,7 +620,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
-        theme: "light",
+        theme: "default",
       }),
     );
     await waitFor(() => expect(screen.getByTestId("pref-font-size-reset")).toBeDisabled());
@@ -632,7 +649,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
-        theme: "light",
+        theme: "default",
       }),
     );
     expect(screen.getByTestId("appearance-content")).toHaveTextContent("1.125");
@@ -652,7 +669,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
-        theme: "light",
+        theme: "default",
       }),
     );
     await waitFor(() => expect(screen.getByTestId("pref-line-height-reset")).toBeDisabled());
@@ -681,7 +698,9 @@ describe("ReaderAppearance", () => {
     );
 
     // Default removes the override entirely — publisher styling wins.
-    await userEvent.click(screen.getByRole("radio", { name: "Default" }));
+    await userEvent.click(
+      within(screen.getByTestId("pref-font-family")).getByRole("radio", { name: "Default" }),
+    );
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
         expect.objectContaining({ fontFamily: null }),

@@ -219,6 +219,108 @@ export function epubTextAlignPreference(
 }
 
 /**
+ * Reader themes (issue #46), following the reading-system model: the
+ * toolkit has no named-theme preference — themes are presets over the six
+ * color preferences (background, text, link, visited, selection pair), the
+ * same vocabulary the reference implementation maps in
+ * `computeReadiumCssJsonMessage`. `default` is the neutral state: it
+ * submits no colors at all, so publisher styling (including link and
+ * selection colors) stays intact.
+ */
+export type EpubThemeName =
+  "default" | "light" | "paper" | "dark" | "contrast" | "blue-contrast" | "mint-contrast";
+
+/** The default theme: neutral (no color override). */
+export const EPUB_DEFAULT_THEME: EpubThemeName = "default";
+
+/** Full color vocabulary a themed preset must provide (issue #46). */
+export interface EpubThemeColors {
+  background: string;
+  text: string;
+  link: string;
+  visited: string;
+  selectionBackground: string;
+  selectionText: string;
+}
+
+/**
+ * Theme presets. Light/Paper/Dark keep their established values, completed
+ * with visited + selection colors. The contrast presets adapt the
+ * reference's accessibility set (contrast2/3/4); where the reference's
+ * pairs fall short of WCAG AA (its #0000ee links on black measure ≈2:1),
+ * the foregrounds are corrected — unit tests enforce ≥ 4.5:1 for every
+ * text/link/visited/selection pair, so this table cannot silently regress.
+ */
+export const EPUB_THEME_COLORS: Record<Exclude<EpubThemeName, "default">, EpubThemeColors> = {
+  light: {
+    background: "#ffffff",
+    text: "#1f2328",
+    link: "#0b62c4",
+    visited: "#551a8b",
+    selectionBackground: "#86b6fe",
+    selectionText: "#1f2328",
+  },
+  paper: {
+    background: "#f6f0e4",
+    text: "#3a332a",
+    link: "#7c5b2a",
+    visited: "#551a8b",
+    selectionBackground: "#86b6fe",
+    selectionText: "#3a332a",
+  },
+  dark: {
+    background: "#101013",
+    text: "#e4e4e7",
+    link: "#7ab7ff",
+    visited: "#c3b0f5",
+    selectionBackground: "#4a5f9e",
+    selectionText: "#ffffff",
+  },
+  contrast: {
+    background: "#000000",
+    text: "#ffff00",
+    link: "#66b2ff",
+    visited: "#c5a3e0",
+    selectionBackground: "#4a5f9e",
+    selectionText: "#ffffff",
+  },
+  "blue-contrast": {
+    background: "#181842",
+    text: "#ffffff",
+    link: "#7ab7ff",
+    visited: "#c5a3e0",
+    selectionBackground: "#4a5f9e",
+    selectionText: "#ffffff",
+  },
+  "mint-contrast": {
+    background: "#c5e7cd",
+    text: "#000000",
+    link: "#0000ee",
+    visited: "#551a8b",
+    selectionBackground: "#86b6fe",
+    selectionText: "#000000",
+  },
+};
+
+/**
+ * Colors a theme submits to the toolkit; null for the neutral default
+ * (whose nulls actively clear a previously applied theme — the toolkit's
+ * preference merging copies nulls and skips undefined).
+ */
+export function epubThemeColors(theme: EpubThemeName): EpubThemeColors | null {
+  return theme === "default" ? null : EPUB_THEME_COLORS[theme];
+}
+
+/**
+ * Background the app paints around/beside the reading surface so the
+ * engine surface and the shell are seamless. The neutral default bridges
+ * nothing (the app surface shows, publisher colors own the content).
+ */
+export function epubThemeBackground(theme: EpubThemeName): string | undefined {
+  return epubThemeColors(theme)?.background;
+}
+
+/**
  * Column-count targets for paginated EPUB reflow (issue #44). The selected
  * value is an explicit target, not an auto-fit hint: ReadiumCSS paginates
  * exactly N columns whenever the viewport fits N columns at the minimal

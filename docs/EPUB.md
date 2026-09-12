@@ -122,7 +122,16 @@ else depends on its types and the seam's handle:
   exactly the toolkit's `TextAlignment` enum (left/justify/right/start).
   Every value flows only through `submitPreferences`, and the toolkit
   stores the compiled properties so newly mounted spine frames inherit
-  them.
+  them. Themes (issue #46) are presets over the six color preferences
+  (background/text/link/visited/selection pair) — the reading system has
+  no named-theme preference. The neutral `default` theme submits explicit
+  nulls so a previous theme is cleared and publisher colors (including
+  link and selection styling) stay intact; Light/Paper/Dark keep their
+  established palettes completed with visited + selection colors, and the
+  contrast presets (black/yellow, deep-blue/white, mint/black) adapt the
+  reference implementation's accessibility set with WCAG-AA-readable
+  pairs enforced by unit test. Theme colors are inert for fixed-layout
+  publications (the toolkit's FXL pool takes no CSS properties).
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

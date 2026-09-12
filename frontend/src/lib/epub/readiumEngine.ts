@@ -33,11 +33,17 @@ import {
   epubFontFamilyPreference,
   epubLineHeightPreference,
 } from "./appearance";
-import type { EpubDocumentLayout, EpubFontFamily, EpubTextAlignment } from "./appearance";
+import type {
+  EpubDocumentLayout,
+  EpubFontFamily,
+  EpubTextAlignment,
+  EpubThemeName,
+} from "./appearance";
 import {
   epubColumnCountPreference,
   epubSpacingPreference,
   epubTextAlignPreference,
+  epubThemeColors,
 } from "./appearance";
 import {
   EPUB_PROGRESS_SCHEMA_VERSION,
@@ -128,15 +134,15 @@ export const EPUB_SCROLLED_SURFACE_MAX_PX = 960;
 
 export const EPUB_MIME_TYPE = "application/epub+zip";
 
-/** Background color the engine paints for a theme. */
-export type EpubThemeName = "light" | "paper" | "dark";
-
-export function epubThemeBackground(theme: EpubThemeName): string {
-  return THEME_COLORS[theme].background;
-}
-
 /** Font stacks offered for user override; null means publisher styles win. */
 export { EPUB_FONT_FAMILIES, type EpubFontFamily } from "./appearance";
+
+/**
+ * Reader themes (issue #46): presets over the toolkit's six color
+ * preferences, with `default` submitting no colors at all. Backgrounds,
+ * mapping, and the shell bridge live in the pure module.
+ */
+export { epubThemeBackground, type EpubThemeName } from "./appearance";
 
 /** Maps an explicit reader alignment onto the toolkit's string enum. */
 const EXPLICIT_TEXT_ALIGNMENTS: Record<Exclude<EpubTextAlignment, "auto">, TextAlignment> = {
@@ -173,12 +179,6 @@ export interface EpubAppearance {
   textAlign: EpubTextAlignment;
   theme: EpubThemeName;
 }
-
-const THEME_COLORS: Record<EpubThemeName, { background: string; text: string; link: string }> = {
-  light: { background: "#ffffff", text: "#1f2328", link: "#0b62c4" },
-  paper: { background: "#f6f0e4", text: "#3a332a", link: "#7c5b2a" },
-  dark: { background: "#101013", text: "#e4e4e7", link: "#7ab7ff" },
-};
 
 const XHTML_TYPE = "application/xhtml+xml";
 const HTML_TYPE = "text/html";
@@ -867,17 +867,26 @@ export class ReadiumEpubHandle {
    * The text-layout scales (word/letter/paragraph spacing, page margins)
    * and alignment map their 0/"auto" sentinels to the toolkit's "no
    * preference" (`epubSpacingPreference`, `epubTextAlignPreference`) so the
-   * default state never injects a CSS override.
+   * default state never injects a CSS override. The theme presets submit
+   * the full six-color vocabulary (`epubThemeColors`); the neutral default
+   * submits nulls so a previous theme is cleared and publisher colors are
+   * restored.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     if (!this.navigator) return;
-    const colors = THEME_COLORS[appearance.theme];
+    // The neutral default submits explicit nulls: the toolkit's preference
+    // merging copies nulls (clearing a previously applied theme so
+    // publisher colors are restored) and skips undefined.
+    const colors = epubThemeColors(appearance.theme);
     const layout = this.navigator.layout as EpubDocumentLayout;
     await this.navigator.submitPreferences(
       new EpubPreferences({
-        backgroundColor: colors.background,
-        textColor: colors.text,
-        linkColor: colors.link,
+        backgroundColor: colors?.background ?? null,
+        textColor: colors?.text ?? null,
+        linkColor: colors?.link ?? null,
+        visitedColor: colors?.visited ?? null,
+        selectionBackgroundColor: colors?.selectionBackground ?? null,
+        selectionTextColor: colors?.selectionText ?? null,
         fontSize: epubFontSizeRatio(appearance.fontSize),
         lineHeight: epubLineHeightPreference(appearance.lineHeight),
         fontFamily: epubFontFamilyPreference(appearance.fontFamily),

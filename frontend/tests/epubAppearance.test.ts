@@ -3,6 +3,7 @@ import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
   EPUB_DEFAULT_TEXT_ALIGNMENT,
+  EPUB_DEFAULT_THEME,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_RATIO_RANGE,
   EPUB_FONT_SIZE_SCALE_PERCENT,
@@ -10,6 +11,7 @@ import {
   EPUB_LINE_HEIGHT_SCALE,
   EPUB_PAGE_GUTTER_SCALE_PX,
   EPUB_PARAGRAPH_SPACING_SCALE,
+  EPUB_THEME_COLORS,
   EPUB_WORD_SPACING_SCALE,
   clampEpubColumnCount,
   EPUB_COLUMN_COUNTS,
@@ -20,6 +22,8 @@ import {
   epubLineHeightPreference,
   epubSpacingPreference,
   epubTextAlignPreference,
+  epubThemeColors,
+  epubThemeBackground,
   isEpubFontSizeStep,
   nearestEpubFontSize,
   nearestEpubLetterSpacing,
@@ -300,5 +304,54 @@ describe("EPUB text-layout scales (issue #45)", () => {
     expect(DEFAULT_READER_PREFERENCES.letterSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.paragraphSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(0);
+  });
+});
+
+describe("EPUB themes (issue #46)", () => {
+  // WCAG 2.x relative luminance / contrast ratio.
+  const luminance = (hex: string): number => {
+    const channels = [1, 3, 5].map((offset) => {
+      const channel = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+  };
+  const ratio = (a: string, b: string): number => {
+    const [la, lb] = [luminance(a), luminance(b)];
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  };
+
+  it("offers the neutral default plus retained and accessible presets", () => {
+    expect(EPUB_DEFAULT_THEME).toBe("default");
+    expect(DEFAULT_READER_PREFERENCES.theme).toBe("default");
+    // Every themed preset provides the full six-color vocabulary.
+    for (const theme of Object.keys(EPUB_THEME_COLORS) as (keyof typeof EPUB_THEME_COLORS)[]) {
+      const colors = EPUB_THEME_COLORS[theme];
+      expect(Object.keys(colors!).sort()).toEqual(
+        ["background", "link", "selectionBackground", "selectionText", "text", "visited"].sort(),
+      );
+    }
+  });
+
+  it("maps the neutral default to no colors and presets to their palette", () => {
+    expect(epubThemeColors("default")).toBeNull();
+    expect(epubThemeBackground("default")).toBeUndefined();
+    for (const [theme, colors] of Object.entries(EPUB_THEME_COLORS)) {
+      expect(epubThemeColors(theme as keyof typeof EPUB_THEME_COLORS)).toEqual(colors);
+      expect(epubThemeBackground(theme as keyof typeof EPUB_THEME_COLORS)).toBe(colors!.background);
+    }
+  });
+
+  it("keeps every foreground/background pair WCAG-AA readable in every theme", () => {
+    for (const [theme, colors] of Object.entries(EPUB_THEME_COLORS)) {
+      const bg = colors!.background;
+      expect(ratio(colors!.text, bg)).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(colors!.link, bg)).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(colors!.visited, bg)).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(colors!.selectionText, colors!.selectionBackground)).toBeGreaterThanOrEqual(4.5);
+      // The selection must also be visible against the page background.
+      expect(ratio(colors!.selectionBackground, bg)).toBeGreaterThanOrEqual(1.5);
+      void theme;
+    }
   });
 });
