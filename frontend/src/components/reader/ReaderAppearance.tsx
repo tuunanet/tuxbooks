@@ -12,6 +12,7 @@ import {
   EPUB_DEFAULT_PAGE_GUTTER_PX,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_FOREGROUND_AA_RATIO,
   EPUB_FOREGROUND_SWATCHES,
   EPUB_LETTER_SPACING_SCALE,
   EPUB_LINE_HEIGHT_SCALE,
@@ -170,7 +171,7 @@ export function ReaderAppearance({ format }: { format?: string }) {
     effectiveForeground !== null && isEpubHexColor(effectiveForeground)
       ? epubContrastRatio(effectiveForeground, referenceBackground)
       : null;
-  const belowAA = foregroundRatio !== null && foregroundRatio < 4.5;
+  const belowAA = foregroundRatio !== null && foregroundRatio < EPUB_FOREGROUND_AA_RATIO;
 
   // PDFs can only be filtered, not recolored — offer exactly the themes
   // with a faithful filter mapping (Blue/Mint are EPUB-only).

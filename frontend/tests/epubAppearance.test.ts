@@ -25,6 +25,7 @@ import {
   epubThemeColors,
   epubThemeBackground,
   epubContrastRatio,
+  epubForegroundFitsTheme,
   epubForegroundPreference,
   epubForegroundReferenceBackground,
   EPUB_FOREGROUND_SWATCHES,
@@ -426,6 +427,25 @@ describe("EPUB foreground override (issue #55)", () => {
     // Invalid stored values normalize to null, never reach the engine.
     expect(epubForegroundPreference("green")).toBeNull();
     expect(epubForegroundPreference("#12345")).toBeNull();
+  });
+
+  it("keeps overrides that fit the theme and drops the rest", () => {
+    // Family rule: dark inks fit light-family themes, light inks fit
+    // dark-family ones. The neutral Default theme is judged on white.
+    expect(epubForegroundFitsTheme(null, "dark")).toBe(true);
+    expect(epubForegroundFitsTheme("#f5efe0", "dark")).toBe(true);
+    expect(epubForegroundFitsTheme("#f5efe0", "default")).toBe(false);
+    expect(epubForegroundFitsTheme("#1f3a6e", "light")).toBe(true);
+    expect(epubForegroundFitsTheme("#1f3a6e", "dark")).toBe(false);
+    // Every curated swatch fits its own family.
+    for (const [theme, fits] of [
+      ["light", "#1f3a6e"],
+      ["paper", "#6b2737"],
+      ["dark", "#f5efe0"],
+      ["contrast", "#e6c98a"],
+    ] as const) {
+      expect(epubForegroundFitsTheme(fits, theme)).toBe(true);
+    }
   });
 
   it("computes the WCAG ratio with one shared implementation", () => {

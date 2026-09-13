@@ -354,6 +354,29 @@ export function epubForegroundReferenceBackground(theme: EpubThemeName): string 
 }
 
 /**
+ * The WCAG AA text-contrast floor, shared by the foreground readout's
+ * warning and the theme-switch rule below.
+ */
+export const EPUB_FOREGROUND_AA_RATIO = 4.5;
+
+/**
+ * True when a foreground override stays legible on `theme`'s background.
+ * Swatches are curated per theme family (dark inks for light-family
+ * themes, light inks for dark-family ones), and a free-form pick is judged
+ * against the theme it was made on — so an override that would fail AA
+ * after a theme switch is dropped rather than coloring body text
+ * illegibly (UAT: bright Parchment ink from Dark surviving a switch to
+ * the white Default page).
+ */
+export function epubForegroundFitsTheme(foreground: string | null, theme: EpubThemeName): boolean {
+  if (foreground === null) return true;
+  return (
+    epubContrastRatio(foreground, epubForegroundReferenceBackground(theme)) >=
+    EPUB_FOREGROUND_AA_RATIO
+  );
+}
+
+/**
  * Curated foreground swatches (issue #55), in two families: dark inks for
  * the light-family themes (Light, Paper, Mint) and light inks for the
  * dark-family themes (Dark, High contrast, Blue). No single color reaches

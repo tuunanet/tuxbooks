@@ -11,14 +11,21 @@ function Probe() {
   return (
     <div>
       <span data-testid="theme">{preferences.theme}</span>
+      <span data-testid="foreground">{preferences.foreground ?? "none"}</span>
       <button type="button" onClick={() => setPreferences({ theme: "paper" })}>
         pick-paper
       </button>
       <button type="button" onClick={() => setPreferences({ theme: "default" })}>
         pick-default
       </button>
+      <button type="button" onClick={() => setPreferences({ theme: "contrast" })}>
+        pick-contrast
+      </button>
       <button type="button" onClick={() => setPreferences({ lineHeight: 1.5 })}>
         patch-line-height
+      </button>
+      <button type="button" onClick={() => setPreferences({ foreground: "#f5efe0" })}>
+        pick-parchment-ink
       </button>
     </div>
   );
@@ -96,6 +103,27 @@ describe("ReaderProvider global theme following", () => {
 
     rerenderWith("dark");
     expect(screen.getByTestId("theme")).toHaveTextContent("dark");
+  });
+
+  it("drops a bright foreground override when the theme switches to a light surface", async () => {
+    // UAT: global dark, override picked on the dark surface, then the user
+    // switches to Default (publisher white) — the bright ink must not
+    // color body text on the white page.
+    renderReader("dark");
+    await userEvent.click(screen.getByRole("button", { name: "pick-parchment-ink" }));
+    expect(screen.getByTestId("foreground")).toHaveTextContent("#f5efe0");
+
+    await userEvent.click(screen.getByRole("button", { name: "pick-default" }));
+    expect(screen.getByTestId("foreground")).toHaveTextContent("none");
+  });
+
+  it("keeps a foreground override across a theme switch it still fits", async () => {
+    renderReader("dark");
+    await userEvent.click(screen.getByRole("button", { name: "pick-parchment-ink" }));
+
+    // Contrast is still a dark-family surface; the override survives.
+    await userEvent.click(screen.getByRole("button", { name: "pick-contrast" }));
+    expect(screen.getByTestId("foreground")).toHaveTextContent("#f5efe0");
   });
 
   it("exposes a concrete theme (publisher default) without a global provider", () => {
