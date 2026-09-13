@@ -291,6 +291,9 @@ describe("EpubReader appearance and navigation", () => {
       foreground: null,
       theme: "default",
     });
+    // The Default surface pins light UA defaults regardless of the app's
+    // color-scheme (section documents inherit it through the iframes).
+    expect(screen.getByTestId("epub-reader")).toHaveStyle({ colorScheme: "light" });
   });
 
   it("leaves the paginated reading surface uncapped (engine grid bounds it)", async () => {

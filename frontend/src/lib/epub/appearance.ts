@@ -360,6 +360,22 @@ export function epubForegroundReferenceBackground(theme: EpubThemeName): string 
 export const EPUB_FOREGROUND_AA_RATIO = 4.5;
 
 /**
+ * Color-scheme the reading surface runs under. ReadiumCSS declares no
+ * `color-scheme`, so section documents resolve UA-default colors (text is
+ * CanvasText) from the OS preference — with a dark OS, publisher pages
+ * whose text is unstyled render light-on-white (UAT). The surface is
+ * therefore pinned per theme family: light for the light-family presets
+ * and the neutral Default (publisher content is light-family by default —
+ * the obvious exception to the app's own color-scheme), dark for the
+ * dark-family presets whose palettes live on near-black surfaces. The
+ * property inherits, so declaring it once on the reader container pins
+ * every section iframe.
+ */
+export function epubThemeColorScheme(theme: EpubThemeName): "light" | "dark" {
+  return theme === "dark" || theme === "contrast" || theme === "blue-contrast" ? "dark" : "light";
+}
+
+/**
  * True when a foreground override stays legible on `theme`'s background.
  * Swatches are curated per theme family (dark inks for light-family
  * themes, light inks for dark-family ones), and a free-form pick is judged

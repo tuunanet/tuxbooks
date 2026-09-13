@@ -27,6 +27,7 @@ import {
   epubContrastRatio,
   epubForegroundFitsTheme,
   epubForegroundPreference,
+  epubThemeColorScheme,
   epubForegroundReferenceBackground,
   EPUB_FOREGROUND_SWATCHES,
   readerChromeVariables,
@@ -446,6 +447,19 @@ describe("EPUB foreground override (issue #55)", () => {
     ] as const) {
       expect(epubForegroundFitsTheme(fits, theme)).toBe(true);
     }
+  });
+
+  it("pins the reading surface's color-scheme per theme family", () => {
+    // The obvious exception to the app's color-scheme: publisher content
+    // is light-family by default, so Default-in-a-dark-app must not run
+    // its section documents under UA dark defaults.
+    expect(epubThemeColorScheme("default")).toBe("light");
+    expect(epubThemeColorScheme("light")).toBe("light");
+    expect(epubThemeColorScheme("paper")).toBe("light");
+    expect(epubThemeColorScheme("mint-contrast")).toBe("light");
+    expect(epubThemeColorScheme("dark")).toBe("dark");
+    expect(epubThemeColorScheme("contrast")).toBe("dark");
+    expect(epubThemeColorScheme("blue-contrast")).toBe("dark");
   });
 
   it("computes the WCAG ratio with one shared implementation", () => {

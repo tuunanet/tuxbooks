@@ -553,6 +553,10 @@ describe("ReaderAppearance", () => {
     // Accessible presets apply like any other theme...
     await userEvent.click(screen.getByRole("radio", { name: "High contrast" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "contrast");
+    // Dark-family surfaces pin dark UA defaults for their section documents.
+    expect(document.querySelector('[data-testid="epub-reader"]')).toHaveStyle({
+      colorScheme: "dark",
+    });
 
     // ...and Default restores the publisher-owned colors (neutral state).
     await userEvent.click(within(themeGroup).getByRole("radio", { name: "Default" }));
