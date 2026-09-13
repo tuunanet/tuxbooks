@@ -9,6 +9,7 @@ import {
   type EpubTextAlignment,
   type EpubThemeName,
 } from "@/lib/epub/appearance";
+import type { ResolvedTheme } from "@/lib/theme";
 
 /** Visual theme of the reader surface; "default" keeps publisher colors. */
 export type ReaderTheme = EpubThemeName;
@@ -77,6 +78,17 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   theme: EPUB_DEFAULT_THEME,
   layout: "paginated",
 };
+
+/**
+ * Reader surface theme while it follows the global app theme (the state
+ * before any appearance-menu pick): dark global → "dark" (EPUB preset /
+ * PDF invert filter), light global → publisher colors. Deliberately not
+ * "light": the neutral "default" keeps publisher styling on a light OS,
+ * which is what a light global theme means.
+ */
+export function autoReaderTheme(resolved: ResolvedTheme): ReaderTheme {
+  return resolved === "dark" ? "dark" : EPUB_DEFAULT_THEME;
+}
 
 export interface ReaderState {
   preferences: ReaderPreferences;

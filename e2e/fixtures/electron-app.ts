@@ -119,6 +119,13 @@ export async function launchElectronApp(): Promise<ElectronApplication> {
   );
   window.on("close", () => logLine("electron-renderer.log", "[close] window closed"));
 
+  // The global theme (and through it the reader surface's auto theme) now
+  // follows the host OS color scheme; pin it so spec expectations that
+  // assume the light default hold on any E2E host. The emulation reaches
+  // the provider's matchMedia subscription and re-applies the resolved
+  // theme, so a dark host's startup paint is corrected before assertions.
+  await window.emulateMedia({ colorScheme: "light" });
+
   // Complete the environment record with the Chromium build the running
   // app actually reports (the launcher side only knows the Electron
   // package version).
