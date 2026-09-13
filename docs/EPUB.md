@@ -131,7 +131,13 @@ else depends on its types and the seam's handle:
   contrast presets (black/yellow, deep-blue/white, mint/black) adapt the
   reference implementation's accessibility set with WCAG-AA-readable
   pairs enforced by unit test. Theme colors are inert for fixed-layout
-  publications (the toolkit's FXL pool takes no CSS properties).
+  publications (the toolkit's FXL pool takes no CSS properties). The
+  foreground override (issue #55) composes on top of any theme: a stored
+  `foreground` maps to `textColor` (null = the theme's or publisher's
+  text color) and touches body text only — links, visited, and selection
+  keep their theme colors; the popover shows a live WCAG ratio against
+  the active theme background (never blocking) and curated swatches are
+  unit-guaranteed on their theme family. EPUB-only (hidden for PDFs).
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
 

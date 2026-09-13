@@ -554,6 +554,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
+        foreground: null,
         theme: "default",
       }),
     );
@@ -600,6 +601,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
+        foreground: null,
         theme: "default",
       }),
     );
@@ -620,6 +622,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
+        foreground: null,
         theme: "default",
       }),
     );
@@ -649,6 +652,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
+        foreground: null,
         theme: "default",
       }),
     );
@@ -669,6 +673,7 @@ describe("ReaderAppearance", () => {
         paragraphSpacing: 0,
         pageGutter: 0,
         textAlign: "auto",
+        foreground: null,
         theme: "default",
       }),
     );
@@ -873,6 +878,68 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const marginsAgain = await screen.findByTestId("pref-page-gutter");
     expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "3");
+  });
+
+  it("overrides the foreground color on top of the theme and resets it", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const handle = lastFakeHandle();
+
+    // Default: no override, so the readout shows the theme's own ratio and
+    // the reset is disabled.
+    expect(handle.setAppearance).toHaveBeenCalledWith(
+      expect.objectContaining({ foreground: null }),
+    );
+    expect(screen.getByTestId("pref-foreground-reset")).toBeDisabled();
+
+    // A curated swatch submits the hex override...
+    await userEvent.click(screen.getByTestId("pref-foreground-parchment"));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ foreground: "#f5efe0" }),
+      ),
+    );
+    expect(screen.getByTestId("pref-foreground-parchment")).toHaveAttribute("aria-pressed", "true");
+
+    // ...the custom picker accepts any hex color (opened from the swatch
+    // trigger; Radix collision handling flips it left near the window edge)...
+    await userEvent.click(screen.getByTestId("pref-foreground-input"));
+    const hexInput = await screen
+      .findByTestId("pref-foreground-hex")
+      .then((wrapper) => within(wrapper).getByRole("textbox"));
+    // Partial input is ignored; only complete hex values commit.
+    fireEvent.change(hexInput, { target: { value: "#336" } });
+    expect(handle.setAppearance).not.toHaveBeenCalledWith(
+      expect.objectContaining({ foreground: "#336" }),
+    );
+    fireEvent.change(hexInput, { target: { value: "#336699" } });
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ foreground: "#336699" }),
+      ),
+    );
+
+    // ...and the readout judges the effective color against the active
+    // theme background (default theme → white reference, 6.1:1 for #336699
+    // stays above AA; a failing ratio would tint the readout destructive).
+    const readout = screen.getByTestId("foreground-contrast");
+    expect(readout).toHaveTextContent(/:1$/);
+
+    // Reset returns to the theme color (null sentinel).
+    await userEvent.click(screen.getByTestId("pref-foreground-reset"));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ foreground: null }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("pref-foreground-reset")).toBeDisabled());
+    expect(screen.getByTestId("pref-foreground-parchment")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 });
 

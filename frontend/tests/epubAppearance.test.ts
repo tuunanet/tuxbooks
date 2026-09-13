@@ -24,6 +24,10 @@ import {
   epubTextAlignPreference,
   epubThemeColors,
   epubThemeBackground,
+  epubContrastRatio,
+  epubForegroundPreference,
+  epubForegroundReferenceBackground,
+  EPUB_FOREGROUND_SWATCHES,
   readerScrollbarColor,
   isEpubFontSizeStep,
   nearestEpubFontSize,
@@ -367,5 +371,52 @@ describe("readerScrollbarColor", () => {
     expect(readerScrollbarColor("paper")).toBe("rgba(58, 51, 42, 0.4) transparent");
     expect(readerScrollbarColor("dark")).toBe("rgba(228, 228, 231, 0.4) transparent");
     expect(readerScrollbarColor("contrast")).toBe("rgba(255, 255, 0, 0.4) transparent");
+  });
+});
+
+describe("EPUB foreground override (issue #55)", () => {
+  it("maps the null sentinel to no preference and passes hex through", () => {
+    expect(epubForegroundPreference(null)).toBeNull();
+    expect(epubForegroundPreference("#B8D4C8")).toBe("#b8d4c8");
+    expect(epubForegroundPreference("#1f3a6e")).toBe("#1f3a6e");
+    // Invalid stored values normalize to null, never reach the engine.
+    expect(epubForegroundPreference("green")).toBeNull();
+    expect(epubForegroundPreference("#12345")).toBeNull();
+  });
+
+  it("computes the WCAG ratio with one shared implementation", () => {
+    expect(epubContrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
+    expect(epubContrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 1);
+    // The theme table stays WCAG-AA through the same function.
+    for (const [, colors] of Object.entries(EPUB_THEME_COLORS)) {
+      expect(epubContrastRatio(colors!.text, colors!.background)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("judges the foreground against the active theme background", () => {
+    expect(epubForegroundReferenceBackground("default")).toBe("#ffffff");
+    expect(epubForegroundReferenceBackground("dark")).toBe(EPUB_THEME_COLORS.dark!.background);
+    expect(epubForegroundReferenceBackground("paper")).toBe(EPUB_THEME_COLORS.paper!.background);
+  });
+
+  it("guarantees every curated swatch on its theme family", () => {
+    const lightFamily = ["light", "paper", "mint-contrast"] as const;
+    const darkFamily = ["dark", "contrast", "blue-contrast"] as const;
+    // No color can reach 4.5:1 on both near-black and near-white, so the
+    // swatches come in two families; each is safe on its entire family.
+    for (const swatch of EPUB_FOREGROUND_SWATCHES.slice(0, 3)) {
+      for (const theme of lightFamily) {
+        expect(
+          epubContrastRatio(swatch.color, EPUB_THEME_COLORS[theme]!.background),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    for (const swatch of EPUB_FOREGROUND_SWATCHES.slice(3)) {
+      for (const theme of darkFamily) {
+        expect(
+          epubContrastRatio(swatch.color, EPUB_THEME_COLORS[theme]!.background),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 });

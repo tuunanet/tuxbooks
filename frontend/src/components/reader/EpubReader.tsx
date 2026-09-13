@@ -274,6 +274,7 @@ export function EpubReader({
       paragraphSpacing: preferences.paragraphSpacing,
       pageGutter: preferences.pageGutter,
       textAlign: preferences.textAlign,
+      foreground: preferences.foreground,
       theme: preferences.theme,
     });
   }, [
@@ -287,6 +288,7 @@ export function EpubReader({
     preferences.paragraphSpacing,
     preferences.pageGutter,
     preferences.textAlign,
+    preferences.foreground,
     preferences.theme,
     interactive,
   ]);
