@@ -28,11 +28,13 @@ describe("PDF theme treatments", () => {
     expect(pdfThemeTreatment("paper").tint).toBe(EPUB_THEME_COLORS.paper.background);
   });
 
-  it("gives floating chrome a themed surface while a treatment is active", () => {
-    // The sticky toolbar must not float an app-white strip over tinted or
-    // inverted pages (UAT feedback).
+  it("gives floating chrome a themed surface for every named theme", () => {
+    // The sticky toolbar must not float an app-colored strip over themed
+    // pages (UAT feedback): tinted/inverted pages, and Light too — its
+    // pages render as-is (white) but the app chrome can be dark. Only the
+    // neutral default keeps the translucent app chrome.
     expect(pdfToolbarSurface("default")).toBeUndefined();
-    expect(pdfToolbarSurface("light")).toBeUndefined();
+    expect(pdfToolbarSurface("light")).toBe(EPUB_THEME_COLORS.light.background);
     expect(pdfToolbarSurface("paper")).toBe(EPUB_THEME_COLORS.paper.background);
     expect(pdfToolbarSurface("dark")).toBe(EPUB_THEME_COLORS.dark.background);
     expect(pdfToolbarSurface("contrast")).toBe(EPUB_THEME_COLORS.contrast.background);

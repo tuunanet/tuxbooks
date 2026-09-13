@@ -145,6 +145,7 @@ frontend/src/
     state/                app shell state (library/detail/reader) + providers
     lib/bridge.ts         the only window.tuxbooks consumer (typed wrappers)
     lib/shortcuts.ts      centralized keyboard shortcut registry
+    lib/theme.ts          global light/dark theme logic (parse/resolve/apply)
     lib/fixtures.ts       realistic sample books for tests/previews
     lib/epub/readiumEngine.ts  the only Readium import site (EPUB seam)
     lib/pdf/pdfEngine.ts  the only MuPDF.js import site (PDF seam)
@@ -179,7 +180,15 @@ React components render state and call the typed wrappers in
 `LibraryDataProvider` owns the fetched library data (shared by the library
 view, global search, and import flows); `ImportProvider` streams
 `import-progress` events and listens to `library-changed` so watcher
-reconciliations reach the UI live.
+reconciliations reach the UI live. `ThemeStateProvider` owns the global
+light/dark theme: the System/Light/Dark preference persists in
+`localStorage` (`tuxbooks.theme`), resolves against the OS color-scheme,
+and applies as a `.dark` class on `<html>`; the inline bootstrap in
+`index.html` mirrors that apply so startup never flashes the wrong theme.
+The reading surface follows the global theme too (`autoReaderTheme` in
+`readerState.ts`: dark → `dark` preset / PDF invert, light → publisher
+default) until a theme is picked in the reader's appearance menu, which
+pins it for the reader session.
 
 ## Testing layers
 

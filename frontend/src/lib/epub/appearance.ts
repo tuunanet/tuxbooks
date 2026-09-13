@@ -379,6 +379,14 @@ export function epubForegroundPreference(foreground: string | null): string | nu
   return foreground !== null && isEpubHexColor(foreground) ? foreground.toLowerCase() : null;
 }
 
+/** Hex color (#rrggbb) as rgba() with the given alpha; undefined off-format. */
+export function hexWithAlpha(hex: string, alpha: number): string | undefined {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return undefined;
+  const value = hex.slice(1);
+  const channel = (offset: number) => parseInt(value.slice(offset, offset + 2), 16);
+  return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, ${alpha})`;
+}
+
 /**
  * Scrollbar colors for the reading surface's scroller: a translucent thumb
  * derived from the theme's own text color over a transparent track (the
@@ -388,10 +396,32 @@ export function epubForegroundPreference(foreground: string | null): string | nu
  */
 export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
   const colors = epubThemeColors(theme);
-  if (!colors || !/^#[0-9a-f]{6}$/i.test(colors.text)) return undefined;
-  const value = colors.text.slice(1);
-  const channel = (offset: number) => parseInt(value.slice(offset, offset + 2), 16);
-  return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, 0.4) transparent`;
+  if (!colors) return undefined;
+  const thumb = hexWithAlpha(colors.text, 0.4);
+  return thumb ? `${thumb} transparent` : undefined;
+}
+
+/**
+ * CSS custom properties retinting shared chrome details (secondary text,
+ * hairlines, progress track/fill) with the active theme's own text color,
+ * applied on the reader root; consumers reference them with app-token
+ * fallbacks. Undefined for the neutral default, where the app tokens are
+ * correct. Without this, app-dark secondary text and an app-light progress
+ * bar float over forced-light themed chrome when the app runs dark (UAT).
+ */
+export function readerChromeVariables(theme: EpubThemeName): Record<string, string> | undefined {
+  const colors = epubThemeColors(theme);
+  if (!colors) return undefined;
+  const muted = hexWithAlpha(colors.text, 0.6);
+  const hairline = hexWithAlpha(colors.text, 0.15);
+  const track = hexWithAlpha(colors.text, 0.2);
+  if (!muted || !hairline || !track) return undefined;
+  return {
+    "--reader-chrome-muted": muted,
+    "--reader-chrome-border": hairline,
+    "--reader-progress-fill": colors.text,
+    "--reader-progress-track": track,
+  };
 }
 
 /**

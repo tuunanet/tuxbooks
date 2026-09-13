@@ -199,7 +199,7 @@ export function PdfSidebar({
                     )}
                     {state === "error" && <span className="text-xs text-destructive">Failed</span>}
                   </span>
-                  <span className="mt-1 block text-center text-xs text-muted-foreground tabular-nums">
+                  <span className="mt-1 block text-center text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums">
                     {size.pageNumber}
                   </span>
                 </button>

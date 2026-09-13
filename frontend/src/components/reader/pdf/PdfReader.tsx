@@ -800,7 +800,10 @@ export function PdfReader({
         {...openTelemetry}
         className="mx-auto max-w-3xl px-6 py-8"
       >
-        <p data-testid="pdf-loading" className="text-center text-sm text-muted-foreground">
+        <p
+          data-testid="pdf-loading"
+          className="text-center text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
+        >
           Loading {book.title}…
         </p>
       </div>

@@ -16,7 +16,7 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
-import { readerScrollbarColor } from "@/lib/epub/appearance";
+import { readerChromeVariables, readerScrollbarColor } from "@/lib/epub/appearance";
 import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
 import {
   bookmarkInputFor,
@@ -45,9 +45,14 @@ import {
   type ReaderSearchState,
 } from "./searchModel";
 
+// Reader chrome classes per theme. Named presets paint their own chrome so
+// the toolbar/drawer match the surface no matter what the app theme is
+// (hexes mirror EPUB_THEME_COLORS; Tailwind needs static class strings).
+// Only the neutral default follows the app tokens — publisher colors own
+// the content and the app owns the chrome.
 const THEME_CLASSES: Record<ReaderTheme, string> = {
   default: "bg-background text-foreground",
-  light: "bg-background text-foreground",
+  light: "bg-[#ffffff] text-[#1f2328]",
   paper: "bg-[#f6f0e4] text-[#3a332a]",
   dark: "bg-zinc-950 text-zinc-100",
   contrast: "bg-black text-[#ffff00]",
@@ -291,8 +296,9 @@ export function ReaderShell() {
       data-testid="reader-view"
       data-theme={preferences.theme}
       className={cn("flex h-screen flex-col overflow-hidden", THEME_CLASSES[preferences.theme])}
+      style={readerChromeVariables(preferences.theme)}
     >
-      <header className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+      <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -444,7 +450,7 @@ export function ReaderShell() {
         </main>
       </div>
 
-      <footer className="shrink-0 border-t px-4 py-2">
+      <footer className="shrink-0 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <Progress
             data-testid="reader-progress"
@@ -454,7 +460,7 @@ export function ReaderShell() {
           />
           <span
             data-testid="reader-position"
-            className="w-10 text-right text-xs text-muted-foreground tabular-nums"
+            className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
           >
             {Math.round(position)}%
           </span>
