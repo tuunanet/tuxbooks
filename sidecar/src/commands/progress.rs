@@ -3,6 +3,7 @@ use serde::Deserialize;
 use crate::commands::emit_book_changed;
 use crate::domain::{ProgressUpdate, ReadingProgress};
 use crate::error::AppError;
+use crate::repository::books;
 use crate::repository::reading_progress::{get_progress, mark_finished, upsert_progress};
 use crate::rpc::EventEmitter;
 use crate::AppState;
@@ -78,5 +79,18 @@ pub async fn mark_book_finished(
     book_id: i64,
 ) -> Result<(), AppError> {
     mark_finished(&state.db, book_id).await?;
+    emit_book_changed(state, events, book_id).await
+}
+
+/// Record that a reading session started (`last_opened_at`), independent of
+/// position saves — a book opened and closed without scrolling still counts
+/// as opened. Emits `library-changed` so the detail view and "Recently
+/// read" section reflect the session immediately.
+pub async fn mark_book_opened(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<(), AppError> {
+    books::mark_opened(&state.db, book_id).await?;
     emit_book_changed(state, events, book_id).await
 }

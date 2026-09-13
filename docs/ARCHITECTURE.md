@@ -141,7 +141,9 @@ the render queue, and persistence. Byte access flows through
 Collection and progress plumbing stays in thin method + repository layers:
 collections CRUD over `repository::collections`; `mark_book_finished` over
 `repository::reading_progress` (`progress_percent = 100`, stored locators
-untouched). `list_books` LEFT JOINs `reading_progress`.
+untouched); `mark_book_opened` over `repository::books::mark_opened`
+(`last_opened_at`, stamped when a reading session starts). `list_books`
+LEFT JOINs `reading_progress`.
 
 ## Frontend structure
 

@@ -57,6 +57,7 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
     list_books: [book],
     get_reading_progress: null,
     save_reading_progress: null,
+    mark_book_opened: null,
     list_annotations: [],
     create_annotation: makeAnnotation({
       id: 1,
@@ -116,6 +117,16 @@ describe("ReaderShell chrome", () => {
 
     expect(await screen.findByTestId("library-view")).toBeInTheDocument();
     expect(screen.queryByTestId("reader-view")).not.toBeInTheDocument();
+  });
+
+  it("stamps last opened once when a reading session starts", async () => {
+    renderReader();
+
+    await screen.findByTestId("reader-view");
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("mark_book_opened", { bookId: 1 }));
+    expect(invokeMock.mock.calls.filter(([method]) => method === "mark_book_opened")).toHaveLength(
+      1,
+    );
   });
 
   it("opens the navigation drawer onto the Search tab", async () => {

@@ -54,6 +54,7 @@ const SIDECAR_METHODS = new Set([
   "get_reading_progress",
   "save_reading_progress",
   "mark_book_finished",
+  "mark_book_opened",
   "get_book_bytes",
   "get_epub_session",
   "get_book_resource",

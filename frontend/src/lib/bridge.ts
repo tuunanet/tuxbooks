@@ -223,6 +223,11 @@ export function markBookFinished(bookId: number): Promise<null> {
   return invoke("mark_book_finished", { bookId });
 }
 
+/** Record that a reading session started (the book detail's "Last opened"). */
+export function markBookOpened(bookId: number): Promise<null> {
+  return invoke("mark_book_opened", { bookId });
+}
+
 /** Every collection with its member book ids, in name order. */
 export function listCollections(): Promise<CollectionSummary[]> {
   return invoke("list_collections");

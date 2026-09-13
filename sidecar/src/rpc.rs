@@ -320,6 +320,12 @@ async fn dispatch(
                 state, events, p.book_id
             )))
         }
+        "mark_book_opened" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::progress::mark_book_opened(
+                state, events, p.book_id
+            )))
+        }
         "get_book_bytes" => {
             let p: BookBytesArgs = parse_params(params)?;
             Ok(call!(commands::reader::get_book_bytes(
@@ -629,6 +635,39 @@ mod tests {
         assert_eq!(*name, "library-changed");
         assert_eq!(payload["kind"], "changed");
         assert_eq!(payload["book"]["progressPercent"], json!(100.0));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn marking_opened_stamps_last_opened_and_emits_library_changed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let id = seed_book(&state, "Opened Book").await;
+        let (events, fired) = capturing_events();
+        let book = crate::repository::books::get_book(&state.db, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(book.last_opened_at.is_none(), "seed starts unopened");
+
+        dispatch(&state, &events, "mark_book_opened", json!({"bookId": id}))
+            .await
+            .unwrap();
+
+        let book = crate::repository::books::get_book(&state.db, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            book.last_opened_at.is_some(),
+            "lastOpenedAt must be stamped"
+        );
+        let fired = fired.lock().unwrap();
+        assert_eq!(fired.len(), 1);
+        let (name, payload) = &fired[0];
+        assert_eq!(*name, "library-changed");
+        assert_eq!(payload["kind"], "changed");
+        assert_eq!(payload["book"]["id"], json!(id));
+        assert!(payload["book"]["lastOpenedAt"].as_str().is_some());
     }
 
     #[tokio::test(flavor = "multi_thread")]
