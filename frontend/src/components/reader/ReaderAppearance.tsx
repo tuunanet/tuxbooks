@@ -11,12 +11,17 @@ import {
   EPUB_DEFAULT_LINE_HEIGHT,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_FOREGROUND_SWATCHES,
   EPUB_LETTER_SPACING_SCALE,
   EPUB_LINE_HEIGHT_SCALE,
   EPUB_PAGE_GUTTER_SCALE_PX,
   EPUB_PARAGRAPH_SPACING_SCALE,
   EPUB_TEXT_ALIGNMENTS,
   EPUB_WORD_SPACING_SCALE,
+  epubContrastRatio,
+  epubForegroundReferenceBackground,
+  epubThemeColors,
+  isEpubHexColor,
   nearestEpubFontSize,
   nearestEpubLetterSpacing,
   nearestEpubLineHeight,
@@ -28,6 +33,7 @@ import {
 } from "@/lib/epub/appearance";
 import { isPdfThemeChoice } from "@/lib/pdf/theme";
 import { cn } from "@/lib/utils";
+import { ForegroundPicker } from "./ForegroundPicker";
 import { useReader, type ReaderLayout, type ReaderTheme } from "@/state/readerState";
 
 const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
@@ -146,6 +152,20 @@ export function ReaderAppearance({ format }: { format?: string }) {
   // Explicit 1–4 target (issue #44); only offered for paginated reflow, and
   // the stored value survives switching to scrolling untouched.
   const columnCount = clampEpubColumnCount(preferences.columnCount);
+
+  // Foreground override (issue #55): null = the active theme's (or
+  // publisher's) text color. The readout judges the effective color — the
+  // override, or the theme's own — against the theme background (white as
+  // the reference on the neutral Default theme, whose background is
+  // publisher-defined).
+  const themePalette = epubThemeColors(preferences.theme);
+  const referenceBackground = epubForegroundReferenceBackground(preferences.theme);
+  const effectiveForeground = preferences.foreground ?? themePalette?.text ?? null;
+  const foregroundRatio =
+    effectiveForeground !== null && isEpubHexColor(effectiveForeground)
+      ? epubContrastRatio(effectiveForeground, referenceBackground)
+      : null;
+  const belowAA = foregroundRatio !== null && foregroundRatio < 4.5;
 
   // PDFs can only be filtered, not recolored — offer exactly the themes
   // with a faithful filter mapping (Blue/Mint are EPUB-only).
@@ -377,6 +397,64 @@ export function ReaderAppearance({ format }: { format?: string }) {
               </div>
 
               {themeSection}
+
+              {/* Foreground override (issue #55): composes on top of the
+                  active theme; links/visited/selection keep their theme
+                  colors (toolkit semantics). The readout never blocks a
+                  choice — it only informs. */}
+              <div>
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span>Foreground</span>
+                  <span className="flex items-center gap-1">
+                    <span
+                      data-testid="foreground-contrast"
+                      title="Contrast against the theme background (WCAG AA needs 4.5:1)"
+                      className={cn(
+                        "tabular-nums text-muted-foreground",
+                        belowAA && "text-destructive",
+                      )}
+                    >
+                      {foregroundRatio === null ? "—" : `${foregroundRatio.toFixed(1)}:1`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      data-testid="pref-foreground-reset"
+                      aria-label="Reset foreground color"
+                      disabled={preferences.foreground === null}
+                      onClick={() => setPreferences({ foreground: null })}
+                    >
+                      <RotateCcw />
+                    </Button>
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {EPUB_FOREGROUND_SWATCHES.map((swatch) => (
+                    <button
+                      key={swatch.color}
+                      type="button"
+                      data-testid={`pref-foreground-${swatch.label.toLowerCase()}`}
+                      aria-label={`${swatch.label} (${swatch.color})`}
+                      aria-pressed={preferences.foreground === swatch.color}
+                      title={swatch.label}
+                      className={cn(
+                        "h-6 w-6 rounded-full border border-border",
+                        preferences.foreground === swatch.color && "ring-2 ring-primary",
+                      )}
+                      style={{ backgroundColor: swatch.color }}
+                      onClick={() => setPreferences({ foreground: swatch.color })}
+                    />
+                  ))}
+                  <ForegroundPicker
+                    value={
+                      preferences.foreground && isEpubHexColor(preferences.foreground)
+                        ? preferences.foreground
+                        : "#1f2328"
+                    }
+                    onChange={(hex) => setPreferences({ foreground: hex })}
+                  />
+                </div>
+              </div>
 
               <div>
                 <p className="mb-2 text-sm">Layout</p>

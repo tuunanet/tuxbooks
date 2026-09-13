@@ -321,6 +321,65 @@ export function epubThemeBackground(theme: EpubThemeName): string | undefined {
 }
 
 /**
+ * WCAG 2.x contrast ratio between two #rrggbb colors (1.0–21.0). Shared by
+ * the foreground picker's live readout and the theme/swatch test suites so
+ * every contrast claim has one implementation.
+ */
+export function epubContrastRatio(foreground: string, background: string): number {
+  const luminance = (hex: string): number => {
+    const channels = [1, 3, 5].map((offset) => {
+      const channel = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+  };
+  const [lf, lb] = [luminance(foreground), luminance(background)];
+  return (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05);
+}
+
+/**
+ * The background a foreground choice is judged against for the live
+ * contrast readout: the active theme's own background; for the neutral
+ * Default theme (publisher-defined background) white is the reference.
+ */
+export function epubForegroundReferenceBackground(theme: EpubThemeName): string {
+  return epubThemeBackground(theme) ?? "#ffffff";
+}
+
+/**
+ * Curated foreground swatches (issue #55), in two families: dark inks for
+ * the light-family themes (Light, Paper, Mint) and light inks for the
+ * dark-family themes (Dark, High contrast, Blue). No single color reaches
+ * 4.5:1 on both near-black and near-white backgrounds, so each swatch is
+ * guaranteed on its family (unit-tested); the live badge shows the exact
+ * ratio for the active theme.
+ */
+export const EPUB_FOREGROUND_SWATCHES: { color: string; label: string }[] = [
+  { color: "#1f3a6e", label: "Navy" },
+  { color: "#6b2737", label: "Maroon" },
+  { color: "#1e5631", label: "Forest" },
+  { color: "#f5efe0", label: "Parchment" },
+  { color: "#b8d4c8", label: "Sage" },
+  { color: "#e6c98a", label: "Amber" },
+];
+
+/** True when `value` is a normalizable #rrggbb color. */
+export function isEpubHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/**
+ * Converts the reader's foreground choice into the toolkit's textColor
+ * preference: null (Default) maps to null — the toolkit then writes no
+ * `--USER__textColor`, so the theme's (or publisher's) text color applies.
+ * Non-hex values normalize to null so an invalid stored string can never
+ * reach the engine.
+ */
+export function epubForegroundPreference(foreground: string | null): string | null {
+  return foreground !== null && isEpubHexColor(foreground) ? foreground.toLowerCase() : null;
+}
+
+/**
  * Scrollbar colors for the reading surface's scroller: a translucent thumb
  * derived from the theme's own text color over a transparent track (the
  * themed chrome shows through). Both values are required — a single-color

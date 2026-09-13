@@ -445,6 +445,32 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.getByTestId("pref-text-align").getByText("Auto", { exact: true }).click();
     await expect.poll(() => frameVar("--USER__textAlign"), { timeout: 30000 }).toBe("");
 
+    // Foreground override (issue #55): a curated swatch lands as
+    // --USER__textColor on the frames (on top of the active theme) and the
+    // reset removes the variable entirely — publisher/theme colors win.
+    await page.getByTestId("pref-foreground-parchment").click();
+    await expect.poll(() => frameVar("--USER__textColor"), { timeout: 30000 }).toBe("#f5efe0");
+
+    // The custom picker renders as a real popover and must stay inside the
+    // window (the appearance popover sits at the right edge here) — a
+    // native <input type="color"> popup is Chromium-positioned and clips.
+    await page.getByTestId("pref-foreground-input").click();
+    const picker = page.getByTestId("pref-foreground-picker");
+    await expect(picker).toBeVisible({ timeout: 30000 });
+    const pickerBox = await picker.boundingBox();
+    const windowWidth = await page.evaluate(() => window.innerWidth);
+    expect(pickerBox).not.toBeNull();
+    if (pickerBox) {
+      expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(windowWidth - 4);
+    }
+    await page.getByTestId("pref-foreground-hex").getByRole("textbox").fill("#336699");
+    await expect.poll(() => frameVar("--USER__textColor"), { timeout: 30000 }).toBe("#336699");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("pref-foreground-picker").waitFor({ state: "detached", timeout: 30000 });
+
+    await page.getByTestId("pref-foreground-reset").click();
+    await expect.poll(() => frameVar("--USER__textColor"), { timeout: 30000 }).toBe("");
+
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
     await returnToLibrary(page);

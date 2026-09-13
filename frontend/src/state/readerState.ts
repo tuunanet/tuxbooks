@@ -53,6 +53,12 @@ export type ReaderFontFamily = EpubFontFamily;
   /** Page margins (gutter) in px; 0 = publication default. */
   pageGutter: number;
   textAlign: EpubTextAlignment;
+  /**
+   * EPUB foreground (text) color override (issue #55): applied on top of
+   * the active theme (null = theme color, sentinel). Body text only —
+   * links, visited, and selection keep their theme colors. EPUB-only.
+   */
+  foreground: string | null;
   theme: ReaderTheme;
   layout: ReaderLayout;
 }
@@ -67,6 +73,7 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   paragraphSpacing: 0,
   pageGutter: 0,
   textAlign: EPUB_DEFAULT_TEXT_ALIGNMENT,
+  foreground: null,
   theme: EPUB_DEFAULT_THEME,
   layout: "paginated",
 };

@@ -41,6 +41,7 @@ import type {
 } from "./appearance";
 import {
   epubColumnCountPreference,
+  epubForegroundPreference,
   epubSpacingPreference,
   epubTextAlignPreference,
   epubThemeColors,
@@ -177,6 +178,10 @@ export interface EpubAppearance {
   /** Page margins (gutter) in px; 0 = publication default. */
   pageGutter: number;
   textAlign: EpubTextAlignment;
+  /** Foreground (text) color override (issue #55), applied on top of the
+   *  active theme: null = the theme's (or publisher's) text color. Body
+   *  text only — links, visited, and selection keep their theme colors. */
+  foreground: string | null;
   theme: EpubThemeName;
 }
 
@@ -882,7 +887,10 @@ export class ReadiumEpubHandle {
     await this.navigator.submitPreferences(
       new EpubPreferences({
         backgroundColor: colors?.background ?? null,
-        textColor: colors?.text ?? null,
+        // The foreground override composes on top of the theme: null falls
+        // back to the theme's text color, which for the neutral default is
+        // itself null (publisher text colors stay intact).
+        textColor: epubForegroundPreference(appearance.foreground) ?? colors?.text ?? null,
         linkColor: colors?.link ?? null,
         visitedColor: colors?.visited ?? null,
         selectionBackgroundColor: colors?.selectionBackground ?? null,

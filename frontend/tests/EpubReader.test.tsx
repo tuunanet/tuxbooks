@@ -288,6 +288,7 @@ describe("EpubReader appearance and navigation", () => {
       paragraphSpacing: 0,
       pageGutter: 0,
       textAlign: "auto",
+      foreground: null,
       theme: "default",
     });
   });
