@@ -238,6 +238,12 @@ async fn dispatch(
                 state, p.book_id
             )))
         }
+        "get_book_file_properties" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::metadata::get_book_file_properties(
+                state, p.book_id
+            )))
+        }
         "update_book_metadata" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -248,6 +254,19 @@ async fn dispatch(
             let p: Args = parse_params(params)?;
             Ok(call!(commands::metadata::update_book_metadata(
                 state, events, p.book_id, p.form
+            )))
+        }
+        "set_metadata_field_source" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Args {
+                book_id: i64,
+                field: String,
+                source: Option<crate::domain::MetadataFieldSource>,
+            }
+            let p: Args = parse_params(params)?;
+            Ok(call!(commands::metadata::set_metadata_field_source(
+                state, events, p.book_id, p.field, p.source
             )))
         }
         "reset_book_metadata" => {
@@ -271,6 +290,18 @@ async fn dispatch(
                 state, events, p.book_id
             )))
         }
+        "embed_book_metadata" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Args {
+                book_id: i64,
+                form: crate::domain::MetadataFields,
+            }
+            let p: Args = parse_params(params)?;
+            Ok(call!(commands::metadata::embed_book_metadata(
+                state, events, p.book_id, p.form
+            )))
+        }
         "get_reading_progress" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::progress::get_reading_progress(
@@ -286,6 +317,12 @@ async fn dispatch(
         "mark_book_finished" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::progress::mark_book_finished(
+                state, events, p.book_id
+            )))
+        }
+        "mark_book_opened" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::progress::mark_book_opened(
                 state, events, p.book_id
             )))
         }
@@ -598,6 +635,74 @@ mod tests {
         assert_eq!(*name, "library-changed");
         assert_eq!(payload["kind"], "changed");
         assert_eq!(payload["book"]["progressPercent"], json!(100.0));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn marking_opened_stamps_last_opened_and_emits_library_changed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let id = seed_book(&state, "Opened Book").await;
+        let (events, fired) = capturing_events();
+        let book = crate::repository::books::get_book(&state.db, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(book.last_opened_at.is_none(), "seed starts unopened");
+
+        dispatch(&state, &events, "mark_book_opened", json!({"bookId": id}))
+            .await
+            .unwrap();
+
+        let book = crate::repository::books::get_book(&state.db, id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            book.last_opened_at.is_some(),
+            "lastOpenedAt must be stamped"
+        );
+        let fired = fired.lock().unwrap();
+        assert_eq!(fired.len(), 1);
+        let (name, payload) = &fired[0];
+        assert_eq!(*name, "library-changed");
+        assert_eq!(payload["kind"], "changed");
+        assert_eq!(payload["book"]["id"], json!(id));
+        assert!(payload["book"]["lastOpenedAt"].as_str().is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn embed_book_metadata_accepts_the_form_param() {
+        // The bridge sends `{bookId, form}`; a bad shape would fail param
+        // parsing (-32602). The seeded row has no file on disk, so the call
+        // reaches the service and fails there (-32000) — proving the method
+        // and its form argument are wired.
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let id = seed_book(&state, "Embed Book").await;
+        let err = dispatch(
+            &state,
+            &test_events(),
+            "embed_book_metadata",
+            json!({
+                "bookId": id,
+                "form": {
+                    "title": "Embed Book",
+                    "subtitle": null,
+                    "publisher": null,
+                    "language": null,
+                    "isbn": null,
+                    "description": null,
+                    "publicationDate": null,
+                    "series": null,
+                    "seriesIndex": null,
+                    "authors": ["Author"],
+                    "subjects": []
+                }
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, -32000, "reached the service, not param parsing");
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -92,7 +92,6 @@ describe("App", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,

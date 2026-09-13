@@ -9,6 +9,7 @@ pub mod rpc;
 pub mod services;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,80 @@ pub fn covers_dir(db_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("covers")
+}
+
+/// Monotonic suffix so concurrent writes never collide on the temp name.
+static ATOMIC_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// `<path>.bak` beside the original (e.g. `book.epub.bak`).
+pub(crate) fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    name.push(".bak");
+    path.with_file_name(name)
+}
+
+/// Copy `path` to `<path>.bak` the first time a file is about to be rewritten,
+/// so the backup always holds the pre-embed original. No-op (and no error)
+/// when a backup already exists; a failed copy is an error, so the caller
+/// aborts without modifying the source. The copy itself is atomic (temp +
+/// rename), so a crash can never leave a truncated backup.
+pub(crate) fn backup_file_once(path: &Path) -> std::io::Result<Option<PathBuf>> {
+    let backup = backup_path(path);
+    if backup.exists() {
+        return Ok(None);
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let unique = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = parent.join(format!(".tuxbooks-backup-{unique}.tmp"));
+    std::fs::copy(path, &temp)?;
+    if let Err(err) = std::fs::rename(&temp, &backup) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(err);
+    }
+    Ok(Some(backup))
+}
+
+/// Replace `path` with `bytes` without ever leaving a partially written file
+/// at the destination: the bytes land in a hidden same-directory temp file,
+/// are flushed to disk, and then renamed over the target. Used when rewriting
+/// a source book file after a metadata embed (EPUB/PDF). On Windows a rename
+/// over an existing file fails, so the destination is removed and the rename
+/// retried — the only non-atomic window, and still never a truncated file.
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "book".to_string());
+    let unique = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = parent.join(format!(".{file_name}.tuxbooks-{unique}.tmp"));
+
+    let write = (|| -> std::io::Result<()> {
+        let mut handle = std::fs::File::create(&temp)?;
+        handle.write_all(bytes)?;
+        handle.sync_all()
+    })();
+    if let Err(err) = write {
+        let _ = std::fs::remove_file(&temp);
+        return Err(err);
+    }
+
+    match std::fs::rename(&temp, path) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            // Windows: rename does not replace an existing destination.
+            if std::fs::remove_file(path).is_ok() && std::fs::rename(&temp, path).is_ok() {
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&temp);
+            Err(first)
+        }
+    }
 }
 
 /// Candidate directories that may contain the PDFium dynamic library, in

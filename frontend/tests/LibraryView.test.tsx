@@ -32,7 +32,6 @@ function renderShell(section: LibrarySection = { kind: "smart", id: "all-books" 
         section,
         selectedBookId: null,
         libraryQuery: "",
-        metadataEditorBookId: null,
       }}
     />,
   );

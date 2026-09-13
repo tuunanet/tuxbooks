@@ -129,13 +129,21 @@ the render queue, and persistence. Byte access flows through
   through `repository::annotations`.
 - `metadata`: library curation — three-layer merge (`book_source_metadata`
   file truth, `book_metadata_overrides` user truth, effective `books`
-  columns) plus normalized authors/subjects/series entities. Source files
-  are never rewritten.
+  columns) plus normalized authors/subjects/series entities. Saving stores
+  overrides without touching the file; the explicit `embed_book_metadata`
+  action writes the effective text metadata back into the EPUB/PDF (see
+  [EPUB.md](EPUB.md) / [PDF.md](PDF.md)), atomically and cover-free.
+  `get_book_file_properties` reads the source file's native metadata fresh
+  for the detail view's read-only "Original File Metadata" panel, and
+  `set_metadata_field_source` persists a per-field library-vs-file choice
+  that the merge honors.
 
 Collection and progress plumbing stays in thin method + repository layers:
 collections CRUD over `repository::collections`; `mark_book_finished` over
 `repository::reading_progress` (`progress_percent = 100`, stored locators
-untouched). `list_books` LEFT JOINs `reading_progress`.
+untouched); `mark_book_opened` over `repository::books::mark_opened`
+(`last_opened_at`, stamped when a reading session starts). `list_books`
+LEFT JOINs `reading_progress`.
 
 ## Frontend structure
 
@@ -146,15 +154,22 @@ frontend/src/
     lib/bridge.ts         the only window.tuxbooks consumer (typed wrappers)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/theme.ts          global light/dark theme logic (parse/resolve/apply)
+    lib/readerSettings.ts persisted reader-appearance defaults (validated
+                          localStorage store shared by Settings and the reader)
     lib/fixtures.ts       realistic sample books for tests/previews
     lib/epub/readiumEngine.ts  the only Readium import site (EPUB seam)
     lib/pdf/pdfEngine.ts  the only MuPDF.js import site (PDF seam)
     hooks/                useLibrary, useAnnotations, useBookMetadata,
-                          useBookActions, useCollectionActions
+                          useBookFileProperties, useBookActions,
+                          useCollectionActions
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX
-        books/            BookCard, BookListItem, BookDetail, metadata dialog
+        books/            BookCard, BookListItem, BookDetail (Overview /
+                          Metadata rail), MetadataPanel (inline library
+                          editing), FilePropertiesPanel, and metadata/
+                          (shared form pieces: field grid, list editor,
+                          cover field)
         search/           GlobalSearch (Ctrl/Cmd+K, backend FTS)
         reader/           ReaderShell — the format-agnostic reader model:
                           owns current book, progress, navigation entry
@@ -187,8 +202,12 @@ and applies as a `.dark` class on `<html>`; the inline bootstrap in
 `index.html` mirrors that apply so startup never flashes the wrong theme.
 The reading surface follows the global theme too (`autoReaderTheme` in
 `readerState.ts`: dark → `dark` preset / PDF invert, light → publisher
-default) until a theme is picked in the reader's appearance menu, which
-pins it for the reader session.
+default) until a theme is picked in the reader's appearance menu or in
+Settings, which pins it. Reader appearance preferences persist on device in
+`localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader
+writes them on every change and Settings → Reading/PDF edits the same store,
+so defaults apply to every book. Values are re-validated and snapped onto the
+supported scales on read, so stale storage can never reach an engine.
 
 ## Testing layers
 

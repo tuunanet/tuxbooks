@@ -1,7 +1,20 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { RotateCcw } from "lucide-react";
+import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
+import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { epubForegroundFitsTheme } from "@/lib/epub/appearance";
+import {
+  clearReaderSettings,
+  defaultReaderSettings,
+  effectiveReaderPreferences,
+  readReaderSettings,
+  writeReaderSettings,
+  type StoredReaderSettings,
+} from "@/lib/readerSettings";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
 type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "advanced";
@@ -30,41 +43,31 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
     {
       label: "Importing",
       value: "Header → Import",
-      hint: "Use the Import menu or drag a folder of books onto the window.",
+      hint: "Use the Import menu, or drag a folder or files onto the window.",
     },
     {
       label: "Collections",
-      value: "Not connected yet",
-      hint: "Creating collections needs a backend command that does not exist yet.",
+      value: "Managed from the sidebar",
+      hint: "Create collections there and add books from any context menu; a book can belong to many.",
     },
   ],
   reading: [
     {
-      label: "Font size",
-      value: "100% default (75–400%)",
-      hint: "Adjustable per session in the reader; persisting reader preferences needs backend support.",
-    },
-    {
-      label: "Theme",
-      value: "Light · Paper · Dark",
-      hint: "Session-only for now, selected in the reader toolbar.",
-    },
-    {
-      label: "Layout",
-      value: "Paginated · Scrolling",
-      hint: "Session-only for now, selected in the reader toolbar.",
+      label: "How defaults are saved",
+      value: "On this device",
+      hint: "Reader appearance is kept locally; it applies to every EPUB you open and can still be adjusted per session in the toolbar.",
     },
   ],
   pdf: [
     {
       label: "Rendering",
-      value: "Arrives with the PDF engine",
-      hint: "PDFs import with metadata only; page rendering is a future reader stage.",
+      value: "Continuous, on demand",
+      hint: "Pages rasterize as you scroll with MuPDF; covers are extracted at import by the sidecar.",
     },
     {
-      label: "Outlines",
-      value: "Not available yet",
-      hint: "The navigation drawer shows an honest placeholder for PDF outlines.",
+      label: "Outlines and thumbnails",
+      value: "Built in",
+      hint: "The navigation drawer shows the PDF outline and a virtualized thumbnail grid.",
     },
   ],
   shortcuts: [
@@ -96,9 +99,102 @@ const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
 ];
 
 /**
+ * Read and write the persisted reader-appearance defaults. Theme handling
+ * mirrors `ReaderProvider`: an explicit theme pick pins the surface, and a
+ * foreground override that stops fitting the new surface is dropped.
+ */
+function useStoredReaderSettings(resolvedTheme: "light" | "dark") {
+  const [stored, setStored] = useState<StoredReaderSettings>(readReaderSettings);
+
+  const setPreferences = useCallback(
+    (patch: Partial<ReaderPreferences>) => {
+      setStored((current) => {
+        const next: StoredReaderSettings = {
+          preferences: { ...current.preferences, ...patch },
+          themePinned: patch.theme !== undefined ? true : current.themePinned,
+        };
+        const currentEffectiveTheme = current.themePinned
+          ? current.preferences.theme
+          : autoReaderTheme(resolvedTheme);
+        if (
+          patch.theme !== undefined &&
+          patch.theme !== currentEffectiveTheme &&
+          !epubForegroundFitsTheme(next.preferences.foreground, next.preferences.theme)
+        ) {
+          next.preferences.foreground = null;
+        }
+        writeReaderSettings(next);
+        return next;
+      });
+    },
+    [resolvedTheme],
+  );
+
+  const reset = useCallback(() => {
+    clearReaderSettings();
+    setStored(defaultReaderSettings());
+  }, []);
+
+  return { stored, setPreferences, reset };
+}
+
+/** The interactive reader-appearance editor shared by Reading and PDF. */
+function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
+  const { resolvedTheme } = useThemeState();
+  const { stored, setPreferences, reset } = useStoredReaderSettings(resolvedTheme);
+  const preferences = effectiveReaderPreferences(stored, resolvedTheme);
+  const section: SettingsSectionId = format === "pdf" ? "pdf" : "reading";
+
+  return (
+    <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
+      <div className="rounded-lg border p-4">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium">
+              {format === "pdf" ? "Default PDF appearance" : "Default reading appearance"}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {format === "pdf"
+                ? "Applied to every PDF you open. PDFs are fixed-layout, so only the theme can be defaulted."
+                : "Applied to every EPUB you open. You can still adjust these per session in the reader."}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" data-testid="reader-settings-reset" onClick={reset}>
+            <RotateCcw data-icon="inline-start" />
+            Reset
+          </Button>
+        </div>
+        <ReaderAppearanceControls
+          preferences={preferences}
+          setPreferences={setPreferences}
+          format={format}
+        />
+      </div>
+      <dl className="divide-y">
+        {SECTION_ROWS[section].map((row) => (
+          <InfoRow key={row.label} row={row} />
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function InfoRow({ row }: { row: SettingsRow }) {
+  return (
+    <div className="grid grid-cols-[10rem_1fr] gap-4 py-3">
+      <dt className="text-sm text-muted-foreground">{row.label}</dt>
+      <dd className="min-w-0">
+        <p className="text-sm">{row.value}</p>
+        {row.hint && <p className="mt-1 text-xs text-muted-foreground">{row.hint}</p>}
+      </dd>
+    </div>
+  );
+}
+
+/**
  * The first persisted control in Settings: stored in localStorage via
  * ThemeStateProvider and applied app-wide; the reader surface keeps its own
- * session-scoped themes.
+ * device-local themes.
  */
 function AppThemeRow() {
   const { preference, resolvedTheme, setPreference } = useThemeState();
@@ -164,10 +260,10 @@ function SettingsNavigation({
 }
 
 /**
- * Settings screen: rows that describe current behavior, plus the first real
- * persisted control — the app theme in General (localStorage via
- * ThemeStateProvider). Every other row stays presentational: no switches or
- * inputs that pretend to persist.
+ * Settings screen. General holds the app theme plus library information;
+ * Reading and PDF hold real, persisted default appearance controls (saved on
+ * device and applied whenever a book opens); the remaining sections describe
+ * shortcuts and local storage.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -179,18 +275,16 @@ export function SettingsShell() {
         <h2 className="text-2xl font-semibold">
           {SECTIONS.find((section) => section.id === active)?.label}
         </h2>
-        <dl data-testid="settings-rows" className="mt-6 divide-y">
-          {active === "general" && <AppThemeRow />}
-          {SECTION_ROWS[active].map((row) => (
-            <div key={row.label} className="grid grid-cols-[10rem_1fr] gap-4 py-3">
-              <dt className="text-sm text-muted-foreground">{row.label}</dt>
-              <dd className="min-w-0">
-                <p className="text-sm">{row.value}</p>
-                {row.hint && <p className="mt-1 text-xs text-muted-foreground">{row.hint}</p>}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        {active === "reading" || active === "pdf" ? (
+          <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
+        ) : (
+          <dl data-testid="settings-rows" className="mt-6 divide-y">
+            {active === "general" && <AppThemeRow />}
+            {SECTION_ROWS[active].map((row) => (
+              <InfoRow key={row.label} row={row} />
+            ))}
+          </dl>
+        )}
       </div>
     </section>
   );

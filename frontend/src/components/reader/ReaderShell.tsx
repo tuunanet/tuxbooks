@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bookmark,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
+import { markBookOpened } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
@@ -163,6 +164,14 @@ export function ReaderShell() {
   // open reader's adapter streams matches in through the shared model
   // helpers, which ignore anything not belonging to the book being searched.
   const bookId = book?.id ?? -1;
+  // Reading session lifecycle: stamp `last_opened_at` once per open so the
+  // "Recently read" section and the detail view's "Last opened" reflect this
+  // session even if the reader closes without a position save. Best-effort —
+  // a failed stamp must not block reading.
+  useEffect(() => {
+    if (bookId === -1) return;
+    void markBookOpened(bookId).catch(() => {});
+  }, [bookId]);
   const runSearch = useCallback(
     (query: string) => {
       if (query === "") {

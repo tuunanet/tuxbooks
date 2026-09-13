@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -8,10 +8,12 @@ use super::EpubError;
 /// Bibliographic metadata extracted from the OPF `<metadata>` section.
 /// Author/subject lists keep every `dc:creator`/`dc:subject` (normalized
 /// entities, milestone 7); `author` stays as the first creator for the
-/// flat display column.
+/// flat display column. `subtitle` is read from an EPUB 3 title refines
+/// link (`title-type` = subtitle), the shape the writer emits.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EpubMetadata {
     pub title: String,
+    pub subtitle: Option<String>,
     pub author: Option<String>,
     pub authors: Vec<String>,
     pub subjects: Vec<String>,
@@ -69,6 +71,12 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
     // Which metadata element's text we are currently accumulating, if any.
     let mut text_target: Option<&'static str> = None;
     let mut text_buf = String::new();
+    // `dc:title` elements in order with their `id`, plus the ids refines-linked
+    // as `title-type=subtitle` — resolved into title/subtitle after the parse.
+    let mut titles: Vec<(Option<String>, String)> = Vec::new();
+    let mut subtitle_title_ids: HashSet<String> = HashSet::new();
+    let mut text_element_id: Option<String> = None;
+    let mut pending_refines: Option<String> = None;
 
     loop {
         match reader.read_event() {
@@ -81,20 +89,26 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                         }
                         section = Some(local.to_string());
                     }
-                    (Some("metadata"), "title")
-                    | (Some("metadata"), "creator")
+                    (Some("metadata"), "title") => {
+                        text_target = Some("title");
+                        text_element_id = attribute(&e.attributes(), "id");
+                        text_buf.clear();
+                    }
+                    (Some("metadata"), "creator")
                     | (Some("metadata"), "subject")
                     | (Some("metadata"), "date")
                     | (Some("metadata"), "language")
                     | (Some("metadata"), "publisher")
                     | (Some("metadata"), "description") => {
                         text_target = Some(local_static(local));
+                        text_element_id = None;
                         text_buf.clear();
                     }
                     (Some("metadata"), "identifier") => {
                         if let Some(scheme) = attribute(&e.attributes(), "scheme") {
                             if scheme.eq_ignore_ascii_case("isbn") && metadata.isbn.is_none() {
                                 text_target = Some("isbn");
+                                text_element_id = None;
                                 text_buf.clear();
                             }
                         }
@@ -102,6 +116,11 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                     (Some("metadata"), "meta") => {
                         handle_legacy_cover_meta(e, &mut legacy_cover_id);
                         handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
+                        if attribute(&e.attributes(), "property").as_deref() == Some("title-type") {
+                            text_target = Some("meta-title-type");
+                            pending_refines = attribute(&e.attributes(), "refines");
+                            text_buf.clear();
+                        }
                     }
                     (Some("manifest"), "item") => {
                         insert_manifest_item(&mut manifest, e)?;
@@ -143,9 +162,11 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                 let local = local_name(e.name().into_inner());
                 if let Some(target) = text_target.take() {
                     let value = text_buf.trim().to_string();
+                    let element_id = text_element_id.take();
+                    let refines = pending_refines.take();
                     if !value.is_empty() {
                         match target {
-                            "title" => metadata.title = value,
+                            "title" => titles.push((element_id, value)),
                             "creator" => metadata.authors.push(value),
                             "subject" => metadata.subjects.push(value),
                             "date" => {
@@ -157,6 +178,15 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                             "publisher" => metadata.publisher = Some(value),
                             "description" => metadata.description = Some(value),
                             "isbn" => metadata.isbn = Some(value),
+                            "meta-title-type" => {
+                                if value == "subtitle" {
+                                    if let Some(id) =
+                                        refines.as_deref().and_then(|value| value.strip_prefix('#'))
+                                    {
+                                        subtitle_title_ids.insert(id.to_string());
+                                    }
+                                }
+                            }
                             _ => unreachable!("unknown text target"),
                         }
                     }
@@ -171,6 +201,23 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
             Ok(Event::Eof) => break,
             Err(err) => return Err(EpubError::OpfXml(err.to_string())),
             _ => {}
+        }
+    }
+
+    // Titles: the first title not marked `title-type=subtitle` is the main
+    // title; a title refines-linked as subtitle fills `subtitle`. A plain
+    // second `dc:title` (no title-type) stays ignored, matching the previous
+    // "last title wins" setup only when it is the first one.
+    for (id, value) in titles {
+        let is_subtitle = id
+            .as_deref()
+            .is_some_and(|id| subtitle_title_ids.contains(id));
+        if is_subtitle {
+            if metadata.subtitle.is_none() {
+                metadata.subtitle = Some(value);
+            }
+        } else if metadata.title.is_empty() {
+            metadata.title = value;
         }
     }
 

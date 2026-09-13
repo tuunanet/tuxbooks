@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { BookDetail } from "@/components/books/BookDetail";
-import { BookMetadataDialog } from "@/components/books/BookMetadataDialog";
 import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
@@ -75,15 +74,6 @@ function Reader() {
 function Shell() {
   const app = useAppState();
   const dispatch = useAppDispatch();
-  const metadataEditorOpen = app.metadataEditorBookId !== null;
-
-  const handleMetadataDialogChange = (next: boolean) => {
-    if (next && app.metadataEditorBookId !== null) {
-      dispatch({ type: "open-metadata-editor", bookId: app.metadataEditorBookId });
-    } else if (!next) {
-      dispatch({ type: "close-metadata-editor" });
-    }
-  };
 
   if (app.view === "reader") {
     return <Reader />;
@@ -108,13 +98,6 @@ function Shell() {
         )}
       </main>
       <DropZoneOverlay />
-      {/* Global curation overlay (milestone 7): reachable from the detail
-          view's Edit button and every book context menu. */}
-      <BookMetadataDialog
-        bookId={app.metadataEditorBookId}
-        open={metadataEditorOpen}
-        onOpenChange={handleMetadataDialogChange}
-      />
     </div>
   );
 }

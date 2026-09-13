@@ -82,7 +82,7 @@ export function LibraryView({ section }: LibraryViewProps) {
     [dispatch],
   );
   const openMetadataEditor = useCallback(
-    (bookId: number) => dispatch({ type: "open-metadata-editor", bookId }),
+    (bookId: number) => dispatch({ type: "open-book-detail", bookId, tab: "metadata" }),
     [dispatch],
   );
   const openReader = useCallback(

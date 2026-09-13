@@ -11,6 +11,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("epub error: {0}")]
     Epub(#[from] crate::epub::EpubError),
+    #[error("pdf error: {0}")]
+    Pdf(#[from] crate::pdf::PdfError),
     #[error("library scan error: {0}")]
     Scan(#[from] crate::services::library_scanner::ScanError),
     #[error("not found")]

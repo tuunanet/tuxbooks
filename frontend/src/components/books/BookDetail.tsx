@@ -1,13 +1,15 @@
 import { Fragment } from "react";
-import { ArrowLeft, BookOpen, FileWarning, Pencil } from "lucide-react";
+import { ArrowLeft, BookOpen, FileWarning } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
+import { MetadataPanel } from "./MetadataPanel";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
-import { useAppDispatch, useAppState } from "@/state/appState";
+import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
 function formatDate(iso: string | null): string {
@@ -22,17 +24,19 @@ function formatDate(iso: string | null): string {
  * Book detail view, rendered inside the library shell (sidebar stays).
  * Data comes from the shared `list_books` payload — there is no
  * `get_book` command yet (decision D1). Reading position comes from the
- * same payload's progress join (milestone 10).
+ * same payload's progress join (milestone 10). The Overview/Metadata rail
+ * makes metadata the primary, transparent surface (issue #58).
  */
 export function BookDetail() {
-  const { selectedBookId, section } = useAppState();
+  const { selectedBookId, section, detailTab = "overview" } = useAppState();
   const { books, collections } = useLibrary();
   const { locateBook, removeBookFromLibrary } = useBookActions();
   const dispatch = useAppDispatch();
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
-  // Subjects live in the normalized metadata view, not the flat book list.
-  const { metadata } = useBookMetadata(book ? book.id : null);
-  const subjects = metadata?.effective.subjects ?? [];
+  // One curation view is shared by the Overview subjects row and the
+  // Metadata panel, so saves and resets refresh both.
+  const curation = useBookMetadata(book ? book.id : null);
+  const subjects = curation.metadata?.effective.subjects ?? [];
   const memberCollections =
     book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
 
@@ -58,18 +62,6 @@ export function BookDetail() {
 
   const facts: [string, string][] = [
     ["Format", book.format.toUpperCase()],
-    ["Publisher", book.publisher ?? "—"],
-    ["Language", book.language ?? "—"],
-    ["ISBN", book.isbn ?? "—"],
-    ["Published", book.publicationDate ?? "—"],
-    [
-      "Series",
-      book.seriesName === null
-        ? "—"
-        : book.seriesIndex === null
-          ? book.seriesName
-          : `${book.seriesName} #${book.seriesIndex}`,
-    ],
     ["Added", formatDate(book.addedAt)],
     ["Last opened", formatDate(book.lastOpenedAt)],
     [
@@ -148,71 +140,84 @@ export function BookDetail() {
                 Continue Reading
               </Button>
             )}
-            <Button
-              variant="outline"
-              data-testid="detail-edit"
-              onClick={() => dispatch({ type: "open-metadata-editor", bookId: book.id })}
-            >
-              <Pencil data-icon="inline-start" />
-              Edit Metadata
-            </Button>
           </div>
         </div>
       </div>
 
-      {book.description && (
-        <div className="mt-8">
-          <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
-          <p className="mt-2 text-sm leading-relaxed">{book.description}</p>
-        </div>
-      )}
+      <Tabs
+        value={detailTab}
+        onValueChange={(value) => dispatch({ type: "select-detail-tab", tab: value as DetailTab })}
+        className="mt-8"
+      >
+        <TabsList data-testid="detail-tabs">
+          <TabsTrigger value="overview" data-testid="detail-tab-overview">
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="metadata" data-testid="detail-tab-metadata">
+            Metadata
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="mt-8">
-        <h3 className="text-sm font-medium text-muted-foreground">Subjects</h3>
-        <div data-testid="detail-subjects" className="mt-2 flex flex-wrap gap-1.5">
-          {subjects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">—</p>
-          ) : (
-            subjects.map((subject) => (
-              <Badge key={subject} variant="secondary">
-                {subject}
-              </Badge>
-            ))
+        <TabsContent value="overview">
+          {book.description && (
+            <div className="mt-4">
+              <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
+              <p className="mt-2 text-sm leading-relaxed">{book.description}</p>
+            </div>
           )}
-        </div>
-      </div>
 
-      <div className="mt-8">
-        <h3 className="text-sm font-medium text-muted-foreground">Details</h3>
-        <dl
-          data-testid="detail-facts"
-          className="mt-2 grid grid-cols-[8rem_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm"
-        >
-          {facts.map(([label, value]) => (
-            <Fragment key={label}>
-              <dt className="text-muted-foreground">{label}</dt>
-              <dd className={label === "File" ? "break-all" : undefined}>{value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      </div>
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">Subjects</h3>
+            <div data-testid="detail-subjects" className="mt-2 flex flex-wrap gap-1.5">
+              {subjects.length === 0 ? (
+                <p className="text-sm text-muted-foreground">—</p>
+              ) : (
+                subjects.map((subject) => (
+                  <Badge key={subject} variant="secondary">
+                    {subject}
+                  </Badge>
+                ))
+              )}
+            </div>
+          </div>
 
-      <div className="mt-8">
-        <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
-        <div data-testid="detail-collections" className="mt-2 flex flex-wrap gap-1.5">
-          {memberCollections.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Not in any collection — add one from a book's right-click menu.
-            </p>
-          ) : (
-            memberCollections.map((collection) => (
-              <Badge key={collection.id} variant="secondary">
-                {collection.name}
-              </Badge>
-            ))
-          )}
-        </div>
-      </div>
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">Details</h3>
+            <dl
+              data-testid="detail-facts"
+              className="mt-2 grid grid-cols-[8rem_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm"
+            >
+              {facts.map(([label, value]) => (
+                <Fragment key={label}>
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className={label === "File" ? "break-all" : undefined}>{value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          </div>
+
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
+            <div data-testid="detail-collections" className="mt-2 flex flex-wrap gap-1.5">
+              {memberCollections.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Not in any collection — add one from a book's right-click menu.
+                </p>
+              ) : (
+                memberCollections.map((collection) => (
+                  <Badge key={collection.id} variant="secondary">
+                    {collection.name}
+                  </Badge>
+                ))
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="metadata">
+          <MetadataPanel book={book} curation={curation} />
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }

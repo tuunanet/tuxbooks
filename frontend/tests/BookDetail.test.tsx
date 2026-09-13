@@ -26,7 +26,6 @@ function renderDetail(
         section: { kind: "smart", id: "all-books" },
         selectedBookId: 1,
         libraryQuery: "",
-        metadataEditorBookId: null,
         ...state,
       }}
     >
@@ -47,7 +46,6 @@ describe("BookDetail", () => {
     expect(facts).toHaveTextContent("Format");
     expect(facts).toHaveTextContent("EPUB");
     expect(facts).toHaveTextContent("Jan 1, 2026");
-    expect(facts).toHaveTextContent("Tuxbooks Press");
     expect(facts).toHaveTextContent("/tmp/library/minimal.epub");
     expect(screen.getByText("Back to All Books")).toBeInTheDocument();
   });
@@ -73,7 +71,6 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       >
         <LibraryDataProvider>
@@ -87,7 +84,6 @@ describe("BookDetail", () => {
     expect(screen.getAllByText("PDF")).toHaveLength(2);
     const facts = screen.getByTestId("detail-facts");
     expect(facts).toHaveTextContent("Last opened—");
-    expect(facts).toHaveTextContent("ISBN—");
   });
 
   it("shows the description only when present", async () => {
@@ -103,9 +99,9 @@ describe("BookDetail", () => {
     expect(screen.queryByText("Description")).not.toBeInTheDocument();
   });
 
-  it("opens the metadata editor from the Edit button (milestone 7)", async () => {
-    // BookDetail fetches the curation view for the subjects row; the dialog
-    // is only mounted after the click.
+  it("mounts the Metadata panel when its tab is selected", async () => {
+    // BookDetail fetches the curation view for the subjects row; the Metadata
+    // panel is only mounted once its tab is active.
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
@@ -118,15 +114,14 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       />,
     );
 
     await screen.findByTestId("book-detail");
     expect(screen.getByTestId("detail-collections")).toHaveTextContent(/not in any collection/i);
-    await userEvent.click(screen.getByTestId("detail-edit"));
-    expect(await screen.findByTestId("metadata-dialog")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("detail-tab-metadata"));
+    expect(await screen.findByTestId("metadata-panel")).toBeInTheDocument();
   });
 
   it("shows the detail's subjects from the metadata view", async () => {
@@ -192,7 +187,6 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       >
         <LibraryDataProvider>
@@ -207,9 +201,80 @@ describe("BookDetail", () => {
     const subjects = screen.getByTestId("detail-subjects");
     expect(subjects).toHaveTextContent("Computing");
     expect(subjects).toHaveTextContent("Mathematics");
-    const facts = screen.getByTestId("detail-facts");
-    expect(facts).toHaveTextContent("1843");
-    expect(facts).toHaveTextContent("Analytical Engines #2");
+  });
+
+  it("shows the Metadata tab with source divergence and file properties", async () => {
+    const effective = {
+      title: "A Minimal Book",
+      subtitle: null,
+      publisher: "Tuxbooks Press",
+      language: "en",
+      isbn: null,
+      description: null,
+      publicationDate: "1843",
+      series: "Analytical Engines",
+      seriesIndex: 2,
+      authors: ["Ada Lovelace"],
+      subjects: ["Computing"],
+    };
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      get_book_metadata: {
+        bookId: 1,
+        effective,
+        source: { ...effective, title: "File Garbled Title" },
+        overridden: {
+          title: true,
+          subtitle: false,
+          publisher: false,
+          language: false,
+          isbn: false,
+          description: false,
+          publicationDate: false,
+          series: false,
+          cover: false,
+          authors: false,
+          subjects: false,
+        },
+        coverPath: null,
+        sourceCoverPath: null,
+      },
+      get_book_file_properties: {
+        bookId: 1,
+        format: "epub",
+        entries: [{ key: "Title", value: "File Garbled Title" }],
+      },
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await screen.findByTestId("book-detail");
+    await userEvent.click(screen.getByTestId("detail-tab-metadata"));
+
+    expect(await screen.findByTestId("metadata-panel")).toBeInTheDocument();
+    // The title diverges from the file, so it carries the orange-dot marker.
+    expect(screen.getByTestId("metadata-title-overridden")).toBeInTheDocument();
+    // The file's own value and the native file properties are both visible.
+    expect(await screen.findByTestId("file-properties-list")).toHaveTextContent(
+      "File Garbled Title",
+    );
+    expect(screen.getByTestId("metadata-title").closest("div")).toHaveTextContent(
+      "File Garbled Title",
+    );
   });
 
   it("returns to the library from the back button", async () => {
@@ -225,7 +290,6 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       />,
     );
@@ -252,7 +316,6 @@ describe("BookDetail", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -276,7 +339,6 @@ describe("BookDetail", () => {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 99,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       >
         <LibraryDataProvider>

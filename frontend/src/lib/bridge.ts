@@ -12,9 +12,11 @@ import type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
+  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
+  MetadataFieldSource,
   MetadataFields,
   ReadingProgressInput,
   ReadingProgressRecord,
@@ -26,6 +28,7 @@ export type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
+  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -124,6 +127,26 @@ export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
 }
 
 /**
+ * Native metadata read fresh from the book's source file, for the read-only
+ * "Original File Metadata" panel. Null for unknown ids.
+ */
+export function getBookFileProperties(bookId: number): Promise<FileProperties | null> {
+  return invoke("get_book_file_properties", { bookId });
+}
+
+/**
+ * Choose which layer is authoritative for one field (`null` restores the
+ * default). The override is kept either way, so switching back is lossless.
+ */
+export function setMetadataFieldSource(
+  bookId: number,
+  field: string,
+  source: MetadataFieldSource | null,
+): Promise<BookMetadata> {
+  return invoke("set_metadata_field_source", { bookId, field, source });
+}
+
+/**
  * Save the metadata edit form. Only fields that differ from the source file
  * become overrides — source files are never rewritten.
  */
@@ -144,6 +167,16 @@ export function setBookCover(bookId: number, imagePath: string): Promise<Book> {
 /** Remove a cover override; the extracted (source) cover returns. */
 export function clearBookCoverOverride(bookId: number): Promise<Book> {
   return invoke("clear_book_cover_override", { bookId });
+}
+
+/**
+ * Write the given metadata into the book's source EPUB/PDF file (explicit
+ * user action). The form is persisted first, so Embed also saves unsaved
+ * edits. The file is re-parsed, so fields the format can hold stop being
+ * overrides. Covers are not embedded.
+ */
+export function embedBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
+  return invoke("embed_book_metadata", { bookId, form });
 }
 
 /** Native image picker for cover overrides; null when cancelled. */
@@ -188,6 +221,11 @@ export function saveReadingProgress(bookId: number, progress: ReadingProgressInp
 /** Flag a book as finished (progress 100) without moving its saved position. */
 export function markBookFinished(bookId: number): Promise<null> {
   return invoke("mark_book_finished", { bookId });
+}
+
+/** Record that a reading session started (the book detail's "Last opened"). */
+export function markBookOpened(bookId: number): Promise<null> {
+  return invoke("mark_book_opened", { bookId });
 }
 
 /** Every collection with its member book ids, in name order. */

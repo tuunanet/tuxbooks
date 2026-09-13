@@ -28,12 +28,15 @@ export async function waitForLibraryView(page: Page): Promise<void> {
 }
 
 /**
- * Leave the reader if one is open, then wait for the library. Reader tests
- * are order-independent: a previous test may have left the reader open.
+ * Leave the reader or a book detail view if one is open, then wait for the
+ * library. Reader tests are order-independent: a previous test may have left
+ * the reader or the detail Metadata panel open.
  */
 export async function ensureLibrary(page: Page): Promise<void> {
   if ((await page.getByTestId("reader-view").count()) > 0) {
     await page.getByTestId("reader-back").click();
+  } else if ((await page.getByTestId("book-detail").count()) > 0) {
+    await page.getByTestId("detail-back").click();
   }
   await waitForLibraryView(page);
 }

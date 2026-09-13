@@ -3,6 +3,9 @@ import { createContext, useContext, type Dispatch } from "react";
 /** The three major application states. Everything else is subordinate. */
 export type AppView = "library" | "detail" | "reader";
 
+/** Sections inside the book detail view; only the first two ship today. */
+export type DetailTab = "overview" | "metadata";
+
 export type SmartSectionId =
   "all-books" | "epubs" | "pdfs" | "recently-added" | "recently-read" | "in-progress" | "finished";
 
@@ -19,35 +22,35 @@ export interface AppState {
   section: LibrarySection;
   selectedBookId: number | null;
   /**
+   * Section shown inside the detail view (issue #58). Metadata is the
+   * primary curation surface; Overview keeps the operational facts.
+   * Optional so partial test/preview states keep working; the provider
+   * defaults it to "overview".
+   */
+  detailTab?: DetailTab;
+  /**
    * Search text for the library header. Scoped to the active section and
    * cleared whenever the section changes, so it lives beside `section`
    * instead of in view-local state.
    */
   libraryQuery: string;
-  /**
-   * Book whose metadata editor is open (milestone 7 curation). Rendered as
-   * a global overlay so the context menu can trigger it from the grid as
-   * well as the detail view's Edit button.
-   */
-  metadataEditorBookId: number | null;
 }
 
 export type AppAction =
   | { type: "select-section"; section: LibrarySection }
   | { type: "select-book"; bookId: number | null }
-  | { type: "open-book-detail"; bookId: number }
+  | { type: "open-book-detail"; bookId: number; tab?: DetailTab }
   | { type: "open-reader"; bookId: number }
   | { type: "return-to-library" }
-  | { type: "set-library-query"; query: string }
-  | { type: "open-metadata-editor"; bookId: number }
-  | { type: "close-metadata-editor" };
+  | { type: "select-detail-tab"; tab: DetailTab }
+  | { type: "set-library-query"; query: string };
 
 export const initialAppState: AppState = {
   view: "library",
   section: { kind: "smart", id: "all-books" },
   selectedBookId: null,
+  detailTab: "overview",
   libraryQuery: "",
-  metadataEditorBookId: null,
 };
 
 export function appStateReducer(state: AppState, action: AppAction): AppState {
@@ -59,17 +62,20 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
     case "select-book":
       return { ...state, selectedBookId: action.bookId };
     case "open-book-detail":
-      return { ...state, view: "detail", selectedBookId: action.bookId };
+      return {
+        ...state,
+        view: "detail",
+        selectedBookId: action.bookId,
+        detailTab: action.tab ?? "overview",
+      };
     case "open-reader":
       return { ...state, view: "reader", selectedBookId: action.bookId };
     case "return-to-library":
       return { ...state, view: "library" };
+    case "select-detail-tab":
+      return state.detailTab === action.tab ? state : { ...state, detailTab: action.tab };
     case "set-library-query":
       return state.libraryQuery === action.query ? state : { ...state, libraryQuery: action.query };
-    case "open-metadata-editor":
-      return { ...state, metadataEditorBookId: action.bookId };
-    case "close-metadata-editor":
-      return state.metadataEditorBookId === null ? state : { ...state, metadataEditorBookId: null };
   }
 }
 

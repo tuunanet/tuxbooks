@@ -181,6 +181,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       // specs exactly like the shared-session harness (helpers re-navigate
       // to a known state before asserting).
       const window = await electronApp.firstWindow();
+      // Renderer-local settings (app theme, reader appearance) persist in
+      // localStorage, which this shared window carries across tests. Clear
+      // them so one test's appearance picks cannot leak into the next;
+      // backend state (reading positions, the library) still accumulates by
+      // design. Best effort — the very first test may still be on about:blank.
+      await window
+        .evaluate(() => {
+          try {
+            window.localStorage.clear();
+          } catch {
+            // about:blank or storage unavailable.
+          }
+        })
+        .catch(() => {});
       await use(window);
       // No explicit teardown: closing the app (worker teardown) closes its
       // windows; a lingering window dies with the app process.

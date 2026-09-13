@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-use crate::domain::NewBook;
+use crate::domain::{MetadataFieldSource, MetadataFieldSources, NewBook};
 use crate::error::AppError;
 
 /// The importer's view of the source file, stored verbatim in
@@ -177,6 +177,93 @@ pub async fn clear_overrides(pool: &SqlitePool, book_id: i64) -> Result<(), AppE
         .bind(book_id)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+/// The explicit per-field authority choices for a book; absent fields keep
+/// the default (library override when one exists, otherwise the file value).
+pub async fn get_field_sources(
+    pool: &SqlitePool,
+    book_id: i64,
+) -> Result<MetadataFieldSources, AppError> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT field, source FROM book_metadata_field_sources WHERE book_id = ?1")
+            .bind(book_id)
+            .fetch_all(pool)
+            .await?;
+    let mut sources = MetadataFieldSources::default();
+    for (field, source) in rows {
+        let value = match source.as_str() {
+            "library" => MetadataFieldSource::Library,
+            "file" => MetadataFieldSource::File,
+            _ => continue,
+        };
+        match field.as_str() {
+            "title" => sources.title = Some(value),
+            "subtitle" => sources.subtitle = Some(value),
+            "publisher" => sources.publisher = Some(value),
+            "language" => sources.language = Some(value),
+            "isbn" => sources.isbn = Some(value),
+            "description" => sources.description = Some(value),
+            "publication_date" => sources.publication_date = Some(value),
+            "series" => sources.series = Some(value),
+            "authors" => sources.authors = Some(value),
+            "subjects" => sources.subjects = Some(value),
+            _ => {}
+        }
+    }
+    Ok(sources)
+}
+
+/// Record one explicit per-field choice (`field` is the storage name, e.g.
+/// `publication_date`).
+pub async fn upsert_field_source(
+    pool: &SqlitePool,
+    book_id: i64,
+    field: &str,
+    source: MetadataFieldSource,
+) -> Result<(), AppError> {
+    let value = match source {
+        MetadataFieldSource::Library => "library",
+        MetadataFieldSource::File => "file",
+    };
+    sqlx::query(
+        r#"
+        INSERT INTO book_metadata_field_sources (book_id, field, source)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(book_id, field) DO UPDATE SET source = excluded.source
+        "#,
+    )
+    .bind(book_id)
+    .bind(field)
+    .bind(value)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Drop every explicit choice (reset/book removal).
+pub async fn clear_field_sources(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM book_metadata_field_sources WHERE book_id = ?1")
+        .bind(book_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Drop the choices for specific storage fields (a save that changed them).
+pub async fn clear_field_sources_for(
+    pool: &SqlitePool,
+    book_id: i64,
+    fields: &[&str],
+) -> Result<(), AppError> {
+    for field in fields {
+        sqlx::query("DELETE FROM book_metadata_field_sources WHERE book_id = ?1 AND field = ?2")
+            .bind(book_id)
+            .bind(*field)
+            .execute(pool)
+            .await?;
+    }
     Ok(())
 }
 

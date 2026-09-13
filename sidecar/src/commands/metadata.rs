@@ -1,9 +1,32 @@
 use crate::commands::emit_book_changed;
-use crate::domain::{Book, BookMetadata, MetadataFields};
+use crate::domain::{Book, BookMetadata, FileProperties, MetadataFieldSource, MetadataFields};
 use crate::error::AppError;
 use crate::rpc::EventEmitter;
 use crate::services::metadata as service;
 use crate::AppState;
+
+/// Persist one per-field library-vs-file authority choice (`None` restores
+/// the default) and emit `library-changed` so every effective view follows.
+pub async fn set_metadata_field_source(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    field: String,
+    source: Option<MetadataFieldSource>,
+) -> Result<BookMetadata, AppError> {
+    let view = service::set_field_source(&state.db, book_id, &field, source).await?;
+    emit_book_changed(state, events, book_id).await?;
+    Ok(view)
+}
+
+/// Read-only native metadata of a book's source file, read fresh from disk
+/// for the detail view's "Original File Metadata" panel. Never writes.
+pub async fn get_book_file_properties(
+    state: &AppState,
+    book_id: i64,
+) -> Result<Option<FileProperties>, AppError> {
+    service::get_book_file_properties(&state.db, book_id).await
+}
 
 /// The full curation view of a book: effective metadata (what every reader
 /// path shows), untouched source-file values, and which fields carry user
@@ -26,6 +49,21 @@ pub async fn update_book_metadata(
     form: MetadataFields,
 ) -> Result<BookMetadata, AppError> {
     let view = service::update_book_metadata(&state.db, book_id, &form).await?;
+    emit_book_changed(state, events, book_id).await?;
+    Ok(view)
+}
+
+/// Write the given metadata into the book's source EPUB/PDF file. The form is
+/// persisted first, so Embed covers unsaved edits (no separate Save needed).
+/// Emits `library-changed` (the file change also triggers the watcher). The
+/// book keeps its id, reading progress, and collections.
+pub async fn embed_book_metadata(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    form: MetadataFields,
+) -> Result<BookMetadata, AppError> {
+    let view = service::embed_book_metadata(&state.db, book_id, &form).await?;
     emit_book_changed(state, events, book_id).await?;
     Ok(view)
 }
