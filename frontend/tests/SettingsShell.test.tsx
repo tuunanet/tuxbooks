@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
 import { THEME_STORAGE_KEY } from "@/lib/theme";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
@@ -51,13 +52,13 @@ describe("SettingsShell", () => {
     }
   });
 
-  it("starts on General with presentational rows", async () => {
+  it("starts on General with the app theme and library information", async () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByTestId("settings-rows")).toHaveTextContent("Library folder");
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Not connected yet");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Managed from the sidebar");
   });
 
   it("switches sections from the navigation", async () => {
@@ -66,11 +67,12 @@ describe("SettingsShell", () => {
     await screen.findByTestId("settings-view");
     await userEvent.click(screen.getByRole("button", { name: "PDF" }));
     expect(screen.getByRole("heading", { name: "PDF" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Arrives with the PDF engine");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Default PDF appearance");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Continuous, on demand");
 
     await userEvent.click(screen.getByRole("button", { name: "Reading" }));
     expect(screen.getByRole("heading", { name: "Reading" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("100% default (75–400%)");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Default reading appearance");
   });
 
   it("lists the shortcuts that actually exist today", async () => {
@@ -110,5 +112,22 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByRole("radio", { name: "System" }));
     expect(document.documentElement).not.toHaveClass("dark");
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
+  });
+
+  it("persists reader appearance defaults from the Reading section", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
+    expect(screen.getByRole("radio", { name: "Paginated" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
+    const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}") as {
+      preferences?: { layout?: string };
+    };
+    expect(stored.preferences?.layout).toBe("scrolling");
+
+    await userEvent.click(screen.getByTestId("reader-settings-reset"));
+    expect(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY)).toBeNull();
   });
 });

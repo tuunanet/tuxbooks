@@ -52,6 +52,19 @@ rasterizes whole documents for the reading surface, while import-time
 covers need a per-file, no-UI rasterization in the sidecar; keeping PDFium
 avoids loading every full document during a scan for identical quality.
 
+## Metadata writing (embed)
+
+`write_metadata(path, &PdfMetadata)` supports the metadata dialog's explicit
+"Embed into file" action: it sets `/Title`, `/Author`, and `/Subject` in the
+document information dictionary (creating one when absent and preserving every
+other Info entry), saves through `lopdf`, and swaps the file atomically.
+Non-ASCII values are written as UTF-16BE hex strings with a byte-order mark —
+the same forms the reader decodes. Publisher, language, ISBN, publication
+date, series, and subtitle have no faithful PDF Info field and stay
+database-side as overrides (the embed flow reports them as still overridden).
+A one-time `<file>.bak` copy of the original is made before the first write
+(later embeds keep it), so the pre-embed file is always recoverable.
+
 ## Error handling
 
 Per-file failures never abort an import run: the importer collects them in

@@ -157,7 +157,10 @@ Order matters only for 1→2→4; the rest are parallelizable.
 - Quick theme toggle button in the sidebar/header (nice-to-have; the settings
   control is the agreed home).
 - Sidecar-persisted settings table mirroring theme (first real backend
-  settings work; would also carry reader preferences later).
+  settings work; would also carry reader preferences later). Reader
+  appearance now persists device-local in `localStorage`
+  (`tuxbooks.reader`, `lib/readerSettings.ts`) via the Settings Reading/PDF
+  sections; a sidecar table remains the path to unifying all settings.
 - ~~Making reader "default" theme track the global resolved theme~~ — done
   during UAT: the reader surface now auto-follows the global theme
   (`autoReaderTheme` + `ReaderProvider globalTheme`), light → publisher

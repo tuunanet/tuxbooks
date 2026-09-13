@@ -57,6 +57,21 @@ pub(crate) fn new_book_from_parsed(
     })
 }
 
+/// Build the bibliographic [`NewBook`] for an already-parsed document,
+/// without touching the artwork cache. Used by metadata embedding to refresh
+/// the source snapshot from a rewritten file (the caller preserves the
+/// existing cover path, since covers are not embedded).
+pub(crate) fn bibliographic_new_book(
+    path: &Path,
+    parsed: &ScannedBook,
+    cover_path: Option<String>,
+) -> NewBook {
+    match parsed {
+        ScannedBook::Epub(book) => to_new_book(path, book, cover_path),
+        ScannedBook::Pdf(book) => pdf_to_new_book(path, book, cover_path),
+    }
+}
+
 /// Import a single file (watcher path): parse, build the book, upsert by
 /// path. `Ok(None)` means the file did not parse (e.g. still being written);
 /// the caller simply waits for a later event instead of treating it as an
@@ -173,7 +188,7 @@ fn to_new_book(path: &Path, book: &EpubBook, cover_path: Option<String>) -> NewB
     NewBook {
         path: path.to_string_lossy().into_owned(),
         title: metadata.title.clone(),
-        subtitle: None,
+        subtitle: metadata.subtitle.clone(),
         author: metadata.author.clone(),
         authors: metadata.authors.clone(),
         subjects: metadata.subjects.clone(),

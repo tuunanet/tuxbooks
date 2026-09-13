@@ -6,7 +6,7 @@ pub mod metadata;
 pub mod reading_progress;
 
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
-pub use book::{Book, NewBook, SearchHit};
+pub use book::{Book, BookFormat, NewBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
 pub use library::LibraryStats;
 pub use metadata::{BookMetadata, MetadataFields, MetadataOverridden};

@@ -1,11 +1,7 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import {
-  autoReaderTheme,
-  DEFAULT_READER_PREFERENCES,
-  ReaderContext,
-  type ReaderPreferences,
-} from "./readerState";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { autoReaderTheme, ReaderContext, type ReaderPreferences } from "./readerState";
 import { epubForegroundFitsTheme } from "@/lib/epub/appearance";
+import { readReaderSettings, writeReaderSettings } from "@/lib/readerSettings";
 import type { ResolvedTheme } from "@/lib/theme";
 
 interface ReaderProviderProps {
@@ -27,11 +23,16 @@ interface ReaderProviderProps {
  * notes) through the annotations commands.
  */
 export function ReaderProvider({ children, globalTheme = "light" }: ReaderProviderProps) {
-  const [preferences, setPreferencesState] = useState<ReaderPreferences>(
-    DEFAULT_READER_PREFERENCES,
-  );
-  const [themePinned, setThemePinned] = useState(false);
+  // Seed from the persisted defaults once; the effect below writes every
+  // change back, so appearance picks apply to the next book too.
+  const [initial] = useState(readReaderSettings);
+  const [preferences, setPreferencesState] = useState<ReaderPreferences>(initial.preferences);
+  const [themePinned, setThemePinned] = useState(initial.themePinned);
   const [position, setPositionState] = useState(0);
+
+  useEffect(() => {
+    writeReaderSettings({ preferences, themePinned });
+  }, [preferences, themePinned]);
 
   const setPosition = useCallback((percentage: number) => {
     setPositionState(Math.max(0, Math.min(100, percentage)));

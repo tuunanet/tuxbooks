@@ -37,7 +37,12 @@ import {
 import { isPdfThemeChoice } from "@/lib/pdf/theme";
 import { cn } from "@/lib/utils";
 import { ForegroundPicker } from "./ForegroundPicker";
-import { useReader, type ReaderLayout, type ReaderTheme } from "@/state/readerState";
+import {
+  useReader,
+  type ReaderLayout,
+  type ReaderPreferences,
+  type ReaderTheme,
+} from "@/state/readerState";
 
 const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
   { value: "default", label: "Default" },
@@ -131,17 +136,24 @@ function ScaleSliderRow(props: {
 }
 
 /**
- * Reading appearance. For EPUB: font size, line spacing, font family,
- * alignment, theme, layout, paginated column count and page margins — the
- * reflow controls only exist for reflowable content. For PDF (fixed
- * layout) the reflow sections would do nothing, so only the theme is
- * offered, applied as a filter over the rendered pages (lib/pdf/theme.ts,
- * the Foliate approach; Thorium ships no PDF theming at all). State lives
- * in the reader context so the whole reading surface responds;
- * persistence is a future backend concern and is not faked here.
+ * Reading appearance controls, shared by the reader popover and the Settings
+ * default editor. For EPUB: font size, line spacing, font family, alignment,
+ * theme, layout, paginated column count and page margins — the reflow
+ * controls only exist for reflowable content. For PDF (fixed layout) the
+ * reflow sections would do nothing, so only the theme is offered, applied as
+ * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
+ * Thorium ships no PDF theming at all). The host owns the state: the reader
+ * passes its context preferences, Settings passes the persisted defaults.
  */
-export function ReaderAppearance({ format }: { format?: string }) {
-  const { preferences, setPreferences } = useReader();
+export function ReaderAppearanceControls({
+  preferences,
+  setPreferences,
+  format,
+}: {
+  preferences: ReaderPreferences;
+  setPreferences: (patch: Partial<ReaderPreferences>) => void;
+  format?: string;
+}) {
   const isPdf = format === "pdf";
 
   // The sliders walk the supported Readium scales by index; the state holds
@@ -203,6 +215,294 @@ export function ReaderAppearance({ format }: { format?: string }) {
   );
 
   return (
+    <>
+      {/* PDFs expose only the theme; EPUB gets the full reflow set.
+          Two balanced columns keep the popover short enough to avoid
+          scrollbars on normal windows; the max-height is only a fallback
+          for very short ones. Sliders live on the left, choice groups on
+          the right. */}
+      {isPdf ? (
+        themeSection
+      ) : (
+        <div className="grid grid-cols-2 gap-x-5">
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span>Font size</span>
+                <span className="flex items-center gap-1">
+                  <span className="tabular-nums text-muted-foreground">{fontSize}%</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    data-testid="pref-font-size-reset"
+                    aria-label="Reset font size"
+                    disabled={atDefaultFontSize}
+                    onClick={() => setPreferences({ epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT })}
+                  >
+                    <RotateCcw />
+                  </Button>
+                </span>
+              </div>
+              <Slider
+                data-testid="pref-font-size"
+                aria-label="Font size"
+                min={0}
+                max={EPUB_FONT_SIZE_SCALE_PERCENT.length - 1}
+                step={1}
+                value={[fontSizeIndex]}
+                onValueChange={(values) => {
+                  const index = values[0];
+                  if (index !== undefined) {
+                    setPreferences({ epubFontSize: EPUB_FONT_SIZE_SCALE_PERCENT[index] });
+                  }
+                }}
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span>Line spacing</span>
+                <span className="flex items-center gap-1">
+                  <span className="tabular-nums text-muted-foreground">
+                    {atDefaultLineHeight ? "Default" : lineHeight}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    data-testid="pref-line-height-reset"
+                    aria-label="Reset line spacing"
+                    disabled={atDefaultLineHeight}
+                    onClick={() => setPreferences({ lineHeight: EPUB_DEFAULT_LINE_HEIGHT })}
+                  >
+                    <RotateCcw />
+                  </Button>
+                </span>
+              </div>
+              <Slider
+                data-testid="pref-line-height"
+                aria-label="Line spacing"
+                min={0}
+                max={EPUB_LINE_HEIGHT_SCALE.length - 1}
+                step={1}
+                value={[lineHeightIndex]}
+                onValueChange={(values) => {
+                  const index = values[0];
+                  if (index !== undefined) {
+                    setPreferences({ lineHeight: EPUB_LINE_HEIGHT_SCALE[index] });
+                  }
+                }}
+              />
+            </div>
+
+            {/* Text-layout scales (issue #45): 0 = publication default, mapped
+                to the toolkit's "no preference" at the seam. They apply in
+                both paginated and scrolling flow. */}
+            <ScaleSliderRow
+              label="Word spacing"
+              sliderTestId="word-spacing"
+              scale={EPUB_WORD_SPACING_SCALE}
+              value={nearestEpubWordSpacing(preferences.wordSpacing)}
+              onStep={(step) => setPreferences({ wordSpacing: step })}
+            />
+            <ScaleSliderRow
+              label="Letter spacing"
+              sliderTestId="letter-spacing"
+              scale={EPUB_LETTER_SPACING_SCALE}
+              value={nearestEpubLetterSpacing(preferences.letterSpacing)}
+              onStep={(step) => setPreferences({ letterSpacing: step })}
+            />
+            <ScaleSliderRow
+              label="Paragraph spacing"
+              sliderTestId="paragraph-spacing"
+              scale={EPUB_PARAGRAPH_SPACING_SCALE}
+              value={nearestEpubParagraphSpacing(preferences.paragraphSpacing)}
+              onStep={(step) => setPreferences({ paragraphSpacing: step })}
+            />
+            {/* Page margins are pagination-scoped in the reading system (body
+                padding applies only outside scroll flow). */}
+            {preferences.layout === "paginated" && (
+              <ScaleSliderRow
+                label="Page margins"
+                sliderTestId="page-gutter"
+                scale={EPUB_PAGE_GUTTER_SCALE_PX}
+                value={nearestEpubPageGutter(preferences.pageGutter)}
+                onStep={(step) => setPreferences({ pageGutter: step })}
+                defaultValue={EPUB_DEFAULT_PAGE_GUTTER_PX}
+              />
+            )}
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="mb-2 text-sm">Font</p>
+              <ToggleGroup
+                data-testid="pref-font-family"
+                type="single"
+                size="sm"
+                variant="outline"
+                spacing={0}
+                className="flex-wrap"
+                value={preferences.fontFamily ?? "default"}
+                onValueChange={(value) =>
+                  setPreferences({
+                    fontFamily:
+                      value === "default"
+                        ? null
+                        : (value as EpubFontFamily) in EPUB_FONT_FAMILIES
+                          ? (value as EpubFontFamily)
+                          : null,
+                  })
+                }
+                aria-label="Font family"
+              >
+                {FONT_FAMILY_OPTIONS.map((option) => (
+                  <ToggleGroupItem key={option.value} value={option.value}>
+                    {option.label}
+                  </ToggleGroupItem>
+                ))}
+                <ToggleGroupItem value="default">Default</ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm">Alignment</p>
+              <ToggleGroup
+                data-testid="pref-text-align"
+                type="single"
+                size="sm"
+                variant="outline"
+                spacing={0}
+                className="flex-wrap"
+                value={preferences.textAlign}
+                onValueChange={(value) =>
+                  value && setPreferences({ textAlign: value as EpubTextAlignment })
+                }
+                aria-label="Text alignment"
+              >
+                {EPUB_TEXT_ALIGNMENTS.map((alignment) => (
+                  <ToggleGroupItem key={alignment} value={alignment}>
+                    {TEXT_ALIGN_LABELS[alignment]}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+
+            {themeSection}
+
+            {/* Foreground override (issue #55): composes on top of the
+                  active theme; links/visited/selection keep their theme
+                  colors (toolkit semantics). The readout never blocks a
+                  choice — it only informs. */}
+            <div>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span>Foreground</span>
+                <span className="flex items-center gap-1">
+                  <span
+                    data-testid="foreground-contrast"
+                    title="Contrast against the theme background (WCAG AA needs 4.5:1)"
+                    className={cn(
+                      "tabular-nums text-muted-foreground",
+                      belowAA && "text-destructive",
+                    )}
+                  >
+                    {foregroundRatio === null ? "—" : `${foregroundRatio.toFixed(1)}:1`}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    data-testid="pref-foreground-reset"
+                    aria-label="Reset foreground color"
+                    disabled={preferences.foreground === null}
+                    onClick={() => setPreferences({ foreground: null })}
+                  >
+                    <RotateCcw />
+                  </Button>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {EPUB_FOREGROUND_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch.color}
+                    type="button"
+                    data-testid={`pref-foreground-${swatch.label.toLowerCase()}`}
+                    aria-label={`${swatch.label} (${swatch.color})`}
+                    aria-pressed={preferences.foreground === swatch.color}
+                    title={swatch.label}
+                    className={cn(
+                      "h-6 w-6 rounded-full border border-border",
+                      preferences.foreground === swatch.color && "ring-2 ring-primary",
+                    )}
+                    style={{ backgroundColor: swatch.color }}
+                    onClick={() => setPreferences({ foreground: swatch.color })}
+                  />
+                ))}
+                <ForegroundPicker
+                  value={
+                    preferences.foreground && isEpubHexColor(preferences.foreground)
+                      ? preferences.foreground
+                      : "#1f2328"
+                  }
+                  onChange={(hex) => setPreferences({ foreground: hex })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm">Layout</p>
+              <ToggleGroup
+                data-testid="pref-layout"
+                type="single"
+                size="sm"
+                variant="outline"
+                spacing={0}
+                value={preferences.layout}
+                onValueChange={(value) =>
+                  value && setPreferences({ layout: value as ReaderLayout })
+                }
+                aria-label="Layout"
+              >
+                {LAYOUT_OPTIONS.map((option) => (
+                  <ToggleGroupItem key={option.value} value={option.value}>
+                    {option.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {preferences.layout === "paginated" && (
+                <div className="mt-3">
+                  <p className="mb-2 text-sm">Columns</p>
+                  <ToggleGroup
+                    data-testid="pref-columns"
+                    type="single"
+                    size="sm"
+                    variant="outline"
+                    spacing={0}
+                    value={String(columnCount)}
+                    onValueChange={(value) =>
+                      value && setPreferences({ columnCount: Number(value) })
+                    }
+                    aria-label="Column count"
+                  >
+                    {EPUB_COLUMN_COUNTS.map((count) => (
+                      <ToggleGroupItem key={count} value={String(count)}>
+                        {COLUMN_COUNT_LABELS[count]}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Reader toolbar control: the appearance popover wrapping the shared controls. */
+export function ReaderAppearance({ format }: { format?: string }) {
+  const { preferences, setPreferences } = useReader();
+  const isPdf = format === "pdf";
+  return (
     <Popover>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -234,286 +534,11 @@ export function ReaderAppearance({ format }: { format?: string }) {
         style={readerPopoverVariables(preferences.theme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        {/* PDFs expose only the theme; EPUB gets the full reflow set.
-            Two balanced columns keep the popover short enough to avoid
-            scrollbars on normal windows; the max-height is only a fallback
-            for very short ones. Sliders live on the left, choice groups on
-            the right. */}
-        {isPdf ? (
-          themeSection
-        ) : (
-          <div className="grid grid-cols-2 gap-x-5">
-            <div className="flex flex-col gap-4">
-              <div>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span>Font size</span>
-                  <span className="flex items-center gap-1">
-                    <span className="tabular-nums text-muted-foreground">{fontSize}%</span>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      data-testid="pref-font-size-reset"
-                      aria-label="Reset font size"
-                      disabled={atDefaultFontSize}
-                      onClick={() =>
-                        setPreferences({ epubFontSize: EPUB_DEFAULT_FONT_SIZE_PERCENT })
-                      }
-                    >
-                      <RotateCcw />
-                    </Button>
-                  </span>
-                </div>
-                <Slider
-                  data-testid="pref-font-size"
-                  aria-label="Font size"
-                  min={0}
-                  max={EPUB_FONT_SIZE_SCALE_PERCENT.length - 1}
-                  step={1}
-                  value={[fontSizeIndex]}
-                  onValueChange={(values) => {
-                    const index = values[0];
-                    if (index !== undefined) {
-                      setPreferences({ epubFontSize: EPUB_FONT_SIZE_SCALE_PERCENT[index] });
-                    }
-                  }}
-                />
-              </div>
-
-              <div>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span>Line spacing</span>
-                  <span className="flex items-center gap-1">
-                    <span className="tabular-nums text-muted-foreground">
-                      {atDefaultLineHeight ? "Default" : lineHeight}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      data-testid="pref-line-height-reset"
-                      aria-label="Reset line spacing"
-                      disabled={atDefaultLineHeight}
-                      onClick={() => setPreferences({ lineHeight: EPUB_DEFAULT_LINE_HEIGHT })}
-                    >
-                      <RotateCcw />
-                    </Button>
-                  </span>
-                </div>
-                <Slider
-                  data-testid="pref-line-height"
-                  aria-label="Line spacing"
-                  min={0}
-                  max={EPUB_LINE_HEIGHT_SCALE.length - 1}
-                  step={1}
-                  value={[lineHeightIndex]}
-                  onValueChange={(values) => {
-                    const index = values[0];
-                    if (index !== undefined) {
-                      setPreferences({ lineHeight: EPUB_LINE_HEIGHT_SCALE[index] });
-                    }
-                  }}
-                />
-              </div>
-
-              {/* Text-layout scales (issue #45): 0 = publication default, mapped
-                to the toolkit's "no preference" at the seam. They apply in
-                both paginated and scrolling flow. */}
-              <ScaleSliderRow
-                label="Word spacing"
-                sliderTestId="word-spacing"
-                scale={EPUB_WORD_SPACING_SCALE}
-                value={nearestEpubWordSpacing(preferences.wordSpacing)}
-                onStep={(step) => setPreferences({ wordSpacing: step })}
-              />
-              <ScaleSliderRow
-                label="Letter spacing"
-                sliderTestId="letter-spacing"
-                scale={EPUB_LETTER_SPACING_SCALE}
-                value={nearestEpubLetterSpacing(preferences.letterSpacing)}
-                onStep={(step) => setPreferences({ letterSpacing: step })}
-              />
-              <ScaleSliderRow
-                label="Paragraph spacing"
-                sliderTestId="paragraph-spacing"
-                scale={EPUB_PARAGRAPH_SPACING_SCALE}
-                value={nearestEpubParagraphSpacing(preferences.paragraphSpacing)}
-                onStep={(step) => setPreferences({ paragraphSpacing: step })}
-              />
-              {/* Page margins are pagination-scoped in the reading system (body
-                padding applies only outside scroll flow). */}
-              {preferences.layout === "paginated" && (
-                <ScaleSliderRow
-                  label="Page margins"
-                  sliderTestId="page-gutter"
-                  scale={EPUB_PAGE_GUTTER_SCALE_PX}
-                  value={nearestEpubPageGutter(preferences.pageGutter)}
-                  onStep={(step) => setPreferences({ pageGutter: step })}
-                  defaultValue={EPUB_DEFAULT_PAGE_GUTTER_PX}
-                />
-              )}
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div>
-                <p className="mb-2 text-sm">Font</p>
-                <ToggleGroup
-                  data-testid="pref-font-family"
-                  type="single"
-                  size="sm"
-                  variant="outline"
-                  spacing={0}
-                  className="flex-wrap"
-                  value={preferences.fontFamily ?? "default"}
-                  onValueChange={(value) =>
-                    setPreferences({
-                      fontFamily:
-                        value === "default"
-                          ? null
-                          : (value as EpubFontFamily) in EPUB_FONT_FAMILIES
-                            ? (value as EpubFontFamily)
-                            : null,
-                    })
-                  }
-                  aria-label="Font family"
-                >
-                  {FONT_FAMILY_OPTIONS.map((option) => (
-                    <ToggleGroupItem key={option.value} value={option.value}>
-                      {option.label}
-                    </ToggleGroupItem>
-                  ))}
-                  <ToggleGroupItem value="default">Default</ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-
-              <div>
-                <p className="mb-2 text-sm">Alignment</p>
-                <ToggleGroup
-                  data-testid="pref-text-align"
-                  type="single"
-                  size="sm"
-                  variant="outline"
-                  spacing={0}
-                  className="flex-wrap"
-                  value={preferences.textAlign}
-                  onValueChange={(value) =>
-                    value && setPreferences({ textAlign: value as EpubTextAlignment })
-                  }
-                  aria-label="Text alignment"
-                >
-                  {EPUB_TEXT_ALIGNMENTS.map((alignment) => (
-                    <ToggleGroupItem key={alignment} value={alignment}>
-                      {TEXT_ALIGN_LABELS[alignment]}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-
-              {themeSection}
-
-              {/* Foreground override (issue #55): composes on top of the
-                  active theme; links/visited/selection keep their theme
-                  colors (toolkit semantics). The readout never blocks a
-                  choice — it only informs. */}
-              <div>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span>Foreground</span>
-                  <span className="flex items-center gap-1">
-                    <span
-                      data-testid="foreground-contrast"
-                      title="Contrast against the theme background (WCAG AA needs 4.5:1)"
-                      className={cn(
-                        "tabular-nums text-muted-foreground",
-                        belowAA && "text-destructive",
-                      )}
-                    >
-                      {foregroundRatio === null ? "—" : `${foregroundRatio.toFixed(1)}:1`}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      data-testid="pref-foreground-reset"
-                      aria-label="Reset foreground color"
-                      disabled={preferences.foreground === null}
-                      onClick={() => setPreferences({ foreground: null })}
-                    >
-                      <RotateCcw />
-                    </Button>
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {EPUB_FOREGROUND_SWATCHES.map((swatch) => (
-                    <button
-                      key={swatch.color}
-                      type="button"
-                      data-testid={`pref-foreground-${swatch.label.toLowerCase()}`}
-                      aria-label={`${swatch.label} (${swatch.color})`}
-                      aria-pressed={preferences.foreground === swatch.color}
-                      title={swatch.label}
-                      className={cn(
-                        "h-6 w-6 rounded-full border border-border",
-                        preferences.foreground === swatch.color && "ring-2 ring-primary",
-                      )}
-                      style={{ backgroundColor: swatch.color }}
-                      onClick={() => setPreferences({ foreground: swatch.color })}
-                    />
-                  ))}
-                  <ForegroundPicker
-                    value={
-                      preferences.foreground && isEpubHexColor(preferences.foreground)
-                        ? preferences.foreground
-                        : "#1f2328"
-                    }
-                    onChange={(hex) => setPreferences({ foreground: hex })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-sm">Layout</p>
-                <ToggleGroup
-                  data-testid="pref-layout"
-                  type="single"
-                  size="sm"
-                  variant="outline"
-                  spacing={0}
-                  value={preferences.layout}
-                  onValueChange={(value) =>
-                    value && setPreferences({ layout: value as ReaderLayout })
-                  }
-                  aria-label="Layout"
-                >
-                  {LAYOUT_OPTIONS.map((option) => (
-                    <ToggleGroupItem key={option.value} value={option.value}>
-                      {option.label}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-                {preferences.layout === "paginated" && (
-                  <div className="mt-3">
-                    <p className="mb-2 text-sm">Columns</p>
-                    <ToggleGroup
-                      data-testid="pref-columns"
-                      type="single"
-                      size="sm"
-                      variant="outline"
-                      spacing={0}
-                      value={String(columnCount)}
-                      onValueChange={(value) =>
-                        value && setPreferences({ columnCount: Number(value) })
-                      }
-                      aria-label="Column count"
-                    >
-                      {EPUB_COLUMN_COUNTS.map((count) => (
-                        <ToggleGroupItem key={count} value={String(count)}>
-                          {COLUMN_COUNT_LABELS[count]}
-                        </ToggleGroupItem>
-                      ))}
-                    </ToggleGroup>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <ReaderAppearanceControls
+          preferences={preferences}
+          setPreferences={setPreferences}
+          format={format}
+        />
       </PopoverContent>
     </Popover>
   );

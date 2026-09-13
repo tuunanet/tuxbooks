@@ -114,6 +114,22 @@ pub async fn update_book_metadata(
     book_id: i64,
     form: &MetadataFields,
 ) -> Result<BookMetadata, AppError> {
+    apply_form(pool, book_id, form).await?;
+    get_book_metadata(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+/// Persist one edit form against the current source snapshot and re-merge
+/// the effective view. Shared by `update_book_metadata` and the embed path
+/// (which first refreshes the source from the rewritten file), so the
+/// minimal-override rules exist once. The user's cover override is always
+/// preserved — covers are never embedded.
+async fn apply_form(
+    pool: &SqlitePool,
+    book_id: i64,
+    form: &MetadataFields,
+) -> Result<(), AppError> {
     let source = load_source(pool, book_id).await?;
 
     let title = clean_required(&form.title, "title")?;
@@ -175,6 +191,85 @@ pub async fn update_book_metadata(
     repo::upsert_overrides(pool, book_id, &overrides).await?;
     recompute_and_apply(pool, book_id).await?;
     repo::sweep_orphans(pool).await?;
+    Ok(())
+}
+
+/// Write the given text metadata into the book's source EPUB/PDF file
+/// (explicit "Embed into file" action). The form is persisted first, so
+/// embedding never ignores unsaved edits — the user does not have to Save
+/// separately. The file is then re-parsed: fields it now carries become
+/// source-authoritative (their overrides are cleared), while anything the
+/// format cannot hold (e.g. PDF subtitle/series) keeps its override so the
+/// effective view is unchanged. Covers are not embedded. Returns the
+/// refreshed curation view.
+pub async fn embed_book_metadata(
+    pool: &SqlitePool,
+    book_id: i64,
+    form: &MetadataFields,
+) -> Result<BookMetadata, AppError> {
+    let book = books::get_book(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let path = std::path::PathBuf::from(&book.path);
+    if !path.exists() {
+        return Err(AppError::InvalidInput(
+            "the book file is missing; reconnect it before embedding".into(),
+        ));
+    }
+
+    // Persist the form first: embedding the current edits is the point of the
+    // action, and it keeps the no-Save flow coherent.
+    apply_form(pool, book_id, form).await?;
+    let desired = get_book_metadata(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?
+        .effective;
+
+    match crate::domain::BookFormat::from_path(&book.path) {
+        crate::domain::BookFormat::Epub => {
+            let epub_metadata = crate::epub::EpubMetadata {
+                title: desired.title.clone(),
+                subtitle: desired.subtitle.clone(),
+                author: desired.authors.first().cloned(),
+                authors: desired.authors.clone(),
+                subjects: desired.subjects.clone(),
+                language: desired.language.clone(),
+                publisher: desired.publisher.clone(),
+                isbn: desired.isbn.clone(),
+                description: desired.description.clone(),
+                publication_date: desired.publication_date.clone(),
+                series: desired.series.clone(),
+                series_index: desired.series_index,
+            };
+            crate::epub::write_metadata(&path, &epub_metadata)?;
+        }
+        crate::domain::BookFormat::Pdf => {
+            let author = if desired.authors.is_empty() {
+                None
+            } else {
+                Some(desired.authors.join(", "))
+            };
+            crate::pdf::write_metadata(
+                &path,
+                &crate::pdf::PdfMetadata {
+                    title: desired.title.clone(),
+                    author,
+                    description: desired.description.clone(),
+                },
+            )?;
+        }
+    }
+
+    // Refresh the source snapshot from the file we just wrote, keeping the
+    // existing extracted cover (covers stay cache-side).
+    let parsed = crate::services::library_scanner::parse_book(&path)
+        .map_err(|err| AppError::InvalidInput(format!("rewritten file is unreadable: {err}")))?;
+    let existing_cover = load_source(pool, book_id).await?.cover_path;
+    let source =
+        crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
+    repo::upsert_source_metadata(pool, book_id, &source).await?;
+
+    apply_form(pool, book_id, &desired).await?;
 
     get_book_metadata(pool, book_id)
         .await?
@@ -460,6 +555,9 @@ fn detect_image_media_type(data: &[u8]) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::db::connection::init_pool;
+    use crate::services::book_importer::bibliographic_new_book;
+    use crate::services::library_scanner::parse_book;
+    use std::path::PathBuf;
 
     async fn setup() -> (tempfile::TempDir, sqlx::SqlitePool, i64) {
         let tmp = tempfile::tempdir().unwrap();
@@ -942,5 +1040,122 @@ mod tests {
             Some("image/webp")
         );
         assert_eq!(detect_image_media_type(b"text"), None);
+    }
+
+    /// Import a real EPUB fixture, returning its book id and the file path.
+    async fn import_fixture_epub(dir: &std::path::Path) -> (sqlx::SqlitePool, i64, PathBuf) {
+        let epub_path = dir.join("book.epub");
+        std::fs::copy(
+            crate::epub::parser::tests_support::fixture_epub(),
+            &epub_path,
+        )
+        .unwrap();
+        let pool = init_pool(&dir.join("t.db")).await.unwrap();
+        let parsed = parse_book(&epub_path).unwrap();
+        let source = bibliographic_new_book(&epub_path, &parsed, None);
+        let (id, _) = books::upsert_book(&pool, &source).await.unwrap();
+        apply_source_metadata(&pool, id, &source).await.unwrap();
+        (pool, id, epub_path)
+    }
+
+    #[tokio::test]
+    async fn embed_writes_epub_metadata_into_the_file_and_clears_overrides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pool, id, epub_path) = import_fixture_epub(tmp.path()).await;
+
+        let mut form = get_book_metadata(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .effective;
+        form.title = "Embedded Title".into();
+        form.subtitle = Some("Embedded Subtitle".into());
+        form.publisher = Some("Embedded Press".into());
+        form.subjects = vec!["Embedded Subject".into()];
+
+        // Embed persists the form itself — no separate save call.
+        let view = embed_book_metadata(&pool, id, &form).await.unwrap();
+        assert_eq!(view.effective.title, "Embedded Title");
+        assert_eq!(view.source.title, "Embedded Title", "source refreshed");
+        assert!(!view.overridden.title);
+        assert!(
+            !view.overridden.subtitle,
+            "subtitle round-trips through EPUB"
+        );
+        assert_eq!(view.source.subtitle.as_deref(), Some("Embedded Subtitle"));
+        assert!(!view.overridden.publisher);
+        assert!(!view.overridden.subjects);
+
+        let reparsed = crate::epub::parse_epub(&epub_path).unwrap();
+        assert_eq!(reparsed.metadata.title, "Embedded Title");
+        assert_eq!(
+            reparsed.metadata.subtitle.as_deref(),
+            Some("Embedded Subtitle")
+        );
+        assert_eq!(
+            reparsed.metadata.publisher.as_deref(),
+            Some("Embedded Press")
+        );
+        assert_eq!(
+            reparsed.metadata.subjects,
+            vec!["Embedded Subject".to_string()]
+        );
+        assert!(
+            crate::backup_path(&epub_path).exists(),
+            "the pre-embed original is backed up"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_writes_pdf_fields_and_keeps_unwritable_overrides() {
+        use crate::pdf::parser::tests_support::{build_pdf, write_pdf};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pdf_path = write_pdf(
+            tmp.path(),
+            "book.pdf",
+            &build_pdf(&[("Title", "Old"), ("Author", "Old Author")]),
+        );
+        let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+        let parsed = parse_book(&pdf_path).unwrap();
+        let source = bibliographic_new_book(&pdf_path, &parsed, None);
+        let (id, _) = books::upsert_book(&pool, &source).await.unwrap();
+        apply_source_metadata(&pool, id, &source).await.unwrap();
+
+        let mut form = get_book_metadata(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .effective;
+        form.title = "New Title".into();
+        form.authors = vec!["New Author".into()];
+        form.series = Some("A Series".into());
+
+        let view = embed_book_metadata(&pool, id, &form).await.unwrap();
+        assert_eq!(view.effective.title, "New Title");
+        assert!(!view.overridden.title);
+        assert!(!view.overridden.authors, "a single author round-trips");
+        assert_eq!(view.effective.authors, vec!["New Author".to_string()]);
+        assert!(view.overridden.series, "PDF cannot hold a series");
+        assert_eq!(view.effective.series.as_deref(), Some("A Series"));
+
+        let parsed_after = crate::pdf::parse_pdf(&pdf_path).unwrap();
+        assert_eq!(parsed_after.metadata.title, "New Title");
+        assert_eq!(parsed_after.metadata.author.as_deref(), Some("New Author"));
+    }
+
+    #[tokio::test]
+    async fn embed_rejects_a_book_whose_file_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pool, id, epub_path) = import_fixture_epub(tmp.path()).await;
+        let form = get_book_metadata(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .effective;
+        std::fs::remove_file(epub_path).unwrap();
+
+        let err = embed_book_metadata(&pool, id, &form).await.unwrap_err();
+        assert!(matches!(err, AppError::InvalidInput(_)), "got: {err:?}");
     }
 }

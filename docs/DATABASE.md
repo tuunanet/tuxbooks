@@ -112,7 +112,8 @@ highlights redraw correctly at any zoom or window size. Index on
 ## Metadata curation (milestone 7)
 
 Milestone 7 keeps three layers so a book's curated metadata can never lose
-the file's own values — and so source files are never rewritten:
+the file's own values — and so an ordinary save never rewrites the source
+file:
 
 1. `book_source_metadata` — **file truth**, one row per book, refreshed by
    the importer on every (re)import and by the reconnect flow. `authors`/
@@ -157,6 +158,22 @@ Implemented once in `services/metadata.rs::recompute_and_apply`:
   only where the form differs from the source — typing the original value
   back removes the override. The cover override always wins over the
   extracted cover until cleared or reset.
+
+### Embedding into the source file
+
+`embed_book_metadata` is the explicit "write this into the book" action. It
+saves the submitted form first (so embedding unsaved edits needs no separate
+Save), rewrites the effective text metadata into the file (EPUB OPF metadata;
+PDF `/Title`, `/Author`, `/Subject`) atomically, re-parses the file, and
+records the result as the new source snapshot. Overrides for fields the format
+can carry are then cleared (the file is authoritative); fields the format
+cannot hold — e.g. a PDF series/subtitle — keep their override, so the
+effective view is unchanged. Covers are never embedded: the artwork cache
+stays the only cover store. Before the first write, a one-time `<file>.bak`
+copy of the original is kept beside the book (`<file>.epub.bak` /
+`<file>.pdf.bak`; the `.bak` extension is never scanned into the library). The
+re-parse also updates the FTS index through the normal effective-column
+triggers.
 
 Deleting a book cascades to all of these tables.
 

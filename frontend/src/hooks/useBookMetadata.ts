@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   clearBookCoverOverride,
+  embedBookMetadata,
   getBookMetadata,
   resetBookMetadata,
   setBookCover,
@@ -29,6 +30,11 @@ function toMessage(err: unknown): string {
 export function useBookMetadata(bookId: number | null) {
   const [loaded, setLoaded] = useState<LoadedView | null>(null);
   const [saving, setSaving] = useState(false);
+  const [embedding, setEmbedding] = useState(false);
+  // Scoped to the book it happened on, like `loaded`, so switching books
+  // never shows another book's embed outcome.
+  const [embedFailure, setEmbedFailure] = useState<{ bookId: number; error: string } | null>(null);
+  const [embedDone, setEmbedDone] = useState<{ bookId: number } | null>(null);
 
   useEffect(() => {
     if (bookId === null) return;
@@ -57,6 +63,7 @@ export function useBookMetadata(bookId: number | null) {
     async (form: MetadataFields) => {
       if (bookId === null) return undefined;
       setSaving(true);
+      setEmbedDone(null);
       try {
         const saved = await updateBookMetadata(bookId, form);
         setLoaded({ bookId, metadata: saved, error: null });
@@ -74,6 +81,7 @@ export function useBookMetadata(bookId: number | null) {
   const reset = useCallback(async () => {
     if (bookId === null) return;
     setSaving(true);
+    setEmbedDone(null);
     try {
       setLoaded({ bookId, metadata: await resetBookMetadata(bookId), error: null });
     } catch (err) {
@@ -106,5 +114,47 @@ export function useBookMetadata(bookId: number | null) {
     }
   }, [bookId]);
 
-  return { metadata, loading, saving, error, save, reset, changeCover, restoreCover };
+  /**
+   * Explicit "Embed into file": the backend persists the form and writes it
+   * into the source EPUB/PDF, then re-parses the file. Passing the form means
+   * unsaved edits are embedded too — Save is not required first. Failures
+   * keep the form and show an inline message.
+   */
+  const embed = useCallback(
+    async (form: MetadataFields) => {
+      if (bookId === null) return;
+      setEmbedding(true);
+      setEmbedFailure(null);
+      setEmbedDone(null);
+      try {
+        const view = await embedBookMetadata(bookId, form);
+        setLoaded({ bookId, metadata: view, error: null });
+        setEmbedDone({ bookId });
+      } catch (err) {
+        setEmbedFailure({ bookId, error: toMessage(err) });
+      } finally {
+        setEmbedding(false);
+      }
+    },
+    [bookId],
+  );
+
+  const embedError =
+    embedFailure !== null && embedFailure.bookId === bookId ? embedFailure.error : null;
+  const embedSuccess = embedDone !== null && embedDone.bookId === bookId;
+
+  return {
+    metadata,
+    loading,
+    saving,
+    embedding,
+    error,
+    embedError,
+    embedSuccess,
+    save,
+    reset,
+    changeCover,
+    restoreCover,
+    embed,
+  };
 }

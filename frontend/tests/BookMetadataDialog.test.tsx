@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { BookMetadataDialog } from "@/components/books/BookMetadataDialog";
@@ -170,6 +170,37 @@ describe("BookMetadataDialog", () => {
     await waitFor(() => expect(screen.getByTestId("metadata-reset")).toBeDisabled());
   });
 
+  it("explains the library-vs-file model and the override marker", async () => {
+    renderDialog();
+
+    await screen.findByTestId("metadata-title");
+    expect(screen.getByTestId("metadata-override-legend")).toHaveTextContent(
+      /Unmarked fields match the book file/i,
+    );
+    expect(screen.getByText(/Save keeps these edits in your library/i)).toBeInTheDocument();
+    expect(screen.getByTestId("metadata-embed")).toHaveAttribute(
+      "title",
+      expect.stringContaining("backup"),
+    );
+  });
+
+  it("shows the file's value under an overridden field and reverts on demand", async () => {
+    renderDialog();
+
+    await screen.findByTestId("metadata-title");
+    // Title is overridden in this view; its file value is shown and revertible.
+    const titleField = screen.getByTestId("metadata-title").closest("div");
+    expect(titleField).not.toBeNull();
+    expect(within(titleField!).getByText("File Garbled Title")).toBeInTheDocument();
+
+    await userEvent.click(within(titleField!).getByRole("button", { name: "Use file value" }));
+    expect(screen.getByTestId("metadata-title")).toHaveValue("File Garbled Title");
+
+    // A field that matches the file shows no source hint at all.
+    const subtitleField = screen.getByTestId("metadata-subtitle").closest("div");
+    expect(within(subtitleField!).queryByText(/^File:/)).not.toBeInTheDocument();
+  });
+
   it("shows backend failures instead of pretending to save", async () => {
     renderDialog({
       update_book_metadata: new Error("invalid input: title must not be empty"),
@@ -180,6 +211,61 @@ describe("BookMetadataDialog", () => {
     expect(await screen.findByTestId("metadata-error")).toHaveTextContent(
       /title must not be empty/i,
     );
+  });
+
+  it("embeds the metadata into the file and reflects the cleared overrides", async () => {
+    const embedded: BookMetadata = {
+      ...view,
+      source: effective,
+      overridden: nothingOverridden,
+    };
+    renderDialog({ embed_book_metadata: embedded });
+
+    await screen.findByTestId("metadata-title");
+    expect(screen.getByTestId("metadata-title-overridden")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("metadata-embed"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("embed_book_metadata", {
+        bookId: 1,
+        form: expect.objectContaining({ title: "A Minimal Book" }),
+      }),
+    );
+    // The file now carries the effective values, so nothing is overridden and
+    // the dialog tells the user Save is unnecessary.
+    await waitFor(() =>
+      expect(screen.queryByTestId("metadata-title-overridden")).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByTestId("metadata-embed-success")).toHaveTextContent(
+      /no need to Save/i,
+    );
+  });
+
+  it("keeps unwritable fields as library edits after embed", async () => {
+    // A PDF-like outcome: title cleared, but subtitle cannot be stored.
+    const embedded: BookMetadata = {
+      ...view,
+      source: { ...effective, title: "A Minimal Book" },
+      overridden: { ...nothingOverridden, subtitle: true },
+    };
+    renderDialog({ embed_book_metadata: embedded });
+
+    await screen.findByTestId("metadata-title");
+    await userEvent.click(screen.getByTestId("metadata-embed"));
+
+    expect(await screen.findByTestId("metadata-embed-success")).toHaveTextContent(
+      /can't store stay as library edits/i,
+    );
+  });
+
+  it("keeps the form and shows an embed failure inline", async () => {
+    renderDialog({ embed_book_metadata: new Error("the book file is missing") });
+
+    await screen.findByTestId("metadata-title");
+    await userEvent.click(screen.getByTestId("metadata-embed"));
+
+    expect(await screen.findByTestId("metadata-embed-error")).toHaveTextContent(/missing/i);
+    expect(screen.getByTestId("metadata-title")).toHaveValue("A Minimal Book");
   });
 
   it("shows an error state when the curation view fails to load", async () => {

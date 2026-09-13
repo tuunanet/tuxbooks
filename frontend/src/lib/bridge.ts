@@ -146,6 +146,16 @@ export function clearBookCoverOverride(bookId: number): Promise<Book> {
   return invoke("clear_book_cover_override", { bookId });
 }
 
+/**
+ * Write the given metadata into the book's source EPUB/PDF file (explicit
+ * user action). The form is persisted first, so Embed also saves unsaved
+ * edits. The file is re-parsed, so fields the format can hold stop being
+ * overrides. Covers are not embedded.
+ */
+export function embedBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
+  return invoke("embed_book_metadata", { bookId, form });
+}
+
 /** Native image picker for cover overrides; null when cancelled. */
 export function pickCoverImage(): Promise<string | null> {
   return tuxbooks().pickCoverImage();

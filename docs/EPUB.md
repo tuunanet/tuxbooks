@@ -50,6 +50,23 @@ pub struct EpubBook {
    `<meta name="cover">` fallback; bytes resolved relative to the OPF
    directory (handles `../`, `./`, and `%XX` escapes).
 
+## Metadata writing (embed)
+
+`write_metadata(path, &EpubMetadata)` supports the metadata dialog's explicit
+"Embed into file" action: it regenerates the managed children of the OPF
+`<metadata>` section — title (plus subtitle through EPUB 3 `title-type`
+refines, the shape the parser now reads back), every `dc:creator`/`dc:subject`,
+description, publisher, language, date, an ISBN `dc:identifier`, and the
+calibre series metas — while every other child is preserved byte-for-byte
+(`dcterms:modified`, non-ISBN identifiers, an ISBN identifier that doubles as
+the package `unique-identifier`, cover metas, custom metadata). The whole
+archive is copied into a new ZIP (`mimetype` stays stored and first) and
+swapped in atomically, so a failure never truncates a book. The cover image
+and all resources are copied untouched. Before the first write a one-time
+`<file>.bak` copy of the original is made (later embeds keep it), so the
+pre-embed file is always recoverable; the `.bak` extension is never scanned
+into the library.
+
 ## Error handling
 
 `EpubError` is an exhaustive enum (`MissingMimetype`, `InvalidMimetype`,

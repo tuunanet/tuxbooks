@@ -1,4 +1,4 @@
-import { beforeAll, afterEach } from "vitest";
+import { beforeAll, beforeEach, afterEach } from "vitest";
 import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import {
@@ -87,6 +87,12 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   resetIntersectionObservers();
+});
+
+// Reader appearance and app theme persist through localStorage; clear between
+// tests so one test's preference can never leak into the next.
+beforeEach(() => {
+  window.localStorage.clear();
 });
 
 afterEach(() => {

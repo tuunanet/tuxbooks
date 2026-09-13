@@ -30,6 +30,21 @@ pub async fn update_book_metadata(
     Ok(view)
 }
 
+/// Write the given metadata into the book's source EPUB/PDF file. The form is
+/// persisted first, so Embed covers unsaved edits (no separate Save needed).
+/// Emits `library-changed` (the file change also triggers the watcher). The
+/// book keeps its id, reading progress, and collections.
+pub async fn embed_book_metadata(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    form: MetadataFields,
+) -> Result<BookMetadata, AppError> {
+    let view = service::embed_book_metadata(&state.db, book_id, &form).await?;
+    emit_book_changed(state, events, book_id).await?;
+    Ok(view)
+}
+
 /// Drop every override: the book returns to exactly its source-file
 /// metadata. Emits `library-changed`.
 pub async fn reset_book_metadata(

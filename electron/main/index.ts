@@ -48,6 +48,7 @@ const SIDECAR_METHODS = new Set([
   "reset_book_metadata",
   "set_book_cover",
   "clear_book_cover_override",
+  "embed_book_metadata",
   "get_reading_progress",
   "save_reading_progress",
   "mark_book_finished",
