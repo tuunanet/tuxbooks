@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { FileDown, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBookFileProperties } from "@/hooks/useBookFileProperties";
@@ -43,7 +42,10 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
   const file = useBookFileProperties(book.id);
   const [form, setForm] = useState<MetadataFormState | null>(null);
   const [formSource, setFormSource] = useState<BookMetadata | null>(null);
-  const [writeToFile, setWriteToFile] = useState(false);
+  // The active tab decides what the footer's primary action does: the Library
+  // tab saves SQLite overrides, the File tab embeds into the file. One action
+  // per tab — no hidden "write to file" modes.
+  const [tab, setTab] = useState<"library" | "file">("library");
   // The curation view returned by the last save; identifies the saved state
   // by reference so a later edit, reset, or book switch hides the indicator.
   const [savedView, setSavedView] = useState<BookMetadata | null>(null);
@@ -67,12 +69,8 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
 
   const onSaveChanges = async () => {
     if (!form || !canSubmit) return;
-    if (writeToFile) {
-      await embed(fromForm(form));
-    } else {
-      const result = await save(fromForm(form));
-      if (result) setSavedView(result);
-    }
+    const result = await save(fromForm(form));
+    if (result) setSavedView(result);
   };
 
   const onEmbed = async () => {
@@ -129,7 +127,11 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
             )}
           </p>
         ) : (
-          <Tabs defaultValue="library" className="mt-4">
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as "library" | "file")}
+            className="mt-4"
+          >
             <TabsList data-testid="metadata-panel-tabs">
               <TabsTrigger value="library" data-testid="metadata-tab-library">
                 Library Metadata
@@ -148,8 +150,9 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
                   aria-hidden="true"
                   className="mt-1 size-1.5 shrink-0 rounded-full bg-amber-500"
                 />
-                Unmarked fields match the book file. Fields you changed get an orange dot and show
-                the file&apos;s original value below them.
+                An orange dot marks fields whose library value differs from the book file — the
+                file&apos;s original value is shown below the field. Fields without a dot match the
+                file.
               </p>
 
               <div className="mt-4 grid gap-4">
@@ -174,8 +177,9 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
             <TabsContent value="file">
               <div className="mt-4 flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2.5 text-xs text-sky-900 dark:text-sky-100">
                 <p>
-                  These values are written into the {formatLabel} file. Fields {formatLabel} cannot
-                  store stay as library edits and are marked below.
+                  Embedding writes these values into the {formatLabel} file, keeping a one-time{" "}
+                  {formatLabel.toLowerCase()} <span className="font-mono">.bak</span> backup. Fields{" "}
+                  {formatLabel} cannot store stay as library edits and are marked below.
                 </p>
               </div>
 
@@ -187,24 +191,6 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
                   format={book.format}
                   isEditable={(field) => isFileWritable(book.format, field)}
                 />
-              </div>
-
-              <div className="mt-4 flex justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  data-testid="metadata-panel-embed"
-                  title={`Write these values into the ${formatLabel} (a one-time .bak backup is kept)`}
-                  disabled={!canSubmit || saving || embedding || loading}
-                  onClick={() => void onEmbed()}
-                >
-                  {embedding ? (
-                    <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
-                  ) : (
-                    <FileDown data-icon="inline-start" />
-                  )}
-                  Embed into file
-                </Button>
               </div>
             </TabsContent>
           </Tabs>
@@ -233,25 +219,11 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
         )}
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-          {metadata && form && (
-            <label
-              htmlFor="metadata-write-to-file"
-              className="mr-auto flex items-center gap-2 text-sm"
-            >
-              <Checkbox
-                id="metadata-write-to-file"
-                data-testid="metadata-write-to-file"
-                checked={writeToFile}
-                onCheckedChange={(checked) => setWriteToFile(checked === true)}
-              />
-              Write changes into file ({formatLabel} metadata where supported)
-            </label>
-          )}
           {saved && !dirty && (
             <span
               data-testid="metadata-panel-saved"
               role="status"
-              className="text-sm text-emerald-600 dark:text-emerald-400"
+              className="mr-auto text-sm text-emerald-600 dark:text-emerald-400"
             >
               Saved to your library.
             </span>
@@ -265,17 +237,32 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
           >
             Cancel
           </Button>
-          <Button
-            size="sm"
-            data-testid="metadata-panel-save"
-            disabled={!canSubmit || saving || embedding || loading}
-            onClick={() => void onSaveChanges()}
-          >
-            {(saving || (writeToFile && embedding)) && (
-              <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
-            )}
-            Save Changes
-          </Button>
+          {tab === "file" ? (
+            <Button
+              size="sm"
+              data-testid="metadata-panel-embed"
+              title={`Write these values into the ${formatLabel} (a one-time .bak backup is kept)`}
+              disabled={!canSubmit || saving || embedding || loading}
+              onClick={() => void onEmbed()}
+            >
+              {embedding ? (
+                <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
+              ) : (
+                <FileDown data-icon="inline-start" />
+              )}
+              Embed into file
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              data-testid="metadata-panel-save"
+              disabled={!canSubmit || saving || embedding || loading}
+              onClick={() => void onSaveChanges()}
+            >
+              {saving && <Loader2 data-icon="inline-start" className="size-4 animate-spin" />}
+              Save Changes
+            </Button>
+          )}
         </div>
       </div>
 

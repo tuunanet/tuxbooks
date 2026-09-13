@@ -61,6 +61,14 @@ Decisions confirmed in review:
   share one choice (the plan's earlier `series_index` row was dropped).
 - Close-out — `just check` green (39 files / 465 tests), `just test-e2e`
   green (seeded 53/53), `just coverage` green (Rust instrumented + frontend).
+- Follow-up (modality fix) — the File tab had three overlapping write paths
+  (in-tab "Embed into file", the "Write changes into file" checkbox +
+  Save Changes, and plain Save Changes), and plain Save on the File tab
+  silently wrote library overrides — the opposite of the tab's promise. Now
+  the active tab decides the one primary action: Library tab → Save Changes
+  (overrides only), File tab → Embed into file (embed; non-writable fields
+  stay library edits). The checkbox and the in-tab embed button are removed;
+  the File tab banner states the embed + `.bak` semantics.
 
 Goal: make the book detail page the primary metadata surface. Show file
 value, library value, and effective value per field; edit library metadata

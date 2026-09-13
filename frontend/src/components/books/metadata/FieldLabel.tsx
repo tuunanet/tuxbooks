@@ -1,6 +1,6 @@
 import { Label } from "@/components/ui/label";
 
-/** Label with a marker when the stored value differs from the source file. */
+/** Label with a marker when the stored value differs from the book file. */
 export function FieldLabel({
   htmlFor,
   children,
@@ -16,8 +16,8 @@ export function FieldLabel({
       {overridden && (
         <span
           data-testid={`${htmlFor}-overridden`}
-          title="This value differs from the source file"
-          aria-label="differs from the source file"
+          title="This value differs from the book file"
+          aria-label="differs from the book file"
           className="size-1.5 rounded-full bg-amber-500"
         />
       )}

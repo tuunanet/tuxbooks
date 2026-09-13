@@ -322,6 +322,11 @@ describe("MetadataPanel", () => {
     await userEvent.clear(title);
     await userEvent.type(title, "Embedded Title");
     await userEvent.click(screen.getByTestId("metadata-tab-file"));
+
+    // The File tab's primary action is the embed — there is no second
+    // "Save Changes" path hiding underneath it.
+    expect(screen.getByTestId("metadata-panel-embed")).toHaveTextContent("Embed into file");
+    expect(screen.queryByTestId("metadata-panel-save")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("metadata-panel-embed"));
 
     await waitFor(() =>
@@ -335,27 +340,24 @@ describe("MetadataPanel", () => {
     );
   });
 
-  it("writes to the file from the Library tab when the checkbox is on", async () => {
-    const embedded: BookMetadata = {
+  it("the Library tab saves to the library and never embeds", async () => {
+    const saved: BookMetadata = {
       ...view,
-      effective: { ...effective, title: "Checkbox Title" },
-      source: { ...source, title: "Checkbox Title" },
-      overridden: { ...view.overridden, title: false, publisher: false, series: false },
+      effective: { ...effective, title: "Library Only Title" },
     };
-    renderPanel({ embed_book_metadata: embedded });
+    renderPanel({ update_book_metadata: saved });
 
     const title = await screen.findByTestId("metadata-title");
     await userEvent.clear(title);
-    await userEvent.type(title, "Checkbox Title");
-    await userEvent.click(screen.getByTestId("metadata-write-to-file"));
+    await userEvent.type(title, "Library Only Title");
     await userEvent.click(screen.getByTestId("metadata-panel-save"));
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("embed_book_metadata", {
+      expect(invokeMock).toHaveBeenCalledWith("update_book_metadata", {
         bookId: 1,
-        form: expect.objectContaining({ title: "Checkbox Title" }),
+        form: expect.objectContaining({ title: "Library Only Title" }),
       }),
     );
-    expect(invokeMock).not.toHaveBeenCalledWith("update_book_metadata", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("embed_book_metadata", expect.anything());
   });
 });
