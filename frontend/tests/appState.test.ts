@@ -9,7 +9,6 @@ describe("appStateReducer", () => {
         section: { kind: "smart", id: "all-books" },
         selectedBookId: 7,
         libraryQuery: "meridian",
-        metadataEditorBookId: null,
       },
       { type: "select-section", section: { kind: "smart", id: "pdfs" } },
     );
@@ -18,7 +17,6 @@ describe("appStateReducer", () => {
       section: { kind: "smart", id: "pdfs" },
       selectedBookId: 7,
       libraryQuery: "",
-      metadataEditorBookId: null,
     });
   });
 
@@ -37,9 +35,18 @@ describe("appStateReducer", () => {
       view: "detail",
       section: { kind: "smart", id: "all-books" },
       selectedBookId: 3,
+      detailTab: "overview",
       libraryQuery: "",
-      metadataEditorBookId: null,
     });
+  });
+
+  it("selects the metadata section of the detail view", () => {
+    const state = appStateReducer(initialAppState, {
+      type: "select-detail-tab",
+      tab: "metadata",
+    });
+    expect(state.detailTab).toBe("metadata");
+    expect(state.view).toBe("library");
   });
 
   it("opening the reader selects the book", () => {
@@ -55,7 +62,6 @@ describe("appStateReducer", () => {
         section: { kind: "collection", id: 2 },
         selectedBookId: 9,
         libraryQuery: "",
-        metadataEditorBookId: null,
       },
       { type: "return-to-library" },
     );
@@ -64,7 +70,6 @@ describe("appStateReducer", () => {
       section: { kind: "collection", id: 2 },
       selectedBookId: 9,
       libraryQuery: "",
-      metadataEditorBookId: null,
     });
   });
 

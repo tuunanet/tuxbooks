@@ -1,9 +1,32 @@
 use crate::commands::emit_book_changed;
-use crate::domain::{Book, BookMetadata, MetadataFields};
+use crate::domain::{Book, BookMetadata, FileProperties, MetadataFieldSource, MetadataFields};
 use crate::error::AppError;
 use crate::rpc::EventEmitter;
 use crate::services::metadata as service;
 use crate::AppState;
+
+/// Persist one per-field library-vs-file authority choice (`None` restores
+/// the default) and emit `library-changed` so every effective view follows.
+pub async fn set_metadata_field_source(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    field: String,
+    source: Option<MetadataFieldSource>,
+) -> Result<BookMetadata, AppError> {
+    let view = service::set_field_source(&state.db, book_id, &field, source).await?;
+    emit_book_changed(state, events, book_id).await?;
+    Ok(view)
+}
+
+/// Read-only native metadata of a book's source file, read fresh from disk
+/// for the detail view's "Original File Metadata" panel. Never writes.
+pub async fn get_book_file_properties(
+    state: &AppState,
+    book_id: i64,
+) -> Result<Option<FileProperties>, AppError> {
+    service::get_book_file_properties(&state.db, book_id).await
+}
 
 /// The full curation view of a book: effective metadata (what every reader
 /// path shows), untouched source-file values, and which fields carry user

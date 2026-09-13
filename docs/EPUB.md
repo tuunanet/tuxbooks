@@ -15,6 +15,7 @@ layers.
 
 ```rust
 pub fn parse_epub(path: &Path) -> Result<EpubBook, EpubError>;
+pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, EpubError>;
 
 pub struct EpubBook {
     pub metadata: EpubMetadata, // title, author(+authors), subjects, language,
@@ -49,6 +50,13 @@ pub struct EpubBook {
 5. **Cover** — EPUB3 `properties~="cover-image"` preferred, EPUB2
    `<meta name="cover">` fallback; bytes resolved relative to the OPF
    directory (handles `../`, `./`, and `%XX` escapes).
+
+## File properties (read-only)
+
+`read_file_properties(path)` returns the managed OPF metadata as native
+key/value entries (Title, Subtitle, Creator(s), Subject(s), Publisher,
+Language, Date, Identifier, Series) for the book detail view's "Original
+File Metadata" panel. Empty fields are omitted; nothing is written.
 
 ## Metadata writing (embed)
 

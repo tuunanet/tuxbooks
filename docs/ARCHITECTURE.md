@@ -133,6 +133,10 @@ the render queue, and persistence. Byte access flows through
   overrides without touching the file; the explicit `embed_book_metadata`
   action writes the effective text metadata back into the EPUB/PDF (see
   [EPUB.md](EPUB.md) / [PDF.md](PDF.md)), atomically and cover-free.
+  `get_book_file_properties` reads the source file's native metadata fresh
+  for the detail view's read-only "Original File Metadata" panel, and
+  `set_metadata_field_source` persists a per-field library-vs-file choice
+  that the merge honors.
 
 Collection and progress plumbing stays in thin method + repository layers:
 collections CRUD over `repository::collections`; `mark_book_finished` over
@@ -154,11 +158,16 @@ frontend/src/
     lib/epub/readiumEngine.ts  the only Readium import site (EPUB seam)
     lib/pdf/pdfEngine.ts  the only MuPDF.js import site (PDF seam)
     hooks/                useLibrary, useAnnotations, useBookMetadata,
-                          useBookActions, useCollectionActions
+                          useBookFileProperties, useBookActions,
+                          useCollectionActions
     components/
         layout/           AppShell, Sidebar
         library/          LibraryView, header, empty states, import UX
-        books/            BookCard, BookListItem, BookDetail, metadata dialog
+        books/            BookCard, BookListItem, BookDetail (Overview /
+                          Metadata rail), MetadataPanel (inline library
+                          editing), FilePropertiesPanel, and metadata/
+                          (shared form pieces: field grid, list editor,
+                          cover field)
         search/           GlobalSearch (Ctrl/Cmd+K, backend FTS)
         reader/           ReaderShell — the format-agnostic reader model:
                           owns current book, progress, navigation entry

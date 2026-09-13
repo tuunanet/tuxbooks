@@ -2,7 +2,7 @@ pub mod parser;
 pub mod render;
 pub mod writer;
 
-pub use parser::{parse_pdf, PdfBook, PdfMetadata};
+pub use parser::{parse_pdf, read_file_properties, PdfBook, PdfMetadata};
 pub use render::render_first_page_cover;
 pub use writer::write_metadata;
 

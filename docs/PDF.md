@@ -11,6 +11,7 @@ belongs to the frontend engine (see "Rendering" below).
 
 ```rust
 pub fn parse_pdf(path: &Path) -> Result<PdfBook, PdfError>;
+pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, PdfError>;
 
 pub struct PdfBook {
     pub metadata: PdfMetadata,
@@ -34,6 +35,15 @@ pub struct PdfMetadata {
 4. **Title fallback** — a missing/empty `/Title` indexes the book under a
    humanized file name (underscores become spaces); titles are mandatory in
    the library schema.
+
+## File properties (read-only)
+
+`read_file_properties(path)` returns every non-empty document information
+dictionary entry in a stable order — Title, Author, Subject, Keywords,
+Creator, Producer, Creation date, Modification date — for the book detail
+view's "Original File Metadata" panel. Unlike `parse_pdf` there is no
+file-name title fallback: the panel reports what the file actually carries.
+PDF date strings (`D:YYYYMMDD…`) are rendered as `YYYY-MM-DD HH:mm`.
 
 ## Import mapping
 
@@ -62,7 +72,9 @@ Non-ASCII values are written as UTF-16BE hex strings with a byte-order mark —
 the same forms the reader decodes. Publisher, language, ISBN, publication
 date, series, and subtitle have no faithful PDF Info field and stay
 database-side as overrides (the embed flow reports them as still overridden).
-A one-time `<file>.bak` copy of the original is made before the first write
+Library subjects are not written to `/Keywords` — that mapping is a deliberate
+follow-up, so `/Keywords` stays a read-only file property for now. A one-time
+`<file>.bak` copy of the original is made before the first write
 (later embeds keep it), so the pre-embed file is always recoverable.
 
 ## Error handling

@@ -238,6 +238,12 @@ async fn dispatch(
                 state, p.book_id
             )))
         }
+        "get_book_file_properties" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::metadata::get_book_file_properties(
+                state, p.book_id
+            )))
+        }
         "update_book_metadata" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -248,6 +254,19 @@ async fn dispatch(
             let p: Args = parse_params(params)?;
             Ok(call!(commands::metadata::update_book_metadata(
                 state, events, p.book_id, p.form
+            )))
+        }
+        "set_metadata_field_source" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Args {
+                book_id: i64,
+                field: String,
+                source: Option<crate::domain::MetadataFieldSource>,
+            }
+            let p: Args = parse_params(params)?;
+            Ok(call!(commands::metadata::set_metadata_field_source(
+                state, events, p.book_id, p.field, p.source
             )))
         }
         "reset_book_metadata" => {

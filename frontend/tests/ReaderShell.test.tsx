@@ -81,7 +81,6 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
-          metadataEditorBookId: null,
         }}
       />
     </ThemeStateProvider>,
@@ -285,7 +284,6 @@ describe("Reader bookmarks", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -325,7 +323,6 @@ describe("Reader bookmarks", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -385,7 +382,6 @@ describe("ReaderNavigation", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -1005,7 +1001,6 @@ describe("PDF appearance menu", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -1086,7 +1081,6 @@ describe("Reader book switching", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,
@@ -1174,7 +1168,6 @@ describe("Reader highlight toolbar", () => {
             section: { kind: "smart", id: "all-books" },
             selectedBookId: 1,
             libraryQuery: "",
-            metadataEditorBookId: null,
           }}
         />
       </ThemeStateProvider>,

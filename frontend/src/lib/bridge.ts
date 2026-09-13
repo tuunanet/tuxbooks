@@ -12,9 +12,11 @@ import type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
+  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
+  MetadataFieldSource,
   MetadataFields,
   ReadingProgressInput,
   ReadingProgressRecord,
@@ -26,6 +28,7 @@ export type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
+  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -121,6 +124,26 @@ export function removeBook(bookId: number): Promise<boolean> {
 /** Curation view of a book: effective metadata, source values, overridden flags. */
 export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
   return invoke("get_book_metadata", { bookId });
+}
+
+/**
+ * Native metadata read fresh from the book's source file, for the read-only
+ * "Original File Metadata" panel. Null for unknown ids.
+ */
+export function getBookFileProperties(bookId: number): Promise<FileProperties | null> {
+  return invoke("get_book_file_properties", { bookId });
+}
+
+/**
+ * Choose which layer is authoritative for one field (`null` restores the
+ * default). The override is kept either way, so switching back is lossless.
+ */
+export function setMetadataFieldSource(
+  bookId: number,
+  field: string,
+  source: MetadataFieldSource | null,
+): Promise<BookMetadata> {
+  return invoke("set_metadata_field_source", { bookId, field, source });
 }
 
 /**

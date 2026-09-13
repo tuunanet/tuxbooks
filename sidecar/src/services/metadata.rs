@@ -1,6 +1,9 @@
 use sqlx::SqlitePool;
 
-use crate::domain::{Book, BookMetadata, MetadataFields, MetadataOverridden, NewBook};
+use crate::domain::{
+    Book, BookMetadata, FileProperties, FileProperty, MetadataFieldSource, MetadataFieldSources,
+    MetadataFields, MetadataOverridden, NewBook,
+};
 use crate::error::AppError;
 use crate::repository::{books, metadata as repo};
 
@@ -49,8 +52,11 @@ pub async fn get_book_metadata(
     let overrides = repo::get_overrides(pool, book_id)
         .await?
         .unwrap_or_default();
-    let authors = repo::list_book_authors(pool, book_id).await?;
-    let subjects = repo::list_book_subjects(pool, book_id).await?;
+    let field_sources = repo::get_field_sources(pool, book_id).await?;
+    let authors =
+        effective_authors(pool, book_id, &source.authors, &overrides, &field_sources).await?;
+    let subjects =
+        effective_subjects(pool, book_id, &source.subjects, &overrides, &field_sources).await?;
 
     let source_authors = source.authors.clone();
     let source_subjects = source.subjects.clone();
@@ -100,7 +106,80 @@ pub async fn get_book_metadata(
         source: source_fields,
         overridden,
         cover_path: book.cover_path,
+        source_cover_path: source.cover_path.clone(),
+        field_sources,
     }))
+}
+
+/// Read-only native metadata of a book's source file, answered fresh from
+/// disk for the detail view's "Original File Metadata" panel. `None` for
+/// unknown ids; a missing file is an explicit error, not a fake empty view.
+pub async fn get_book_file_properties(
+    pool: &SqlitePool,
+    book_id: i64,
+) -> Result<Option<FileProperties>, AppError> {
+    let Some(book) = books::get_book(pool, book_id).await? else {
+        return Ok(None);
+    };
+    let path = std::path::Path::new(&book.path);
+    if !path.exists() {
+        return Err(AppError::InvalidInput(
+            "the book file is missing; reconnect it to read its metadata".into(),
+        ));
+    }
+    let format = crate::domain::BookFormat::from_path(&book.path);
+    let raw = match format {
+        crate::domain::BookFormat::Epub => crate::epub::read_file_properties(path)?,
+        crate::domain::BookFormat::Pdf => crate::pdf::read_file_properties(path)?,
+    };
+    Ok(Some(FileProperties {
+        book_id,
+        format,
+        entries: raw
+            .into_iter()
+            .map(|(key, value)| FileProperty { key, value })
+            .collect(),
+    }))
+}
+
+/// Persist one per-field authority choice (or clear it with `None`), then
+/// re-merge the effective view so cards, records, and search follow.
+pub async fn set_field_source(
+    pool: &SqlitePool,
+    book_id: i64,
+    field: &str,
+    source: Option<MetadataFieldSource>,
+) -> Result<BookMetadata, AppError> {
+    let storage = storage_field_key(field)
+        .ok_or_else(|| AppError::InvalidInput(format!("unknown metadata field `{field}`")))?;
+    if books::get_book(pool, book_id).await?.is_none() {
+        return Err(AppError::NotFound);
+    }
+    match source {
+        Some(value) => repo::upsert_field_source(pool, book_id, storage, value).await?,
+        None => repo::clear_field_sources_for(pool, book_id, &[storage]).await?,
+    }
+    recompute_and_apply(pool, book_id).await?;
+    get_book_metadata(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+/// Map the wire (camelCase) field key to its storage column name.
+fn storage_field_key(field: &str) -> Option<&'static str> {
+    Some(match field {
+        "title" => "title",
+        "subtitle" => "subtitle",
+        "authors" => "authors",
+        "publisher" => "publisher",
+        "language" => "language",
+        "isbn" => "isbn",
+        "publicationDate" => "publication_date",
+        "series" => "series",
+        "subjects" => "subjects",
+        "description" => "description",
+        _ => return None,
+    })
 }
 
 /// Save the edit form (milestone 7). Every field is written through the
@@ -131,6 +210,10 @@ async fn apply_form(
     form: &MetadataFields,
 ) -> Result<(), AppError> {
     let source = load_source(pool, book_id).await?;
+    let existing_overrides = repo::get_overrides(pool, book_id)
+        .await?
+        .unwrap_or_default();
+    let field_sources = repo::get_field_sources(pool, book_id).await?;
 
     let title = clean_required(&form.title, "title")?;
     let subtitle = clean_optional(&form.subtitle);
@@ -154,11 +237,102 @@ async fn apply_form(
 
     // Minimal overrides: only fields that differ from the source are stored.
     let series_unit = series_override(
-        series_name,
+        series_name.clone(),
         series_index,
         source.series.as_deref(),
         source.series_index,
     );
+
+    // A saved field is a deliberate library choice: clear any explicit
+    // "use the file value" preference for fields this form changed, so the
+    // edit becomes the effective value instead of being shadowed.
+    let previous_authors = effective_authors(
+        pool,
+        book_id,
+        &source.authors,
+        &existing_overrides,
+        &field_sources,
+    )
+    .await?;
+    let previous_subjects = effective_subjects(
+        pool,
+        book_id,
+        &source.subjects,
+        &existing_overrides,
+        &field_sources,
+    )
+    .await?;
+    let (previous_series, previous_series_index) =
+        effective_series(&existing_overrides, &source, &field_sources);
+    let mut changed_fields: Vec<&str> = Vec::new();
+    if merged_scalar(
+        &existing_overrides.title,
+        Some(&source.title),
+        field_sources.title,
+    )
+    .as_deref()
+        != Some(title.as_str())
+    {
+        changed_fields.push("title");
+    }
+    if merged_scalar(
+        &existing_overrides.subtitle,
+        source.subtitle.as_deref(),
+        field_sources.subtitle,
+    ) != subtitle
+    {
+        changed_fields.push("subtitle");
+    }
+    if merged_scalar(
+        &existing_overrides.publisher,
+        source.publisher.as_deref(),
+        field_sources.publisher,
+    ) != publisher
+    {
+        changed_fields.push("publisher");
+    }
+    if merged_scalar(
+        &existing_overrides.language,
+        source.language.as_deref(),
+        field_sources.language,
+    ) != language
+    {
+        changed_fields.push("language");
+    }
+    if merged_scalar(
+        &existing_overrides.isbn,
+        source.isbn.as_deref(),
+        field_sources.isbn,
+    ) != isbn
+    {
+        changed_fields.push("isbn");
+    }
+    if merged_scalar(
+        &existing_overrides.description,
+        source.description.as_deref(),
+        field_sources.description,
+    ) != description
+    {
+        changed_fields.push("description");
+    }
+    if merged_scalar(
+        &existing_overrides.publication_date,
+        source.publication_date.as_deref(),
+        field_sources.publication_date,
+    ) != publication_date
+    {
+        changed_fields.push("publication_date");
+    }
+    if previous_series != series_name || previous_series_index != series_index {
+        changed_fields.push("series");
+    }
+    if previous_authors != authors {
+        changed_fields.push("authors");
+    }
+    if previous_subjects != subjects {
+        changed_fields.push("subjects");
+    }
+
     let overrides = repo::OverrideRow {
         title: text_override(Some(title.clone()), Some(&source.title)),
         subtitle: text_override(subtitle, source.subtitle.as_deref()),
@@ -174,10 +348,7 @@ async fn apply_form(
         } else {
             None
         },
-        cover_path: repo::get_overrides(pool, book_id)
-            .await?
-            .unwrap_or_default()
-            .cover_path,
+        cover_path: existing_overrides.cover_path.clone(),
         authors_customized: authors != source.authors,
         subjects_customized: subjects != source.subjects,
     };
@@ -188,6 +359,7 @@ async fn apply_form(
     if overrides.subjects_customized {
         repo::replace_book_subjects(pool, book_id, &subjects).await?;
     }
+    repo::clear_field_sources_for(pool, book_id, &changed_fields).await?;
     repo::upsert_overrides(pool, book_id, &overrides).await?;
     recompute_and_apply(pool, book_id).await?;
     repo::sweep_orphans(pool).await?;
@@ -284,6 +456,7 @@ pub async fn reset_book_metadata(
     book_id: i64,
 ) -> Result<BookMetadata, AppError> {
     repo::clear_overrides(pool, book_id).await?;
+    repo::clear_field_sources(pool, book_id).await?;
     recompute_and_apply(pool, book_id).await?;
     repo::sweep_orphans(pool).await?;
 
@@ -345,34 +518,29 @@ async fn recompute_and_apply(pool: &SqlitePool, book_id: i64) -> Result<(), AppE
     let overrides = repo::get_overrides(pool, book_id)
         .await?
         .unwrap_or_default();
+    let field_sources = repo::get_field_sources(pool, book_id).await?;
 
-    // Normalized lists: user-owned once customized, otherwise the file's.
-    let authors = if overrides.authors_customized {
-        repo::list_book_authors(pool, book_id).await?
-    } else {
-        let list = source.authors.clone();
-        repo::replace_book_authors(pool, book_id, &list).await?;
-        list
-    };
-    if !overrides.subjects_customized {
+    // Normalized lists: a `file` preference follows the file and leaves the
+    // stored override intact; otherwise user-owned once customized, else the
+    // file's (materialized into the join tables).
+    let authors =
+        effective_authors(pool, book_id, &source.authors, &overrides, &field_sources).await?;
+    if !overrides.authors_customized && field_sources.authors != Some(MetadataFieldSource::File) {
+        repo::replace_book_authors(pool, book_id, &source.authors).await?;
+    }
+    if !overrides.subjects_customized && field_sources.subjects != Some(MetadataFieldSource::File) {
         repo::replace_book_subjects(pool, book_id, &source.subjects).await?;
     }
 
-    // Scalar fields: override (empty string = explicitly cleared) else source.
+    // Scalar fields: a `file` preference wins over the override; otherwise
+    // override (empty string = explicitly cleared) else source.
     let title = clean_required(
-        scalar_value(&overrides.title, Some(&source.title))
+        merged_scalar(&overrides.title, Some(&source.title), field_sources.title)
             .as_deref()
             .unwrap_or_default(),
         "title",
     )?;
-    // The series name and index travel as one unit: an overridden unit
-    // (`Some(name)`) owns both values, an empty name is an explicit clear,
-    // and `None` inherits both from the source.
-    let (series, series_index) = match overrides.series.as_deref() {
-        None => (source.series.clone(), source.series_index),
-        Some("") => (None, None),
-        Some(name) => (Some(name.to_owned()), overrides.series_index),
-    };
+    let (series, series_index) = effective_series(&overrides, &source, &field_sources);
     let series_id = match series.as_deref() {
         Some(name) => Some(repo::ensure_series(pool, name).await?),
         None => None,
@@ -383,15 +551,32 @@ async fn recompute_and_apply(pool: &SqlitePool, book_id: i64) -> Result<(), AppE
         book_id,
         &repo::EffectiveValues {
             title,
-            subtitle: scalar_value(&overrides.subtitle, source.subtitle.as_deref()),
+            subtitle: merged_scalar(
+                &overrides.subtitle,
+                source.subtitle.as_deref(),
+                field_sources.subtitle,
+            ),
             author: display_authors(&authors),
-            publisher: scalar_value(&overrides.publisher, source.publisher.as_deref()),
-            language: scalar_value(&overrides.language, source.language.as_deref()),
-            isbn: scalar_value(&overrides.isbn, source.isbn.as_deref()),
-            description: scalar_value(&overrides.description, source.description.as_deref()),
-            publication_date: scalar_value(
+            publisher: merged_scalar(
+                &overrides.publisher,
+                source.publisher.as_deref(),
+                field_sources.publisher,
+            ),
+            language: merged_scalar(
+                &overrides.language,
+                source.language.as_deref(),
+                field_sources.language,
+            ),
+            isbn: merged_scalar(&overrides.isbn, source.isbn.as_deref(), field_sources.isbn),
+            description: merged_scalar(
+                &overrides.description,
+                source.description.as_deref(),
+                field_sources.description,
+            ),
+            publication_date: merged_scalar(
                 &overrides.publication_date,
                 source.publication_date.as_deref(),
+                field_sources.publication_date,
             ),
             series_id,
             series_index,
@@ -400,6 +585,70 @@ async fn recompute_and_apply(pool: &SqlitePool, book_id: i64) -> Result<(), AppE
     )
     .await
     .map(|_| ())
+}
+
+/// Merge one scalar with a per-field authority choice: `file` ignores the
+/// override; otherwise the minimal-override rule applies.
+fn merged_scalar(
+    override_value: &Option<String>,
+    source_value: Option<&str>,
+    source: Option<MetadataFieldSource>,
+) -> Option<String> {
+    match source {
+        Some(MetadataFieldSource::File) => {
+            source_value.filter(|v| !v.is_empty()).map(str::to_owned)
+        }
+        _ => scalar_value(override_value, source_value),
+    }
+}
+
+/// The effective author list: a `file` preference follows the file, a
+/// customized list is user-owned, and otherwise the file's list applies.
+async fn effective_authors(
+    pool: &SqlitePool,
+    book_id: i64,
+    source: &[String],
+    overrides: &repo::OverrideRow,
+    field_sources: &MetadataFieldSources,
+) -> Result<Vec<String>, AppError> {
+    if field_sources.authors == Some(MetadataFieldSource::File) || !overrides.authors_customized {
+        Ok(source.to_vec())
+    } else {
+        repo::list_book_authors(pool, book_id).await
+    }
+}
+
+/// The effective subject list; same rules as [`effective_authors`].
+async fn effective_subjects(
+    pool: &SqlitePool,
+    book_id: i64,
+    source: &[String],
+    overrides: &repo::OverrideRow,
+    field_sources: &MetadataFieldSources,
+) -> Result<Vec<String>, AppError> {
+    if field_sources.subjects == Some(MetadataFieldSource::File) || !overrides.subjects_customized {
+        Ok(source.to_vec())
+    } else {
+        repo::list_book_subjects(pool, book_id).await
+    }
+}
+
+/// The effective series name/index (one unit): a `file` preference takes both
+/// from the file; otherwise an overridden unit owns both, an empty name is an
+/// explicit clear, and `None` inherits both.
+fn effective_series(
+    overrides: &repo::OverrideRow,
+    source: &SourceMetadata,
+    field_sources: &MetadataFieldSources,
+) -> (Option<String>, Option<f64>) {
+    if field_sources.series == Some(MetadataFieldSource::File) {
+        return (source.series.clone(), source.series_index);
+    }
+    match overrides.series.as_deref() {
+        None => (source.series.clone(), source.series_index),
+        Some("") => (None, None),
+        Some(name) => (Some(name.to_owned()), overrides.series_index),
+    }
 }
 
 /// The stored source snapshot; books imported before the snapshot existed
@@ -1021,6 +1270,135 @@ mod tests {
     async fn get_book_metadata_is_none_for_unknown_ids() {
         let (_tmp, pool, _id) = setup().await;
         assert!(get_book_metadata(&pool, 999).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn file_preference_shadows_the_override_but_keeps_it() {
+        let (_tmp, pool, id) = setup().await;
+        update_book_metadata(&pool, id, &form(id, "Curated Title"))
+            .await
+            .unwrap();
+        assert_eq!(effective(&pool, id).await.title, "Curated Title");
+
+        // Choosing the file value changes the effective view but not the
+        // stored override, and the divergence marker stays.
+        let view = set_field_source(&pool, id, "title", Some(MetadataFieldSource::File))
+            .await
+            .unwrap();
+        assert_eq!(view.effective.title, "File Garbled Title");
+        assert!(view.overridden.title);
+        assert_eq!(view.field_sources.title, Some(MetadataFieldSource::File));
+        assert_eq!(effective(&pool, id).await.title, "File Garbled Title");
+
+        // Switching back to library restores the override.
+        let view = set_field_source(&pool, id, "title", Some(MetadataFieldSource::Library))
+            .await
+            .unwrap();
+        assert_eq!(view.effective.title, "Curated Title");
+        assert_eq!(view.field_sources.title, Some(MetadataFieldSource::Library));
+
+        // Clearing the choice returns to the default (override wins).
+        let view = set_field_source(&pool, id, "title", None).await.unwrap();
+        assert_eq!(view.effective.title, "Curated Title");
+        assert_eq!(view.field_sources.title, None);
+        assert!(view.overridden.title);
+    }
+
+    #[tokio::test]
+    async fn saving_a_changed_field_clears_its_file_preference() {
+        let (_tmp, pool, id) = setup().await;
+        update_book_metadata(&pool, id, &form(id, "Curated Title"))
+            .await
+            .unwrap();
+        set_field_source(&pool, id, "title", Some(MetadataFieldSource::File))
+            .await
+            .unwrap();
+
+        // Editing the field is a deliberate library choice: the preference is
+        // cleared so the new value becomes effective.
+        let view = update_book_metadata(&pool, id, &form(id, "Edited Title"))
+            .await
+            .unwrap();
+        assert_eq!(view.effective.title, "Edited Title");
+        assert_eq!(view.field_sources.title, None);
+    }
+
+    #[tokio::test]
+    async fn file_preference_on_lists_preserves_the_custom_list() {
+        let (_tmp, pool, id) = setup().await;
+        let mut f = form(id, "File Garbled Title");
+        f.authors = vec!["Ada Lovelace".into()];
+        update_book_metadata(&pool, id, &f).await.unwrap();
+        assert_eq!(
+            effective(&pool, id).await.author.as_deref(),
+            Some("Ada Lovelace")
+        );
+
+        let view = set_field_source(&pool, id, "authors", Some(MetadataFieldSource::File))
+            .await
+            .unwrap();
+        assert_eq!(
+            view.effective.authors,
+            vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()],
+            "the file's list becomes effective"
+        );
+        assert!(view.overridden.authors, "the user list is still stored");
+        assert_eq!(
+            repo::list_book_authors(&pool, id).await.unwrap(),
+            vec!["Ada Lovelace".to_string()],
+            "the custom list is preserved for switching back"
+        );
+
+        let view = set_field_source(&pool, id, "authors", None).await.unwrap();
+        assert_eq!(view.effective.authors, vec!["Ada Lovelace".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn file_preference_on_series_takes_both_from_the_file() {
+        let (_tmp, pool, id) = setup().await;
+        let mut f = form(id, "File Garbled Title");
+        f.series = Some("Engines".into());
+        f.series_index = Some(7.0);
+        update_book_metadata(&pool, id, &f).await.unwrap();
+
+        let view = set_field_source(&pool, id, "series", Some(MetadataFieldSource::File))
+            .await
+            .unwrap();
+        assert_eq!(view.effective.series.as_deref(), Some("Analytical Engines"));
+        assert_eq!(view.effective.series_index, Some(2.0));
+        assert!(view.overridden.series);
+        let book = effective(&pool, id).await;
+        assert_eq!(book.series_name.as_deref(), Some("Analytical Engines"));
+        assert_eq!(book.series_index, Some(2.0));
+    }
+
+    #[tokio::test]
+    async fn reset_clears_field_source_preferences() {
+        let (_tmp, pool, id) = setup().await;
+        update_book_metadata(&pool, id, &form(id, "Curated Title"))
+            .await
+            .unwrap();
+        set_field_source(&pool, id, "title", Some(MetadataFieldSource::File))
+            .await
+            .unwrap();
+
+        let view = reset_book_metadata(&pool, id).await.unwrap();
+        assert_eq!(view.field_sources.title, None);
+        assert_eq!(view.effective.title, "File Garbled Title");
+    }
+
+    #[tokio::test]
+    async fn set_field_source_rejects_unknown_fields_and_books() {
+        let (_tmp, pool, id) = setup().await;
+        let err = set_field_source(&pool, id, "cover", Some(MetadataFieldSource::File))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::InvalidInput(_)), "got: {err:?}");
+
+        let err = set_field_source(&pool, 999, "title", Some(MetadataFieldSource::File))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::NotFound));
     }
 
     #[test]

@@ -52,6 +52,41 @@ pub fn parse_epub(path: &Path) -> Result<EpubBook, EpubError> {
     })
 }
 
+/// Native metadata entries for the read-only "Original File Metadata" panel,
+/// built from the same OPF parse the importer uses. Only non-empty values are
+/// returned, in a stable display order.
+pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, EpubError> {
+    let metadata = parse_epub(path)?.metadata;
+    let mut entries = Vec::new();
+    let mut push = |key: &str, value: Option<String>| {
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            entries.push((key.to_string(), value));
+        }
+    };
+    push("Title", Some(metadata.title));
+    push("Subtitle", metadata.subtitle);
+    push(
+        "Creator(s)",
+        (!metadata.authors.is_empty()).then(|| metadata.authors.join(", ")),
+    );
+    push(
+        "Subject(s)",
+        (!metadata.subjects.is_empty()).then(|| metadata.subjects.join(", ")),
+    );
+    push("Publisher", metadata.publisher);
+    push("Language", metadata.language);
+    push("Date", metadata.publication_date);
+    push("Identifier (ISBN)", metadata.isbn);
+    if let Some(series) = metadata.series {
+        let value = match metadata.series_index {
+            Some(index) => format!("{series} #{index}"),
+            None => series,
+        };
+        entries.push(("Series".to_string(), value));
+    }
+    Ok(entries)
+}
+
 fn read_mimetype<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<(), EpubError> {
     if zip.is_empty() {
         return Err(EpubError::MissingMimetype);
@@ -244,6 +279,21 @@ mod tests {
         assert_eq!(book.metadata.author.as_deref(), Some("Ada Lovelace"));
         assert_eq!(book.metadata.language.as_deref(), Some("en"));
         assert_eq!(book.metadata.isbn.as_deref(), Some("978-3-16-148410-0"));
+    }
+
+    #[test]
+    fn file_properties_list_native_metadata() {
+        let entries = read_file_properties(&fixture_epub()).unwrap();
+        assert_eq!(
+            entries[0],
+            ("Title".to_string(), "A Minimal Book".to_string())
+        );
+        assert!(entries.contains(&(
+            "Identifier (ISBN)".to_string(),
+            "978-3-16-148410-0".to_string()
+        )));
+        assert!(entries.contains(&("Language".to_string(), "en".to_string())));
+        assert!(!entries.iter().any(|(_, value)| value.is_empty()));
     }
 
     #[test]

@@ -52,6 +52,73 @@ pub fn parse_pdf(path: &Path) -> Result<PdfBook, PdfError> {
     })
 }
 
+/// Every non-empty native entry of the document information dictionary, in a
+/// stable display order, for the read-only "Original File Metadata" panel.
+/// Unlike `parse_pdf`, a missing `/Title` stays missing (no file-name
+/// fallback): this view reports what the file actually carries.
+pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, PdfError> {
+    let doc = Document::load(path).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let info = doc
+        .trailer
+        .get(b"Info")
+        .ok()
+        .and_then(|obj| resolve(&doc, obj))
+        .and_then(|obj| obj.as_dict().ok().cloned());
+
+    let read = |key: &[u8]| -> Option<String> {
+        info.as_ref()
+            .and_then(|dict| dict.get(key).ok())
+            .and_then(|obj| resolve(&doc, obj))
+            .and_then(|obj| obj.as_str().ok())
+            .map(decode_pdf_string)
+            .filter(|value| !value.is_empty())
+    };
+
+    let mut entries = Vec::new();
+    let mut push = |key: &str, value: Option<String>| {
+        if let Some(value) = value {
+            entries.push((key.to_string(), value));
+        }
+    };
+    push("Title", read(b"Title"));
+    push("Author", read(b"Author"));
+    push("Subject", read(b"Subject"));
+    push("Keywords", read(b"Keywords"));
+    push("Creator", read(b"Creator"));
+    push("Producer", read(b"Producer"));
+    push(
+        "Creation date",
+        read(b"CreationDate").map(|value| decode_pdf_date(&value)),
+    );
+    push(
+        "Modification date",
+        read(b"ModDate").map(|value| decode_pdf_date(&value)),
+    );
+    Ok(entries)
+}
+
+/// PDF dates look like `D:YYYYMMDDHHmmSSOHH'mm'`; render the common
+/// `YYYY-MM-DD HH:mm` shape and fall back to the raw value when the string
+/// does not carry a full date.
+fn decode_pdf_date(raw: &str) -> String {
+    let digits: String = raw
+        .strip_prefix("D:")
+        .unwrap_or(raw)
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    match (digits.get(0..4), digits.get(4..6), digits.get(6..8)) {
+        (Some(year), Some(month), Some(day)) => {
+            let date = format!("{year}-{month}-{day}");
+            match (digits.get(8..10), digits.get(10..12)) {
+                (Some(hour), Some(minute)) => format!("{date} {hour}:{minute}"),
+                _ => date,
+            }
+        }
+        _ => raw.to_string(),
+    }
+}
+
 /// Follow one indirect-reference hop; lopdf stores trailer values as
 /// `Reference` whenever the Info dictionary lives in an object stream.
 fn resolve<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Object> {
@@ -205,6 +272,55 @@ mod tests {
         // Plain literal bytes decode as PDFDocEncoding/Latin-1.
         assert_eq!(decode_pdf_string(b"Plain"), "Plain");
         assert_eq!(decode_pdf_string(b"  padded  "), "padded");
+    }
+
+    #[test]
+    fn reads_native_info_dictionary_entries_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_pdf(
+            tmp.path(),
+            "props.pdf",
+            &build_pdf(&[
+                ("Title", "The Quiet Meridian"),
+                ("Author", "Elena Vasquez"),
+                ("Subject", "tide charts"),
+                ("Keywords", "tides, radio"),
+                ("Creator", "Acme Writer"),
+                ("Producer", "Acme Publisher"),
+                ("CreationDate", "D:20230412102400-04'00'"),
+                ("ModDate", "D:20230501120000Z"),
+            ]),
+        );
+
+        let entries = read_file_properties(&path).unwrap();
+        assert_eq!(
+            entries[0],
+            ("Title".to_string(), "The Quiet Meridian".to_string())
+        );
+        assert!(entries.contains(&("Keywords".to_string(), "tides, radio".to_string())));
+        assert!(entries.contains(&("Creator".to_string(), "Acme Writer".to_string())));
+        assert!(entries.contains(&("Creation date".to_string(), "2023-04-12 10:24".to_string())));
+        assert!(entries.contains(&(
+            "Modification date".to_string(),
+            "2023-05-01 12:00".to_string()
+        )));
+    }
+
+    #[test]
+    fn file_properties_omit_missing_entries_without_a_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_pdf(tmp.path(), "untitled.pdf", &build_pdf(&[]));
+        assert_eq!(read_file_properties(&path).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn pdf_dates_render_common_shapes() {
+        assert_eq!(
+            decode_pdf_date("D:20230412102400-04'00'"),
+            "2023-04-12 10:24"
+        );
+        assert_eq!(decode_pdf_date("D:20230412"), "2023-04-12");
+        assert_eq!(decode_pdf_date("not a date"), "not a date");
     }
 }
 

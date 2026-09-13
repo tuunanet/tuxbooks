@@ -5,9 +5,15 @@ import {
   getBookMetadata,
   resetBookMetadata,
   setBookCover,
+  setMetadataFieldSource,
   updateBookMetadata,
 } from "@/lib/bridge";
-import type { BookMetadata, MetadataFields } from "@/types/domain";
+import type {
+  BookMetadata,
+  MetadataFieldSource,
+  MetadataFieldSources,
+  MetadataFields,
+} from "@/types/domain";
 
 interface LoadedView {
   bookId: number;
@@ -115,6 +121,27 @@ export function useBookMetadata(bookId: number | null) {
   }, [bookId]);
 
   /**
+   * Choose which layer is authoritative for one field (`null` restores the
+   * default). The override is kept either way, so switching back is lossless.
+   */
+  const setFieldSource = useCallback(
+    async (field: keyof MetadataFieldSources, source: MetadataFieldSource | null) => {
+      if (bookId === null) return;
+      setSaving(true);
+      setEmbedDone(null);
+      try {
+        const view = await setMetadataFieldSource(bookId, field, source);
+        setLoaded({ bookId, metadata: view, error: null });
+      } catch (err) {
+        setLoaded({ bookId, metadata: null, error: toMessage(err) });
+      } finally {
+        setSaving(false);
+      }
+    },
+    [bookId],
+  );
+
+  /**
    * Explicit "Embed into file": the backend persists the form and writes it
    * into the source EPUB/PDF, then re-parses the file. Passing the form means
    * unsaved edits are embedded too — Save is not required first. Failures
@@ -155,6 +182,10 @@ export function useBookMetadata(bookId: number | null) {
     reset,
     changeCover,
     restoreCover,
+    setFieldSource,
     embed,
   };
 }
+
+/** The curation view and mutations a loaded book exposes to its editors. */
+export type BookMetadataCuration = ReturnType<typeof useBookMetadata>;

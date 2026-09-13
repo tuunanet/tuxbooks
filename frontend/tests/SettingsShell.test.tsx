@@ -25,7 +25,6 @@ function renderSettings() {
               section: { kind: "settings" },
               selectedBookId: null,
               libraryQuery: "",
-              metadataEditorBookId: null,
             }}
           />
         </ImportProvider>

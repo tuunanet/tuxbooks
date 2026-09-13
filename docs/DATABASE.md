@@ -159,6 +159,23 @@ Implemented once in `services/metadata.rs::recompute_and_apply`:
   back removes the override. The cover override always wins over the
   extracted cover until cleared or reset.
 
+### Per-field source preference (issue #58)
+
+`book_metadata_field_sources` (migration `0010`) stores an explicit
+library-vs-file choice per field. An absent row is the default: the library
+override when one exists, otherwise the file value. Choices are sparse — only
+deviations are stored, and `reset_book_metadata` clears them with the
+overrides.
+
+`merged_scalar` and `effective_series` honour a `file` choice by taking the
+source value; the override row is never deleted, so switching back is
+lossless. For the normalized lists a `file` choice computes the effective list
+from the source JSON without rewriting `book_authors`/`book_subjects`, so the
+user's stored list survives. A save clears the choice for any field whose
+submitted value changed, so an edit always becomes effective. `title`,
+`subtitle`, `authors`, `publisher`, `language`, `isbn`, `publication_date`,
+`series`, `subjects`, and `description` are selectable; `cover` is excluded.
+
 ### Embedding into the source file
 
 `embed_book_metadata` is the explicit "write this into the book" action. It

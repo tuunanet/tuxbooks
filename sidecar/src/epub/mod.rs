@@ -4,7 +4,7 @@ pub mod session;
 pub mod writer;
 
 pub use metadata::EpubMetadata;
-pub use parser::{parse_epub, CoverImage, EpubBook};
+pub use parser::{parse_epub, read_file_properties, CoverImage, EpubBook};
 pub use session::{build_session, guess_member_media_type, read_member, EpubReadingSession};
 pub use writer::write_metadata;
 
