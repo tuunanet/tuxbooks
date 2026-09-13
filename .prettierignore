@@ -12,6 +12,3 @@ LICENSE.md
 # EPUB fixture corpus: source trees + READMEs are generated/script-owned and
 # must stay byte-stable for the determinism check (just make-epub-fixtures)
 tests/fixtures/epub
-
-# generated knowledge graph (hooks rewrite these constantly)
-graphify-out

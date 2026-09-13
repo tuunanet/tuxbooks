@@ -52,12 +52,5 @@ sidecar/pdfium/
 *.swp
 electron/dist/
 
-# graphify local-only outputs (git has no trailing comments on pattern lines)
-graphify-out/
-#graphify-out/cost.json
-#graphify-out/cache/
-#graphify-out/2*/
-#graphify-out/graph.html
-
 # Kate editor swap files
 *.kate-swp

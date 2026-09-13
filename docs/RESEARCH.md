@@ -29,6 +29,3 @@ specific source for the question rather than a generic web search.
 3. General/current information or web research → **Firecrawl**
 4. If multiple sources are relevant, use them together and cross-check
    important technical conclusions.
-
-Do not invoke graphify merely because the question is being asked from within
-this repository. The question itself must concern the TuxBooks codebase.
