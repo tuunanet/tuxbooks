@@ -9,8 +9,10 @@ import {
   EPUB_COLUMN_COUNTS,
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
+  EPUB_DEFAULT_PAGE_GUTTER_PX,
   EPUB_FONT_FAMILIES,
   EPUB_FONT_SIZE_SCALE_PERCENT,
+  EPUB_FOREGROUND_AA_RATIO,
   EPUB_FOREGROUND_SWATCHES,
   EPUB_LETTER_SPACING_SCALE,
   EPUB_LINE_HEIGHT_SCALE,
@@ -28,6 +30,7 @@ import {
   nearestEpubPageGutter,
   nearestEpubParagraphSpacing,
   nearestEpubWordSpacing,
+  readerPopoverVariables,
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
@@ -82,8 +85,11 @@ function ScaleSliderRow(props: {
   scale: readonly number[];
   value: number;
   onStep: (step: number) => void;
+  /** What the reset button restores; 0 (publication default) unless overridden. */
+  defaultValue?: number;
 }) {
-  const atDefault = props.value === 0;
+  const defaultValue = props.defaultValue ?? 0;
+  const atDefault = props.value === defaultValue;
   const index = props.scale.indexOf(props.value);
   return (
     <div>
@@ -99,7 +105,7 @@ function ScaleSliderRow(props: {
             data-testid={`pref-${props.sliderTestId}-reset`}
             aria-label={`Reset ${props.label.toLowerCase()}`}
             disabled={atDefault}
-            onClick={() => props.onStep(0)}
+            onClick={() => props.onStep(defaultValue)}
           >
             <RotateCcw />
           </Button>
@@ -165,7 +171,7 @@ export function ReaderAppearance({ format }: { format?: string }) {
     effectiveForeground !== null && isEpubHexColor(effectiveForeground)
       ? epubContrastRatio(effectiveForeground, referenceBackground)
       : null;
-  const belowAA = foregroundRatio !== null && foregroundRatio < 4.5;
+  const belowAA = foregroundRatio !== null && foregroundRatio < EPUB_FOREGROUND_AA_RATIO;
 
   // PDFs can only be filtered, not recolored — offer exactly the themes
   // with a faithful filter mapping (Blue/Mint are EPUB-only).
@@ -222,6 +228,10 @@ export function ReaderAppearance({ format }: { format?: string }) {
           // controls use the wider two-column shape that avoids scrollbars.
           isPdf ? "w-64" : "w-[30rem]",
         )}
+        // The popover is portaled outside the reader root; redefine the
+        // app tokens in its scope so it follows the reader theme instead
+        // of the global light/dark mode.
+        style={readerPopoverVariables(preferences.theme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         {/* PDFs expose only the theme; EPUB gets the full reflow set.
@@ -337,6 +347,7 @@ export function ReaderAppearance({ format }: { format?: string }) {
                   scale={EPUB_PAGE_GUTTER_SCALE_PX}
                   value={nearestEpubPageGutter(preferences.pageGutter)}
                   onStep={(step) => setPreferences({ pageGutter: step })}
+                  defaultValue={EPUB_DEFAULT_PAGE_GUTTER_PX}
                 />
               )}
             </div>

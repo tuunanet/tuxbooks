@@ -25,6 +25,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 
 import { AppShell } from "@/components/layout/AppShell";
 import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
@@ -70,15 +71,20 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
     delete_annotation: true,
   });
   return render(
-    <AppShell
-      initialState={{
-        view: "reader",
-        section: { kind: "smart", id: "all-books" },
-        selectedBookId: 1,
-        libraryQuery: "",
-        metadataEditorBookId: null,
-      }}
-    />,
+    // The reader surface consumes the global resolved theme (auto reader
+    // theme); jsdom's matchMedia stub reports light, so the surface stays
+    // on publisher default unless a test picks a theme.
+    <ThemeStateProvider>
+      <AppShell
+        initialState={{
+          view: "reader",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+          metadataEditorBookId: null,
+        }}
+      />
+    </ThemeStateProvider>,
   );
 }
 
@@ -272,15 +278,17 @@ describe("Reader bookmarks", () => {
       delete_annotation: true,
     });
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
     await screen.findByTestId("reader-view");
 
@@ -310,15 +318,17 @@ describe("Reader bookmarks", () => {
       delete_annotation: true,
     });
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
     await screen.findByTestId("reader-view");
 
@@ -368,15 +378,17 @@ describe("ReaderNavigation", () => {
       list_annotations: [],
     });
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
     await screen.findByTestId("reader-view");
 
@@ -529,9 +541,22 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
 
+    // Light paints its own chrome (white) instead of following the app
+    // tokens — in a dark app the toolbar must still match the forced-white
+    // surface (UAT feedback).
+    await userEvent.click(screen.getByRole("radio", { name: "Light" }));
+    const lightView = screen.getByTestId("reader-view");
+    expect(lightView).toHaveAttribute("data-theme", "light");
+    expect(lightView).toHaveClass("bg-[#ffffff]");
+    expect(lightView).not.toHaveClass("bg-background");
+
     // Accessible presets apply like any other theme...
     await userEvent.click(screen.getByRole("radio", { name: "High contrast" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "contrast");
+    // Dark-family surfaces pin dark UA defaults for their section documents.
+    expect(document.querySelector('[data-testid="epub-reader"]')).toHaveStyle({
+      colorScheme: "dark",
+    });
 
     // ...and Default restores the publisher-owned colors (neutral state).
     await userEvent.click(within(themeGroup).getByRole("radio", { name: "Default" }));
@@ -552,7 +577,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -599,7 +624,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -620,7 +645,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -650,7 +675,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -671,7 +696,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -860,8 +885,7 @@ describe("ReaderAppearance", () => {
 
     const margins = screen.getByTestId("pref-page-gutter");
     const thumb = within(margins).getByRole("slider");
-    // Three steps: 0 → 10px → 20px → 30px.
-    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    // Opens at the 10px default; two steps: 10px → 20px → 30px.
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -878,6 +902,16 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const marginsAgain = await screen.findByTestId("pref-page-gutter");
     expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "3");
+
+    // Reset restores the opening default (10px), one step from the left
+    // edge — not the publication-default 0.
+    await userEvent.click(screen.getByRole("button", { name: "Reset page margins" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ pageGutter: 10 }),
+      ),
+    );
+    expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "1");
   });
 
   it("overrides the foreground color on top of the theme and resets it", async () => {
@@ -964,15 +998,17 @@ describe("PDF appearance menu", () => {
       list_annotations: [],
     });
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
 
     await screen.findByTestId("pdf-canvas");
@@ -1043,15 +1079,17 @@ describe("Reader book switching", () => {
       list_annotations: [],
     });
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
 
     // The EPUB session lists its engine TOC in the drawer.
@@ -1129,15 +1167,17 @@ describe("Reader highlight toolbar", () => {
       delete_annotation: true,
     });
     return render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
   }
 

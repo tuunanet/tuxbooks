@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { BookDetail } from "@/components/books/BookDetail";
 import { AppShell } from "@/components/layout/AppShell";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
@@ -242,15 +243,19 @@ describe("BookDetail", () => {
     });
 
     render(
-      <AppShell
-        initialState={{
-          view: "detail",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      // Continue Reading enters the reader view, which consumes the global
+      // resolved theme for the auto reader surface.
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "detail",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
 
     await screen.findByTestId("book-detail");

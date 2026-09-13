@@ -469,7 +469,10 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     minimizable: true,
     icon: appIcon(),
     show: false,
-    backgroundColor: "#0b0b0f",
+    // Light background matching the :root token in frontend/src/index.css;
+    // the renderer's inline theme bootstrap paints the real choice before
+    // first content paint.
+    backgroundColor: "#ffffff",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

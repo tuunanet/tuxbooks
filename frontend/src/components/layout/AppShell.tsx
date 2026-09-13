@@ -15,6 +15,7 @@ import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
+import { useThemeState } from "@/state/themeState";
 import { Sidebar } from "./Sidebar";
 
 /** Focuses the global search field once it exists (wired up in the search stage). */
@@ -57,10 +58,13 @@ function PdfEnginePrewarm() {
 /**
  * Reader: the full window, no library sidebar. Own providers — reader state
  * is session-scoped and the toolbar introduces the app's first tooltips.
+ * The reader surface follows the global theme until a theme is picked in
+ * the appearance menu (ReaderProvider pins it from then on).
  */
 function Reader() {
+  const { resolvedTheme } = useThemeState();
   return (
-    <ReaderProvider>
+    <ReaderProvider globalTheme={resolvedTheme}>
       <TooltipProvider delayDuration={200}>
         <ReaderShell />
       </TooltipProvider>

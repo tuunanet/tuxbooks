@@ -53,7 +53,7 @@ export function PdfToolbar({
       <span
         data-testid="pdf-page-indicator"
         aria-live="polite"
-        className="px-2 text-xs text-muted-foreground tabular-nums"
+        className="px-2 text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
       >
         Page {pageNumber} of {pageCount}
       </span>
@@ -68,7 +68,10 @@ export function PdfToolbar({
         <span aria-hidden="true">›</span>
       </Button>
 
-      <span className="mx-2 h-4 w-px bg-border" aria-hidden="true" />
+      <span
+        className="mx-2 h-4 w-px bg-[var(--reader-chrome-border,var(--border))]"
+        aria-hidden="true"
+      />
 
       <Button
         variant="ghost"
@@ -82,7 +85,7 @@ export function PdfToolbar({
       </Button>
       <span
         data-testid="pdf-zoom-level"
-        className="w-10 text-center text-xs text-muted-foreground tabular-nums"
+        className="w-10 text-center text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
       >
         {zoomPercent}%
       </span>

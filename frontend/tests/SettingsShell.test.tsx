@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AppShell } from "@/components/layout/AppShell";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { mockInvoke } from "./mocks/bridge";
 
 function renderSettings() {
@@ -13,23 +15,33 @@ function renderSettings() {
     list_books: [],
   });
   return render(
-    <LibraryDataProvider>
-      <ImportProvider>
-        <AppShell
-          initialState={{
-            view: "library",
-            section: { kind: "settings" },
-            selectedBookId: null,
-            libraryQuery: "",
-            metadataEditorBookId: null,
-          }}
-        />
-      </ImportProvider>
-    </LibraryDataProvider>,
+    <ThemeStateProvider>
+      <LibraryDataProvider>
+        <ImportProvider>
+          <AppShell
+            initialState={{
+              view: "library",
+              section: { kind: "settings" },
+              selectedBookId: null,
+              libraryQuery: "",
+              metadataEditorBookId: null,
+            }}
+          />
+        </ImportProvider>
+      </LibraryDataProvider>
+    </ThemeStateProvider>,
   );
 }
 
 describe("SettingsShell", () => {
+  beforeEach(() => {
+    // The theme provider and its DOM side effects persist across tests in
+    // this file's shared jsdom document.
+    window.localStorage.clear();
+    document.documentElement.className = "";
+    document.documentElement.style.colorScheme = "";
+  });
+
   it("renders the settings view with all sections", async () => {
     renderSettings();
 
@@ -80,5 +92,23 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByTestId("settings-rows")).toHaveTextContent("Local only");
     expect(screen.getByTestId("settings-rows")).toHaveTextContent("SQLite FTS5");
+  });
+
+  it("applies and persists the app theme from the General section", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    expect(screen.getByRole("radiogroup", { name: "App theme" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Following system");
+
+    await userEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    expect(document.documentElement).toHaveClass("dark");
+    expect(document.documentElement.style.colorScheme).toBe("dark");
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Always dark");
+
+    await userEvent.click(screen.getByRole("radio", { name: "System" }));
+    expect(document.documentElement).not.toHaveClass("dark");
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
   });
 });

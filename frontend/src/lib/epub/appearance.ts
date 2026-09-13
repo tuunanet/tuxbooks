@@ -187,6 +187,13 @@ export function nearestEpubParagraphSpacing(value: number): number {
  */
 export const EPUB_PAGE_GUTTER_SCALE_PX = [0, 10, 20, 30, 40, 60] as const;
 
+/**
+ * The opening page margin, and the value the appearance popover's reset
+ * button restores (UAT preference). 0 on the ladder remains publication
+ * default — reachable by sliding, just not the default anymore.
+ */
+export const EPUB_DEFAULT_PAGE_GUTTER_PX = 10;
+
 /** Nearest supported page-margin step. */
 export function nearestEpubPageGutter(value: number): number {
   return nearestEpubScaleStep(EPUB_PAGE_GUTTER_SCALE_PX, value);
@@ -347,6 +354,45 @@ export function epubForegroundReferenceBackground(theme: EpubThemeName): string 
 }
 
 /**
+ * The WCAG AA text-contrast floor, shared by the foreground readout's
+ * warning and the theme-switch rule below.
+ */
+export const EPUB_FOREGROUND_AA_RATIO = 4.5;
+
+/**
+ * Color-scheme the reading surface runs under. ReadiumCSS declares no
+ * `color-scheme`, so section documents resolve UA-default colors (text is
+ * CanvasText) from the OS preference — with a dark OS, publisher pages
+ * whose text is unstyled render light-on-white (UAT). The surface is
+ * therefore pinned per theme family: light for the light-family presets
+ * and the neutral Default (publisher content is light-family by default —
+ * the obvious exception to the app's own color-scheme), dark for the
+ * dark-family presets whose palettes live on near-black surfaces. The
+ * property inherits, so declaring it once on the reader container pins
+ * every section iframe.
+ */
+export function epubThemeColorScheme(theme: EpubThemeName): "light" | "dark" {
+  return theme === "dark" || theme === "contrast" || theme === "blue-contrast" ? "dark" : "light";
+}
+
+/**
+ * True when a foreground override stays legible on `theme`'s background.
+ * Swatches are curated per theme family (dark inks for light-family
+ * themes, light inks for dark-family ones), and a free-form pick is judged
+ * against the theme it was made on — so an override that would fail AA
+ * after a theme switch is dropped rather than coloring body text
+ * illegibly (UAT: bright Parchment ink from Dark surviving a switch to
+ * the white Default page).
+ */
+export function epubForegroundFitsTheme(foreground: string | null, theme: EpubThemeName): boolean {
+  if (foreground === null) return true;
+  return (
+    epubContrastRatio(foreground, epubForegroundReferenceBackground(theme)) >=
+    EPUB_FOREGROUND_AA_RATIO
+  );
+}
+
+/**
  * Curated foreground swatches (issue #55), in two families: dark inks for
  * the light-family themes (Light, Paper, Mint) and light inks for the
  * dark-family themes (Dark, High contrast, Blue). No single color reaches
@@ -379,6 +425,14 @@ export function epubForegroundPreference(foreground: string | null): string | nu
   return foreground !== null && isEpubHexColor(foreground) ? foreground.toLowerCase() : null;
 }
 
+/** Hex color (#rrggbb) as rgba() with the given alpha; undefined off-format. */
+export function hexWithAlpha(hex: string, alpha: number): string | undefined {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return undefined;
+  const value = hex.slice(1);
+  const channel = (offset: number) => parseInt(value.slice(offset, offset + 2), 16);
+  return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, ${alpha})`;
+}
+
 /**
  * Scrollbar colors for the reading surface's scroller: a translucent thumb
  * derived from the theme's own text color over a transparent track (the
@@ -388,10 +442,69 @@ export function epubForegroundPreference(foreground: string | null): string | nu
  */
 export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
   const colors = epubThemeColors(theme);
-  if (!colors || !/^#[0-9a-f]{6}$/i.test(colors.text)) return undefined;
-  const value = colors.text.slice(1);
-  const channel = (offset: number) => parseInt(value.slice(offset, offset + 2), 16);
-  return `rgba(${channel(0)}, ${channel(2)}, ${channel(4)}, 0.4) transparent`;
+  if (!colors) return undefined;
+  const thumb = hexWithAlpha(colors.text, 0.4);
+  return thumb ? `${thumb} transparent` : undefined;
+}
+
+/**
+ * CSS custom properties retinting shared chrome details (secondary text,
+ * hairlines, progress track/fill) with the active theme's own text color,
+ * applied on the reader root; consumers reference them with app-token
+ * fallbacks. Undefined for the neutral default, where the app tokens are
+ * correct. Without this, app-dark secondary text and an app-light progress
+ * bar float over forced-light themed chrome when the app runs dark (UAT).
+ */
+export function readerChromeVariables(theme: EpubThemeName): Record<string, string> | undefined {
+  const colors = epubThemeColors(theme);
+  if (!colors) return undefined;
+  const muted = hexWithAlpha(colors.text, 0.6);
+  const hairline = hexWithAlpha(colors.text, 0.15);
+  const track = hexWithAlpha(colors.text, 0.2);
+  if (!muted || !hairline || !track) return undefined;
+  return {
+    "--reader-chrome-muted": muted,
+    "--reader-chrome-border": hairline,
+    "--reader-progress-fill": colors.text,
+    "--reader-progress-track": track,
+  };
+}
+
+/**
+ * App token overrides scoping the appearance popover to the active theme.
+ * Radix portals the popover to document.body — outside the reader root —
+ * so the themed look is applied by redefining the app tokens its shadcn
+ * controls (sliders, toggle groups, labels) consume. Undefined for the
+ * neutral default: that popover keeps the app chrome (UAT: it should
+ * follow the reader theme, not the app's light/dark mode).
+ */
+export function readerPopoverVariables(theme: EpubThemeName): Record<string, string> | undefined {
+  const colors = epubThemeColors(theme);
+  if (!colors) return undefined;
+  const muted = hexWithAlpha(colors.text, 0.08);
+  const accent = hexWithAlpha(colors.text, 0.1);
+  const mutedForeground = hexWithAlpha(colors.text, 0.6);
+  const hairline = hexWithAlpha(colors.text, 0.2);
+  const edge = hexWithAlpha(colors.text, 0.25);
+  const focus = hexWithAlpha(colors.text, 0.4);
+  if (!muted || !accent || !mutedForeground || !hairline || !edge || !focus) return undefined;
+  return {
+    "--popover": colors.background,
+    "--popover-foreground": colors.text,
+    "--background": colors.background,
+    "--foreground": colors.text,
+    "--primary": colors.text,
+    "--primary-foreground": colors.background,
+    "--secondary": muted,
+    "--secondary-foreground": colors.text,
+    "--muted": muted,
+    "--muted-foreground": mutedForeground,
+    "--accent": accent,
+    "--accent-foreground": colors.text,
+    "--border": hairline,
+    "--input": edge,
+    "--ring": focus,
+  };
 }
 
 /**

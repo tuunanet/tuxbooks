@@ -184,7 +184,9 @@ export function ReaderNavigation({
             <TabsContent value="contents" className="min-h-0 flex-1 px-2 py-2">
               <ScrollArea className="h-full pr-2">
                 {epubToc === null && (
-                  <p className="px-2 py-1 text-sm text-muted-foreground">Loading contents…</p>
+                  <p className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]">
+                    Loading contents…
+                  </p>
                 )}
                 {epubToc !== null &&
                   flattenToc(epubToc).map(({ item, depth }, index) => (
@@ -200,7 +202,7 @@ export function ReaderNavigation({
                     </button>
                   ))}
                 {epubToc !== null && epubToc.length === 0 && (
-                  <p className="px-2 py-1 text-sm text-muted-foreground">
+                  <p className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]">
                     This book has no contents entries.
                   </p>
                 )}
@@ -214,7 +216,10 @@ export function ReaderNavigation({
               <TabsContent value="pages" className="min-h-0 flex-1 px-4 py-3">
                 <ScrollArea className="h-full">
                   {pageCount === 0 ? (
-                    <p data-testid="nav-pages-loading" className="text-sm text-muted-foreground">
+                    <p
+                      data-testid="nav-pages-loading"
+                      className="text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
+                    >
                       Loading pages…
                     </p>
                   ) : (
@@ -243,12 +248,14 @@ export function ReaderNavigation({
               >
                 <ScrollArea className="h-full pr-2">
                   {pdfOutline === null && (
-                    <p className="px-2 py-1 text-sm text-muted-foreground">Loading outline…</p>
+                    <p className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]">
+                      Loading outline…
+                    </p>
                   )}
                   {pdfOutline !== null && pdfOutline.length === 0 && (
                     <p
                       data-testid="nav-outline-empty"
-                      className="px-2 py-1 text-sm text-muted-foreground"
+                      className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
                     >
                       This document has no outline.
                     </p>
@@ -260,7 +267,7 @@ export function ReaderNavigation({
                         <p
                           key={`${item.title}-${index}`}
                           style={{ paddingLeft: `${8 + depth * 16}px` }}
-                          className="block max-w-full truncate px-2 py-1.5 text-sm text-muted-foreground"
+                          className="block max-w-full truncate px-2 py-1.5 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
                         >
                           {item.title}
                         </p>
@@ -287,7 +294,7 @@ export function ReaderNavigation({
             {bookmarks.length === 0 ? (
               <p
                 data-testid="nav-bookmarks-empty"
-                className="px-1 py-1 text-sm text-muted-foreground"
+                className="px-1 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
               >
                 No bookmarks yet. Press the bookmark action to mark the current position.
               </p>
@@ -308,7 +315,7 @@ export function ReaderNavigation({
             {highlights.length === 0 ? (
               <p
                 data-testid="nav-highlights-empty"
-                className="px-1 py-1 text-sm text-muted-foreground"
+                className="px-1 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
               >
                 No highlights yet. Select text in the book and pick a color.
               </p>

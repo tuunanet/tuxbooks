@@ -9,6 +9,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 
 import App from "@/App";
 import { AppShell } from "@/components/layout/AppShell";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeBook } from "./factories";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 
@@ -83,15 +84,18 @@ describe("App", () => {
     });
 
     render(
-      <AppShell
-        initialState={{
-          view: "reader",
-          section: { kind: "smart", id: "all-books" },
-          selectedBookId: 1,
-          libraryQuery: "",
-          metadataEditorBookId: null,
-        }}
-      />,
+      // The reader consumes the global resolved theme (auto reader surface).
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+            metadataEditorBookId: null,
+          }}
+        />
+      </ThemeStateProvider>,
     );
 
     expect(await screen.findByTestId("reader-view")).toBeInTheDocument();

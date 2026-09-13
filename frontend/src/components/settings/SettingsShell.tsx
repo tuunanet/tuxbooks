@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { useThemeState } from "@/state/themeState";
 
 type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "advanced";
 
@@ -39,7 +42,7 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
     {
       label: "Font size",
       value: "100% default (75–400%)",
-      hint: "Adjustable per session in the reader; saving preferences needs backend support.",
+      hint: "Adjustable per session in the reader; persisting reader preferences needs backend support.",
     },
     {
       label: "Theme",
@@ -86,6 +89,46 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
   ],
 };
 
+const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
+/**
+ * The first persisted control in Settings: stored in localStorage via
+ * ThemeStateProvider and applied app-wide; the reader surface keeps its own
+ * session-scoped themes.
+ */
+function AppThemeRow() {
+  const { preference, resolvedTheme, setPreference } = useThemeState();
+  const hint =
+    preference === "system" ? `Following system (${resolvedTheme})` : `Always ${preference}`;
+  return (
+    <div className="grid grid-cols-[10rem_1fr] gap-4 py-3">
+      <dt className="text-sm text-muted-foreground">App theme</dt>
+      <dd className="min-w-0">
+        <ToggleGroup
+          type="single"
+          size="sm"
+          variant="outline"
+          spacing={0}
+          value={preference}
+          onValueChange={(value) => value && setPreference(value as AppThemePreference)}
+          aria-label="App theme"
+        >
+          {APP_THEME_OPTIONS.map((option) => (
+            <ToggleGroupItem key={option.value} value={option.value}>
+              {option.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+      </dd>
+    </div>
+  );
+}
+
 function SettingsNavigation({
   active,
   onSectionChange,
@@ -121,9 +164,10 @@ function SettingsNavigation({
 }
 
 /**
- * Settings screen: sections with presentational rows only. No switches or
- * inputs that pretend to persist — values describe current behavior and
- * where the real controls will live.
+ * Settings screen: rows that describe current behavior, plus the first real
+ * persisted control — the app theme in General (localStorage via
+ * ThemeStateProvider). Every other row stays presentational: no switches or
+ * inputs that pretend to persist.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -136,6 +180,7 @@ export function SettingsShell() {
           {SECTIONS.find((section) => section.id === active)?.label}
         </h2>
         <dl data-testid="settings-rows" className="mt-6 divide-y">
+          {active === "general" && <AppThemeRow />}
           {SECTION_ROWS[active].map((row) => (
             <div key={row.label} className="grid grid-cols-[10rem_1fr] gap-4 py-3">
               <dt className="text-sm text-muted-foreground">{row.label}</dt>

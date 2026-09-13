@@ -25,9 +25,13 @@ import {
   epubThemeColors,
   epubThemeBackground,
   epubContrastRatio,
+  epubForegroundFitsTheme,
   epubForegroundPreference,
+  epubThemeColorScheme,
   epubForegroundReferenceBackground,
   EPUB_FOREGROUND_SWATCHES,
+  readerChromeVariables,
+  readerPopoverVariables,
   readerScrollbarColor,
   isEpubFontSizeStep,
   nearestEpubFontSize,
@@ -308,7 +312,7 @@ describe("EPUB text-layout scales (issue #45)", () => {
     expect(DEFAULT_READER_PREFERENCES.wordSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.letterSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.paragraphSpacing).toBe(0);
-    expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(10);
   });
 });
 
@@ -374,6 +378,48 @@ describe("readerScrollbarColor", () => {
   });
 });
 
+describe("readerChromeVariables", () => {
+  it("keeps app tokens for the neutral default", () => {
+    expect(readerChromeVariables("default")).toBeUndefined();
+  });
+
+  it("derives chrome tints from the theme's own text color", () => {
+    // Secondary text, hairlines, and the progress bar must follow the
+    // active theme, not the app tokens — in a dark app they would float
+    // light-on-light over the Light/Paper chrome (UAT feedback).
+    expect(readerChromeVariables("light")).toEqual({
+      "--reader-chrome-muted": "rgba(31, 35, 40, 0.6)",
+      "--reader-chrome-border": "rgba(31, 35, 40, 0.15)",
+      "--reader-progress-fill": "#1f2328",
+      "--reader-progress-track": "rgba(31, 35, 40, 0.2)",
+    });
+    expect(readerChromeVariables("dark")?.["--reader-progress-fill"]).toBe("#e4e4e7");
+  });
+});
+
+describe("readerPopoverVariables", () => {
+  it("keeps the app chrome for the neutral default", () => {
+    expect(readerPopoverVariables("default")).toBeUndefined();
+  });
+
+  it("redefines the popover's app tokens from the theme's own pair", () => {
+    // The popover is portaled outside the reader root, so it re-scopes
+    // the tokens its controls consume; every derived value tints from the
+    // theme's text color over its own background (UAT: the appearance
+    // popover follows the reader theme, not the global mode).
+    const vars = readerPopoverVariables("paper");
+    expect(vars).toMatchObject({
+      "--popover": "#f6f0e4",
+      "--popover-foreground": "#3a332a",
+      "--primary": "#3a332a",
+      "--primary-foreground": "#f6f0e4",
+      "--muted-foreground": "rgba(58, 51, 42, 0.6)",
+      "--border": "rgba(58, 51, 42, 0.2)",
+    });
+    expect(readerPopoverVariables("dark")?.["--popover"]).toBe("#101013");
+  });
+});
+
 describe("EPUB foreground override (issue #55)", () => {
   it("maps the null sentinel to no preference and passes hex through", () => {
     expect(epubForegroundPreference(null)).toBeNull();
@@ -382,6 +428,38 @@ describe("EPUB foreground override (issue #55)", () => {
     // Invalid stored values normalize to null, never reach the engine.
     expect(epubForegroundPreference("green")).toBeNull();
     expect(epubForegroundPreference("#12345")).toBeNull();
+  });
+
+  it("keeps overrides that fit the theme and drops the rest", () => {
+    // Family rule: dark inks fit light-family themes, light inks fit
+    // dark-family ones. The neutral Default theme is judged on white.
+    expect(epubForegroundFitsTheme(null, "dark")).toBe(true);
+    expect(epubForegroundFitsTheme("#f5efe0", "dark")).toBe(true);
+    expect(epubForegroundFitsTheme("#f5efe0", "default")).toBe(false);
+    expect(epubForegroundFitsTheme("#1f3a6e", "light")).toBe(true);
+    expect(epubForegroundFitsTheme("#1f3a6e", "dark")).toBe(false);
+    // Every curated swatch fits its own family.
+    for (const [theme, fits] of [
+      ["light", "#1f3a6e"],
+      ["paper", "#6b2737"],
+      ["dark", "#f5efe0"],
+      ["contrast", "#e6c98a"],
+    ] as const) {
+      expect(epubForegroundFitsTheme(fits, theme)).toBe(true);
+    }
+  });
+
+  it("pins the reading surface's color-scheme per theme family", () => {
+    // The obvious exception to the app's color-scheme: publisher content
+    // is light-family by default, so Default-in-a-dark-app must not run
+    // its section documents under UA dark defaults.
+    expect(epubThemeColorScheme("default")).toBe("light");
+    expect(epubThemeColorScheme("light")).toBe("light");
+    expect(epubThemeColorScheme("paper")).toBe("light");
+    expect(epubThemeColorScheme("mint-contrast")).toBe("light");
+    expect(epubThemeColorScheme("dark")).toBe("dark");
+    expect(epubThemeColorScheme("contrast")).toBe("dark");
+    expect(epubThemeColorScheme("blue-contrast")).toBe("dark");
   });
 
   it("computes the WCAG ratio with one shared implementation", () => {

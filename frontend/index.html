@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TuxBooks</title>
+    <script>
+      // Applies the stored theme before any bundle runs so startup never
+      // flashes the wrong theme. Mirrors src/lib/theme.ts — keep in sync:
+      // only exact "light"/"dark" count; anything else follows the OS.
+      (() => {
+        var stored = null;
+        try {
+          stored = localStorage.getItem("tuxbooks.theme");
+        } catch (error) {
+          // Storage unavailable: follow the OS.
+        }
+        var dark =
+          stored === "dark" ||
+          (stored !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
