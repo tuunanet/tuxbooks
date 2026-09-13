@@ -898,6 +898,16 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const marginsAgain = await screen.findByTestId("pref-page-gutter");
     expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "3");
+
+    // Reset restores the opening default (10px), one step from the left
+    // edge — not the publication-default 0.
+    await userEvent.click(screen.getByRole("button", { name: "Reset page margins" }));
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenCalledWith(
+        expect.objectContaining({ pageGutter: 10 }),
+      ),
+    );
+    expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "1");
   });
 
   it("overrides the foreground color on top of the theme and resets it", async () => {

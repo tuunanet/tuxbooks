@@ -188,9 +188,9 @@ export function nearestEpubParagraphSpacing(value: number): number {
 export const EPUB_PAGE_GUTTER_SCALE_PX = [0, 10, 20, 30, 40, 60] as const;
 
 /**
- * The opening page margin (UAT preference). The reset button keeps 0 =
- * publication default; this only decides where a fresh reader session
- * starts on the ladder.
+ * The opening page margin, and the value the appearance popover's reset
+ * button restores (UAT preference). 0 on the ladder remains publication
+ * default — reachable by sliding, just not the default anymore.
  */
 export const EPUB_DEFAULT_PAGE_GUTTER_PX = 10;
 
