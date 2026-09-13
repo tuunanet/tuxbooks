@@ -694,7 +694,20 @@ app.whenReady().then(() => {
     const windows = BrowserWindow.getAllWindows();
     debugLog(`forward ${name} windows=${windows.length}`);
     for (const window of windows) {
-      window.webContents.send("tuxbooks:event", name, payload);
+      // A window closing, a reload disposing the old frame, or app quit
+      // racing sidecar output can dispose the render frame between the
+      // window lookup and the send — Electron then throws "Render frame
+      // was disposed before WebFrameMain could be accessed". The event is
+      // transient UI state with no renderer left to receive it; dropping
+      // it (and the destroy checks narrow the race without eliminating
+      // it, hence the catch) is the correct behavior. The sidecar keeps
+      // running and the next event reaches the next live frame.
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      try {
+        window.webContents.send("tuxbooks:event", name, payload);
+      } catch {
+        // Frame died mid-send; nothing to deliver to.
+      }
     }
   };
   const sidecar = new Sidecar(locateSidecar(process.resourcesPath), forward);
