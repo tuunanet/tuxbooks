@@ -19,6 +19,32 @@ beforeAll(() => {
   }
   Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});
 
+  // vitest's jsdom global exposes a localStorage accessor that resolves to
+  // undefined (jsdom's real storage is not wired through the global proxy);
+  // the app theme persists through localStorage, so provide a working one.
+  if (!window.localStorage) {
+    const store = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        get length() {
+          return store.size;
+        },
+        key: (index: number) => [...store.keys()][index] ?? null,
+        getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+        setItem: (key: string, value: string) => {
+          store.set(key, String(value));
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+        clear: () => {
+          store.clear();
+        },
+      } satisfies Storage,
+    });
+  }
+
   // The (temporary, pre-migration) foliate-js paginator queries the color
   // scheme at construction time; jsdom has no matchMedia.
   if (!window.matchMedia) {
