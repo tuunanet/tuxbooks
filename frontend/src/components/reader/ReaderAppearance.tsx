@@ -28,6 +28,7 @@ import {
   nearestEpubPageGutter,
   nearestEpubParagraphSpacing,
   nearestEpubWordSpacing,
+  readerPopoverVariables,
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
@@ -222,6 +223,10 @@ export function ReaderAppearance({ format }: { format?: string }) {
           // controls use the wider two-column shape that avoids scrollbars.
           isPdf ? "w-64" : "w-[30rem]",
         )}
+        // The popover is portaled outside the reader root; redefine the
+        // app tokens in its scope so it follows the reader theme instead
+        // of the global light/dark mode.
+        style={readerPopoverVariables(preferences.theme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         {/* PDFs expose only the theme; EPUB gets the full reflow set.

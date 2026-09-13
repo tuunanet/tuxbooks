@@ -29,6 +29,7 @@ import {
   epubForegroundReferenceBackground,
   EPUB_FOREGROUND_SWATCHES,
   readerChromeVariables,
+  readerPopoverVariables,
   readerScrollbarColor,
   isEpubFontSizeStep,
   nearestEpubFontSize,
@@ -309,7 +310,7 @@ describe("EPUB text-layout scales (issue #45)", () => {
     expect(DEFAULT_READER_PREFERENCES.wordSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.letterSpacing).toBe(0);
     expect(DEFAULT_READER_PREFERENCES.paragraphSpacing).toBe(0);
-    expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(0);
+    expect(DEFAULT_READER_PREFERENCES.pageGutter).toBe(10);
   });
 });
 
@@ -391,6 +392,29 @@ describe("readerChromeVariables", () => {
       "--reader-progress-track": "rgba(31, 35, 40, 0.2)",
     });
     expect(readerChromeVariables("dark")?.["--reader-progress-fill"]).toBe("#e4e4e7");
+  });
+});
+
+describe("readerPopoverVariables", () => {
+  it("keeps the app chrome for the neutral default", () => {
+    expect(readerPopoverVariables("default")).toBeUndefined();
+  });
+
+  it("redefines the popover's app tokens from the theme's own pair", () => {
+    // The popover is portaled outside the reader root, so it re-scopes
+    // the tokens its controls consume; every derived value tints from the
+    // theme's text color over its own background (UAT: the appearance
+    // popover follows the reader theme, not the global mode).
+    const vars = readerPopoverVariables("paper");
+    expect(vars).toMatchObject({
+      "--popover": "#f6f0e4",
+      "--popover-foreground": "#3a332a",
+      "--primary": "#3a332a",
+      "--primary-foreground": "#f6f0e4",
+      "--muted-foreground": "rgba(58, 51, 42, 0.6)",
+      "--border": "rgba(58, 51, 42, 0.2)",
+    });
+    expect(readerPopoverVariables("dark")?.["--popover"]).toBe("#101013");
   });
 });
 

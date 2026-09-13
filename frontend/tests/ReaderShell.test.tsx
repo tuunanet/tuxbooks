@@ -573,7 +573,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -620,7 +620,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -641,7 +641,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -671,7 +671,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -692,7 +692,7 @@ describe("ReaderAppearance", () => {
         wordSpacing: 0,
         letterSpacing: 0,
         paragraphSpacing: 0,
-        pageGutter: 0,
+        pageGutter: 10,
         textAlign: "auto",
         foreground: null,
         theme: "default",
@@ -881,8 +881,7 @@ describe("ReaderAppearance", () => {
 
     const margins = screen.getByTestId("pref-page-gutter");
     const thumb = within(margins).getByRole("slider");
-    // Three steps: 0 → 10px → 20px → 30px.
-    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    // Opens at the 10px default; two steps: 10px → 20px → 30px.
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>

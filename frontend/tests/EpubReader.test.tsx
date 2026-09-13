@@ -286,7 +286,7 @@ describe("EpubReader appearance and navigation", () => {
       wordSpacing: 0,
       letterSpacing: 0,
       paragraphSpacing: 0,
-      pageGutter: 0,
+      pageGutter: 10,
       textAlign: "auto",
       foreground: null,
       theme: "default",

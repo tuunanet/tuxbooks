@@ -187,6 +187,13 @@ export function nearestEpubParagraphSpacing(value: number): number {
  */
 export const EPUB_PAGE_GUTTER_SCALE_PX = [0, 10, 20, 30, 40, 60] as const;
 
+/**
+ * The opening page margin (UAT preference). The reset button keeps 0 =
+ * publication default; this only decides where a fresh reader session
+ * starts on the ladder.
+ */
+export const EPUB_DEFAULT_PAGE_GUTTER_PX = 10;
+
 /** Nearest supported page-margin step. */
 export function nearestEpubPageGutter(value: number): number {
   return nearestEpubScaleStep(EPUB_PAGE_GUTTER_SCALE_PX, value);
@@ -421,6 +428,43 @@ export function readerChromeVariables(theme: EpubThemeName): Record<string, stri
     "--reader-chrome-border": hairline,
     "--reader-progress-fill": colors.text,
     "--reader-progress-track": track,
+  };
+}
+
+/**
+ * App token overrides scoping the appearance popover to the active theme.
+ * Radix portals the popover to document.body — outside the reader root —
+ * so the themed look is applied by redefining the app tokens its shadcn
+ * controls (sliders, toggle groups, labels) consume. Undefined for the
+ * neutral default: that popover keeps the app chrome (UAT: it should
+ * follow the reader theme, not the app's light/dark mode).
+ */
+export function readerPopoverVariables(theme: EpubThemeName): Record<string, string> | undefined {
+  const colors = epubThemeColors(theme);
+  if (!colors) return undefined;
+  const muted = hexWithAlpha(colors.text, 0.08);
+  const accent = hexWithAlpha(colors.text, 0.1);
+  const mutedForeground = hexWithAlpha(colors.text, 0.6);
+  const hairline = hexWithAlpha(colors.text, 0.2);
+  const edge = hexWithAlpha(colors.text, 0.25);
+  const focus = hexWithAlpha(colors.text, 0.4);
+  if (!muted || !accent || !mutedForeground || !hairline || !edge || !focus) return undefined;
+  return {
+    "--popover": colors.background,
+    "--popover-foreground": colors.text,
+    "--background": colors.background,
+    "--foreground": colors.text,
+    "--primary": colors.text,
+    "--primary-foreground": colors.background,
+    "--secondary": muted,
+    "--secondary-foreground": colors.text,
+    "--muted": muted,
+    "--muted-foreground": mutedForeground,
+    "--accent": accent,
+    "--accent-foreground": colors.text,
+    "--border": hairline,
+    "--input": edge,
+    "--ring": focus,
   };
 }
 
