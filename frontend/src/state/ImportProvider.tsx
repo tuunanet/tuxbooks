@@ -36,12 +36,16 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       try {
         const report = await importPathsCommand(targets);
         await refresh();
-        setSummary({ imported: report.imported, updated: report.updated });
+        setSummary({
+          imported: report.imported,
+          updated: report.updated,
+          skipped: report.skipped,
+        });
         setFailures(report.failed);
         setPhase("done");
       } catch (err) {
         setFailures(targets.map((path) => ({ path, error: toMessage(err) })));
-        setSummary({ imported: 0, updated: 0 });
+        setSummary({ imported: 0, updated: 0, skipped: 0 });
         setPhase("done");
       }
     },

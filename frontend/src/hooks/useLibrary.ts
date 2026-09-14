@@ -200,9 +200,11 @@ export function useLibraryData(): LibraryState {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void onImportProgress((book) => {
+    void onImportProgress((batch) => {
       if (disposed) return;
-      pendingRef.current.push({ kind: "upsert", book });
+      for (const book of batch.books) {
+        pendingRef.current.push({ kind: "upsert", book });
+      }
       scheduleFlush();
     })
       .then((fn) => {

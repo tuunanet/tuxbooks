@@ -671,6 +671,55 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn import_paths_streams_batched_progress_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let opf = r#"<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Batch Book</dc:title><dc:language>en</dc:language></metadata>
+<manifest/><spine/></package>"#;
+        for name in ["one.epub", "two.epub"] {
+            crate::epub::parser::tests_support::write_zip(
+                &lib.join(name),
+                &[
+                    ("mimetype", "application/epub+zip".as_bytes()),
+                    (
+                        "META-INF/container.xml",
+                        br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+                    ),
+                    ("content.opf", opf.as_bytes()),
+                ],
+            );
+        }
+        let state = test_state(tmp.path()).await;
+        let (events, fired) = capturing_events();
+
+        let result = dispatch(
+            &state,
+            &events,
+            "import_paths",
+            json!({"paths": [lib.to_string_lossy()]}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["imported"], json!(2));
+        let fired = fired.lock().unwrap();
+        assert_eq!(
+            fired.len(),
+            1,
+            "batched: one event for both books, not one per book"
+        );
+        let (name, payload) = &fired[0];
+        assert_eq!(*name, "import-progress");
+        let books = payload["books"].as_array().expect("payload.books array");
+        assert_eq!(books.len(), 2);
+        for book in books {
+            assert!(book["id"].as_i64().unwrap() > 0);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn embed_book_metadata_accepts_the_form_param() {
         // The bridge sends `{bookId, form}`; a bad shape would fail param
         // parsing (-32602). The seeded row has no file on disk, so the call

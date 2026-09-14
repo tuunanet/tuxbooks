@@ -97,12 +97,15 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
 }
 
 /**
- * Subscribe to per-book import progress (the `import-progress` backend
- * event). The callback receives each book as soon as it is persisted, so
- * covers appear while a scan is still running. Resolves an unlisten fn.
+ * Subscribe to import progress (the `import-progress` backend event). The
+ * sidecar batches persisted books and emits them as arrays — the callback
+ * receives each batch as it lands, so covers appear while a scan is still
+ * running without one IPC event per book. Resolves an unlisten fn.
  */
-export function onImportProgress(callback: (book: Book) => void): Promise<() => void> {
-  const unlisten = onEvent<Book>("import-progress", callback);
+export function onImportProgress(
+  callback: (batch: { books: Book[] }) => void,
+): Promise<() => void> {
+  const unlisten = onEvent<{ books: Book[] }>("import-progress", callback);
   return Promise.resolve(unlisten);
 }
 

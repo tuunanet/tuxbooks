@@ -12,10 +12,11 @@ export function ImportStatus() {
   const summaryLine =
     phase === "importing"
       ? "Importing…"
-      : summary && (summary.imported > 0 || summary.updated > 0)
+      : summary && (summary.imported > 0 || summary.updated > 0 || summary.skipped > 0)
         ? [
             summary.imported > 0 ? `Imported ${summary.imported} new` : null,
             summary.updated > 0 ? `updated ${summary.updated}` : null,
+            summary.skipped > 0 ? `${summary.skipped} already in your library` : null,
           ]
             .filter(Boolean)
             .join(", ")

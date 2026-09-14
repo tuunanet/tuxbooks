@@ -8,6 +8,8 @@ export interface ImportFailure {
 export interface ImportSummary {
   imported: number;
   updated: number;
+  /** Files already in the library whose file had not changed. */
+  skipped: number;
 }
 
 export type ImportPhase = "idle" | "importing" | "done";
