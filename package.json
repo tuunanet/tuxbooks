@@ -1,6 +1,6 @@
 {
   "name": "tuxbooks",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "license": "GPL-3.0-or-later",
   "description": "Local-first ebook library manager (bookshelf style) built with Electron + React + a Rust sidecar.",
