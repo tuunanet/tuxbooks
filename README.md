@@ -39,6 +39,9 @@ chmod +x tuxbooks_<version>_amd64.AppImage && ./tuxbooks_<version>_amd64.AppImag
 Verify downloads against `SHA256SUMS.txt` in the same release. See
 [docs/RELEASE.md](docs/RELEASE.md) for how releases are cut and packaged.
 
+On Ubuntu/Kubuntu, local app data (database, settings) lives in
+`~/.local/share/com.tuxbooks.app`.
+
 ## Getting started
 
 Prerequisites: Node ≥ 22, pnpm 10, Rust (stable).
