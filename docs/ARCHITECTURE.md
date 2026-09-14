@@ -145,6 +145,16 @@ untouched); `mark_book_opened` over `repository::books::mark_opened`
 (`last_opened_at`, stamped when a reading session starts). `list_books`
 LEFT JOINs `reading_progress`.
 
+Bulk imports stream (issue #61): `import_directory` enumerates with
+`list_book_files`, skips files whose size+mtime still match the stored row
+(`ImportReport::skipped`), parses the rest with bounded concurrency
+(3-permit `Semaphore` + `spawn_blocking`; covers extracted in the same
+blocking task), and persists in arrival order over a channel — peak memory
+is O(1) parsed book and `on_book` streams each persisted row to the
+command layer, which batches them into `import-progress` events
+(`{ books: [...] }`, count/time-triggered `ProgressBatcher`). The
+watcher's per-file `import_file` path is unchanged.
+
 ## Frontend structure
 
 ```

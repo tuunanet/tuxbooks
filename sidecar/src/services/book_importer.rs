@@ -1,15 +1,24 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use sqlx::SqlitePool;
+use tokio::sync::{mpsc, Semaphore};
 
 use crate::domain::NewBook;
 use crate::epub::EpubBook;
 use crate::error::AppError;
 use crate::repository::books;
-use crate::services::library_scanner::{parse_book, scan_directory, ScanError, ScannedBook};
+use crate::services::library_scanner::{list_book_files, parse_book, ScanError, ScannedBook};
+
+/// How many files may be parsed (+ cover-extracted) at once. Parsing is
+/// CPU-bound (zip/XML, PDFium rasterization) and runs on the blocking pool;
+/// a small bounded set keeps several cores busy without starving the rest
+/// of the runtime, while persistence stays serialized behind the channel.
+const PARSE_CONCURRENCY: usize = 3;
 
 /// Summary of an import run over a library directory.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -17,6 +26,9 @@ use crate::services::library_scanner::{parse_book, scan_directory, ScanError, Sc
 pub struct ImportReport {
     pub imported: u64,
     pub updated: u64,
+    /// Files whose stored size+mtime still match the source file — never
+    /// re-parsed. A re-import of an existing library is a stat-only pass.
+    pub skipped: u64,
     pub failed: Vec<FailedImport>,
 }
 
@@ -72,6 +84,113 @@ pub(crate) fn bibliographic_new_book(
     }
 }
 
+/// Import a library directory: enumerate, skip unchanged files, parse the
+/// rest with bounded concurrency, and persist in arrival order, streaming
+/// each persisted book to `on_book` as soon as it lands (issue #61).
+///
+/// The walk itself never parses — [`list_book_files`] is names-only — and
+/// no more than [`PARSE_CONCURRENCY`] books are ever parsed or held in
+/// memory at once, so peak memory is O(1) parsed book, not O(library).
+/// Files whose stored size+mtime still match the source (the same
+/// skip-if-unchanged contract the reconciler applies) are never read;
+/// per-file failures are reported and do not abort the run.
+pub async fn import_directory(
+    pool: &SqlitePool,
+    library_root: &Path,
+    covers_dir: &Path,
+    pdfium_dirs: &[PathBuf],
+    on_book: &(dyn Fn(&crate::domain::Book) + Send + Sync),
+) -> Result<ImportReport, AppError> {
+    let files = list_book_files(library_root).map_err(|err| match err {
+        ScanError::Io { source, .. } => AppError::Io(source),
+        other => AppError::InvalidInput(other.to_string()),
+    })?;
+
+    // One snapshot of the known rows: stored size/mtime for the skip check
+    // and the stored cover path for the keep-what-works rule.
+    let known: HashMap<String, crate::domain::Book> = books::list_books(pool)
+        .await?
+        .into_iter()
+        .map(|book| (book.path.clone(), book))
+        .collect();
+
+    let mut report = ImportReport::default();
+    let mut queued: Vec<(PathBuf, Option<String>)> = Vec::new();
+    for path in files {
+        let path_str = path.to_string_lossy().into_owned();
+        let stored = known.get(&path_str);
+        let stats = file_stats(&path);
+        if let Some(book) = stored {
+            if book.available && stats == Some((book.file_size, book.file_mtime)) {
+                report.skipped += 1;
+                continue;
+            }
+        }
+        let previous_cover = stored.and_then(|book| book.cover_path.clone());
+        queued.push((path, previous_cover));
+    }
+
+    // Bounded parse workers feed one persister through a channel: parsing
+    // and cover extraction block on the worker pool while DB writes stay
+    // serialized, and the channel's backpressure keeps memory bounded — a
+    // parser can only run ahead by the channel's few slots.
+    let semaphore = Arc::new(Semaphore::new(PARSE_CONCURRENCY));
+    let (tx, mut rx) = mpsc::channel::<(PathBuf, Result<NewBook, String>)>(PARSE_CONCURRENCY);
+    let mut workers = Vec::with_capacity(queued.len());
+    for (path, previous_cover) in queued {
+        let semaphore = semaphore.clone();
+        let tx = tx.clone();
+        let covers_dir = covers_dir.to_path_buf();
+        let pdfium_dirs = pdfium_dirs.to_vec();
+        workers.push(tokio::spawn(async move {
+            let _permit = semaphore.acquire().await;
+            let parse_path = path.clone();
+            let result = tokio::task::spawn_blocking(move || -> Result<NewBook, String> {
+                let parsed = parse_book(&parse_path).map_err(|err| err.to_string())?;
+                new_book_from_parsed(
+                    &parse_path,
+                    &parsed,
+                    &covers_dir,
+                    &pdfium_dirs,
+                    previous_cover.as_deref(),
+                )
+                .map_err(|err| err.to_string())
+            })
+            .await
+            .unwrap_or_else(|err| Err(format!("parse task failed: {err}")));
+            let _ = tx.send((path, result)).await;
+        }));
+    }
+    // Dropping the sender ends the receive loop once every worker finished.
+    drop(tx);
+
+    while let Some((path, result)) = rx.recv().await {
+        match result {
+            Err(error) => report.failed.push(FailedImport {
+                path: path.to_string_lossy().into_owned(),
+                error,
+            }),
+            Ok(new_book) => {
+                let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+                // Record the fresh parse as source truth and re-merge the
+                // effective view, so user metadata overrides survive file
+                // changes (milestone 7).
+                crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
+                if let Some(book) = books::get_book(pool, id).await? {
+                    on_book(&book);
+                }
+                bump(&mut report, inserted);
+            }
+        }
+    }
+    for worker in workers {
+        worker
+            .await
+            .map_err(|err| AppError::InvalidInput(format!("import worker failed: {err}")))?;
+    }
+    Ok(report)
+}
+
 /// Import a single file (watcher path): parse, build the book, upsert by
 /// path. `Ok(None)` means the file did not parse (e.g. still being written);
 /// the caller simply waits for a later event instead of treating it as an
@@ -100,53 +219,6 @@ pub async fn import_file(
     crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
     let book = books::get_book(pool, id).await?.expect("row just upserted");
     Ok(Some(ImportOutcome { book, inserted }))
-}
-
-/// Scan `library_root` for EPUBs and PDFs and persist them (upsert keyed by
-/// path). EPUB covers are extracted from the package; PDF covers are
-/// rasterized from page 1 with the PDFium libraries probed in `pdfium_dirs`
-/// — best-effort in both cases, never an import failure. Files that fail to
-/// parse are reported in [`ImportReport::failed`] and do not abort the run.
-/// `on_book` runs after each upsert with the persisted row, so callers can
-/// stream progress instead of waiting for the whole run.
-pub async fn import_directory(
-    pool: &SqlitePool,
-    library_root: &Path,
-    covers_dir: &Path,
-    pdfium_dirs: &[PathBuf],
-    on_book: &(dyn Fn(&crate::domain::Book) + Send + Sync),
-) -> Result<ImportReport, AppError> {
-    let entries = scan_directory(library_root).map_err(|err| match err {
-        ScanError::Io { source, .. } => AppError::Io(source),
-        other => AppError::InvalidInput(other.to_string()),
-    })?;
-
-    let mut report = ImportReport::default();
-    for entry in entries {
-        match &entry.book {
-            Err(error) => report.failed.push(FailedImport {
-                path: entry.path.to_string_lossy().into_owned(),
-                error: error.to_string(),
-            }),
-            Ok(parsed) => {
-                let previous_cover = existing_cover(pool, &entry.path).await?;
-                let new_book = new_book_from_parsed(
-                    &entry.path,
-                    parsed,
-                    covers_dir,
-                    pdfium_dirs,
-                    previous_cover.as_deref(),
-                )?;
-                let (id, inserted) = books::upsert_book(pool, &new_book).await?;
-                crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
-                if let Some(book) = books::get_book(pool, id).await? {
-                    on_book(&book);
-                }
-                bump(&mut report, inserted);
-            }
-        }
-    }
-    Ok(report)
 }
 
 fn bump(report: &mut ImportReport, inserted: bool) {
@@ -386,7 +458,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reimport_updates_instead_of_duplicating() {
+    async fn reimport_skips_unchanged_files_and_reparses_on_change() {
         let tmp = tempfile::tempdir().unwrap();
         let lib = tmp.path().join("library");
         std::fs::create_dir_all(&lib).unwrap();
@@ -399,11 +471,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first.imported, 1);
+        assert_eq!(first.skipped, 0);
+
+        // Second run: size+mtime still match — a stat-only pass.
         let second = import_directory(&pool, &lib, &covers, &[], &|_| {})
             .await
             .unwrap();
-        assert_eq!(second.updated, 1);
+        assert_eq!(second.skipped, 1);
+        assert_eq!(second.updated, 0);
         assert_eq!(second.imported, 0);
+        assert_eq!(books::count_books(&pool).await.unwrap(), 1);
+
+        // A changed file (mtime moved) is re-parsed as an update.
+        let path = lib.join("book.epub");
+        let previous = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new().set_modified(previous + std::time::Duration::from_secs(10)),
+        )
+        .unwrap();
+        drop(file);
+        let third = import_directory(&pool, &lib, &covers, &[], &|_| {})
+            .await
+            .unwrap();
+        assert_eq!(third.skipped, 0);
+        assert_eq!(third.updated, 1);
+        assert_eq!(third.imported, 0);
         assert_eq!(books::count_books(&pool).await.unwrap(), 1);
     }
 
@@ -585,8 +678,19 @@ mod tests {
             .clone()
             .expect("v1 cover");
 
-        // Same path, different content -> different cache key.
+        // Same path, different content -> different cache key. The rewrite
+        // is same-length within the same second, so size+mtime would still
+        // match — bump mtime explicitly to simulate a real modification
+        // (the skip-if-unchanged contract sees it, and re-parses).
         tmp_epub_with_cover(&lib, "book.epub", Some(b"cover-version-2"));
+        let previous = std::fs::metadata(&book_file).unwrap().modified().unwrap();
+        std::fs::File::open(&book_file)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(previous + std::time::Duration::from_secs(10)),
+            )
+            .unwrap();
         import_directory(&pool, &lib, &covers, &[], &|_| {})
             .await
             .unwrap();

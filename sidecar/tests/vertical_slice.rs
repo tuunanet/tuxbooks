@@ -68,10 +68,24 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].book_id, book.id);
 
-    // Re-import must update in place, not duplicate.
+    // Re-import skips the unchanged file entirely (stat-only pass), and a
+    // real modification re-parses as an update, never a duplicate.
     let rerun = import_directory(&pool, &library, &covers, &[], &|_| {}).await?;
-    assert_eq!(rerun.updated, 1);
+    assert_eq!(rerun.skipped, 1);
+    assert_eq!(rerun.updated, 0);
     assert_eq!(rerun.imported, 0);
+
+    let book_path = library.join("minimal.epub");
+    let previous = std::fs::metadata(&book_path).unwrap().modified().unwrap();
+    std::fs::File::open(&book_path)
+        .unwrap()
+        .set_times(
+            std::fs::FileTimes::new().set_modified(previous + std::time::Duration::from_secs(10)),
+        )
+        .unwrap();
+    let changed = import_directory(&pool, &library, &covers, &[], &|_| {}).await?;
+    assert_eq!(changed.skipped, 0);
+    assert_eq!(changed.updated, 1);
     assert_eq!(books::count_books(&pool).await?, 1);
 
     // Collections count feeds the same stats command shape the frontend gets.

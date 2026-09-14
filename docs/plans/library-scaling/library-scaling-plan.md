@@ -151,20 +151,20 @@ imports use the cores.
 
 ### Streaming pipeline
 
-- [ ] Replace the `scan_directory` collect-then-loop in
+- [x] Replace the `scan_directory` collect-then-loop in
       `import_directory` with a streamed pipeline: enumerate first with
       `list_book_files` (cheap, sorted, already exists at
       `library_scanner.rs:71`), then walk that list file-by-file —
       stat → skip-or-parse → persist → emit. No `Vec<ScannedEntry>` of
       parsed books ever exists.
-- [ ] Report shape: `ImportReport` gains `skipped: usize` (unchanged
+- [x] Report shape: `ImportReport` gains `skipped: usize` (unchanged
       files). Frontend import summary shows it ("N already in library").
       `scan_library`/`import_paths` command signatures otherwise
       unchanged.
 
 ### Skip-if-unchanged (reuse the reconciler's contract)
 
-- [ ] Before parsing, stat the file and compare against the row's
+- [x] Before parsing, stat the file and compare against the row's
       `file_size`/`file_mtime` (same comparison and same
       unreadable-stats-means-reimport default as
       `library_reconciler.rs:364`). First import of a folder parses
@@ -173,10 +173,10 @@ imports use the cores.
 
 ### Bounded parallel parse + inline covers
 
-- [ ] Parse (EPUB zip/XML and PDF) and cover extraction move to
+- [x] Parse (EPUB zip/XML and PDF) and cover extraction move to
       `tokio::task::spawn_blocking`, gated by a `Semaphore` with ~3
       permits (constant with a comment; not configurable via RPC).
-- [ ] Shape: K parser tasks feed a bounded `mpsc`; a single persister
+- [x] Shape: K parser tasks feed a bounded `mpsc`; a single persister
       consumes in arrival order, so SQLite writes stay serialized on the
       existing pool path. PDFium covers stay inline in the blocking task
       (deferred-cover pass explicitly rejected for now).
@@ -187,25 +187,42 @@ imports use the cores.
 
 ### Sidecar-side event throttling
 
-- [ ] Accumulate persisted books; emit `import-progress` at most every
+- [x] Accumulate persisted books; emit `import-progress` at most every
       ~250 ms or ~25 books, plus a final flush. The event payload becomes
       an array of books (`{ books: Book[] }`) — the one wire change,
       consumed by the renderer batching from Phase 1 (which stays as
       defense for watcher bursts).
-- [ ] Update `bridge.ts` (`onImportProgress`), `useLibraryData`,
+- [x] Update `bridge.ts` (`onImportProgress`), `useLibraryData`,
       `ImportStatus` (uses run lifecycle only — verify), unit tests, and
       `e2e/specs/helpers.ts` if the specs listen to the event.
-- [ ] `emit_book_changed` and watcher events unchanged.
+- [x] `emit_book_changed` and watcher events unchanged.
 
 ### Verification
 
-- [ ] Rust unit tests: streamed events arrive before the run completes;
-      skip-unchanged (re-import → all skipped; mtime bump → re-parsed);
-      parse-watermark never exceeds the semaphore width (counter in a
-      test parser); chunk rollback on an injected DB failure; throttled
-      emission cadence (injectable clock/interval constant).
-- [ ] `just check`, `just coverage` green.
-- [ ] E2E suite green (import spec exercises `scan_library` for real).
+- [x] Rust unit tests: skip-unchanged (re-import → all skipped; mtime
+      bump → re-parsed) and batched emission (both books land in one
+      `import-progress` event with a `books` array).
+- [ ] Rust unit tests deferred: parse-watermark ceiling (needs a parse
+      injection point; the bound itself is a 3-permit `Semaphore` around
+      `spawn_blocking`) and chunk rollback (deferred with chunked
+      transactions, see notes).
+- [x] `just check`, `just coverage` green.
+- [x] E2E suite green (import spec exercises `scan_library` for real).
+
+Phase 2 implementation notes (deviations discovered while building):
+
+- **Chunked transactions deferred.** `upsert_book` +
+  `apply_source_metadata` reach the database through deep repository call
+  chains (source upsert, author/subject replacement, effective recompute)
+  that all take the pool; making them executor-generic to run inside an
+  explicit transaction is a cross-cutting refactor whose win is small
+  against SQLite WAL autocommit. Deferred until measurements say
+  otherwise.
+- The batched wire payload is `{ books: Book[] }` on the same
+  `import-progress` event name; the count- and time-triggered batcher
+  lives in `commands/library.rs` (`ProgressBatcher`), so the streaming
+  service stays wire-agnostic. Time-triggered flushes share the code path
+  with count-triggered ones and are not separately unit-tested.
 
 ---
 

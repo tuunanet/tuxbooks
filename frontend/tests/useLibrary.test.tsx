@@ -141,7 +141,8 @@ describe("useLibraryData library-changed synchronization", () => {
 });
 
 function act_emit(book: ReturnType<typeof makeBook>): void {
+  // The sidecar batches persisted books into one event (issue #61).
   act(() => {
-    emitBridgeEvent("import-progress", book);
+    emitBridgeEvent("import-progress", { books: [book] });
   });
 }

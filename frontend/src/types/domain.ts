@@ -155,6 +155,8 @@ export interface SearchHit {
 export interface ImportReport {
   imported: number;
   updated: number;
+  /** Files whose size+mtime still matched the stored row — never re-parsed. */
+  skipped: number;
   failed: { path: string; error: string }[];
 }
 
