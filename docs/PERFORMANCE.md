@@ -72,6 +72,9 @@ Re-run the relevant verifications when editing:
 - `LibraryView` (virtualizer options, column metrics, keyboard focus
   model), `BookCover`, `useLibraryData` batching/patching — PERF-15,
   PERF-16.
+- Scale corpus + spec (`scripts/make-epub-corpus.py`,
+  `e2e/specs/z-library-scale.e2e.ts`: window cap, sort liveness, skip
+  pass) — PERF-15, PERF-16.
 
 ## How to measure
 
