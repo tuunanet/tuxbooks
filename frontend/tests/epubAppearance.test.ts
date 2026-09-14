@@ -386,10 +386,13 @@ describe("readerChromeVariables", () => {
   it("derives chrome tints from the theme's own text color", () => {
     // Secondary text, hairlines, and the progress bar must follow the
     // active theme, not the app tokens — in a dark app they would float
-    // light-on-light over the Light/Paper chrome (UAT feedback).
+    // light-on-light over the Light/Paper chrome (UAT feedback). The
+    // surface is the theme's own background, for chrome that overlays the
+    // document (the auto-hiding footer).
     expect(readerChromeVariables("light")).toEqual({
       "--reader-chrome-muted": "rgba(31, 35, 40, 0.6)",
       "--reader-chrome-border": "rgba(31, 35, 40, 0.15)",
+      "--reader-chrome-surface": "#ffffff",
       "--reader-progress-fill": "#1f2328",
       "--reader-progress-track": "rgba(31, 35, 40, 0.2)",
     });

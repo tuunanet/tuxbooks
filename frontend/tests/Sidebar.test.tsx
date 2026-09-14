@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -96,5 +96,64 @@ describe("Sidebar", () => {
 
     await userEvent.click(screen.getByText("Vacation Reads"));
     expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", id: 5 });
+  });
+
+  it("creates a collection and lands in its section", async () => {
+    const onSectionChange = vi.fn();
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 0 },
+      list_books: [],
+      list_collections: [],
+      create_collection: {
+        id: 7,
+        name: "To Read",
+        createdAt: "2026-09-14T00:00:00.000Z",
+        bookIds: [],
+      },
+    });
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await userEvent.click(screen.getByTestId("new-collection-button"));
+    await userEvent.type(screen.getByTestId("collection-name"), "To Read");
+    await userEvent.click(screen.getByTestId("collection-create"));
+
+    // Saving refreshes the shared collection list and navigates to the
+    // fresh collection's (empty) section.
+    await waitFor(() => {
+      expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", id: 7 });
+    });
+    expect(screen.queryByTestId("collection-dialog")).not.toBeInTheDocument();
+  });
+
+  it("deleting the active collection falls back to All Books", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      list_books: [],
+      list_collections: [
+        { id: 5, name: "Vacation Reads", createdAt: "2026-01-01T00:00:00.000Z", bookIds: [] },
+      ],
+      delete_collection: true,
+    });
+    const onSectionChange = vi.fn();
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar active={{ kind: "collection", id: 5 }} onSectionChange={onSectionChange} />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-delete-5"));
+    await waitFor(() => {
+      expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "all-books" });
+    });
   });
 });

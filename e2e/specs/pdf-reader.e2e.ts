@@ -111,8 +111,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     // Paper multiplies the white pages down to the theme's paper color —
     // the tint overlay, not a filter (a filter cannot darken white) — and
-    // the sticky toolbar takes the themed surface too (no app-white strip
-    // floating over the tinted pages).
+    // the page/zoom controls dock into the reader header (issue #68), whose
+    // chrome the themed shell paints (no app-white strip floating over the
+    // tinted pages).
     await theme.getByText("Paper", { exact: true }).click();
     await expect(page.getByTestId("pdf-theme-tint")).toBeAttached();
     await expect(
@@ -124,7 +125,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect
       .poll(
         () =>
-          page.getByTestId("pdf-prev").evaluate((el) => el.parentElement?.style.backgroundColor),
+          page
+            .getByTestId("pdf-toolbar")
+            .evaluate(
+              (el) => getComputedStyle(el.closest("[data-testid=reader-view]")!).backgroundColor,
+            ),
         { timeout: 30000 },
       )
       .toBe("rgb(246, 240, 228)");

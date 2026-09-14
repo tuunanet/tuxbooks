@@ -46,6 +46,18 @@ minimumReleaseAgeExclude:
   - "@rollup/rollup-win32-ia32-msvc@4.63.1"
   - "@rollup/rollup-win32-x64-gnu@4.63.1"
   - "@rollup/rollup-win32-x64-msvc@4.63.1"
+  # 2026-09-14: GHSA-82fw-gwwq-j7x9 (vitest path traversal via @vitest/mocker
+  # redirect mock, medium) — fix train bumped to 4.1.11. Remove once 4.1.11 is
+  # 30+ days old (2026-09-17).
+  - "vitest@4.1.11"
+  - "@vitest/coverage-v8@4.1.11"
+  - "@vitest/expect@4.1.11"
+  - "@vitest/mocker@4.1.11"
+  - "@vitest/pretty-format@4.1.11"
+  - "@vitest/runner@4.1.11"
+  - "@vitest/snapshot@4.1.11"
+  - "@vitest/spy@4.1.11"
+  - "@vitest/utils@4.1.11"
 
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:

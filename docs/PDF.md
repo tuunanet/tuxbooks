@@ -160,11 +160,18 @@ environment, and a failed prewarm only means the next open starts cold.
   resolves to a tree of `{ title, page (1-based | null), items }`;
   unresolvable entries degrade to inert rows, never errors. Re-exported
   through the engine seam so components never touch the engine's raw types.
-- `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` / `PdfToolbar` — one
-  geometry slot per page for the entire document; canvases only for the
-  bounded render set. Slots carry `data-pdf-slot` + `data-render-state`
-  lifecycle attributes (`unloaded|queued|loading|rendering|rendered|error`)
-  for tests and diagnostics.
+- `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` — one geometry slot
+  per page for the entire document; canvases only for the bounded render
+  set. Slots carry `data-pdf-slot` + `data-render-state` lifecycle
+  attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
+  and diagnostics.
+- `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`
+  and zoom `− % +`, one compact group; issue #68), docked through a portal
+  into a header slot owned by ReaderShell — the same pattern as PdfSidebar,
+  with an inline fallback when no host is provided (standalone renders,
+  e.g. unit tests). No control row renders above the document, so its
+  vertical space goes to the pages; the reader keeps owning the zoom and
+  position state.
 - `PdfSidebar` — the thumbnails panel (below). Rendered through a React
   portal into a host `<aside>` owned by ReaderShell's layout.
 
