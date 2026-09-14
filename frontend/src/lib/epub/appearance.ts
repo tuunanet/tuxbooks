@@ -449,11 +449,13 @@ export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
 
 /**
  * CSS custom properties retinting shared chrome details (secondary text,
- * hairlines, progress track/fill) with the active theme's own text color,
- * applied on the reader root; consumers reference them with app-token
- * fallbacks. Undefined for the neutral default, where the app tokens are
- * correct. Without this, app-dark secondary text and an app-light progress
- * bar float over forced-light themed chrome when the app runs dark (UAT).
+ * hairlines, chrome surfaces, progress track/fill) with the active theme's
+ * own colors, applied on the reader root; consumers reference them with
+ * app-token fallbacks. Undefined for the neutral default, where the app
+ * tokens are correct. Without this, app-dark secondary text and an
+ * app-light progress bar float over forced-light themed chrome when the
+ * app runs dark (UAT). The surface is the theme's own background, for
+ * chrome that overlays the document (the auto-hiding progress footer).
  */
 export function readerChromeVariables(theme: EpubThemeName): Record<string, string> | undefined {
   const colors = epubThemeColors(theme);
@@ -465,6 +467,7 @@ export function readerChromeVariables(theme: EpubThemeName): Record<string, stri
   return {
     "--reader-chrome-muted": muted,
     "--reader-chrome-border": hairline,
+    "--reader-chrome-surface": colors.background,
     "--reader-progress-fill": colors.text,
     "--reader-progress-track": track,
   };

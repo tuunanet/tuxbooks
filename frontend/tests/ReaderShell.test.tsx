@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Annotation } from "@/types/domain";
 
@@ -94,6 +94,46 @@ async function openNavigation() {
   fireEvent.click(await screen.findByTestId("reader-nav-trigger"));
   return screen.findByTestId("reader-nav");
 }
+
+describe("Reader progress footer auto-hide", () => {
+  it("hides by default, reveals on bottom-edge hover, and fades back after a delay", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+
+    const footer = screen.getByTestId("reader-footer");
+    expect(footer).toHaveAttribute("data-progress-visible", "false");
+
+    // Hovering the slim bottom-edge zone reveals the footer.
+    fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
+    expect(footer).toHaveAttribute("data-progress-visible", "true");
+
+    // The footer fades back only after the cursor has been away for the
+    // full delay (1500ms); a return before that cancels the fade.
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerLeave(footer);
+      act(() => {
+        vi.advanceTimersByTime(1499);
+      });
+      expect(footer).toHaveAttribute("data-progress-visible", "true");
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(footer).toHaveAttribute("data-progress-visible", "false");
+
+      fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
+      expect(footer).toHaveAttribute("data-progress-visible", "true");
+      fireEvent.pointerLeave(footer);
+      fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(footer).toHaveAttribute("data-progress-visible", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("ReaderShell chrome", () => {
   it("renders the full-window reader without the library sidebar", async () => {

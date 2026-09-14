@@ -61,6 +61,9 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
   "mint-contrast": "bg-[#c5e7cd] text-black",
 };
 
+/** Delay before the progress footer fades back out after the cursor leaves. */
+const PROGRESS_HIDE_DELAY_MS = 1500;
+
 /**
  * Full-window reading mode: no sidebar, its own visual language, and a
  * distinct visual language from the library. The shell owns the genuinely
@@ -126,6 +129,32 @@ export function ReaderShell() {
   const [pdfControlsHost, setPdfControlsHost] = useState<HTMLElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
+  // Auto-hiding progress footer: hidden by default, a slim hover zone at
+  // the window's bottom edge reveals it, and it fades back once the cursor
+  // has been away for a beat. The document gains the footer's layout space
+  // because the footer overlays it instead of stacking above it.
+  const [progressVisible, setProgressVisible] = useState(false);
+  const progressHideTimerRef = useRef<number | null>(null);
+  const showProgress = useCallback(() => {
+    if (progressHideTimerRef.current !== null) {
+      window.clearTimeout(progressHideTimerRef.current);
+      progressHideTimerRef.current = null;
+    }
+    setProgressVisible(true);
+  }, []);
+  const scheduleProgressHide = useCallback(() => {
+    if (progressHideTimerRef.current !== null) window.clearTimeout(progressHideTimerRef.current);
+    progressHideTimerRef.current = window.setTimeout(() => {
+      progressHideTimerRef.current = null;
+      setProgressVisible(false);
+    }, PROGRESS_HIDE_DELAY_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (progressHideTimerRef.current !== null) window.clearTimeout(progressHideTimerRef.current);
+    },
+    [],
+  );
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
@@ -309,7 +338,10 @@ export function ReaderShell() {
     <div
       data-testid="reader-view"
       data-theme={preferences.theme}
-      className={cn("flex h-screen flex-col overflow-hidden", THEME_CLASSES[preferences.theme])}
+      className={cn(
+        "relative flex h-screen flex-col overflow-hidden",
+        THEME_CLASSES[preferences.theme],
+      )}
       style={readerChromeVariables(preferences.theme)}
     >
       <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
@@ -473,7 +505,36 @@ export function ReaderShell() {
         </main>
       </div>
 
-      <footer className="shrink-0 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2">
+      {/* Auto-hiding progress footer: overlays the document so the reading
+          area keeps the footer's former layout space. A slim hover zone at
+          the window's bottom edge reveals it (a hidden surface cannot be
+          hovered); the footer stays up while the cursor is over it and
+          fades back out a beat after it leaves. `data-progress-visible`
+          makes the state assertable in jsdom, where Tailwind classes carry
+          no computed styles. */}
+      <div
+        data-testid="reader-footer-hover-zone"
+        aria-hidden="true"
+        className={cn(
+          "absolute inset-x-0 bottom-0 z-10 h-4",
+          progressVisible && "pointer-events-none",
+        )}
+        onPointerEnter={showProgress}
+        onPointerLeave={scheduleProgressHide}
+      />
+      <footer
+        data-testid="reader-footer"
+        data-progress-visible={progressVisible}
+        onPointerEnter={showProgress}
+        onPointerLeave={scheduleProgressHide}
+        style={{ backgroundColor: "var(--reader-chrome-surface, var(--background))" }}
+        className={cn(
+          "absolute inset-x-0 bottom-0 z-10 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2 transition-[opacity,translate] duration-300 ease-out",
+          progressVisible
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-2 opacity-0",
+        )}
+      >
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <Progress
             data-testid="reader-progress"
