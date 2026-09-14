@@ -148,6 +148,9 @@ export function LibraryView({ section }: LibraryViewProps) {
    */
   const attachScroller = useCallback((el: HTMLDivElement | null) => {
     scrollRef.current = el;
+    // `scrollRef.current` is nulled by React on detach — before layout
+    // cleanups run — so the scroll-save path reads this handle instead.
+    scrollElRef.current = el;
     setScrollEl(el);
     observerRef.current?.disconnect();
     observerRef.current = null;
@@ -179,6 +182,11 @@ export function LibraryView({ section }: LibraryViewProps) {
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollEl,
+    // tanstack's default flushSync-on-notify fires from layout effects
+    // while React is rendering ("React cannot flush when React is already
+    // rendering"); async commits keep the window shift on the normal
+    // scheduler, which is imperceptible for scrolling.
+    useFlushSync: false,
     estimateSize: () => rowEstimate,
     overscan: OVERSCAN_ROWS,
     // No-layout environments (jsdom tests, SSR) report offsetHeight 0 for
@@ -290,15 +298,22 @@ export function LibraryView({ section }: LibraryViewProps) {
     if (Number.isFinite(index)) setFocusedIndex(index);
   }, []);
 
-  // Scroll position survives navigation: saved per section when the
-  // section changes or the view unmounts, restored on mount.
+  // Scroll position survives navigation: saved continuously on scroll
+  // (plus on section change/unmount) and restored on mount. The save must
+  // not read `scrollRef.current` at unmount time — React detaches refs
+  // (callback refs get null) before layout cleanups run, which silently
+  // dropped every save; `scrollElRef` is never nulled and the onScroll
+  // write keeps the map current regardless of teardown order.
   const sectionKey = `${section.kind}:${"id" in section ? section.id : ""}`;
+  const scrollElRef = useRef<HTMLDivElement | null>(null);
+  const sectionKeyRef = useRef(sectionKey);
+  sectionKeyRef.current = sectionKey;
   useLayoutEffect(() => {
     return () => {
-      const el = scrollRef.current;
-      if (el) scrollPositions.set(sectionKey, el.scrollTop);
+      const el = scrollElRef.current;
+      if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
     };
-  }, [sectionKey]);
+  }, []);
   useLayoutEffect(() => {
     if (!scrollEl) return;
     const saved = scrollPositions.get(sectionKey);
@@ -444,6 +459,10 @@ export function LibraryView({ section }: LibraryViewProps) {
           data-testid={isGrid ? "book-grid" : "book-list"}
           onKeyDown={handleContainerKeyDown}
           onFocusCapture={handleFocusCapture}
+          onScroll={() => {
+            const el = scrollElRef.current;
+            if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
+          }}
           className="min-h-0 flex-1 overflow-y-auto"
         >
           {unvirtualized ? (
