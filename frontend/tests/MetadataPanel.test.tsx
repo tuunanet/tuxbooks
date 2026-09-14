@@ -161,7 +161,11 @@ describe("MetadataPanel", () => {
   it("disables Save until a field actually changes", async () => {
     renderPanel();
 
-    const save = await screen.findByTestId("metadata-panel-save");
+    // The footer renders even while the curation is still loading — wait
+    // for the form itself, or the title query races the fetch and flakes
+    // under load.
+    await screen.findByTestId("metadata-title");
+    const save = screen.getByTestId("metadata-panel-save");
     expect(save).toBeDisabled();
     await userEvent.type(screen.getByTestId("metadata-title"), "!");
     expect(save).toBeEnabled();
