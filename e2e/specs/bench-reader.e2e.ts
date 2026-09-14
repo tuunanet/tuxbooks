@@ -695,11 +695,11 @@ test.describe("reader performance benchmark", () => {
       for (let i = 0; i < 2; i++) {
         const button = page.getByTestId(`pdf-zoom-${direction}`);
         if ((await button.getAttribute("disabled")) !== null) break;
-        const before = await textOf(page, "pdf-zoom-level");
+        const before = await textOf(page, "pdf-zoom-reset");
         const after = await interactionLatency(
           page,
           () => button.click(),
-          async () => (await textOf(page, "pdf-zoom-level")) !== before,
+          async () => (await textOf(page, "pdf-zoom-reset")) !== before,
         );
         report.pdf.zoomLatencyMs.push(after);
       }

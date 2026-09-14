@@ -61,7 +61,7 @@ Re-run the relevant verifications when editing:
 
 - `PdfPageCanvas` / `pdfBitmapCache` / `usePdfVirtualization` / `PdfReader`
   render-policy constants (`MAX_ACTIVE_CANVASES`, `MAX_CONCURRENT_RENDERS`,
-  `ZOOM_LEVELS`) — PERF-1 to PERF-6.
+  `ZOOM_LADDER`) — PERF-1 to PERF-6.
 - `usePdfScrollTracking`, `ReaderShell` scroll container — PERF-5, PERF-9.
 - EPUB engine seam (Readium navigator options, flow/appearance wiring,
   scrolled-surface cap) — PERF-7, PERF-8, PERF-12.

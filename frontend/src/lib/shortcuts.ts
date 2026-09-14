@@ -42,10 +42,16 @@ export function useShortcut(combo: string | null, handler: ShortcutHandler): voi
 
 const BARE_MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"]);
 
-/** Normalize a keyboard event into a combo string, or null for bare modifiers. */
+/**
+ * Normalize a keyboard event into a combo string, or null for bare
+ * modifiers. Shift is part of the combo ("shift+space" vs "space"), so
+ * selection-extension keys (Shift+arrows) and Shift+Space never alias the
+ * unmodified navigation combos.
+ */
 export function comboFromEvent(event: KeyboardEvent): string | null {
   if (BARE_MODIFIER_KEYS.has(event.key)) return null;
   const mod = event.ctrlKey || event.metaKey;
+  const shift = event.shiftKey;
   const key = event.key === " " ? "space" : event.key.toLowerCase();
-  return mod ? `mod+${key}` : key;
+  return `${mod ? "mod+" : ""}${shift ? "shift+" : ""}${key}`;
 }

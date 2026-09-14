@@ -566,6 +566,64 @@ describe("ReaderNavigation", () => {
   });
 });
 
+describe("Reader presentation mode (issue #65)", () => {
+  it("toggles with Ctrl+L, hides the chrome, and exits with Esc", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-title")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
+    // The chrome is gone: no header, no footer, no hover zone.
+    expect(screen.queryByTestId("reader-title")).toBeNull();
+    expect(screen.queryByTestId("reader-footer")).toBeNull();
+    expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
+    // The reader swaps in the floating presentation bar.
+    expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
+
+    // Esc is the exit path and restores the normal chrome.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
+    expect(screen.getByTestId("reader-title")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
+  });
+
+  it("toggles back off with Ctrl+L", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
+  });
+
+  it("flips whole pages with PageDown, Space, and Shift+Space while presenting", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "PageDown" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+
+    // Shift+Space steps back a page (its own combo, not plain Space).
+    fireEvent.keyDown(window, { key: " ", shiftKey: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+  });
+});
+
 describe("ReaderAppearance", () => {
   it("changes the reader theme, layout, and font family", async () => {
     renderReader();

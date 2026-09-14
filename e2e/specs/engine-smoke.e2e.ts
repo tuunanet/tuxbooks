@@ -110,15 +110,28 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
     });
 
     // Zoom works: the level indicator changes and the backing store grows
-    // with it (fit-width × zoom × dpr).
+    // with it (fit-width × zoom × dpr). The manual zoom is a ladder step
+    // from the current effective scale (issue #65): zoom-in snaps onto the
+    // next rung above the fit, zoom-out steps back down the ladder — which
+    // is at or below the fit scale, never a fixed value.
     const canvas = firstPdfCanvas(page);
     const widthBefore = Number(await canvas.getAttribute("width"));
+    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-level")).toContainText("150%", { timeout: 30000 });
+    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+      timeout: 30000,
+    });
+    const levelZoomed = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
     await expect
       .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
       .toBeGreaterThan(widthBefore);
     await page.getByTestId("pdf-zoom-out").click();
+    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelZoomed, {
+      timeout: 30000,
+    });
+    await expect
+      .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
+      .toBeLessThanOrEqual(widthBefore);
 
     await returnToLibrary(page);
   });
