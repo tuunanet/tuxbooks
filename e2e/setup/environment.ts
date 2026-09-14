@@ -5,6 +5,7 @@
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -38,6 +39,15 @@ export const scratchDir = path.join(os.tmpdir(), `tuxbooks-e2e-${runId}`);
 export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
 export const configDir = path.join(scratchDir, "config");
+
+/**
+ * The library-scale corpus (issue #61): generated into its own directory —
+ * deliberately outside the watched `libraryDir`, so only the scale spec's
+ * bulk import brings it in and the other seeded suites never see it.
+ */
+export const scaleCorpusDir = path.join(scratchDir, "scale-corpus");
+/** How many books the scale corpus carries (issue #61 plan, phase 3). */
+export const SCALE_CORPUS_SIZE = 1500;
 
 export function killStaleProcesses(): void {
   // A crashed run can leave the app tree (including the dist's crashpad
@@ -124,6 +134,24 @@ export function prepareEnvironment(seeded: boolean): void {
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
+
+    // The library-scale corpus only matters to the seeded phase (the scale
+    // spec imports it through the real bulk path). Generated at setup so
+    // `just test-e2e` stays self-contained; a failed generation skips the
+    // spec rather than failing the phase.
+    if (process.env.E2E_PHASE === "seeded") {
+      mkdirSync(scaleCorpusDir, { recursive: true });
+      const generator = path.join(repoRoot, "scripts", "make-epub-corpus.py");
+      try {
+        execFileSync("python3", [generator, scaleCorpusDir, String(SCALE_CORPUS_SIZE)]);
+      } catch (err) {
+        console.warn(
+          `[e2e] scale corpus generation failed; library-scale.e2e.ts will skip:`,
+          err instanceof Error ? err.message : err,
+        );
+        rmSync(scaleCorpusDir, { recursive: true, force: true });
+      }
+    }
   }
 
   // The benchmark phase (just bench-reader) seeds only the free-corpus

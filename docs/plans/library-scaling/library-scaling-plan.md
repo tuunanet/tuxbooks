@@ -233,33 +233,53 @@ describe the new import pipeline and library contracts.
 
 ### Synthetic corpus + E2E
 
-- [ ] Add a corpus generator (extend `scripts/make-epub-fixtures.py` or a
+- [x] Add a corpus generator (extend `scripts/make-epub-fixtures.py` or a
       sibling `scripts/make-epub-corpus.py`): deterministic minimal EPUBs
       (one tiny xhtml + minimal OPF, varied title/author), N via CLI,
       written to a target dir. Must generate ~1,500 books fast (seconds).
-- [ ] New `e2e/specs/library-scale.e2e.ts` (seeded flavor): generate the
-      corpus into the fixture tempdir, import it through the UI, then
-      assert — structural only, no timing per `docs/PERFORMANCE.md`: - import completes with the full count in the header; - `[data-book-card]` count within the PERF-15 cap after settle; - scrolling to the middle of the scrollbar renders a different
-      window (title at top changes); - UI liveness probe: change the sort, assert the first card changes
-      (the renderer processed a full-library operation while big); - a second import pass reports everything skipped (Phase 2
-      contract).
-- [ ] Wire the corpus into the E2E fixture build so `just test-e2e`
+- [x] New `e2e/specs/z-library-scale.e2e.ts` (seeded flavor): corpus
+      generated at setup, imported through the real bulk path, then
+      assert — structural only, no timing per `docs/PERFORMANCE.md`:
+      import completes with the full count in the header; `[data-book-card]`
+      count within the PERF-15 cap after settle; scrolling to the middle
+      renders a different window (title at top changes); sort liveness
+      (first card changes); a re-import reports everything skipped
+      (Phase 2 contract).
+- [x] Wire the corpus into the E2E fixture build so `just test-e2e`
       stays self-contained and terminates.
 
 ### Docs
 
-- [ ] `docs/ARCHITECTURE.md`: import pipeline section — streaming +
+- [x] `docs/ARCHITECTURE.md`: import pipeline section — streaming +
       skip + bounded parallelism + chunked transactions; batched
       `import-progress` contract.
-- [ ] `docs/PERFORMANCE.md`: touch-list additions (`book_importer`,
+- [x] `docs/PERFORMANCE.md`: touch-list additions (`book_importer`,
       `library_scanner`, corpus spec).
 - [ ] Issue #61: post results (corpus size, observations) and close with
       the fix PRs referenced.
 
 ### Verification
 
-- [ ] `just check`, `just test-e2e` (now including the scale spec),
+- [x] `just check`, `just test-e2e` (now including the scale spec),
       `just coverage` green.
+
+Phase 3 implementation notes (deviations discovered while building):
+
+- **The spec drives the import through the renderer bridge**
+  (`page.evaluate` → `window.tuxbooks.invoke("import_paths")`) — the
+  native folder dialog is not automatable (same rule as library-sync's
+  "Locate File" note). This exercises the exact command the UI's Import
+  Folder flow issues.
+- **The spec runs last** (`z-…` filename): the seeded phase shares one
+  app and library, and the corpus leaves 1,500 books behind — every
+  other suite assumes the seeded fixtures. A mid-phase placement wedged
+  everything after it (fixed by the rename).
+- The skip assertion reads the re-import's `ImportReport.skipped`
+  directly from the command's return value — no relaunch needed, which
+  the single-worker phase forbids anyway (single-instance lock).
+- Corpus generation happens in the E2E global setup
+  (`environment.ts` spawns `python3 scripts/make-epub-corpus.py` into the
+  scratch dir, only for the seeded phase; failures skip the spec).
 
 ---
 
