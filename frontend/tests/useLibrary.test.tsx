@@ -34,11 +34,11 @@ describe("useLibraryData import-progress streaming", () => {
 
     act_emit(makeBook({ id: 3, title: "After", coverPath: "/covers/y.png" }));
 
-    await waitFor(() => expect(result.current.books).toHaveLength(1));
-    expect(result.current.books[0]).toMatchObject({ id: 3, title: "After" });
+    await waitFor(() => expect(result.current.books[0]).toMatchObject({ id: 3, title: "After" }));
+    expect(result.current.books).toHaveLength(1);
   });
 
-  it("keeps the list ordered by title as books stream in", async () => {
+  it("appends streamed books unsorted and reconciles title order on refresh", async () => {
     mockInvoke(emptyLibrary);
     const { result } = renderHook(() => useLibraryData());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -46,9 +46,17 @@ describe("useLibraryData import-progress streaming", () => {
     act_emit(makeBook({ id: 1, title: "Zeta" }));
     act_emit(makeBook({ id: 2, title: "Alpha" }));
 
-    await waitFor(() =>
-      expect(result.current.books.map((b) => b.title)).toEqual(["Alpha", "Zeta"]),
-    );
+    // Streaming order is append order — O(1) patches, no per-event sort.
+    await waitFor(() => expect(result.current.books).toHaveLength(2));
+    expect(result.current.books.map((b) => b.title)).toEqual(["Zeta", "Alpha"]);
+
+    // The completing import refresh re-fetches; the backend sorts.
+    mockInvoke({
+      ...emptyLibrary,
+      list_books: [makeBook({ id: 2, title: "Alpha" }), makeBook({ id: 1, title: "Zeta" })],
+    });
+    await act(() => result.current.refresh());
+    expect(result.current.books.map((b) => b.title)).toEqual(["Alpha", "Zeta"]);
   });
 });
 

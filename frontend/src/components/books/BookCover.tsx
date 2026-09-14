@@ -33,6 +33,8 @@ export function BookCover({ book, className, initialClassName }: BookCoverProps)
           src={coverFileUrl(coverPath)}
           alt=""
           onError={() => setLoadFailed(true)}
+          loading="lazy"
+          decoding="async"
           className="size-full object-cover"
           draggable={false}
         />

@@ -16,7 +16,36 @@ minimumReleaseAge: 43200
 # an unpinned org pattern (`@org/*`) works but admits the whole org — use
 # only to get unstuck, then replace with pins. Each entry carries a dated
 # comment naming the advisory; remove entries once the versions age out.
-minimumReleaseAgeExclude: []
+minimumReleaseAgeExclude:
+  # 2026-09-14: already-locked rollup 4.63.1 platform binaries (no advisory —
+  # re-resolution for @tanstack/react-virtual tripped the age gate on packages
+  # the lockfile pins). Remove once 4.63.1 is 30+ days old (2026-09-28).
+  - "@rollup/rollup-android-arm64@4.63.1"
+  - "@noble/hashes@2.4.0"
+  - "@rollup/rollup-android-arm-eabi@4.63.1"
+  - "@rollup/rollup-darwin-arm64@4.63.1"
+  - "@rollup/rollup-darwin-x64@4.63.1"
+  - "@rollup/rollup-freebsd-arm64@4.63.1"
+  - "@rollup/rollup-freebsd-x64@4.63.1"
+  - "@rollup/rollup-linux-arm64-gnu@4.63.1"
+  - "@rollup/rollup-linux-arm64-musl@4.63.1"
+  - "@rollup/rollup-linux-arm-gnueabihf@4.63.1"
+  - "@rollup/rollup-linux-arm-musleabihf@4.63.1"
+  - "@rollup/rollup-linux-loong64-gnu@4.63.1"
+  - "@rollup/rollup-linux-loong64-musl@4.63.1"
+  - "@rollup/rollup-linux-ppc64-gnu@4.63.1"
+  - "@rollup/rollup-linux-ppc64-musl@4.63.1"
+  - "@rollup/rollup-linux-riscv64-gnu@4.63.1"
+  - "@rollup/rollup-linux-riscv64-musl@4.63.1"
+  - "@rollup/rollup-linux-s390x-gnu@4.63.1"
+  - "@rollup/rollup-linux-x64-gnu@4.63.1"
+  - "@rollup/rollup-linux-x64-musl@4.63.1"
+  - "@rollup/rollup-openbsd-x64@4.63.1"
+  - "@rollup/rollup-openharmony-arm64@4.63.1"
+  - "@rollup/rollup-win32-arm64-msvc@4.63.1"
+  - "@rollup/rollup-win32-ia32-msvc@4.63.1"
+  - "@rollup/rollup-win32-x64-gnu@4.63.1"
+  - "@rollup/rollup-win32-x64-msvc@4.63.1"
 
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:

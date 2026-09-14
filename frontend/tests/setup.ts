@@ -5,6 +5,7 @@ import {
   installMockIntersectionObserver,
   resetIntersectionObservers,
 } from "./mocks/intersectionObserver";
+import { installMockResizeObserver, resetResizeObservers } from "./mocks/resizeObserver";
 
 // Coverage-instrumented runs are slower on the main thread; the 1s default
 // otherwise makes waitFor-based tests flaky exactly when the gate matters.
@@ -60,13 +61,10 @@ beforeAll(() => {
     })) as unknown as typeof window.matchMedia;
   }
 
-  // Radix ScrollArea and Slider observe size changes.
-  if (!globalThis.ResizeObserver) {
-    globalThis.ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+  // Radix ScrollArea and Slider observe size changes; the virtualized
+  // library grid needs tests to fire real entries (tests/mocks/resizeObserver).
+  if (!globalThis.ResizeObserver || globalThis.ResizeObserver.name !== "MockResizeObserver") {
+    installMockResizeObserver();
   }
 
   // The PDF virtualization observes page slots; tests fire synthetic
@@ -87,6 +85,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   resetIntersectionObservers();
+  resetResizeObservers();
 });
 
 // Reader appearance and app theme persist through localStorage; clear between

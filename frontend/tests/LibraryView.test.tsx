@@ -112,6 +112,32 @@ describe("LibraryView selection and opening", () => {
     expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
   });
 
+  it("restores the grid scroll position after a detail round trip", async () => {
+    // Regression (issue #61 phase 1 QA): returning from the detail view
+    // lost the scroll position — the save read a ref React had already
+    // nulled during unmount. Saving happens on scroll now.
+    mockInvoke({
+      get_library_stats: { bookCount: 40, collectionCount: 0 },
+      list_books: Array.from({ length: 40 }, (_, index) =>
+        makeBook({ id: index + 1, title: `Shelf Book ${index + 1}` }),
+      ),
+    });
+
+    renderShell();
+    const grid = await screen.findByTestId("book-grid");
+    grid.scrollTop = 5000;
+    grid.dispatchEvent(new Event("scroll"));
+
+    const card = screen.getAllByTestId("book-card").at(0);
+    if (!card) throw new Error("expected a card");
+    fireEvent.doubleClick(card);
+    expect(await screen.findByTestId("book-detail")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("detail-back"));
+    const restored = await screen.findByTestId("book-grid");
+    expect(restored.scrollTop).toBe(5000);
+  });
+
   it("roves focus through the cards with arrow keys", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 3, collectionCount: 0 },
