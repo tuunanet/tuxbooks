@@ -1055,10 +1055,14 @@ describe("PDF appearance menu", () => {
     expect(tint.style.mixBlendMode).toBe("multiply");
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
 
-    // The sticky toolbar takes the themed surface too — no app-white strip
-    // floating over the tinted pages.
-    expect(screen.getByTestId("pdf-prev").parentElement?.style.backgroundColor).toBe(
-      "rgb(246, 240, 228)",
+    // The page/zoom controls dock into the shell's header (issue #68) — no
+    // separate control row above the document — and the header chrome
+    // follows the theme through the shell's THEME_CLASSES.
+    const header = screen.getByTestId("pdf-page-indicator").closest("header");
+    expect(header).not.toBeNull();
+    expect(header).toContainElement(screen.getByTestId("pdf-toolbar"));
+    expect(screen.queryByTestId("pdf-reader")).not.toContainElement(
+      screen.getByTestId("pdf-toolbar"),
     );
   });
 });

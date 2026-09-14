@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -72,6 +72,7 @@ interface PdfReaderProps {
   onDocumentLoad?: (count: number) => void;
   onOutlineLoad?: (outline: { title: string; page: number | null; items: unknown[] }[]) => void;
   sidebarHost?: HTMLElement | null;
+  controlsHost?: HTMLElement | null;
   scrollContainerRef?: RefObject<HTMLElement | null>;
   adapterRef?: { current: ReaderAdapter | null };
   onSearchGroup?: (bookId: number, group: unknown) => void;
@@ -100,6 +101,7 @@ function readerTree(props: PdfReaderProps) {
           onDocumentLoad={props.onDocumentLoad}
           onOutlineLoad={props.onOutlineLoad}
           sidebarHost={props.sidebarHost}
+          controlsHost={props.controlsHost}
           scrollContainerRef={props.scrollContainerRef}
           adapterRef={props.adapterRef}
           onSearchGroup={props.onSearchGroup as never}
@@ -1166,6 +1168,52 @@ describe("PdfReader navigation", () => {
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
     );
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+  });
+});
+
+describe("PdfReader controls docking", () => {
+  async function renderWithHeaderHost() {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    // Mirrors the shell: a header-owned slot the reader's controls portal
+    // into (issue #68), rendered alongside the reader itself.
+    function Harness() {
+      const [host, setHost] = useState<HTMLElement | null>(null);
+      return (
+        <div>
+          <header ref={setHost} data-testid="fake-reader-header" />
+          {readerTree({ controlsHost: host })}
+        </div>
+      );
+    }
+
+    render(<Harness />);
+    await screen.findByTestId("pdf-canvas");
+  }
+
+  it("docks the toolbar into the shell's header host when one is provided", async () => {
+    await renderWithHeaderHost();
+
+    // The controls live in the header, not in a separate row above the
+    // document — the reader element must not contain them.
+    const toolbar = screen.getByTestId("pdf-toolbar");
+    expect(screen.getByTestId("fake-reader-header")).toContainElement(toolbar);
+    expect(screen.getByTestId("pdf-reader")).not.toContainElement(toolbar);
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("keeps navigation working through the docked controls", async () => {
+    await renderWithHeaderHost();
+
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2");
   });
 });
 

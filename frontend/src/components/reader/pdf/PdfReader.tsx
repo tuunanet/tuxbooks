@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
-import { pdfThemeTreatment, pdfToolbarSurface } from "@/lib/pdf/theme";
+import { pdfThemeTreatment } from "@/lib/pdf/theme";
 import {
   isHighlightColor,
   highlightAtPoint,
@@ -83,6 +83,17 @@ interface PdfReaderProps {
    * of the document handle.
    */
   sidebarHost?: HTMLElement | null;
+  /**
+   * Host element for the document controls (PdfToolbar: page navigation +
+   * zoom), a header slot owned by ReaderShell's layout. The controls dock
+   * through a portal so the dedicated control row above the document is
+   * gone and its vertical space goes to the pages (issue #68), while this
+   * component stays the single owner of the zoom and position state. Null
+   * while the shell provides no host (standalone renders, e.g. unit
+   * tests); the controls then fall back to rendering inline above the
+   * document.
+   */
+  controlsHost?: HTMLElement | null;
   /** The reader's scroll container, owned by ReaderShell. */
   scrollContainerRef?: RefObject<HTMLElement | null>;
   /**
@@ -118,8 +129,9 @@ interface PdfReaderProps {
  * that position and reports page changes back. Responsibilities live in the
  * pdf/ modules: document loading (usePdfDocument), geometry (usePdfGeometry
  * + pdfLayout), fit-width layout scale (useFitWidthScale), slot rendering
- * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), toolbar state (PdfToolbar),
- * and the thumbnails sidebar (PdfSidebar, portaled into the shell's host).
+ * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), document controls docked
+ * into the shell's header (PdfToolbar, portaled), and the thumbnails
+ * sidebar (PdfSidebar, portaled into the shell's host).
  * Persistence runs through the shared useReaderProgress contract. The
  * outline comes from the engine seam and is reported upward for the
  * navigation drawer, and in-book search streams page text matches through
@@ -130,6 +142,7 @@ export function PdfReader({
   onDocumentLoad,
   onOutlineLoad,
   sidebarHost,
+  controlsHost,
   scrollContainerRef,
   adapterRef,
   onPositionChange,
@@ -810,6 +823,24 @@ export function PdfReader({
     );
   }
 
+  // Document controls (page navigation + zoom): docked into the shell's
+  // header host when one is provided, inline above the document otherwise
+  // (standalone renders). Either way the groups stay intact —
+  // `‹ Page X of Y ›` and `− zoom% +` (§ issue #68).
+  const controls = (
+    <PdfToolbar
+      pageNumber={currentPage}
+      pageCount={effectivePageCount}
+      zoomPercent={Math.round(zoom * 100)}
+      canZoomIn={zoomIndex < ZOOM_LEVELS.length - 1}
+      canZoomOut={zoomIndex > 0}
+      onPrev={() => goToPage(currentPage - 1)}
+      onNext={() => goToPage(currentPage + 1)}
+      onZoomIn={() => changeZoom(1)}
+      onZoomOut={() => changeZoom(-1)}
+    />
+  );
+
   return (
     <div
       ref={rootRef}
@@ -820,18 +851,7 @@ export function PdfReader({
       {...openTelemetry}
       className="flex flex-col items-stretch px-6 py-4"
     >
-      <PdfToolbar
-        pageNumber={currentPage}
-        pageCount={effectivePageCount}
-        zoomPercent={Math.round(zoom * 100)}
-        canZoomIn={zoomIndex < ZOOM_LEVELS.length - 1}
-        canZoomOut={zoomIndex > 0}
-        surfaceColor={pdfToolbarSurface(preferences.theme)}
-        onPrev={() => goToPage(currentPage - 1)}
-        onNext={() => goToPage(currentPage + 1)}
-        onZoomIn={() => changeZoom(1)}
-        onZoomOut={() => changeZoom(-1)}
-      />
+      {controlsHost ? createPortal(controls, controlsHost) : controls}
       <PdfDocumentView
         document={pdfDocument}
         slots={slots}

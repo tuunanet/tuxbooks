@@ -7,9 +7,6 @@ interface PdfToolbarProps {
   zoomPercent: number;
   canZoomIn: boolean;
   canZoomOut: boolean;
-  /** Themed surface color for the sticky strip (paper tint, dark
-   *  backgrounds); undefined keeps the neutral translucent app chrome. */
-  surfaceColor?: string;
   onPrev: () => void;
   onNext: () => void;
   onZoomIn: () => void;
@@ -17,11 +14,12 @@ interface PdfToolbarProps {
 }
 
 /**
- * PDF reader toolbar: page navigation, page indicator, and zoom. Rendered
- * sticky so the controls stay reachable while the document scrolls. With a
- * themed surface the strip is opaque in the theme's own background — a
- * translucent app-white strip over tinted/inverted pages reads as a white
- * artifact (UAT feedback).
+ * PDF document controls: page navigation (`‹ Page 1 of 991 ›`) and zoom
+ * (`− 75% +`), one compact group docked into the shell's reader header via
+ * a portal (issue #68) — no dedicated control row above the document, so
+ * the freed vertical space goes to the pages. Two clearly separated
+ * clusters with a small divider: prev/next stay grouped around the page
+ * indicator, zoom out/level/in stay grouped together.
  */
 export function PdfToolbar({
   pageNumber,
@@ -29,7 +27,6 @@ export function PdfToolbar({
   zoomPercent,
   canZoomIn,
   canZoomOut,
-  surfaceColor,
   onPrev,
   onNext,
   onZoomIn,
@@ -37,8 +34,10 @@ export function PdfToolbar({
 }: PdfToolbarProps) {
   return (
     <div
-      className="sticky top-0 z-10 -mx-2 mb-3 flex items-center gap-1 bg-background/95 px-2 py-1"
-      style={surfaceColor ? { backgroundColor: surfaceColor } : undefined}
+      data-testid="pdf-toolbar"
+      role="group"
+      aria-label="Page navigation and zoom"
+      className="flex items-center gap-1"
     >
       <Button
         variant="ghost"
@@ -53,7 +52,7 @@ export function PdfToolbar({
       <span
         data-testid="pdf-page-indicator"
         aria-live="polite"
-        className="px-2 text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
+        className="whitespace-nowrap px-2 text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
       >
         Page {pageNumber} of {pageCount}
       </span>

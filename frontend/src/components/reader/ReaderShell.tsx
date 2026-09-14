@@ -119,6 +119,11 @@ export function ReaderShell() {
   // PdfReader fills the host through a portal (it owns the document handle).
   const [pdfSidebarOpen, setPdfSidebarOpen] = useState(false);
   const [pdfSidebarHost, setPdfSidebarHost] = useState<HTMLElement | null>(null);
+  // PDF page/zoom controls dock into this header slot through the same
+  // portal pattern: the reader keeps owning the zoom and position state,
+  // the shell only provides the layout host (issue #68 — one compact
+  // header row, no separate control bar above the document).
+  const [pdfControlsHost, setPdfControlsHost] = useState<HTMLElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
 
@@ -323,6 +328,14 @@ export function ReaderShell() {
           <TooltipContent>Back to Library</TooltipContent>
         </Tooltip>
 
+        {isPdf && (
+          <div
+            ref={setPdfControlsHost}
+            data-testid="pdf-header-controls"
+            className="flex shrink-0 items-center"
+          />
+        )}
+
         <div className="min-w-0 flex-1 px-2 text-center">
           <p data-testid="reader-title" className="truncate text-sm font-medium">
             {book.title}
@@ -446,6 +459,7 @@ export function ReaderShell() {
               onDocumentLoad={setPdfPageCount}
               onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
               sidebarHost={pdfSidebarHost}
+              controlsHost={pdfControlsHost}
               scrollContainerRef={readerContentRef}
               onPositionChange={(position) => setReportedPosition({ bookId: book.id, position })}
               adapterRef={adapterRef}
