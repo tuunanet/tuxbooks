@@ -69,9 +69,14 @@ test.describe("tuxbooks high-DPI configuration (devicePixelRatio 2)", () => {
       ),
     ).toBeLessThanOrEqual(8192);
 
-    // Zoom still works at dpr 2 and respects the caps.
+    // Zoom still works at dpr 2 and respects the caps. The manual zoom is
+    // a ladder step from the current effective scale (issue #65) — assert
+    // the change, not a fixed rung.
+    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-level")).toContainText("150%", { timeout: 30000 });
+    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+      timeout: 30000,
+    });
     await expect
       .poll(async () => Number(await canvas.getAttribute("width")), { timeout: 30000 })
       .toBeGreaterThan(Math.floor(612 * fit * dpr));

@@ -16,6 +16,58 @@ export interface PageSize {
   height: number;
 }
 
+/**
+ * Zoom mode of the PDF reader. The fit modes are dynamic: the scale is
+ * continuously recomputed from the measured viewport (resize, sidebar
+ * toggles) and never stored. `custom` is a fixed level on the zoom ladder
+ * (1 = 100%).
+ */
+export type ZoomMode = "fit-width" | "fit-page" | "fit-height" | "custom";
+
+/** Request for {@link computePdfScale}: the zoom state plus page references. */
+export interface PdfScaleRequest {
+  mode: ZoomMode;
+  /** Custom-mode ladder level; ignored by the fit modes. */
+  level: number;
+  /** Document-wide reference page (page 1); null before geometry is known. */
+  reference: Pick<PageSize, "width" | "height"> | null;
+  /**
+   * The current page's own size while presentation mode is active: fit
+   * height is computed from the page being read, so mixed-size documents
+   * rescale per page.
+   */
+  presentationPage: Pick<PageSize, "width" | "height"> | null;
+}
+
+/**
+ * The layout scale for one render pass (pure — unit-tested without a
+ * browser). Presentation mode always fit-heights the current page; every
+ * other mode is document-wide (page-1 reference) so ordinary navigation
+ * never rescales the layout mid-document. Unmeasurable inputs fall back
+ * to 1 so callers never render at a zero scale.
+ */
+export function computePdfScale(
+  request: PdfScaleRequest,
+  areaWidth: number,
+  viewportHeight: number,
+): number {
+  if (request.presentationPage) {
+    return fitHeightScale(viewportHeight, request.presentationPage.height);
+  }
+  const reference = request.reference;
+  if (!reference) return 1;
+  switch (request.mode) {
+    case "fit-width":
+      return fitWidthScale(areaWidth, reference.width);
+    case "fit-page":
+      return fitPageScale(areaWidth, viewportHeight, reference.width, reference.height);
+    case "fit-height":
+      return fitHeightScale(viewportHeight, reference.height);
+    case "custom":
+      return request.level > 0 ? request.level : 1;
+  }
+}
+
 /** Displayed pixel geometry of one page slot in document coordinates. */
 export interface LayoutSlot {
   pageNumber: number;
@@ -35,6 +87,62 @@ export const PAGE_GAP_PX = 8;
 export function fitWidthScale(availableWidth: number, referencePageWidth: number): number {
   if (availableWidth <= 0 || referencePageWidth <= 0) return 1;
   return availableWidth / referencePageWidth;
+}
+
+/**
+ * Scale that fits a page of `referencePageHeight` page units into
+ * `availableHeight` CSS pixels (dynamic fit-height mode — presentation
+ * mode and the Ctrl+3 zoom mode). Falls back to 1 when unmeasurable.
+ */
+export function fitHeightScale(availableHeight: number, referencePageHeight: number): number {
+  if (availableHeight <= 0 || referencePageHeight <= 0) return 1;
+  return availableHeight / referencePageHeight;
+}
+
+/**
+ * Scale that fits a whole page inside both dimensions at once (Ctrl+1):
+ * the binding axis wins. Falls back to 1 when unmeasurable.
+ */
+export function fitPageScale(
+  availableWidth: number,
+  availableHeight: number,
+  pageWidth: number,
+  pageHeight: number,
+): number {
+  if (pageWidth <= 0 || pageHeight <= 0) return 1;
+  return Math.min(
+    fitWidthScale(availableWidth, pageWidth),
+    fitHeightScale(availableHeight, pageHeight),
+  );
+}
+
+/**
+ * Discrete zoom ladder for the manual (custom) zoom mode. `Ctrl + +` /
+ * `Ctrl + -` step between neighbors; the effective scale snaps onto the
+ * nearest rung first, so zooming out of a fit mode continues from where
+ * the page actually is.
+ */
+export const ZOOM_LADDER = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
+
+/** The Ctrl+0 reset level (100%). */
+export const DEFAULT_ZOOM_LEVEL = 1;
+
+/**
+ * Nearest ladder entry at or above/below `scale`, stepping `direction`
+ * (+1 in, -1 out) rungs from there. Clamps at both ends of the ladder so
+ * rapid input never escapes the bounds.
+ */
+export function stepZoomLevel(scale: number, direction: 1 | -1): number {
+  let index = 0;
+  for (let i = 0; i < ZOOM_LADDER.length; i++) {
+    if ((ZOOM_LADDER[i] as number) <= scale) index = i;
+  }
+  if (direction === 1) {
+    while (index < ZOOM_LADDER.length - 1 && (ZOOM_LADDER[index] as number) <= scale) index++;
+  } else {
+    while (index > 0 && (ZOOM_LADDER[index] as number) >= scale) index--;
+  }
+  return ZOOM_LADDER[index] as number;
 }
 
 /** Fill the whole document with an estimate derived from one known page. */

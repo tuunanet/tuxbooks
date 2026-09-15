@@ -47,6 +47,39 @@ describe("comboFromEvent", () => {
     expect(comboFromEvent(new KeyboardEvent("keydown", { key: "b", ctrlKey: true }))).toBe("mod+b");
   });
 
+  it("keeps shift part of the combo", () => {
+    // Shift+Space is its own combo (issue #65: previous page in PDF
+    // presentation mode), and shifted navigation keys (selection
+    // extension) never alias the unmodified navigation combos.
+    expect(comboFromEvent(new KeyboardEvent("keydown", { key: " ", shiftKey: true }))).toBe(
+      "shift+space",
+    );
+    expect(
+      comboFromEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true })),
+    ).toBe("shift+arrowright");
+    expect(
+      comboFromEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, shiftKey: true })),
+    ).toBe("mod+shift+k");
+  });
+
+  it("dispatches a shift combo to its own handler", () => {
+    const onNext = vi.fn();
+    const onPrev = vi.fn();
+    render(
+      <ShortcutProvider>
+        <Harness combo="space" onFire={onNext} />
+        <Harness combo="shift+space" onFire={onPrev} />
+      </ShortcutProvider>,
+    );
+
+    fireKey({ key: " ", shiftKey: true });
+    expect(onPrev).toHaveBeenCalledTimes(1);
+    expect(onNext).not.toHaveBeenCalled();
+    fireKey({ key: " " });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrev).toHaveBeenCalledTimes(1);
+  });
+
   it("returns null for bare modifier presses", () => {
     expect(comboFromEvent(new KeyboardEvent("keydown", { key: "Control" }))).toBeNull();
     expect(comboFromEvent(new KeyboardEvent("keydown", { key: "Meta" }))).toBeNull();

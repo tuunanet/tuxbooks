@@ -2,15 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   clampOffset,
   compensateOffset,
+  computePdfScale,
   documentHeight,
   displayedSizes,
   estimatePageSizes,
+  fitHeightScale,
+  fitPageScale,
   fitWidthScale,
   layoutSlots,
   offsetForPage,
   pageAtOffset,
   PAGE_GAP_PX,
+  stepZoomLevel,
   thumbnailGeometry,
+  ZOOM_LADDER,
   type LayoutSlot,
   type PageSize,
 } from "@/components/reader/pdf/pdfLayout";
@@ -30,6 +35,125 @@ describe("fitWidthScale", () => {
   it("falls back to 1 for unmeasurable dimensions", () => {
     expect(fitWidthScale(0, 612)).toBe(1);
     expect(fitWidthScale(1224, 0)).toBe(1);
+  });
+});
+
+describe("fitHeightScale", () => {
+  it("maps the reference page height onto the available height", () => {
+    expect(fitHeightScale(1584, 792)).toBe(2);
+    expect(fitHeightScale(396, 792)).toBe(0.5);
+  });
+
+  it("falls back to 1 for unmeasurable dimensions", () => {
+    expect(fitHeightScale(0, 792)).toBe(1);
+    expect(fitHeightScale(1584, 0)).toBe(1);
+  });
+});
+
+describe("fitPageScale", () => {
+  it("lets the binding axis win", () => {
+    // A 1224×1584 viewport fits the letter page at 2× on both axes.
+    expect(fitPageScale(1224, 1584, 612, 792)).toBe(2);
+    // A narrow viewport is width-bound.
+    expect(fitPageScale(612, 1584, 612, 792)).toBe(1);
+    // A short viewport is height-bound.
+    expect(fitPageScale(1224, 396, 612, 792)).toBe(0.5);
+  });
+
+  it("falls back to 1 for degenerate page units", () => {
+    expect(fitPageScale(1224, 1584, 0, 792)).toBe(1);
+    expect(fitPageScale(1224, 1584, 612, 0)).toBe(1);
+  });
+});
+
+describe("stepZoomLevel", () => {
+  it("steps up and down the ladder from an exact rung", () => {
+    expect(stepZoomLevel(1, 1)).toBe(1.5);
+    expect(stepZoomLevel(1.5, 1)).toBe(2);
+    expect(stepZoomLevel(1.5, -1)).toBe(1);
+    expect(stepZoomLevel(1, -1)).toBe(0.75);
+  });
+
+  it("snaps an off-ladder scale onto the nearest rung before stepping", () => {
+    // Zooming out of a fit mode continues from where the page actually is.
+    expect(stepZoomLevel(1.2, 1)).toBe(1.5);
+    expect(stepZoomLevel(1.2, -1)).toBe(1);
+    expect(stepZoomLevel(2.6, 1)).toBe(3);
+  });
+
+  it("clamps at both ladder bounds", () => {
+    const floor = ZOOM_LADDER[0] as number;
+    const ceiling = ZOOM_LADDER[ZOOM_LADDER.length - 1] as number;
+    expect(stepZoomLevel(floor, -1)).toBe(floor);
+    expect(stepZoomLevel(ceiling, 1)).toBe(ceiling);
+  });
+});
+
+describe("computePdfScale", () => {
+  const reference = { width: 612, height: 792 };
+
+  it("computes the mode-specific document scale", () => {
+    expect(
+      computePdfScale(
+        { mode: "fit-width", level: 1, reference, presentationPage: null },
+        1224,
+        1584,
+      ),
+    ).toBe(2);
+    expect(
+      computePdfScale(
+        { mode: "fit-height", level: 1, reference, presentationPage: null },
+        1224,
+        1584,
+      ),
+    ).toBe(2);
+    expect(
+      computePdfScale(
+        { mode: "fit-page", level: 1, reference, presentationPage: null },
+        1224,
+        1000,
+      ),
+    ).toBe(1.2626262626262625);
+    expect(
+      computePdfScale(
+        { mode: "custom", level: 1.5, reference, presentationPage: null },
+        1224,
+        1584,
+      ),
+    ).toBe(1.5);
+  });
+
+  it("fit-heights the current page in presentation mode, whatever the mode", () => {
+    // Mixed-size document: page 2 is landscape — presentation rescales per
+    // page from the page being read.
+    const landscape = { width: 1224, height: 612 };
+    expect(
+      computePdfScale(
+        { mode: "fit-width", level: 1, reference, presentationPage: landscape },
+        1224,
+        612,
+      ),
+    ).toBe(1);
+    expect(
+      computePdfScale(
+        { mode: "custom", level: 3, reference, presentationPage: landscape },
+        1224,
+        612,
+      ),
+    ).toBe(1);
+  });
+
+  it("falls back to 1 before geometry is known", () => {
+    expect(
+      computePdfScale(
+        { mode: "fit-width", level: 1, reference: null, presentationPage: null },
+        1224,
+        1584,
+      ),
+    ).toBe(1);
+    expect(
+      computePdfScale({ mode: "custom", level: 0, reference, presentationPage: null }, 1224, 1584),
+    ).toBe(1);
   });
 });
 

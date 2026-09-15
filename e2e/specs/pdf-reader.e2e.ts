@@ -277,8 +277,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     // Zoom invalidates every cached bitmap; the visible page must converge
     // to a freshly rendered canvas at the new scale.
+    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-level")).toContainText("150%", { timeout: 30000 });
+    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+      timeout: 30000,
+    });
     await expect.poll(() => canvasIsNonBlank(page, 11), { timeout: 30000 }).toBe(true);
 
     // Reverse scroll across already-visited pages: cached bitmaps make
@@ -296,9 +299,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(cache).not.toBeNull();
     expect(cache!.entries).toBeLessThanOrEqual(8);
     // The byte budget bounds retained memory except the newest single page
-    // (oversized-keep-latest): at this point the reader sits at 150% zoom,
-    // so one dpr-scaled page bitmap is the allowed excess.
-    const onePage = await maxSingleBitmapBytes(page, 1.5);
+    // (oversized-keep-latest): at this point the reader sits one ladder rung
+    // above its fit scale (issue #65 — at reference viewport sizes that is
+    // at most 1.5× the fit factor; 2 covers the whole ladder), so one
+    // dpr-scaled page bitmap is the allowed excess.
+    const onePage = await maxSingleBitmapBytes(page, 2);
     expect(cache!.bytes).toBeLessThanOrEqual(320 * 1024 * 1024 + onePage);
 
     await returnToLibrary(page);
@@ -358,8 +363,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     // Zoom rescales every slot; the current page must stay rendered and
     // visible rather than leaving a stale viewport offset (UAT regression).
+    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-level")).toContainText("150%", { timeout: 30000 });
+    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+      timeout: 30000,
+    });
     await waitForRendered(page, 87);
     expect(
       await page.evaluate(

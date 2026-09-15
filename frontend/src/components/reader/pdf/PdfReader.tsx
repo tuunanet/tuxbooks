@@ -19,9 +19,9 @@ import {
 } from "../readerModel";
 import { useReaderProgress } from "../useReaderProgress";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
-import { useFitWidthScale } from "./hooks/useFitWidthScale";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
+import { usePdfScale } from "./hooks/usePdfScale";
 import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
   READING_ANCHOR_RATIO,
@@ -31,6 +31,7 @@ import {
 } from "./hooks/usePdfScrollTracking";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
+import { PdfPresentationBar } from "./PdfPresentationBar";
 import { PdfSidebar } from "./PdfSidebar";
 import { PdfToolbar } from "./PdfToolbar";
 import { PdfBitmapCache } from "./pdfBitmapCache";
@@ -41,14 +42,31 @@ import {
   effectiveRenderRatio,
   renderBufferBytes,
 } from "./pdfRenderPolicy";
-import { displayedSizes, layoutSlots } from "./pdfLayout";
+import {
+  DEFAULT_ZOOM_LEVEL,
+  ZOOM_LADDER,
+  displayedSizes,
+  layoutSlots,
+  stepZoomLevel,
+  type ZoomMode,
+} from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
 import type { ReaderSearchGroup } from "../searchModel";
 import type { Annotation, AnnotationInput, AnnotationRect } from "@/types/domain";
 import type { Book } from "@/types/domain";
 
-const ZOOM_LEVELS = [0.5, 0.75, 1, 1.5, 2] as const;
-const DEFAULT_ZOOM_INDEX = 2;
+/**
+ * Zoom state (issue #65): a mode plus, for `custom`, the absolute ladder
+ * level (1 = 100%). The fit modes are dynamic — the layout scale is
+ * recomputed from the measured viewport whenever it changes — while custom
+ * pins the scale until the user zooms again.
+ */
+interface ZoomState {
+  mode: ZoomMode;
+  level: number;
+}
+
+const DEFAULT_ZOOM_STATE: ZoomState = { mode: "fit-width", level: DEFAULT_ZOOM_LEVEL };
 
 /**
  * Count fallback for simultaneously active page canvases. The primary
@@ -68,6 +86,13 @@ const MAX_ACTIVE_CANVASES = 8;
  * finishes".
  */
 const MAX_CONCURRENT_RENDERS = 2;
+
+/**
+ * Wheel-delta accumulation that maps onto one zoom step (issue #65): a
+ * mouse-wheel notch reports ~±100, a trackpad pinch streams small deltas —
+ * accumulating keeps one gesture at one ladder step.
+ */
+const WHEEL_STEP_PX = 40;
 
 interface PdfReaderProps {
   book: Book;
@@ -112,6 +137,17 @@ interface PdfReaderProps {
   onSearchDone?: (bookId: number) => void;
   /** Highlights of the open book; drawn over rendered pages. */
   highlights?: Annotation[];
+  /**
+   * Presentation mode (issue #65): fullscreen, distraction-free, one page
+   * at a time at a dynamic fit-height scale. The shell owns the toggle
+   * (Ctrl+L), the chrome hiding, and the fullscreen request; this
+   * component rescales the document and swaps the controls.
+   */
+  presentationMode?: boolean;
+  /** Exits presentation mode (the in-mode exit control). */
+  onExitPresentation?: () => void;
+  /** Toggles presentation mode (the toolbar's in-header control). */
+  onTogglePresentation?: () => void;
   /** Persists a highlight created from a text selection. */
   onCreateHighlight?: (input: AnnotationInput) => void;
   /**
@@ -128,10 +164,11 @@ interface PdfReaderProps {
  * single source of truth — this component renders the document according to
  * that position and reports page changes back. Responsibilities live in the
  * pdf/ modules: document loading (usePdfDocument), geometry (usePdfGeometry
- * + pdfLayout), fit-width layout scale (useFitWidthScale), slot rendering
- * (PdfDocumentView/PdfPageSlot/PdfPageCanvas), document controls docked
- * into the shell's header (PdfToolbar, portaled), and the thumbnails
- * sidebar (PdfSidebar, portaled into the shell's host).
+ * + pdfLayout), zoom modes and the derived layout scale (usePdfScale),
+ * slot rendering (PdfDocumentView/PdfPageSlot/PdfPageCanvas), document
+ * controls docked into the shell's header (PdfToolbar, portaled), the
+ * presentation-mode bar (PdfPresentationBar), and the thumbnails sidebar
+ * (PdfSidebar, portaled into the shell's host).
  * Persistence runs through the shared useReaderProgress contract. The
  * outline comes from the engine seam and is reported upward for the
  * navigation drawer, and in-book search streams page text matches through
@@ -149,6 +186,9 @@ export function PdfReader({
   onSearchGroup,
   onSearchDone,
   highlights = [],
+  presentationMode = false,
+  onExitPresentation,
+  onTogglePresentation,
   onCreateHighlight,
   onSelectionChange,
 }: PdfReaderProps) {
@@ -164,22 +204,34 @@ export function PdfReader({
   const { sizes, measurePages } = usePdfGeometry(pdfDocument, pageCount);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
 
-  const [zoomIndex, setZoomIndex] = useState<number>(DEFAULT_ZOOM_INDEX);
+  const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
   const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(() => new Set());
 
-  const zoom = ZOOM_LEVELS[zoomIndex] as number;
   const effectivePageCount = pageCount > 0 ? pageCount : PDF_PLACEHOLDER_PAGE_COUNT;
   const currentPage = positionToPage(position, effectivePageCount);
   const layoutReady = status === "ready" && sizes !== null;
 
-  // Layout scale = fit-width base × user zoom multiplier (§ fit width).
-  // The reference page is page 1; wider pages in mixed documents overflow
-  // horizontally instead of shrinking the fit reference.
-  const referencePageWidth = sizes?.[0]?.width ?? 0;
-  const { scale: fitScale, contentAreaRef: registerContentArea } =
-    useFitWidthScale(referencePageWidth);
-  const scale = fitScale * zoom;
+  // Layout scale from the zoom state (§ issue #65): fit modes recompute
+  // from the measured content area and viewport; presentation mode
+  // fit-heights the page being read so mixed-size documents rescale per
+  // page. The request object is memoized — it is the scale hook's effect
+  // dependency.
+  const referencePage = sizes?.[0] ?? null;
+  const presentationPage = presentationMode && sizes ? (sizes[currentPage - 1] ?? null) : null;
+  const scaleRequest = useMemo(
+    () => ({
+      mode: zoom.mode,
+      level: zoom.level,
+      reference: referencePage,
+      presentationPage,
+    }),
+    [zoom.mode, zoom.level, referencePage, presentationPage],
+  );
+  const { scale, contentAreaRef: registerContentArea } = usePdfScale(
+    scaleRequest,
+    scrollContainerRef,
+  );
 
   // PERF-11 diagnostics (docs/PERFORMANCE.md): the reader publishes one
   // deterministic attribute snapshotting the geometry that drives every
@@ -573,9 +625,10 @@ export function PdfReader({
     measurePages([...visiblePages, ...preloadPages]);
   }, [layoutReady, measurePages, visiblePages, preloadPages]);
 
-  // Re-anchor after layout-scale changes (zoom multiplier, window resize,
-  // fit-width recalculation): the anchor's page + in-page fraction — kept
-  // current by the scroll tracker — is mapped onto the rescaled layout, so
+  // Re-anchor after layout-scale changes (zoom, fit recalculation,
+  // window resize, presentation rescale): the anchor's page + in-page
+  // fraction — kept current by the scroll tracker — is mapped onto the
+  // rescaled layout, so
   // the user keeps reading at the exact same spot (§ zoom preserves the
   // reading position) instead of falling back to the page's top edge.
   const activeSlotRef = useRef<HTMLDivElement | null>(null);
@@ -633,7 +686,11 @@ export function PdfReader({
   // The loop guard: a page change that *originated from scrolling* must not
   // scroll back. The scroll tracker stamps every page it reports; if the
   // observed change matches the last scroll report, it is the user's own
-  // scroll and re-anchoring is skipped. Scale changes re-anchor by fraction.
+  // scroll and re-anchoring is skipped. A scale change alone (zoom, fit
+  // recalculation, presentation rescale) re-anchors by fraction; a page
+  // change from navigation (presentation flips, toolbar, restore) lands on
+  // the new page's top edge — which is also what presentation mode wants
+  // when the scale changes because the next page has different dimensions.
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
@@ -644,11 +701,11 @@ export function PdfReader({
       mountedRef.current = true;
       return;
     }
-    if (pageChanged && !scaleChanged && scrollReportedPageRef.current === currentPage) {
+    if (scaleChanged && !pageChanged) {
+      reanchorRef.current();
       return;
     }
-    if (scaleChanged) {
-      reanchorRef.current();
+    if (pageChanged && scrollReportedPageRef.current === currentPage) {
       return;
     }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
@@ -760,25 +817,115 @@ export function PdfReader({
     goToPageRef.current = goToPage;
   });
 
-  // A zoom change invalidates rendered canvases; the new scale re-renders
-  // the visible pages while evicted slots simply resize their reservations.
-  // Cached bitmaps are keyed by scale, so they are dropped too.
-  const changeZoom = (steps: number) => {
-    setZoomIndex((index) => Math.max(0, Math.min(ZOOM_LEVELS.length - 1, index + steps)));
+  // A zoom or fit-mode change invalidates rendered canvases; the new scale
+  // re-renders the visible pages while evicted slots simply resize their
+  // reservations. Cached bitmaps are keyed by scale, so they are dropped
+  // too.
+  const applyZoom = useCallback(
+    (next: ZoomState) => {
+      setZoom(next);
+      setRenderedPages(new Set());
+      setFailedPages(new Set());
+      bitmapCache.clear();
+    },
+    [bitmapCache],
+  );
+
+  // Manual zoom (ladder stepping): the effective scale snaps onto the
+  // nearest rung first, so zooming out of a fit mode continues from where
+  // the page actually is (issue #65).
+  const zoomBySteps = useCallback(
+    (steps: 1 | -1) => {
+      applyZoom({ mode: "custom", level: stepZoomLevel(scale, steps) });
+    },
+    [applyZoom, scale],
+  );
+  const resetZoom = useCallback(
+    () => applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL }),
+    [applyZoom],
+  );
+  const setZoomMode = useCallback(
+    (mode: ZoomMode) => applyZoom({ mode, level: zoom.level }),
+    [applyZoom, zoom.level],
+  );
+
+  // Latest handlers for the keyboard/wheel registrations below (the
+  // registrations are stable; the closures track the live scale).
+  const zoomByStepsRef = useRef<(steps: 1 | -1) => void>(() => {});
+  useEffect(() => {
+    zoomByStepsRef.current = zoomBySteps;
+  });
+  const resetZoomRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    resetZoomRef.current = resetZoom;
+  });
+  const setZoomModeRef = useRef<(mode: ZoomMode) => void>(() => {});
+  useEffect(() => {
+    setZoomModeRef.current = setZoomMode;
+  });
+  // Keyboard zoom (§ reader keyboard, issue #65): Ctrl + +/-/0 and the fit
+  // modes on Ctrl+1/2/3, plus the historical bare +/=/- steps. The shell
+  // does not bind these, so there is no conflict with global reader
+  // shortcuts. Both +/=/- spellings are registered: the shifted `+` and
+  // the unshifted `=` share a key on most layouts.
+  useShortcut("+", () => zoomByStepsRef.current(1));
+  useShortcut("=", () => zoomByStepsRef.current(1));
+  useShortcut("-", () => zoomByStepsRef.current(-1));
+  useShortcut("mod++", () => zoomByStepsRef.current(1));
+  useShortcut("mod+=", () => zoomByStepsRef.current(1));
+  useShortcut("mod+-", () => zoomByStepsRef.current(-1));
+  useShortcut("mod+0", () => resetZoomRef.current());
+  useShortcut("mod+1", () => setZoomModeRef.current("fit-page"));
+  useShortcut("mod+2", () => setZoomModeRef.current("fit-width"));
+  useShortcut("mod+3", () => setZoomModeRef.current("fit-height"));
+
+  // Ctrl + mouse wheel zooms (and trackpad pinch, which Chromium reports as
+  // a ctrl-modified wheel): the scroller never zooms the page natively, so
+  // the default must be suppressed. Steps accumulate small deltas so one
+  // pinch gesture maps onto one ladder step.
+  useEffect(() => {
+    const container = scrollContainerRef?.current ?? null;
+    if (!container) return;
+    let accumulated = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      accumulated += event.deltaY;
+      if (accumulated <= -WHEEL_STEP_PX) {
+        accumulated = 0;
+        zoomByStepsRef.current(1);
+      } else if (accumulated >= WHEEL_STEP_PX) {
+        accumulated = 0;
+        zoomByStepsRef.current(-1);
+      }
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [scrollContainerRef]);
+
+  // Presentation mode is a dynamic fit-height mode (§ issue #65): entering
+  // saves the previous zoom state and switches to fit-height (the current
+  // page and its position are untouched — the scale hook derives the scale
+  // per page); leaving restores exactly what was saved. Render-phase
+  // adjustment: the prop flip is the trigger, so the zoom state adjusts in
+  // the same render pass (the React-recommended alternative to a
+  // setState-in-effect cascade). The invalidation mirrors applyZoom, but
+  // the bitmap cache is replaced wholesale (the established render-phase
+  // pattern) instead of mutated mid-render.
+  const [presentationSync, setPresentationSync] = useState<{
+    active: boolean;
+    saved: ZoomState | null;
+  }>(() => ({ active: presentationMode, saved: null }));
+  if (presentationSync.active !== presentationMode) {
+    const saved = presentationMode ? zoom : presentationSync.saved;
+    setPresentationSync({ active: presentationMode, saved: presentationMode ? zoom : null });
+    setZoom(
+      presentationMode ? { mode: "fit-height", level: DEFAULT_ZOOM_LEVEL } : (saved as ZoomState),
+    );
     setRenderedPages(new Set());
     setFailedPages(new Set());
-    bitmapCache.clear();
-  };
-
-  // Keyboard zoom (§ reader keyboard): +/= in, - out. The shell does not
-  // bind these, so there is no conflict with global reader shortcuts.
-  const keyboardZoomRef = useRef<(steps: number) => void>(null);
-  useEffect(() => {
-    keyboardZoomRef.current = changeZoom;
-  });
-  useShortcut("+", () => keyboardZoomRef.current?.(1));
-  useShortcut("=", () => keyboardZoomRef.current?.(1));
-  useShortcut("-", () => keyboardZoomRef.current?.(-1));
+    setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
+  }
 
   if (status === "error") {
     return (
@@ -825,19 +972,31 @@ export function PdfReader({
 
   // Document controls (page navigation + zoom): docked into the shell's
   // header host when one is provided, inline above the document otherwise
-  // (standalone renders). Either way the groups stay intact —
-  // `‹ Page X of Y ›` and `− zoom% +` (§ issue #68).
+  // (standalone renders). In presentation mode the header chrome is hidden
+  // by the shell; the document instead carries the minimal floating bar
+  // (prev/next, the page indicator, exit) so the workflow stays
+  // pointer-accessible without leaving the mode (§ issue #65).
+  const zoomPercent = Math.round(scale * 100);
   const controls = (
     <PdfToolbar
       pageNumber={currentPage}
       pageCount={effectivePageCount}
-      zoomPercent={Math.round(zoom * 100)}
-      canZoomIn={zoomIndex < ZOOM_LEVELS.length - 1}
-      canZoomOut={zoomIndex > 0}
+      zoomMode={zoom.mode}
+      zoomPercent={zoomPercent}
+      canZoomIn={
+        zoom.mode !== "custom" || zoom.level < (ZOOM_LADDER[ZOOM_LADDER.length - 1] as number)
+      }
+      canZoomOut={zoom.mode !== "custom" || zoom.level > (ZOOM_LADDER[0] as number)}
       onPrev={() => goToPage(currentPage - 1)}
       onNext={() => goToPage(currentPage + 1)}
-      onZoomIn={() => changeZoom(1)}
-      onZoomOut={() => changeZoom(-1)}
+      onZoomIn={() => zoomByStepsRef.current(1)}
+      onZoomOut={() => zoomByStepsRef.current(-1)}
+      onResetZoom={resetZoom}
+      onFitPage={() => setZoomMode("fit-page")}
+      onFitWidth={() => setZoomMode("fit-width")}
+      onFitHeight={() => setZoomMode("fit-height")}
+      onTogglePresentation={onTogglePresentation}
+      presentationActive={presentationMode}
     />
   );
 
@@ -846,12 +1005,28 @@ export function PdfReader({
       ref={rootRef}
       data-testid="pdf-reader"
       data-pdf-engine-state="interactive"
+      data-pdf-presentation={presentationMode}
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
       {...openTelemetry}
-      className="flex flex-col items-stretch px-6 py-4"
+      className={
+        presentationMode
+          ? "flex flex-col items-stretch p-0"
+          : "flex flex-col items-stretch px-6 py-4"
+      }
     >
-      {controlsHost ? createPortal(controls, controlsHost) : controls}
+      {presentationMode ? (
+        <PdfPresentationBar
+          pageNumber={currentPage}
+          pageCount={effectivePageCount}
+          onPrev={() => goToPage(currentPage - 1)}
+          onNext={() => goToPage(currentPage + 1)}
+          onExit={onExitPresentation}
+        />
+      ) : (
+        controlsHost && createPortal(controls, controlsHost)
+      )}
+      {!presentationMode && !controlsHost && controls}
       <PdfDocumentView
         document={pdfDocument}
         slots={slots}
@@ -874,6 +1049,7 @@ export function PdfReader({
         themeTint={pdfThemeTreatment(preferences.theme).tint}
       />
       {sidebarHost &&
+        !presentationMode &&
         createPortal(
           <PdfSidebar
             document={pdfDocument}

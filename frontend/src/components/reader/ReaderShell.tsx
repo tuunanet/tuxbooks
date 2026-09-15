@@ -29,6 +29,7 @@ import {
   type ReaderPosition,
 } from "./readerModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
+import { pageToPosition, positionToPage } from "./pdf/pdfPages";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationInput } from "@/types/domain";
@@ -127,6 +128,19 @@ export function ReaderShell() {
   // the shell only provides the layout host (issue #68 — one compact
   // header row, no separate control bar above the document).
   const [pdfControlsHost, setPdfControlsHost] = useState<HTMLElement | null>(null);
+  // PDF presentation mode (issue #65): the shell owns the toggle (Ctrl+L),
+  // the chrome hiding (header, footer, thumbnails sidebar), and the
+  // fullscreen request; the PDF reader owns the fit-height rescale and the
+  // floating in-mode bar. Presentation always ends with the book — a book
+  // switch must never carry the mode (and its hidden chrome) into the next.
+  const [pdfPresentation, setPdfPresentation] = useState(false);
+  // Whether the fullscreen request actually succeeded: Esc leaves real
+  // fullscreen natively, and the fullscreenchange listener then ends the
+  // mode — but a denied/unavailable request (jsdom, kiosk shells) must not
+  // tear the mode down on the next event. State, not a ref: the book-switch
+  // reset runs as a render-phase adjustment, where refs are off-limits.
+  const [fullscreenEntered, setFullscreenEntered] = useState(false);
+  const readerViewRef = useRef<HTMLDivElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
   // Auto-hiding progress footer: hidden by default, a slim hover zone at
@@ -181,23 +195,111 @@ export function ReaderShell() {
   // those combos outright (engine page turns) regardless of registration
   // order — a shell percentage step with no page count would clamp straight
   // to the beginning or end of the document.
-  useShortcut(isEpub ? null : "arrowright", () => setPosition(position + step));
-  useShortcut(isEpub ? null : "space", () => setPosition(position + step));
-  useShortcut(isEpub ? null : "arrowleft", () => setPosition(position - step));
+  // PDF steps are page-based (issue #65): percentage stepping accumulates
+  // rounding error (66.67% maps back onto page 2), so a page flip always
+  // lands on the adjacent page. Without a known page count the percentage
+  // step remains the fallback.
+  const flipPdfPage = useCallback(
+    (delta: 1 | -1) => {
+      const count = pdfPageCount ?? 0;
+      if (count <= 0) {
+        setPosition(position + delta * step);
+        return;
+      }
+      const page = positionToPage(position, count);
+      const next = Math.max(1, Math.min(count, page + delta));
+      setPosition(pageToPosition(next, count));
+    },
+    [pdfPageCount, position, setPosition, step],
+  );
+  const pdfPageStep = useCallback(
+    (delta: 1 | -1) => {
+      if (isPdf) flipPdfPage(delta);
+      else setPosition(position + delta * step);
+    },
+    [flipPdfPage, isPdf, position, setPosition, step],
+  );
+  useShortcut(isEpub ? null : "arrowright", () => pdfPageStep(1));
+  useShortcut(isEpub ? null : "space", () => pdfPageStep(1));
+  useShortcut(isEpub ? null : "arrowleft", () => pdfPageStep(-1));
   useShortcut(isEpub ? null : "pagedown", () => {
+    // Presentation mode turns the scroll-steppers into full page flips
+    // (§ issue #65): one page fills the viewport, so partial-viewport
+    // scrolling would land mid-page.
+    if (isPdf && pdfPresentation) {
+      flipPdfPage(1);
+      return;
+    }
     const container = readerContentRef.current;
     if (container) container.scrollTop += container.clientHeight * 0.9;
   });
   useShortcut(isEpub ? null : "pageup", () => {
+    if (isPdf && pdfPresentation) {
+      flipPdfPage(-1);
+      return;
+    }
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
+  useShortcut(isPdf && pdfPresentation ? "shift+space" : null, () => flipPdfPage(-1));
   useShortcut("mod+f", () => openNav("search"));
+
+  // PDF presentation mode (issue #65): Ctrl+L toggles, Esc exits, and a
+  // native fullscreen exit (Esc while really fullscreen) ends the mode
+  // through fullscreenchange. The fullscreen request is best-effort — a
+  // denied request still gives the distraction-free layout, just inside
+  // the normal window.
+  const exitPresentation = useCallback(() => {
+    setPdfPresentation(false);
+    if (fullscreenEntered && document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+    }
+    setFullscreenEntered(false);
+  }, [fullscreenEntered]);
+  const togglePresentation = useCallback(() => {
+    if (pdfPresentation) {
+      exitPresentation();
+      return;
+    }
+    const surface = readerViewRef.current;
+    const request = surface?.requestFullscreen?.bind(surface);
+    if (request) {
+      request()
+        .then(() => {
+          setFullscreenEntered(true);
+        })
+        .catch(() => {});
+    }
+    setPdfPresentation(true);
+  }, [exitPresentation, pdfPresentation]);
+  useShortcut(isPdf ? "mod+l" : null, togglePresentation);
+  useShortcut(isPdf && pdfPresentation ? "escape" : null, exitPresentation);
+  useEffect(() => {
+    if (!pdfPresentation) return;
+    const onFullscreenChange = () => {
+      if (fullscreenEntered && !document.fullscreenElement) {
+        setFullscreenEntered(false);
+        setPdfPresentation(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [pdfPresentation, fullscreenEntered]);
 
   // In-book search: the shell owns the state (one book open at a time), the
   // open reader's adapter streams matches in through the shared model
   // helpers, which ignore anything not belonging to the book being searched.
   const bookId = book?.id ?? -1;
+  // End presentation mode when the open book changes (also covers the
+  // return-to-library path — the mode never outlives its book). Render-
+  // phase adjustment keyed on the book: the reset lands in the same render
+  // pass as the switch, never as a setState-in-effect cascade.
+  const [presentationBookId, setPresentationBookId] = useState(bookId);
+  if (presentationBookId !== bookId) {
+    setPresentationBookId(bookId);
+    setPdfPresentation(false);
+    setFullscreenEntered(false);
+  }
   // Reading session lifecycle: stamp `last_opened_at` once per open so the
   // "Recently read" section and the detail view's "Last opened" reflect this
   // session even if the reader closes without a position save. Best-effort —
@@ -336,113 +438,120 @@ export function ReaderShell() {
 
   return (
     <div
+      ref={readerViewRef}
       data-testid="reader-view"
       data-theme={preferences.theme}
+      data-pdf-presentation={isPdf && pdfPresentation ? "true" : undefined}
       className={cn(
         "relative flex h-screen flex-col overflow-hidden",
         THEME_CLASSES[preferences.theme],
       )}
       style={readerChromeVariables(preferences.theme)}
     >
-      <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              data-testid="reader-back"
-              aria-label="Back to Library"
-              onClick={() => dispatch({ type: "return-to-library" })}
-            >
-              <ArrowLeft />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Back to Library</TooltipContent>
-        </Tooltip>
-
-        {isPdf && (
-          <div
-            ref={setPdfControlsHost}
-            data-testid="pdf-header-controls"
-            className="flex shrink-0 items-center"
-          />
-        )}
-
-        <div className="min-w-0 flex-1 px-2 text-center">
-          <p data-testid="reader-title" className="truncate text-sm font-medium">
-            {book.title}
-          </p>
-        </div>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              data-testid="reader-search"
-              aria-label="Search in book"
-              onClick={() => openNav("search")}
-            >
-              <Search />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Search in book (Ctrl+F)</TooltipContent>
-        </Tooltip>
-
-        {isPdf && (
+      {/* Presentation mode hides the normal chrome (header, footer,
+          thumbnails sidebar — § issue #65): the document owns the screen,
+          navigation stays on the keyboard and the reader's floating bar. */}
+      {!pdfPresentation && (
+        <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                data-testid="reader-sidebar-toggle"
-                aria-label="Toggle page thumbnails"
-                aria-pressed={pdfSidebarOpen}
-                onClick={() => setPdfSidebarOpen((open) => !open)}
+                data-testid="reader-back"
+                aria-label="Back to Library"
+                onClick={() => dispatch({ type: "return-to-library" })}
               >
-                <PanelLeft />
+                <ArrowLeft />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Page thumbnails</TooltipContent>
+            <TooltipContent>Back to Library</TooltipContent>
           </Tooltip>
-        )}
 
-        <ReaderAppearance format={book?.format} />
+          {isPdf && (
+            <div
+              ref={setPdfControlsHost}
+              data-testid="pdf-header-controls"
+              className="flex shrink-0 items-center"
+            />
+          )}
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              data-testid="reader-nav-trigger"
-              aria-label="Contents and bookmarks"
-              onClick={() => openNav(isEpub ? "contents" : "pages")}
-            >
-              <TableOfContents />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Contents</TooltipContent>
-        </Tooltip>
+          <div className="min-w-0 flex-1 px-2 text-center">
+            <p data-testid="reader-title" className="truncate text-sm font-medium">
+              {book.title}
+            </p>
+          </div>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              data-testid="reader-bookmark"
-              aria-label={bookmarked ? "Remove bookmark" : "Add bookmark"}
-              aria-pressed={bookmarked}
-              onClick={() => toggleBookmark()}
-            >
-              {bookmarked ? <BookmarkCheck className="fill-current" /> : <Bookmark />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Bookmark (Ctrl+B)</TooltipContent>
-        </Tooltip>
-      </header>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-search"
+                aria-label="Search in book"
+                onClick={() => openNav("search")}
+              >
+                <Search />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Search in book (Ctrl+F)</TooltipContent>
+          </Tooltip>
+
+          {isPdf && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid="reader-sidebar-toggle"
+                  aria-label="Toggle page thumbnails"
+                  aria-pressed={pdfSidebarOpen}
+                  onClick={() => setPdfSidebarOpen((open) => !open)}
+                >
+                  <PanelLeft />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Page thumbnails</TooltipContent>
+            </Tooltip>
+          )}
+
+          <ReaderAppearance format={book?.format} />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-nav-trigger"
+                aria-label="Contents and bookmarks"
+                onClick={() => openNav(isEpub ? "contents" : "pages")}
+              >
+                <TableOfContents />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Contents</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-bookmark"
+                aria-label={bookmarked ? "Remove bookmark" : "Add bookmark"}
+                aria-pressed={bookmarked}
+                onClick={() => toggleBookmark()}
+              >
+                {bookmarked ? <BookmarkCheck className="fill-current" /> : <Bookmark />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Bookmark (Ctrl+B)</TooltipContent>
+          </Tooltip>
+        </header>
+      )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {isPdf && pdfSidebarOpen && (
+        {isPdf && pdfSidebarOpen && !pdfPresentation && (
           <aside
             ref={setPdfSidebarHost}
             data-testid="pdf-sidebar"
@@ -498,6 +607,9 @@ export function ReaderShell() {
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
               highlights={highlights}
+              presentationMode={pdfPresentation}
+              onExitPresentation={exitPresentation}
+              onTogglePresentation={togglePresentation}
               onCreateHighlight={handleCreateHighlight}
               onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
             />
@@ -512,44 +624,48 @@ export function ReaderShell() {
           fades back out a beat after it leaves. `data-progress-visible`
           makes the state assertable in jsdom, where Tailwind classes carry
           no computed styles. */}
-      <div
-        data-testid="reader-footer-hover-zone"
-        aria-hidden="true"
-        className={cn(
-          "absolute inset-x-0 bottom-0 z-10 h-4",
-          progressVisible && "pointer-events-none",
-        )}
-        onPointerEnter={showProgress}
-        onPointerLeave={scheduleProgressHide}
-      />
-      <footer
-        data-testid="reader-footer"
-        data-progress-visible={progressVisible}
-        onPointerEnter={showProgress}
-        onPointerLeave={scheduleProgressHide}
-        style={{ backgroundColor: "var(--reader-chrome-surface, var(--background))" }}
-        className={cn(
-          "absolute inset-x-0 bottom-0 z-10 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2 transition-[opacity,translate] duration-300 ease-out",
-          progressVisible
-            ? "translate-y-0 opacity-100"
-            : "pointer-events-none translate-y-2 opacity-0",
-        )}
-      >
-        <div className="mx-auto flex max-w-3xl items-center gap-3">
-          <Progress
-            data-testid="reader-progress"
-            aria-label="Reading position"
-            value={position}
-            className="flex-1"
+      {!pdfPresentation && (
+        <>
+          <div
+            data-testid="reader-footer-hover-zone"
+            aria-hidden="true"
+            className={cn(
+              "absolute inset-x-0 bottom-0 z-10 h-4",
+              progressVisible && "pointer-events-none",
+            )}
+            onPointerEnter={showProgress}
+            onPointerLeave={scheduleProgressHide}
           />
-          <span
-            data-testid="reader-position"
-            className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
+          <footer
+            data-testid="reader-footer"
+            data-progress-visible={progressVisible}
+            onPointerEnter={showProgress}
+            onPointerLeave={scheduleProgressHide}
+            style={{ backgroundColor: "var(--reader-chrome-surface, var(--background))" }}
+            className={cn(
+              "absolute inset-x-0 bottom-0 z-10 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2 transition-[opacity,translate] duration-300 ease-out",
+              progressVisible
+                ? "translate-y-0 opacity-100"
+                : "pointer-events-none translate-y-2 opacity-0",
+            )}
           >
-            {Math.round(position)}%
-          </span>
-        </div>
-      </footer>
+            <div className="mx-auto flex max-w-3xl items-center gap-3">
+              <Progress
+                data-testid="reader-progress"
+                aria-label="Reading position"
+                value={position}
+                className="flex-1"
+              />
+              <span
+                data-testid="reader-position"
+                className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
+              >
+                {Math.round(position)}%
+              </span>
+            </div>
+          </footer>
+        </>
+      )}
 
       <ReaderNavigation
         open={nav.open}

@@ -144,9 +144,11 @@ environment, and a failed prewarm only means the next open starts cold.
 - `hooks/usePdfScrollTracking` — rAF-coalesced scroll sampling. Current
   page = the page containing the reading anchor (viewport top + 25% of the
   viewport height); also records the anchor's in-page fraction.
-- `hooks/useFitWidthScale` — layout scale = fit-width base (reference page
-  1 vs. content area) × zoom multiplier (50–200%; keyboard +/= and -).
-  Wider pages in mixed documents overflow horizontally.
+- `hooks/usePdfScale` — layout scale from the zoom state (issue #65): the
+  fit modes recompute continuously from the measured content area and the
+  shell's scroll container (ResizeObserver pair + window resize), custom
+  mode is a fixed ladder level. Pure scale selection lives in
+  `pdfLayout.computePdfScale`; unmeasurable dimensions fall back to 1.
 - shared `components/reader/useReaderProgress` — debounced save +
   restore-once (below); one persistence core for both formats, with PDF
   page validation in `readerModel.parsePdfProgress`.
@@ -165,15 +167,72 @@ environment, and a failed prewarm only means the next open starts cold.
   set. Slots carry `data-pdf-slot` + `data-render-state` lifecycle
   attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
   and diagnostics.
-- `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`
-  and zoom `− % +`, one compact group; issue #68), docked through a portal
-  into a header slot owned by ReaderShell — the same pattern as PdfSidebar,
-  with an inline fallback when no host is provided (standalone renders,
-  e.g. unit tests). No control row renders above the document, so its
-  vertical space goes to the pages; the reader keeps owning the zoom and
-  position state.
+- `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`;
+  the zoom cluster `− % +` whose indicator doubles as the Ctrl+0 reset; the
+  fit page/width/height toggles with `aria-pressed` state; the
+  presentation-mode toggle — issue #65), docked through a portal into a
+  header slot owned by ReaderShell — the same pattern as PdfSidebar, with
+  an inline fallback when no host is provided (standalone renders, e.g.
+  unit tests). Native `title` tooltips instead of Radix Tooltip: the
+  toolbar also renders standalone, where no TooltipProvider exists. No
+  control row renders above the document, so its vertical space goes to
+  the pages; the reader keeps owning the zoom and position state.
+- `PdfPresentationBar` — the floating in-presentation controls (prev/next,
+  page indicator, exit), fixed to the bottom edge of the document while
+  the shell's chrome is hidden (issue #65).
 - `PdfSidebar` — the thumbnails panel (below). Rendered through a React
   portal into a host `<aside>` owned by ReaderShell's layout.
+
+### Zoom modes (issue #65)
+
+The zoom state is `{ mode, level }` — never a bare multiplier:
+
+- **Fit width** (default; Ctrl+2) — document-wide scale from the page-1
+  reference vs. the content area. Wider pages in mixed documents overflow
+  horizontally instead of shrinking the fit reference.
+- **Fit page** (Ctrl+1) — the binding axis wins (min of fit width/height).
+- **Fit height** (Ctrl+3) — viewport height vs. the page-1 reference
+  height.
+- **Custom** — a fixed rung on `ZOOM_LADDER` (25–400%; 1 = 100%). Ctrl+0
+  resets to 100%. `Ctrl`+`+`/`-` (also bare `+`/`=`/`-`) snap the current
+  effective scale onto the nearest rung and step from there, so leaving a
+  fit mode continues from where the page actually is.
+
+The fit modes are dynamic: the scale is recomputed from the measured
+viewport whenever it changes (window resize, sidebar toggle), and the
+indicator shows the effective page zoom (`scale × 100`). Any zoom or
+mode change invalidates rendered canvases and the scale-keyed bitmap
+cache. `Ctrl` + mouse wheel zooms (trackpad pinch arrives as the same
+ctrl-modified wheel in Chromium): the deltas accumulate onto ladder steps
+(`WHEEL_STEP_PX`, 40). The toolbar's zoom indicator doubles as the reset
+control. A scale change alone re-anchors by the reading anchor's in-page
+fraction; a page change from navigation lands on the new page's top edge.
+
+### Presentation mode (issue #65)
+
+Ctrl+L (shell-owned toggle; also the toolbar's Presentation button) turns
+the PDF reader into a fullscreen, distraction-free one-page view:
+
+- The shell hides the normal chrome (header, progress footer, thumbnails
+  sidebar), requests fullscreen best-effort (a denied request still gives
+  the layout inside the normal window), and exits the mode on `Esc` and on
+  a native fullscreen exit (`fullscreenchange`). The mode never outlives
+  the open book.
+- The reader switches to a **dynamic fit-height mode keyed to the page
+  being read**: the scale is recomputed per page from its real dimensions,
+  so mixed-size documents rescale as you flip (the whole document relayouts
+  at the current page's scale). Entering preserves the current page and
+  position; leaving restores the pre-presentation zoom state exactly.
+- Page navigation lands on the page's top edge, so `PageDown`/`Space`/
+  `PageUp`/`Shift+Space`/arrows (page-based shell steps, not percentage
+  stepping — rounding error would map midpoints back onto the previous
+  page) flip whole pages without touching zoom controls. The floating
+  `PdfPresentationBar` mirrors prev/next/indicator and adds the exit
+  control.
+
+Shift participates in shortcut combos (`shift+space` vs `space`), so
+selection-extension keys and Shift+Space never alias the unmodified
+navigation combos.
 
 ### Virtualization and rendering policy
 
