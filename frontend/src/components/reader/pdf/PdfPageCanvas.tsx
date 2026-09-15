@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import { isRenderingCancelled, type PdfDocument, type PdfRenderTask } from "@/lib/pdf/pdfEngine";
+import {
+  isRenderingCancelled,
+  type PdfDocument,
+  type PdfRenderTask,
+  type SmartPalette,
+} from "@/lib/pdf/pdfEngine";
 import { effectiveRenderRatio } from "./pdfRenderPolicy";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 
@@ -23,6 +28,18 @@ interface PdfPageCanvasProps {
    * final quality.
    */
   preview?: boolean;
+  /**
+   * Smart Dark palette (issue #67): present, the worker recolors text/
+   * vector/image-mask colors at raster time; absent, pages render as-is.
+   * Part of the render and cache identity — a mode switch re-renders.
+   */
+  smartColors?: SmartPalette;
+  /**
+   * The color-mode variant this canvas renders with ("original"|"smart"):
+   * keyed into the shared bitmap cache (issue #67), so mode switches never
+   * serve the other variant's pixels.
+   */
+  renderVariant?: string;
   /**
    * Shared per-document bitmap cache (§ rendering policy). A hit blits the
    * retained bitmap synchronously — no engine work; a completed render
@@ -87,6 +104,8 @@ export function PdfPageCanvas({
   height,
   scale,
   preview = false,
+  smartColors,
+  renderVariant = "original",
   bitmapCache = null,
   testId = "pdf-canvas",
   onPageRendered,
@@ -129,7 +148,7 @@ export function PdfPageCanvas({
       scale,
       window.devicePixelRatio || 1,
     );
-    const cached = bitmapCache?.get(pageNumber, scale, ratio);
+    const cached = bitmapCache?.get(pageNumber, scale, ratio, renderVariant);
     if (cached) {
       const startedAt = performance.now();
       canvas.setAttribute("data-pdf-render-quality", "final");
@@ -168,6 +187,7 @@ export function PdfPageCanvas({
         canvas: buffer,
         viewport,
         transform: targetRatio !== 1 ? [targetRatio, 0, 0, targetRatio, 0, 0] : undefined,
+        smartColors,
       });
       taskRef.current = task;
       await task.promise;
@@ -189,7 +209,13 @@ export function PdfPageCanvas({
       renderedRef.current?.(pageNumber);
 
       if (!needsRefinement) {
-        bitmapCache?.put({ pageNumber, scale, ratio: previewRatio, buffer: firstBuffer });
+        bitmapCache?.put({
+          pageNumber,
+          scale,
+          ratio: previewRatio,
+          variant: renderVariant,
+          buffer: firstBuffer,
+        });
         return;
       }
 
@@ -197,10 +223,16 @@ export function PdfPageCanvas({
       // atomically replacing the preview blit. The preview is cached too,
       // so a supersession before refinement completes still avoids a
       // re-raster on re-entry.
-      bitmapCache?.put({ pageNumber, scale, ratio: previewRatio, buffer: firstBuffer });
+      bitmapCache?.put({
+        pageNumber,
+        scale,
+        ratio: previewRatio,
+        variant: renderVariant,
+        buffer: firstBuffer,
+      });
       const refinedBuffer = await renderInto(ratio);
       canvas.setAttribute("data-pdf-render-quality", "final");
-      bitmapCache?.put({ pageNumber, scale, ratio, buffer: refinedBuffer });
+      bitmapCache?.put({ pageNumber, scale, ratio, variant: renderVariant, buffer: refinedBuffer });
       blit(canvas, refinedBuffer, width, height);
     })().catch((err: unknown) => {
       if (cancelled || isRenderingCancelled(err) || err instanceof CancelledRender) return;
@@ -211,7 +243,17 @@ export function PdfPageCanvas({
       cancelled = true;
       taskRef.current?.cancel();
     };
-  }, [document, pageNumber, width, height, scale, preview, bitmapCache]);
+  }, [
+    document,
+    pageNumber,
+    width,
+    height,
+    scale,
+    preview,
+    smartColors,
+    renderVariant,
+    bitmapCache,
+  ]);
 
   return (
     <canvas

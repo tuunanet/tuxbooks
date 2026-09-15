@@ -8,11 +8,13 @@ function bitmap(
   width: number,
   height: number,
   ratio = 1,
+  variant = "original",
 ): PdfBitmap {
   return {
     pageNumber,
     scale,
     ratio,
+    variant,
     buffer: { width, height } as HTMLCanvasElement,
   };
 }
@@ -23,22 +25,22 @@ describe("PdfBitmapCache", () => {
     cache.put(bitmap(1, 1, 8, 8));
     cache.put(bitmap(2, 1, 8, 8));
 
-    expect(cache.get(1, 1, 1)?.pageNumber).toBe(1);
+    expect(cache.get(1, 1, 1, "original")?.pageNumber).toBe(1);
     expect(cache.size).toBe(2);
 
     // Page 1 was just touched, so page 2 is now the LRU entry: a third put
     // under the entry cap must evict page 2, not page 1.
     cache.put(bitmap(3, 1, 8, 8));
-    expect(cache.get(1, 1, 1)).not.toBeNull();
-    expect(cache.get(2, 1, 1)).toBeNull();
-    expect(cache.get(3, 1, 1)).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original")).not.toBeNull();
+    expect(cache.get(2, 1, 1, "original")).toBeNull();
+    expect(cache.get(3, 1, 1, "original")).not.toBeNull();
   });
 
   it("misses when the render scale differs", () => {
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 1, 8, 8));
-    expect(cache.get(1, 1, 1)).not.toBeNull();
-    expect(cache.get(1, 1.5, 1)).toBeNull();
+    expect(cache.get(1, 1, 1, "original")).not.toBeNull();
+    expect(cache.get(1, 1.5, 1, "original")).toBeNull();
   });
 
   it("misses when the render ratio differs", () => {
@@ -47,13 +49,24 @@ describe("PdfBitmapCache", () => {
     // served — a miss re-renders once instead.
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 1, 8, 8, 1));
-    expect(cache.get(1, 1, 1)).not.toBeNull();
-    expect(cache.get(1, 1, 2)).toBeNull();
+    expect(cache.get(1, 1, 1, "original")).not.toBeNull();
+    expect(cache.get(1, 1, 2, "original")).toBeNull();
+  });
+
+  it("misses when the color-mode variant differs (issue #67)", () => {
+    // Smart Dark pixels are not Original pixels: a mode switch must miss
+    // and re-render, never blit the other variant's bitmap.
+    const cache = new PdfBitmapCache();
+    cache.put(bitmap(1, 1, 8, 8, 1, "smart"));
+    expect(cache.get(1, 1, 1, "smart")).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original")).toBeNull();
+    cache.put(bitmap(2, 1, 8, 8, 1, "original"));
+    expect(cache.get(2, 1, 1, "smart")).toBeNull();
   });
 
   it("misses for unknown pages", () => {
     const cache = new PdfBitmapCache();
-    expect(cache.get(9, 1, 1)).toBeNull();
+    expect(cache.get(9, 1, 1, "original")).toBeNull();
   });
 
   it("evicts by byte budget, oldest first", () => {
@@ -64,16 +77,16 @@ describe("PdfBitmapCache", () => {
     expect(cache.byteSize).toBe(2048);
 
     cache.put(bitmap(3, 1, 16, 16));
-    expect(cache.get(1, 1, 1)).toBeNull();
-    expect(cache.get(2, 1, 1)).not.toBeNull();
-    expect(cache.get(3, 1, 1)).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original")).toBeNull();
+    expect(cache.get(2, 1, 1, "original")).not.toBeNull();
+    expect(cache.get(3, 1, 1, "original")).not.toBeNull();
     expect(cache.byteSize).toBe(2048);
   });
 
   it("always keeps the most recently inserted bitmap even when oversized", () => {
     const cache = new PdfBitmapCache(64, 10);
     cache.put(bitmap(1, 1, 64, 64));
-    expect(cache.get(1, 1, 1)).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original")).not.toBeNull();
     expect(cache.size).toBe(1);
   });
 
@@ -92,8 +105,8 @@ describe("PdfBitmapCache", () => {
     cache.put(bitmap(1, 6.2, 3816, 4938, 1));
     cache.put(bitmap(2, 6.2, 3816, 4938, 1));
     expect(cache.size).toBe(2);
-    expect(cache.get(1, 6.2, 1)).not.toBeNull();
-    expect(cache.get(2, 6.2, 1)).not.toBeNull();
+    expect(cache.get(1, 6.2, 1, "original")).not.toBeNull();
+    expect(cache.get(2, 6.2, 1, "original")).not.toBeNull();
   });
 
   it("holds two dpr-2 capped 4K buffers under the default budget (PERF-3, dpr 2)", () => {
@@ -104,8 +117,8 @@ describe("PdfBitmapCache", () => {
     cache.put(bitmap(1, 6.2, 5092, 6590, 1.334));
     cache.put(bitmap(2, 6.2, 5092, 6590, 1.334));
     expect(cache.size).toBe(2);
-    expect(cache.get(1, 6.2, 1.334)).not.toBeNull();
-    expect(cache.get(2, 6.2, 1.334)).not.toBeNull();
+    expect(cache.get(1, 6.2, 1.334, "original")).not.toBeNull();
+    expect(cache.get(2, 6.2, 1.334, "original")).not.toBeNull();
   });
 
   it("remove and clear drop entries and bytes", () => {
@@ -113,12 +126,12 @@ describe("PdfBitmapCache", () => {
     cache.put(bitmap(1, 1, 8, 8));
     cache.put(bitmap(2, 1, 8, 8));
     cache.remove(1);
-    expect(cache.get(1, 1, 1)).toBeNull();
+    expect(cache.get(1, 1, 1, "original")).toBeNull();
     expect(cache.byteSize).toBe(8 * 8 * 4);
 
     cache.clear();
     expect(cache.size).toBe(0);
     expect(cache.byteSize).toBe(0);
-    expect(cache.get(2, 1, 1)).toBeNull();
+    expect(cache.get(2, 1, 1, "original")).toBeNull();
   });
 });

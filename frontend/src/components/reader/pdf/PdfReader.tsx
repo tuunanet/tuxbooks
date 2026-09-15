@@ -204,6 +204,18 @@ export function PdfReader({
   const { sizes, measurePages } = usePdfGeometry(pdfDocument, pageCount);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
 
+  // Theme treatment (issue #67): the dark preset is Smart Dark — pages
+  // rasterize with worker-side object-aware recoloring (no CSS filter);
+  // Invert keeps the full-page negative as a filter; Paper tints; the rest
+  // render as-is. The smart palette rides the render requests, and the
+  // color-mode variant keys the bitmap cache: switching modes must
+  // invalidate rendered canvases and cached bitmaps (a mode change is a
+  // pixel change, not a zoom change). The invalidation itself runs after
+  // the render-bookkeeping state is declared, in the established
+  // render-phase reset pattern.
+  const treatment = pdfThemeTreatment(preferences.theme);
+  const renderVariant = treatment.smart ? "smart" : "original";
+
   const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
   const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(() => new Set());
@@ -616,6 +628,23 @@ export function PdfReader({
     setBookkeepingDocument(pdfDocument);
     setRenderedPages(new Set());
     setFailedPages(new Set());
+  }
+
+  // Color-mode invalidation (issue #67): a theme switch between modes with
+  // different rendered pixels (as-is ↔ Smart Dark) is a pixel change —
+  // rendered canvases, failure marks, and the bitmap cache reset with the
+  // variant, exactly like a document switch. Filter/tint-only switches
+  // (Invert, Paper) keep variant "original": the CSS treatment applies to
+  // the same pixels live.
+  const [variantState, setVariantState] = useState<{
+    variant: string;
+    document: typeof pdfDocument;
+  }>(() => ({ variant: renderVariant, document: pdfDocument }));
+  if (variantState.variant !== renderVariant || variantState.document !== pdfDocument) {
+    setVariantState({ variant: renderVariant, document: pdfDocument });
+    setRenderedPages(new Set());
+    setFailedPages(new Set());
+    setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
   // Measure pages as they approach visibility so slot estimates become real
@@ -1045,8 +1074,10 @@ export function PdfReader({
         contentAreaRef={contentAreaRef}
         onRetryPage={retryPage}
         highlightsByPage={highlightsByPage}
-        themeFilter={pdfThemeTreatment(preferences.theme).filter}
-        themeTint={pdfThemeTreatment(preferences.theme).tint}
+        themeFilter={treatment.filter}
+        themeTint={treatment.tint}
+        smartColors={treatment.smart}
+        renderVariant={renderVariant}
       />
       {sidebarHost &&
         !presentationMode &&
@@ -1057,6 +1088,8 @@ export function PdfReader({
             currentPage={currentPage}
             measurePages={measurePages}
             onNavigate={goToPage}
+            smartColors={treatment.smart}
+            renderVariant={renderVariant}
           />,
           sidebarHost,
         )}

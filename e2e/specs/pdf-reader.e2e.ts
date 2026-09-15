@@ -93,21 +93,32 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect(page.getByTestId("pref-columns")).not.toBeAttached();
     await expect(page.getByTestId("pref-page-gutter")).not.toBeAttached();
 
-    // The theme group offers exactly the filter-faithful presets, and a
-    // choice lands on the document surface as a filter.
+    // The theme group offers exactly the PDF color modes (issue #67):
+    // Smart dark (worker-side recoloring), the explicit Invert negative,
+    // and High contrast — a choice lands on the document surface.
     const theme = page.getByTestId("pref-theme");
     await expect(theme.getByText("Default", { exact: true })).toBeVisible();
+    await expect(theme.getByText("Smart dark", { exact: true })).toBeVisible();
+    await expect(theme.getByText("Invert", { exact: true })).toBeVisible();
     await expect(theme.getByText("High contrast", { exact: true })).toBeVisible();
     await expect(theme.getByText("Blue", { exact: true })).toBeHidden();
     await expect(page.getByTestId("pdf-document").evaluate((el) => el.style.filter)).resolves.toBe(
       "",
     );
-    await theme.getByText("Dark", { exact: true }).click();
+    // Invert is the full-page negative (the old Dark recipe); Smart dark
+    // applies no CSS filter — it recolors at raster time in the worker.
+    await theme.getByText("Invert", { exact: true }).click();
     await expect
       .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.filter), {
         timeout: 30000,
       })
       .toBe("invert(1) hue-rotate(180deg)");
+    await theme.getByText("Smart dark", { exact: true }).click();
+    await expect
+      .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.filter), {
+        timeout: 30000,
+      })
+      .toBe("");
 
     // Paper multiplies the white pages down to the theme's paper color —
     // the tint overlay, not a filter (a filter cannot darken white) — and

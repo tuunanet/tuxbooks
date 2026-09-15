@@ -22,6 +22,7 @@ import {
   EPUB_WORD_SPACING_SCALE,
   epubContrastRatio,
   epubForegroundReferenceBackground,
+  epubSurfaceTheme,
   epubThemeColors,
   isEpubHexColor,
   nearestEpubFontSize,
@@ -34,7 +35,7 @@ import {
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
-import { isPdfThemeChoice } from "@/lib/pdf/theme";
+import { PDF_THEME_MENU_OPTIONS } from "@/lib/pdf/theme";
 import { cn } from "@/lib/utils";
 import { ForegroundPicker } from "./ForegroundPicker";
 import {
@@ -175,9 +176,12 @@ export function ReaderAppearanceControls({
   // publisher's) text color. The readout judges the effective color — the
   // override, or the theme's own — against the theme background (white as
   // the reference on the neutral Default theme, whose background is
-  // publisher-defined).
-  const themePalette = epubThemeColors(preferences.theme);
-  const referenceBackground = epubForegroundReferenceBackground(preferences.theme);
+  // publisher-defined). The palette lookup uses the EPUB-facing theme: a
+  // PDF-only Invert pick maps onto the dark preset's colors.
+  const themePalette = epubThemeColors(epubSurfaceTheme(preferences.theme));
+  const referenceBackground = epubForegroundReferenceBackground(
+    epubSurfaceTheme(preferences.theme),
+  );
   const effectiveForeground = preferences.foreground ?? themePalette?.text ?? null;
   const foregroundRatio =
     effectiveForeground !== null && isEpubHexColor(effectiveForeground)
@@ -185,11 +189,10 @@ export function ReaderAppearanceControls({
       : null;
   const belowAA = foregroundRatio !== null && foregroundRatio < EPUB_FOREGROUND_AA_RATIO;
 
-  // PDFs can only be filtered, not recolored — offer exactly the themes
-  // with a faithful filter mapping (Blue/Mint are EPUB-only).
-  const themeOptions = isPdf
-    ? THEME_OPTIONS.filter((option) => isPdfThemeChoice(option.value))
-    : THEME_OPTIONS;
+  // PDFs expose theme choices with a faithful treatment (issue #67: Smart
+  // dark recolors in the worker, Invert is the explicit negative) — a
+  // superset of the EPUB-faithful filter list.
+  const themeOptions = isPdf ? PDF_THEME_MENU_OPTIONS : THEME_OPTIONS;
 
   const themeSection = (
     <div>
@@ -531,7 +534,7 @@ export function ReaderAppearance({ format }: { format?: string }) {
         // The popover is portaled outside the reader root; redefine the
         // app tokens in its scope so it follows the reader theme instead
         // of the global light/dark mode.
-        style={readerPopoverVariables(preferences.theme)}
+        style={readerPopoverVariables(epubSurfaceTheme(preferences.theme))}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <ReaderAppearanceControls

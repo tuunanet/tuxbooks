@@ -1,6 +1,6 @@
 import { useMemo, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
-import type { PdfDocument } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
@@ -50,6 +50,11 @@ interface PdfDocumentViewProps {
   /** Multiply-tint color for paper-style themes (white pages take on the
    *  tint); undefined = no overlay. See lib/pdf/theme.ts. */
   themeTint?: string;
+  /** Smart Dark palette (issue #67): present, pages rasterize with
+   *  worker-side object-aware recoloring; absent, pages render as-is. */
+  smartColors?: SmartPalette;
+  /** Color-mode variant keyed into the bitmap cache ("original"|"smart"). */
+  renderVariant?: string;
 }
 
 /**
@@ -78,6 +83,8 @@ export function PdfDocumentView({
   highlightsByPage,
   themeFilter,
   themeTint,
+  smartColors,
+  renderVariant = "original",
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -152,6 +159,8 @@ export function PdfDocumentView({
                     height={slot.height}
                     scale={scale}
                     preview={previewAnchorRender && slot.pageNumber === anchorPage}
+                    smartColors={smartColors}
+                    renderVariant={renderVariant}
                     bitmapCache={bitmapCache}
                     onPageRendered={onPageRendered}
                     onPageError={onPageError}

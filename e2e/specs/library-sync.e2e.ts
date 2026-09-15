@@ -33,7 +33,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
   });
 
   test("imports a book dropped into the watched library while the app runs", async ({ page }) => {
-    expect(await cardCount(page)).toBe(4);
+    expect(await cardCount(page)).toBe(5);
 
     copyFileSync(epubFixture, path.join(libraryDir, "sync-added.epub"));
 
@@ -42,7 +42,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
         timeout: 30000,
         message: "a book added on disk never appeared in the library",
       })
-      .toBe(5);
+      .toBe(6);
   });
 
   test("keeps the book available when its file is renamed on disk", async ({ page }) => {
@@ -57,7 +57,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
         }),
         { timeout: 30000, message: "renaming a file on disk broke its library entry" },
       )
-      .toEqual({ count: 5, missing: 0 });
+      .toEqual({ count: 6, missing: 0 });
   });
 
   test("marks the book unavailable when its file disappears", async ({ page }) => {
@@ -76,7 +76,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
           message: "a deleted file neither stayed available nor turned up missing",
         },
       )
-      .toEqual({ count: 5, missing: 1 });
+      .toEqual({ count: 6, missing: 1 });
   });
 
   test("removes the missing book from the library on demand", async ({ page }) => {
@@ -89,7 +89,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
         timeout: 30000,
         message: "the removed book never left the library view",
       })
-      .toBe(4);
+      .toBe(5);
     expect(await missingOverlays(page)).toBe(0);
   });
 
@@ -103,6 +103,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     expect(allText).toContain("A Minimal Manual");
     expect(allText).toContain("A Large Fixture");
     expect(allText).toContain("Odd Sizes");
+    expect(allText).toContain("Smart Colors");
     expect(await missingOverlays(page)).toBe(0);
   });
 });

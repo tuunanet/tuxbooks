@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PdfDocument } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { thumbnailGeometry, type PageSize } from "./pdfLayout";
@@ -25,6 +25,10 @@ interface PdfSidebarProps {
   measurePages: (pageNumbers: number[]) => void;
   /** Navigates the reader to a clicked thumbnail's page. */
   onNavigate: (pageNumber: number) => void;
+  /** Smart Dark palette (issue #67): thumbnails follow the page mode. */
+  smartColors?: SmartPalette;
+  /** Color-mode variant the thumbnails render with. */
+  renderVariant?: string;
 }
 
 /**
@@ -42,6 +46,8 @@ export function PdfSidebar({
   currentPage,
   measurePages,
   onNavigate,
+  smartColors,
+  renderVariant = "original",
 }: PdfSidebarProps) {
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
   const [renderedThumbs, setRenderedThumbs] = useState<ReadonlySet<number>>(() => new Set());
@@ -193,6 +199,8 @@ export function PdfSidebar({
                         height={geometry.height}
                         scale={THUMBNAIL_WIDTH_PX / size.width}
                         testId="pdf-thumbnail"
+                        smartColors={smartColors}
+                        renderVariant={renderVariant}
                         onPageRendered={handleThumbRendered}
                         onPageError={handleThumbError}
                       />

@@ -19,6 +19,18 @@
  * request and the global is pinned before the dynamic import.
  */
 
+import {
+  classifyRasterImage,
+  deviceColorToRgb,
+  imageStatsFromSampler,
+  recolorColor,
+  recolorPixelsInPlace,
+  PAGE_IMAGE_COVERAGE_THRESHOLD,
+  type Rgb,
+  type SmartPalette,
+  type RasterImageTreatment,
+} from "./smartColors";
+
 type WorkerRequest =
   | {
       id: number;
@@ -29,7 +41,17 @@ type WorkerRequest =
     }
   | { id: number; method: "prewarm"; params: { wasmUrl: string } }
   | { id: number; method: "pageSize"; params: { page: number } }
-  | { id: number; method: "render"; params: { page: number; width: number; height: number } }
+  | {
+      id: number;
+      method: "render";
+      params: {
+        page: number;
+        width: number;
+        height: number;
+        /** Smart Dark recoloring palette (issue #67); absent = render as-is. */
+        smart?: { background: number[]; text: number[] };
+      };
+    }
   | { id: number; method: "text"; params: { page: number } }
   | { id: number; method: "outline"; params?: undefined };
 
@@ -42,9 +64,16 @@ interface WorkerResponse {
 
 type MupdfModule = typeof import("mupdf");
 type MupdfDocument = InstanceType<MupdfModule["Document"]>;
+type MupdfColor = import("mupdf").Color;
 
 let mupdf: MupdfModule | null = null;
 let document: MupdfDocument | null = null;
+
+/**
+ * Generation of the open document, mixed into the per-image decision keys so
+ * a reopened document can never inherit the previous document's decisions.
+ */
+let documentGeneration = 0;
 
 async function ensureEngine(wasmUrl: string): Promise<MupdfModule> {
   if (!mupdf) {
@@ -230,6 +259,381 @@ function extractLines(doc: MupdfDocument, page: number): TextLine[] {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Smart Dark (issue #67) — object-aware recoloring inside the render device. */
+
+/** Per-image classifications (decisions only); keys carry the doc generation. */
+const imageDecisions = new Map<string, RasterImageTreatment>();
+const IMAGE_DECISIONS_CAP = 4096;
+
+/** Transformed (recolored) scan images reused across a document's renders. */
+interface TransformedImage {
+  image: InstanceType<MupdfModule["Image"]>;
+}
+const transformedImages = new Map<string, TransformedImage>();
+const TRANSFORMED_IMAGE_ENTRIES = 2;
+/** Images above this pixel count are transformed per render, never cached. */
+const TRANSFORMED_IMAGE_MAX_PIXELS = 4 * 1024 * 1024;
+
+/** Cap on sampled pixels while classifying one image (classification only). */
+const IMAGE_STATS_MAX_SAMPLES = 8192;
+
+function normalizeSmartPalette(
+  smart: { background: number[]; text: number[] } | undefined,
+): SmartPalette | null {
+  if (!smart) return null;
+  const [br, bg, bb] = smart.background;
+  const [tr, tg, tb] = smart.text;
+  const values = [br, bg, bb, tr, tg, tb];
+  if (values.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+    return null;
+  }
+  return {
+    background: [br!, bg!, bb!] as Rgb,
+    text: [tr!, tg!, tb!] as Rgb,
+  };
+}
+
+/**
+ * Recolor a fill/stroke/text/image-mask paint color onto the palette.
+ * Returns the (colorspace, color) pair to forward, or null to forward the
+ * operation unchanged — an unknown colorspace (Indexed, Separation, …) or a
+ * conversion failure must never drop a drawing op.
+ */
+function recoloredColor(
+  palette: SmartPalette,
+  color: number[],
+  colorspace: InstanceType<MupdfModule["ColorSpace"]>,
+): { colorspace: InstanceType<MupdfModule["ColorSpace"]>; color: Rgb } | null {
+  try {
+    const rgb = deviceColorToRgb(color, colorspace.getType(), colorspace.getNumberOfComponents());
+    if (!rgb) return null;
+    return { colorspace: mupdf!.ColorSpace.DeviceRGB, color: recolorColor(rgb, palette) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Classify (and for scans, transform) one raster image draw. The decision
+ * is cached per document+page+ordinal so re-renders at different scales
+ * never pay the analysis twice; the transformed image itself is cached in a
+ * two-entry LRU (bounded by count, and only for images that fit the pixel
+ * cap) so the two-stage first paint does not transform a scan twice.
+ *
+ * The ORIGINAL image's decoded pixmap is only ever read: the recolor works
+ * on a private DeviceRGB copy (`convertToColorSpace` allocates), because
+ * the decode result is owned by MuPDF's per-image cache and mutating it
+ * would corrupt later renders.
+ *
+ * `ctm` is the interpreter's image→page-space transform: the draw device
+ * concatenates its own creation transform internally (fz_draw_fill_image
+ * does `fz_concat(in_ctm, dev->transform)`), so the page-space image area
+ * comes straight from this matrix's determinant.
+ */
+function treatImage(
+  image: InstanceType<MupdfModule["Image"]>,
+  ctm: number[],
+  page: number,
+  ordinal: number,
+  pageArea: number,
+  palette: SmartPalette,
+): InstanceType<MupdfModule["Image"]> | null {
+  const decisionKey = `${documentGeneration}:${page}:${ordinal}`;
+  const cachedDecision = imageDecisions.get(decisionKey);
+
+  // Page-space area of the image rect ÷ page area = coverage.
+  const ctmDet = Math.abs((ctm[0] ?? 0) * (ctm[3] ?? 0) - (ctm[1] ?? 0) * (ctm[2] ?? 0));
+  const coverage = pageArea > 0 ? ctmDet / pageArea : 0;
+  if (coverage < PAGE_IMAGE_COVERAGE_THRESHOLD) {
+    return null; // Illustration/screenshot-sized: never analyzed, never touched.
+  }
+
+  let decision = cachedDecision;
+  if (!decision) {
+    decision = classifyRasterized(image, coverage);
+    if (imageDecisions.size >= IMAGE_DECISIONS_CAP) imageDecisions.clear();
+    imageDecisions.set(decisionKey, decision);
+  }
+  if (decision === "preserve") {
+    return null;
+  }
+
+  // Huge scans transform per render; the LRU is reserved for ordinary
+  // page-sized scans so a pathological image cannot pin the cache.
+  const cacheable = image.getWidth() * image.getHeight() <= TRANSFORMED_IMAGE_MAX_PIXELS;
+  if (cacheable) {
+    const cached = transformedImages.get(decisionKey);
+    if (cached) {
+      transformedImages.delete(decisionKey);
+      transformedImages.set(decisionKey, cached);
+      return cached.image;
+    }
+  }
+  const transformed = buildRecoloredImage(image, palette);
+  if (transformed && cacheable) {
+    transformedImages.delete(decisionKey);
+    transformedImages.set(decisionKey, transformed);
+    while (transformedImages.size > TRANSFORMED_IMAGE_ENTRIES) {
+      const oldest = transformedImages.keys().next().value;
+      if (oldest === undefined) break;
+      transformedImages.delete(oldest);
+    }
+  }
+  return transformed?.image ?? null;
+}
+
+/** Decode + classify one page-covering image (stats only, read-only). */
+function classifyRasterized(
+  image: InstanceType<MupdfModule["Image"]>,
+  coverage: number,
+): RasterImageTreatment {
+  let source: InstanceType<MupdfModule["Pixmap"]> | null = null;
+  try {
+    source = image.toPixmap();
+    const colorspace = source.getColorSpace();
+    if (!colorspace) return "preserve";
+    const type = colorspace.getType();
+    if (type !== "RGB" && type !== "Gray" && type !== "BGR") {
+      // CMYK and exotic spaces: sample through a private RGB conversion.
+      const converted = source.convertToColorSpace(mupdf!.ColorSpace.DeviceRGB, false);
+      try {
+        return classifyFromPixmap(converted, coverage);
+      } finally {
+        converted.destroy();
+      }
+    }
+    return classifyFromPixmap(source, coverage);
+  } catch {
+    return "preserve";
+  } finally {
+    source?.destroy();
+  }
+}
+
+/** Sample a pixmap (read-only) and classify it. */
+function classifyFromPixmap(
+  pixmap: InstanceType<MupdfModule["Pixmap"]>,
+  coverage: number,
+): RasterImageTreatment {
+  const pixels = pixmap.getPixels();
+  const width = pixmap.getWidth();
+  const height = pixmap.getHeight();
+  const stride = pixmap.getStride();
+  const alpha = pixmap.getAlpha();
+  const components = pixmap.getNumberOfComponents() + alpha;
+  const colorspace = pixmap.getColorSpace();
+  const type = colorspace?.getType() ?? "RGB";
+  const total = width * height;
+  if (total === 0 || stride === 0 || components <= 0) return "preserve";
+  // Deterministic stride sampling: every `step`-th pixel in linear order,
+  // bounded at IMAGE_STATS_MAX_SAMPLES samples.
+  const step = Math.max(1, Math.floor(total / IMAGE_STATS_MAX_SAMPLES));
+  const samples = Math.ceil(total / step);
+  let next = 0;
+  const stats = imageStatsFromSampler(() => {
+    const index = next;
+    next += step;
+    if (index >= total) return null;
+    const base = Math.floor(index / width) * stride + (index % width) * components;
+    if (base + components > pixels.length) return null;
+    const a = alpha === 1 ? (pixels[base + components - 1] ?? 0) / 255 : 1;
+    if (type === "Gray") {
+      const gray = (pixels[base] ?? 0) / 255;
+      return { rgb: [gray, gray, gray], alpha: a };
+    }
+    const r = type === "BGR" ? (pixels[base + 2] ?? 0) : (pixels[base] ?? 0);
+    const b = type === "BGR" ? (pixels[base] ?? 0) : (pixels[base + 2] ?? 0);
+    return { rgb: [r / 255, (pixels[base + 1] ?? 0) / 255, b / 255], alpha: a };
+  }, samples);
+  return classifyRasterImage(stats, coverage);
+}
+
+/**
+ * Build the recolored stand-in image for a classified scan: private DeviceRGB
+ * copy, in-place palette remap, new Image (which takes ownership of the
+ * pixmap's reference). Null when the image cannot be processed (no colorspace,
+ * conversion failure) — the caller then forwards the original unchanged.
+ */
+function buildRecoloredImage(
+  image: InstanceType<MupdfModule["Image"]>,
+  palette: SmartPalette,
+): TransformedImage | null {
+  let source: InstanceType<MupdfModule["Pixmap"]> | null = null;
+  try {
+    source = image.toPixmap();
+    const colorspace = source.getColorSpace();
+    if (!colorspace) return null;
+    const keepAlpha = source.getAlpha() === 1;
+    // Always through a private copy: the decoded pixmap returned by
+    // toPixmap() is owned by MuPDF's per-image decode cache, so mutating it
+    // in place would corrupt later renders of the same image.
+    const copy = source.convertToColorSpace(mupdf!.ColorSpace.DeviceRGB, keepAlpha);
+    try {
+      source.destroy();
+      source = null;
+      const components = copy.getNumberOfComponents() + (copy.getAlpha() === 1 ? 1 : 0);
+      recolorPixelsInPlace(
+        copy.getPixels(),
+        components,
+        copy.getStride(),
+        copy.getHeight(),
+        palette,
+      );
+      const recolored = new mupdf!.Image(copy);
+      return { image: recolored };
+    } finally {
+      copy.destroy();
+    }
+  } catch {
+    return null;
+  } finally {
+    source?.destroy();
+  }
+}
+
+/**
+ * The Smart Dark render device: a MuPDF JavaScript Device that forwards
+ * every operation to a DrawDevice painting the target pixmap, remapping
+ * fill/stroke/text/image-mask paint colors onto the dark palette and
+ * leaving ordinary raster images untouched. Every callback must forward —
+ * an omitted callback is a no-op on the native side, which would silently
+ * drop clips, groups, masks, and tiles.
+ */
+function makeSmartRecolorDevice(
+  draw: InstanceType<MupdfModule["DrawDevice"]>,
+  palette: SmartPalette,
+  page: number,
+  pageArea: number,
+): InstanceType<MupdfModule["Device"]> {
+  let imageOrdinal = 0;
+  return new mupdf!.Device({
+    close: () => draw.close(),
+    fillPath: (path, evenOdd, ctm, colorspace, color, alpha) => {
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.fillPath(path, evenOdd, ctm, mapped.colorspace, mapped.color, alpha);
+      else draw.fillPath(path, evenOdd, ctm, colorspace, color as MupdfColor, alpha);
+    },
+    strokePath: (path, stroke, ctm, colorspace, color, alpha) => {
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.strokePath(path, stroke, ctm, mapped.colorspace, mapped.color, alpha);
+      else draw.strokePath(path, stroke, ctm, colorspace, color as MupdfColor, alpha);
+    },
+    clipPath: (path, evenOdd, ctm) => draw.clipPath(path, evenOdd, ctm),
+    clipStrokePath: (path, stroke, ctm) => draw.clipStrokePath(path, stroke, ctm),
+    fillText: (text, ctm, colorspace, color, alpha) => {
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.fillText(text, ctm, mapped.colorspace, mapped.color, alpha);
+      else draw.fillText(text, ctm, colorspace, color as MupdfColor, alpha);
+    },
+    strokeText: (text, stroke, ctm, colorspace, color, alpha) => {
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.strokeText(text, stroke, ctm, mapped.colorspace, mapped.color, alpha);
+      else draw.strokeText(text, stroke, ctm, colorspace, color as MupdfColor, alpha);
+    },
+    clipText: (text, ctm) => draw.clipText(text, ctm),
+    clipStrokeText: (text, stroke, ctm) => draw.clipStrokeText(text, stroke, ctm),
+    ignoreText: (text, ctm) => draw.ignoreText(text, ctm),
+    fillShade: (shade, ctm, alpha) => draw.fillShade(shade, ctm, alpha),
+    fillImage: (image, ctm, alpha) => {
+      const standIn = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
+      if (standIn) draw.fillImage(standIn, ctm, alpha);
+      else draw.fillImage(image, ctm, alpha);
+    },
+    fillImageMask: (image, ctm, colorspace, color, alpha) => {
+      // Image masks are stencil shapes painted a flat color (faxed text,
+      // knockouts): the paint follows the text/line rules, the mask itself
+      // passes through.
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.fillImageMask(image, ctm, mapped.colorspace, mapped.color, alpha);
+      else draw.fillImageMask(image, ctm, colorspace, color as MupdfColor, alpha);
+    },
+    clipImageMask: (image, ctm) => draw.clipImageMask(image, ctm),
+    popClip: () => draw.popClip(),
+    beginMask: (area, luminosity, colorspace, color) => {
+      const mapped = recoloredColor(palette, color, colorspace);
+      if (mapped) draw.beginMask(area, luminosity, mapped.colorspace, mapped.color);
+      else draw.beginMask(area, luminosity, colorspace, color as MupdfColor);
+    },
+    endMask: () => draw.endMask(),
+    beginGroup: (area, colorspace, isolated, knockout, blendmode, alpha) =>
+      draw.beginGroup(area, colorspace, isolated, knockout, blendmode, alpha),
+    endGroup: () => draw.endGroup(),
+    beginTile: (area, view, xstep, ystep, ctm, id, docId) =>
+      draw.beginTile(area, view, xstep, ystep, ctm, id, docId),
+    endTile: () => draw.endTile(),
+    beginLayer: (name) => draw.beginLayer(name),
+    endLayer: () => draw.endLayer(),
+  });
+}
+
+/**
+ * The Smart Dark render path (issue #67): the page runs through a
+ * recoloring Device into a DrawDevice painting the same DeviceRGB/alpha
+ * pixmap the plain path produces, so the main-thread contract (ImageBitmap
+ * in page pixels) is unchanged. Reproduces fz_new_pixmap_from_page
+ * semantics exactly as the plain path's toPixmap(): pixmap bbox from the
+ * page bounds × transform, transparent clear (alpha), run page (contents +
+ * annotations + widgets), close device.
+ *
+ * The page background is pre-filled with the palette's background color
+ * through the draw device before the content runs: a PDF does not paint its
+ * own page background — viewers supply the white — so without this, a page
+ * without an explicit background fill would stay transparent and read
+ * white over the reader's white page slot in dark mode.
+ */
+async function renderSmartPage(
+  page: number,
+  width: number,
+  height: number,
+  palette: SmartPalette,
+): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+  if (!mupdf || !document) throw new Error("no document open");
+  const loaded = document.loadPage(page - 1);
+  try {
+    const bounds = loaded.getBounds();
+    const [x0, y0, x1, y1] = bounds;
+    const pageWidth = x1 - x0;
+    const pageHeight = y1 - y0;
+    const ctm = mupdf.Matrix.scale(width / pageWidth, height / pageHeight);
+    const bbox = mupdf.Rect.transform(bounds, ctm);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
+    try {
+      pixmap.clear(0);
+      const draw = new mupdf.DrawDevice(ctm, pixmap);
+      const backgroundPath = new mupdf.Path();
+      backgroundPath.rect(x0, y0, x1, y1);
+      // The path is already in page space and the draw device concatenates
+      // its own page→device transform internally, so the identity matrix is
+      // the correct in_ctm here — the render ctm would double-scale.
+      draw.fillPath(
+        backgroundPath,
+        false,
+        mupdf.Matrix.identity,
+        mupdf.ColorSpace.DeviceRGB,
+        palette.background,
+        1,
+      );
+      const smart = makeSmartRecolorDevice(draw, palette, page, pageWidth * pageHeight);
+      try {
+        loaded.run(smart, mupdf.Matrix.identity);
+      } finally {
+        // fz_close_device: flushes pending groups/masks/blends, matching the
+        // plain path's toPixmap internals.
+        smart.close();
+      }
+      const pixels = new Uint8ClampedArray(pixmap.getPixels());
+      const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
+      const bitmap = await createImageBitmap(imageData);
+      return { width: bitmap.width, height: bitmap.height, bitmap };
+    } finally {
+      pixmap.destroy();
+    }
+  } finally {
+    loaded.destroy();
+  }
+}
+
 const methods = {
   async prewarm({ wasmUrl }: { wasmUrl: string }): Promise<{ ready: boolean }> {
     // Engine load only: no document, no allocation, no rasterization.
@@ -246,6 +650,11 @@ const methods = {
   }): Promise<{ pageCount: number }> {
     const mod = await ensureEngine(params.wasmUrl);
     document?.destroy();
+    // A switched book must never inherit the previous document's Smart Dark
+    // image decisions (they are keyed per page/ordinal, but the generation
+    // guard makes cross-document collisions impossible by construction).
+    documentGeneration += 1;
+    transformedImages.clear();
     if (params.bookUrl !== undefined) {
       // Range-backed open: MuPDF pulls only the ranges it needs (xref trail
       // first, page 1 content next) straight off tuxbooks://.
@@ -279,12 +688,18 @@ const methods = {
     page,
     width,
     height,
+    smart,
   }: {
     page: number;
     width: number;
     height: number;
+    smart?: { background: number[]; text: number[] };
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!mupdf || !document) throw new Error("no document open");
+    const palette = normalizeSmartPalette(smart);
+    if (palette) {
+      return renderSmartPage(page, width, height, palette);
+    }
     const loaded = document.loadPage(page - 1);
     try {
       const [x0, y0, x1, y1] = loaded.getBounds();

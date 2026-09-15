@@ -2,6 +2,7 @@ import workerUrl from "./mupdfWorker?worker&url";
 import wasmUrlRaw from "virtual:mupdf-wasm-url";
 import { normalizePdfOutline, type PdfOutlineItem, type RawPdfOutline } from "./pdfOutline";
 import { assemblePageText, type PdfTextItem } from "./pdfSearch";
+import type { SmartPalette } from "./smartColors";
 import type { BookFormat } from "@/types/domain";
 
 /**
@@ -181,11 +182,18 @@ export interface PdfPage {
    * Rasterizes the page into `canvas` (sized by the caller) at the viewport
    * size times the transform ratio. Returns a cancellable promise; a
    * cancelled render rejects with PdfRenderCancelledError and never paints.
+   *
+   * `smartColors` turns on Smart Dark object-aware recoloring in the worker
+   * (issue #67): text/vector/image-mask colors are remapped onto the dark
+   * palette while ordinary images pass through. Undefined renders the page
+   * as-is (Original, and every filter/tint-based theme — those are applied
+   * as CSS over the surface, never at raster time).
    */
   render(options: {
     canvas: HTMLCanvasElement;
     viewport: { width: number; height: number };
     transform?: number[];
+    smartColors?: SmartPalette;
   }): { promise: Promise<void>; cancel(): void };
 }
 
@@ -238,8 +246,8 @@ class MuPdfDocument implements PdfDocument {
     }
     return {
       getViewport: ({ scale }) => ({ width: size.width * scale, height: size.height * scale }),
-      render: ({ canvas, viewport, transform }) =>
-        this.renderPage(pageNumber, canvas, viewport, transform),
+      render: ({ canvas, viewport, transform, smartColors }) =>
+        this.renderPage(pageNumber, canvas, viewport, transform, smartColors),
     };
   }
 
@@ -248,6 +256,7 @@ class MuPdfDocument implements PdfDocument {
     canvas: HTMLCanvasElement,
     viewport: { width: number; height: number },
     transform: number[] | undefined,
+    smartColors: SmartPalette | undefined,
   ): { promise: Promise<void>; cancel(): void } {
     const ratio = transform ? (transform[0] ?? 1) : 1;
     const width = Math.floor(viewport.width * ratio);
@@ -256,6 +265,7 @@ class MuPdfDocument implements PdfDocument {
       page: pageNumber,
       width,
       height,
+      smart: smartColors,
     });
     const promise = result.then((raw) => {
       const { bitmap } = raw as { bitmap: ImageBitmap };
@@ -436,6 +446,9 @@ export async function getPdfPageText(document: PdfDocument, pageNumber: number):
 }
 
 export { findPageMatches, type PdfSearchExcerpt } from "./pdfSearch";
+
+/** Smart Dark recoloring palette (issue #67), re-exported through the seam. */
+export type { SmartPalette } from "./smartColors";
 
 /**
  * Renders one page's text layer into `container` (positioned over the page

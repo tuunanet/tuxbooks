@@ -3,9 +3,11 @@ import {
   isPdfThemeChoice,
   pdfThemeTreatment,
   PDF_THEME_CHOICES,
+  PDF_THEME_MENU_OPTIONS,
   PDF_THEME_TREATMENTS,
 } from "@/lib/pdf/theme";
 import { EPUB_THEME_COLORS } from "@/lib/epub/appearance";
+import { hexToRgb01 } from "@/lib/pdf/smartColors";
 
 describe("PDF theme treatments", () => {
   it("leaves the neutral and light pages untreated", () => {
@@ -13,10 +15,27 @@ describe("PDF theme treatments", () => {
     expect(pdfThemeTreatment("light")).toEqual({});
   });
 
-  it("maps the dark theme to the fixed-content invert recipe", () => {
-    // Foliate's recipe for fixed content in dark mode.
-    expect(pdfThemeTreatment("dark").filter).toBe("invert(1) hue-rotate(180deg)");
-    expect(pdfThemeTreatment("dark").tint).toBeUndefined();
+  it("maps the dark theme to Smart Dark worker-side recoloring (issue #67)", () => {
+    // Dark is no longer a CSS invert filter: pages rasterize with the
+    // object-aware recoloring palette shared with the EPUB dark preset.
+    const treatment = pdfThemeTreatment("dark");
+    expect(treatment.filter).toBeUndefined();
+    expect(treatment.tint).toBeUndefined();
+    expect(treatment.smart).toEqual({
+      background: hexToRgb01(EPUB_THEME_COLORS.dark.background),
+      text: hexToRgb01(EPUB_THEME_COLORS.dark.text),
+    });
+    // The palette is a genuinely dark/light pair.
+    expect(treatment.smart?.background.reduce((a, b) => a + b, 0)).toBeLessThan(0.5);
+    expect(treatment.smart?.text.reduce((a, b) => a + b, 0)).toBeGreaterThan(1.5);
+  });
+
+  it("keeps the explicit negative as the Invert choice (issue #67)", () => {
+    // The old Dark recipe survives as a first-class mode for users who
+    // actually want a full-page inversion.
+    expect(pdfThemeTreatment("invert").filter).toBe("invert(1) hue-rotate(180deg)");
+    expect(pdfThemeTreatment("invert").tint).toBeUndefined();
+    expect(pdfThemeTreatment("invert").smart).toBeUndefined();
   });
 
   it("tints paper pages with the theme's own paper color", () => {
@@ -28,7 +47,8 @@ describe("PDF theme treatments", () => {
   });
 
   it("has a treatment for exactly the themes offered to PDFs", () => {
-    // Default/Light render as-is; the dark presets filter.
+    // Default/Light render as-is; Dark recolors in the worker; Invert and
+    // High contrast filter.
     for (const theme of PDF_THEME_CHOICES) {
       expect(theme in PDF_THEME_TREATMENTS).toBe(true);
       expect(isPdfThemeChoice(theme)).toBe(true);
@@ -40,9 +60,21 @@ describe("PDF theme treatments", () => {
     expect(isPdfThemeChoice("mint-contrast")).toBe(false);
     expect(pdfThemeTreatment("blue-contrast")).toEqual({});
     expect(pdfThemeTreatment("mint-contrast")).toEqual({});
-    // Every theme key is still mapped (total map over the theme set).
+    // Every theme key is still mapped (total map over the theme set: the
+    // EPUB palette names + the neutral default + the PDF-only Invert).
     expect(Object.keys(PDF_THEME_TREATMENTS).length).toBe(
-      Object.keys(EPUB_THEME_COLORS).length + 1,
+      Object.keys(EPUB_THEME_COLORS).length + 2,
     );
+  });
+
+  it("offers the menu choices with Invert and the Smart dark label", () => {
+    const values = PDF_THEME_MENU_OPTIONS.map((option) => option.value);
+    expect(values).toContain("dark");
+    expect(values).toContain("invert");
+    expect(values).not.toContain("blue-contrast");
+    expect(values.every((value) => isPdfThemeChoice(value))).toBe(true);
+    const labels = PDF_THEME_MENU_OPTIONS.map((option) => option.label);
+    expect(labels).toContain("Smart dark");
+    expect(labels).toContain("Invert");
   });
 });

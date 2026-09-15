@@ -1212,14 +1212,15 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
 
-    // Exactly the themes with a faithful filter mapping are offered, and a
-    // choice lands on the rendered pages as a CSS filter.
+    // Exactly the PDF theme choices are offered (issue #67: Smart dark
+    // recolors in the worker, Invert is the explicit negative), and a
+    // filter choice lands on the rendered pages as a CSS filter.
     const theme = screen.getByTestId("pref-theme");
     expect(
       within(theme)
         .getAllByRole("radio")
         .map((radio) => radio.textContent),
-    ).toEqual(["Default", "Light", "Paper", "Dark", "High contrast"]);
+    ).toEqual(["Default", "Light", "Paper", "Smart dark", "Invert", "High contrast"]);
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
     await userEvent.click(within(theme).getByRole("radio", { name: "High contrast" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe(

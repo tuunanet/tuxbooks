@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { autoReaderTheme, ReaderContext, type ReaderPreferences } from "./readerState";
-import { epubForegroundFitsTheme } from "@/lib/epub/appearance";
+import { epubForegroundFitsTheme, epubSurfaceTheme } from "@/lib/epub/appearance";
 import { readReaderSettings, writeReaderSettings } from "@/lib/readerSettings";
 import type { ResolvedTheme } from "@/lib/theme";
 
@@ -56,7 +56,9 @@ export function ReaderProvider({ children, globalTheme = "light" }: ReaderProvid
         if (
           patch.theme !== undefined &&
           patch.theme !== currentEffectiveTheme &&
-          !epubForegroundFitsTheme(next.foreground, next.theme)
+          // The fit check uses the EPUB-facing surface of the theme (the
+          // PDF-only Invert preset degrades to dark — issue #67).
+          !epubForegroundFitsTheme(next.foreground, epubSurfaceTheme(next.theme))
         ) {
           next.foreground = null;
         }
