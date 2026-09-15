@@ -1078,6 +1078,7 @@ export function PdfReader({
         themeTint={treatment.tint}
         smartColors={treatment.smart}
         renderVariant={renderVariant}
+        pageBackground={treatment.pageBackground}
       />
       {sidebarHost &&
         !presentationMode &&
@@ -1090,6 +1091,7 @@ export function PdfReader({
             onNavigate={goToPage}
             smartColors={treatment.smart}
             renderVariant={renderVariant}
+            pageBackground={treatment.pageBackground}
           />,
           sidebarHost,
         )}

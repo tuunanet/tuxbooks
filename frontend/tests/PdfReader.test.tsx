@@ -366,6 +366,40 @@ describe("PdfReader loading", () => {
     expect(doc.renderOptions.at(-1)?.smartColors).toBeUndefined();
   });
 
+  it("placeholders pending page slots with the dark palette in Smart Dark (issue #67)", async () => {
+    // A page that is queued/rendering shows the wrapper behind its still-
+    // transparent canvas; white there is a white flash on a dark surface.
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PdfReader book={pdfBook} onDocumentLoad={() => {}} onOutlineLoad={() => {}} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await screen.findByTestId("pdf-canvas");
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+
+    // Default (neutral): the faithful paper-white placeholder.
+    const wrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+    expect(wrapper).not.toBeNull();
+    expect((wrapper as HTMLElement).style.backgroundColor).toBe("");
+
+    // Smart Dark: the placeholder is the raster's own pre-fill color.
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    await waitFor(() => {
+      const darkWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+      expect((darkWrapper as HTMLElement | null)?.style.backgroundColor).toBe("rgb(16, 16, 19)");
+    });
+  });
+
   it("shows an honest error when the document cannot be opened", async () => {
     openDocumentMock.mockRejectedValueOnce(new Error("file went away"));
 

@@ -55,6 +55,12 @@ interface PdfDocumentViewProps {
   smartColors?: SmartPalette;
   /** Color-mode variant keyed into the bitmap cache ("original"|"smart"). */
   renderVariant?: string;
+  /**
+   * CSS background for the page wrapper while the page's raster is pending
+   * (issue #67 follow-up): Smart Dark must not flash white before the dark
+   * bitmap blits. Undefined keeps the paper-white placeholder.
+   */
+  pageBackground?: string;
 }
 
 /**
@@ -85,6 +91,7 @@ export function PdfDocumentView({
   themeTint,
   smartColors,
   renderVariant = "original",
+  pageBackground,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -151,7 +158,14 @@ export function PdfDocumentView({
                 // painted effects on the canvas would be re-composited every
                 // frame. Text/highlight overlays are positioned in this same
                 // wrapper, so the 1px border inset applies to all equally.
-                <div className="relative overflow-hidden rounded-sm border bg-white">
+                // The placeholder background follows the theme (issue #67
+                // follow-up): a Smart Dark page still queued/rendering must
+                // not flash white before its dark bitmap blits.
+                <div
+                  data-pdf-page-wrapper={slot.pageNumber}
+                  className="relative overflow-hidden rounded-sm border bg-white"
+                  style={pageBackground ? { backgroundColor: pageBackground } : undefined}
+                >
                   <PdfPageCanvas
                     document={document}
                     pageNumber={slot.pageNumber}

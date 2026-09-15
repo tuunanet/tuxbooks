@@ -28,6 +28,18 @@ describe("PDF theme treatments", () => {
     // The palette is a genuinely dark/light pair.
     expect(treatment.smart?.background.reduce((a, b) => a + b, 0)).toBeLessThan(0.5);
     expect(treatment.smart?.text.reduce((a, b) => a + b, 0)).toBeGreaterThan(1.5);
+    // The pending-page placeholder matches the raster's own pre-fill, so a
+    // queued/rendering page never flashes white on a dark surface.
+    expect(treatment.pageBackground).toBe(EPUB_THEME_COLORS.dark.background);
+  });
+
+  it("needs no placeholder for the filter-based and as-is treatments", () => {
+    // Filter modes invert the white placeholder live; as-is modes are
+    // faithful white pages.
+    expect(pdfThemeTreatment("invert").pageBackground).toBeUndefined();
+    expect(pdfThemeTreatment("contrast").pageBackground).toBeUndefined();
+    expect(pdfThemeTreatment("default").pageBackground).toBeUndefined();
+    expect(pdfThemeTreatment("light").pageBackground).toBeUndefined();
   });
 
   it("keeps the explicit negative as the Invert choice (issue #67)", () => {

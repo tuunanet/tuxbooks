@@ -180,6 +180,18 @@ test.describe("smart PDF coloring (issue #67)", () => {
     await waitForRendered(page, 5);
     await waitForPixels(page, 5);
 
+    // The pending-page placeholder follows the dark palette: a page that is
+    // still queued/rendering must not flash white before its bitmap blits.
+    await expect
+      .poll(
+        () =>
+          page
+            .locator("[data-pdf-page-wrapper='5']")
+            .evaluate((el) => getComputedStyle(el).backgroundColor),
+        { timeout: 30000 },
+      )
+      .toBe("rgb(16, 16, 19)");
+
     // Page 5 (cover): recognizable — the same colors as the original
     // render (same scale, deterministic raster), and not inverted.
     const smartCover = await patchColor(page, 5, 0.5, 0.2);

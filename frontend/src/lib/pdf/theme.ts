@@ -32,6 +32,17 @@ export interface PdfThemeTreatment {
   tint?: string;
   /** Worker-side object-aware recoloring palette (Smart Dark). */
   smart?: SmartPalette;
+  /**
+   * CSS background for the page slots while their raster is pending
+   * (issue #67 follow-up): a PDF page paints no background of its own —
+   * in Original mode the viewer's white shows through, but a Smart Dark
+   * page that is still queued/rendering must not flash white before its
+   * dark bitmap blits. The color is the same preset the worker pre-fills
+   * the raster with, so placeholder and rendered pixels agree exactly.
+   * Filter-based dark modes need none (the filter inverts the white
+   * placeholder live).
+   */
+  pageBackground?: string;
 }
 
 /**
@@ -48,7 +59,7 @@ export const PDF_THEME_TREATMENTS: Record<ReaderTheme, PdfThemeTreatment> = {
   default: {},
   light: {},
   paper: { tint: EPUB_THEME_COLORS.paper.background },
-  dark: { smart: SMART_DARK_PALETTE },
+  dark: { smart: SMART_DARK_PALETTE, pageBackground: EPUB_THEME_COLORS.dark.background },
   // The explicit negative-style mode (issue #67): the old Dark recipe,
   // kept for users who actually want a full-page inversion.
   invert: { filter: "invert(1) hue-rotate(180deg)" },

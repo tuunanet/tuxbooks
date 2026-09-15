@@ -29,6 +29,11 @@ interface PdfSidebarProps {
   smartColors?: SmartPalette;
   /** Color-mode variant the thumbnails render with. */
   renderVariant?: string;
+  /**
+   * CSS background for thumbnail cells while their raster is pending
+   * (issue #67 follow-up) — same placeholder contract as the main pages.
+   */
+  pageBackground?: string;
 }
 
 /**
@@ -48,6 +53,7 @@ export function PdfSidebar({
   onNavigate,
   smartColors,
   renderVariant = "original",
+  pageBackground,
 }: PdfSidebarProps) {
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
   const [renderedThumbs, setRenderedThumbs] = useState<ReadonlySet<number>>(() => new Set());
@@ -188,7 +194,10 @@ export function PdfSidebar({
                   className="block w-full rounded-md p-1 text-left outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50 aria-current:bg-accent"
                 >
                   <span
-                    style={{ height: `${geometry.height}px` }}
+                    style={{
+                      height: `${geometry.height}px`,
+                      ...(pageBackground ? { backgroundColor: pageBackground } : {}),
+                    }}
                     className="flex w-full items-center justify-center overflow-hidden rounded-sm border bg-white"
                   >
                     {canvasSet.has(size.pageNumber) && (
