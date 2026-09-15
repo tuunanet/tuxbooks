@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
@@ -62,10 +63,17 @@ export class Sidecar {
     }
     this.stopped = false;
     // Under E2E diagnostics the sidecar's stderr goes to a per-instance file
-    // (clearer than interleaving it with the app's own output).
+    // (clearer than interleaving it with the app's own output). The file
+    // lives in its own mkdtemp'd directory (0700, unpredictable name) — a
+    // fixed, predictable path in the shared temp dir is a symlink target on
+    // multi-user machines (CodeQL js/insecure-temporary-file). Nothing else
+    // locates the log by name; it is human-read diagnostics only.
     const debugLogPath =
       process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
-        ? `/tmp/tuxbooks-sidecar-${process.pid}-${process.env.E2E_RUN_ID}.log`
+        ? path.join(
+            fs.mkdtempSync(path.join(os.tmpdir(), `tuxbooks-sidecar-${process.pid}-`)),
+            "sidecar.log",
+          )
         : null;
     const stderr = debugLogPath ? fs.openSync(debugLogPath, "a") : "inherit";
     this.child = spawn(this.binaryPath, [], {

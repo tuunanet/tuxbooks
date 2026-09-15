@@ -44,6 +44,11 @@ function writeMarker(expiresInDays: number): void {
     chrome: "e2e",
   };
   fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  // codeql[js/insecure-temporary-file] test-only: the marker path is fixed by
+  // the app's own contract (the Electron main reads it next to
+  // TEST_DATABASE_PATH), and the scratch dir is a single-run, single-user
+  // ephemeral dir (e2e/setup/environment.ts) — predictability is the
+  // multi-process E2E contract, not an attacker-controlled name.
   fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2));
 }
 

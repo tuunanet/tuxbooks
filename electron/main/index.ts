@@ -1,6 +1,7 @@
 import { protocol, app, BrowserWindow, Menu, nativeImage, ipcMain, dialog, shell } from "electron";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { locateSidecar, RpcFailure, Sidecar, SidecarError } from "./sidecar";
@@ -674,10 +675,16 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 app.whenReady().then(() => {
   bootElapsed("app ready");
   // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
-  // per-run file, so E2E diagnosis works from CI artifacts alone.
+  // per-run file, so E2E diagnosis works from CI artifacts alone. The file
+  // lives in its own mkdtemp'd directory (0700, unpredictable name) — a
+  // fixed path in the shared temp dir is a symlink target on multi-user
+  // machines (same class as the sidecar's debug log).
   const debugLogPath =
     process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
-      ? `/tmp/tuxbooks-main-debug-${process.env.E2E_RUN_ID}.log`
+      ? path.join(
+          fs.mkdtempSync(path.join(os.tmpdir(), `tuxbooks-main-debug-${process.env.E2E_RUN_ID}-`)),
+          "main-debug.log",
+        )
       : null;
   const debugLog = (line: string): void => {
     if (!debugLogPath) return;
