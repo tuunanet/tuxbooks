@@ -210,8 +210,9 @@ fraction; a page change from navigation lands on the new page's top edge.
 
 ### Presentation mode (issue #65)
 
-Ctrl+L (shell-owned toggle; also the toolbar's Presentation button) turns
-the PDF reader into a fullscreen, distraction-free one-page view:
+Ctrl+L (shell-owned toggle, shared with the EPUB mode — issue #64; also the
+toolbar's Presentation button) turns the PDF reader into a fullscreen,
+distraction-free one-page view:
 
 - The shell hides the normal chrome (header, progress footer, thumbnails
   sidebar), requests fullscreen best-effort (a denied request still gives

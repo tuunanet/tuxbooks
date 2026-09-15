@@ -19,6 +19,7 @@ import {
   type ReaderPosition,
 } from "./readerModel";
 import { useReaderProgress } from "./useReaderProgress";
+import { EpubPresentationBar } from "./epub/EpubPresentationBar";
 import { useEpubDocument } from "./epub/hooks/useEpubDocument";
 import type { Annotation, AnnotationInput } from "@/types/domain";
 import type { Book } from "@/types/domain";
@@ -53,6 +54,16 @@ interface EpubReaderProps {
    * highlight editing lives in the navigation drawer.
    */
   onSelectionChange?: (selection: ReaderSelection | null) => void;
+  /**
+   * Presentation mode (issue #64, the PDF twin is issue #65): the shell
+   * hides its chrome around this surface; the reader adds the floating
+   * bar. Position and appearance need no special handling — the engine
+   * keeps the locator across the relayout, and the preferences are state,
+   * not chrome.
+   */
+  presentationMode?: boolean;
+  /** Exits presentation mode (the in-mode exit control). */
+  onExitPresentation?: () => void;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
@@ -88,12 +99,18 @@ export function EpubReader({
   highlights = [],
   onCreateHighlight,
   onSelectionChange,
+  presentationMode = false,
+  onExitPresentation,
 }: EpubReaderProps) {
   const { preferences, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const reportedFractionRef = useRef<number | null>(null);
   const currentSectionRef = useRef<EpubSectionProgress | null>(null);
   const [locator, setLocator] = useState<EpubLocator | null>(null);
+  // Spine position for the presentation bar's indicator (a ref alone would
+  // not re-render; relocates already re-render via setLocator, and the two
+  // states commit together).
+  const [section, setSection] = useState<EpubSectionProgress | null>(null);
   const { status, handle, error } = useEpubDocument(book.id);
   const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
@@ -103,6 +120,7 @@ export function EpubReader({
   const handleRelocate = useCallback(
     (view: ReadiumEpubHandle, detail: EpubRelocateDetail) => {
       currentSectionRef.current = detail.section;
+      setSection(detail.section);
       const overall = detail.totalProgression * 100;
       reportedFractionRef.current = detail.totalProgression;
       view.hostElement.dataset.epubSection = String(detail.section.current);
@@ -452,6 +470,7 @@ export function EpubReader({
       data-testid="epub-reader"
       data-epub-state={interactive ? "ready" : "loading"}
       data-layout={preferences.layout}
+      data-epub-presentation={presentationMode}
       className="h-full"
       style={{
         backgroundColor: epubThemeBackground(preferences.theme),
@@ -461,6 +480,14 @@ export function EpubReader({
         colorScheme: epubThemeColorScheme(preferences.theme),
       }}
     >
+      {presentationMode && (
+        <EpubPresentationBar
+          section={section}
+          onPrev={() => turnPages(handle?.prev())}
+          onNext={() => turnPages(handle?.next())}
+          onExit={onExitPresentation}
+        />
+      )}
       {!interactive && (
         <p
           data-testid="epub-loading"
