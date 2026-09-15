@@ -331,6 +331,40 @@ function recoloredColor(
  * does `fz_concat(in_ctm, dev->transform)`), so the page-space image area
  * comes straight from this matrix's determinant.
  */
+/** Classify once per document+page+ordinal, caching the decision. */
+function decisionFor(
+  image: InstanceType<MupdfModule["Image"]>,
+  decisionKey: string,
+  coverage: number,
+): RasterImageTreatment {
+  const cached = imageDecisions.get(decisionKey);
+  if (cached) return cached;
+  const decision = classifyRasterized(image, coverage);
+  if (imageDecisions.size >= IMAGE_DECISIONS_CAP) imageDecisions.clear();
+  imageDecisions.set(decisionKey, decision);
+  return decision;
+}
+
+/** LRU lookup that refreshes recency on hit. */
+function cachedTransformedImage(key: string): TransformedImage | null {
+  const cached = transformedImages.get(key);
+  if (!cached) return null;
+  transformedImages.delete(key);
+  transformedImages.set(key, cached);
+  return cached;
+}
+
+/** LRU store with count-based eviction. */
+function storeTransformedImage(key: string, entry: TransformedImage): void {
+  transformedImages.delete(key);
+  transformedImages.set(key, entry);
+  while (transformedImages.size > TRANSFORMED_IMAGE_ENTRIES) {
+    const oldest = transformedImages.keys().next().value;
+    if (oldest === undefined) break;
+    transformedImages.delete(oldest);
+  }
+}
+
 function treatImage(
   image: InstanceType<MupdfModule["Image"]>,
   ctm: number[],
@@ -339,9 +373,6 @@ function treatImage(
   pageArea: number,
   palette: SmartPalette,
 ): InstanceType<MupdfModule["Image"]> | null {
-  const decisionKey = `${documentGeneration}:${page}:${ordinal}`;
-  const cachedDecision = imageDecisions.get(decisionKey);
-
   // Page-space area of the image rect ÷ page area = coverage.
   const ctmDet = Math.abs((ctm[0] ?? 0) * (ctm[3] ?? 0) - (ctm[1] ?? 0) * (ctm[2] ?? 0));
   const coverage = pageArea > 0 ? ctmDet / pageArea : 0;
@@ -349,13 +380,8 @@ function treatImage(
     return null; // Illustration/screenshot-sized: never analyzed, never touched.
   }
 
-  let decision = cachedDecision;
-  if (!decision) {
-    decision = classifyRasterized(image, coverage);
-    if (imageDecisions.size >= IMAGE_DECISIONS_CAP) imageDecisions.clear();
-    imageDecisions.set(decisionKey, decision);
-  }
-  if (decision === "preserve") {
+  const decisionKey = `${documentGeneration}:${page}:${ordinal}`;
+  if (decisionFor(image, decisionKey, coverage) === "preserve") {
     return null;
   }
 
@@ -363,22 +389,12 @@ function treatImage(
   // page-sized scans so a pathological image cannot pin the cache.
   const cacheable = image.getWidth() * image.getHeight() <= TRANSFORMED_IMAGE_MAX_PIXELS;
   if (cacheable) {
-    const cached = transformedImages.get(decisionKey);
-    if (cached) {
-      transformedImages.delete(decisionKey);
-      transformedImages.set(decisionKey, cached);
-      return cached.image;
-    }
+    const cached = cachedTransformedImage(decisionKey);
+    if (cached) return cached.image;
   }
   const transformed = buildRecoloredImage(image, palette);
   if (transformed && cacheable) {
-    transformedImages.delete(decisionKey);
-    transformedImages.set(decisionKey, transformed);
-    while (transformedImages.size > TRANSFORMED_IMAGE_ENTRIES) {
-      const oldest = transformedImages.keys().next().value;
-      if (oldest === undefined) break;
-      transformedImages.delete(oldest);
-    }
+    storeTransformedImage(decisionKey, transformed);
   }
   return transformed?.image ?? null;
 }

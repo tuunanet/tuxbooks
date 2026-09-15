@@ -158,6 +158,29 @@ export function hexToRgb01(hex: string): Rgb | null {
   return [((value >> 16) & 0xff) / 255, ((value >> 8) & 0xff) / 255, (value & 0xff) / 255];
 }
 
+/** Gray replicates into RGB. */
+function grayToRgb(color: number[]): Rgb {
+  const gray = color[0] ?? 0;
+  return [gray, gray, gray];
+}
+
+/** BGR swaps into RGB. */
+function bgrToRgb(color: number[]): Rgb {
+  return [color[2] ?? 0, color[1] ?? 0, color[0] ?? 0];
+}
+
+/**
+ * CMYK converts subtractively (naive device conversion — the palette remap
+ * dominates the result, so ICC accuracy is not needed for recoloring).
+ */
+function cmykToRgb(color: number[]): Rgb {
+  const cyan = color[0] ?? 0;
+  const magenta = color[1] ?? 0;
+  const yellow = color[2] ?? 0;
+  const black = color[3] ?? 0;
+  return [(1 - cyan) * (1 - black), (1 - magenta) * (1 - black), (1 - yellow) * (1 - black)];
+}
+
 /**
  * Device color → RGB for recoloring. `color` carries `components` values in
  * the device colorspace named by `type`. Known colorspaces convert (Gray
@@ -165,25 +188,21 @@ export function hexToRgb01(hex: string): Rgb | null {
  * null and the caller forwards the operation unchanged rather than guessing.
  */
 export function deviceColorToRgb(color: number[], type: string, components: number): Rgb | null {
-  if (type === "Gray" && components === 1 && color.length >= 1) {
-    const gray = color[0] ?? 0;
-    return [gray, gray, gray];
+  const enough = color.length >= components;
+  if (type === "Gray" && components === 1 && enough) {
+    return grayToRgb(color);
   }
-  if ((type === "RGB" || type === "Lab") && components >= 3 && color.length >= 3) {
+  if ((type === "RGB" || type === "Lab") && components >= 3 && enough) {
     // Lab components are not RGB channels, but a Lab fill whose L* is what
     // matters maps acceptably through the triple treated as RGB; real Lab
     // text colors are rare and the palette remap dominates the result.
     return [color[0] ?? 0, color[1] ?? 0, color[2] ?? 0];
   }
-  if (type === "BGR" && components >= 3 && color.length >= 3) {
-    return [color[2] ?? 0, color[1] ?? 0, color[0] ?? 0];
+  if (type === "BGR" && components >= 3 && enough) {
+    return bgrToRgb(color);
   }
-  if (type === "CMYK" && components === 4 && color.length >= 4) {
-    const cyan = color[0] ?? 0;
-    const magenta = color[1] ?? 0;
-    const yellow = color[2] ?? 0;
-    const black = color[3] ?? 0;
-    return [(1 - cyan) * (1 - black), (1 - magenta) * (1 - black), (1 - yellow) * (1 - black)];
+  if (type === "CMYK" && components === 4 && enough) {
+    return cmykToRgb(color);
   }
   return null;
 }

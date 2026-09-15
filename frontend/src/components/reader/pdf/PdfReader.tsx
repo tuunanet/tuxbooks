@@ -94,6 +94,104 @@ const MAX_CONCURRENT_RENDERS = 2;
  */
 const WHEEL_STEP_PX = 40;
 
+/**
+ * A settled selection's outcome (issue: the pointerup handler defers by a
+ * tick, then classifies): `cleared` resets the pending candidate, `click`
+ * addresses an existing highlight under a collapsed pointer, `select`
+ * carries a fresh text-selection candidate.
+ */
+type SettledSelection =
+  | { kind: "cleared" }
+  | { kind: "click"; text: string; highlightId: Annotation["id"] }
+  | {
+      kind: "select";
+      page: number;
+      text: string;
+      rects: AnnotationRect[];
+      highlightId: Annotation["id"] | null;
+    };
+
+/** The page slot a DOM node belongs to, with its element; null outside one. */
+function slotOf(node: Node | null): { page: number; slot: Element } | null {
+  const element = node instanceof Element ? node : (node?.parentElement ?? null);
+  const slot = element?.closest("[data-pdf-slot]") ?? null;
+  const page = Number(slot?.getAttribute("data-pdf-slot"));
+  return slot && Number.isInteger(page) && page >= 1 ? { page, slot } : null;
+}
+
+/** The highlight under a collapsed pointer (plain click), if any. */
+function highlightAtClick(input: {
+  highlightsByPage: Map<number, Annotation[]>;
+  clickTarget: Element | null;
+  clickX: number;
+  clickY: number;
+}): Annotation | null {
+  const found = slotOf(input.clickTarget);
+  const slotRect = found?.slot.getBoundingClientRect();
+  return found && slotRect && slotRect.width > 0 && slotRect.height > 0
+    ? highlightAtPoint(
+        input.highlightsByPage.get(found.page) ?? [],
+        found.page,
+        (input.clickX - slotRect.left) / slotRect.width,
+        (input.clickY - slotRect.top) / slotRect.height,
+      )
+    : null;
+}
+
+/** Selection rects normalized to the slot's page space, drops-empty. */
+function rectsFromSelection(selection: Selection, slot: Element): AnnotationRect[] {
+  const slotRect = slot.getBoundingClientRect();
+  return Array.from(selection.getRangeAt(0).getClientRects())
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .map((rect) =>
+      normalizeRect(rect, slotRect.left, slotRect.top, slotRect.width, slotRect.height),
+    )
+    .filter((rect) => rect.width > 0 && rect.height > 0);
+}
+
+/**
+ * Classify a settled selection: a collapsed pointer resolves the highlight
+ * under it (so the toolbar can recolor or remove it), a text selection
+ * becomes a highlight candidate targeting the largest-overlap highlight.
+ */
+function resolveSettledSelection(
+  selection: Selection | null,
+  hasDocument: boolean,
+  input: {
+    highlightsByPage: Map<number, Annotation[]>;
+    clickTarget: Element | null;
+    clickX: number;
+    clickY: number;
+  },
+): SettledSelection {
+  if (!selection || selection.rangeCount === 0 || !hasDocument) {
+    return { kind: "cleared" };
+  }
+  if (selection.isCollapsed) {
+    const clicked = highlightAtClick(input);
+    return clicked === null
+      ? { kind: "cleared" }
+      : { kind: "click", text: clicked.text ?? "", highlightId: clicked.id };
+  }
+  const text = selection.toString().replace(/\s+/g, " ").trim();
+  const found = text === "" ? null : slotOf(selection.anchorNode);
+  if (!found) {
+    return { kind: "cleared" };
+  }
+  const rects = rectsFromSelection(selection, found.slot);
+  if (rects.length === 0) {
+    return { kind: "cleared" };
+  }
+  // Re-selecting highlighted text addresses that highlight (largest
+  // overlap) instead of stacking a new one on top.
+  const targeted = highlightForSelection(
+    input.highlightsByPage.get(found.page) ?? [],
+    found.page,
+    rects,
+  );
+  return { kind: "select", page: found.page, text, rects, highlightId: targeted?.id ?? null };
+}
+
 interface PdfReaderProps {
   book: Book;
   /** Reports the real page count once the document has loaded. */
@@ -406,75 +504,26 @@ export function PdfReader({
       const clickX = typeof pointer.clientX === "number" ? pointer.clientX : 0;
       const clickY = typeof pointer.clientY === "number" ? pointer.clientY : 0;
       window.setTimeout(() => {
-        const selection = window.getSelection();
-        if (!selection || selection.rangeCount === 0 || !pdfDocument) {
+        const resolution = resolveSettledSelection(window.getSelection(), pdfDocument !== null, {
+          highlightsByPage: highlightsByPageRef.current,
+          clickTarget,
+          clickX,
+          clickY,
+        });
+        if (resolution.kind === "select") {
+          pendingSelectionRef.current = {
+            page: resolution.page,
+            text: resolution.text,
+            rects: resolution.rects,
+          };
+        } else {
           pendingSelectionRef.current = null;
-          onSelectionChangeRef.current?.(null);
-          return;
         }
-        if (selection.isCollapsed) {
-          // Plain click: address the existing highlight under the pointer,
-          // if any, so the toolbar offers recolor and removal for it.
-          pendingSelectionRef.current = null;
-          const slot = clickTarget?.closest("[data-pdf-slot]") ?? null;
-          const page = Number(slot?.getAttribute("data-pdf-slot"));
-          const slotRect = slot?.getBoundingClientRect();
-          const clicked =
-            slot &&
-            slotRect &&
-            Number.isInteger(page) &&
-            page >= 1 &&
-            slotRect.width > 0 &&
-            slotRect.height > 0
-              ? highlightAtPoint(
-                  highlightsByPageRef.current.get(page) ?? [],
-                  page,
-                  (clickX - slotRect.left) / slotRect.width,
-                  (clickY - slotRect.top) / slotRect.height,
-                )
-              : null;
-          onSelectionChangeRef.current?.(
-            clicked === null ? null : { text: clicked.text ?? "", highlightId: clicked.id },
-          );
-          return;
-        }
-        const text = selection.toString().replace(/\s+/g, " ").trim();
-        if (text === "") {
-          pendingSelectionRef.current = null;
-          onSelectionChangeRef.current?.(null);
-          return;
-        }
-        const anchorNode = selection.anchorNode;
-        const element =
-          anchorNode instanceof Element ? anchorNode : (anchorNode?.parentElement ?? null);
-        const slot = element?.closest("[data-pdf-slot]") ?? null;
-        const page = Number(slot?.getAttribute("data-pdf-slot"));
-        if (!slot || !Number.isInteger(page) || page < 1) {
-          pendingSelectionRef.current = null;
-          onSelectionChangeRef.current?.(null);
-          return;
-        }
-        const slotRect = slot.getBoundingClientRect();
-        const rects = Array.from(selection.getRangeAt(0).getClientRects())
-          .filter((rect) => rect.width > 0 && rect.height > 0)
-          .map((rect) =>
-            normalizeRect(rect, slotRect.left, slotRect.top, slotRect.width, slotRect.height),
-          )
-          .filter((rect) => rect.width > 0 && rect.height > 0);
-        if (rects.length === 0) {
-          pendingSelectionRef.current = null;
-          onSelectionChangeRef.current?.(null);
-          return;
-        }
-        pendingSelectionRef.current = { page, text, rects };
-        // Re-selecting highlighted text addresses that highlight (largest
-        // overlap) instead of stacking a new one on top.
-        const targeted = highlightForSelection(
-          highlightsByPageRef.current.get(page) ?? [],
-          page,
-          rects,
+        onSelectionChangeRef.current?.(
+          resolution.kind === "cleared"
+            ? null
+            : { text: resolution.text, highlightId: resolution.highlightId },
         );
-        onSelectionChangeRef.current?.({ text, highlightId: targeted?.id ?? null });
       }, 0);
     };
     document.addEventListener("pointerup", readSelection);

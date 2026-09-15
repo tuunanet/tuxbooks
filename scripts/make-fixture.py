@@ -136,6 +136,70 @@ def tiny_png() -> bytes:
         + chunk(b"IEND", b"")
     )
 
+def image_xobject(image: dict) -> tuple[str, bytes]:
+    """One Flate-compressed raster XObject: (object body, stream bytes)."""
+    pixels = image["pixels"]
+    compressed = zlib.compress(pixels, 9)
+    colorspace = "/DeviceGray" if image.get("gray") else "/DeviceRGB"
+    body = (
+        f"<< /Type /XObject /Subtype /Image /Width {image['width']} "
+        f"/Height {image['height']} /ColorSpace {colorspace} "
+        f"/BitsPerComponent 8 /Filter /FlateDecode /Length {len(compressed)} >>"
+    )
+    return body, compressed
+
+
+def collect_image_objects(
+    pages: list[dict], first_object: int
+) -> tuple[list[tuple[str, bytes]], dict[int, list[tuple[str, int]]], int]:
+    """Allocate raster image XObjects page by page: returns the object
+    bodies, each page's (name, object-number) refs, and the next free
+    object number."""
+    image_objects: list[tuple[str, bytes]] = []
+    page_image_refs: dict[int, list[tuple[str, int]]] = {}
+    next_object = first_object
+    for page_index, page in enumerate(pages, start=1):
+        refs = []
+        for image in page.get("images", []):
+            number = next_object
+            next_object += 1
+            body, stream = image_xobject(image)
+            image_objects.append((body, stream))
+            refs.append((image["name"], number))
+        if refs:
+            page_image_refs[page_index] = refs
+    return image_objects, page_image_refs, next_object
+
+
+def allocate_outline_tree(
+    outline: list[dict] | None, first_object: int
+) -> tuple[int | None, list[dict], int]:
+    """Plan the outline tree before any object body is built: the catalog
+    needs the /Outlines root's object number, and item numbers are allocated
+    depth-first (pre-order). Returns (root number or None, top-level nodes,
+    next free object number)."""
+    if not outline:
+        return None, [], first_object
+    root = first_object
+    next_number = root + 1
+
+    def allocate(entry: dict, parent: int) -> dict:
+        nonlocal next_number
+        node = {
+            "title": entry["title"],
+            "page": entry["page"],
+            "number": next_number,
+            "parent": parent,
+            "children": [],
+        }
+        next_number += 1
+        node["children"] = [allocate(child, node["number"]) for child in entry.get("children", [])]
+        return node
+
+    top = [allocate(entry, root) for entry in outline]
+    return root, top, next_number
+
+
 def build_pdf(
     pages: list[dict],
     title: str,
@@ -182,50 +246,12 @@ def build_pdf(
     # Raster image XObjects (smart-colors fixture only): allocated right
     # after the font object so documents without images keep the exact
     # object numbering they always had.
-    image_objects: list[tuple[str, bytes]] = []  # (object body, stream bytes)
-    page_image_refs: dict[int, list[tuple[str, int]]] = {}
-    next_object = font_object + 1
-    for page_index, page in enumerate(pages, start=1):
-        refs = []
-        for image in page.get("images", []):
-            number = next_object
-            next_object += 1
-            pixels = image["pixels"]
-            compressed = zlib.compress(pixels, 9)
-            colorspace = "/DeviceGray" if image.get("gray") else "/DeviceRGB"
-            body = (
-                f"<< /Type /XObject /Subtype /Image /Width {image['width']} "
-                f"/Height {image['height']} /ColorSpace {colorspace} "
-                f"/BitsPerComponent 8 /Filter /FlateDecode /Length {len(compressed)} >>"
-            )
-            image_objects.append((body, compressed))
-            refs.append((image["name"], number))
-        if refs:
-            page_image_refs[page_index] = refs
+    image_objects, page_image_refs, next_object = collect_image_objects(pages, font_object + 1)
 
     # The outline tree is planned before any object body is built: the
     # catalog needs the /Outlines root's object number, and item numbers are
     # allocated depth-first (pre-order) right after the last static object.
-    outline_root: int | None = None
-    outline_top: list[dict] = []
-    if outline:
-        outline_root = next_object
-        next_number = outline_root + 1
-
-        def allocate(entry: dict, parent: int) -> dict:
-            nonlocal next_number
-            node = {
-                "title": entry["title"],
-                "page": entry["page"],
-                "number": next_number,
-                "parent": parent,
-                "children": [],
-            }
-            next_number += 1
-            node["children"] = [allocate(child, node["number"]) for child in entry.get("children", [])]
-            return node
-
-        outline_top = [allocate(entry, outline_root) for entry in outline]
+    outline_root, outline_top, next_object = allocate_outline_tree(outline, next_object)
 
     def subtree_count(node: dict) -> int:
         return 1 + sum(subtree_count(child) for child in node["children"])
@@ -382,6 +408,11 @@ def uniform_pages(count: int, width: float = 612, height: float = 792) -> list[d
 MIXED_PAGE_SIZES = [(612, 792), (792, 612), (420, 1008), (500, 500), (595, 842), (360, 504)]
 
 
+def gradient_channel(value: float) -> int:
+    """Clamp a 0–1 component to a byte, clamped to the representable range."""
+    return round(255 * min(1.0, max(0.0, value)))
+
+
 def gradient_photo(width: int, height: int) -> bytes:
     """Sunrise gradient: deep blue at the top into warm orange at the bottom.
     Colorful enough that every sampled pixel is chromatic (an object-aware
@@ -395,12 +426,11 @@ def gradient_photo(width: int, height: int) -> bytes:
         b = 0.50 - 0.40 * t
         for x in range(width):
             fx = x / max(1, width - 1)
-            channel = lambda v: round(255 * min(1.0, max(0.0, v)))
             rows += bytes(
                 (
-                    channel(r + 0.10 * fx),
-                    channel(g + 0.05 * fx),
-                    channel(b),
+                    gradient_channel(r + 0.10 * fx),
+                    gradient_channel(g + 0.05 * fx),
+                    gradient_channel(b),
                 )
             )
     return bytes(rows)
