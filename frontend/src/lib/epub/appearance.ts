@@ -237,6 +237,25 @@ export function epubTextAlignPreference(
 export type EpubThemeName =
   "default" | "light" | "paper" | "dark" | "contrast" | "blue-contrast" | "mint-contrast";
 
+/**
+ * The reader surface's theme vocabulary: the EPUB presets plus the PDF-only
+ * explicit-inversion preset (issue #67). `invert` exists so PDFs keep the
+ * negative-style dark mode Smart Dark replaced; it is never offered for
+ * EPUB, where it would have no faithful meaning — consumers with EPUB
+ * semantics normalize through `epubSurfaceTheme`.
+ */
+export type ReaderTheme = EpubThemeName | "invert";
+
+/**
+ * The theme with EPUB semantics for a reader theme: the PDF-only Invert
+ * preset degrades to the dark preset (visually the closest surface — dark
+ * background, light text), so an Invert pick made on a PDF never reaches
+ * EPUB engines or EPUB-derived chrome as an unknown name.
+ */
+export function epubSurfaceTheme(theme: ReaderTheme): EpubThemeName {
+  return theme === "invert" ? "dark" : theme;
+}
+
 /** The default theme: neutral (no color override). */
 export const EPUB_DEFAULT_THEME: EpubThemeName = "default";
 

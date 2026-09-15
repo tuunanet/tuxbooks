@@ -22,6 +22,7 @@ import {
   pdfFixture,
   repoRoot,
   sidecarBinaryPath,
+  smartPdfFixture,
 } from "./fixtures.js";
 
 /** Unique per invocation; the launcher (or playwright.config) sets it. */
@@ -134,6 +135,7 @@ export function prepareEnvironment(seeded: boolean): void {
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
+    copyFileSync(smartPdfFixture, path.join(libraryDir, "smart.pdf"));
 
     // The library-scale corpus only matters to the seeded phase (the scale
     // spec imports it through the real bulk path). Generated at setup so

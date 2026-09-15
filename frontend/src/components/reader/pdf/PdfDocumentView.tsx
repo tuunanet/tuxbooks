@@ -1,6 +1,6 @@
 import { useMemo, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
-import type { PdfDocument } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
@@ -50,6 +50,17 @@ interface PdfDocumentViewProps {
   /** Multiply-tint color for paper-style themes (white pages take on the
    *  tint); undefined = no overlay. See lib/pdf/theme.ts. */
   themeTint?: string;
+  /** Smart Dark palette (issue #67): present, pages rasterize with
+   *  worker-side object-aware recoloring; absent, pages render as-is. */
+  smartColors?: SmartPalette;
+  /** Color-mode variant keyed into the bitmap cache ("original"|"smart"). */
+  renderVariant?: string;
+  /**
+   * CSS background for the page wrapper while the page's raster is pending
+   * (issue #67 follow-up): Smart Dark must not flash white before the dark
+   * bitmap blits. Undefined keeps the paper-white placeholder.
+   */
+  pageBackground?: string;
 }
 
 /**
@@ -78,6 +89,9 @@ export function PdfDocumentView({
   highlightsByPage,
   themeFilter,
   themeTint,
+  smartColors,
+  renderVariant = "original",
+  pageBackground,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
   const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
@@ -144,7 +158,14 @@ export function PdfDocumentView({
                 // painted effects on the canvas would be re-composited every
                 // frame. Text/highlight overlays are positioned in this same
                 // wrapper, so the 1px border inset applies to all equally.
-                <div className="relative overflow-hidden rounded-sm border bg-white">
+                // The placeholder background follows the theme (issue #67
+                // follow-up): a Smart Dark page still queued/rendering must
+                // not flash white before its dark bitmap blits.
+                <div
+                  data-pdf-page-wrapper={slot.pageNumber}
+                  className="relative overflow-hidden rounded-sm border bg-white"
+                  style={pageBackground ? { backgroundColor: pageBackground } : undefined}
+                >
                   <PdfPageCanvas
                     document={document}
                     pageNumber={slot.pageNumber}
@@ -152,6 +173,8 @@ export function PdfDocumentView({
                     height={slot.height}
                     scale={scale}
                     preview={previewAnchorRender && slot.pageNumber === anchorPage}
+                    smartColors={smartColors}
+                    renderVariant={renderVariant}
                     bitmapCache={bitmapCache}
                     onPageRendered={onPageRendered}
                     onPageError={onPageError}

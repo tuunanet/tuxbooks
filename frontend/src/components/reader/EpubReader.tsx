@@ -8,7 +8,7 @@ import {
   type EpubTocItem,
   type ReadiumEpubHandle,
 } from "@/lib/epub/readiumEngine";
-import { epubThemeColorScheme } from "@/lib/epub/appearance";
+import { epubSurfaceTheme, epubThemeColorScheme } from "@/lib/epub/appearance";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
 import { highlightCssColor, isHighlightColor, type ReaderSelection } from "./annotationModel";
@@ -294,7 +294,7 @@ export function EpubReader({
       pageGutter: preferences.pageGutter,
       textAlign: preferences.textAlign,
       foreground: preferences.foreground,
-      theme: preferences.theme,
+      theme: epubSurfaceTheme(preferences.theme),
     });
   }, [
     handle,
@@ -473,11 +473,11 @@ export function EpubReader({
       data-epub-presentation={presentationMode}
       className="h-full"
       style={{
-        backgroundColor: epubThemeBackground(preferences.theme),
+        backgroundColor: epubThemeBackground(epubSurfaceTheme(preferences.theme)),
         // Pin the section documents' UA-default colors to the theme family
         // instead of the OS/global scheme (color-scheme inherits into the
         // navigator's iframes).
-        colorScheme: epubThemeColorScheme(preferences.theme),
+        colorScheme: epubThemeColorScheme(epubSurfaceTheme(preferences.theme)),
       }}
     >
       {presentationMode && (

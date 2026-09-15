@@ -54,3 +54,6 @@ electron/dist/
 
 # Kate editor swap files
 *.kate-swp
+
+# Local debugging fixture (issue #67 follow-up) — temporary copy, never commit.
+tests/fixtures/ai-engineering.pdf

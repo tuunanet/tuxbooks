@@ -34,12 +34,14 @@ export const epubFixture = path.join(repoRoot, "tests", "fixtures", "books", "mi
 export const pdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "minimal.pdf");
 export const largePdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "large.pdf");
 export const mixedPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "mixed.pdf");
+export const smartPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "smart.pdf");
 
 export const seededBookTitles = {
   epub: "A Minimal Book",
   pdf: "A Minimal Manual",
   largePdf: "A Large Fixture",
   mixedPdf: "Odd Sizes",
+  smartPdf: "Smart Colors",
 } as const;
 
 /**

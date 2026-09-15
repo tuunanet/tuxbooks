@@ -25,7 +25,7 @@ import {
   nearestEpubWordSpacing,
   type EpubFontFamily,
   type EpubTextAlignment,
-  type EpubThemeName,
+  type ReaderTheme,
 } from "@/lib/epub/appearance";
 import type { ResolvedTheme } from "@/lib/theme";
 import {
@@ -48,12 +48,13 @@ export interface StoredReaderSettings {
   themePinned: boolean;
 }
 
-const THEMES: readonly EpubThemeName[] = [
+const THEMES: readonly ReaderTheme[] = [
   "default",
   "light",
   "paper",
   "dark",
   "contrast",
+  "invert",
   "blue-contrast",
   "mint-contrast",
 ];
@@ -81,8 +82,8 @@ export function sanitizeReaderPreferences(raw: unknown): ReaderPreferences {
   const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const defaults = DEFAULT_READER_PREFERENCES;
 
-  const theme = THEMES.includes(source.theme as EpubThemeName)
-    ? (source.theme as EpubThemeName)
+  const theme = THEMES.includes(source.theme as ReaderTheme)
+    ? (source.theme as ReaderTheme)
     : defaults.theme;
   const layout = LAYOUTS.includes(source.layout as ReaderLayout)
     ? (source.layout as ReaderLayout)

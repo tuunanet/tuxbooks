@@ -271,21 +271,23 @@ describe("PdfReader loading", () => {
     expect(onDocumentLoad).toHaveBeenCalledWith(3);
   });
 
-  it("filters the rendered pages by the reader theme", async () => {
+  it("treats the pages per the reader theme (issue #67 color modes)", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
       get_reading_progress: null,
       save_reading_progress: null,
     });
 
-    // Default (neutral) renders the pages as-is; Dark applies the fixed-
-    // content invert recipe (lib/pdf/theme.ts) without re-rendering.
+    // Default (neutral) renders the pages as-is; Dark rasterizes with
+    // worker-side Smart Dark recoloring (no CSS filter); Invert is the
+    // explicit negative filter; Paper multiplies the tint over the pages.
     const onSearchGroup = vi.fn() as never;
     const onSelectionChange = vi.fn() as never;
     render(
       <ShortcutProvider>
         <ReaderProvider>
           <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PreferenceProbe label="probe-invert" patch={{ theme: "invert" }} />
           <PreferenceProbe label="probe-paper" patch={{ theme: "paper" }} />
           <PdfReader
             book={pdfBook}
@@ -301,14 +303,110 @@ describe("PdfReader loading", () => {
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
 
+    // Smart dark: no filter — the recoloring happened at raster time.
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    expect(screen.getByTestId("pdf-document").style.filter).toBe("");
+    expect(screen.queryByTestId("pdf-theme-tint")).not.toBeInTheDocument();
+
+    // The explicit negative: the full-page inversion filter.
+    await userEvent.click(screen.getByRole("button", { name: "probe-invert" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("invert(1) hue-rotate(180deg)");
 
+    // Paper multiplies the white pages down to the theme's paper color.
     await userEvent.click(screen.getByRole("button", { name: "probe-paper" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
     const tint = screen.getByTestId("pdf-theme-tint");
     expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
     expect(tint.style.mixBlendMode).toBe("multiply");
+  });
+
+  it("rasterizes with the Smart Dark palette when the dark theme is active (issue #67)", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PreferenceProbe label="probe-default" patch={{ theme: "default" }} />
+          <PdfReader book={pdfBook} onDocumentLoad={() => {}} onOutlineLoad={() => {}} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await screen.findByTestId("pdf-canvas");
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+
+    // Neutral default: pages render as-is — no palette rides the requests.
+    expect(doc.renderOptions.length).toBeGreaterThan(0);
+    for (const call of doc.renderOptions) {
+      expect(call.smartColors).toBeUndefined();
+    }
+
+    // Dark: every render request carries the Smart Dark palette (the EPUB
+    // dark preset's own background/text pair), and switching re-renders.
+    const before = doc.renderOptions.length;
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    await waitFor(() => expect(doc.renderOptions.length).toBeGreaterThan(before));
+    const smart = doc.renderOptions.at(-1)?.smartColors as
+      { background: number[]; text: number[] } | undefined;
+    expect(smart).toBeDefined();
+    // #101013 background, #e4e4e7 text (0–1 components).
+    expect(smart?.background[0]).toBeCloseTo(16 / 255, 3);
+    expect(smart?.text[0]).toBeCloseTo(228 / 255, 3);
+
+    // Back to default: the palette disappears again (variant invalidation
+    // re-rendered — the smart colors are gone from the latest requests).
+    const afterSmart = doc.renderOptions.length;
+    await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
+    await waitFor(() => expect(doc.renderOptions.length).toBeGreaterThan(afterSmart));
+    expect(doc.renderOptions.at(-1)?.smartColors).toBeUndefined();
+  });
+
+  it("placeholders pending page slots with the dark palette in Smart Dark (issue #67)", async () => {
+    // A page that is queued/rendering shows the wrapper behind its still-
+    // transparent canvas; white there is a white flash on a dark surface.
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PreferenceProbe label="probe-default" patch={{ theme: "default" }} />
+          <PdfReader book={pdfBook} onDocumentLoad={() => {}} onOutlineLoad={() => {}} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await screen.findByTestId("pdf-canvas");
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+
+    // Default (neutral): the faithful paper-white placeholder.
+    const wrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+    expect(wrapper).not.toBeNull();
+    expect((wrapper as HTMLElement).style.backgroundColor).toBe("");
+
+    // Smart Dark: the placeholder is the raster's own pre-fill color.
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    await waitFor(() => {
+      const darkWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+      expect((darkWrapper as HTMLElement | null)?.style.backgroundColor).toBe("rgb(16, 16, 19)");
+    });
+
+    // Back to Default: the dark placeholder must go with it — a pending
+    // slot returns to the paper-white background.
+    await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
+    await waitFor(() => {
+      const plainWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+      expect((plainWrapper as HTMLElement | null)?.style.backgroundColor).toBe("");
+    });
   });
 
   it("shows an honest error when the document cannot be opened", async () => {

@@ -430,18 +430,65 @@ open-path ordering (page 1 first, then adjacent pages, then outline and
 thumbnails) is enforced on the main thread — see "Open-timeline
 telemetry" above.
 
-### Appearance
+### Appearance and color modes (issue #67)
 
 PDFs are fixed-layout rasters: the reader's reflow controls (font size,
 spacing, family, alignment, columns, layout, margins) apply only to EPUB
 and are not displayed for PDFs — the appearance menu offers exactly the
-theme. The theme lands on the rendered pages as a CSS filter over the
-document surface (`lib/pdf/theme.ts`, applied by `PdfDocumentView`),
-since pages cannot be recolored: Default and Light render as-is, Paper
-multiply-tints the white pages to the theme's own paper color (a
-filter cannot darken white), Dark uses the fixed-content invert recipe
-(`invert(1) hue-rotate(180deg)`, the approach Foliate popularized),
-and High contrast combines grayscale + invert + a contrast boost. The
-recolor-only presets (Blue, Mint) have no faithful raster filter and
-remain EPUB-only. The shell chrome around the surface follows the same
-theme in both formats.
+theme, which for PDFs is really a set of **color modes**
+(`lib/pdf/theme.ts`, driven by the same stored reader theme as EPUB):
+
+- **Default / Light** — pages render as-is.
+- **Paper** — multiply-tints the white pages to the theme's own paper color
+  (a CSS filter cannot darken white).
+- **Dark = Smart Dark** — object-aware recoloring _inside the MuPDF worker,
+  before rasterization_: the page runs through a callback `Device`
+  (`makeSmartRecolorDevice` in `mupdfWorker.ts`) that forwards every drawing
+  operation to a `DrawDevice` while remapping fill/stroke/text/image-mask
+  paint colors onto the dark palette (`lib/pdf/smartColors.ts`). Black maps
+  to the light text color, white to the dark background, grays ramp by
+  luminance; chromatic colors keep their hue with a compressed lightness so
+  links and accent fills stay recognizable. Ordinary `fillImage` operations
+  pass through unchanged — photographs, covers, and screenshots are never
+  turned into negatives. Pages without an explicit background fill are
+  pre-filled with the dark background (PDFs do not paint their own page
+  background; viewers supply the white). Image-mask paints follow the
+  text rules (masks are stencil shapes, not photos).
+- **Invert** — the explicit full-page negative (`invert(1)
+hue-rotate(180deg)`, the recipe Foliate popularized), kept from the old
+  Dark behavior for users who actually want inversion. A CSS filter over
+  the document surface, like High contrast (`grayscale + invert +
+contrast`).
+
+The recolor-only EPUB presets (Blue, Mint) have no faithful raster
+treatment and remain EPUB-only. "Invert" is a PDF-only stored theme name
+(`ReaderTheme` in `lib/epub/appearance.ts`); consumers with EPUB semantics
+normalize it to the dark preset via `epubSurfaceTheme` so a pick made on a
+PDF never reaches EPUB engines or shell chrome as an unknown name.
+
+#### Scanned and rasterized pages
+
+A page that _is_ one large image cannot be recolored object-by-object, and
+leaving it bright would break dark reading. When a raster image covers
+most of the page (≥ 60% coverage), the worker samples its decoded pixels
+and classifies it (`classifyRasterImage`): paper-backed, achromatic
+rasters (scans, rasterized text pages) are transformed with the same
+palette mapping as vector content; anything with meaningful chromatic
+content keeps its colors. The chromatic-fraction signal exists because
+the mean saturation cannot tell covers from scans: on a white-dominant
+page (the AI Engineering cover measures 69% near-white, mean spread
+0.027, 2.7% clearly chromatic pixels) the background dilutes the mean
+into indistinguishability, while the chromatic accents (logo, colored
+artwork) always mark designed artwork. Classification decisions are
+cached per document/page/image-ordinal, and the transformed image in a
+small LRU, so re-renders never re-pay the analysis. The original image's
+decoded pixmap is only ever read — the transform runs on a private
+DeviceRGB copy (`convertToColorSpace`), since the decode result is owned
+by MuPDF's per-image cache.
+
+Color mode is part of the render and cache identity: the worker render
+request carries the palette only in Smart Dark, and the per-document
+bitmap cache (`pdfBitmapCache`) keys entries by `{page, scale, ratio,
+variant}` where `variant` is `"original" | "smart"` — a mode switch
+re-renders instead of serving the other mode's pixels. The shell chrome
+around the surface follows the same theme in both formats.

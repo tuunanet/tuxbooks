@@ -8,12 +8,12 @@ import {
   EPUB_DEFAULT_THEME,
   type EpubFontFamily,
   type EpubTextAlignment,
-  type EpubThemeName,
 } from "@/lib/epub/appearance";
 import type { ResolvedTheme } from "@/lib/theme";
+import type { ReaderTheme } from "@/lib/epub/appearance";
 
 /** Visual theme of the reader surface; "default" keeps publisher colors. */
-export type ReaderTheme = EpubThemeName;
+export type { ReaderTheme } from "@/lib/epub/appearance";
 
 /** Paginated shows one placeholder page at a time; scrolling shows all. */
 export type ReaderLayout = "paginated" | "scrolling";
@@ -82,10 +82,10 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
 
 /**
  * Reader surface theme while it follows the global app theme (the state
- * before any appearance-menu pick): dark global → "dark" (EPUB preset /
- * PDF invert filter), light global → publisher colors. Deliberately not
- * "light": the neutral "default" keeps publisher styling on a light OS,
- * which is what a light global theme means.
+ * before any appearance-menu pick): dark global → "dark" (EPUB dark preset /
+ * PDF Smart Dark recoloring, issue #67), light global → publisher colors.
+ * Deliberately not "light": the neutral "default" keeps publisher styling on
+ * a light OS, which is what a light global theme means.
  */
 export function autoReaderTheme(resolved: ResolvedTheme): ReaderTheme {
   return resolved === "dark" ? "dark" : EPUB_DEFAULT_THEME;

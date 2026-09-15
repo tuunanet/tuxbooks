@@ -9,12 +9,13 @@
  *
  * The cache is bounded twice over — a byte budget and an entry count — so
  * memory stays flat on any document (§ memory: avoid unbounded caches).
- * Entries are keyed by page and matched against the render scale and the
- * effective render ratio (pdfRenderPolicy), so a zoom change naturally
- * misses and a resize across monitors with a different devicePixelRatio
- * never serves a stale low-ratio bitmap (a miss just re-renders once);
- * explicit invalidation happens when the reader zooms and when the document
- * is swapped.
+ * Entries are keyed by page and matched against the render scale, the
+ * effective render ratio (pdfRenderPolicy), and the color-mode variant
+ * (issue #67: "original" vs "smart" bitmaps are different pixels — a mode
+ * switch must miss), so a zoom change naturally misses and a resize across
+ * monitors with a different devicePixelRatio never serves a stale low-ratio
+ * bitmap (a miss just re-renders once); explicit invalidation happens when
+ * the reader zooms, switches color mode, and when the document is swapped.
  */
 
 /**
@@ -40,6 +41,13 @@ export interface PdfBitmap {
    * serves a buffer rendered for another devicePixelRatio.
    */
   readonly ratio: number;
+  /**
+   * The color-mode variant the buffer was rendered with (issue #67):
+   * "original" for as-is/filter/tint rendering, "smart" for worker-side
+   * Smart Dark recoloring. Bitmaps of different variants are different
+   * pixels, so the cache never serves one for the other.
+   */
+  readonly variant: string;
   /** Offscreen (detached) canvas holding the rendered page pixels. */
   readonly buffer: HTMLCanvasElement;
 }
@@ -60,12 +68,13 @@ export class PdfBitmapCache {
   }
 
   /**
-   * The cached bitmap for a page rendered at exactly `scale` and `ratio`,
-   * or null. A successful lookup refreshes the entry's recency.
+   * The cached bitmap for a page rendered at exactly `scale`, `ratio`, and
+   * color-mode `variant`, or null. A successful lookup refreshes the
+   * entry's recency.
    */
-  get(pageNumber: number, scale: number, ratio: number): PdfBitmap | null {
+  get(pageNumber: number, scale: number, ratio: number, variant: string): PdfBitmap | null {
     const hit = this.#entries.get(pageNumber);
-    if (!hit || hit.scale !== scale || hit.ratio !== ratio) return null;
+    if (!hit || hit.scale !== scale || hit.ratio !== ratio || hit.variant !== variant) return null;
     this.#entries.delete(pageNumber);
     this.#entries.set(pageNumber, hit);
     return hit;

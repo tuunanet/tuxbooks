@@ -3,7 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { epubForegroundFitsTheme } from "@/lib/epub/appearance";
+import { epubForegroundFitsTheme, epubSurfaceTheme } from "@/lib/epub/appearance";
 import {
   clearReaderSettings,
   defaultReaderSettings,
@@ -119,7 +119,10 @@ function useStoredReaderSettings(resolvedTheme: "light" | "dark") {
         if (
           patch.theme !== undefined &&
           patch.theme !== currentEffectiveTheme &&
-          !epubForegroundFitsTheme(next.preferences.foreground, next.preferences.theme)
+          !epubForegroundFitsTheme(
+            next.preferences.foreground,
+            epubSurfaceTheme(next.preferences.theme),
+          )
         ) {
           next.preferences.foreground = null;
         }

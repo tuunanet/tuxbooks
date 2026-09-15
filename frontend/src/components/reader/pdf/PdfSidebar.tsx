@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PdfDocument } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { thumbnailGeometry, type PageSize } from "./pdfLayout";
@@ -25,6 +25,15 @@ interface PdfSidebarProps {
   measurePages: (pageNumbers: number[]) => void;
   /** Navigates the reader to a clicked thumbnail's page. */
   onNavigate: (pageNumber: number) => void;
+  /** Smart Dark palette (issue #67): thumbnails follow the page mode. */
+  smartColors?: SmartPalette;
+  /** Color-mode variant the thumbnails render with. */
+  renderVariant?: string;
+  /**
+   * CSS background for thumbnail cells while their raster is pending
+   * (issue #67 follow-up) — same placeholder contract as the main pages.
+   */
+  pageBackground?: string;
 }
 
 /**
@@ -42,6 +51,9 @@ export function PdfSidebar({
   currentPage,
   measurePages,
   onNavigate,
+  smartColors,
+  renderVariant = "original",
+  pageBackground,
 }: PdfSidebarProps) {
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
   const [renderedThumbs, setRenderedThumbs] = useState<ReadonlySet<number>>(() => new Set());
@@ -182,7 +194,10 @@ export function PdfSidebar({
                   className="block w-full rounded-md p-1 text-left outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50 aria-current:bg-accent"
                 >
                   <span
-                    style={{ height: `${geometry.height}px` }}
+                    style={{
+                      height: `${geometry.height}px`,
+                      ...(pageBackground ? { backgroundColor: pageBackground } : {}),
+                    }}
                     className="flex w-full items-center justify-center overflow-hidden rounded-sm border bg-white"
                   >
                     {canvasSet.has(size.pageNumber) && (
@@ -193,6 +208,8 @@ export function PdfSidebar({
                         height={geometry.height}
                         scale={THUMBNAIL_WIDTH_PX / size.width}
                         testId="pdf-thumbnail"
+                        smartColors={smartColors}
+                        renderVariant={renderVariant}
                         onPageRendered={handleThumbRendered}
                         onPageError={handleThumbError}
                       />

@@ -27,7 +27,7 @@ import { SCALE_CORPUS_SIZE, scaleCorpusDir } from "../setup/environment.js";
 /** Grid window cap: PERF-15's budget, asserted live at scale. */
 const WINDOW_CAP = 120;
 /** Books pre-seeded into the scratch library by global setup. */
-const SEEDED_BOOKS = 4;
+const SEEDED_BOOKS = 5;
 
 function corpusReady(): boolean {
   try {

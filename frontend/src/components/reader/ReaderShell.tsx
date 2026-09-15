@@ -18,7 +18,11 @@ import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
 import { useReader, type ReaderTheme } from "@/state/readerState";
-import { readerChromeVariables, readerScrollbarColor } from "@/lib/epub/appearance";
+import {
+  epubSurfaceTheme,
+  readerChromeVariables,
+  readerScrollbarColor,
+} from "@/lib/epub/appearance";
 import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
 import {
   bookmarkInputFor,
@@ -58,6 +62,9 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
   light: "bg-[#ffffff] text-[#1f2328]",
   paper: "bg-[#f6f0e4] text-[#3a332a]",
   dark: "bg-zinc-950 text-zinc-100",
+  // PDF-only explicit inversion (issue #67): the same chrome the dark
+  // preset paints — the negative pages float over an equally dark surface.
+  invert: "bg-zinc-950 text-zinc-100",
   contrast: "bg-black text-[#ffff00]",
   "blue-contrast": "bg-[#181842] text-white",
   "mint-contrast": "bg-[#c5e7cd] text-black",
@@ -449,7 +456,7 @@ export function ReaderShell() {
         "relative flex h-screen flex-col overflow-hidden",
         THEME_CLASSES[preferences.theme],
       )}
-      style={readerChromeVariables(preferences.theme)}
+      style={readerChromeVariables(epubSurfaceTheme(preferences.theme))}
     >
       {/* Presentation mode (issues #65 PDF / #64 EPUB) hides the normal
           chrome (header, footer, thumbnails sidebar): the document owns the
@@ -599,7 +606,7 @@ export function ReaderShell() {
           className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable] [scrollbar-color:var(--reader-scrollbar-thumb,auto)]"
           style={
             {
-              "--reader-scrollbar-thumb": readerScrollbarColor(preferences.theme),
+              "--reader-scrollbar-thumb": readerScrollbarColor(epubSurfaceTheme(preferences.theme)),
             } as React.CSSProperties
           }
         >

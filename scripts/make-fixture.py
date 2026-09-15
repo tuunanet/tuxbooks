@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate tests/fixtures/books/minimal.epub and minimal.pdf — tiny valid
-book fixtures.
+book fixtures — plus large.pdf, mixed.pdf, and smart.pdf.
 
 Deterministic: fixed timestamps and ordering, safe to commit to Git.
 The book content is original placeholder text (no copyrighted material).
@@ -136,6 +136,70 @@ def tiny_png() -> bytes:
         + chunk(b"IEND", b"")
     )
 
+def image_xobject(image: dict) -> tuple[str, bytes]:
+    """One Flate-compressed raster XObject: (object body, stream bytes)."""
+    pixels = image["pixels"]
+    compressed = zlib.compress(pixels, 9)
+    colorspace = "/DeviceGray" if image.get("gray") else "/DeviceRGB"
+    body = (
+        f"<< /Type /XObject /Subtype /Image /Width {image['width']} "
+        f"/Height {image['height']} /ColorSpace {colorspace} "
+        f"/BitsPerComponent 8 /Filter /FlateDecode /Length {len(compressed)} >>"
+    )
+    return body, compressed
+
+
+def collect_image_objects(
+    pages: list[dict], first_object: int
+) -> tuple[list[tuple[str, bytes]], dict[int, list[tuple[str, int]]], int]:
+    """Allocate raster image XObjects page by page: returns the object
+    bodies, each page's (name, object-number) refs, and the next free
+    object number."""
+    image_objects: list[tuple[str, bytes]] = []
+    page_image_refs: dict[int, list[tuple[str, int]]] = {}
+    next_object = first_object
+    for page_index, page in enumerate(pages, start=1):
+        refs = []
+        for image in page.get("images", []):
+            number = next_object
+            next_object += 1
+            body, stream = image_xobject(image)
+            image_objects.append((body, stream))
+            refs.append((image["name"], number))
+        if refs:
+            page_image_refs[page_index] = refs
+    return image_objects, page_image_refs, next_object
+
+
+def allocate_outline_tree(
+    outline: list[dict] | None, first_object: int
+) -> tuple[int | None, list[dict], int]:
+    """Plan the outline tree before any object body is built: the catalog
+    needs the /Outlines root's object number, and item numbers are allocated
+    depth-first (pre-order). Returns (root number or None, top-level nodes,
+    next free object number)."""
+    if not outline:
+        return None, [], first_object
+    root = first_object
+    next_number = root + 1
+
+    def allocate(entry: dict, parent: int) -> dict:
+        nonlocal next_number
+        node = {
+            "title": entry["title"],
+            "page": entry["page"],
+            "number": next_number,
+            "parent": parent,
+            "children": [],
+        }
+        next_number += 1
+        node["children"] = [allocate(child, node["number"]) for child in entry.get("children", [])]
+        return node
+
+    top = [allocate(entry, root) for entry in outline]
+    return root, top, next_number
+
+
 def build_pdf(
     pages: list[dict],
     title: str,
@@ -147,10 +211,13 @@ def build_pdf(
     Each entry of `pages` is {"mediabox": (x0, y0, w, h), "label": str}; every
     page draws a filled rectangle and two text lines ("Tuxbooks PDF Fixture"
     and the label) so a rendered canvas is visibly non-blank on any page size.
-    `outline` is an optional list of {"title", "page", "children": [...]}
-    entries (1-based page numbers) emitted as a classic /Outlines tree with
-    explicit /XYZ destinations. Byte-identical on every run (no timestamps),
-    so imported book ids stay stable."""
+    A page may instead carry {"stream": bytes} (a raw content stream) and
+    {"images": [{"name", "width", "height", "gray" | "rgb", "pixels": bytes}]}
+    — Flate-compressed XObjects for pages with raster content (the smart-
+    colors fixture). `outline` is an optional list of {"title", "page",
+    "children": [...]} entries (1-based page numbers) emitted as a classic
+    /Outlines tree with explicit /XYZ destinations. Byte-identical on every
+    run (no timestamps), so imported book ids stay stable."""
 
     def pdf_string(value: str) -> str:
         escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
@@ -159,7 +226,7 @@ def build_pdf(
     def info_entry(key: str, value: str) -> str:
         return f"/{key} {pdf_string(value)}"
 
-    def page_stream(label: str, height: float) -> bytes:
+    def default_page_stream(label: str, height: float) -> bytes:
         content = "\n".join(
             [
                 "0.20 0.47 0.79 rg",
@@ -176,29 +243,15 @@ def build_pdf(
     first_stream, last_stream = last_page + 1, last_page + page_count
     font_object = last_stream + 1
 
+    # Raster image XObjects (smart-colors fixture only): allocated right
+    # after the font object so documents without images keep the exact
+    # object numbering they always had.
+    image_objects, page_image_refs, next_object = collect_image_objects(pages, font_object + 1)
+
     # The outline tree is planned before any object body is built: the
     # catalog needs the /Outlines root's object number, and item numbers are
-    # allocated depth-first (pre-order) right after the font object.
-    outline_root: int | None = None
-    outline_top: list[dict] = []
-    if outline:
-        outline_root = font_object + 1
-        next_number = outline_root + 1
-
-        def allocate(entry: dict, parent: int) -> dict:
-            nonlocal next_number
-            node = {
-                "title": entry["title"],
-                "page": entry["page"],
-                "number": next_number,
-                "parent": parent,
-                "children": [],
-            }
-            next_number += 1
-            node["children"] = [allocate(child, node["number"]) for child in entry.get("children", [])]
-            return node
-
-        outline_top = [allocate(entry, outline_root) for entry in outline]
+    # allocated depth-first (pre-order) right after the last static object.
+    outline_root, outline_top, next_object = allocate_outline_tree(outline, next_object)
 
     def subtree_count(node: dict) -> int:
         return 1 + sum(subtree_count(child) for child in node["children"])
@@ -246,23 +299,28 @@ def build_pdf(
     ]
     for index, page in enumerate(pages, start=1):
         _, _, width, height = page["mediabox"]
+        xobject_entries = ""
+        if index in page_image_refs:
+            xobject_entries = " ".join(f"/{name} {number} 0 R" for name, number in page_image_refs[index])
+            xobject_entries = f" /XObject << {xobject_entries} >>"
         objects.append(
             " ".join(
                 [
                     "<< /Type /Page /Parent 2 0 R",
                     f"/MediaBox [{' '.join(str(coord) for coord in page['mediabox'])}]",
-                    f"/Resources << /Font << /F1 {font_object} 0 R >> >>",
+                    f"/Resources << /Font << /F1 {font_object} 0 R >>{xobject_entries} >>",
                     f"/Contents {first_stream + index - 1} 0 R >>",
                 ]
             )
         )
-    for page in pages:
-        _, _, _, height = page["mediabox"]
-        stream = page_stream(page["label"], height)
+    for index, page in enumerate(pages, start=1):
+        stream = page["stream"] if "stream" in page else default_page_stream(page["label"], page["mediabox"][3])
         objects.append((f"<< /Length {len(stream)} >>", stream))
     objects.append(
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
     )
+    for body, stream in image_objects:
+        objects.append((body, stream))
     if outline_root is not None:
         objects.append(
             " ".join(
@@ -349,6 +407,162 @@ def uniform_pages(count: int, width: float = 612, height: float = 792) -> list[d
 # 100% zoom so no horizontal scrolling is needed to see them fully.
 MIXED_PAGE_SIZES = [(612, 792), (792, 612), (420, 1008), (500, 500), (595, 842), (360, 504)]
 
+
+def gradient_channel(value: float) -> int:
+    """Clamp a 0–1 component to a byte, clamped to the representable range."""
+    return round(255 * min(1.0, max(0.0, value)))
+
+
+def gradient_photo(width: int, height: int) -> bytes:
+    """Sunrise gradient: deep blue at the top into warm orange at the bottom.
+    Colorful enough that every sampled pixel is chromatic (an object-aware
+    recolor would visibly shift it), so an E2E pixel comparison proves
+    photographs are preserved, not flipped."""
+    rows = bytearray()
+    for y in range(height):
+        t = y / max(1, height - 1)
+        r = 0.10 + 0.85 * t
+        g = 0.15 + 0.35 * t
+        b = 0.50 - 0.40 * t
+        for x in range(width):
+            fx = x / max(1, width - 1)
+            rows += bytes(
+                (
+                    gradient_channel(r + 0.10 * fx),
+                    gradient_channel(g + 0.05 * fx),
+                    gradient_channel(b),
+                )
+            )
+    return bytes(rows)
+
+
+def scanned_page(width: int, height: int) -> bytes:
+    """A scanned-page-like grayscale raster: paper-white background with
+    black text-line bars — high near-white fraction, low saturation, so the
+    classifier reads it as paper-backed content."""
+    rows = bytearray()
+    for y in range(height):
+        in_band = 24 <= (y % 48) < 40  # a text line every 48 rows
+        for x in range(width):
+            if in_band and (x * 7 + y) % 13 < 8:  # ragged glyph-ish bars
+                rows.append(0)
+            else:
+                rows.append(255)
+    return bytes(rows)
+
+
+def text_page_stream(width: float, height: float) -> bytes:
+    """Black text on white plus a blue link-colored line and a gray rule —
+    the classic black-on-white page, entirely vector content."""
+    content = "\n".join(
+        [
+            "0 0 0 rg",
+            f"BT /F1 32 Tf 72 {height - 120:.0f} Td (Smart Colors Fixture) Tj ET",
+            f"BT /F1 18 Tf 72 {height - 170:.0f} Td (Black text on a white page.) Tj ET",
+            f"BT /F1 18 Tf 72 {height - 210:.0f} Td (Vector text recolors in smart dark.) Tj ET",
+            "0.04 0.38 0.77 rg",
+            f"BT /F1 18 Tf 72 {height - 250:.0f} Td (A link-colored line stays recognizable.) Tj ET",
+            "0.5 0.5 0.5 RG 1 w",
+            f"72 {height - 290:.0f} m {width - 72:.0f} {height - 290:.0f} l S",
+        ]
+    )
+    return content.encode("ascii")
+
+
+def line_art_cover(width: int = 240, height: int = 320) -> bytes:
+    """White-background cover with a large dark mass and chromatic accents —
+    the O'Reilly-cover structure (issue #67 follow-up regression): the mean
+    saturation is diluted into meaninglessness by the paper background, but
+    ~3% of the pixels are clearly chromatic, which must preserve the image
+    instead of luminance-flipping it into a ghost."""
+    rows = bytearray()
+    for y in range(height):
+        for x in range(width):
+            dx = (x - 120) / 60
+            dy = (y - 190) / 90
+            in_owl = dx * dx + dy * dy <= 1
+            in_red_bar = 20 <= x < 90 and 20 <= y < 34
+            in_orange = (x - 150) ** 2 + (y - 150) ** 2 <= 18 * 18
+            if in_red_bar:
+                rows += bytes((200, 30, 30))
+            elif in_orange:
+                rows += bytes((230, 120, 30))
+            elif in_owl:
+                rows += bytes((30, 25, 20))
+            else:
+                rows += bytes((255, 255, 255))
+    return bytes(rows)
+
+
+def write_smart_pdf(path: Path) -> None:
+    width, height = 612, 792
+
+    def photo_image(name: str, w: int = 160, h: int = 120) -> dict:
+        return {
+            "name": name,
+            "width": w,
+            "height": h,
+            "pixels": gradient_photo(w, h),
+        }
+
+    pages = [
+        # 1 — text-heavy: pure vector black-on-white + a colored line.
+        {"mediabox": (0, 0, width, height), "stream": text_page_stream(width, height)},
+        # 2 — photo: a colorful image over most (not all) of the page plus
+        # a text caption; the image must keep its colors.
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [photo_image("Im0")],
+            "stream": (
+                "q 500 0 0 650 56 80 cm /Im0 Do Q\n"
+                "0 0 0 rg\n"
+                f"BT /F1 16 Tf 72 {height - 760:.0f} Td (Photo caption) Tj ET"
+            ).encode("ascii"),
+        },
+        # 3 — scanned: one full-bleed DeviceGray paper-with-ink raster.
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [
+                {
+                    "name": "Im0",
+                    "width": 240,
+                    "height": 320,
+                    "gray": True,
+                    "pixels": scanned_page(240, 320),
+                }
+            ],
+            "stream": b"q 612 0 0 792 0 0 cm /Im0 Do Q",
+        },
+        # 4 — mixed: vector text plus a small colorful diagram-like image
+        # (small coverage — always preserved) on a white page.
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [photo_image("Im0", 80, 60)],
+            "stream": (
+                "0 0 0 rg\n"
+                "BT /F1 24 Tf 72 700 Td (Mixed page) Tj ET\n"
+                "q 200 0 0 150 72 420 cm /Im0 Do Q\n"
+                "BT /F1 16 Tf 72 380 Td (Text next to a small image.) Tj ET"
+            ).encode("ascii"),
+        },
+        # 5 — cover: full-bleed colorful gradient, the illustrated-cover case.
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [photo_image("Im0", 200, 260)],
+            "stream": b"q 612 0 0 792 0 0 cm /Im0 Do Q",
+        },
+        # 6 — line-art cover: white background, a large dark mass, and ~3%
+        # chromatic accents — the white-cover structure whose mean saturation
+        # is diluted by the background; the chromatic fraction must preserve
+        # it (issue #67 follow-up regression).
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [{"name": "Im0", "width": 240, "height": 320, "pixels": line_art_cover()}],
+            "stream": b"q 612 0 0 792 0 0 cm /Im0 Do Q",
+        },
+    ]
+    write_pdf(path, pages, "Smart Colors", "A PDF fixture for smart dark color modes.")
+
 # Nested outline for the large fixture: five parts on pages 1/21/41/61/81,
 # each with two sections offset by ten pages. Exercises hierarchical outline
 # navigation and deep destinations in reader and E2E tests.
@@ -390,6 +604,8 @@ def main() -> None:
         "Odd Sizes",
         "A PDF with varying page dimensions.",
     )
+    write_smart_pdf(FIXTURES / "smart.pdf")
+
 
 if __name__ == "__main__":
     main()

@@ -79,6 +79,7 @@ beforeAll(() => {
   HTMLCanvasElement.prototype.getContext = (() =>
     ({
       drawImage() {},
+      clearRect() {},
     }) as unknown as CanvasRenderingContext2D) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 });
 
