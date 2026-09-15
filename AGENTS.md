@@ -41,6 +41,15 @@ just test-frontend    # vitest run (CI mode)
 pnpm --filter frontend exec vitest run <file-or-pattern>
 ```
 
+### Releases
+
+Cutting a release = `just bump X.Y.Z` (applies the version to all five
+places at once; refuses drifted files and existing tags), review +
+commit the diff (`chore: bump version to X.Y.Z`), let CI go green, then
+`git tag -a vX.Y.Z && git push origin vX.Y.Z` — the release workflow
+verifies and publishes. Never move or reuse a tag. Full contract:
+`docs/RELEASE.md`.
+
 ### External knowledge & source research
 
 When repository context alone is insufficient, prefer the most specific source:
