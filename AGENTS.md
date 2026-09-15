@@ -23,7 +23,7 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
   format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
 - Do not silently change these architectural conventions.
 
-## Commands (in this order)
+## Commands
 
 The live command set is in the justfile — check `just --list` and
 `docs/BUILD.md` for what is wired up in this migration phase. Run `just check`
@@ -38,17 +38,9 @@ just test-e2e         # real-app desktop E2E, headless on Linux (builds first)
 just test             # unit tests, rust + frontend concurrently
 just test-rust        # cargo test (service crate)
 just test-frontend    # vitest run (CI mode)
+just bump X.Y.Z       # apply a release version to all versioned files
 pnpm --filter frontend exec vitest run <file-or-pattern>
 ```
-
-### Releases
-
-Cutting a release = `just bump X.Y.Z` (applies the version to all five
-places at once; refuses drifted files and existing tags), review +
-commit the diff (`chore: bump version to X.Y.Z`), let CI go green, then
-`git tag -a vX.Y.Z && git push origin vX.Y.Z` — the release workflow
-verifies and publishes. Never move or reuse a tag. Full contract:
-`docs/RELEASE.md`.
 
 ### External knowledge & source research
 
