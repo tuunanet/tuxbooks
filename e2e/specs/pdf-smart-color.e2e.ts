@@ -14,7 +14,9 @@ import {
  * chroma-preserving accents — while ordinary raster images keep their
  * original colors. The smart-colors fixture carries one page per case:
  * 1 text-heavy vector page, 2 photo page, 3 scanned (DeviceGray) page,
- * 4 mixed text+small image, 5 full-bleed cover gradient.
+ * 4 mixed text+small image, 5 full-bleed cover gradient, 6 white-background
+ * line-art cover (chromatic accents must preserve it — the AI Engineering
+ * regression).
  */
 
 /**
@@ -87,6 +89,11 @@ async function patchColor(
  * page paints at least some opaque ink; a blank canvas is fully
  * transparent.
  */
+/** A composited patch counts as dark when its luminance is well below mid. */
+function isDark(color: [number, number, number]): boolean {
+  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 100;
+}
+
 async function waitForPixels(page: Page, pageNumber: number): Promise<void> {
   await expect
     .poll(
@@ -144,7 +151,7 @@ test.describe("smart PDF coloring (issue #67)", () => {
     await openInReader(page, "Smart Colors (PDF)");
     const canvas = page.locator("[data-testid=pdf-canvas][data-pdf-page='1']");
     await canvas.waitFor({ state: "attached", timeout: 30000 });
-    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 5", {
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 6", {
       timeout: 30000,
     });
 
@@ -171,6 +178,16 @@ test.describe("smart PDF coloring (issue #67)", () => {
     await goToPage(page, 5);
     const originalCover = await patchColor(page, 5, 0.5, 0.2);
     expect(originalCover[2]).toBeGreaterThan(originalCover[0] + 20); // blue top
+
+    await goToPage(page, 6);
+    const originalLineArt = {
+      average: await averageLuminance(page, 6),
+      owl: await patchColor(page, 6, 0.5, 0.594), // inside the dark mass
+      accent: await patchColor(page, 6, 0.2, 0.08), // the red logo bar
+    };
+    expect(originalLineArt.average).toBeGreaterThan(180); // paper-white cover
+    expect(isDark(originalLineArt.owl)).toBe(true);
+    expect(originalLineArt.accent[0]).toBeGreaterThan(150); // red
 
     await pickTheme(page, "Smart dark");
     // Smart dark applies no CSS filter — the recoloring is raster-level.
@@ -227,6 +244,16 @@ test.describe("smart PDF coloring (issue #67)", () => {
     // the page reads dark overall.
     await goToPage(page, 4);
     expect(await averageLuminance(page, 4)).toBeLessThan(120);
+
+    // Page 6 (white-background line-art cover): the chromatic-accent rule
+    // preserves it — still a bright page, its dark mass stays dark (not
+    // luminance-flipped into a ghost) and the red accent stays red.
+    await goToPage(page, 6);
+    expect(await averageLuminance(page, 6)).toBeGreaterThan(180);
+    const smartLineArtOwl = await patchColor(page, 6, 0.5, 0.594);
+    expect(isDark(smartLineArtOwl)).toBe(true);
+    const smartLineArtAccent = await patchColor(page, 6, 0.2, 0.08);
+    expect(smartLineArtAccent[0]).toBeGreaterThan(150);
 
     await returnToLibrary(page);
   });

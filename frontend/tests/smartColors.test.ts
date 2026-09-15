@@ -112,6 +112,7 @@ describe("imageStatsFromSampler", () => {
       return ink ? { rgb: [0.1, 0.1, 0.1], alpha: 1 } : { rgb: [1, 1, 1], alpha: 1 };
     }, samples);
     expect(stats.nearWhiteFrac).toBeCloseTo(0.8, 5);
+    expect(stats.coloredFrac).toBe(0);
     expect(stats.meanSaturation).toBeLessThan(0.01);
     expect(stats.luminanceVariance).toBeGreaterThan(0.01);
   });
@@ -120,6 +121,21 @@ describe("imageStatsFromSampler", () => {
     const stats = imageStatsFromSampler(() => ({ rgb: [0.8, 0.2, 0.3], alpha: 1 }), 100);
     expect(stats.nearWhiteFrac).toBe(0);
     expect(stats.meanSaturation).toBeGreaterThan(0.4);
+    expect(stats.coloredFrac).toBe(1);
+  });
+
+  it("counts chromatic pixels even when the mean is diluted by white", () => {
+    // The AI Engineering cover's failure mode (issue #67 follow-up): a
+    // white-dominant page with a few vivid accents — the mean spread is
+    // tiny, but the colored fraction is not.
+    let index = 0;
+    const stats = imageStatsFromSampler(() => {
+      const accent = index % 25 === 0; // 4% chromatic pixels
+      index += 1;
+      return accent ? { rgb: [0.85, 0.1, 0.1], alpha: 1 } : { rgb: [1, 1, 1], alpha: 1 };
+    }, 1000);
+    expect(stats.meanSaturation).toBeLessThan(0.05);
+    expect(stats.coloredFrac).toBeCloseTo(0.04, 5);
   });
 
   it("ignores transparent samples", () => {
@@ -134,12 +150,14 @@ describe("classifyRasterImage", () => {
   const paperStats: ImageStats = {
     nearWhiteFrac: 0.85,
     meanSaturation: 0.02,
+    coloredFrac: 0,
     meanLuminance: 0.9,
     luminanceVariance: 0.04,
   };
   const photoStats: ImageStats = {
     nearWhiteFrac: 0.05,
     meanSaturation: 0.45,
+    coloredFrac: 0.6,
     meanLuminance: 0.5,
     luminanceVariance: 0.08,
   };
@@ -157,18 +175,34 @@ describe("classifyRasterImage", () => {
     expect(classifyRasterImage({ ...paperStats, meanSaturation: 0.4 }, 0.95)).toBe("preserve");
   });
 
+  it("preserves a white-background cover with chromatic accents (AI Engineering)", () => {
+    // Regression (issue #67 follow-up): the O'Reilly cover measures
+    // nearWhiteFrac 0.69, meanSaturation 0.027, coloredFrac 0.027 — the
+    // mean signal is useless on white-dominant pages; the chromatic
+    // fraction (red logo, orange owl accents, green moss) preserves it.
+    const cover: ImageStats = {
+      nearWhiteFrac: 0.686,
+      meanSaturation: 0.027,
+      coloredFrac: 0.027,
+      meanLuminance: 0.75,
+      luminanceVariance: 0.06,
+    };
+    expect(classifyRasterImage(cover, 1)).toBe("preserve");
+  });
+
   it("preserves smaller illustrations regardless of statistics", () => {
     // A diagram occupying less than the page-coverage threshold keeps its
     // colors even when its own background is white paper.
     expect(classifyRasterImage(paperStats, PAGE_IMAGE_COVERAGE_THRESHOLD - 0.01)).toBe("preserve");
   });
 
-  it("flags a barely-saturated full-bleed rasterized document page", () => {
+  it("flags an achromatic full-bleed rasterized document page", () => {
     // Near the paper threshold: a rasterized text page (white background,
-    // black text) is the canonical recolor case.
+    // black text, no chromatic content) is the canonical recolor case.
     const stats: ImageStats = {
       nearWhiteFrac: NEAR_WHITE_THRESHOLD,
       meanSaturation: 0.05,
+      coloredFrac: 0.004,
       meanLuminance: 0.85,
       luminanceVariance: 0.05,
     };

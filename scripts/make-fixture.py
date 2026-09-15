@@ -439,6 +439,31 @@ def text_page_stream(width: float, height: float) -> bytes:
     return content.encode("ascii")
 
 
+def line_art_cover(width: int = 240, height: int = 320) -> bytes:
+    """White-background cover with a large dark mass and chromatic accents —
+    the O'Reilly-cover structure (issue #67 follow-up regression): the mean
+    saturation is diluted into meaninglessness by the paper background, but
+    ~3% of the pixels are clearly chromatic, which must preserve the image
+    instead of luminance-flipping it into a ghost."""
+    rows = bytearray()
+    for y in range(height):
+        for x in range(width):
+            dx = (x - 120) / 60
+            dy = (y - 190) / 90
+            in_owl = dx * dx + dy * dy <= 1
+            in_red_bar = 20 <= x < 90 and 20 <= y < 34
+            in_orange = (x - 150) ** 2 + (y - 150) ** 2 <= 18 * 18
+            if in_red_bar:
+                rows += bytes((200, 30, 30))
+            elif in_orange:
+                rows += bytes((230, 120, 30))
+            elif in_owl:
+                rows += bytes((30, 25, 20))
+            else:
+                rows += bytes((255, 255, 255))
+    return bytes(rows)
+
+
 def write_smart_pdf(path: Path) -> None:
     width, height = 612, 792
 
@@ -494,6 +519,15 @@ def write_smart_pdf(path: Path) -> None:
         {
             "mediabox": (0, 0, width, height),
             "images": [photo_image("Im0", 200, 260)],
+            "stream": b"q 612 0 0 792 0 0 cm /Im0 Do Q",
+        },
+        # 6 — line-art cover: white background, a large dark mass, and ~3%
+        # chromatic accents — the white-cover structure whose mean saturation
+        # is diluted by the background; the chromatic fraction must preserve
+        # it (issue #67 follow-up regression).
+        {
+            "mediabox": (0, 0, width, height),
+            "images": [{"name": "Im0", "width": 240, "height": 320, "pixels": line_art_cover()}],
             "stream": b"q 612 0 0 792 0 0 cm /Im0 Do Q",
         },
     ]

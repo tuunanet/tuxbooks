@@ -471,14 +471,20 @@ PDF never reaches EPUB engines or shell chrome as an unknown name.
 A page that _is_ one large image cannot be recolored object-by-object, and
 leaving it bright would break dark reading. When a raster image covers
 most of the page (≥ 60% coverage), the worker samples its decoded pixels
-and classifies it (`classifyRasterImage`): paper-backed, low-saturation
+and classifies it (`classifyRasterImage`): paper-backed, achromatic
 rasters (scans, rasterized text pages) are transformed with the same
-palette mapping as vector content; photos and covers keep their colors.
-Classification decisions are cached per document/page/image-ordinal, and
-the transformed image in a small LRU, so re-renders never re-pay the
-analysis. The original image's decoded pixmap is only ever read — the
-transform runs on a private DeviceRGB copy (`convertToColorSpace`), since
-the decode result is owned by MuPDF's per-image cache.
+palette mapping as vector content; anything with meaningful chromatic
+content keeps its colors. The chromatic-fraction signal exists because
+the mean saturation cannot tell covers from scans: on a white-dominant
+page (the AI Engineering cover measures 69% near-white, mean spread
+0.027, 2.7% clearly chromatic pixels) the background dilutes the mean
+into indistinguishability, while the chromatic accents (logo, colored
+artwork) always mark designed artwork. Classification decisions are
+cached per document/page/image-ordinal, and the transformed image in a
+small LRU, so re-renders never re-pay the analysis. The original image's
+decoded pixmap is only ever read — the transform runs on a private
+DeviceRGB copy (`convertToColorSpace`), since the decode result is owned
+by MuPDF's per-image cache.
 
 Color mode is part of the render and cache identity: the worker render
 request carries the palette only in Smart Dark, and the per-document

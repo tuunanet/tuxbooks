@@ -194,6 +194,14 @@ export interface ImageStats {
   nearWhiteFrac: number;
   /** Mean channel spread (saturation proxy). */
   meanSaturation: number;
+  /**
+   * Fraction of clearly chromatic pixels (channel spread above the
+   * COLORED_FRACTION pixel gate). Scanned text pages are overwhelmingly
+   * achromatic; designed artwork (covers, diagrams) always carries chromatic
+   * accents. Unlike the mean, this is not diluted by a dominant white or
+   * black background.
+   */
+  coloredFrac: number;
   /** Mean luminance. */
   meanLuminance: number;
   /** Luminance variance (text-like contrast signal). */
@@ -211,6 +219,7 @@ export type PixelSampler = () => { rgb: Rgb; alpha: number } | null;
 export function imageStatsFromSampler(sample: PixelSampler, samples: number): ImageStats {
   let nearWhite = 0;
   let saturation = 0;
+  let colored = 0;
   let luminanceSum = 0;
   let luminanceSqSum = 0;
   let counted = 0;
@@ -225,17 +234,27 @@ export function imageStatsFromSampler(sample: PixelSampler, samples: number): Im
     if (spread < 0.06 && lum >= 0.92) {
       nearWhite += 1;
     }
+    if (spread > COLORED_PIXEL_CHROMA) {
+      colored += 1;
+    }
     saturation += spread;
     luminanceSum += lum;
     luminanceSqSum += lum * lum;
   }
   if (counted === 0) {
-    return { nearWhiteFrac: 0, meanSaturation: 0, meanLuminance: 1, luminanceVariance: 0 };
+    return {
+      nearWhiteFrac: 0,
+      meanSaturation: 0,
+      coloredFrac: 0,
+      meanLuminance: 1,
+      luminanceVariance: 0,
+    };
   }
   const meanLum = luminanceSum / counted;
   return {
     nearWhiteFrac: nearWhite / counted,
     meanSaturation: saturation / counted,
+    coloredFrac: colored / counted,
     meanLuminance: meanLum,
     luminanceVariance: Math.max(0, luminanceSqSum / counted - meanLum * meanLum),
   };
@@ -267,9 +286,29 @@ export const NEAR_WHITE_THRESHOLD = 0.5;
 export const MEAN_SATURATION_THRESHOLD = 0.35;
 
 /**
+ * Channel spread at or above which a pixel counts as clearly chromatic
+ * (the COLORED_FRACTION signal's per-pixel gate).
+ */
+export const COLORED_PIXEL_CHROMA = 0.2;
+
+/**
+ * Fraction of clearly chromatic pixels above which a paper-backed image is
+ * treated as designed artwork rather than a scan (issue #67 follow-up):
+ * covers and diagrams carry chromatic accents — a red logo, colored
+ * eyes/fur, a mossy branch — while scanned text is overwhelmingly
+ * achromatic. The mean saturation cannot make this call: on a
+ * white-dominant page (the AI Engineering cover measures 2.7% chromatic
+ * pixels at a mean spread of just 0.027) the mean is diluted into
+ * indistinguishability. JPEG chroma noise on B/W scans stays far below
+ * this gate.
+ */
+export const COLORED_FRACTION_THRESHOLD = 0.02;
+
+/**
  * Decide the treatment of a page-covering image from its statistics. A
- * paper-backed, low-saturation image is treated like the document's own
- * content (recolor); everything else keeps its colors.
+ * paper-backed, achromatic image is treated like the document's own content
+ * (recolor — the scan/rasterized-page case); anything with meaningful
+ * chromatic content keeps its colors (covers, photos, diagrams).
  */
 export function classifyRasterImage(stats: ImageStats, coverage: number): RasterImageTreatment {
   if (coverage < PAGE_IMAGE_COVERAGE_THRESHOLD) {
@@ -277,7 +316,8 @@ export function classifyRasterImage(stats: ImageStats, coverage: number): Raster
   }
   if (
     stats.nearWhiteFrac >= NEAR_WHITE_THRESHOLD &&
-    stats.meanSaturation <= MEAN_SATURATION_THRESHOLD
+    stats.meanSaturation <= MEAN_SATURATION_THRESHOLD &&
+    stats.coloredFrac < COLORED_FRACTION_THRESHOLD
   ) {
     return "recolor";
   }
