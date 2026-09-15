@@ -117,6 +117,10 @@ export function PdfPageCanvas({
   // published as a deterministic `data-pdf-render-ms` attribute — a
   // diagnostic only, never asserted by timing in CI.
   const renderMsRef = useRef<number[]>([]);
+  // Color-mode identity of the last effect run (issue #67 follow-up): a
+  // change means the mounted canvas still holds the previous mode's opaque
+  // bitmap, which must be cleared before the new-mode render starts.
+  const previousVariantRef = useRef(renderVariant);
 
   const publishRenderMs = (canvas: HTMLCanvasElement, ms: number) => {
     const samples = [...renderMsRef.current, ms].slice(-RENDER_MS_SAMPLE_COUNT);
@@ -138,6 +142,20 @@ export function PdfPageCanvas({
     if (!canvas) return;
 
     let cancelled = false;
+
+    // Mode-switch reset (issue #67 follow-up): a canvas that survives a
+    // color-mode change still holds the previous mode's opaque bitmap, and
+    // while the new-mode render is in flight it would present the wrong
+    // colors entirely (a Smart Dark page sitting dark inside a Default
+    // document). Clear it to transparent so the wrapper's themed
+    // placeholder shows, exactly like a never-rendered page. Geometry-only
+    // re-renders (zoom, resize) deliberately keep the old pixels visible
+    // until the atomic blit — smoother there, and the pixels are merely
+    // stale-scaled, never wrong-mode.
+    if (previousVariantRef.current !== renderVariant) {
+      previousVariantRef.current = renderVariant;
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Fast path: a bitmap rendered at this scale and ratio is already
     // retained from an earlier visit — blit it and report completion. No

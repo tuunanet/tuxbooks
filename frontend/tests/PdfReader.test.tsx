@@ -380,6 +380,7 @@ describe("PdfReader loading", () => {
       <ShortcutProvider>
         <ReaderProvider>
           <PreferenceProbe label="probe-dark" patch={{ theme: "dark" }} />
+          <PreferenceProbe label="probe-default" patch={{ theme: "default" }} />
           <PdfReader book={pdfBook} onDocumentLoad={() => {}} onOutlineLoad={() => {}} />
         </ReaderProvider>
       </ShortcutProvider>,
@@ -397,6 +398,14 @@ describe("PdfReader loading", () => {
     await waitFor(() => {
       const darkWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
       expect((darkWrapper as HTMLElement | null)?.style.backgroundColor).toBe("rgb(16, 16, 19)");
+    });
+
+    // Back to Default: the dark placeholder must go with it — a pending
+    // slot returns to the paper-white background.
+    await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
+    await waitFor(() => {
+      const plainWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
+      expect((plainWrapper as HTMLElement | null)?.style.backgroundColor).toBe("");
     });
   });
 

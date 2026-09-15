@@ -255,6 +255,13 @@ test.describe("smart PDF coloring (issue #67)", () => {
     const smartLineArtAccent = await patchColor(page, 6, 0.2, 0.08);
     expect(smartLineArtAccent[0]).toBeGreaterThan(150);
 
+    // Round trip (issue #67 follow-up): switching back to Default must
+    // re-render pending slots over the paper placeholder — no stale Smart
+    // Dark bitmap may linger on any canvas.
+    await pickTheme(page, "Default");
+    await goToPage(page, 3);
+    expect(await averageLuminance(page, 3)).toBeGreaterThan(180);
+
     await returnToLibrary(page);
   });
 
