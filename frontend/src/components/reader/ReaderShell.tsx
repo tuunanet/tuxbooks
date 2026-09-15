@@ -4,6 +4,7 @@ import {
   Bookmark,
   BookmarkCheck,
   PanelLeft,
+  Presentation,
   Search,
   TableOfContents,
 } from "lucide-react";
@@ -128,12 +129,13 @@ export function ReaderShell() {
   // the shell only provides the layout host (issue #68 — one compact
   // header row, no separate control bar above the document).
   const [pdfControlsHost, setPdfControlsHost] = useState<HTMLElement | null>(null);
-  // PDF presentation mode (issue #65): the shell owns the toggle (Ctrl+L),
-  // the chrome hiding (header, footer, thumbnails sidebar), and the
-  // fullscreen request; the PDF reader owns the fit-height rescale and the
+  // Presentation mode (issues #65 PDF / #64 EPUB): the shell owns the toggle
+  // (Ctrl+L), the chrome hiding (header, footer, thumbnails sidebar), and
+  // the fullscreen request; the open reader owns the format-specific
+  // rescale/layout (PDF fit-height, EPUB none — the engine reflows) and the
   // floating in-mode bar. Presentation always ends with the book — a book
   // switch must never carry the mode (and its hidden chrome) into the next.
-  const [pdfPresentation, setPdfPresentation] = useState(false);
+  const [presentation, setPresentation] = useState(false);
   // Whether the fullscreen request actually succeeded: Esc leaves real
   // fullscreen natively, and the fullscreenchange listener then ends the
   // mode — but a denied/unavailable request (jsdom, kiosk shells) must not
@@ -226,7 +228,7 @@ export function ReaderShell() {
     // Presentation mode turns the scroll-steppers into full page flips
     // (§ issue #65): one page fills the viewport, so partial-viewport
     // scrolling would land mid-page.
-    if (isPdf && pdfPresentation) {
+    if (isPdf && presentation) {
       flipPdfPage(1);
       return;
     }
@@ -234,30 +236,30 @@ export function ReaderShell() {
     if (container) container.scrollTop += container.clientHeight * 0.9;
   });
   useShortcut(isEpub ? null : "pageup", () => {
-    if (isPdf && pdfPresentation) {
+    if (isPdf && presentation) {
       flipPdfPage(-1);
       return;
     }
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
-  useShortcut(isPdf && pdfPresentation ? "shift+space" : null, () => flipPdfPage(-1));
+  useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
   useShortcut("mod+f", () => openNav("search"));
 
-  // PDF presentation mode (issue #65): Ctrl+L toggles, Esc exits, and a
-  // native fullscreen exit (Esc while really fullscreen) ends the mode
-  // through fullscreenchange. The fullscreen request is best-effort — a
-  // denied request still gives the distraction-free layout, just inside
-  // the normal window.
+  // Presentation mode (issues #65 PDF / #64 EPUB): Ctrl+L toggles, Esc
+  // exits, and a native fullscreen exit (Esc while really fullscreen) ends
+  // the mode through fullscreenchange. The fullscreen request is
+  // best-effort — a denied request still gives the distraction-free layout,
+  // just inside the normal window.
   const exitPresentation = useCallback(() => {
-    setPdfPresentation(false);
+    setPresentation(false);
     if (fullscreenEntered && document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {});
     }
     setFullscreenEntered(false);
   }, [fullscreenEntered]);
   const togglePresentation = useCallback(() => {
-    if (pdfPresentation) {
+    if (presentation) {
       exitPresentation();
       return;
     }
@@ -270,21 +272,21 @@ export function ReaderShell() {
         })
         .catch(() => {});
     }
-    setPdfPresentation(true);
-  }, [exitPresentation, pdfPresentation]);
-  useShortcut(isPdf ? "mod+l" : null, togglePresentation);
-  useShortcut(isPdf && pdfPresentation ? "escape" : null, exitPresentation);
+    setPresentation(true);
+  }, [exitPresentation, presentation]);
+  useShortcut(book !== null ? "mod+l" : null, togglePresentation);
+  useShortcut(presentation ? "escape" : null, exitPresentation);
   useEffect(() => {
-    if (!pdfPresentation) return;
+    if (!presentation) return;
     const onFullscreenChange = () => {
       if (fullscreenEntered && !document.fullscreenElement) {
         setFullscreenEntered(false);
-        setPdfPresentation(false);
+        setPresentation(false);
       }
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, [pdfPresentation, fullscreenEntered]);
+  }, [presentation, fullscreenEntered]);
 
   // In-book search: the shell owns the state (one book open at a time), the
   // open reader's adapter streams matches in through the shared model
@@ -297,7 +299,7 @@ export function ReaderShell() {
   const [presentationBookId, setPresentationBookId] = useState(bookId);
   if (presentationBookId !== bookId) {
     setPresentationBookId(bookId);
-    setPdfPresentation(false);
+    setPresentation(false);
     setFullscreenEntered(false);
   }
   // Reading session lifecycle: stamp `last_opened_at` once per open so the
@@ -441,17 +443,19 @@ export function ReaderShell() {
       ref={readerViewRef}
       data-testid="reader-view"
       data-theme={preferences.theme}
-      data-pdf-presentation={isPdf && pdfPresentation ? "true" : undefined}
+      data-pdf-presentation={isPdf && presentation ? "true" : undefined}
+      data-epub-presentation={isEpub && presentation ? "true" : undefined}
       className={cn(
         "relative flex h-screen flex-col overflow-hidden",
         THEME_CLASSES[preferences.theme],
       )}
       style={readerChromeVariables(preferences.theme)}
     >
-      {/* Presentation mode hides the normal chrome (header, footer,
-          thumbnails sidebar — § issue #65): the document owns the screen,
-          navigation stays on the keyboard and the reader's floating bar. */}
-      {!pdfPresentation && (
+      {/* Presentation mode (issues #65 PDF / #64 EPUB) hides the normal
+          chrome (header, footer, thumbnails sidebar): the document owns the
+          screen, navigation stays on the keyboard and the reader's floating
+          bar. */}
+      {!presentation && (
         <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -517,6 +521,25 @@ export function ReaderShell() {
 
           <ReaderAppearance format={book?.format} />
 
+          {isEpub && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  data-testid="epub-presentation-toggle"
+                  title="Presentation mode (Ctrl+L)"
+                  aria-label="Presentation mode (Ctrl+L)"
+                  aria-pressed={presentation}
+                  onClick={togglePresentation}
+                >
+                  <Presentation />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Presentation mode (Ctrl+L)</TooltipContent>
+            </Tooltip>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -551,7 +574,7 @@ export function ReaderShell() {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {isPdf && pdfSidebarOpen && !pdfPresentation && (
+        {isPdf && pdfSidebarOpen && !presentation && (
           <aside
             ref={setPdfSidebarHost}
             data-testid="pdf-sidebar"
@@ -592,6 +615,8 @@ export function ReaderShell() {
               highlights={highlights}
               onCreateHighlight={handleCreateHighlight}
               onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
+              presentationMode={presentation}
+              onExitPresentation={exitPresentation}
             />
           ) : (
             <PdfReader
@@ -607,7 +632,7 @@ export function ReaderShell() {
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
               highlights={highlights}
-              presentationMode={pdfPresentation}
+              presentationMode={presentation}
               onExitPresentation={exitPresentation}
               onTogglePresentation={togglePresentation}
               onCreateHighlight={handleCreateHighlight}
@@ -624,7 +649,7 @@ export function ReaderShell() {
           fades back out a beat after it leaves. `data-progress-visible`
           makes the state assertable in jsdom, where Tailwind classes carry
           no computed styles. */}
-      {!pdfPresentation && (
+      {!presentation && (
         <>
           <div
             data-testid="reader-footer-hover-zone"

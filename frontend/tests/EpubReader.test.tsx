@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Mock } from "vitest";
 
@@ -550,6 +550,109 @@ function fakeHandleOrThrow() {
   lastFakeHandle();
   return lastFakeHandle();
 }
+
+describe("EpubReader presentation mode (issue #64)", () => {
+  beforeEach(() => {
+    fakeEpubHandles.length = 0;
+  });
+
+  interface PresentationProps {
+    presentationMode?: boolean;
+    onExitPresentation?: () => void;
+  }
+
+  function renderPresentingReader(props: PresentationProps = {}) {
+    return render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader
+            book={makeBookShim()}
+            presentationMode={props.presentationMode}
+            onExitPresentation={props.onExitPresentation}
+          />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+  }
+
+  it("shows the floating bar only in presentation mode", async () => {
+    mockHappyPath(null);
+
+    const view = renderPresentingReader({ presentationMode: false });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    expect(screen.queryByTestId("epub-presentation-bar")).toBeNull();
+    expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-presentation", "false");
+
+    view.rerender(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader book={makeBookShim()} presentationMode onExitPresentation={() => {}} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-presentation", "true");
+    expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument();
+  });
+
+  it("keeps the engine mounted and loaded across a presentation flip", async () => {
+    mockHappyPath(null);
+
+    const view = renderPresentingReader({ presentationMode: false });
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    expect(handle.init).toHaveBeenCalledTimes(1);
+    expect(handle.hostElement.isConnected).toBe(true);
+
+    view.rerender(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <EpubReader book={makeBookShim()} presentationMode onExitPresentation={() => {}} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument());
+    // Entering fullscreen hides shell chrome only — the document must not
+    // reload (init stays a one-time restore).
+    expect(handle.init).toHaveBeenCalledTimes(1);
+    expect(handle.close).not.toHaveBeenCalled();
+    expect(handle.hostElement.isConnected).toBe(true);
+  });
+
+  it("navigates and exits through the presentation bar", async () => {
+    mockHappyPath(null);
+    const onExitPresentation = vi.fn();
+
+    renderPresentingReader({ presentationMode: true, onExitPresentation });
+    await waitFor(fakeHandleOrThrow);
+    const handle = lastFakeHandle();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // The indicator starts unknown and follows the engine's relocates.
+    expect(screen.getByTestId("epub-section-indicator")).toHaveTextContent("…");
+    handle.emitRelocate({
+      locator: FAKE_LOCATOR.section1,
+      section: { current: 0, total: 2 },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-section-indicator")).toHaveTextContent("Section 1 of 2"),
+    );
+
+    fireEvent.click(screen.getByTestId("epub-pres-next"));
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("epub-pres-prev"));
+    expect(handle.prev).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("epub-pres-exit"));
+    expect(onExitPresentation).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("EpubReader highlights and selection", () => {
   beforeEach(() => {

@@ -624,6 +624,87 @@ describe("Reader presentation mode (issue #65)", () => {
   });
 });
 
+describe("Reader EPUB presentation mode (issue #64)", () => {
+  it("toggles with Ctrl+L, hides the chrome, and exits with Esc", async () => {
+    renderReader("epub");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-title")).toBeInTheDocument();
+    // The EPUB toggle rides in the shell header next to the appearance
+    // popover — the EPUB counterpart of the PDF toolbar's Presentation
+    // button.
+    expect(screen.getByTestId("epub-presentation-toggle")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-epub-presentation", "true");
+    // The chrome is gone: no header, no footer, no hover zone.
+    expect(screen.queryByTestId("reader-title")).toBeNull();
+    expect(screen.queryByTestId("reader-footer")).toBeNull();
+    expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
+    // The reader swaps in the floating presentation bar.
+    expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument();
+    // No PDF presentation state leaks into an EPUB reader.
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
+
+    // Esc is the exit path and restores the normal chrome.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-epub-presentation");
+    expect(screen.getByTestId("reader-title")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(screen.getByTestId("epub-presentation-toggle")).toBeInTheDocument();
+  });
+
+  it("toggles back off with Ctrl+L", async () => {
+    renderReader("epub");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-epub-presentation", "true");
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-epub-presentation");
+  });
+
+  it("enters through the header toggle and turns pages from the floating bar", async () => {
+    renderReader("epub");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
+
+    fireEvent.click(screen.getByTestId("epub-presentation-toggle"));
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-epub-presentation", "true");
+    expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument();
+
+    // The bar drives engine page turns (the same seam the keys use).
+    fireEvent.click(screen.getByTestId("epub-pres-next"));
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("epub-pres-prev"));
+    expect(handle.prev).toHaveBeenCalledTimes(1);
+
+    // The spine indicator follows the relocate the turn reports.
+    handle.emitRelocate({
+      fraction: 0.5,
+      section: { current: 1, total: 2 },
+      totalProgression: 0.6,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-section-indicator")).toHaveTextContent("Section 2 of 2"),
+    );
+
+    // The in-mode exit button restores the chrome without a reload.
+    fireEvent.click(screen.getByTestId("epub-pres-exit"));
+    expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-epub-presentation");
+    expect(screen.queryByTestId("epub-presentation-bar")).toBeNull();
+    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(handle.init).toHaveBeenCalledTimes(1);
+    expect(handle.hostElement.isConnected).toBe(true);
+  });
+});
+
 describe("ReaderAppearance", () => {
   it("changes the reader theme, layout, and font family", async () => {
     renderReader();

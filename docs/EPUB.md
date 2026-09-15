@@ -248,6 +248,29 @@ remote content), and external links are intercepted, never navigated.
 The renderer has no Node.js access (`contextIsolation: true`,
 `nodeIntegration: false`, sandboxed preload).
 
+### Presentation mode (issue #64)
+
+Ctrl+L (shell-owned toggle, shared with the PDF mode — issue #65; also the
+header's Presentation button, `epub-presentation-toggle`) turns the EPUB
+reader into a fullscreen, distraction-free view:
+
+- The shell hides the normal chrome (header, progress footer), requests
+  fullscreen best-effort (a denied request still gives the layout inside
+  the normal window), and exits the mode on `Esc` and on a native
+  fullscreen exit (`fullscreenchange`). The mode never outlives the open
+  book.
+- The reader adds the floating `EpubPresentationBar` (prev/next engine page
+  turns, spine indicator `Section X of Y`, exit) — the twin of the PDF
+  bar. Keyboard navigation is unchanged: the EPUB engine owns
+  arrows/space/PageUp/PageDown in both modes; the shell never
+  percentage-steps an EPUB.
+- Position, pagination, and appearance need no save/restore cycle: entering
+  and leaving only hide/show chrome around the surface. The engine keeps
+  the locator across the relayout (Chromium fullscreen resize reflows the
+  columns in place) and appearance preferences are reader state, not
+  chrome — nothing reloads (`init` stays a one-time restore; E2E/state
+  attributes keep their meaning).
+
 ### Testability contract
 
 Stable DOM attributes on the engine host (`data-epub-state`,
