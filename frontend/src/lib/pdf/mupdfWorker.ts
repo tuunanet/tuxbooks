@@ -330,13 +330,12 @@ const methods = {
   },
 };
 
-// Dedicated worker: messages can only come from the creating document (a
-// same-origin module worker), and under the app's `tuxbooks://` custom
-// protocol that origin is opaque ("null"), so a literal origin check is
-// impossible — requests are additionally validated by the method dispatch
-// below.
-//
-// codeql[js/missing-origin-check] dedicated worker; opaque origin under tuxbooks://.
+// js/missing-origin-check triage (dismissed "false positive" on the
+// code-scanning alert): dedicated workers only receive messages from the
+// creating document — a same-origin module worker — and under the app's
+// `tuxbooks://` custom protocol that origin is opaque ("null"), so a
+// literal origin check is impossible. Requests are additionally validated
+// by the method dispatch below.
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   const respond = (response: WorkerResponse, transfer: Transferable[] = []): void => {
