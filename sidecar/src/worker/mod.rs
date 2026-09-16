@@ -1,5 +1,6 @@
 pub mod client;
 pub mod proto;
+pub mod sandbox;
 
 use crate::limits::ResourceLimits;
 use base64::Engine as _;
@@ -112,11 +113,13 @@ impl From<crate::pdf::PdfError> for JobError {
 }
 
 fn self_test_response() -> Result<WorkerResponse, JobError> {
-    // Task 6 replaces these literals with real sandbox observations.
+    // The worker applies the sandbox before running any op, so the probes
+    // observe real enforcement (Task 6). On non-Linux the probes report
+    // their actual unrestricted results with LandlockStatus::NotApplicable.
     let report = SandboxSelfTest {
-        landlock: LandlockStatus::NotApplicable,
-        open_denied: false,
-        socket_denied: false,
+        landlock: sandbox::landlock_abi(),
+        open_denied: std::fs::File::open("/proc/self/status").is_err(),
+        socket_denied: sandbox::probe_socket_denied(),
     };
     done_json(serde_json::to_value(report).map_err(|err| JobError::worker(err.to_string()))?)
 }

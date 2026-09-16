@@ -30,6 +30,9 @@ fn run() -> i32 {
         // pins this ordering as part of the sandbox contract).
         tuxbooks_lib::pdf::render::probe_and_load(&job.pdfium_dirs);
     }
+    if let Err(message) = tuxbooks_lib::worker::sandbox::prepare(&job.limits) {
+        return fail(WorkerErrorKind::Sandbox, message);
+    }
     let mut document = if job.op == WorkerOp::SelfTest {
         None
     } else {
