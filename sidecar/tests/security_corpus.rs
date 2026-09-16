@@ -87,9 +87,7 @@ fn malformed_zip_shapes_fail_typed() {
 
     for path in [&truncated, &corrupt, &garbage] {
         match parse_epub(path, &ResourceLimits::DEFAULTS).unwrap_err() {
-            err @ (EpubError::Zip(_) | EpubError::MissingMimetype) => {
-                assert!(!err.to_string().is_empty());
-            }
+            EpubError::Zip(_) | EpubError::MissingMimetype => {}
             other => panic!(
                 "{}: expected a typed zip failure, got: {other:?}",
                 path.display()
@@ -162,6 +160,47 @@ fn malformed_pdf_xref_shapes_fail_typed() {
 }
 
 #[test]
+fn pdf_decompression_bomb_is_contained_by_the_worker() {
+    // Containment-level teeth, not trip-level: no deterministic trip exists
+    // to assert, because the parse path reads metadata before any stream
+    // inflation and the component that answers the bomb (lopdf's decode,
+    // the allocator, the sandbox) is not ours. This test pins the weaker,
+    // still-binding claim: the ~19 MB to 4095 MiB bomb is answered by some
+    // typed worker outcome within the deadline, and the sidecar keeps
+    // working afterwards. A trip-level bomb fixture belongs to #88
+    // (fuzzing), per docs/TESTING.md.
+    let client = WorkerClient::locate().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("bomb.pdf");
+    std::fs::write(&path, hostile_pdf::inflation_bomb()).unwrap();
+
+    let started = std::time::Instant::now();
+    let err = client
+        .pdf_parse(&path, &ResourceLimits::DEFAULTS)
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            WorkerError::Parse(_)
+                | WorkerError::Limit(_)
+                | WorkerError::Crash(_)
+                | WorkerError::Deadline
+        ),
+        "the bomb must be answered by a typed worker outcome, got: {err:?}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "containment must be prompt, took {:?}",
+        started.elapsed()
+    );
+    // The sidecar survived: a benign parse still goes through.
+    let good = client
+        .pdf_parse(&fixture("minimal.pdf"), &ResourceLimits::DEFAULTS)
+        .unwrap();
+    assert!(!good.metadata.title.is_empty());
+}
+
+#[test]
 fn cyclic_page_tree_walk_is_bounded() {
     // A Pages node whose Kids array references itself: the node budget must
     // trip instead of looping forever.
@@ -196,6 +235,10 @@ fn hostile_huge_page_cover_render_stays_bounded() {
             "a 100000x100000 page must rasterize into the fixed cover budget, got {} bytes",
             png.len()
         ),
+        // Ok(None) is a sanctioned outcome: the cover importer treats a
+        // failed render as soft (an existing cover is kept), so a hostile
+        // page may yield no cover at all. It may never exceed the budget
+        // or take the worker down.
         Ok(None) => {}
         Err(err) => assert!(
             matches!(

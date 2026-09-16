@@ -75,3 +75,67 @@ pub(crate) fn bad_startxref() -> Vec<u8> {
     out[pos + 10..pos + 10 + value.len()].copy_from_slice(value);
     out
 }
+
+/// A decompression bomb: ~19 MB of zlib-wrapped DEFLATE that inflates to
+/// 4095 MiB, wired as a PDF 1.5 cross-reference stream so lopdf must
+/// decompress it during load (it decodes xref streams eagerly). The parse
+/// path leaves lopdf's own `max_decompressed_size` unset, so the worker's
+/// 3 GiB RLIMIT_AS is what answers the allocation. Construction is
+/// deterministic and cheap: the zero run is compressed by the zip crate
+/// (the only deflate available to test code, at level 1) and the raw
+/// DEFLATE bytes are reused as the stream payload.
+pub(crate) fn inflation_bomb() -> Vec<u8> {
+    let raw = deflate_zeros(4095 * (1 << 20));
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.5\n");
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+    let xref_stream = pdf.len();
+    pdf.extend_from_slice(
+        format!(
+            "3 0 obj\n<< /Type /XRef /Size 4 /W [1 3 2] /Root 1 0 R /Filter /FlateDecode /Length {} >>\nstream\n",
+            raw.len()
+        )
+        .as_bytes(),
+    );
+    pdf.extend_from_slice(&raw);
+    pdf.extend_from_slice(
+        format!("\nendstream\nendobj\nstartxref\n{}\n%%EOF\n", xref_stream).as_bytes(),
+    );
+    pdf
+}
+
+/// Compress `len` zero bytes with the zip crate and wrap the raw DEFLATE
+/// member payload into the zlib container PDF FlateDecode carries (2-byte
+/// header plus adler32; for a zero run the checksum is closed-form: the
+/// high half is `len mod 65521`, the low half 1).
+fn deflate_zeros(len: usize) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut zip_buffer: Vec<u8> = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_buffer));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .compression_level(Some(1));
+        zip.start_file("payload".to_string(), options).unwrap();
+        let chunk = vec![0u8; 1 << 20];
+        for _ in 0..(len / chunk.len()) {
+            zip.write_all(&chunk).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    // Local header layout: sig(4) version(2) flags(2) method(2) time(2)
+    // date(2) crc(4) csize(4) usize(4) nlen(2) elen(2) name extra data.
+    let buf = &zip_buffer;
+    let nlen = u16::from_le_bytes([buf[26], buf[27]]) as usize;
+    let elen = u16::from_le_bytes([buf[28], buf[29]]) as usize;
+    let csize = u32::from_le_bytes(buf[18..22].try_into().unwrap()) as usize;
+    let data_start = 30 + nlen + elen;
+
+    let checksum = (((len as u64) % 65521) << 16) | 1;
+    let mut zlib = Vec::with_capacity(csize + 6);
+    zlib.extend_from_slice(&[0x78, 0x9C]);
+    zlib.extend_from_slice(&buf[data_start..data_start + csize]);
+    zlib.extend_from_slice(&(checksum as u32).to_be_bytes());
+    zlib
+}
