@@ -122,7 +122,12 @@ pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubE
                     }
                     (Some("metadata"), "meta") => {
                         handle_legacy_cover_meta(e, &mut legacy_cover_id);
-                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
+                        handle_calibre_meta(
+                            e,
+                            limits,
+                            &mut metadata.series,
+                            &mut series_index_raw,
+                        )?;
                         if attribute(&e.attributes(), "property").as_deref() == Some("title-type") {
                             text_target = Some("meta-title-type");
                             pending_refines = attribute(&e.attributes(), "refines");
@@ -145,7 +150,12 @@ pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubE
                 match (section.as_deref(), local) {
                     (Some("metadata"), "meta") => {
                         handle_legacy_cover_meta(e, &mut legacy_cover_id);
-                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
+                        handle_calibre_meta(
+                            e,
+                            limits,
+                            &mut metadata.series,
+                            &mut series_index_raw,
+                        )?;
                     }
                     (Some("manifest"), "item") => {
                         insert_manifest_item(&mut manifest, e)?;
@@ -280,28 +290,34 @@ fn handle_legacy_cover_meta(
 /// `<meta name="calibre:series" content="..."/>` and
 /// `<meta name="calibre:series_index" content="3"/>`. The index is kept raw
 /// until the end of the parse so a missing/invalid value simply stays unset.
+/// Attribute-derived values are still metadata strings (M-1): each is
+/// checked against `max_metadata_string_bytes` before it is kept.
 fn handle_calibre_meta(
     e: &quick_xml::events::BytesStart<'_>,
+    limits: &ResourceLimits,
     series: &mut Option<String>,
     series_index_raw: &mut Option<String>,
-) {
+) -> Result<(), EpubError> {
     let name = attribute(&e.attributes(), "name");
     let content = attribute(&e.attributes(), "content");
     match (name.as_deref(), content) {
         (Some("calibre:series"), Some(value)) => {
             let value = value.trim();
             if !value.is_empty() {
+                limits.check_metadata_string(value)?;
                 *series = Some(value.to_string());
             }
         }
         (Some("calibre:series_index"), Some(value)) => {
             let value = value.trim();
             if !value.is_empty() {
+                limits.check_metadata_string(value)?;
                 *series_index_raw = Some(value.to_string());
             }
         }
         _ => {}
     }
+    Ok(())
 }
 
 /// Series indexes are decimal numbers, sometimes written with a trailing
@@ -503,6 +519,29 @@ mod tests {
         let opf = format!(
             r#"<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title></metadata></package>"#
         );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    /// M-1/#86: the calibre series is attribute-derived, so it bypasses the
+    /// text-target cap unless the attribute value is checked too. A hostile
+    /// OPF must not smuggle an unbounded series (or index) string into the
+    /// library and the renderer.
+    #[test]
+    fn parse_opf_rejects_oversized_calibre_series_attribute() {
+        let big = "x".repeat(2 << 20);
+        let opf = MINIMAL_OPF.replace(
+            r#"content="Analytical Engines""#,
+            &format!(r#"content="{big}""#),
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_opf_rejects_oversized_calibre_series_index_attribute() {
+        let big = "9".repeat(2 << 20);
+        let opf = MINIMAL_OPF.replace(r#"content="2""#, &format!(r#"content="{big}""#));
         let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
