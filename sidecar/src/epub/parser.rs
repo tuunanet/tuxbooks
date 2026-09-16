@@ -265,6 +265,31 @@ pub(crate) fn resolve_zip_path(opf_path: &str, href: &str) -> String {
     normalize_path(&format!("{dir}{decoded}"))
 }
 
+/// Validate a renderer-supplied member path before any lookup (E-5):
+/// traversal segments, absolute paths, Windows separators and drive
+/// prefixes, and NUL/control characters are rejected with a typed error
+/// instead of relying on the archive lookup to miss. Mirrors the protocol
+/// layer's `parseMemberPath` exactly, so the two gates cannot drift.
+pub(crate) fn validate_member_path(path: &str) -> Result<(), EpubError> {
+    let reject = || Err(EpubError::InvalidMemberPath(path.to_string()));
+    if path.contains('\\') || path.starts_with('/') {
+        return reject();
+    }
+    if path.chars().any(|c| c == '\0' || c.is_control()) {
+        return reject();
+    }
+    if path.split('/').any(|segment| segment == "..") {
+        return reject();
+    }
+    let mut chars = path.chars();
+    if let (Some(first), Some(second)) = (chars.next(), chars.next()) {
+        if first.is_ascii_alphabetic() && second == ':' {
+            return reject();
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn normalize_path(path: &str) -> String {
     let mut segments: Vec<&str> = Vec::new();
     for segment in path.split('/') {

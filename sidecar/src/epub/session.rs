@@ -153,8 +153,10 @@ pub fn build_session(
 }
 
 /// Read one ZIP entry by path. The path must already be decoded;
-/// `normalize_path` collapses `.`/`..`, so a member path can never traverse
-/// above the archive root. Member reads enforce the `limits` quotas (R-1).
+/// `validate_member_path` rejects hostile shapes outright (E-5) and
+/// `normalize_path` collapses `.`/`..`, so a member path can never
+/// traverse above the archive root. Member reads enforce the `limits`
+/// quotas (R-1).
 pub fn read_member(
     path: &Path,
     member: &str,
@@ -163,6 +165,10 @@ pub fn read_member(
     limits.check_source_file(std::fs::metadata(path)?.len())?;
     let mut zip = ZipArchive::new(BufReader::new(File::open(path)?))?;
     super::parser::check_archive_totals(&mut zip, limits)?;
+    if member.is_empty() {
+        return Ok(None);
+    }
+    super::parser::validate_member_path(member)?;
     let member = normalize_path(member);
     if member.is_empty() {
         return Ok(None);
@@ -1003,6 +1009,51 @@ mod tests {
         assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
 
+    #[test]
+    fn read_member_rejects_hostile_member_paths_e5() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("members.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                (
+                    "OEBPS/chapter1.xhtml",
+                    b"<html><body>hi</body></html>".as_slice(),
+                ),
+            ],
+        );
+        for member in [
+            "../secret.txt",
+            "OEBPS/../../../etc/passwd",
+            "..\\windows\\system32",
+            "OEBPS\\..\\x",
+            "/etc/passwd",
+            "C:/Windows/system32/config",
+            "a\0b",
+            "OEBPS/\x01x",
+            "line\nbreak",
+        ] {
+            let err = read_member(&path, member, &ResourceLimits::DEFAULTS).unwrap_err();
+            assert!(
+                matches!(err, EpubError::InvalidMemberPath(_)),
+                "`{member}`: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_documents_leak_no_filesystem_paths_e4() {
+        let (tmp, path) = session_book();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let file_path = path.to_string_lossy().into_owned();
+        let dir_path = tmp.path().to_string_lossy().into_owned();
+        for document in [&session.manifest_json, &session.positions_json] {
+            assert!(!document.contains(&file_path), "{document}");
+            assert!(!document.contains(&dir_path), "{document}");
+        }
+    }
+
     /// Patch a ZIP entry's declared uncompressed size down to `new_size` in
     /// both the local header and the central directory, leaving the deflate
     /// stream and CRC intact: the header lies about its size, a hostile-file
@@ -1476,11 +1527,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
-        // Traversal collapses to the root and misses instead of escaping.
+        // Traversal is rejected outright, not merely missed.
+        let err = read_member(&path, "../etc/passwd", &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(
-            read_member(&path, "../etc/passwd", &ResourceLimits::DEFAULTS)
-                .unwrap()
-                .is_none()
+            matches!(err, EpubError::InvalidMemberPath(_)),
+            "got: {err:?}"
         );
         assert!(
             read_member(&path, "OEBPS/missing.xhtml", &ResourceLimits::DEFAULTS)
