@@ -22,7 +22,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use zip::ZipArchive;
 
-use super::metadata::{attribute, local_name, parse_opf, OpfPackage};
+use super::metadata::{attribute, local_name, parse_opf, text_event_content, OpfPackage};
 use super::parser::{
     normalize_path, parse_container_xml, percent_decode, read_entry, resolve_zip_path,
 };
@@ -507,7 +507,7 @@ fn parse_nav_document(
     }
 
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut stack: Vec<Scope> = Vec::new();
     let mut finished: Vec<(bool, Vec<TocItem>)> = Vec::new();
@@ -524,7 +524,10 @@ fn parse_nav_document(
                             .clone()
                             .flatten()
                             .filter(|attr| local_name(attr.key.as_ref()) == "type")
-                            .filter_map(|attr| attr.unescape_value().ok())
+                            .filter_map(|attr| {
+                                attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                    .ok()
+                            })
                             .any(|value| {
                                 value
                                     .split_whitespace()
@@ -579,7 +582,7 @@ fn parse_nav_document(
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if matches!(
                     stack.last(),
                     Some(Scope::Li {
@@ -587,7 +590,7 @@ fn parse_nav_document(
                         ..
                     })
                 ) {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
@@ -675,7 +678,7 @@ fn parse_ncx_document(
     };
 
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut roots: Vec<TocItem> = Vec::new();
     // Open navPoints, outermost first; each closing navPoint completes one.
@@ -717,9 +720,9 @@ fn parse_ncx_document(
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if in_nav_label {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
@@ -780,7 +783,7 @@ fn resolve_nav_href(base_dir: &str, href: &str) -> String {
 /// per-itemref `layout="pre-paginated"` on every spine item).
 fn detect_fixed_layout(opf_xml: &str) -> bool {
     let mut reader = Reader::from_str(opf_xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut capturing_rendition_meta = false;
     let mut rendition_layout: Option<String> = None;
@@ -812,9 +815,9 @@ fn detect_fixed_layout(opf_xml: &str) -> bool {
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if capturing_rendition_meta {
-                    if let Ok(value) = t.unescape() {
+                    if let Some(value) = text_event_content(&event) {
                         rendition_layout = Some(value.trim().to_string());
                     }
                 }
@@ -837,7 +840,7 @@ fn detect_fixed_layout(opf_xml: &str) -> bool {
 /// The spine's declared page progression (`page-progression-direction`).
 fn detect_page_progression(opf_xml: &str) -> &'static str {
     let mut reader = Reader::from_str(opf_xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
@@ -977,9 +980,9 @@ fn extract_visible_text(xml: &str, label: &str) -> Result<String, EpubError> {
                     skip_depth += 1;
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if skip_depth == 0 {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         for word in decoded.split_whitespace() {
                             if !out.is_empty() {
                                 out.push(' ');

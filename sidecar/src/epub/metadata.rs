@@ -61,7 +61,7 @@ pub struct OpfPackage {
 pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubError> {
     limits.check_xml_bytes(xml.len())?;
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut depth = 0usize;
     let mut metadata = EpubMetadata::default();
@@ -168,9 +168,9 @@ pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubE
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if text_target.is_some() {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
@@ -367,11 +367,56 @@ pub(crate) fn attribute(
     attrs.clone().flatten().find_map(|attr| {
         let key = local_name(attr.key.as_ref());
         if key.eq_ignore_ascii_case(name) {
-            attr.unescape_value().ok().map(|v| v.to_string())
+            attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.to_string())
         } else {
             None
         }
     })
+}
+
+/// Text content of a text-like event for accumulation into a buffer.
+///
+/// quick-xml 0.40+ reports general entity references as their own
+/// `Event::GeneralRef` instead of leaving them inside `Event::Text`, so
+/// every text-accumulating parser must resolve them explicitly. Only
+/// predefined XML entities and numeric character references resolve;
+/// anything else (custom entities need a DTD, which is never fetched) is
+/// dropped, and character references outside the XML 1.0 character set
+/// fail closed. This keeps the pre-0.40 `unescape()` semantics for
+/// well-formed documents without re-merging reference resolution into the
+/// reader.
+pub(crate) fn text_event_content<'a>(event: &'a Event<'_>) -> Option<std::borrow::Cow<'a, str>> {
+    match event {
+        Event::Text(t) => t.html_content().ok(),
+        Event::GeneralRef(r) => resolve_entity_ref(r),
+        _ => None,
+    }
+}
+
+fn resolve_entity_ref<'a>(
+    r: &'a quick_xml::events::BytesRef<'_>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let raw = std::str::from_utf8(r.as_ref()).ok()?;
+    if let Some(hex) = raw.strip_prefix("#x").or_else(|| raw.strip_prefix("#X")) {
+        let code = u32::from_str_radix(hex, 16).ok()?;
+        char_ref(code)
+    } else if let Some(dec) = raw.strip_prefix('#') {
+        let code: u32 = dec.parse().ok()?;
+        char_ref(code)
+    } else {
+        quick_xml::escape::resolve_xml_entity(raw).map(std::borrow::Cow::Borrowed)
+    }
+}
+
+fn char_ref(code: u32) -> Option<std::borrow::Cow<'static, str>> {
+    match code {
+        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF => {
+            char::from_u32(code).map(|c| std::borrow::Cow::Owned(c.to_string()))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
