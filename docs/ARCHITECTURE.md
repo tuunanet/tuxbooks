@@ -112,6 +112,22 @@ modules (`frontend/tests/security/`):
   `parseExternalHttpUrl`; scripts, data/file/custom schemes, credentials,
   control characters, and over-long strings are dropped.
 
+### Metadata and annotation neutrality (issue #86, invariants M-1, M-2)
+
+Publication-derived and user-stored strings (metadata fields, annotation
+text/notes/locators, search hits, collection names, reader profile data) are
+rendered only through React text nodes and escaped attributes; the renderer
+has no `dangerouslySetInnerHTML`, no dynamic `href`, and no
+`document.title`/clipboard/notifications fed from data. The single URL-carrying
+sink is the stored cover path, which `lib/bridge.ts coverFileUrl` reduces to a
+percent-encoded file name under the fixed `tuxbooks://cover/` scheme. Reader
+profile values from localStorage are snapped back onto the supported scales on
+read (`lib/readerSettings.ts`). Attack side: parse-time caps bound the strings
+(`docs/RESOURCE_LIMITS.md`, including the attribute-derived calibre series
+values), and the hostile-fixture tests in
+`frontend/tests/security/metadataNeutrality.test.tsx` pin every sink above.
+External navigation stays behind the X-5 `linkPolicy` gate.
+
 ### Document worker (issue #81, ADR 0001)
 
 The sidecar spawns `tuxbooks-worker` one process per parse job, hands the
