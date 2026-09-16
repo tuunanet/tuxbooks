@@ -29,6 +29,47 @@ use super::parser::{
 use super::EpubError;
 use crate::limits::{Deadline, ResourceLimits};
 
+/// Media types the reader refuses to serve (E-1): scripts are not a
+/// supported publication feature, so a book declaring them fails to open
+/// instead of reaching a frame.
+const SCRIPT_MEDIA_TYPES: &[&str] = &[
+    "text/javascript",
+    "application/javascript",
+    "application/x-javascript",
+    "text/ecmascript",
+    "application/ecmascript",
+    "text/jscript",
+    "application/wasm",
+];
+
+/// TOC href schemes that are dropped outright (E-3): they can never be
+/// legitimate navigation targets. Remote web links are kept and intercepted
+/// as external links by the renderer.
+const DANGEROUS_TOC_SCHEMES: &[&str] = &[
+    "javascript:",
+    "vbscript:",
+    "data:",
+    "file:",
+    "blob:",
+    "filesystem:",
+];
+
+/// True when `href` starts with an explicit URI scheme (`http:`, `js:`…).
+/// Percent-encoded references (`%3a…`) do not match, matching URI grammar.
+fn has_explicit_scheme(href: &str) -> bool {
+    let Some(colon) = href.find(':') else {
+        return false;
+    };
+    if colon == 0 {
+        return false;
+    }
+    let mut scheme = href[..colon].chars();
+    if !scheme.next().is_some_and(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    scheme.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 /// Media type the Readium toolkit looks up to find the positions list.
 pub const POSITIONS_MEDIA_TYPE: &str = "application/vnd.readium.position-list+json";
 
@@ -94,6 +135,7 @@ pub fn build_session(
         .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
     let package = parse_opf(&opf_xml, limits)?;
+    validate_manifest(&package)?;
     deadline.check()?;
 
     let spine = resolve_spine_entries(&package, &opf_path)?;
@@ -188,6 +230,24 @@ fn read_mimetype<R: Read + Seek>(
     Ok(())
 }
 
+/// Manifest-level fences (E-1, E-3) applied before anything is served:
+/// script media types and non-local hrefs fail the session.
+fn validate_manifest(package: &OpfPackage) -> Result<(), EpubError> {
+    for (id, item) in &package.manifest {
+        let media_type = item.media_type.trim().to_ascii_lowercase();
+        if SCRIPT_MEDIA_TYPES.contains(&media_type.as_str()) {
+            return Err(EpubError::ScriptedContent(format!(
+                "manifest item `{id}` declares media type `{}`",
+                item.media_type
+            )));
+        }
+        if has_explicit_scheme(&item.href) {
+            return Err(EpubError::ExternalRef(format!("manifest item `{id}`")));
+        }
+    }
+    Ok(())
+}
+
 fn resolve_spine_entries(
     package: &OpfPackage,
     opf_path: &str,
@@ -200,6 +260,9 @@ fn resolve_spine_entries(
                 .manifest
                 .get(idref)
                 .ok_or_else(|| EpubError::BrokenSpine(idref.clone()))?;
+            if has_explicit_scheme(&item.href) {
+                return Err(EpubError::ExternalRef(format!("spine item `{idref}`")));
+            }
             let zip_path = resolve_zip_path(opf_path, &item.href);
             Ok(SpineEntry {
                 encoded: encoded_href(&zip_path),
@@ -375,6 +438,17 @@ fn parse_toc<R: Read + Seek>(
     Ok(Vec::new())
 }
 
+/// True when a raw TOC href uses a scheme the reader never navigates
+/// (E-3): script/data/file targets are dropped at the source. Remote web
+/// links are kept — the renderer reports them as intercepted external
+/// links.
+fn is_dangerous_toc_href(href: &str) -> bool {
+    let lower = href.trim().to_ascii_lowercase();
+    DANGEROUS_TOC_SCHEMES
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+}
+
 /// EPUB 3 navigation document: the `<nav epub:type="toc">` list (or, when
 /// none is typed, the first `<nav>`), parsed as nested `ol > li > a` trees.
 /// Other navs (landmarks, page-list) are ignored.
@@ -391,9 +465,18 @@ fn parse_nav_document(
 
     #[derive(Debug)]
     enum Scope {
-        Nav { is_toc: bool, items: Vec<TocItem> },
-        Ol { items: Vec<TocItem> },
-        Li { item: TocItem, label_done: bool },
+        Nav {
+            is_toc: bool,
+            items: Vec<TocItem>,
+        },
+        Ol {
+            items: Vec<TocItem>,
+        },
+        Li {
+            item: TocItem,
+            label_done: bool,
+            skip: bool,
+        },
     }
 
     let mut reader = Reader::from_str(xml);
@@ -442,14 +525,24 @@ fn parse_nav_document(
                                 children: Vec::new(),
                             },
                             label_done: false,
+                            skip: false,
                         });
                     }
                     "a" | "span" if matches!(stack.last(), Some(Scope::Li { .. })) => {
                         if local == "a" {
                             if let Some(href) = attribute(&e.attributes(), "href") {
-                                if let Some(Scope::Li { item, label_done }) = stack.last_mut() {
+                                if let Some(Scope::Li {
+                                    item,
+                                    label_done,
+                                    skip,
+                                }) = stack.last_mut()
+                                {
                                     if !*label_done {
-                                        item.href = resolve_nav_href(nav_dir, &href);
+                                        if is_dangerous_toc_href(&href) {
+                                            *skip = true;
+                                        } else {
+                                            item.href = resolve_nav_href(nav_dir, &href);
+                                        }
                                     }
                                 }
                             }
@@ -476,7 +569,10 @@ fn parse_nav_document(
                 let local = local_name(e.name().into_inner());
                 match local {
                     "a" | "span" => {
-                        if let Some(Scope::Li { item, label_done }) = stack.last_mut() {
+                        if let Some(Scope::Li {
+                            item, label_done, ..
+                        }) = stack.last_mut()
+                        {
                             if !*label_done {
                                 item.label = text_buf.trim().to_string();
                                 *label_done = true;
@@ -485,7 +581,10 @@ fn parse_nav_document(
                         text_buf.clear();
                     }
                     "li" => {
-                        if let Some(Scope::Li { item, .. }) = stack.pop() {
+                        if let Some(Scope::Li { item, skip, .. }) = stack.pop() {
+                            if skip {
+                                continue;
+                            }
                             if let Some(Scope::Ol { items }) = stack.last_mut() {
                                 items.push(item);
                             }
@@ -500,7 +599,11 @@ fn parse_nav_document(
                             // nested list, or the nav itself for the top-level
                             // toc list.
                             match stack.last_mut() {
-                                Some(Scope::Li { item, .. }) => item.children = items,
+                                Some(Scope::Li { item, skip, .. }) => {
+                                    if !*skip {
+                                        item.children = items;
+                                    }
+                                }
                                 Some(Scope::Nav {
                                     items: nav_items, ..
                                 }) => nav_items.extend(items),
@@ -550,6 +653,9 @@ fn parse_ncx_document(
     let mut roots: Vec<TocItem> = Vec::new();
     // Open navPoints, outermost first; each closing navPoint completes one.
     let mut open_points: Vec<TocItem> = Vec::new();
+    // Parallel to open_points: navPoints whose content src is dangerous are
+    // completed but dropped (E-3).
+    let mut open_skips: Vec<bool> = Vec::new();
     let mut text_buf = String::new();
     let mut in_nav_label = false;
 
@@ -565,12 +671,19 @@ fn parse_ncx_document(
                             href: String::new(),
                             children: Vec::new(),
                         });
+                        open_skips.push(false);
                     }
                     "navLabel" => in_nav_label = true,
                     "content" => {
                         if let Some(point) = open_points.last_mut() {
                             if let Some(src) = attribute(&e.attributes(), "src") {
-                                point.href = resolve_nav_href(ncx_dir, &src);
+                                if is_dangerous_toc_href(&src) {
+                                    if let Some(skip) = open_skips.last_mut() {
+                                        *skip = true;
+                                    }
+                                } else {
+                                    point.href = resolve_nav_href(ncx_dir, &src);
+                                }
                             }
                         }
                     }
@@ -595,7 +708,11 @@ fn parse_ncx_document(
                         text_buf.clear();
                     }
                     "navPoint" => {
+                        let skip = open_skips.pop().unwrap_or(false);
                         if let Some(point) = open_points.pop() {
+                            if skip {
+                                continue;
+                            }
                             match open_points.last_mut() {
                                 Some(parent) => parent.children.push(point),
                                 None => roots.push(point),
@@ -739,7 +856,7 @@ fn build_positions_json<R: Read + Seek>(
                     Some(bytes) => {
                         bytes_read += bytes.len() as u64;
                         limits.check_total_uncompressed(bytes_read)?;
-                        extract_visible_text(&String::from_utf8_lossy(&bytes))
+                        extract_visible_text(&String::from_utf8_lossy(&bytes), &entry.encoded)?
                             .chars()
                             .count()
                     }
@@ -809,8 +926,10 @@ fn clamp01(value: f64) -> f64 {
 }
 
 /// Visible text of an XHTML document: everything outside `head`, `title`,
-/// `style`, and `script`, entities unescaped, whitespace collapsed.
-fn extract_visible_text(xml: &str) -> String {
+/// `style`, and `script`, entities unescaped, whitespace collapsed. A
+/// `<script>` element anywhere in the document fails the session (E-1):
+/// scripted EPUBs are not a supported feature, so the book never opens.
+fn extract_visible_text(xml: &str, label: &str) -> Result<String, EpubError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
 
@@ -821,7 +940,13 @@ fn extract_visible_text(xml: &str) -> String {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                if skip_depth > 0 || is_skipped_element(local_name(e.name().into_inner())) {
+                let name = local_name(e.name().into_inner());
+                if name == "script" && skip_depth == 0 {
+                    return Err(EpubError::ScriptedContent(format!(
+                        "spine document `{label}` contains a `<script>` element"
+                    )));
+                }
+                if skip_depth > 0 || is_skipped_element(name) {
                     skip_depth += 1;
                 }
             }
@@ -846,7 +971,7 @@ fn extract_visible_text(xml: &str) -> String {
         }
     }
 
-    out
+    Ok(out)
 }
 
 fn is_skipped_element(name: &str) -> bool {
@@ -969,6 +1094,171 @@ mod tests {
             Ok(_) => panic!("build_session accepted lying headers past the byte budget"),
             Err(other) => panic!("expected limit error, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_rejects_script_media_types_e1() {
+        for media_type in [
+            "text/javascript",
+            "application/javascript",
+            "application/x-javascript",
+            "text/ecmascript",
+            "application/ecmascript",
+            "text/jscript",
+            "application/wasm",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("scripted.epub");
+            let opf = OPF.replace(
+                r#"<item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>"#,
+                &format!(
+                    r#"<item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/><item id="js" href="evil.js" media-type="{media_type}"/>"#
+                ),
+            );
+            write_zip(
+                &path,
+                &[
+                    ("mimetype", "application/epub+zip".as_bytes()),
+                    ("META-INF/container.xml", container()),
+                    ("content.opf", opf.as_bytes()),
+                    ("nav.xhtml", NAV.as_bytes()),
+                    ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                    ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+                    ("evil.js", b"alert(1)".as_slice()),
+                ],
+            );
+            let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+            assert!(
+                matches!(err, EpubError::ScriptedContent(_)),
+                "media type {media_type}: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_rejects_spine_documents_containing_scripts_e1() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("inline-script.epub");
+        let scripted = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><p>hi</p><script>alert(1)</script></body></html>"#;
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", scripted.as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn session_rejects_remote_spine_hrefs_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remote.epub");
+        let opf = OPF.replace(
+            r#"href="chapter2.xhtml""#,
+            r#"href="https://evil.example/x.xhtml""#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", opf.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ExternalRef(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn session_rejects_script_scheme_spine_hrefs_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("scheme.epub");
+        let opf = OPF.replace(r#"href="chapter2.xhtml""#, r#"href="javascript:alert(1)""#);
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", opf.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ExternalRef(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn toc_entries_with_dangerous_schemes_are_dropped_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("evil-toc.epub");
+        let nav = NAV.replace(
+            r#"<li><a href="chapter2.xhtml">Two</a>"#,
+            r#"<li><a href="javascript:alert(1)">Evil</a></li><li><a href="chapter2.xhtml">Two</a>"#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", nav.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
+        let toc = manifest["toc"].as_array().unwrap();
+        assert_eq!(
+            toc.len(),
+            2,
+            "the javascript: entry must be dropped: {toc:?}"
+        );
+        assert!(serde_json::to_string(toc)
+            .unwrap()
+            .to_lowercase()
+            .find("javascript:")
+            .is_none());
+    }
+
+    #[test]
+    fn toc_keeps_remote_links_for_external_interception_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remote-toc.epub");
+        let nav = NAV.replace(
+            r#"<li><a href="chapter2.xhtml">Two</a>"#,
+            r#"<li><a href="https://vendor.example/book">Buy</a></li><li><a href="chapter2.xhtml">Two</a>"#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", nav.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
+        let toc = manifest["toc"].as_array().unwrap();
+        assert_eq!(
+            toc.len(),
+            3,
+            "remote toc links stay for interception: {toc:?}"
+        );
     }
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1214,10 +1504,20 @@ mod tests {
     }
 
     #[test]
-    fn visible_text_excludes_head_and_scripts() {
+    fn visible_text_excludes_head_and_styles() {
         let xml = r#"<html><head><title>Do not leak</title><style>p { color: red }</style></head>
-            <body><p>Hello   world</p><script>ignored()</script><p>Second &amp; last</p></body></html>"#;
-        assert_eq!(extract_visible_text(xml), "Hello world Second & last");
+            <body><p>Hello   world</p><p>Second &amp; last</p></body></html>"#;
+        assert_eq!(
+            extract_visible_text(xml, "chapter1.xhtml").unwrap(),
+            "Hello world Second & last"
+        );
+    }
+
+    #[test]
+    fn visible_text_reports_spine_documents_with_scripts() {
+        let xml = r#"<html><body><p>Hello</p><script>alert(1)</script></body></html>"#;
+        let err = extract_visible_text(xml, "chapter1.xhtml").unwrap_err();
+        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
     }
 
     #[test]
