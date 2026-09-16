@@ -19,6 +19,16 @@ any frontend precondition.
   output in `dist-packages/`. The rpm needs the `rpm` package (rpmbuild)
   installed; the deb and AppImage targets are self-contained.
 - `just check-deb` — the packaging gate (below).
+- `just audit` — the dependency audits (issue #89): the npm audit gate plus
+  RustSec `cargo audit` over the sidecar and fuzz lockfiles. Networked.
+  The same gates run in CI (.github/workflows/audit.yml, with a weekly
+  sweep); triage policy and the current triage table: docs/SUPPLY_CHAIN.md.
+- `just check-supply-chain` — the offline supply-chain gate: maturity
+  floor, build-script allowlists, audit/SBOM workflow wiring, pinned fuzz
+  toolchain. Runs as part of `just check`.
+- `just sbom` — writes the CycloneDX SBOM
+  (`dist-packages/SBOM-tuxbooks-<version>.cdx.json`) over the npm and Rust
+  trees; releases publish it (docs/RELEASE.md).
 
 ## Electron runtime binary
 

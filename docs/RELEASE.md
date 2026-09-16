@@ -10,12 +10,13 @@ are unchanged from the earlier releases.
 
 ## Artifacts
 
-| Artifact                       | Built by               | Purpose                                                            |
-| ------------------------------ | ---------------------- | ------------------------------------------------------------------ |
-| `tuxbooks_<version>_amd64.deb` | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`   |
-| `tuxbooks-<version>.AppImage`  | release workflow (tag) | Portable single-file build for other Linux setups, no installation |
-| `SHA256SUMS.txt`               | release workflow (tag) | Checksums for both artifacts                                       |
-| deb + rpm + AppImage           | `just package` (local) | Local packaging verification; rpm is not published                 |
+| Artifact                           | Built by               | Purpose                                                               |
+| ---------------------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `tuxbooks_<version>_amd64.deb`     | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`      |
+| `tuxbooks-<version>.AppImage`      | release workflow (tag) | Portable single-file build for other Linux setups, no installation    |
+| `SBOM-tuxbooks-<version>.cdx.json` | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md |
+| `SHA256SUMS.txt`                   | release workflow (tag) | Checksums for both artifacts and the SBOM                             |
+| deb + rpm + AppImage               | `just package` (local) | Local packaging verification; rpm is not published                    |
 
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
@@ -93,9 +94,12 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
      real-binary E2E suites (`just test`, `just test-e2e`), so a tag never
      publishes what has not been proven;
    - **publish** — refuses to run unless the tag exactly matches the
-     version in the packaging manifest, builds deb + AppImage, writes
-     `SHA256SUMS.txt`, and publishes a pre-release with install
-     instructions.
+     version in the packaging manifest, builds deb + AppImage, generates
+     the SBOM (`just sbom`), writes `SHA256SUMS.txt` over the installers
+     and the SBOM, and publishes a pre-release with install instructions.
+
+Before tagging, run `just audit`: release builds must be free of
+untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
 
 ## AppImage specifics
 
@@ -109,7 +113,9 @@ environment only to _execute_ the AppImage).
 - **Signed artifacts:** `SHA256SUMS.txt` only. GPG/(sigstore) signing waits
   until there is key infrastructure and a distribution channel that
   consumes it; checksums over HTTPS from the GitHub release are the
-  pre-1.0 baseline.
+  pre-1.0 baseline. Provenance today: every release artifact is built by
+  the release workflow from an immutable `v*` tag of this repository, with
+  the SBOM (S-4) publishing the exact dependency set the build resolved.
 - **Update strategy:** none built. deb installs upgrade in place via `apt`
   (same package name and identifier), AppImage is replaced by downloading
   the newer file. If auto-update is ever required, that is

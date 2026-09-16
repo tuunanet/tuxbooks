@@ -82,3 +82,5 @@ Read the one that fits the task; each is short.
 - `docs/TESTING.md` — test layers, agent rules, and E2E infrastructure.
 - `docs/COVERAGE.md` — per-category coverage floors and exclusions.
 - `docs/RELEASE.md` — packaging and cutting releases.
+- `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script and
+  maturity policies (issue #89); run `just audit` before releases.
