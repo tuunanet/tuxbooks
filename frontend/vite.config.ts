@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
 import path from "node:path";
 
+import { appUiCsp } from "../electron/shared/appCsp";
+
 /**
  * Emits the MuPDF WASM bundle as a build asset and serves it in dev,
  * exposing its URL through a virtual module. The package does not export
@@ -46,6 +48,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // X-2 (issue #85) in dev too: the same policy builder the app:// header
+    // uses, with the development variant's documented allowances for
+    // Vite's HMR (inline refresh preamble, injected styles, ws socket).
+    headers: { "Content-Security-Policy": appUiCsp("development") },
     watch: {
       ignored: ["**/sidecar/**"],
     },

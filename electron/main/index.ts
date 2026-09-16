@@ -1,4 +1,14 @@
-import { protocol, app, BrowserWindow, Menu, nativeImage, ipcMain, dialog, shell } from "electron";
+import {
+  protocol,
+  app,
+  BrowserWindow,
+  Menu,
+  nativeImage,
+  ipcMain,
+  dialog,
+  session,
+  shell,
+} from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +18,15 @@ import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from 
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
+import {
+  assertRendererIsolation,
+  isAllowedAppNavigation,
+  isPermissionAllowed,
+  originOfRequestUrl,
+  RENDERER_ISOLATION,
+} from "./windowSecurity";
+import { APP_UI_CSP } from "../shared/appCsp";
+import { parseExternalHttpUrl } from "../shared/linkPolicy";
 import {
   APP_ORIGIN,
   IPC_CHANNELS,
@@ -21,8 +40,6 @@ import {
  * dialogs/shell, the scoped `tuxbooks://` resource protocol, and the Rust
  * sidecar. Plumbing only — no business logic.
  */
-
-const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:1420";
 
 // Startup segment timing (dev diagnosis): where the boot latency sits —
 // Electron init, sidecar readiness, or the renderer's first mount.
@@ -105,6 +122,16 @@ function coversDir(): string {
   return path.join(appDataDir(), "covers");
 }
 
+/**
+ * X-5 (issue #85): the only path to shell.openExternal. The raw string
+ * never reaches shell, only parseExternalHttpUrl's canonical http(s)
+ * output does; everything else is dropped.
+ */
+function openExternalIfValid(raw: string): void {
+  const validated = parseExternalHttpUrl(raw);
+  if (validated !== null) void shell.openExternal(validated);
+}
+
 /** Root of the built renderer bundle, served as `app://bundle/...`. */
 
 function rendererDistDir(): string {
@@ -161,7 +188,12 @@ function registerAppProtocol(): void {
       const body = fs.readFileSync(filePath);
       return new Response(body, {
         status: 200,
-        headers: { "content-type": mime, "content-length": String(body.length) },
+        headers: {
+          "content-type": mime,
+          "content-length": String(body.length),
+          // X-2: the app UI's CSP rides on every app:// response (issue #85).
+          "content-security-policy": APP_UI_CSP,
+        },
       });
     } catch {
       return new Response("not found", { status: 404 });
@@ -215,6 +247,14 @@ function appIcon(): Electron.NativeImage | undefined {
 }
 
 function createWindow(forward: (name: string, payload: unknown) => void): BrowserWindow {
+  // X-1 (issue #85): the four isolation flags are explicit, and the
+  // assertion fails startup loudly when one drifts instead of shipping a
+  // softer renderer.
+  const webPreferences: Electron.WebPreferences = {
+    preload: path.join(__dirname, "preload.cjs"),
+    ...RENDERER_ISOLATION,
+  };
+  assertRendererIsolation(webPreferences);
   const window = new BrowserWindow({
     ...WINDOW_DEFAULTS,
     center: true,
@@ -228,13 +268,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     // the renderer's inline theme bootstrap paints the real choice before
     // first content paint.
     backgroundColor: "#ffffff",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
+    webPreferences,
   });
 
   window.webContents.on("did-finish-load", () => bootElapsed("renderer did-finish-load"));
@@ -264,22 +298,21 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     bootElapsed("window shown");
   });
 
-  // In-page links never spawn extra Chromium windows; http(s) links go to
-  // the system browser, everything else is dropped.
+  // In-page links never spawn extra Chromium windows. X-5 (issue #85):
+  // every target goes through the validated link seam first, only
+  // canonical http(s) URLs reach the system browser, everything else is
+  // dropped. X-3: the top frame navigates only inside the app origin (or
+  // the dev server while one is actually configured); anything else,
+  // file://, the resource protocol, data:, other origins, is prevented,
+  // and validated http(s) targets go to the system browser instead.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      void shell.openExternal(url);
-    }
+    openExternalIfValid(url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    const built = url === `${APP_ORIGIN}/index.html` || url.startsWith(`${APP_ORIGIN}/assets/`);
-    if (url !== DEV_SERVER_URL && !built && !url.startsWith("file://")) {
-      event.preventDefault();
-      if (url.startsWith("http://") || url.startsWith("https://")) {
-        void shell.openExternal(url);
-      }
-    }
+    if (isAllowedAppNavigation(url, process.env.VITE_DEV_SERVER_URL)) return;
+    event.preventDefault();
+    openExternalIfValid(url);
   });
 
   // Dev server only when explicitly requested (just dev); everything else —
@@ -492,6 +525,22 @@ app.whenReady().then(() => {
       }
     }
   };
+  // X-4 (issue #85): permissions are denied by default. The single grant
+  // is fullscreen from the application's own origin, the reader's
+  // presentation mode (ReaderShell). Both handlers share the one policy
+  // function so requests and checks can never disagree.
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  session.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      callback(
+        isPermissionAllowed(permission, originOfRequestUrl(details.requestingUrl), devServerUrl),
+      );
+    },
+  );
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    return isPermissionAllowed(permission, requestingOrigin, devServerUrl);
+  });
+
   const sidecar = new Sidecar(locateSidecar(process.resourcesPath), forward);
   registerAppProtocol();
   registerProtocol(sidecar);
