@@ -3,6 +3,7 @@ pub mod db;
 pub mod domain;
 pub mod epub;
 pub mod error;
+pub mod limits;
 pub mod pdf;
 pub mod repository;
 pub mod rpc;
