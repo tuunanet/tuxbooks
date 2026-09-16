@@ -35,7 +35,7 @@ pub fn write_metadata(path: &Path, metadata: &EpubMetadata) -> Result<(), EpubEr
         &crate::limits::ResourceLimits::DEFAULTS,
     )?
     .ok_or(EpubError::MissingContainer)?;
-    let opf_path = parse_container_xml(&container)?;
+    let opf_path = parse_container_xml(&container, &crate::limits::ResourceLimits::DEFAULTS)?;
     let opf_bytes = read_entry(
         &mut archive,
         &opf_path,

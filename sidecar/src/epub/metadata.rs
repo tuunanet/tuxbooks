@@ -4,6 +4,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use super::EpubError;
+use crate::limits::ResourceLimits;
 
 /// Bibliographic metadata extracted from the OPF `<metadata>` section.
 /// Author/subject lists keep every `dc:creator`/`dc:subject` (normalized
@@ -54,11 +55,15 @@ pub struct OpfPackage {
     pub legacy_cover_id: Option<String>,
 }
 
-/// Parse an EPUB package document (OPF) from XML text.
-pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
+/// Parse an EPUB package document (OPF) from XML text. Document size,
+/// nesting depth, and every extracted metadata string are bounded by
+/// `limits` (R-1).
+pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
+    let mut depth = 0usize;
     let mut metadata = EpubMetadata::default();
     let mut manifest: HashMap<String, ManifestItem> = HashMap::new();
     let mut spine = Vec::new();
@@ -81,6 +86,8 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
+                depth += 1;
+                limits.check_xml_depth(depth)?;
                 let local = local_name(e.name().into_inner());
                 match (section.as_deref(), local) {
                     (None, "metadata") | (None, "manifest") | (None, "spine") => {
@@ -159,12 +166,14 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                 }
             }
             Ok(Event::End(ref e)) => {
+                depth = depth.saturating_sub(1);
                 let local = local_name(e.name().into_inner());
                 if let Some(target) = text_target.take() {
                     let value = text_buf.trim().to_string();
                     let element_id = text_element_id.take();
                     let refines = pending_refines.take();
                     if !value.is_empty() {
+                        limits.check_metadata_string(&value)?;
                         match target {
                             "title" => titles.push((element_id, value)),
                             "creator" => metadata.authors.push(value),
@@ -352,6 +361,7 @@ pub(crate) fn attribute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::ResourceLimits;
 
     const MINIMAL_OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
@@ -385,7 +395,7 @@ mod tests {
 
     #[test]
     fn parses_all_metadata_fields() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.title, "A Minimal Book");
         assert_eq!(opf.metadata.author.as_deref(), Some("Ada Lovelace"));
         assert_eq!(
@@ -416,25 +426,25 @@ mod tests {
                 "",
             )
             .replace(r#"<meta name="calibre:series_index" content="2"/>"#, "");
-        let opf = parse_opf(&without).unwrap();
+        let opf = parse_opf(&without, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series, None);
         assert_eq!(opf.metadata.series_index, None);
 
         // A non-numeric index is dropped, not an error.
         let odd = MINIMAL_OPF.replace(r#"content="2""#, r#"content="two""#);
-        let opf = parse_opf(&odd).unwrap();
+        let opf = parse_opf(&odd, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series.as_deref(), Some("Analytical Engines"));
         assert_eq!(opf.metadata.series_index, None);
 
         // A comma decimal separator parses.
         let comma = MINIMAL_OPF.replace(r#"content="2""#, r#"content="2,5""#);
-        let opf = parse_opf(&comma).unwrap();
+        let opf = parse_opf(&comma, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series_index, Some(2.5));
     }
 
     #[test]
     fn parses_manifest_and_spine() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.spine, vec!["c1".to_string(), "c2".to_string()]);
         let c1 = opf.manifest.get("c1").unwrap();
         assert_eq!(c1.href, "chapter1.xhtml");
@@ -445,20 +455,24 @@ mod tests {
 
     #[test]
     fn detects_legacy_epub2_cover_meta() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.legacy_cover_id.as_deref(), Some("cover-image"));
     }
 
     #[test]
     fn missing_title_is_an_error() {
         let opf = MINIMAL_OPF.replace("<dc:title>A Minimal Book</dc:title>", "");
-        let err = parse_opf(&opf).unwrap_err();
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingTitle), "got: {err:?}");
     }
 
     #[test]
     fn malformed_xml_is_an_error() {
-        let err = parse_opf("<package><metadata></metdata></package>").unwrap_err();
+        let err = parse_opf(
+            "<package><metadata></metdata></package>",
+            &ResourceLimits::DEFAULTS,
+        )
+        .unwrap_err();
         assert!(matches!(err, EpubError::OpfXml(_)), "got: {err:?}");
     }
 
@@ -466,8 +480,30 @@ mod tests {
     fn html_entities_in_text_are_unescaped() {
         let opf = parse_opf(
             r#"<package version="3.0"><metadata><dc:title>A &amp; B</dc:title></metadata></package>"#,
+            &ResourceLimits::DEFAULTS,
         )
         .unwrap();
         assert_eq!(opf.metadata.title, "A & B");
+    }
+
+    #[test]
+    fn parse_opf_rejects_deeply_nested_xml() {
+        let nest_open: String = "<d>".repeat(600);
+        let nest_close: String = "</d>".repeat(600);
+        let opf = format!(
+            r#"<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">{nest_open}<dc:title>Deep</dc:title>{nest_close}</metadata></package>"#
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_opf_rejects_oversized_metadata_string() {
+        let title = "x".repeat(2 << 20);
+        let opf = format!(
+            r#"<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title></metadata></package>"#
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
 }

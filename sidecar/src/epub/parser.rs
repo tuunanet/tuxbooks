@@ -43,13 +43,13 @@ pub fn parse_epub(path: &Path, limits: &ResourceLimits) -> Result<EpubBook, Epub
 
     let container = read_entry(&mut zip, "META-INF/container.xml", limits)?
         .ok_or(EpubError::MissingContainer)?;
-    let opf_path = parse_container_xml(&container)?;
+    let opf_path = parse_container_xml(&container, limits)?;
     deadline.check()?;
 
     let opf_bytes = read_entry(&mut zip, &opf_path, limits)?
         .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
-    let package = parse_opf(&opf_xml)?;
+    let package = parse_opf(&opf_xml, limits)?;
     deadline.check()?;
 
     let spine = resolve_spine(&package)?;
@@ -152,15 +152,29 @@ fn read_mimetype<R: Read + Seek>(
     Ok(())
 }
 
-pub(crate) fn parse_container_xml(bytes: &[u8]) -> Result<String, EpubError> {
+pub(crate) fn parse_container_xml(
+    bytes: &[u8],
+    limits: &ResourceLimits,
+) -> Result<String, EpubError> {
+    limits.check_xml_bytes(bytes.len())?;
     let xml =
         String::from_utf8(bytes.to_vec()).map_err(|e| EpubError::ContainerXml(e.to_string()))?;
     let mut reader = Reader::from_str(&xml);
     reader.config_mut().trim_text(true);
+    let mut depth = 0usize;
 
     loop {
         match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+            Ok(Event::Start(ref e)) => {
+                depth += 1;
+                limits.check_xml_depth(depth)?;
+                if local_name(e.name().into_inner()) == "rootfile" {
+                    if let Some(full_path) = attribute(&e.attributes(), "full-path") {
+                        return Ok(full_path);
+                    }
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
                 if local_name(e.name().into_inner()) == "rootfile" {
                     if let Some(full_path) = attribute(&e.attributes(), "full-path") {
                         return Ok(full_path);
@@ -433,6 +447,28 @@ mod tests {
     #[test]
     fn parse_epub_accepts_fixture_under_default_limits() {
         parse_epub(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
+    }
+
+    #[test]
+    fn parse_epub_rejects_oversized_opf() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bigopf.epub");
+        let mut opf = OPF.to_string();
+        opf.push_str(&format!("<!-- {} -->", "x".repeat(4 << 10)));
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", CONTAINER),
+                ("content.opf", opf.as_bytes()),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_xml_bytes: 100,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
 
     #[test]

@@ -88,12 +88,12 @@ pub fn build_session(
     deadline.check()?;
     let container = read_entry(&mut zip, "META-INF/container.xml", limits)?
         .ok_or(EpubError::MissingContainer)?;
-    let opf_path = parse_container_xml(&container)?;
+    let opf_path = parse_container_xml(&container, limits)?;
     deadline.check()?;
     let opf_bytes = read_entry(&mut zip, &opf_path, limits)?
         .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
-    let package = parse_opf(&opf_xml)?;
+    let package = parse_opf(&opf_xml, limits)?;
     deadline.check()?;
 
     let spine = resolve_spine_entries(&package, &opf_path)?;
@@ -381,8 +381,9 @@ fn parse_toc<R: Read + Seek>(
 fn parse_nav_document(
     xml: &str,
     nav_zip_path: &str,
-    _limits: &ResourceLimits,
+    limits: &ResourceLimits,
 ) -> Result<Vec<TocItem>, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let nav_dir = match nav_zip_path.rfind('/') {
         Some(idx) => &nav_zip_path[..=idx],
         None => "",
@@ -429,9 +430,11 @@ fn parse_nav_document(
                         Some(Scope::Nav { .. }) | Some(Scope::Ol { .. }) | Some(Scope::Li { .. })
                     ) =>
                     {
+                        limits.check_xml_depth(stack.len() + 1)?;
                         stack.push(Scope::Ol { items: Vec::new() });
                     }
                     "li" if matches!(stack.last(), Some(Scope::Ol { .. })) => {
+                        limits.check_xml_depth(stack.len() + 1)?;
                         stack.push(Scope::Li {
                             item: TocItem {
                                 label: String::new(),
@@ -533,8 +536,9 @@ fn parse_nav_document(
 fn parse_ncx_document(
     xml: &str,
     ncx_zip_path: &str,
-    _limits: &ResourceLimits,
+    limits: &ResourceLimits,
 ) -> Result<Vec<TocItem>, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let ncx_dir = match ncx_zip_path.rfind('/') {
         Some(idx) => &ncx_zip_path[..=idx],
         None => "",
@@ -555,6 +559,7 @@ fn parse_ncx_document(
                 let local = local_name(e.name().into_inner());
                 match local {
                     "navPoint" => {
+                        limits.check_xml_depth(open_points.len() + 1)?;
                         open_points.push(TocItem {
                             label: String::new(),
                             href: String::new(),
