@@ -397,6 +397,17 @@ Worker boundary tests drive hostile documents through the real
 `tuxbooks-worker` and pin that the typed error comes back and the worker
 still serves the next benign job.
 
+One known soft spot, kept honest rather than papered over: the PDF
+decompression-bomb fixture (`pdf_decompression_bomb_is_contained_by_the_worker`)
+asserts containment (a typed worker outcome, bounded time, sidecar alive),
+not a specific trip, because the component that answers the bomb is inside
+lopdf/the allocator, not tuxbooks code. The trip-level obligation belongs
+to #88: fuzzing hunts minimized bombs and lands them here as builders with
+trip-level assertions. The concrete candidate the corpus work surfaced:
+lopdf's `LoadOptions::max_decompressed_size` bounds exactly this class
+(eager xref/object-stream inflation) and the parse path leaves it unset;
+wiring it would turn the containment into a typed trip.
+
 `just test` and `just check` run the corpus layers with everything else
 (`security_corpus.rs` on the Rust stream, the corpus vitest file on the
 frontend stream); no extra command is needed.
