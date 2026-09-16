@@ -90,7 +90,10 @@ pub(crate) fn check_archive_totals<R: Read + Seek>(
         if entry.is_dir() {
             continue;
         }
-        total += entry.size();
+        // Declared sizes are hostile input: saturate instead of wrapping,
+        // so two entries declaring 2^63 cannot alias the total back under
+        // the budget in release builds (R-1).
+        total = total.saturating_add(entry.size());
     }
     limits.check_total_uncompressed(total)?;
     Ok(())
@@ -366,11 +369,59 @@ pub(crate) mod tests_support {
         }
         zip.finish().unwrap();
     }
+
+    /// Like [`write_zip`], but every entry carries zip64 size fields
+    /// (`large_file`), so the declared sizes can be rewritten to values
+    /// beyond u32 by [`patch_zip64_declared_sizes`].
+    pub(crate) fn write_zip_large(path: &Path, entries: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for (name, data) in entries {
+            zip.start_file(
+                *name,
+                zip::write::SimpleFileOptions::default().large_file(true),
+            )
+            .unwrap();
+            zip.write_all(data).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    /// Overwrite the declared uncompressed size (the first 8-byte zip64
+    /// field) in every central directory record. This forges the sizes the
+    /// reader reports, exactly what a hostile archive lies about.
+    pub(crate) fn patch_zip64_declared_sizes(bytes: &mut [u8], size: u64) {
+        let declared = size.to_le_bytes();
+        let mut i = 0;
+        while i + 46 <= bytes.len() {
+            if &bytes[i..i + 4] != b"PK\x01\x02" {
+                i += 1;
+                continue;
+            }
+            let name_len = u16::from_le_bytes([bytes[i + 28], bytes[i + 29]]) as usize;
+            let extra_len = u16::from_le_bytes([bytes[i + 30], bytes[i + 31]]) as usize;
+            let comment_len = u16::from_le_bytes([bytes[i + 32], bytes[i + 33]]) as usize;
+            let extra_start = i + 46 + name_len;
+            let extra_end = (extra_start + extra_len).min(bytes.len());
+            let mut j = extra_start;
+            while j + 4 <= extra_end {
+                let id = u16::from_le_bytes([bytes[j], bytes[j + 1]]);
+                let field_len = u16::from_le_bytes([bytes[j + 2], bytes[j + 3]]) as usize;
+                if id == 1 && field_len >= 8 && j + 4 + 8 <= extra_end {
+                    bytes[j + 4..j + 4 + 8].copy_from_slice(&declared);
+                }
+                j += 4 + field_len;
+            }
+            i = extra_start + extra_len + comment_len;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::tests_support::{fixture_epub, write_zip};
+    use super::tests_support::{
+        fixture_epub, patch_zip64_declared_sizes, write_zip, write_zip_large,
+    };
     use super::*;
     use crate::epub::{read_member, read_member_reader};
     use crate::limits::ResourceLimits;
@@ -471,6 +522,22 @@ mod tests {
             ..ResourceLimits::DEFAULTS
         };
         let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn check_archive_totals_saturates_hostile_declared_totals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("wrap.epub");
+        write_zip_large(&path, &[("a.bin", &[0u8; 8]), ("b.bin", &[0u8; 8])]);
+        let mut bytes = std::fs::read(&path).unwrap();
+        // Two entries declaring 2^63 each: a wrapping u64 sum aliases back
+        // to 0 in release builds and slips past the R-1 pre-scan.
+        patch_zip64_declared_sizes(&mut bytes, 1u64 << 63);
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(zip.by_index(0).unwrap().size(), 1u64 << 63);
+        assert_eq!(zip.by_index(1).unwrap().size(), 1u64 << 63);
+        let err = check_archive_totals(&mut zip, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
 
