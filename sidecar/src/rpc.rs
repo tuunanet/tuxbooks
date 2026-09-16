@@ -487,20 +487,26 @@ pub async fn serve() -> i32 {
     0
 }
 
-/// Parse one request line and dispatch it. Malformed JSON without an id
-/// cannot be answered (JSON-RPC id is required here), so it is logged.
-fn handle_line(
+/// Outcome of one request line through the boundary logic.
+pub enum RequestLineOutcome {
+    /// A formatted JSON-RPC response line (result or error object).
+    Response(String),
+    /// Not decodable JSON: nothing is answerable. `handle_line` logs it.
+    Malformed(String),
+}
+
+/// One request line taken through decode, envelope validation, dispatch,
+/// and response formatting. Split out from `handle_line` so the fuzz
+/// target (issue #88) drives the exact boundary code instead of a mirror
+/// of it.
+pub async fn handle_request_line(
     state: &Arc<AppState>,
     events: &EventEmitter,
-    tx: &mpsc::UnboundedSender<String>,
     line: &str,
-) {
+) -> RequestLineOutcome {
     let request: Value = match serde_json::from_str(line) {
         Ok(value) => value,
-        Err(err) => {
-            eprintln!("malformed request: {err}");
-            return;
-        }
+        Err(err) => return RequestLineOutcome::Malformed(err.to_string()),
     };
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = match request.get("method").and_then(Value::as_str) {
@@ -510,21 +516,36 @@ fn handle_line(
                 code: -32600,
                 message: "request is missing the method field".into(),
             };
-            let _ignored = tx.send(format!("{}\n", err.error_response(id)));
-            return;
+            return RequestLineOutcome::Response(format!("{}\n", err.error_response(id)));
         }
     };
     let params = request.get("params").cloned().unwrap_or(json!({}));
+    let body = match dispatch(state, events, &method, params).await {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
+        Err(err) => err.error_response(id).to_string(),
+    };
+    RequestLineOutcome::Response(format!("{body}\n"))
+}
 
+/// Parse one request line and dispatch it. Malformed JSON without an id
+/// cannot be answered (JSON-RPC id is required here), so it is logged.
+fn handle_line(
+    state: &Arc<AppState>,
+    events: &EventEmitter,
+    tx: &mpsc::UnboundedSender<String>,
+    line: &str,
+) {
     let state = state.clone();
     let events = events.clone();
     let tx = tx.clone();
+    let line = line.to_string();
     tokio::spawn(async move {
-        let line = match dispatch(&state, &events, &method, params).await {
-            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
-            Err(err) => err.error_response(id).to_string(),
-        };
-        let _ignored = tx.send(format!("{line}\n"));
+        match handle_request_line(&state, &events, &line).await {
+            RequestLineOutcome::Response(response) => {
+                let _ignored = tx.send(response);
+            }
+            RequestLineOutcome::Malformed(err) => eprintln!("malformed request: {err}"),
+        }
     });
 }
 

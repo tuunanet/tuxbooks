@@ -179,10 +179,7 @@ fn read_mimetype<R: Read + Seek>(
     Ok(())
 }
 
-pub(crate) fn parse_container_xml(
-    bytes: &[u8],
-    limits: &ResourceLimits,
-) -> Result<String, EpubError> {
+pub fn parse_container_xml(bytes: &[u8], limits: &ResourceLimits) -> Result<String, EpubError> {
     limits.check_xml_bytes(bytes.len())?;
     let xml =
         String::from_utf8(bytes.to_vec()).map_err(|e| EpubError::ContainerXml(e.to_string()))?;
