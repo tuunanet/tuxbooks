@@ -14,8 +14,11 @@
 
 - TDD: each task's failing test exists and is observed failing (RED) before implementation (GREEN). Compile errors naming the missing API count as RED, matching the #83 plan convention.
 - No new dependencies. `limits` stays std + thiserror + serde. Worker modules use std, libc, serde, base64, thiserror, and `tuxbooks_lib` parse modules only. Nothing reachable from `worker_main.rs` may touch `sqlx`, the repository, or `notify`.
-- Sandbox tests never weaken the test process: Landlock is thread-scoped (safe to apply in a test thread), but a seccomp filter is process-wide and irreversible, so the seccomp proof always runs in a forked child, and no test calls `prepare()` itself. The pure fail-closed decision gets its own seam (`sandbox::check`) so it is testable without applying anything.
-- The worker inherits nothing: `env_clear()` at spawn, fds 0/1/2/3 only, no paths on argv, PDFium directories travel in the job payload (W-7).
+- Sandbox tests never weaken the test process: Landlock is thread-scoped (safe to apply in a test thread), but a seccomp filter is process-wide and irreversible, so the seccomp proof always runs in a forked child with the BPF program built before the fork (M2), and no test calls `prepare()` itself. The pure fail-closed decision gets its own seam (`sandbox::check`) so it is testable without applying anything.
+- The worker inherits nothing: `env_clear()` at spawn, fds 0/1/2/3 only (`close_range(4, u32::MAX)` in `pre_exec` enforces it on Linux, W-7), no paths on argv, PDFium directories travel in the job payload.
+- C1 exit contract: the worker exits 0 whenever it wrote a well-formed response (Done or Failed) and nonzero only when none exists; the client parses the response before consulting the exit status. Without this, every typed worker failure would collapse into `Crash`/-32004.
+- Landlock owns filesystem denial only; network denial is seccomp's job (`socket` denied unconditionally, which closes TCP, UDP, AF_UNIX, and netlink on every supported kernel). Landlock's network ABI is not used (ADR 0001 D3 rejection; also removes the E2BIG attr-size hazard, C2).
+- Embed sources are capped at `MAX_EMBED_SOURCE_BYTES` = 512 MiB so source, rewrite, and base64 output fit the 3 GiB address-space rlimit together (I2).
 - Fail closed everywhere: missing worker binary, unavailable Linux sandbox, failed self-verification, and malformed worker output all produce typed errors and never fall back to in-process parsing.
 - The worker response cap is 2 GiB (`MAX_WORKER_RESPONSE_BYTES`), staying above the sidecar 1 GiB source quota including base64 growth (Task 2 ledger).
 - Worker-sourced sidecar failures surface as typed JSON-RPC codes (Task 2 ledger): deadline -32001, limit -32002, sandbox -32003, other worker failures -32004.
@@ -30,8 +33,8 @@
 | --------------- | --------- |
 | W-1, P-1 (parse/extract/cover in the worker) | Tasks 3-5 (ops), Task 7 (sidecar routing flips traffic) |
 | W-5 (opaque handle, no FS authority) | Tasks 3-5 (fd handoff), Task 6 (Landlock deny-all + self-verification) |
-| W-2, W-3, W-4 (no DB/network/spawn) | Task 6 (Landlock + seccomp + selftest probes) |
-| W-6, W-8 (bounded typed results, limits) | Tasks 1, 3, 8 (typed response, quotas in the job, deadline kill, rlimits, response cap) |
+| W-2, W-3, W-4 (no DB/network/spawn) | Task 6 (Landlock FS denial, seccomp incl. unconditional socket denial, selftest probes) |
+| W-6, W-8 (bounded typed results, limits) | Tasks 1, 3, 8 (typed response, quotas in the job, deadline kill, rlimits, SIGXCPU mapped to a typed limit, embed source cap, response cap) |
 | W-7 (minimal privileges/environment) | Task 3 (env_clear, fd set, argv) |
 | W-9 (killable, restartable, sidecar survives) | Task 3 (client kill/crash handling), Task 8 (service-level containment) |
 | W-10 (Linux sandbox layer) | Task 6 (Landlock, seccomp, rlimits, fail closed) |
@@ -144,7 +147,7 @@ pub struct SandboxSelfTest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum LandlockStatus {
-    Applied { abi: u32, network: bool },
+    Applied { abi: u32 },
     Unsupported,
     NotApplicable,
 }
@@ -152,6 +155,12 @@ pub enum LandlockStatus {
 /// Hard cap on one worker response (Task 2 ledger): above the sidecar
 /// 1 GiB source quota including base64 growth (1 GiB -> ~1.37 GiB).
 pub const MAX_WORKER_RESPONSE_BYTES: usize = 2 << 30;
+
+/// Embed jobs cap the source document below the address-space rlimit
+/// (ADR 0001, I2): source + rewritten document + base64 output (x4/3)
+/// must fit `WORKER_ADDRESS_SPACE_CAP` together, and a specific
+/// bounded-resource error beats an allocator abort surfacing as a crash.
+pub const MAX_EMBED_SOURCE_BYTES: u64 = 512 << 20;
 ```
 
 - [ ] **Step 1: Write the failing tests** in `sidecar/src/worker/proto.rs` (create the file with just the test module and imports; `sidecar/src/worker/mod.rs` and the `lib.rs` line are added so the module resolves)
@@ -244,7 +253,7 @@ pub mod proto;
 
 pub use proto::{
     LandlockStatus, MetadataPayload, SandboxSelfTest, WorkerErrorKind, WorkerJob, WorkerOp,
-    WorkerResponse, MAX_WORKER_RESPONSE_BYTES,
+    WorkerResponse, MAX_EMBED_SOURCE_BYTES, MAX_WORKER_RESPONSE_BYTES,
 };
 ```
 
@@ -428,6 +437,10 @@ pub struct WorkerClient { binary_path: PathBuf }
 pub enum WorkerError {
     #[error("document worker unavailable: {0}")]
     Unavailable(String),
+    /// The sidecar could not open the document at all: distinct from a
+    /// missing worker binary (M4), same -32004 code.
+    #[error("document could not be opened by the sidecar: {0}")]
+    Document(String),
     #[error("document worker protocol error: {0}")]
     Protocol(String),
     #[error("resource limit exceeded: {0}")]
@@ -717,7 +730,7 @@ impl WorkerClient {
 
     pub fn run(&self, job: &WorkerJob, document: &Path) -> Result<WorkerResponse, WorkerError> {
         let file = std::fs::File::open(document)
-            .map_err(|err| WorkerError::Unavailable(format!("document open: {err}")))?;
+            .map_err(|err| WorkerError::Document(format!("{document}: {err}")))?;
         let fd = file.as_raw_fd();
         let mut child = Command::new(&self.binary_path)
             .stdin(Stdio::piped())
@@ -725,6 +738,18 @@ impl WorkerClient {
             .stderr(Stdio::inherit())
             .env_clear()
             .pre_exec(move || {
+                // Enforce the fd contract (W-7, ADR 0001 D2): everything
+                // above 3 goes, then the document lands on fd 3. close_range
+                // is Linux 5.9+, below the 5.13 sandbox floor; on other
+                // unixes std's close-on-exec discipline is the documented
+                // fallback. Failing closed here beats spawning with leaked
+                // descriptors.
+                #[cfg(target_os = "linux")]
+                {
+                    if libc::close_range(4, u32::MAX, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
                 if libc::dup2(fd, 3) == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
@@ -756,8 +781,11 @@ impl WorkerClient {
                 .read_to_end(&mut buf);
             let _ = tx.send((buf, outcome));
         });
-        let (buf, outcome) = rx.recv_timeout(Self::budget(&job.limits)).map_err(|_| {
+        let (buf, _outcome) = rx.recv_timeout(Self::budget(&job.limits)).map_err(|_| {
             let _ = child.kill();
+            // M1: reap before returning, or the killed worker stays a
+            // zombie for the lifetime of this process.
+            let _ = child.wait();
             let _ = reader.join();
             WorkerError::Deadline
         })?;
@@ -770,20 +798,29 @@ impl WorkerClient {
                 "worker response exceeded the response-line cap".to_string(),
             ));
         }
-        if outcome.is_err() {
-            return Err(WorkerError::Protocol("worker response read failed".to_string()));
+
+        // C1: the worker exits 0 whenever it wrote a well-formed response,
+        // including `Failed` responses, so the response is parsed BEFORE the
+        // exit status is consulted. A nonzero exit only means "no well-formed
+        // response existed", which is where crash mapping belongs. A worker
+        // that crashes after writing a well-formed response still gets its
+        // response honored: the response is the contract.
+        if buf.is_empty() {
+            return Err(crash_error(&status, "worker produced no response"));
         }
-        if !status.success() {
-            return Err(WorkerError::Crash(format!(
-                "exit code {:?} signal {:?}",
-                status.code(),
-                status.signal()
-            )));
-        }
-        let line = std::str::from_utf8(&buf)
-            .map_err(|err| WorkerError::Protocol(format!("utf8: {err}")))?;
-        let response: WorkerResponse = serde_json::from_str(line.trim())
-            .map_err(|err| WorkerError::Protocol(format!("worker response: {err}")))?;
+        let line = match std::str::from_utf8(&buf) {
+            Ok(line) => line,
+            Err(_) => return Err(crash_error(&status, "worker response was not utf8")),
+        };
+        let response: WorkerResponse = match serde_json::from_str(line.trim()) {
+            Ok(response) => response,
+            Err(err) => {
+                return Err(crash_error(
+                    &status,
+                    &format!("worker response was not a well-formed result: {err}"),
+                ));
+            }
+        };
         match response {
             WorkerResponse::Done { .. } => Ok(response),
             WorkerResponse::Failed { kind, message, limit } => Err(match kind {
@@ -823,6 +860,24 @@ impl WorkerClient {
         }
     }
 }
+
+/// Map a worker that produced no well-formed response onto the typed error
+/// space (I3): an `RLIMIT_CPU` kill is a resource-limit failure, not a
+/// mystery crash, so SIGXCPU maps to a typed limit error and everything
+/// else to `Crash`.
+fn crash_error(status: &std::process::ExitStatus, detail: &str) -> WorkerError {
+    if status.signal() == Some(libc::SIGXCPU) {
+        return WorkerError::Limit(crate::limits::LimitExceeded {
+            limit: "RLIMIT_CPU",
+            detail: "worker was killed by its CPU rlimit".to_string(),
+        });
+    }
+    WorkerError::Crash(format!(
+        "{detail} (exit code {:?} signal {:?})",
+        status.code(),
+        status.signal()
+    ))
+}
 ```
 
 `sidecar/src/worker/mod.rs` gains:
@@ -834,8 +889,20 @@ pub mod proto;
 pub use client::{WorkerClient, WorkerError};
 pub use proto::{
     LandlockStatus, MetadataPayload, SandboxSelfTest, WorkerErrorKind, WorkerJob, WorkerOp,
-    WorkerResponse, MAX_WORKER_RESPONSE_BYTES,
+    WorkerResponse, MAX_EMBED_SOURCE_BYTES, MAX_WORKER_RESPONSE_BYTES,
 };
+
+/// Typed refusal for an embed source over the cap, or `None` when it fits.
+/// Extracted as a pure function so the cap is testable without a 513 MiB
+/// fixture (ADR 0001, I2).
+pub fn embed_source_error(len: u64) -> Option<(&'static str, String)> {
+    (len > MAX_EMBED_SOURCE_BYTES).then(|| {
+        (
+            "max_embed_source_bytes",
+            format!("embed source is {len} bytes, over the {MAX_EMBED_SOURCE_BYTES} byte embed cap"),
+        )
+    })
+}
 
 /// W-11: die with the sidecar. Lifecycle containment only (a compromised
 /// worker can clear it); every other layer stands without it.
@@ -912,15 +979,19 @@ fn run() -> i32 {
         }
     };
     let response = tuxbooks_lib::worker::run_job(&job, document.as_mut());
-    let ok = matches!(response, WorkerResponse::Done { .. });
     let line = serde_json::to_string(&response).expect("worker response serializes");
     let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{line}");
-    let _ = stdout.flush();
-    if ok {
-        0
-    } else {
-        1
+    // C1 exit contract (ADR 0001 D1): exit 0 whenever a well-formed response
+    // went out, whether it reports success or a typed failure. A nonzero
+    // exit means no well-formed response exists, which is the only thing the
+    // sidecar reads as a crash. Returning 1 on a Failed response would
+    // collapse every typed parse, limit, and sandbox error into Crash.
+    match writeln!(stdout, "{line}").and_then(|_| stdout.flush()) {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("worker: response write failed: {err}");
+            1
+        }
     }
 }
 
@@ -956,8 +1027,11 @@ fn fail(kind: WorkerErrorKind, message: String) -> i32 {
     let response = WorkerResponse::Failed { kind, message, limit: None };
     let line = serde_json::to_string(&response).expect("failure response serializes");
     let mut stdout = std::io::stdout().lock();
-    let _ = writeln!(stdout, "{line}");
-    1
+    // The Failed response is well-formed, so the C1 exit contract gives it 0.
+    match writeln!(stdout, "{line}").and_then(|_| stdout.flush()) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
 }
 ```
 
@@ -1435,6 +1509,17 @@ fn embed_rejects_a_hostile_document_instead_of_rewriting_it() {
         .unwrap_err();
     assert!(matches!(err, WorkerError::Parse(_)), "got: {err:?}");
 }
+
+#[test]
+fn embed_sources_over_the_cap_are_refused_without_reading() {
+    // I2: source + rewrite + base64 must fit the address-space rlimit
+    // together, so oversized embeds are refused up front with a typed
+    // limit error naming the cap.
+    let (limit, _) = tuxbooks_lib::worker::embed_source_error(513 << 20)
+        .expect("513 MiB exceeds the embed cap");
+    assert_eq!(limit, "max_embed_source_bytes");
+    assert!(tuxbooks_lib::worker::embed_source_error(511 << 20).is_none());
+}
 ```
 
 - [ ] **Step 2: Run and verify RED**
@@ -1448,19 +1533,26 @@ Expected: compile failure, no `epub_embed` wrapper.
 
 ```rust
         WorkerOp::EpubEmbed => match &job.metadata {
-            Some(MetadataPayload::Epub(metadata)) => done_bytes(
-                crate::epub::rewrite_epub_bytes(
-                    std::io::BufReader::new(&*document),
-                    metadata,
-                    limits,
-                )?,
-            ),
+            Some(MetadataPayload::Epub(metadata)) => {
+                enforce_embed_cap(document)?;
+                done_bytes(
+                    crate::epub::rewrite_epub_bytes(
+                        std::io::BufReader::new(&*document),
+                        metadata,
+                        limits,
+                    )?,
+                )
+            }
             _ => Err(JobError::worker("epub_embed requires epub metadata".to_string())),
         },
         WorkerOp::PdfEmbed => match &job.metadata {
             Some(MetadataPayload::Pdf(metadata)) => {
+                enforce_embed_cap(document)?;
                 let bytes = read_fd_bounded(document, limits)?;
-                done_bytes(crate::pdf::rewrite_pdf_bytes(&bytes, metadata, limits)?)
+                let rewritten = crate::pdf::rewrite_pdf_bytes(&bytes, metadata, limits)?;
+                // I2: halve the peak before the base64 copy is allocated.
+                drop(bytes);
+                done_bytes(rewritten)
             }
             _ => Err(JobError::worker("pdf_embed requires pdf metadata".to_string())),
         },
@@ -1468,6 +1560,24 @@ Expected: compile failure, no `epub_embed` wrapper.
 
 (the catch-all arm shrinks to `WorkerOp::SelfTest` only, which never reaches `dispatch` anyway).
 
+The embed cap helper, next to `embed_source_error` in `worker/mod.rs` (I2: a 1 GiB embed would need source + rewrite + base64, about 3.4 GiB against the 3 GiB `RLIMIT_AS`; the cap refuses such jobs up front with a typed limit error instead of an allocator abort that would surface as a crash):
+
+```rust
+fn enforce_embed_cap(document: &std::fs::File) -> Result<(), JobError> {
+    let len = document
+        .metadata()
+        .map_err(|err| JobError::parse(err.to_string()))?
+        .len();
+    match embed_source_error(len) {
+        Some((limit, message)) => Err(JobError {
+            kind: WorkerErrorKind::Limit,
+            message,
+            limit: Some(limit),
+        }),
+        None => Ok(()),
+    }
+}
+```
 `client.rs` wrappers (same shape as `epub_parse`, `bytes_b64` required):
 
 ```rust
@@ -1544,9 +1654,9 @@ pub fn check(status: &LandlockStatus) -> Result<(), String>;
 pub fn prepare(limits: &ResourceLimits) -> Result<SandboxReport, String>;
 ```
 
-**Fixed startup order (ADR 0001 D3):** PDEATHSIG (already in `worker_main`) then, inside `prepare`: `prctl(PR_SET_NO_NEW_PRIVS)`, Landlock apply (all FS access denied; TCP bind/connect denied from ABI 4), seccomp deny-list, rlimits (`RLIMIT_CPU` soft = `max_parse_seconds`, hard = +5 s; `RLIMIT_AS` = `WORKER_ADDRESS_SPACE_CAP` = 3 GiB; `RLIMIT_FSIZE` = 0, the worker writes no files), self-verification (attempt `open("/proc/self/status")` expecting denial; attempt `socket(AF_INET, SOCK_STREAM)` expecting denial). PDFium loading happens in `worker_main` before `prepare` (D3 ordering), so `prepare` never needs the filesystem.
+**Fixed startup order (ADR 0001 D3):** PDEATHSIG (already in `worker_main`) then, inside `prepare`: `prctl(PR_SET_NO_NEW_PRIVS)`, Landlock apply (all FS access denied; filesystem only, no network handling), seccomp deny-list, rlimits (`RLIMIT_CPU` soft = `max_parse_seconds`, hard = +5 s; `RLIMIT_AS` = `WORKER_ADDRESS_SPACE_CAP` = 3 GiB; `RLIMIT_FSIZE` = 0, the worker writes no files), self-verification (attempt `open("/proc/self/status")` expecting denial; attempt `socket(AF_INET, SOCK_STREAM)` expecting denial). PDFium loading happens in `worker_main` before `prepare` (D3 ordering), so `prepare` never needs the filesystem.
 
-**Seccomp deny-list** (classic BPF, action `SECCOMP_RET_ERRNO | EPERM`, default `SECCOMP_RET_ALLOW`, syscall numbers from `libc` `SYS_*` constants, arch-checked against `AUDIT_ARCH_X86_64` / `AUDIT_ARCH_AARCH64` by build target): `execve`, `execveat`, `fork`, `vfork`, `clone`/`clone3` where the flag word carries any of `CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS` (plain thread clones pass), `unshare`, `setns`, `mount`, `umount2`, `ptrace`, `bpf`, `keyctl`, `kexec_load`, `kexec_file_load`, `open_by_handle_at`, `name_to_handle_at`, `reboot`, `swapon`, `swapoff`, `init_module`, `finit_module`, `delete_module`; plus, only when Landlock's network ABI is missing, `socket`, `socketpair`, `connect`, `bind`, `listen`, `accept`, `accept4`, `sendto`, `recvfrom`.
+**Seccomp deny-list** (classic BPF, action `SECCOMP_RET_ERRNO | EPERM`, default `SECCOMP_RET_ALLOW`, syscall numbers from `libc` `SYS_*` constants, arch-checked against `AUDIT_ARCH_X86_64` / `AUDIT_ARCH_AARCH64` by build target): `execve`, `execveat`, `fork`, `vfork`, `clone`/`clone3` where the flag word carries any of `CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS` (plain thread clones pass), `unshare`, `setns`, `mount`, `umount2`, `ptrace`, `bpf`, `keyctl`, `kexec_load`, `kexec_file_load`, `open_by_handle_at`, `name_to_handle_at`, `reboot`, `swapon`, `swapoff`, `init_module`, `finit_module`, `delete_module`; and `socket`, `socketpair`, `connect`, `bind`, `listen`, `accept`, `accept4`, `sendto`, `recvfrom` unconditionally. Denying `socket` outright is what owns W-3: one rule closes TCP, UDP, AF_UNIX, and netlink creation on every supported kernel, which is why Landlock's network ABI (TCP bind/connect only, kernel 6.7+) was dropped.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1561,9 +1671,35 @@ mod tests {
     #[test]
     fn unsupported_landlock_fails_closed() {
         assert!(check(&LandlockStatus::Unsupported).is_err());
-        assert!(check(&LandlockStatus::Applied { abi: 4, network: true }).is_ok());
+        assert!(check(&LandlockStatus::Applied { abi: 4 }).is_ok());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn handled_fs_bits_track_the_probed_abi() {
+        // C2 pin: handled bits grow only with the ABI the kernel reported,
+        // so an older kernel never handles an access bit it cannot enforce.
+        let abi1 = fs_bits(1);
+        assert_eq!(abi1 & (1 << 13), 0, "REFER is ABI 2+");
+        let abi2 = fs_bits(2);
+        assert_ne!(abi2 & (1 << 13), 0);
+        assert_eq!(abi2 & (1 << 14), 0, "TRUNCATE is ABI 3+");
+        assert_eq!(fs_bits(3) & (1 << 14), 1 << 14);
+        assert_eq!(fs_bits(5) & (1 << 15), 1 << 15, "IOCTL_DEV is ABI 5+");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn landlock_ruleset_attr_is_fs_only_so_no_e2big_negotiation_exists() {
+        // C2 pin: the attribute is the 8-byte fs-only struct every
+        // Landlock kernel accepts. The 16-byte struct with
+        // handled_access_net is rejected with E2BIG on kernels below 6.7,
+        // which is one reason the network bits are gone.
+        assert_eq!(
+            std::mem::size_of::<landlock_ffi::LandlockRulesetAttr>(),
+            std::mem::size_of::<u64>()
+        );
+    }
     #[test]
     fn landlock_denies_open_in_the_applying_thread() {
         if !landlock_supported() {
@@ -1583,18 +1719,24 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn seccomp_denies_socket_creation() {
-        // A seccomp filter is process-wide and irreversible: prove it in a
-        // forked child that installs the filter and probes socket().
+        // A seccomp filter is process-wide and irreversible, and the test
+        // process is multithreaded: the BPF program is built BEFORE the
+        // fork (M2), so the forked child only runs async-signal-safe
+        // syscalls (install, socket, _exit).
         if !landlock_supported() {
             eprintln!("skipping: sandbox layer only meaningful on supported kernels");
             return;
         }
+        let program = build_seccomp_program();
         let pid = unsafe { libc::fork() };
         assert!(pid >= 0);
         if pid == 0 {
-            install_seccomp_deny_list(true).expect("filter installs");
+            if install_seccomp_program(&program).is_err() {
+                unsafe { libc::_exit(2) };
+            }
             let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
             let denied = fd == -1 && unsafe { *libc::__errno_location() } == libc::EPERM;
             unsafe { libc::_exit(if denied { 0 } else { 1 }) };
@@ -1661,21 +1803,22 @@ fn worker_refuses_to_parse_when_the_sandbox_cannot_apply() {
 - [ ] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml sandbox`
-Expected: compile failure, no `sandbox` module items (`check`, `apply_landlock_deny_all`, `install_seccomp_deny_list` missing).
+Expected: compile failure, no `sandbox` module items (`check`, `apply_landlock_deny_all`, `build_seccomp_program`, `install_seccomp_program` missing).
 
 - [ ] **Step 3: Implement** `sidecar/src/worker/sandbox.rs`:
 
 ```rust
 //! The worker's own OS containment (ADR 0001 D3, W-2..W-5, W-10, W-11).
 //! Three dependency-free layers applied by the worker itself, then proven:
-//! Landlock (all filesystem access denied, TCP bind/connect where the ABI
-//! is 4+), a seccomp classic-BPF deny-list (exec/spawn/namespaces/debug,
-//! plus sockets where Landlock's network ABI is missing), and rlimits.
-//! Self-verification closes the loop: if the probes do not observe the
-//! claimed denials, the job fails with a typed sandbox error. Nothing here
-//! is root-required or display-dependent; all of it is testable headless
-//! in CI. Landlock is thread-scoped; seccomp is process-wide, which is why
-//! tests exercise seccomp only in forked children.
+//! Landlock (all filesystem access denied; filesystem only), a seccomp
+//! classic-BPF deny-list (exec/spawn/namespaces/debug syscalls, plus socket
+//! creation unconditionally: TCP, UDP, AF_UNIX, and netlink in one rule),
+//! and rlimits. Self-verification closes the loop: if the probes do not
+//! observe the claimed denials, the job fails with a typed sandbox error.
+//! Nothing here is root-required or display-dependent; all of it is
+//! testable headless in CI. Landlock is thread-scoped; seccomp is
+//! process-wide, which is why tests exercise seccomp only in forked
+//! children, with the program built before the fork.
 
 use std::fs::File;
 
@@ -1683,7 +1826,9 @@ use crate::limits::ResourceLimits;
 use crate::worker::proto::LandlockStatus;
 
 /// Address-space ceiling for one job (W-8): headroom over the 2 GiB
-/// total-uncompressed quota plus parser and PDFium working set.
+/// total-uncompressed quota plus parser and PDFium working set. Embed
+/// sources are additionally capped at `MAX_EMBED_SOURCE_BYTES` so the
+/// source, the rewritten document, and the base64 output fit together.
 pub const WORKER_ADDRESS_SPACE_CAP: u64 = 3 << 30;
 
 /// The pure fail-closed decision: Linux parses nothing without Landlock.
@@ -1711,23 +1856,25 @@ pub fn prepare(limits: &ResourceLimits) -> Result<SandboxReport, String> {
     // 1. PR_SET_NO_NEW_PRIVS: required by Landlock's restrict_self and by
     //    seccomp; also prevents privilege escalation through exec.
     set_no_new_privs()?;
-    // 2. Landlock deny-all: every handled FS access (and TCP bind/connect
-    //    from ABI 4) is denied because the ruleset carries zero rules.
+    // 2. Landlock deny-all: every handled FS access is denied because the
+    //    ruleset carries zero rules. Filesystem only; the network is
+    //    seccomp's job (see below).
     let landlock = if cfg!(target_os = "linux") {
         apply_landlock_deny_all().map_err(|err| format!("landlock: {err}"))?
     } else {
         LandlockStatus::NotApplicable
     };
-    // 3. seccomp deny-list: exec/spawn/namespaces/debug syscalls; sockets
-    //    only where Landlock could not handle the network.
-    let seccomp_applied = install_seccomp(&landlock)?;
-    // 4. rlimits: CPU, address space, no file writes.
-    apply_rlimits(limits)?;
+    // 3. seccomp deny-list: exec/spawn/namespaces/debug syscalls, and
+    //    socket creation unconditionally (owns W-3 on every kernel).
+    let seccomp_applied = install_seccomp()?;
+    // 4. rlimits: CPU, address space, no file writes (Linux; the report
+    //    records honestly what applied on each platform).
+    let rlimits_applied = apply_rlimits(limits)?;
     // 5. self-verification: the probes must observe the claimed denials.
     let report = SandboxReport {
         landlock,
         seccomp_applied,
-        rlimits_applied: true,
+        rlimits_applied,
         verified: false,
     };
     self_verify(&report)?;
@@ -1738,7 +1885,7 @@ pub fn landlock_abi() -> LandlockStatus {
     #[cfg(target_os = "linux")]
     {
         match probe_landlock_abi() {
-            Some(abi) => LandlockStatus::Applied { abi, network: abi >= 4 },
+            Some(abi) => LandlockStatus::Applied { abi },
             None => LandlockStatus::Unsupported,
         }
     }
@@ -1753,12 +1900,20 @@ pub fn landlock_supported() -> bool {
 }
 
 pub fn probe_socket_denied() -> bool {
-    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
-    if fd == -1 {
-        return unsafe { *libc::__errno_location() } == libc::EPERM;
+    #[cfg(target_os = "linux")]
+    {
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        if fd == -1 {
+            return unsafe { *libc::__errno_location() } == libc::EPERM;
+        }
+        unsafe { libc::close(fd) };
+        false
     }
-    unsafe { libc::close(fd) };
-    false
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No sandbox layer claims network denial off Linux.
+        false
+    }
 }
 
 pub fn self_verify(report: &SandboxReport) -> Result<(), String> {
@@ -1767,35 +1922,56 @@ pub fn self_verify(report: &SandboxReport) -> Result<(), String> {
             return Err("self-verification failed: filesystem denial not in effect".to_string());
         }
     }
+    // C3: socket denial is claimed whenever seccomp applied (always on
+    // Linux), so the probe must observe it unconditionally. There is no
+    // ABI-4 branch left to disagree with the layering.
     if report.seccomp_applied && !probe_socket_denied() {
         return Err("self-verification failed: network denial not in effect".to_string());
     }
     Ok(())
 }
 
-pub fn apply_rlimits(limits: &ResourceLimits) -> Result<(), String> {
-    use libc::{rlimit, setrlimit, RLIMIT_AS, RLIMIT_CPU, RLIMIT_FSIZE};
-    let set = |resource: libc::__rlimit_resource_t, cur: u64, max: u64| {
-        let value = rlimit { rlim_cur: cur, rlim_max: max };
-        let rc = unsafe { setrlimit(resource, &value) };
-        if rc == -1 {
-            Err(format!("setrlimit({resource}) failed: {}", std::io::Error::last_os_error()))
-        } else {
-            Ok(())
-        }
-    };
-    let cpu = limits.max_parse_seconds;
-    set(RLIMIT_CPU, cpu, cpu.saturating_add(5))?;
-    set(RLIMIT_AS, WORKER_ADDRESS_SPACE_CAP, WORKER_ADDRESS_SPACE_CAP)?;
-    set(RLIMIT_FSIZE, 0, 0)
+pub fn apply_rlimits(limits: &ResourceLimits) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use libc::{rlimit, setrlimit, RLIMIT_AS, RLIMIT_CPU, RLIMIT_FSIZE};
+        let set = |resource: libc::__rlimit_resource_t, cur: u64, max: u64| {
+            let value = rlimit { rlim_cur: cur, rlim_max: max };
+            let rc = unsafe { setrlimit(resource, &value) };
+            if rc == -1 {
+                Err(format!("setrlimit({resource}) failed: {}", std::io::Error::last_os_error()))
+            } else {
+                Ok(())
+            }
+        };
+        let cpu = limits.max_parse_seconds;
+        set(RLIMIT_CPU, cpu, cpu.saturating_add(5))?;
+        set(RLIMIT_AS, WORKER_ADDRESS_SPACE_CAP, WORKER_ADDRESS_SPACE_CAP)?;
+        set(RLIMIT_FSIZE, 0, 0)?;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // No rlimit enforcement off Linux; the report says so.
+        let _ = limits;
+        Ok(false)
+    }
 }
 
 fn set_no_new_privs() -> Result<(), String> {
-    const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
-    let rc = unsafe { libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
-    if rc == -1 {
-        Err(format!("PR_SET_NO_NEW_PRIVS: {}", std::io::Error::last_os_error()))
-    } else {
+    #[cfg(target_os = "linux")]
+    {
+        const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+        let rc = unsafe { libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
+        if rc == -1 {
+            Err(format!("PR_SET_NO_NEW_PRIVS: {}", std::io::Error::last_os_error()))
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // prctl does not exist off Linux; nothing to set there.
         Ok(())
     }
 }
@@ -1804,18 +1980,22 @@ fn set_no_new_privs() -> Result<(), String> {
 //
 // ABI probe: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
 // returns the ABI version, or -1 with EOPNOTSUPP/EINVAL on pre-5.13 kernels.
-// Apply: create a ruleset whose handled_access_fs carries every FS bit (plus
-// the LANDLOCK_ACCESS_NET bits from ABI 4), add ZERO rules, then
+// Apply: create a ruleset whose handled_access_fs carries the FS bits the
+// probed ABI supports, add ZERO rules, then
 // landlock_restrict_self(ruleset_fd, 0): every handled access is denied.
-// Syscall numbers come from libc's SYS_landlock_* constants.
+// C2: the ruleset attribute is the fs-only 8-byte struct the UAPI has had
+// since 5.13 on every supported kernel. The 16-byte struct with
+// handled_access_net (6.7+) is deliberately not used: pre-6.7 kernels
+// reject larger attribute sizes with E2BIG, and the network is seccomp's
+// job anyway. Syscall numbers come from libc's SYS_landlock_* constants.
 
 #[cfg(target_os = "linux")]
 mod landlock_ffi {
-    // repr(C) mirrors of the UAPI structs (libc does not ship landlock.h).
+    // repr(C) mirror of the UAPI struct (libc does not ship landlock.h).
+    // fs-only: exactly one u64, so no attr-size negotiation can ever occur.
     #[repr(C)]
     pub struct LandlockRulesetAttr {
         pub handled_access_fs: u64,
-        pub handled_access_net: u64,
     }
 
     // LANDLOCK_ACCESS_FS bits (UAPI, stable): EXECUTE(0), WRITE_FILE(1),
@@ -1837,8 +2017,6 @@ mod landlock_ffi {
         }
         bits
     }
-    // ABI 4 network bits: BIND_TCP(0), CONNECT_TCP(1).
-    pub const NET_BITS: u64 = (1 << 2) - 1;
 
     pub const CREATE_RULESET_VERSION: u32 = 1 << 0;
 
@@ -1858,10 +2036,9 @@ mod landlock_ffi {
         }
     }
 
-    pub fn restrict_all(abi: u32, network: bool) -> Result<(), String> {
+    pub fn restrict_all(abi: u32) -> Result<(), String> {
         let attr = LandlockRulesetAttr {
             handled_access_fs: fs_bits(abi),
-            handled_access_net: if network { NET_BITS } else { 0 },
         };
         let fd = unsafe {
             libc::syscall(
@@ -1899,8 +2076,8 @@ fn probe_landlock_abi() -> Option<u32> {
 #[cfg(target_os = "linux")]
 fn apply_landlock_deny_all() -> Result<LandlockStatus, String> {
     let status = landlock_abi();
-    if let LandlockStatus::Applied { abi, network } = status {
-        landlock_ffi::restrict_all(abi, network)?;
+    if let LandlockStatus::Applied { abi } = status {
+        landlock_ffi::restrict_all(abi)?;
     }
     Ok(status)
 }
@@ -1916,23 +2093,24 @@ fn apply_landlock_deny_all() -> Result<LandlockStatus, String> {
 // the syscall number, one compare-and-deny pair per denied syscall (with the
 // clone flag check inlined for clone), then RET_ALLOW. Jump offsets are
 // computed from the instruction vector so the arithmetic cannot drift.
+// Building the program (a plain Vec) and installing it (a syscall) are split
+// (M2): the forked test child must not allocate, so it receives a program
+// built before the fork.
 
 #[cfg(target_os = "linux")]
-fn install_seccomp(landlock: &LandlockStatus) -> Result<bool, String> {
-    let deny_sockets = !matches!(landlock, LandlockStatus::Applied { network: true, .. });
-    install_seccomp_deny_list(deny_sockets)?;
+fn install_seccomp() -> Result<bool, String> {
+    let program = build_seccomp_program();
+    install_seccomp_program(&program)?;
     Ok(true)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn install_seccomp(_landlock: &LandlockStatus) -> Result<bool, String> {
+fn install_seccomp() -> Result<bool, String> {
     Ok(false)
 }
 
 #[cfg(target_os = "linux")]
-fn install_seccomp_deny_list(deny_sockets: bool) -> Result<(), String> {
-    use std::mem::size_of;
-
+fn build_seccomp_program() -> Vec<sock_filter> {
     const BPF_LD: u16 = 0x00;
     const BPF_W: u16 = 0x00;
     const BPF_ABS: u16 = 0x20;
@@ -1948,23 +2126,23 @@ fn install_seccomp_deny_list(deny_sockets: bool) -> Result<(), String> {
     const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
     const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
     const EPERM: u32 = 1;
-    const SECCOMP_SET_MODE_FILTER: u32 = 1;
 
+    /// repr(C) mirror of the UAPI `sock_filter` (libc does not ship it).
     #[repr(C)]
     #[derive(Clone, Copy)]
-    struct SockFilter {
-        code: u16,
-        jt: u8,
-        jf: u8,
-        k: u32,
+    pub struct sock_filter {
+        pub code: u16,
+        pub jt: u8,
+        pub jf: u8,
+        pub k: u32,
     }
     #[repr(C)]
-    struct SockFprog {
+    struct sock_fprog {
         len: u16,
-        filter: *const SockFilter,
+        filter: *const sock_filter,
     }
 
-    let instr = |code: u16, jt: u8, jf: u8, k: u32| SockFilter { code, jt, jf, k };
+    let instr = |code: u16, jt: u8, jf: u8, k: u32| sock_filter { code, jt, jf, k };
     let load = |offset: u32| instr(BPF_LD | BPF_W | BPF_ABS, 0, 0, offset);
     let ret = |value: u32| instr(BPF_RET | BPF_K, 0, 0, value);
     let ret_eperm = ret(SECCOMP_RET_ERRNO | EPERM);
@@ -2018,25 +2196,39 @@ fn install_seccomp_deny_list(deny_sockets: bool) -> Result<(), String> {
         program.push(instr(BPF_JMP | BPF_JSET, 0, 1, NS_FLAGS as u32));
         program.push(ret_eperm);
     }
-    if deny_sockets {
-        for syscall in [
-            libc::SYS_socket,
-            libc::SYS_socketpair,
-            libc::SYS_connect,
-            libc::SYS_bind,
-            libc::SYS_listen,
-            libc::SYS_accept,
-            libc::SYS_accept4,
-            libc::SYS_sendto,
-            libc::SYS_recvfrom,
-        ] {
-            program.push(instr(BPF_JMP | BPF_JEQ, 0, 1, syscall as u32));
-            program.push(ret_eperm);
-        }
+    // C3: socket denial is unconditional. One rule closes TCP, UDP,
+    // AF_UNIX, and netlink creation, which owns W-3 on every supported
+    // kernel; there is no Landlock-network conditional to disagree with.
+    for syscall in [
+        libc::SYS_socket,
+        libc::SYS_socketpair,
+        libc::SYS_connect,
+        libc::SYS_bind,
+        libc::SYS_listen,
+        libc::SYS_accept,
+        libc::SYS_accept4,
+        libc::SYS_sendto,
+        libc::SYS_recvfrom,
+    ] {
+        program.push(instr(BPF_JMP | BPF_JEQ, 0, 1, syscall as u32));
+        program.push(ret_eperm);
     }
     program.push(ret_allow);
 
-    let fprog = SockFprog {
+    program
+}
+
+/// Installs a prebuilt program (M2: the forked test child must not
+/// allocate, so the Vec is built before the fork and passed in).
+#[cfg(target_os = "linux")]
+fn install_seccomp_program(program: &[sock_filter]) -> Result<(), String> {
+    const SECCOMP_SET_MODE_FILTER: u32 = 1;
+    #[repr(C)]
+    struct sock_fprog {
+        len: u16,
+        filter: *const sock_filter,
+    }
+    let fprog = sock_fprog {
         len: program.len() as u16,
         filter: program.as_ptr(),
     };
@@ -2045,7 +2237,7 @@ fn install_seccomp_deny_list(deny_sockets: bool) -> Result<(), String> {
             libc::SYS_seccomp,
             SECCOMP_SET_MODE_FILTER,
             0u32,
-            &fprog as *const SockFprog,
+            &fprog as *const sock_fprog,
         )
     };
     if rc < 0 {
@@ -2056,7 +2248,7 @@ fn install_seccomp_deny_list(deny_sockets: bool) -> Result<(), String> {
 }
 ```
 
-Jump-offset check for the generated program (each `JEQ` uses `jt=0` so the true path falls through to the immediately following `RET EPERM`, and `jf` skips exactly that one instruction; the arch check inverts this: `jt=1` skips the `RET EPERM` on match; the clone block's first `JEQ` uses `jf=3` to skip the three instructions of the flag check). Keep these invariants in the code comments when implementing.
+Jump-offset check for the generated program (each `JEQ` uses `jt=0` so the true path falls through to the immediately following `RET EPERM`, and `jf` skips exactly that one instruction; the arch check inverts this: `jt=1` skips the `RET EPERM` on match; the clone block's first `JEQ` uses `jf=3` to skip the three instructions of the flag check). Keep these invariants in the code comments when implementing. The `sock_filter` struct and the BPF constants live at module level (not inside `build_seccomp_program`) so both the builder and the installer can see them; the sketch above keeps them adjacent for review, and the implementer lifts them to module scope.
 
 `sidecar/src/worker/mod.rs`'s `self_test_response` becomes real:
 
@@ -2328,6 +2520,33 @@ fn worker_with_missing_binary_fails_closed() {
     let result = WorkerClient::new(PathBuf::from("/nonexistent/tuxbooks-worker"))
         .epub_parse(&fixture("minimal.epub"), &ResourceLimits::DEFAULTS);
     assert!(matches!(result, Err(WorkerError::Unavailable(_))));
+}
+
+#[test]
+fn an_rlimit_cpu_kill_maps_to_a_typed_limit_error() {
+    // I3: SIGXCPU (the RLIMIT_CPU backstop firing) is a resource-limit
+    // failure, not a mystery crash, so it must surface as a typed limit
+    // error rather than Crash/-32004.
+    let path = fixture("minimal.pdf");
+    let (_dir, cpu) = client_with("kill -XCPU $$");
+    let err = cpu
+        .run(&job(WorkerOp::PdfParse, ResourceLimits::DEFAULTS), &path)
+        .unwrap_err();
+    assert!(matches!(err, WorkerError::Limit(_)), "got: {err:?}");
+}
+
+#[test]
+fn a_failed_response_reaches_the_sidecar_as_a_typed_error() {
+    // C1 regression pin: the worker writes a well-formed Failed response
+    // and exits 0, so the client must map it by kind, never as Crash. The
+    // real worker refuses garbage with kind=parse.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("garbage.epub");
+    std::fs::write(&path, b"definitely not a zip archive").unwrap();
+    let err = client()
+        .epub_parse(&path, &ResourceLimits::DEFAULTS)
+        .unwrap_err();
+    assert!(matches!(err, WorkerError::Parse(_)), "got: {err:?}");
 }
 
 #[test]
