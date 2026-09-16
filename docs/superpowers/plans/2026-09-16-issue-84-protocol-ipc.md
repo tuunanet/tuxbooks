@@ -28,15 +28,15 @@
 
 ## Invariant-to-mechanism map
 
-| Invariant | Mechanism | Where enforced |
-| --- | --- | --- |
-| T-1 renderer never supplies filesystem paths | Cover URLs carry the cover file name, not the stored path; the handler resolves names inside the covers dir itself. Reveal takes a book id; main resolves the path via the sidecar. | `coverFileUrl`, `revealBook`, protocol handler |
-| T-2 normalize + validate against expected root, fail closed | Strict parsers for book id (digits only, positive, safe integer), member path (relative, no `..`/backslash/NUL/control, bounded), cover name (flat image file name only), range header (safe integers, `end >= start`, else 416). Host allowlist (`book`, `cover`) after scheme check. Cover reads re-check containment against the realpath of the resolved file. | `pathSchema.ts` parsers, `protocolHandler.ts` |
-| T-3 no generic filesystem read primitive | The cover route no longer accepts a path at all (400 on the old path-bearing shape); the only filesystem reads are book-id-derived sidecar calls and name-resolved covers inside one root. | protocol handler |
-| T-4 fixed MIME types | `bookSourceMime` (format query, fixed map), `memberMime` (fixed extension table mirroring the sidecar's `guess_member_media_type`; the wire `mediaType` string is ignored), `coverMime` (fixed extension map). | `pathSchema.ts`, handler headers |
-| T-5 preload enumerated, no passthrough, JSON-RPC hidden | Preload API keeps explicitly enumerated functions; IPC channel names and the privileged-scheme table move to the shared module; config-verification tests assert the enumeration, the two registered schemes, and that `lib/bridge.ts` is the only `window.tuxbooks` consumer. | `pathSchema.ts`, `preloadSurface.test.ts` |
-| T-6 callers/senders validated; unknown methods rejected; malformed input cannot crash; payloads bounded | `ipcMain.handle` checks the sender frame origin (app://bundle or the dev server), the method allowlist, params shape, and a byte cap; `Sidecar.call` rejects oversized requests; the response line buffer has an overflow cap; Rust tests pin unknown-method/-32600/-32602/malformed-JSON handling. | `ipcPolicy.ts`, `sidecar.ts`, `rpc.rs` tests |
-| T-7 path-bearing command review | `scan_library`, `import_paths`, `reconnect_book`, `set_book_cover` params are schema-validated (absolute, normalized, bounded); `reconnect_book`/`set_book_cover`/`scan_library` additionally require paths that main itself issued via a dialog; findings beyond that are recorded in the task report. | `ipcPolicy.ts` + report |
+| Invariant                                                                                               | Mechanism                                                                                                                                                                                                                                                                                                                                                          | Where enforced                                 |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| T-1 renderer never supplies filesystem paths                                                            | Cover URLs carry the cover file name, not the stored path; the handler resolves names inside the covers dir itself. Reveal takes a book id; main resolves the path via the sidecar.                                                                                                                                                                                | `coverFileUrl`, `revealBook`, protocol handler |
+| T-2 normalize + validate against expected root, fail closed                                             | Strict parsers for book id (digits only, positive, safe integer), member path (relative, no `..`/backslash/NUL/control, bounded), cover name (flat image file name only), range header (safe integers, `end >= start`, else 416). Host allowlist (`book`, `cover`) after scheme check. Cover reads re-check containment against the realpath of the resolved file. | `pathSchema.ts` parsers, `protocolHandler.ts`  |
+| T-3 no generic filesystem read primitive                                                                | The cover route no longer accepts a path at all (400 on the old path-bearing shape); the only filesystem reads are book-id-derived sidecar calls and name-resolved covers inside one root.                                                                                                                                                                         | protocol handler                               |
+| T-4 fixed MIME types                                                                                    | `bookSourceMime` (format query, fixed map), `memberMime` (fixed extension table mirroring the sidecar's `guess_member_media_type`; the wire `mediaType` string is ignored), `coverMime` (fixed extension map).                                                                                                                                                     | `pathSchema.ts`, handler headers               |
+| T-5 preload enumerated, no passthrough, JSON-RPC hidden                                                 | Preload API keeps explicitly enumerated functions; IPC channel names and the privileged-scheme table move to the shared module; config-verification tests assert the enumeration, the two registered schemes, and that `lib/bridge.ts` is the only `window.tuxbooks` consumer.                                                                                     | `pathSchema.ts`, `preloadSurface.test.ts`      |
+| T-6 callers/senders validated; unknown methods rejected; malformed input cannot crash; payloads bounded | `ipcMain.handle` checks the sender frame origin (app://bundle or the dev server), the method allowlist, params shape, and a byte cap; `Sidecar.call` rejects oversized requests; the response line buffer has an overflow cap; Rust tests pin unknown-method/-32600/-32602/malformed-JSON handling.                                                                | `ipcPolicy.ts`, `sidecar.ts`, `rpc.rs` tests   |
+| T-7 path-bearing command review                                                                         | `scan_library`, `import_paths`, `reconnect_book`, `set_book_cover` params are schema-validated (absolute, normalized, bounded); `reconnect_book`/`set_book_cover`/`scan_library` additionally require paths that main itself issued via a dialog; findings beyond that are recorded in the task report.                                                            | `ipcPolicy.ts` + report                        |
 
 ---
 
@@ -93,8 +93,17 @@ export function isAllowedSenderUrl(raw: string, devServerUrl: string | undefined
 ```ts
 export class NotFoundError extends Error {}
 export interface BookSources {
-  getBookBytes(bookId: number, offset?: number, length?: number): Promise<{ data: string; offset: number; total: number }>;
-  getBookResource(bookId: number, member: string, offset?: number, length?: number): Promise<{ data: string; offset: number; total: number; mediaType: string }>;
+  getBookBytes(
+    bookId: number,
+    offset?: number,
+    length?: number,
+  ): Promise<{ data: string; offset: number; total: number }>;
+  getBookResource(
+    bookId: number,
+    member: string,
+    offset?: number,
+    length?: number,
+  ): Promise<{ data: string; offset: number; total: number; mediaType: string }>;
   readCover(name: string): Promise<Uint8Array>;
 }
 export function handleProtocolRequest(
@@ -122,7 +131,10 @@ Behavior: scheme/host allowlist (only `tuxbooks://book`, `tuxbooks://cover`; any
 
 ```ts
 export type IssuedKind = "directory" | "book-file" | "book-files" | "cover-image";
-export class IssuedPaths { issue(kind: IssuedKind, path: string): void; has(kind: IssuedKind, path: string): boolean; }
+export class IssuedPaths {
+  issue(kind: IssuedKind, path: string): void;
+  has(kind: IssuedKind, path: string): boolean;
+}
 export function validateInvokeParams(method: string, params: unknown, issued: IssuedPaths): void; // throws SidecarError-shaped Error
 ```
 

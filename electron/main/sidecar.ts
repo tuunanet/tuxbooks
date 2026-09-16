@@ -3,6 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { LineBuffer, serializeRequest } from "./sidecarTransport";
+import { MAX_RESPONSE_LINE_BYTES } from "../shared/pathSchema";
+
 /**
  * The Rust sidecar (docs/ARCHITECTURE.md): a JSON-RPC-over-stdio
  * service owned by the Electron main process. Spawned at startup,
@@ -30,7 +33,7 @@ export class Sidecar {
   private child: ChildProcess | null = null;
   private pending = new Map<number, Pending>();
   private nextId = 1;
-  private buffer = "";
+  private lines = new LineBuffer(MAX_RESPONSE_LINE_BYTES);
   private events: (name: string, payload: unknown) => void;
   private stopped = false;
   private restartDelay = RESTART_BASE_MS;
@@ -88,13 +91,9 @@ export class Sidecar {
   }
 
   private onData(chunk: string): void {
-    this.buffer += chunk;
-    for (;;) {
-      const newline = this.buffer.indexOf("\n");
-      if (newline === -1) return;
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line) this.onLine(line);
+    for (const line of this.lines.push(chunk)) {
+      const trimmed = line.trim();
+      if (trimmed) this.onLine(trimmed);
     }
   }
 
@@ -161,7 +160,12 @@ export class Sidecar {
     const child = this.child;
     if (!child) return Promise.reject(new SidecarError("sidecar is not running"));
     const id = this.nextId++;
-    const request = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+    let request: string;
+    try {
+      request = serializeRequest(id, method, params);
+    } catch (error) {
+      return Promise.reject(new SidecarError((error as Error).message));
+    }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);

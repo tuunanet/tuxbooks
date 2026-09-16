@@ -802,4 +802,64 @@ mod tests {
             .unwrap_err();
         assert_eq!(malformed.code, -32602);
     }
+
+    /// Pull one response line off the channel (or None on timeout/close).
+    async fn next_response(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Option<Value> {
+        let line = tokio::time::timeout(std::time::Duration::from_millis(2_000), rx.recv())
+            .await
+            .ok()??;
+        serde_json::from_str(&line).ok()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_json_lines_are_ignored_without_crashing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(&state, &test_events(), &tx, "{not json");
+        handle_line(&state, &test_events(), &tx, "");
+        // Nothing answerable was sent; no response may be produced.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(150), rx.recv())
+                .await
+                .is_err()
+        );
+        // And the service is still alive.
+        let answered = dispatch(&state, &test_events(), "ping", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(answered, json!("pong"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn requests_without_a_method_field_are_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(&state, &test_events(), &tx, r#"{"jsonrpc":"2.0","id":9}"#);
+        let response = next_response(&mut rx).await.expect("error response");
+        assert_eq!(response["id"], json!(9));
+        assert_eq!(response["error"]["code"], json!(-32600));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_params_are_rejected_and_the_service_stays_alive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(
+            &state,
+            &test_events(),
+            &tx,
+            r#"{"jsonrpc":"2.0","id":3,"method":"scan_library","params":{"path":42}}"#,
+        );
+        let response = next_response(&mut rx).await.expect("error response");
+        assert_eq!(response["id"], json!(3));
+        assert_eq!(response["error"]["code"], json!(-32602));
+        // Same channel, next request: the sidecar is unaffected.
+        let answered = dispatch(&state, &test_events(), "ping", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(answered, json!("pong"));
+    }
 }

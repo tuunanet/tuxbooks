@@ -43,7 +43,7 @@ describe("BookCover", () => {
       <BookCover book={makeBook({ coverPath: "/data/covers/1.png" })} />,
     );
     const img = container.querySelector("img");
-    expect(img).toHaveAttribute("src", "tuxbooks://cover/%2Fdata%2Fcovers%2F1.png");
+    expect(img).toHaveAttribute("src", "tuxbooks://cover/1.png");
   });
 
   it("falls back to the placeholder when the cover fails to load", () => {

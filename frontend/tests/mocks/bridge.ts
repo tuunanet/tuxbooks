@@ -19,9 +19,7 @@ export const pickDirectoryMock: Mock<() => Promise<string | null>> = vi.fn(async
 export const pickBookFileMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const pickBookFilesMock: Mock<() => Promise<string[]>> = vi.fn(async () => []);
 export const pickCoverImageMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
-export const revealInFileManagerMock: Mock<(target: string) => Promise<void>> = vi.fn(
-  async () => {},
-);
+export const revealBookMock: Mock<(bookId: number) => Promise<void>> = vi.fn(async () => {});
 export const fetchBookBytesMock: Mock<(bookId: number, format: string) => Promise<ArrayBuffer>> =
   vi.fn(async () => new ArrayBuffer(16));
 export const pathForFileMock: Mock<(file: File) => string> = vi.fn(
@@ -49,7 +47,7 @@ export function installTuxbooksMock(): void {
     pickBookFile: () => pickBookFileMock(),
     pickBookFiles: () => pickBookFilesMock(),
     pickCoverImage: () => pickCoverImageMock(),
-    revealInFileManager: (target: string) => revealInFileManagerMock(target),
+    revealBook: (bookId: number) => revealBookMock(bookId),
     fetchBookBytes: (bookId: number, format: string) => fetchBookBytesMock(bookId, format),
     pathForFile: (file: File) => pathForFileMock(file),
   };
@@ -79,9 +77,11 @@ export function emitBridgeEvent(name: string, payload: unknown): void {
 }
 
 /**
- * Covers are addressed through the scoped `tuxbooks://cover/<encoded path>`
- * protocol; tests assert on this exact URL shape.
+ * Covers are addressed through the scoped `tuxbooks://cover/<name>` protocol,
+ * where `<name>` is the flat file name of the cached cover; tests assert on
+ * this exact URL shape.
  */
 export function coverUrlFor(path: string): string {
-  return `tuxbooks://cover/${encodeURIComponent(path)}`;
+  const lastSeparator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return `tuxbooks://cover/${encodeURIComponent(path.slice(lastSeparator + 1))}`;
 }

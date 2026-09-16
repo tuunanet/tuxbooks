@@ -4,8 +4,17 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { locateSidecar, RpcFailure, Sidecar, SidecarError } from "./sidecar";
+import { locateSidecar, Sidecar, SidecarError } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
+import { handleProtocolRequest, type BookSources } from "./protocolHandler";
+import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
+import {
+  APP_ORIGIN,
+  IPC_CHANNELS,
+  PRIVILEGED_SCHEMES,
+  isAllowedSenderUrl,
+  isValidBookId,
+} from "../shared/pathSchema";
 
 /**
  * Electron main process (docs/ARCHITECTURE.md): window lifecycle, native
@@ -30,45 +39,6 @@ const bootElapsed = (label: string): void => {
 bootElapsed("electron process");
 
 // CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
-
-/**
- * The renderer may only call these JSON-RPC methods through the bridge —
- * an explicit allowlist, not a passthrough.
- */
-const SIDECAR_METHODS = new Set([
-  "ping",
-  "get_library_stats",
-  "list_books",
-  "search_books",
-  "remove_book",
-  "scan_library",
-  "import_paths",
-  "reconnect_book",
-  "get_book_metadata",
-  "get_book_file_properties",
-  "update_book_metadata",
-  "reset_book_metadata",
-  "set_metadata_field_source",
-  "set_book_cover",
-  "clear_book_cover_override",
-  "embed_book_metadata",
-  "get_reading_progress",
-  "save_reading_progress",
-  "mark_book_finished",
-  "mark_book_opened",
-  "get_book_bytes",
-  "get_epub_session",
-  "get_book_resource",
-  "list_collections",
-  "create_collection",
-  "delete_collection",
-  "add_book_to_collection",
-  "remove_book_from_collection",
-  "list_annotations",
-  "create_annotation",
-  "update_annotation",
-  "delete_annotation",
-]);
 
 // One library database owner: a second app instance quits immediately.
 if (!app.requestSingleInstanceLock()) {
@@ -108,33 +78,8 @@ Menu.setApplicationMenu(null);
 // subsequent navigation and fetch. corsEnabled matters: the renderer origin
 // (dev server / packaged page) fetch()es this scheme cross-origin, and
 // Chromium refuses non-CORS-enabled schemes before the handler even runs.
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "tuxbooks",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-  {
-    // The built renderer's own origin. A standard, secure scheme — not
-    // file:// — because opaque file origins leak into blob: child frames
-    // (the reader engines' sandboxed section documents), whose postMessage
-    // then fails with "Invalid target origin 'null'". app:// keeps the page
-    // and its blob frames same-origin.
-    scheme: "app",
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-]);
+// The table (docs/ARCHITECTURE.md) declares exactly these two schemes.
+protocol.registerSchemesAsPrivileged([...PRIVILEGED_SCHEMES]);
 
 /**
  * Mirror of the sidecar's database-path resolution (TEST_* overrides first,
@@ -160,41 +105,7 @@ function coversDir(): string {
   return path.join(appDataDir(), "covers");
 }
 
-function bookMime(format: string | null): string {
-  if (format === "epub") return "application/epub+zip";
-  if (format === "pdf") return "application/pdf";
-  return "application/octet-stream";
-}
-
-const COVER_MIME_BY_EXTENSION: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-};
-
-function coverMime(filePath: string): string {
-  return (
-    COVER_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream"
-  );
-}
-
-/** Parse a single `bytes=start-end` range header (open ends allowed). */
-function parseRange(header: string | null): { start?: number; end?: number } | null {
-  if (!header) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-  if (!match) return null;
-  const [, rawStart, rawEnd] = match;
-  if (rawStart === "" && rawEnd === "") return null;
-  return {
-    start: rawStart === "" ? undefined : Number(rawStart),
-    end: rawEnd === "" ? undefined : Number(rawEnd),
-  };
-}
-
 /** Root of the built renderer bundle, served as `app://bundle/...`. */
-const APP_ORIGIN = "app://bundle";
 
 function rendererDistDir(): string {
   return path.join(__dirname, "../../frontend/dist");
@@ -225,208 +136,75 @@ const APP_MIME_BY_EXTENSION: Record<string, string> = {
 /**
  * Serve the built renderer over the `app` scheme: `app://bundle/<path>`
  * maps onto the dist directory, unknown paths fall back to index.html (the
- * renderer is a single page). Registered next to `tuxbooks://` in main.
+ * renderer is a single page). Registered next to `tuxbooks://` in main;
+ * every malformed URL fails closed to 404.
  */
 function registerAppProtocol(): void {
   const dist = rendererDistDir();
   protocol.handle("app", (request) => {
-    const url = new URL(request.url);
-    if (url.host !== "bundle") {
-      return new Response("not found", { status: 404 });
-    }
-    const relative = decodeURIComponent(url.pathname.slice(1));
-    const resolved = path.resolve(dist, relative);
-    let filePath = resolved;
-    if (relative === "" || (!resolved.startsWith(dist + path.sep) && resolved !== dist)) {
-      filePath = path.join(dist, "index.html");
-    } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      // SPA fallback: the renderer owns its routing state-side.
-      filePath = path.join(dist, "index.html");
-    }
-    const mime =
-      APP_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
-    const body = fs.readFileSync(filePath);
-    return new Response(body, {
-      status: 200,
-      headers: { "content-type": mime, "content-length": String(body.length) },
-    });
-  });
-}
-
-function registerProtocol(sidecar: Sidecar): void {
-  const covers = coversDir();
-  const debug = process.env.TUXBOOKS_DEBUG_IPC === "1";
-  protocol.handle("tuxbooks", async (request) => {
-    const url = new URL(request.url);
-    if (debug) console.log(`[tuxbooks://] ${request.method} ${request.url}`);
-
-    // The renderer origin (dev server / app:// page) is cross-origin to this
-    // scheme; without CORS the renderer fetch() fails before the handler
-    // response is usable. The scheme serves only this app's own resources.
-    const cors = { "access-control-allow-origin": "*" };
-
-    // tuxbooks://book/<id>?format=epub|pdf — a stored book's source bytes
-    // (Range-capable: the reader engines seek into large documents).
-    // tuxbooks://book/<id>/<encoded member path> — one EPUB ZIP member
-    // (chapter document, image, stylesheet, font) for the Readium
-    // navigator, which resolves sub-resources against the publication base
-    // URL. The member path is percent-encoded exactly like the manifest's
-    // hrefs; it is decoded once here before the sidecar lookup.
-    if (url.host === "book") {
-      const rest = url.pathname.slice(1);
-      const slash = rest.indexOf("/");
-      const bookId = Number.parseInt(slash === -1 ? rest : rest.slice(0, slash), 10);
-      if (!Number.isInteger(bookId) || bookId <= 0) {
-        return new Response("invalid book id", { status: 400 });
-      }
-      if (slash === -1) {
-        return serveBookBytes(url, sidecar, bookId, request);
-      }
-      return serveBookResource(sidecar, bookId, decodeURIComponent(rest.slice(slash + 1)), request);
-    }
-
-    // tuxbooks://cover/<url-encoded absolute path> — extracted cover art.
-    // The path must resolve inside the covers directory (no traversal).
-    if (url.host === "cover") {
-      const requested = decodeURIComponent(url.pathname.slice(1));
-      const resolved = path.resolve(requested);
-      if (resolved !== covers && !resolved.startsWith(covers + path.sep)) {
-        return new Response("forbidden", { status: 403 });
-      }
-      try {
-        const bytes = await fsp.readFile(resolved);
-        return new Response(bytes, {
-          status: 200,
-          headers: {
-            "content-type": coverMime(resolved),
-            "content-length": String(bytes.length),
-            ...cors,
-          },
-        });
-      } catch {
+    try {
+      const url = new URL(request.url);
+      if (url.host !== "bundle") {
         return new Response("not found", { status: 404 });
       }
-    }
-
-    return new Response("not found", { status: 404 });
-  });
-}
-
-/** `tuxbooks://book/<id>` — a stored book's whole source file (Range-capable). */
-async function serveBookBytes(
-  url: URL,
-  sidecar: Sidecar,
-  bookId: number,
-  request: Request,
-): Promise<Response> {
-  const cors = { "access-control-allow-origin": "*" };
-  const range = parseRange(request.headers.get("range"));
-  try {
-    if (range && range.start !== undefined) {
-      const end = range.end ?? Number.MAX_SAFE_INTEGER;
-      if (end < range.start) {
-        return new Response("invalid range", { status: 416 });
+      const relative = decodeURIComponent(url.pathname.slice(1));
+      const resolved = path.resolve(dist, relative);
+      let filePath = resolved;
+      if (relative === "" || (!resolved.startsWith(dist + path.sep) && resolved !== dist)) {
+        filePath = path.join(dist, "index.html");
+      } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        // SPA fallback: the renderer owns its routing state-side.
+        filePath = path.join(dist, "index.html");
       }
-      const result = (await sidecar.call("get_book_bytes", {
-        bookId,
-        offset: range.start,
-        length: end - range.start + 1,
-      })) as { data: string; offset: number; total: number };
-      if (range.start >= result.total) {
-        return new Response("range not satisfiable", {
-          status: 416,
-          headers: { "content-range": `bytes */${result.total}`, ...cors },
-        });
-      }
-      const bytes = Buffer.from(result.data, "base64");
-      return new Response(bytes, {
-        status: 206,
-        headers: {
-          "content-type": bookMime(url.searchParams.get("format")),
-          "content-length": String(bytes.length),
-          "content-range": `bytes ${result.offset}-${result.offset + bytes.length - 1}/${result.total}`,
-          "accept-ranges": "bytes",
-          ...cors,
-        },
+      const mime =
+        APP_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
+      const body = fs.readFileSync(filePath);
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": mime, "content-length": String(body.length) },
       });
+    } catch {
+      return new Response("not found", { status: 404 });
     }
-    const result = (await sidecar.call("get_book_bytes", { bookId })) as {
-      data: string;
-      total: number;
-    };
-    const bytes = Buffer.from(result.data, "base64");
-    return new Response(bytes, {
-      status: 200,
-      headers: {
-        "content-type": bookMime(url.searchParams.get("format")),
-        "content-length": String(bytes.length),
-        "accept-ranges": "bytes",
-        ...cors,
-      },
-    });
-  } catch (error) {
-    if (error instanceof RpcFailure) {
-      return new Response(error.message, { status: 404, headers: cors });
-    }
-    console.error("[tuxbooks://book] failed:", error);
-    return new Response("internal error", { status: 500, headers: cors });
-  }
+  });
 }
 
 /**
- * `tuxbooks://book/<id>/<member>` — one EPUB ZIP member, decoded and
- * extracted by the sidecar. Ranges slice the decoded member (member entries
- * decompress whole); 404 maps from a failed lookup, 416 from a bad range.
+ * Read one artwork-cache cover file by its flat name. Containment is
+ * checked twice: lexically against the cache root, then against the
+ * realpath of both root and file, so a symlink planted in the cache cannot
+ * point the read elsewhere (issue #84 T-2).
  */
-async function serveBookResource(
-  sidecar: Sidecar,
-  bookId: number,
-  member: string,
-  request: Request,
-): Promise<Response> {
-  const cors = { "access-control-allow-origin": "*" };
-  if (member.length === 0) {
-    return new Response("missing resource path", { status: 400 });
+async function readCoverFile(root: string, name: string): Promise<Uint8Array> {
+  const resolved = path.resolve(root, name);
+  if (!resolved.startsWith(root + path.sep)) {
+    throw new Error("outside covers root");
   }
-  const range = parseRange(request.headers.get("range"));
-  if (range && range.start !== undefined && range.end !== undefined && range.end < range.start) {
-    return new Response("invalid range", { status: 416 });
+  const [realRoot, realFile] = await Promise.all([fsp.realpath(root), fsp.realpath(resolved)]);
+  if (realFile !== realRoot && !realFile.startsWith(realRoot + path.sep)) {
+    throw new Error("outside covers root");
   }
-  try {
-    const result = (await sidecar.call("get_book_resource", {
-      bookId,
-      path: member,
-      offset: range?.start,
-      length:
-        range?.start !== undefined
-          ? (range.end ?? Number.MAX_SAFE_INTEGER) - range.start + 1
-          : undefined,
-    })) as { data: string; offset: number; total: number; mediaType: string };
-    if (range?.start !== undefined && range.start >= result.total) {
-      return new Response("range not satisfiable", {
-        status: 416,
-        headers: { "content-range": `bytes */${result.total}`, ...cors },
-      });
-    }
-    const bytes = Buffer.from(result.data, "base64");
-    const headers: Record<string, string> = {
-      "content-type": result.mediaType,
-      "content-length": String(bytes.length),
-      "accept-ranges": "bytes",
-      ...cors,
-    };
-    if (range?.start !== undefined) {
-      headers["content-range"] =
-        `bytes ${result.offset}-${result.offset + bytes.length - 1}/${result.total}`;
-    }
-    return new Response(bytes, { status: range?.start !== undefined ? 206 : 200, headers });
-  } catch (error) {
-    if (error instanceof RpcFailure) {
-      return new Response(error.message, { status: 404, headers: cors });
-    }
-    console.error("[tuxbooks://book] resource failed:", error);
-    return new Response("internal error", { status: 500, headers: cors });
-  }
+  return fsp.readFile(realFile);
+}
+
+function registerProtocol(sidecar: Sidecar): void {
+  const sources: BookSources = {
+    getBookBytes: (bookId, offset, length) =>
+      sidecar.call("get_book_bytes", { bookId, offset, length }) as Promise<{
+        data: string;
+        offset: number;
+        total: number;
+      }>,
+    getBookResource: (bookId, member, offset, length) =>
+      sidecar.call("get_book_resource", { bookId, path: member, offset, length }) as Promise<{
+        data: string;
+        offset: number;
+        total: number;
+        mediaType: string;
+      }>,
+    readCover: (name) => readCoverFile(coversDir(), name),
+  };
+  protocol.handle("tuxbooks", (request) => handleProtocolRequest(request, sources));
 }
 
 /**
@@ -615,12 +393,22 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
 
 function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
   const debugIpc = process.env.TUXBOOKS_DEBUG_IPC === "1";
-  ipcMain.handle("tuxbooks:invoke", async (_event, method: unknown, params: unknown) => {
-    if (typeof method !== "string" || !SIDECAR_METHODS.has(method)) {
+  // Paths handed to the renderer through native dialogs; filesystem-acting
+  // IPC calls accept only these back (docs/ARCHITECTURE.md, issue #84).
+  const issued = new IssuedPaths();
+
+  ipcMain.handle(IPC_CHANNELS.invoke, async (event, method: unknown, params: unknown) => {
+    if (typeof method !== "string") {
       throw new SidecarError(`method not allowed: ${String(method)}`);
     }
-    if (params === null || typeof params !== "object" || Array.isArray(params)) {
-      throw new SidecarError("params must be an object");
+    const senderUrl = event.senderFrame?.url ?? "";
+    if (!isAllowedSenderUrl(senderUrl, process.env.VITE_DEV_SERVER_URL)) {
+      throw new SidecarError("sender is not the application page");
+    }
+    try {
+      validateInvokeParams(method, params, issued);
+    } catch (error) {
+      throw new SidecarError((error as Error).message);
     }
     if (debugIpc) {
       debugLog?.(`ipc ${method}`);
@@ -629,13 +417,15 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
     return sidecar.call(method, params as Record<string, unknown>);
   });
 
-  ipcMain.handle("tuxbooks:dialog", async (_event, kind: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.dialog, async (_event, kind: unknown) => {
     if (kind === "directory") {
       const result = await dialog.showOpenDialog({
         properties: ["openDirectory"],
         title: "Choose a folder to import",
       });
-      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+      if (result.canceled || result.filePaths.length === 0) return null;
+      issued.issue("directory", result.filePaths[0]);
+      return result.filePaths[0];
     }
     if (kind === "book-file") {
       const result = await dialog.showOpenDialog({
@@ -643,7 +433,9 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
         title: "Locate the book file",
         filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
       });
-      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+      if (result.canceled || result.filePaths.length === 0) return null;
+      issued.issue("book-file", result.filePaths[0]);
+      return result.filePaths[0];
     }
     if (kind === "book-files") {
       const result = await dialog.showOpenDialog({
@@ -651,7 +443,9 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
         title: "Choose book files to import",
         filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
       });
-      return result.canceled ? [] : result.filePaths;
+      if (result.canceled) return [];
+      for (const filePath of result.filePaths) issued.issue("book-files", filePath);
+      return result.filePaths;
     }
     if (kind === "cover-image") {
       const result = await dialog.showOpenDialog({
@@ -659,16 +453,25 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
         title: "Choose a cover image",
         filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
       });
-      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+      if (result.canceled || result.filePaths.length === 0) return null;
+      issued.issue("cover-image", result.filePaths[0]);
+      return result.filePaths[0];
     }
     throw new SidecarError(`unknown dialog kind: ${String(kind)}`);
   });
 
-  ipcMain.handle("tuxbooks:reveal", (_event, target: unknown) => {
-    if (typeof target !== "string" || target.length === 0) {
-      throw new SidecarError("reveal requires a path");
+  ipcMain.handle(IPC_CHANNELS.reveal, async (_event, bookId: unknown) => {
+    if (!isValidBookId(bookId)) {
+      throw new SidecarError("reveal requires a book id");
     }
-    shell.showItemInFolder(target);
+    // The path is resolved here from the library database; the renderer
+    // never supplies one (issue #84 T-1).
+    const books = (await sidecar.call("list_books")) as Array<{ id: number; path: string }>;
+    const book = books.find((candidate) => candidate.id === bookId);
+    if (!book) {
+      throw new SidecarError(`no book ${bookId}`);
+    }
+    shell.showItemInFolder(book.path);
   });
 }
 

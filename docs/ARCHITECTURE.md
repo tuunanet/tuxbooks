@@ -41,6 +41,38 @@ describes the current contract.
   app's origin only) — never an arbitrary local HTTP server; paths never
   cross into the renderer.
 
+### Renderer-facing boundary (issue #84, invariants T-1..T-7)
+
+The Chromium-facing boundary is enforced in three modules, all unit-tested
+in `frontend/tests/security/`:
+
+- `electron/shared/pathSchema.ts` — the validated path/query schema shared
+  by main, preload, and tests: book ids, EPUB member paths, cover names,
+  absolute-path shape checks, range headers, fixed MIME tables, the sidecar
+  method allowlist, IPC channel names, the privileged-scheme table, and the
+  sender-origin policy.
+- `electron/main/protocolHandler.ts` — the pure `tuxbooks://` handler:
+  scheme/host allowlist (`book`, `cover` only), strict URL parsing that
+  fails closed (400/404/405/416), and fixed MIME types. Cover URLs carry
+  the artwork-cache file name, never a path; main resolves the name inside
+  the cache with lexical + realpath containment. The sidecar's wire
+  media-type string is ignored for headers. Error bodies are fixed strings
+  (`not found`, `internal error`); upstream messages never leak.
+- `electron/main/ipcPolicy.ts` — the `tuxbooks:invoke` policy: sender must
+  be the app page (`app://bundle` or the dev server), method allowlist,
+  per-method param schemas, and an 8 MB params cap. `scan_library`,
+  `reconnect_book`, and `set_book_cover` accept only paths main itself
+  issued through a native dialog; `import_paths` also accepts drag-and-drop
+  paths (shape-checked). Reveal takes a book id and resolves the path via
+  the sidecar.
+
+The sidecar transport bounds both directions: requests over 8 MB are
+rejected before write (`electron/main/sidecarTransport.ts`), and response
+lines beyond the largest legitimate book payload are discarded instead of
+buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
+are rejected by the sidecar with typed JSON-RPC errors and never crash it
+(pinned by `sidecar/src/rpc.rs` tests).
+
 ## Gotchas
 
 Each has bitten before (or is a known trap of the Electron stack):
