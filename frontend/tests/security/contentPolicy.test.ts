@@ -1,11 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ACTIVE_CONTENT_HTML_SNIPPETS, SCRIPTED_HTML_SNIPPETS } from "./attackVectors";
 import {
+  ACTIVE_CONTENT_HTML_SNIPPETS,
+  DANGEROUS_SCHEME_HREFS,
+  EXTERNAL_RESOURCE_URLS,
+  SCRIPTED_HTML_SNIPPETS,
+} from "./attackVectors";
+import {
+  classifyPublicationHref,
   declaredEncoding,
   insertFrameCspMeta,
+  isPublicationResourceUrl,
   isSanitizableContentType,
+  policyFetchClient,
   PUBLICATION_FRAME_CSP,
+  publicationBaseUrl,
   sanitizePublicationText,
 } from "@/lib/epub/contentPolicy";
 
@@ -156,5 +165,108 @@ describe("declared document encoding", () => {
 
   it("ignores encoding declarations outside the prolog", () => {
     expect(declaredEncoding(`<html><head><meta charset="utf-8"></head></html>`)).toBeNull();
+  });
+});
+
+describe("publication href classification (E-3)", () => {
+  it.each(["chapter2.xhtml", "img/pic.png", "ch%20apter.xhtml#frag", "../styles/book.css"])(
+    "treats %s as an in-book target",
+    (href) => {
+      expect(classifyPublicationHref(href)).toBe("in-book");
+    },
+  );
+
+  it.each(["https://evil.example/x", "http://other.example/", "mailto:a@b.c", "tel:+12345"])(
+    "treats %s as an external link to report",
+    (href) => {
+      expect(classifyPublicationHref(href)).toBe("external");
+    },
+  );
+
+  it.each(DANGEROUS_SCHEME_HREFS)("treats %s as blocked", (href) => {
+    expect(classifyPublicationHref(href)).toBe("blocked");
+  });
+});
+
+describe("the publication fetch client (E-3)", () => {
+  const base = publicationBaseUrl(7);
+
+  function xhtmlResponse(body: string): Response {
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "application/xhtml+xml" },
+    });
+  }
+
+  it("rejects request URLs outside the session base before fetching", async () => {
+    const inner = vi.fn();
+    const client = policyFetchClient(base, inner);
+    await expect(client("https://evil.example/x.png")).rejects.toThrow();
+    await expect(client("http://127.0.0.1:8080/")).rejects.toThrow();
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it("passes session-base requests through to the inner fetch", async () => {
+    const inner = vi.fn(() => Promise.resolve(new Response("ok")));
+    const client = policyFetchClient(base, inner);
+    const response = await client(`${base}chapter1.xhtml`);
+    expect(await response.text()).toBe("ok");
+    expect(inner).toHaveBeenCalledExactlyOnceWith(`${base}chapter1.xhtml`, undefined);
+  });
+
+  it("sanitizes document responses and injects the frame CSP", async () => {
+    const doc = xhtml(`<p>x</p><script>alert(1)</script><a href="javascript:alert(1)">y</a>`);
+    const client = policyFetchClient(base, () => Promise.resolve(xhtmlResponse(doc)));
+    const text = await (await client(`${base}chapter1.xhtml`)).text();
+    expect(text).toContain("<p>x</p>");
+    expect(text.toLowerCase()).not.toContain("<script");
+    expect(text.toLowerCase()).not.toContain("javascript:");
+    expect(text).toContain('http-equiv="Content-Security-Policy"');
+  });
+
+  it.each(["image/png", "text/css", "font/woff2", "application/octet-stream"])(
+    "leaves %s responses untouched",
+    async (contentType) => {
+      const body = "\u0000\u0001\u0002binary-ish";
+      const client = policyFetchClient(
+        base,
+        () => new Response(body, { headers: { "content-type": contentType } }),
+      );
+      const response = await client(`${base}asset.bin`);
+      expect(await response.text()).toBe(body);
+    },
+  );
+
+  it("keeps the response status of a sanitized document", async () => {
+    const client = policyFetchClient(base, () =>
+      xhtmlResponse(xhtml('<p>x</p><iframe src="page.xhtml"></iframe>')),
+    );
+    const response = await client(`${base}chapter1.xhtml`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/xhtml+xml");
+    expect((await response.text()).toLowerCase()).not.toContain("<iframe");
+  });
+});
+
+describe("the publication base URL (E-4)", () => {
+  it("is the opaque book-id resource space", () => {
+    expect(publicationBaseUrl(7)).toBe("tuxbooks://book/7/");
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects the unsafe book id %s",
+    (bookId) => {
+      expect(() => publicationBaseUrl(bookId)).toThrow();
+    },
+  );
+
+  it("accepts only URLs under the same book's base", () => {
+    const base = publicationBaseUrl(7);
+    expect(isPublicationResourceUrl(`${base}chapter1.xhtml`, base)).toBe(true);
+    expect(isPublicationResourceUrl(`${base}manifest.json`, base)).toBe(true);
+    expect(isPublicationResourceUrl(publicationBaseUrl(8), base)).toBe(false);
+    expect(isPublicationResourceUrl("https://evil.example/x", base)).toBe(false);
+    expect(isPublicationResourceUrl("file:///etc/passwd", base)).toBe(false);
+    expect(isPublicationResourceUrl("tuxbooks://cover/a.png", base)).toBe(false);
   });
 });

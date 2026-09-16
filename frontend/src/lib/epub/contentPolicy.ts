@@ -154,3 +154,119 @@ function serializeHtml(doc: Document): string {
         }>`;
   return `${prefix}${doc.documentElement.outerHTML}`;
 }
+
+/**
+ * The only URL space the engine ever forms for a publication (E-4): an
+ * opaque book id on the resource protocol, never a filesystem path.
+ */
+export function publicationBaseUrl(bookId: number): string {
+  if (!Number.isSafeInteger(bookId) || bookId <= 0) {
+    throw new Error(`invalid book id: ${bookId}`);
+  }
+  return `tuxbooks://book/${bookId}/`;
+}
+
+/** True when `rawUrl` resolves inside the publication rooted at `baseUrl`. */
+export function isPublicationResourceUrl(rawUrl: string, baseUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const base = new URL(baseUrl);
+    if (url.protocol !== base.protocol || url.host !== base.host) return false;
+    return url.pathname.startsWith(base.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export type PublicationHrefClass = "in-book" | "external" | "blocked";
+
+const EXTERNAL_HREF_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
+
+/**
+ * What a link inside publication content may do (E-3): relative targets
+ * are the engine's own navigation, the web/mail/tel schemes are reported
+ * external links that are never navigated, and every other absolute target
+ * (file:, javascript:, data:, blob:, custom protocols, protocol-relative)
+ * is blocked outright.
+ */
+export function classifyPublicationHref(href: string): PublicationHrefClass {
+  const trimmed = href.trim();
+  if (trimmed.startsWith("//")) return "blocked";
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(trimmed)?.[0]?.toLowerCase();
+  if (scheme === undefined) return "in-book";
+  return EXTERNAL_HREF_SCHEMES.has(scheme) ? "external" : "blocked";
+}
+
+type FetchInput = string | URL | Request;
+
+/**
+ * The fetch client the publication's `HttpFetcher` runs through (E-3).
+ * Every request the toolkit issues for a resource must stay inside the
+ * session base, and every document response is fenced
+ * (`sanitizePublicationText` + frame CSP meta) before anything can parse
+ * it. Non-document responses pass through byte-identically; any failure in
+ * the fencing pipeline degrades to the unmodified response, which the
+ * sidecar's own script gates already bounded.
+ */
+export function policyFetchClient(
+  baseUrl: string,
+  fetchImpl?: (input: FetchInput, init?: RequestInit) => Promise<Response>,
+): (input: FetchInput, init?: RequestInit) => Promise<Response> {
+  const inner =
+    fetchImpl ??
+    ((input: FetchInput, init?: RequestInit) => fetch(input as RequestInfo | URL, init));
+  return async (input, init) => {
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!isPublicationResourceUrl(raw, baseUrl)) {
+      throw new Error(`publication request outside the session base: ${raw}`);
+    }
+    const response = await inner(input, init);
+    const contentType = response.headers.get("content-type");
+    if (!response.ok || !isSanitizableContentType(contentType)) return response;
+    return fenceDocumentResponse(response);
+  };
+}
+
+async function fenceDocumentResponse(response: Response): Promise<Response> {
+  const bytes = await response.arrayBuffer();
+  const passthrough = () =>
+    new Response(bytes, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders(response),
+    });
+  try {
+    const contentType = response.headers.get("content-type") ?? "";
+    const label =
+      declaredEncoding(new TextDecoder("latin1").decode(bytes.slice(0, 200))) ?? "utf-8";
+    const text = new TextDecoder(label).decode(bytes);
+    const isXml = contentType.includes("xhtml") || contentType.includes("svg");
+    const sanitized = sanitizePublicationText(text, isXml);
+    const fenced = insertFrameCspMeta(sanitized, isXml);
+    if (fenced === text) return passthrough();
+    const output = isXml
+      ? declareUtf8Prolog(fenced)
+      : fenced.replace(/<meta[^>]+charset[^>]*>/gi, `<meta charset="utf-8">`);
+    return new Response(output, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders(response),
+    });
+  } catch {
+    return passthrough();
+  }
+}
+
+function responseHeaders(response: Response): Headers {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return headers;
+}
+
+const XML_PROLOG_ENCODING = /^(<\?xml[^>]*?)encoding\s*=\s*["'][^"']+["']/i;
+
+/** A modified document is re-emitted as UTF-8; its prolog must say so. */
+function declareUtf8Prolog(text: string): string {
+  if (!/^<\?xml/i.test(text)) return text;
+  return text.replace(XML_PROLOG_ENCODING, `$1encoding="UTF-8"`);
+}
