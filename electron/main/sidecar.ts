@@ -22,8 +22,20 @@ type Pending = {
   timer: NodeJS.Timeout;
 };
 
-/** JSON-RPC error carrying the sidecar's human-readable message. */
-export class RpcFailure extends Error {}
+/**
+ * JSON-RPC error carrying the sidecar's typed code (-32000 app error,
+ * -32001 deadline, -32002 limit, -32003 sandbox, -32004 crash) and its
+ * human-readable message. Callers branch on `code`; the message alone
+ * cannot distinguish a miss from a refusal.
+ */
+export class RpcFailure extends Error {
+  constructor(
+    message: string,
+    readonly code?: number,
+  ) {
+    super(message);
+  }
+}
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const RESTART_BASE_MS = 500;
@@ -118,7 +130,7 @@ export class Sidecar {
       this.pending.delete(message.id);
       clearTimeout(pending.timer);
       if (message.error) {
-        pending.reject(new RpcFailure(message.error.message));
+        pending.reject(new RpcFailure(message.error.message, message.error.code));
       } else {
         pending.resolve(message.result);
       }

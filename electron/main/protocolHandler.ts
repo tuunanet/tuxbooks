@@ -23,6 +23,21 @@ import {
 /** Signals "the requested book, member, or cover does not exist" (404). */
 export class NotFoundError extends Error {}
 
+/**
+ * Signals a typed sidecar failure that is not a miss: a limit trip (413),
+ * an exceeded deadline (504), or a sandbox refusal (503). The status
+ * carries the distinction the renderer needs; a 404 would misread a
+ * refused or bounded read as a missing resource.
+ */
+export class SourceStatusError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 interface ByteRange {
   start?: number;
   end?: number;
@@ -227,9 +242,19 @@ async function serveCover(url: URL, sources: BookSources): Promise<Response> {
   }
 }
 
+/** Fixed body per typed source status; upstream messages never leak (T-4). */
+const SOURCE_STATUS_BODIES: Record<number, string> = {
+  413: "resource limit exceeded",
+  503: "service unavailable",
+  504: "gateway timeout",
+};
+
 function sourceError(error: unknown): Response {
   if (error instanceof NotFoundError) {
     return textResponse(404, "not found");
+  }
+  if (error instanceof SourceStatusError) {
+    return textResponse(error.status, SOURCE_STATUS_BODIES[error.status] ?? "internal error");
   }
   return textResponse(500, "internal error");
 }
