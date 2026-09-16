@@ -13,11 +13,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { locateSidecar, Sidecar, SidecarError } from "./sidecar";
+import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
-import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
+import { IssuedPaths } from "./ipcPolicy";
+import { registerIpcHandlers } from "./ipcHandlers";
 import {
   assertRendererIsolation,
   isAllowedAppNavigation,
@@ -27,13 +28,7 @@ import {
 } from "./windowSecurity";
 import { APP_UI_CSP } from "../shared/appCsp";
 import { parseExternalHttpUrl } from "../shared/linkPolicy";
-import {
-  APP_ORIGIN,
-  IPC_CHANNELS,
-  PRIVILEGED_SCHEMES,
-  isAllowedSenderUrl,
-  isValidBookId,
-} from "../shared/pathSchema";
+import { APP_ORIGIN, PRIVILEGED_SCHEMES } from "../shared/pathSchema";
 
 /**
  * Electron main process (docs/ARCHITECTURE.md): window lifecycle, native
@@ -397,87 +392,23 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
 }
 
 function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
-  const debugIpc = process.env.TUXBOOKS_DEBUG_IPC === "1";
   // Paths handed to the renderer through native dialogs; filesystem-acting
   // IPC calls accept only these back (docs/ARCHITECTURE.md, issue #84).
-  const issued = new IssuedPaths();
-
-  ipcMain.handle(IPC_CHANNELS.invoke, async (event, method: unknown, params: unknown) => {
-    if (typeof method !== "string") {
-      throw new SidecarError(`method not allowed: ${String(method)}`);
-    }
-    const senderUrl = event.senderFrame?.url ?? "";
-    if (!isAllowedSenderUrl(senderUrl, process.env.VITE_DEV_SERVER_URL)) {
-      throw new SidecarError("sender is not the application page");
-    }
-    try {
-      validateInvokeParams(method, params, issued);
-    } catch (error) {
-      throw new SidecarError((error as Error).message);
-    }
-    if (debugIpc) {
-      debugLog?.(`ipc ${method}`);
-      console.log(`[ipc] ${method}`);
-    }
-    return sidecar.call(method, params as Record<string, unknown>);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.dialog, async (_event, kind: unknown) => {
-    if (kind === "directory") {
-      const result = await dialog.showOpenDialog({
-        properties: ["openDirectory"],
-        title: "Choose a folder to import",
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      issued.issue("directory", result.filePaths[0]);
-      return result.filePaths[0];
-    }
-    if (kind === "book-file") {
-      const result = await dialog.showOpenDialog({
-        properties: ["openFile"],
-        title: "Locate the book file",
-        filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      issued.issue("book-file", result.filePaths[0]);
-      return result.filePaths[0];
-    }
-    if (kind === "book-files") {
-      const result = await dialog.showOpenDialog({
-        properties: ["openFile", "multiSelections"],
-        title: "Choose book files to import",
-        filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
-      });
-      if (result.canceled) return [];
-      for (const filePath of result.filePaths) issued.issue("book-files", filePath);
-      return result.filePaths;
-    }
-    if (kind === "cover-image") {
-      const result = await dialog.showOpenDialog({
-        properties: ["openFile"],
-        title: "Choose a cover image",
-        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      issued.issue("cover-image", result.filePaths[0]);
-      return result.filePaths[0];
-    }
-    throw new SidecarError(`unknown dialog kind: ${String(kind)}`);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.reveal, async (_event, bookId: unknown) => {
-    if (!isValidBookId(bookId)) {
-      throw new SidecarError("reveal requires a book id");
-    }
-    // The path is resolved here from the library database; the renderer
-    // never supplies one (issue #84 T-1).
-    const books = (await sidecar.call("list_books")) as Array<{ id: number; path: string }>;
-    const book = books.find((candidate) => candidate.id === bookId);
-    if (!book) {
-      throw new SidecarError(`no book ${bookId}`);
-    }
-    shell.showItemInFolder(book.path);
-  });
+  // The handlers themselves (with the per-channel sender gate) live in
+  // ipcHandlers.ts, unit-tested without Electron.
+  registerIpcHandlers(
+    (channel, handler) => {
+      ipcMain.handle(channel, (event, ...args) => handler(event, ...args));
+    },
+    {
+      sidecar,
+      issued: new IssuedPaths(),
+      dialog,
+      shell,
+      debugIpc: process.env.TUXBOOKS_DEBUG_IPC === "1",
+      debugLog,
+    },
+  );
 }
 
 app.whenReady().then(() => {
