@@ -25,6 +25,12 @@ fn selftest_reports_denials_when_landlock_is_supported() {
         report.socket_denied,
         "worker must observe its own network denial"
     );
+    // W-7 observed, not just enforced: the worker holds fds 0-3 only.
+    assert!(
+        report.open_fds <= 4,
+        "worker must hold fds 0-3 only, got: {}",
+        report.open_fds
+    );
 }
 
 #[test]

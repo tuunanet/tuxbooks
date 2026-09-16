@@ -86,6 +86,9 @@ pub struct SandboxSelfTest {
     pub landlock: LandlockStatus,
     pub open_denied: bool,
     pub socket_denied: bool,
+    /// Descriptors the worker actually holds (fcntl count, no path access):
+    /// the W-7 contract is 0-3 only.
+    pub open_fds: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

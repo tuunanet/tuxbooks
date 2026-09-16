@@ -116,10 +116,16 @@ fn self_test_response() -> Result<WorkerResponse, JobError> {
     // The worker applies the sandbox before running any op, so the probes
     // observe real enforcement (Task 6). On non-Linux the probes report
     // their actual unrestricted results with LandlockStatus::NotApplicable.
+    // /proc/self/fd cannot be opened under Landlock, so descriptors are
+    // counted by fcntl instead (no path access).
+    let open_fds = (0..32i32)
+        .filter(|&fd| unsafe { libc::fcntl(fd, libc::F_GETFD) } != -1)
+        .count() as u32;
     let report = SandboxSelfTest {
         landlock: sandbox::landlock_abi(),
         open_denied: std::fs::File::open("/proc/self/status").is_err(),
         socket_denied: sandbox::probe_socket_denied(),
+        open_fds,
     };
     done_json(serde_json::to_value(report).map_err(|err| JobError::worker(err.to_string()))?)
 }

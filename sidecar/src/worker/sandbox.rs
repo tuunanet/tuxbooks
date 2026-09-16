@@ -560,11 +560,15 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn seccomp_denies_socket_creation() {
+    fn seccomp_denies_socket_exec_and_namespace_creation() {
         // A seccomp filter is process-wide and irreversible, and the test
         // process is multithreaded: the BPF program is built BEFORE the
         // fork (M2), so the forked child only runs async-signal-safe
-        // syscalls (prctl, install, socket, _exit).
+        // syscalls (prctl, install, socket, execve probe, _exit).
+        // Every probe below must be observed, not just enforced: a wrong
+        // SYS_* constant in the deny array would otherwise be invisible.
+        // Success exits with the distinctive 7 so a wrongly-allowed execve
+        // (which replaces this image with /bin/true, exit 0) cannot pass.
         if !landlock_supported() {
             eprintln!("skipping: sandbox layer only meaningful on supported kernels");
             return;
@@ -609,13 +613,27 @@ mod tests {
             if !(rc == -1 && unsafe { *libc::__errno_location() } == libc::EPERM) {
                 unsafe { libc::_exit(4) };
             }
-            unsafe { libc::_exit(0) };
+            // execve must die with EPERM (W-4): process creation is denied
+            // at the filter, observed here and not merely enforced.
+            let path = b"/bin/true\0";
+            let argv: [*const libc::c_char; 1] = [std::ptr::null()];
+            let rc = unsafe {
+                libc::execve(
+                    path.as_ptr() as *const libc::c_char,
+                    argv.as_ptr(),
+                    argv.as_ptr(),
+                )
+            };
+            if !(rc == -1 && unsafe { *libc::__errno_location() } == libc::EPERM) {
+                unsafe { libc::_exit(5) };
+            }
+            unsafe { libc::_exit(7) };
         }
         let mut status = 0;
         assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
         assert!(
-            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            "socket() must be denied under the filter"
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 7,
+            "spawn and socket denial must be observed under the filter (exit status {status})"
         );
     }
 }
