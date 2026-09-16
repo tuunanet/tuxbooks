@@ -411,6 +411,95 @@ residual classes and lands minimized inputs here as builders.
 (`security_corpus.rs` on the Rust stream, the corpus vitest file on the
 frontend stream); no extra command is needed.
 
+## Fuzzing (issue #88)
+
+Four libFuzzer targets (cargo-fuzz) cover the highest-risk parser and
+boundary surfaces from #81-#83, proving the P, R, and T invariants under
+mutation. Nightly CI cadence, never per-PR.
+
+| Target       | Surface                                    | Entry points (`sidecar/src`)                                                                         |
+| ------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `epub-parse` | EPUB ZIP/member/path handling              | `epub/parser.rs` `parse_epub_reader`; `epub/session.rs` `read_member_reader`, `build_session_reader` |
+| `opf-xml`    | OPF/XML manifest parsing                   | `epub/metadata.rs` `parse_opf`; `epub/parser.rs` `parse_container_xml`                               |
+| `pdf-parse`  | PDF object parsing and metadata extraction | `pdf/parser.rs` `parse_pdf_bytes` (lopdf load + bounded page-tree walk)                              |
+| `json-rpc`   | JSON-RPC parameter decoding (T-6)          | `rpc.rs` `handle_request_line` against a real scratch `AppState`                                     |
+
+### Running locally
+
+Prerequisites (nightly toolchain + cargo-fuzz):
+
+```sh
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz --locked
+```
+
+Bounded runs (`just fuzz <target> <seconds>`, default 60):
+
+```sh
+just fuzz epub-parse 60      # one target, time-boxed
+just fuzz-smoke              # 30s per target, the end-to-end proof run
+just fuzz-ci                 # the nightly cadence: 300s per target
+```
+
+The first invocation compiles the instrumented build (minutes); later runs
+are incremental. Every run is time-boxed with `-max_total_time`, capped with
+`-rss_limit_mb=4096` and `-timeout=25` per exec, and writes only inside the
+workspace: `sidecar/fuzz/corpus/<target>/` (runtime corpus) and
+`sidecar/fuzz/artifacts/` (crash files), both gitignored.
+
+### Seeds and harness shape
+
+- Seeds are committed under `sidecar/fuzz/seeds/<target>/`: derived from the
+  checked-in fixtures (`tests/fixtures/books/minimal.epub` /
+  `minimal.pdf`), the parser tests' valid OPF/container XML, and one
+  JSON-RPC request per seed file. `just fuzz` copies them into the runtime
+  corpus at the start of each run.
+- `epub-parse` dispatches on the first input byte: `0x00` +
+  NUL-terminated member path + archive bytes drives the member lookup
+  (E-5 path gate), `0x01` + archive bytes drives the reading-session
+  build, anything else is the import parse. Real EPUB files seed the
+  default mode directly.
+- Fuzz runs use a tightened quota table
+  (`fuzz/fuzz_targets/fuzz_limits.rs`): the production `ResourceLimits`
+  with byte caps around 1 MiB, so hostile archives trip a quota in
+  microseconds instead of inflating toward the 512 MiB production
+  ceilings. Quota trips are typed errors, not hangs.
+- `json-rpc` builds one process-lifetime scratch state (tempdir SQLite,
+  seeded book row, real schema) and drives `handle_request_line`, the
+  exact boundary code `handle_line` runs. Filesystem-path parameters
+  (`scan_library`, `import_paths`, `reconnect_book`, `set_book_cover`)
+  are pinned into the scratch directory before the request executes, and
+  `create_collection` names are pinned so the scratch database cannot
+  grow without bound; non-string shapes stay untouched, so -32602
+  parameter decoding stays reachable. Every produced response line is
+  asserted to be valid JSON.
+
+### Crash triage
+
+A crash stops the target and writes
+`sidecar/fuzz/artifacts/<target>/crash-*` (named by input hash). Reproduce
+and minimize from `sidecar/` with the nightly toolchain active (or
+`RUSTUP_TOOLCHAIN=nightly` exported):
+
+```sh
+cargo fuzz run <target> <crash-file>                        # reproduce
+cargo fuzz run <target> -- -minimize_crash=1 <crash-file>   # minimize
+```
+
+A confirmed crash lands as a deterministic builder in
+`sidecar/tests/fixtures/security/` (never a blob — see that directory's
+README) with the fix referencing the fuzz case that found it, per issue
+#88's acceptance criteria.
+
+Hangs vs limits: a libFuzzer `-timeout` hit in these targets is a bug —
+the tightened quota table bounds decompression and parsing work, so
+unbounded behavior cannot hide behind a quota. The one known residual
+class stays outside these targets by construction: content streams that
+PDFium decodes at render time are not bounded by lopdf and remain
+containment-only (worker RLIMIT_AS + deadline, docs/RESOURCE_LIMITS.md);
+fuzzing that class is PDFium/OSS-Fuzz work, not sidecar-harness work.
+Renderer (TypeScript) surfaces are out of scope for #88.
+
 ## EPUB fixture corpus (three tiers)
 
 The dedicated EPUB corpus lives in `tests/fixtures/epub/` (see its
