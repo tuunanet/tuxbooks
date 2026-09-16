@@ -3,15 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { SECURITY_CORPUS } from "./index";
 import { HOSTILE_EPUB_CORPUS } from "./hostileEpub";
 import {
+  ABSOLUTE_COVER_PATHS,
   ACTIVE_CONTENT_HTML_SNIPPETS,
   BAD_BOOK_IDS,
   DANGEROUS_SCHEME_HREFS,
+  DOUBLE_ENCODED_TRAVERSAL_MEMBERS,
   ENCODED_TRAVERSAL_MEMBERS,
   EXTERNAL_RESOURCE_URLS,
   SCRIPTED_HTML_SNIPPETS,
   TRAVERSAL_MEMBER_PATHS,
   UNSUPPORTED_ENCODING_PROLOGS,
 } from "../attackVectors";
+import {
+  decodeUriComponentSafe,
+  parseBookId,
+  parseCoverName,
+  parseMemberPath,
+} from "../../../../electron/shared/pathSchema";
 import {
   classifyPublicationHref,
   PUBLICATION_FRAME_CSP,
@@ -77,6 +85,35 @@ describe("the security corpus index (issue #87)", () => {
       expect(fixture.bytes[0]).toBe(0x50);
       expect(fixture.chapter.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("the traversal corpus fails closed at the path schema (T-2, T-3)", () => {
+  it.each(TRAVERSAL_MEMBER_PATHS)("rejects the member path %s", (member) => {
+    expect(parseMemberPath(member)).toBeNull();
+  });
+
+  it.each(ENCODED_TRAVERSAL_MEMBERS)("rejects %s after the handler's single decode", (encoded) => {
+    const decoded = decodeUriComponentSafe(encoded);
+    expect(decoded).not.toBeNull();
+    expect(parseMemberPath(decoded!)).toBeNull();
+  });
+
+  it.each(DOUBLE_ENCODED_TRAVERSAL_MEMBERS)(
+    "accepts %s as a literal name after one decode (it misses at serving)",
+    (encoded) => {
+      const decoded = decodeUriComponentSafe(encoded);
+      expect(decoded).not.toBeNull();
+      expect(parseMemberPath(decoded!)).not.toBeNull();
+    },
+  );
+
+  it.each(BAD_BOOK_IDS)("rejects the book id %s", (id) => {
+    expect(parseBookId(id)).toBeNull();
+  });
+
+  it.each(ABSOLUTE_COVER_PATHS)("rejects the cover reference %s", (name) => {
+    expect(parseCoverName(name)).toBeNull();
   });
 });
 
