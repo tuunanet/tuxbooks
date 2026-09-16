@@ -106,7 +106,6 @@ untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
 Electron AppImages bundle the whole runtime (Electron + Chromium + Node).
 electron-builder creates them without FUSE; users need FUSE or an
 extract-run environment only to _execute_ the AppImage.
-environment only to _execute_ the AppImage).
 
 ## Deliberate deferrals
 

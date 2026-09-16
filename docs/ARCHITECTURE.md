@@ -46,7 +46,7 @@ describes the current contract.
 
 ### Renderer-facing boundary (issue #84, invariants T-1..T-7)
 
-The Chromium-facing boundary is enforced in three modules, all unit-tested
+The Chromium-facing boundary is enforced in four modules, all unit-tested
 in `frontend/tests/security/`:
 
 - `electron/shared/pathSchema.ts` — the validated path/query schema shared
@@ -60,7 +60,10 @@ in `frontend/tests/security/`:
   the artwork-cache file name, never a path; main resolves the name inside
   the cache with lexical + realpath containment. The sidecar's wire
   media-type string is ignored for headers. Error bodies are fixed strings
-  (`not found`, `internal error`); upstream messages never leak.
+  (`not found`, `internal error`, plus one per typed sidecar failure);
+  upstream messages never leak. Typed sidecar codes keep their meaning at
+  the protocol boundary: limit 413, sandbox 503, deadline 504, and 404
+  only for genuine misses.
 - `electron/main/ipcPolicy.ts` — the `tuxbooks:invoke` policy: sender must
   be the app page (`app://bundle` or the dev server), method allowlist,
   per-method param schemas, and an 8 MB params cap. `scan_library`,
@@ -68,13 +71,11 @@ in `frontend/tests/security/`:
   issued through a native dialog; `import_paths` also accepts drag-and-drop
   paths (shape-checked). Reveal takes a book id and resolves the path via
   the sidecar.
-
-The sidecar transport bounds both directions: requests over 8 MB are
-rejected before write (`electron/main/sidecarTransport.ts`), and response
-lines beyond the largest legitimate book payload are discarded instead of
-buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
-are rejected by the sidecar with typed JSON-RPC errors and never crash it
-(pinned by `sidecar/src/rpc.rs` tests).
+- `electron/main/ipcHandlers.ts` — the ipcMain handler wiring: invoke, the
+  native dialogs, and reveal. Every channel gates its sender (the same
+  app-page rule) before touching anything native, because the preload
+  bridge is exposed to sandboxed publication frames. Registration and the
+  native surfaces are injected, so the gate is tested without Electron.
 
 The sidecar transport bounds both directions: requests over 8 MB are
 rejected before write (`electron/main/sidecarTransport.ts`), and response
