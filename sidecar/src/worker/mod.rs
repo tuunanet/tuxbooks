@@ -232,8 +232,54 @@ fn dispatch(job: &WorkerJob, document: &mut std::fs::File) -> Result<WorkerRespo
             let cover = crate::pdf::render::render_first_page_cover_bytes(&pdfium, &bytes, limits)?;
             done_optional_bytes(cover)
         }
-        WorkerOp::SelfTest | WorkerOp::EpubEmbed | WorkerOp::PdfEmbed => Err(JobError::worker(
-            format!("op {:?} is not wired in this task", job.op),
-        )),
+        WorkerOp::EpubEmbed => match &job.metadata {
+            Some(MetadataPayload::Epub(metadata)) => {
+                enforce_embed_cap(document)?;
+                done_bytes(crate::epub::rewrite_epub_bytes(
+                    std::io::BufReader::new(&*document),
+                    metadata,
+                    limits,
+                )?)
+            }
+            _ => Err(JobError::worker(
+                "epub_embed requires epub metadata".to_string(),
+            )),
+        },
+        WorkerOp::PdfEmbed => match &job.metadata {
+            Some(MetadataPayload::Pdf(metadata)) => {
+                enforce_embed_cap(document)?;
+                let bytes = read_fd_bounded(document, limits)?;
+                let rewritten = crate::pdf::rewrite_pdf_bytes(&bytes, metadata, limits)?;
+                // I2: halve the peak before the base64 copy is allocated.
+                drop(bytes);
+                done_bytes(rewritten)
+            }
+            _ => Err(JobError::worker(
+                "pdf_embed requires pdf metadata".to_string(),
+            )),
+        },
+        WorkerOp::SelfTest => Err(JobError::worker(format!(
+            "op {:?} is not wired in this task",
+            job.op
+        ))),
+    }
+}
+
+/// The embed cap helper (I2: a 1 GiB embed would need source + rewrite +
+/// base64, about 3.4 GiB against the 3 GiB `RLIMIT_AS`; the cap refuses
+/// such jobs up front with a typed limit error instead of an allocator
+/// abort that would surface as a crash).
+fn enforce_embed_cap(document: &std::fs::File) -> Result<(), JobError> {
+    let len = document
+        .metadata()
+        .map_err(|err| JobError::parse(err.to_string()))?
+        .len();
+    match embed_source_error(len) {
+        Some((limit, message)) => Err(JobError {
+            kind: WorkerErrorKind::Limit,
+            message,
+            limit: Some(limit),
+        }),
+        None => Ok(()),
     }
 }

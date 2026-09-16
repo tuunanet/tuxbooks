@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use crate::limits::ResourceLimits;
 use crate::worker::proto::{
-    SandboxSelfTest, WorkerErrorKind, WorkerJob, WorkerOp, WorkerResponse,
+    MetadataPayload, SandboxSelfTest, WorkerErrorKind, WorkerJob, WorkerOp, WorkerResponse,
     MAX_WORKER_RESPONSE_BYTES,
 };
 
@@ -433,6 +433,68 @@ impl WorkerClient {
             WorkerResponse::Done {
                 bytes_b64: None, ..
             } => Ok(None),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Rewrite an EPUB's metadata in the worker; the sidecar owns the write
+    /// (backup + atomic replace). Returns the full rewritten bytes.
+    pub fn epub_embed(
+        &self,
+        document: &Path,
+        metadata: &crate::epub::EpubMetadata,
+        limits: &ResourceLimits,
+    ) -> Result<Vec<u8>, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::EpubEmbed,
+            limits: *limits,
+            member: None,
+            metadata: Some(MetadataPayload::Epub(metadata.clone())),
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                bytes_b64: Some(b64),
+                ..
+            } => base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|err| WorkerError::Protocol(err.to_string())),
+            WorkerResponse::Done {
+                bytes_b64: None, ..
+            } => Err(WorkerError::Protocol(
+                "epub_embed returned no bytes".to_string(),
+            )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Rewrite a PDF's Info dictionary in the worker; the sidecar owns the
+    /// write (backup + atomic replace). Returns the full rewritten bytes.
+    pub fn pdf_embed(
+        &self,
+        document: &Path,
+        metadata: &crate::pdf::PdfMetadata,
+        limits: &ResourceLimits,
+    ) -> Result<Vec<u8>, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::PdfEmbed,
+            limits: *limits,
+            member: None,
+            metadata: Some(MetadataPayload::Pdf(metadata.clone())),
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                bytes_b64: Some(b64),
+                ..
+            } => base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|err| WorkerError::Protocol(err.to_string())),
+            WorkerResponse::Done {
+                bytes_b64: None, ..
+            } => Err(WorkerError::Protocol(
+                "pdf_embed returned no bytes".to_string(),
+            )),
             WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
         }
     }
