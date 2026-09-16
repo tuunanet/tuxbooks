@@ -35,11 +35,23 @@ pub enum EpubError {
     BrokenSpine(String),
     #[error("manifest item `{0}` has no href")]
     ManifestItemWithoutHref(String),
+    #[error("{0}")]
+    Limit(#[from] crate::limits::LimitExceeded),
+}
+
+impl From<crate::limits::ReadBoundedError> for EpubError {
+    fn from(err: crate::limits::ReadBoundedError) -> Self {
+        match err {
+            crate::limits::ReadBoundedError::Limit(limit) => EpubError::Limit(limit),
+            crate::limits::ReadBoundedError::Io(io) => EpubError::Io(io),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::epub::parser::tests_support::write_zip;
+    use crate::limits::ResourceLimits;
 
     use super::*;
 
@@ -48,7 +60,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("garbage.epub");
         std::fs::write(&path, b"definitely not a zip archive").unwrap();
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::Zip(_)), "got: {err:?}");
     }
 
@@ -57,7 +69,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("empty.epub");
         write_zip(&path, &[]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingMimetype), "got: {err:?}");
     }
 
@@ -66,7 +78,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("wrong.epub");
         write_zip(&path, &[("mimetype", b"application/zip")]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::InvalidMimetype), "got: {err:?}");
     }
 
@@ -81,7 +93,7 @@ mod tests {
                 ("mimetype", "application/epub+zip".as_bytes()),
             ],
         );
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingMimetype), "got: {err:?}");
     }
 
@@ -90,7 +102,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nocontainer.epub");
         write_zip(&path, &[("mimetype", "application/epub+zip".as_bytes())]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingContainer), "got: {err:?}");
     }
 }

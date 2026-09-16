@@ -49,21 +49,23 @@ pub struct ResourceLimits {
 
 /// Documented baseline (docs/RESOURCE_LIMITS.md). Generous against real
 /// books, provisional until benchmarked (R-4 follow-up).
-pub const DEFAULTS: ResourceLimits = ResourceLimits {
-    max_source_file_bytes: 1 << 30,
-    max_entries: 100_000,
-    max_compressed_member_bytes: 256 << 20,
-    max_decompressed_bytes: 512 << 20,
-    max_total_uncompressed_bytes: 2 << 30,
-    max_xml_bytes: 32 << 20,
-    max_xml_depth: 512,
-    max_metadata_string_bytes: 1 << 20,
-    max_pages: 100_000,
-    max_page_tree_nodes: 1_000_000,
-    max_page_tree_depth: 128,
-    max_cover_png_bytes: 16 << 20,
-    max_parse_seconds: 30,
-};
+impl ResourceLimits {
+    pub const DEFAULTS: ResourceLimits = ResourceLimits {
+        max_source_file_bytes: 1 << 30,
+        max_entries: 100_000,
+        max_compressed_member_bytes: 256 << 20,
+        max_decompressed_bytes: 512 << 20,
+        max_total_uncompressed_bytes: 2 << 30,
+        max_xml_bytes: 32 << 20,
+        max_xml_depth: 512,
+        max_metadata_string_bytes: 1 << 20,
+        max_pages: 100_000,
+        max_page_tree_nodes: 1_000_000,
+        max_page_tree_depth: 128,
+        max_cover_png_bytes: 16 << 20,
+        max_parse_seconds: 30,
+    };
+}
 
 /// A tripped quota. Typed so callers can react to bounded-resource failure
 /// without parsing error strings.
@@ -356,7 +358,7 @@ mod tests {
 
     #[test]
     fn defaults_leave_room_for_real_books() {
-        let d = DEFAULTS;
+        let d = ResourceLimits::DEFAULTS;
         d.check_source_file(50 << 20).unwrap();
         d.check_entries(5_000).unwrap();
         d.check_member(64 << 20, 128 << 20).unwrap();

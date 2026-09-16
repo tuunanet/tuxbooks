@@ -129,7 +129,9 @@ pub async fn get_book_file_properties(
     }
     let format = crate::domain::BookFormat::from_path(&book.path);
     let raw = match format {
-        crate::domain::BookFormat::Epub => crate::epub::read_file_properties(path)?,
+        crate::domain::BookFormat::Epub => {
+            crate::epub::read_file_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
+        }
         crate::domain::BookFormat::Pdf => crate::pdf::read_file_properties(path)?,
     };
     Ok(Some(FileProperties {
@@ -1464,7 +1466,8 @@ mod tests {
         assert!(!view.overridden.publisher);
         assert!(!view.overridden.subjects);
 
-        let reparsed = crate::epub::parse_epub(&epub_path).unwrap();
+        let reparsed =
+            crate::epub::parse_epub(&epub_path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(reparsed.metadata.title, "Embedded Title");
         assert_eq!(
             reparsed.metadata.subtitle.as_deref(),

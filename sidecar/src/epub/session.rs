@@ -27,6 +27,7 @@ use super::parser::{
     normalize_path, parse_container_xml, percent_decode, read_entry, resolve_zip_path,
 };
 use super::EpubError;
+use crate::limits::{Deadline, ResourceLimits};
 
 /// Media type the Readium toolkit looks up to find the positions list.
 pub const POSITIONS_MEDIA_TYPE: &str = "application/vnd.readium.position-list+json";
@@ -70,25 +71,38 @@ pub struct TocItem {
 }
 
 /// Build the reading session for an EPUB file: container → OPF → RWPM
-/// manifest + estimated positions list.
-pub fn build_session(path: &Path) -> Result<EpubReadingSession, EpubError> {
+/// manifest + estimated positions list. Every stage enforces the `limits`
+/// quotas (issue #83).
+pub fn build_session(
+    path: &Path,
+    limits: &ResourceLimits,
+) -> Result<EpubReadingSession, EpubError> {
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    let deadline = Deadline::start(limits);
     let file = File::open(path)?;
     let mut zip = ZipArchive::new(BufReader::new(file))?;
+    super::parser::check_archive_totals(&mut zip, limits)?;
+    deadline.check()?;
 
-    read_mimetype(&mut zip)?;
-    let container =
-        read_entry(&mut zip, "META-INF/container.xml")?.ok_or(EpubError::MissingContainer)?;
+    read_mimetype(&mut zip, limits)?;
+    deadline.check()?;
+    let container = read_entry(&mut zip, "META-INF/container.xml", limits)?
+        .ok_or(EpubError::MissingContainer)?;
     let opf_path = parse_container_xml(&container)?;
-    let opf_bytes =
-        read_entry(&mut zip, &opf_path)?.ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
+    deadline.check()?;
+    let opf_bytes = read_entry(&mut zip, &opf_path, limits)?
+        .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
     let package = parse_opf(&opf_xml)?;
+    deadline.check()?;
 
     let spine = resolve_spine_entries(&package, &opf_path)?;
-    let toc = parse_toc(&mut zip, &opf_path, &package)?;
+    let toc = parse_toc(&mut zip, &opf_path, &package, limits)?;
+    deadline.check()?;
 
     let manifest_json = build_manifest_json(&package, &spine, &toc, &opf_xml)?;
-    let positions_json = build_positions_json(&mut zip, &spine)?;
+    let positions_json = build_positions_json(&mut zip, &spine, limits)?;
+    deadline.check()?;
 
     Ok(EpubReadingSession {
         manifest_json,
@@ -98,15 +112,20 @@ pub fn build_session(path: &Path) -> Result<EpubReadingSession, EpubError> {
 
 /// Read one ZIP entry by path. The path must already be decoded;
 /// `normalize_path` collapses `.`/`..`, so a member path can never traverse
-/// above the archive root.
-pub fn read_member(path: &Path, member: &str) -> Result<Option<Vec<u8>>, EpubError> {
-    let file = File::open(path)?;
-    let mut zip = ZipArchive::new(BufReader::new(file))?;
+/// above the archive root. Member reads enforce the `limits` quotas (R-1).
+pub fn read_member(
+    path: &Path,
+    member: &str,
+    limits: &ResourceLimits,
+) -> Result<Option<Vec<u8>>, EpubError> {
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    let mut zip = ZipArchive::new(BufReader::new(File::open(path)?))?;
+    super::parser::check_archive_totals(&mut zip, limits)?;
     let member = normalize_path(member);
     if member.is_empty() {
         return Ok(None);
     }
-    read_entry(&mut zip, &member)
+    read_entry(&mut zip, &member, limits)
 }
 
 /// Best-effort media type for a stored ZIP member, by extension. Frame
@@ -141,16 +160,28 @@ pub fn guess_member_media_type(member: &str) -> &'static str {
     }
 }
 
-fn read_mimetype<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<(), EpubError> {
+fn read_mimetype<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    limits: &ResourceLimits,
+) -> Result<(), EpubError> {
     if zip.is_empty() {
         return Err(EpubError::MissingMimetype);
     }
-    let mut first = zip.by_index(0)?;
+    let first = zip.by_index(0)?;
     if first.name() != "mimetype" {
         return Err(EpubError::MissingMimetype);
     }
+    limits.check_member(first.compressed_size(), first.size())?;
     let mut value = String::new();
-    first.read_to_string(&mut value)?;
+    first
+        .take(limits.max_decompressed_bytes.saturating_add(1))
+        .read_to_string(&mut value)?;
+    if value.len() as u64 > limits.max_decompressed_bytes {
+        return Err(EpubError::Limit(crate::limits::LimitExceeded {
+            limit: "max_decompressed_bytes",
+            detail: "mimetype member over cap".to_string(),
+        }));
+    }
     if value != "application/epub+zip" {
         return Err(EpubError::InvalidMimetype);
     }
@@ -310,6 +341,7 @@ fn parse_toc<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     opf_path: &str,
     package: &OpfPackage,
+    limits: &ResourceLimits,
 ) -> Result<Vec<TocItem>, EpubError> {
     if let Some(item) = package
         .manifest
@@ -317,9 +349,9 @@ fn parse_toc<R: Read + Seek>(
         .find(|item| item.has_property("nav"))
     {
         let nav_zip_path = resolve_zip_path(opf_path, &item.href);
-        if let Some(bytes) = read_entry(zip, &nav_zip_path)? {
+        if let Some(bytes) = read_entry(zip, &nav_zip_path, limits)? {
             let xml = String::from_utf8_lossy(&bytes).into_owned();
-            return parse_nav_document(&xml, &nav_zip_path);
+            return parse_nav_document(&xml, &nav_zip_path, limits);
         }
     }
 
@@ -333,9 +365,9 @@ fn parse_toc<R: Read + Seek>(
     if let Some(ncx_id) = ncx_id {
         if let Some(item) = package.manifest.get(&ncx_id) {
             let ncx_zip_path = resolve_zip_path(opf_path, &item.href);
-            if let Some(bytes) = read_entry(zip, &ncx_zip_path)? {
+            if let Some(bytes) = read_entry(zip, &ncx_zip_path, limits)? {
                 let xml = String::from_utf8_lossy(&bytes).into_owned();
-                return parse_ncx_document(&xml, &ncx_zip_path);
+                return parse_ncx_document(&xml, &ncx_zip_path, limits);
             }
         }
     }
@@ -346,7 +378,11 @@ fn parse_toc<R: Read + Seek>(
 /// EPUB 3 navigation document: the `<nav epub:type="toc">` list (or, when
 /// none is typed, the first `<nav>`), parsed as nested `ol > li > a` trees.
 /// Other navs (landmarks, page-list) are ignored.
-fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, EpubError> {
+fn parse_nav_document(
+    xml: &str,
+    nav_zip_path: &str,
+    _limits: &ResourceLimits,
+) -> Result<Vec<TocItem>, EpubError> {
     let nav_dir = match nav_zip_path.rfind('/') {
         Some(idx) => &nav_zip_path[..=idx],
         None => "",
@@ -494,7 +530,11 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
 
 /// EPUB 2 NCX table of contents: `navMap > navPoint > (navLabel > text,
 /// content[src])`, nested `navPoint` children.
-fn parse_ncx_document(xml: &str, ncx_zip_path: &str) -> Result<Vec<TocItem>, EpubError> {
+fn parse_ncx_document(
+    xml: &str,
+    ncx_zip_path: &str,
+    _limits: &ResourceLimits,
+) -> Result<Vec<TocItem>, EpubError> {
     let ncx_dir = match ncx_zip_path.rfind('/') {
         Some(idx) => &ncx_zip_path[..=idx],
         None => "",
@@ -678,12 +718,13 @@ fn detect_page_progression(opf_xml: &str) -> &'static str {
 fn build_positions_json<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     spine: &[SpineEntry],
+    limits: &ResourceLimits,
 ) -> Result<String, EpubError> {
     let mut item_texts: Vec<(String, usize)> = Vec::with_capacity(spine.len());
     for entry in spine {
         let chars =
             if entry.media_type == "application/xhtml+xml" || entry.media_type == "text/html" {
-                match read_entry(zip, &entry.zip_path)? {
+                match read_entry(zip, &entry.zip_path, limits)? {
                     Some(bytes) => extract_visible_text(&String::from_utf8_lossy(&bytes))
                         .chars()
                         .count(),
@@ -801,6 +842,26 @@ fn is_skipped_element(name: &str) -> bool {
 mod tests {
     use super::super::parser::tests_support::write_zip;
     use super::*;
+    use crate::limits::ResourceLimits;
+
+    #[test]
+    fn read_member_rejects_oversized_member() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("member.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("big.bin", &vec![0u8; 4 << 10]),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_decompressed_bytes: 1_024,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = read_member(&path, "big.bin", &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
@@ -865,7 +926,7 @@ mod tests {
     #[test]
     fn builds_manifest_with_reading_order_and_toc() {
         let (_tmp, path) = session_book();
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
 
         assert_eq!(manifest["metadata"]["title"], "Session Book");
@@ -898,7 +959,7 @@ mod tests {
     #[test]
     fn builds_positions_across_spine() {
         let (_tmp, path) = session_book();
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let list: serde_json::Value = serde_json::from_str(&session.positions_json).unwrap();
 
         let positions = list["positions"].as_array().unwrap();
@@ -958,7 +1019,7 @@ mod tests {
                 ),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(
             manifest["readingOrder"][0]["href"],
@@ -987,7 +1048,7 @@ mod tests {
                 ("chapter2.xhtml", b"<html><body>y</body></html>".as_slice()),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(manifest["metadata"]["layout"], "fixed");
     }
@@ -1008,14 +1069,26 @@ mod tests {
             ],
         );
         assert_eq!(
-            read_member(&path, "OEBPS/chapter1.xhtml").unwrap().unwrap(),
+            read_member(&path, "OEBPS/chapter1.xhtml", &ResourceLimits::DEFAULTS)
+                .unwrap()
+                .unwrap(),
             b"<html><body>hi</body></html>"
         );
-        let png = read_member(&path, "OEBPS/img/pic.png").unwrap().unwrap();
+        let png = read_member(&path, "OEBPS/img/pic.png", &ResourceLimits::DEFAULTS)
+            .unwrap()
+            .unwrap();
         assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
         // Traversal collapses to the root and misses instead of escaping.
-        assert!(read_member(&path, "../etc/passwd").unwrap().is_none());
-        assert!(read_member(&path, "OEBPS/missing.xhtml").unwrap().is_none());
+        assert!(
+            read_member(&path, "../etc/passwd", &ResourceLimits::DEFAULTS)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            read_member(&path, "OEBPS/missing.xhtml", &ResourceLimits::DEFAULTS)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1072,7 +1145,7 @@ mod tests {
                 ("c1.xhtml", b"<html><body>c</body></html>".as_slice()),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         let toc = manifest["toc"].as_array().unwrap();
         assert_eq!(toc.len(), 1);
@@ -1106,7 +1179,7 @@ mod tests {
                 ),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(manifest["toc"].as_array().unwrap().len(), 0);
         let list: serde_json::Value = serde_json::from_str(&session.positions_json).unwrap();
@@ -1122,7 +1195,7 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let path = tmp.path().join("fuzz.epub");
             std::fs::write(&path, &data).unwrap();
-            let _ = build_session(&path);
+            let _ = build_session(&path, &ResourceLimits::DEFAULTS);
         }
     }
 }

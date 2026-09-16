@@ -59,7 +59,7 @@ pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
     {
         parse_pdf(path).map(ScannedBook::Pdf).map_err(Into::into)
     } else {
-        parse_epub(path)
+        parse_epub(path, &crate::limits::ResourceLimits::DEFAULTS)
             .map(|book| ScannedBook::Epub(Box::new(book)))
             .map_err(Into::into)
     }

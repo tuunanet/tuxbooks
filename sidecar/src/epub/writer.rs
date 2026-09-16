@@ -29,11 +29,19 @@ pub fn write_metadata(path: &Path, metadata: &EpubMetadata) -> Result<(), EpubEr
     let source = File::open(path)?;
     let mut archive = ZipArchive::new(BufReader::new(source))?;
 
-    let container =
-        read_entry(&mut archive, "META-INF/container.xml")?.ok_or(EpubError::MissingContainer)?;
+    let container = read_entry(
+        &mut archive,
+        "META-INF/container.xml",
+        &crate::limits::ResourceLimits::DEFAULTS,
+    )?
+    .ok_or(EpubError::MissingContainer)?;
     let opf_path = parse_container_xml(&container)?;
-    let opf_bytes = read_entry(&mut archive, &opf_path)?
-        .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
+    let opf_bytes = read_entry(
+        &mut archive,
+        &opf_path,
+        &crate::limits::ResourceLimits::DEFAULTS,
+    )?
+    .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
 
     let rewritten_opf = rewrite_opf(&opf_xml, metadata)?;
@@ -319,7 +327,8 @@ mod tests {
 
         write_metadata(&path, &metadata()).unwrap();
 
-        let parsed = super::super::parse_epub(&path).unwrap();
+        let parsed =
+            super::super::parse_epub(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Curated Title");
         assert_eq!(
             parsed.metadata.authors,
@@ -382,7 +391,8 @@ mod tests {
         };
         write_metadata(&path, &with_subtitle).unwrap();
 
-        let parsed = super::super::parse_epub(&path).unwrap();
+        let parsed =
+            super::super::parse_epub(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Curated Title");
         assert_eq!(parsed.metadata.subtitle.as_deref(), Some("A Subtitle"));
     }

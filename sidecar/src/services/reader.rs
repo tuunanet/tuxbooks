@@ -26,7 +26,11 @@ pub async fn load_epub_session(
     book_id: i64,
 ) -> Result<crate::epub::EpubReadingSession, AppError> {
     let book = epub_book(pool, book_id).await?;
-    crate::epub::build_session(std::path::Path::new(&book.path)).map_err(epub_error)
+    crate::epub::build_session(
+        std::path::Path::new(&book.path),
+        &crate::limits::ResourceLimits::DEFAULTS,
+    )
+    .map_err(epub_error)
 }
 
 /// Extract one EPUB ZIP member by (decoded, normalized) path, with its
@@ -39,9 +43,13 @@ pub async fn load_book_resource(
     resource: &str,
 ) -> Result<(Vec<u8>, &'static str), AppError> {
     let book = epub_book(pool, book_id).await?;
-    let bytes = crate::epub::read_member(std::path::Path::new(&book.path), resource)
-        .map_err(epub_error)?
-        .ok_or(AppError::NotFound)?;
+    let bytes = crate::epub::read_member(
+        std::path::Path::new(&book.path),
+        resource,
+        &crate::limits::ResourceLimits::DEFAULTS,
+    )
+    .map_err(epub_error)?
+    .ok_or(AppError::NotFound)?;
     let media_type = crate::epub::guess_member_media_type(resource);
     Ok((bytes, media_type))
 }

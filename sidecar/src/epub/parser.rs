@@ -8,6 +8,7 @@ use zip::ZipArchive;
 
 use super::metadata::{attribute, local_name, parse_opf, OpfPackage};
 use super::EpubError;
+use crate::limits::{read_bounded, Deadline, ResourceLimits};
 
 /// Cover image bytes with their media type (e.g. `image/png`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,24 +27,34 @@ pub struct EpubBook {
 }
 
 /// Open an EPUB file, validate its container structure, and extract
-/// metadata, reading order, and the cover image when present.
-pub fn parse_epub(path: &Path) -> Result<EpubBook, EpubError> {
+/// metadata, reading order, and the cover image when present. Every stage
+/// enforces the `limits` quotas (issue #83) and fails fast with a typed
+/// limit error instead of unbounded work.
+pub fn parse_epub(path: &Path, limits: &ResourceLimits) -> Result<EpubBook, EpubError> {
+    limits.check_source_file(source_len(path)?)?;
+    let deadline = Deadline::start(limits);
     let file = File::open(path)?;
     let mut zip = ZipArchive::new(BufReader::new(file))?;
+    check_archive_totals(&mut zip, limits)?;
+    deadline.check()?;
 
-    read_mimetype(&mut zip)?;
+    read_mimetype(&mut zip, limits)?;
+    deadline.check()?;
 
-    let container =
-        read_entry(&mut zip, "META-INF/container.xml")?.ok_or(EpubError::MissingContainer)?;
+    let container = read_entry(&mut zip, "META-INF/container.xml", limits)?
+        .ok_or(EpubError::MissingContainer)?;
     let opf_path = parse_container_xml(&container)?;
+    deadline.check()?;
 
-    let opf_bytes =
-        read_entry(&mut zip, &opf_path)?.ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
+    let opf_bytes = read_entry(&mut zip, &opf_path, limits)?
+        .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
     let package = parse_opf(&opf_xml)?;
+    deadline.check()?;
 
     let spine = resolve_spine(&package)?;
-    let cover = extract_cover(&package, &opf_path, &mut zip)?;
+    let cover = extract_cover(&package, &opf_path, &mut zip, limits)?;
+    deadline.check()?;
 
     Ok(EpubBook {
         metadata: package.metadata,
@@ -52,11 +63,37 @@ pub fn parse_epub(path: &Path) -> Result<EpubBook, EpubError> {
     })
 }
 
+fn source_len(path: &Path) -> Result<u64, EpubError> {
+    Ok(std::fs::metadata(path)?.len())
+}
+
+/// Cheap central-directory pre-scan (R-1): entry count and the sum of
+/// declared uncompressed sizes, before any member is decompressed.
+pub(crate) fn check_archive_totals<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    limits: &ResourceLimits,
+) -> Result<(), EpubError> {
+    limits.check_entries(zip.len())?;
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let entry = zip.by_index(i)?;
+        if entry.is_dir() {
+            continue;
+        }
+        total += entry.size();
+    }
+    limits.check_total_uncompressed(total)?;
+    Ok(())
+}
+
 /// Native metadata entries for the read-only "Original File Metadata" panel,
 /// built from the same OPF parse the importer uses. Only non-empty values are
 /// returned, in a stable display order.
-pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, EpubError> {
-    let metadata = parse_epub(path)?.metadata;
+pub fn read_file_properties(
+    path: &Path,
+    limits: &ResourceLimits,
+) -> Result<Vec<(String, String)>, EpubError> {
+    let metadata = parse_epub(path, limits)?.metadata;
     let mut entries = Vec::new();
     let mut push = |key: &str, value: Option<String>| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
@@ -87,16 +124,28 @@ pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, EpubEr
     Ok(entries)
 }
 
-fn read_mimetype<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<(), EpubError> {
+fn read_mimetype<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    limits: &ResourceLimits,
+) -> Result<(), EpubError> {
     if zip.is_empty() {
         return Err(EpubError::MissingMimetype);
     }
-    let mut first = zip.by_index(0)?;
+    let first = zip.by_index(0)?;
     if first.name() != "mimetype" {
         return Err(EpubError::MissingMimetype);
     }
+    limits.check_member(first.compressed_size(), first.size())?;
     let mut value = String::new();
-    first.read_to_string(&mut value)?;
+    first
+        .take(limits.max_decompressed_bytes.saturating_add(1))
+        .read_to_string(&mut value)?;
+    if value.len() as u64 > limits.max_decompressed_bytes {
+        return Err(EpubError::Limit(crate::limits::LimitExceeded {
+            limit: "max_decompressed_bytes",
+            detail: "mimetype member over cap".to_string(),
+        }));
+    }
     if value != "application/epub+zip" {
         return Err(EpubError::InvalidMimetype);
     }
@@ -143,6 +192,7 @@ fn extract_cover<R: Read + Seek>(
     package: &OpfPackage,
     opf_path: &str,
     zip: &mut ZipArchive<R>,
+    limits: &ResourceLimits,
 ) -> Result<Option<CoverImage>, EpubError> {
     let item = package
         .manifest
@@ -160,7 +210,7 @@ fn extract_cover<R: Read + Seek>(
     };
 
     let zip_path = resolve_zip_path(opf_path, &item.href);
-    match read_entry(zip, &zip_path)? {
+    match read_entry(zip, &zip_path, limits)? {
         Some(data) => Ok(Some(CoverImage {
             media_type: item.media_type.clone(),
             data,
@@ -172,6 +222,7 @@ fn extract_cover<R: Read + Seek>(
 pub(crate) fn read_entry<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
+    limits: &ResourceLimits,
 ) -> Result<Option<Vec<u8>>, EpubError> {
     for i in 0..zip.len() {
         let mut file = zip.by_index(i)?;
@@ -179,9 +230,9 @@ pub(crate) fn read_entry<R: Read + Seek>(
             continue;
         }
         if file.name() == name {
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            return Ok(Some(buf));
+            limits.check_member(file.compressed_size(), file.size())?;
+            let data = read_bounded(file.by_ref(), limits.max_decompressed_bytes)?;
+            return Ok(Some(data));
         }
     }
     Ok(None)
@@ -258,6 +309,7 @@ pub(crate) mod tests_support {
 mod tests {
     use super::tests_support::{fixture_epub, write_zip};
     use super::*;
+    use crate::limits::ResourceLimits;
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
@@ -272,9 +324,120 @@ mod tests {
   <spine><itemref idref="c1"/></spine>
 </package>"#;
 
+    const CONTAINER: &[u8] =
+        br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#;
+
+    fn limits(max_source_file_bytes: u64) -> ResourceLimits {
+        ResourceLimits {
+            max_source_file_bytes,
+            ..ResourceLimits::DEFAULTS
+        }
+    }
+
+    #[test]
+    fn parse_epub_rejects_oversized_source_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("huge.epub");
+        std::fs::write(&path, vec![0u8; 200]).unwrap();
+        let err = parse_epub(&path, &limits(100)).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_rejects_too_many_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("many.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", CONTAINER),
+                ("content.opf", OPF.as_bytes()),
+                ("filler.bin", &[0u8; 8]),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_entries: 3,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_rejects_decompression_bomb_cover() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bomb.epub");
+        let cover_opf = OPF.replace(
+            r#"href="c1.xhtml" media-type="application/xhtml+xml""#,
+            r#"href="cover.png" media-type="image/png" properties="cover-image""#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", CONTAINER),
+                ("content.opf", cover_opf.as_bytes()),
+                ("cover.png", &vec![0u8; 4 << 20]),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_decompressed_bytes: 1_024,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_rejects_oversized_total_uncompressed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("total.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", CONTAINER),
+                ("content.opf", OPF.as_bytes()),
+                ("filler.bin", &vec![0u8; 3 << 10]),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_total_uncompressed_bytes: 2_000,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_rejects_expired_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("slow.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", CONTAINER),
+                ("content.opf", OPF.as_bytes()),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_parse_seconds: 0,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_epub(&path, &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_accepts_fixture_under_default_limits() {
+        parse_epub(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
+    }
+
     #[test]
     fn parses_fixture_metadata() {
-        let book = parse_epub(&fixture_epub()).unwrap();
+        let book = parse_epub(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(book.metadata.title, "A Minimal Book");
         assert_eq!(book.metadata.author.as_deref(), Some("Ada Lovelace"));
         assert_eq!(book.metadata.language.as_deref(), Some("en"));
@@ -283,7 +446,7 @@ mod tests {
 
     #[test]
     fn file_properties_list_native_metadata() {
-        let entries = read_file_properties(&fixture_epub()).unwrap();
+        let entries = read_file_properties(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(
             entries[0],
             ("Title".to_string(), "A Minimal Book".to_string())
@@ -298,7 +461,7 @@ mod tests {
 
     #[test]
     fn fixture_spine_is_in_reading_order() {
-        let book = parse_epub(&fixture_epub()).unwrap();
+        let book = parse_epub(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(
             book.spine,
             vec![
@@ -311,7 +474,7 @@ mod tests {
 
     #[test]
     fn fixture_cover_is_extracted() {
-        let book = parse_epub(&fixture_epub()).unwrap();
+        let book = parse_epub(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
         let cover = book.cover.expect("fixture has a cover");
         assert_eq!(cover.media_type, "image/png");
         assert_eq!(&cover.data[..4], &[0x89, b'P', b'N', b'G']);
@@ -336,7 +499,7 @@ mod tests {
                 ("c1.xhtml", b"<html><body>c1</body></html>"),
             ],
         );
-        let book = parse_epub(&path).unwrap();
+        let book = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(book.spine, vec!["c1.xhtml".to_string()]);
         assert!(book.cover.is_none());
     }
@@ -358,7 +521,7 @@ mod tests {
                 ("ch apters/c1.xhtml", b"<html/>"),
             ],
         );
-        let book = parse_epub(&path).unwrap();
+        let book = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(book.spine, vec!["ch%20apters/c1.xhtml".to_string()]);
     }
 
@@ -378,7 +541,7 @@ mod tests {
                 ("content.opf", opf.as_bytes()),
             ],
         );
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::BrokenSpine(_)), "got: {err:?}");
     }
 
@@ -396,7 +559,7 @@ mod tests {
                 ),
             ],
         );
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::NoRootfile), "got: {err:?}");
     }
 
@@ -406,7 +569,7 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let path = tmp.path().join("fuzz.epub");
             std::fs::write(&path, &data).unwrap();
-            let _ = parse_epub(&path);
+            let _ = parse_epub(&path, &ResourceLimits::DEFAULTS);
         }
     }
 }
