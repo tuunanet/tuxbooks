@@ -16,8 +16,12 @@
  * convert through `lib/epub/progressMigration.ts` at restore/jump time.
  *
  * Content renders in same-origin sandboxed iframes (blob: URLs built by the
- * navigator); scripted EPUB content is blocked by the application CSP, and
- * external links are intercepted by `handleLocator`, never navigated.
+ * navigator). Every document the navigator reads flows through the content
+ * policy (`lib/epub/contentPolicy.ts`): requests are confined to the
+ * session base, document text is sanitized and a strict frame CSP is
+ * injected before anything parses it, loaded frames get a DOM belt, and
+ * scripted EPUB content is blocked by the intersecting CSPs. External links
+ * are intercepted by `handleLocator`, never navigated.
  */
 
 import { HttpFetcher, Link, Locator, Manifest, Publication } from "@readium/shared";
@@ -28,6 +32,12 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
+import {
+  classifyPublicationHref,
+  policyFetchClient,
+  publicationBaseUrl,
+  sanitizeFrameDocument,
+} from "./contentPolicy";
 import {
   epubFontSizeRatio,
   epubFontFamilyPreference,
@@ -248,13 +258,13 @@ export class ReadiumEpubHandle {
 
   private constructor(bookId: number, manifestJson: unknown, positionsJson: unknown) {
     this.bookId = bookId;
-    const sessionBaseUrl = `tuxbooks://book/${bookId}/`;
+    const sessionBaseUrl = publicationBaseUrl(bookId);
 
     const manifest = Manifest.deserialize(manifestJson);
     if (!manifest) throw new Error("EPUB session manifest is not a valid webpub manifest");
     manifest.setSelfLink(`${sessionBaseUrl}manifest.json`);
 
-    const fetcher = new HttpFetcher(undefined, sessionBaseUrl);
+    const fetcher = new HttpFetcher(policyFetchClient(sessionBaseUrl), sessionBaseUrl);
     this.fetcher = fetcher;
     this.publication = new Publication({ manifest, fetcher });
 
@@ -595,6 +605,7 @@ export class ReadiumEpubHandle {
 
   private handleFrameLoaded(wnd: Window): void {
     const doc = wnd.document;
+    sanitizeFrameDocument(doc);
     const href = this.currentLocator?.href ?? "";
     const index = this.sectionIndexOf(href);
     for (const handler of this.loadHandlers) {
@@ -603,17 +614,17 @@ export class ReadiumEpubHandle {
   }
 
   /**
-   * The engine routes unhandled hrefs here: absolute web targets
-   * (http/mailto/tel) are external links — reported, never navigated —
-   * and in-book anchors are handed back to the engine (return false).
+   * The engine routes unhandled hrefs here. Classification decides: in-book
+   * targets go back to the engine (return false); web/mail/tel targets are
+   * external links — reported, never navigated — and every other absolute
+   * target (file:, javascript:, data:, custom protocols, protocol-relative)
+   * is blocked outright, also reported and never navigated.
    */
   private handleLocator(locator: Locator): boolean {
     const href = locator.href ?? "";
-    if (/^(https?:|mailto:|tel:)/i.test(href)) {
-      for (const handler of this.externalLinkHandlers) handler(href);
-      return true;
-    }
-    return false;
+    if (classifyPublicationHref(href) === "in-book") return false;
+    for (const handler of this.externalLinkHandlers) handler(href);
+    return true;
   }
 
   private handleTextSelected(selection: BasicTextSelection): void {
@@ -692,6 +703,8 @@ export class ReadiumEpubHandle {
   /**
    * Navigate to an app-level locator: a spine index (number), a serialized
    * locator JSON, or a legacy foliate CFI (annotations migrate on the fly).
+   * A string target carrying a non-in-book href (a remote TOC entry, a
+   * dangerous scheme) is reported as an external link instead of navigated.
    */
   async goTo(target: string | number): Promise<void> {
     await this.settled(async () => {
@@ -702,9 +715,27 @@ export class ReadiumEpubHandle {
         if (link) navigator.goLink(link, false, () => {});
         return;
       }
+      if (this.reportNonLocalTarget(target)) return;
       const locator = await this.toLocator(target);
       if (locator) navigator.go(locator, false, () => {});
     });
+  }
+
+  /**
+   * True when `target` names a non-in-book href: it was reported through the
+   * external-link handlers and must not be navigated.
+   */
+  private reportNonLocalTarget(target: string): boolean {
+    let href: string | null = null;
+    try {
+      const json = JSON.parse(target) as { href?: unknown };
+      if (typeof json?.href === "string") href = json.href;
+    } catch {
+      return false;
+    }
+    if (href === null || classifyPublicationHref(href) === "in-book") return false;
+    for (const handler of this.externalLinkHandlers) handler(href);
+    return true;
   }
 
   /** Serialized locator of the current position (what a bookmark persists). */

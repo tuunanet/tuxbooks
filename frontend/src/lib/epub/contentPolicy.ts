@@ -62,6 +62,39 @@ function hasScriptScheme(value: string): boolean {
 }
 
 /**
+ * Post-mount belt for a loaded section document (E-1, E-2): remove any
+ * content-authored active node that survived to the live frame. The
+ * toolkit's own injected nodes are marked `data-readium` and are left
+ * alone — a forged marker can only preserve an inert node, since the
+ * frame CSP and the sidecar's script gates run independently of this
+ * sweep.
+ */
+export function sanitizeFrameDocument(doc: Document): void {
+  const owned = (element: Element): boolean => {
+    for (let node: Element | null = element; node !== null; node = node.parentElement) {
+      if (node.hasAttribute("data-readium")) return true;
+    }
+    return false;
+  };
+  for (const active of doc.querySelectorAll(REMOVED_ELEMENTS + ", script")) {
+    if (!owned(active)) active.remove();
+  }
+  for (const meta of doc.querySelectorAll("meta[http-equiv]")) {
+    if (!owned(meta) && meta.getAttribute("http-equiv")?.trim().toLowerCase() === "refresh") {
+      meta.remove();
+    }
+  }
+  for (const use of doc.querySelectorAll("use")) {
+    if (owned(use)) continue;
+    const target = use.getAttribute("href") ?? use.getAttribute("xlink:href") ?? "";
+    if (!target.trim().startsWith("#")) use.remove();
+  }
+  for (const element of doc.querySelectorAll("*")) {
+    if (!owned(element)) scrubActiveAttributes(element);
+  }
+}
+
+/**
  * Strip active content from a publication document: script elements
  * anywhere in the tree (XHTML, SVG, inline or sourced), active-content
  * elements (`object`/`embed`/`iframe` and kin), inline event handler
@@ -105,22 +138,26 @@ function stripActiveContent(doc: Document, isXml: boolean): string | null {
     changed = true;
   }
   for (const element of doc.querySelectorAll("*")) {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      if (name.startsWith("on")) {
-        element.removeAttribute(attribute.name);
-        changed = true;
-      } else if (
-        ACTIVE_URL_ATTRIBUTES.has(attribute.localName) &&
-        hasScriptScheme(attribute.value)
-      ) {
-        element.removeAttribute(attribute.name);
-        changed = true;
-      }
-    }
+    changed = scrubActiveAttributes(element) || changed;
   }
   if (!changed) return null;
   return isXml ? serializeXml(doc) : serializeHtml(doc);
+}
+
+/** Removes handler and script-scheme attributes; true when anything went. */
+function scrubActiveAttributes(element: Element): boolean {
+  let changed = false;
+  for (const attribute of Array.from(element.attributes)) {
+    const name = attribute.name.toLowerCase();
+    if (name.startsWith("on")) {
+      element.removeAttribute(attribute.name);
+      changed = true;
+    } else if (ACTIVE_URL_ATTRIBUTES.has(attribute.localName) && hasScriptScheme(attribute.value)) {
+      element.removeAttribute(attribute.name);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /**

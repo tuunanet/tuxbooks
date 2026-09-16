@@ -15,6 +15,7 @@ import {
   policyFetchClient,
   PUBLICATION_FRAME_CSP,
   publicationBaseUrl,
+  sanitizeFrameDocument,
   sanitizePublicationText,
 } from "@/lib/epub/contentPolicy";
 
@@ -201,8 +202,9 @@ describe("the publication fetch client (E-3)", () => {
   it("rejects request URLs outside the session base before fetching", async () => {
     const inner = vi.fn();
     const client = policyFetchClient(base, inner);
-    await expect(client("https://evil.example/x.png")).rejects.toThrow();
-    await expect(client("http://127.0.0.1:8080/")).rejects.toThrow();
+    for (const url of EXTERNAL_RESOURCE_URLS) {
+      await expect(client(url)).rejects.toThrow();
+    }
     expect(inner).not.toHaveBeenCalled();
   });
 
@@ -230,7 +232,7 @@ describe("the publication fetch client (E-3)", () => {
       const body = "\u0000\u0001\u0002binary-ish";
       const client = policyFetchClient(
         base,
-        () => new Response(body, { headers: { "content-type": contentType } }),
+        async () => new Response(body, { headers: { "content-type": contentType } }),
       );
       const response = await client(`${base}asset.bin`);
       expect(await response.text()).toBe(body);
@@ -238,13 +240,49 @@ describe("the publication fetch client (E-3)", () => {
   );
 
   it("keeps the response status of a sanitized document", async () => {
-    const client = policyFetchClient(base, () =>
-      xhtmlResponse(xhtml('<p>x</p><iframe src="page.xhtml"></iframe>')),
+    const client = policyFetchClient(base, async () =>
+      xhtmlResponse(xhtml(`<p>x</p><iframe src="page.xhtml"></iframe>`)),
     );
     const response = await client(`${base}chapter1.xhtml`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/xhtml+xml");
     expect((await response.text()).toLowerCase()).not.toContain("<iframe");
+  });
+});
+
+describe("the mounted-frame belt", () => {
+  function mountedDoc(): Document {
+    return new DOMParser().parseFromString(
+      xhtml(
+        `<p id="keep">t</p><script>content()</script>` +
+          `<div onclick="x()"></div><iframe src="page.xhtml"></iframe>` +
+          `<svg data-readium="true"><script>toolkit()</script></svg>`,
+      ),
+      "application/xhtml+xml",
+    );
+  }
+
+  it("removes content-authored active nodes but keeps the toolkit's own", () => {
+    const doc = mountedDoc();
+    sanitizeFrameDocument(doc);
+    expect(doc.querySelector("#keep")).not.toBeNull();
+    expect(doc.querySelectorAll("script")).toHaveLength(1);
+    expect(doc.querySelector("script")?.textContent).toBe("toolkit()");
+    expect(doc.querySelectorAll("iframe")).toHaveLength(0);
+    expect(doc.querySelector("#keep")?.hasAttribute("onclick")).toBe(false);
+  });
+
+  it("removes refresh metas and external SVG use from content only", () => {
+    const doc = new DOMParser().parseFromString(
+      xhtml(
+        `<meta http-equiv="refresh" content="1;url=https://evil.example/" />` +
+          `<svg><use href="https://evil.example/x.svg#y" /></svg>`,
+      ),
+      "application/xhtml+xml",
+    );
+    sanitizeFrameDocument(doc);
+    expect(doc.querySelectorAll("meta")).toHaveLength(0);
+    expect(doc.querySelectorAll("use")).toHaveLength(0);
   });
 });
 
