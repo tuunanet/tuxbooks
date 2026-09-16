@@ -77,8 +77,8 @@ export function isAllowedSenderUrl(raw: string, devServerUrl: string | undefined
 
 **Steps:**
 
-- [ ] RED: `pathSchema.test.ts` names every export above; run `pnpm --filter frontend exec vitest run tests/security/pathSchema.test.ts` and observe the import failure.
-- [ ] GREEN: implement the module minimally; tests pass.
+- [x] RED: `pathSchema.test.ts` names every export above; run `pnpm --filter frontend exec vitest run tests/security/pathSchema.test.ts` and observe the import failure.
+- [x] GREEN: implement the module minimally; tests pass.
 - [ ] `attackVectors.ts`: export traversal member paths (plain, percent-encoded, double-encoded, backslash, absolute, NUL, control chars, oversized), bad book ids, bad ranges, scheme-confusion URLs, and absolute-path cover URLs; typed so #87 can extend the arrays.
 
 ### Task 2: Pure protocol handler (`electron/main/protocolHandler.ts`)
@@ -116,9 +116,9 @@ Behavior: scheme/host allowlist (only `tuxbooks://book`, `tuxbooks://cover`; any
 
 **Steps:**
 
-- [ ] RED: `protocolHandler.test.ts` covering the full negative matrix (host allowlist, decode errors, ids, members, covers, ranges, error mapping, MIME pinning) plus happy paths; observe import failure.
-- [ ] GREEN: implement; tests pass.
-- [ ] Wire in `electron/main/index.ts`: delete the in-file `parseRange`/MIME maps/`SIDECAR_METHODS` (now imported), replace `registerProtocol` body with a `handleProtocolRequest` delegation whose `readCover` does resolve + startsWith + realpath containment, and whose sidecar calls map `RpcFailure` to `NotFoundError`.
+- [x] RED: `protocolHandler.test.ts` covering the full negative matrix (host allowlist, decode errors, ids, members, covers, ranges, error mapping, MIME pinning) plus happy paths; observe import failure.
+- [x] GREEN: implement; tests pass.
+- [x] Wire in `electron/main/index.ts`: delete the in-file `parseRange`/MIME maps/`SIDECAR_METHODS` (now imported), replace `registerProtocol` body with a `handleProtocolRequest` delegation whose `readCover` does resolve + startsWith + realpath containment, and whose sidecar calls map `RpcFailure` to `NotFoundError`.
 
 ### Task 3: IPC policy (`electron/main/ipcPolicy.ts`)
 
@@ -142,9 +142,9 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
 
 **Steps:**
 
-- [ ] RED: `ipcPolicy.test.ts` (allowlist, shape, size, per-method schema, token requirement, drag-drop exemption); observe import failure.
-- [ ] GREEN: implement; tests pass.
-- [ ] Wire in `index.ts`: `registerIpc` issues dialog results into `IssuedPaths`, routes `tuxbooks:invoke` through `validateInvokeParams`, and changes `tuxbooks:reveal` to take a book id (resolve via `sidecar.call("list_books")`).
+- [x] RED: `ipcPolicy.test.ts` (allowlist, shape, size, per-method schema, token requirement, drag-drop exemption); observe import failure.
+- [x] GREEN: implement; tests pass.
+- [x] Wire in `index.ts`: `registerIpc` issues dialog results into `IssuedPaths`, routes `tuxbooks:invoke` through `validateInvokeParams`, and changes `tuxbooks:reveal` to take a book id (resolve via `sidecar.call("list_books")`).
 
 ### Task 4: Preload + renderer call sites
 
@@ -158,8 +158,8 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
 
 **Steps:**
 
-- [ ] RED: preload-surface audit test + updated mock expectations fail.
-- [ ] GREEN: implement; full frontend suite passes.
+- [x] RED: preload-surface audit test + updated mock expectations fail.
+- [x] GREEN: implement; full frontend suite passes.
 
 ### Task 5: Payload bounds + Rust rejection pins
 
@@ -170,12 +170,12 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
 
 **Steps:**
 
-- [ ] RED: extend `ipcPolicy.test.ts`/new sidecar tests for the caps; Rust `cargo test --manifest-path sidecar/Cargo.toml rpc::` for the new pins (compile error first where the harness is new).
-- [ ] GREEN: implement caps; `just test-rust` green.
+- [x] RED: extend `ipcPolicy.test.ts`/new sidecar tests for the caps; Rust `cargo test --manifest-path sidecar/Cargo.toml rpc::` for the new pins (compile error first where the harness is new).
+- [x] GREEN: implement caps; `just test-rust` green.
 
 ### Task 6: Verification
 
-- [ ] `just format` (Rust touched), `just check` green.
-- [ ] `just test-e2e` green (headless, single run).
-- [ ] `docs/ARCHITECTURE.md`: IPC section records the path schema, cover-name URLs, id-based reveal, sender validation, and payload caps.
-- [ ] Task report with per-invariant RED/GREEN evidence and T-7 review findings.
+- [x] `just format` (Rust touched), `just check` green.
+- [x] `just test-e2e` green (headless, single run).
+- [x] `docs/ARCHITECTURE.md`: IPC section records the path schema, cover-name URLs, id-based reveal, sender validation, and payload caps.
+- [ ] Task report (in progress) with per-invariant RED/GREEN evidence and T-7 review findings.
