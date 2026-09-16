@@ -57,8 +57,9 @@ Each has bitten before (or is a known trap of the Electron stack):
 | Module        | May depend on                               | Must never import     |
 | ------------- | ------------------------------------------- | --------------------- |
 | `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri, electron glue  |
-| `epub/`       | std, zip, quick-xml                         | tauri, sqlx, electron |
-| `pdf/`        | std, lopdf                                  | tauri, sqlx, electron |
+| `limits/`     | std, thiserror                              | runtime crates, sqlx  |
+| `epub/`       | std, zip, quick-xml, limits                 | tauri, sqlx, electron |
+| `pdf/`        | std, lopdf, limits                          | tauri, sqlx, electron |
 | `db/`         | sqlx, migrations                            | tauri, electron       |
 | `repository/` | sqlx, domain                                | tauri, epub, pdf      |
 | `services/`   | domain, repository, epub, pdf, db           | tauri, electron       |
@@ -82,7 +83,8 @@ require a live database. See [DATABASE.md](DATABASE.md).
 ## EPUB layer
 
 Import-time parsing stays in Rust (`epub/`, ZIP + OPF XML into a plain
-`EpubBook`). Reader rendering belongs to **Readium TS Toolkit** in the
+`EpubBook`) under the shared resource limits (`docs/RESOURCE_LIMITS.md`).
+Reader rendering belongs to **Readium TS Toolkit** in the
 renderer, behind the single-module seam `lib/epub/readiumEngine.ts` —
 publication parsing, navigator state, pagination, locators, selection, and
 navigation are Readium's; React owns only the surrounding UI. EPUB
@@ -92,7 +94,8 @@ resources load through `tuxbooks://`. See [EPUB.md](EPUB.md).
 
 Import-time metadata stays in Rust (`pdf/` via `lopdf`; page-1 cover
 rasterization via `pdfium-render` — retained unless MuPDF in the renderer
-provably replaces it, see [PDF.md](PDF.md)). Reader rendering belongs to
+provably replaces it, see [PDF.md](PDF.md)), under the shared resource
+limits ([RESOURCE_LIMITS.md](RESOURCE_LIMITS.md)). Reader rendering belongs to
 **MuPDF.js/WASM** in the renderer behind `lib/pdf/pdfEngine.ts` (the only
 MuPDF import site); `components/reader/pdf/` owns layout, virtualization,
 the render queue, and persistence. Byte access flows through
