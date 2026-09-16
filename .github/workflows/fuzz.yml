@@ -1,0 +1,52 @@
+name: Fuzz (nightly)
+
+# Issue #88: fuzzing runs at nightly cadence, never per-PR
+# (docs/TESTING.md "Fuzzing"). Each target is time-boxed; a crash fails the
+# job and uploads the artifact for triage.
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz targets (libFuzzer)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sidecar
+            sidecar/fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Fuzz (bounded, five minutes per target)
+        run: just fuzz-ci
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: sidecar/fuzz/artifacts/
+          if-no-files-found: ignore

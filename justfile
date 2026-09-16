@@ -311,3 +311,38 @@ check:
 coverage:
     node scripts/coverage-gate.mjs
     pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+
+# Fuzzing (issue #88, docs/TESTING.md "Fuzzing"). libFuzzer via cargo-fuzz:
+# needs the nightly toolchain and the cargo-fuzz subcommand
+# (`rustup toolchain install nightly --profile minimal && cargo install
+# cargo-fuzz --locked`). The run is time-boxed with -max_total_time and all
+# artifacts stay inside the workspace: crash files land in
+# sidecar/fuzz/artifacts/, the runtime corpus in sidecar/fuzz/corpus/
+# (both gitignored; committed seeds are copied in per run).
+
+# Fuzz one target for SECONDS seconds. First run compiles the instrumented
+# build (minutes); later runs are incremental.
+fuzz TARGET SECONDS="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}/sidecar"
+    export RUSTUP_TOOLCHAIN=nightly
+    mkdir -p "fuzz/corpus/{{TARGET}}"
+    cp fuzz/seeds/{{TARGET}}/* "fuzz/corpus/{{TARGET}}/"
+    cargo fuzz run {{TARGET}} "fuzz/corpus/{{TARGET}}" -- \
+        -max_total_time={{SECONDS}} -rss_limit_mb=4096 -timeout=25
+
+# Short bounded pass over all four targets (the local proof run).
+fuzz-smoke:
+    just fuzz epub-parse 30
+    just fuzz opf-xml 30
+    just fuzz pdf-parse 30
+    just fuzz json-rpc 30
+
+# Nightly cadence (docs/TESTING.md): five minutes per target, run by
+# .github/workflows/fuzz.yml. Never per-PR.
+fuzz-ci:
+    just fuzz epub-parse 300
+    just fuzz opf-xml 300
+    just fuzz pdf-parse 300
+    just fuzz json-rpc 300
