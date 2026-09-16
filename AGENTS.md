@@ -23,7 +23,16 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
   format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
 - Do not silently change these architectural conventions.
 
-## Commands (in this order)
+## Writing for humans
+
+Invoke the `unslop` skill over anything a person will read, before you commit, post, or
+send it: commit messages, the PR title and body, README and doc edits, code
+comments, and the closing reply. It strips AI tells (em dashes, filler,
+hedging, chatbot phrases, puffery, bold-label lists) and replaces fancy
+words with plain ones and passive voice with active. Apply it to text you
+wrote or changed, not to prose you didn't touch.
+
+## Commands
 
 The live command set is in the justfile — check `just --list` and
 `docs/BUILD.md` for what is wired up in this migration phase. Run `just check`
@@ -38,6 +47,7 @@ just test-e2e         # real-app desktop E2E, headless on Linux (builds first)
 just test             # unit tests, rust + frontend concurrently
 just test-rust        # cargo test (service crate)
 just test-frontend    # vitest run (CI mode)
+just bump X.Y.Z       # apply a release version to all versioned files
 pnpm --filter frontend exec vitest run <file-or-pattern>
 ```
 
