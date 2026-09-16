@@ -242,11 +242,49 @@ in the navigation drawer.
 
 ### Security
 
-EPUB content may contain scripts. Sections render in sandboxed iframes;
-the Electron session enforces a restrictive CSP (`script-src 'self'`, no
-remote content), and external links are intercepted, never navigated.
-The renderer has no Node.js access (`contextIsolation: true`,
-`nodeIntegration: false`, sandboxed preload).
+Publication content is hostile input and the reader enforces the boundary
+invariants E-1..E-5 (issue #82, see the umbrella #78) in two layers.
+
+**Sidecar pre-serve gates (Rust, `epub/session.rs`).** A book that declares
+script media types (`text/javascript` and kin, `application/wasm`) fails to
+open (`ScriptedContent`), a spine document containing a `<script>` element
+fails the session build, and spine hrefs that name remote or scheme'd
+targets (`https:`, `javascript:`, …) fail with `ExternalRef`: scripted
+EPUBs are not a supported feature and never reach a frame. TOC/NCX entries
+whose hrefs use dangerous schemes (`javascript:`, `data:`, `vbscript:`,
+`file:`, `blob:`) are dropped at the source; remote web links stay in the
+TOC and are intercepted as external links. `read_member` validates every
+renderer-supplied member path (traversal, absolute, backslash, NUL,
+control chars, drive prefixes) with `InvalidMemberPath` before
+normalization (E-5), mirroring the protocol layer's `parseMemberPath`.
+Session documents carry only book-id-relative encoded hrefs — never
+filesystem paths (E-4).
+
+**Engine seam fences (TS, `lib/epub/contentPolicy.ts`).** Every document
+the navigator reads flows through a policy fetch client wrapped around the
+publication's `HttpFetcher`: requests outside the session base
+(`tuxbooks://book/<id>/`) are rejected before any fetch, and HTML/XHTML/SVG
+responses are sanitized (script elements, `on*` handlers, `javascript:`
+URLs, `object`/`embed`/`iframe` and kin removed) with a strict frame CSP
+meta injected before the document parses. The toolkit injects its own
+permissive frame CSP; browsers enforce all policies together, so the
+stricter one wins: `script-src blob:` (no inline scripts, handlers,
+`javascript:` URLs, or script files), `object-src`/`frame-src`/
+`child-src`/`connect-src` `'none'`, resource loads confined to
+`tuxbooks: blob: data:`. Loaded frames get a DOM belt
+(`sanitizeFrameDocument`) that strips content-authored active nodes while
+leaving the toolkit's `[data-readium]` nodes alone. Link targets are
+classified: in-book hrefs navigate, web/mail/tel are reported external
+links (never navigated), and everything else (`file:`, `javascript:`,
+`data:`, custom protocols, protocol-relative) is blocked outright (E-1,
+E-2, E-3).
+
+Sections render in same-origin sandboxed iframes; the renderer has no
+Node.js access (`contextIsolation: true`, `nodeIntegration: false`,
+sandboxed preload). The policy module is unit-tested in
+`frontend/tests/security/contentPolicy.test.ts` over the shared
+`attackVectors` corpus; the sidecar gates are pinned in `epub/session.rs`
+tests named per invariant.
 
 ### Presentation mode (issue #64)
 
