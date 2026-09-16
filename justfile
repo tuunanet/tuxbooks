@@ -114,6 +114,29 @@ package TARGETS="deb rpm AppImage": build
 check-deb:
     bash scripts/check-deb.sh
 
+# Dependency audits (issue #89, S-2): the npm gate (untriaged high/critical
+# advisories fail) plus RustSec cargo-audit over the sidecar and fuzz
+# lockfiles. Networked. CI runs the same gates (.github/workflows/audit.yml,
+# weekly sweep included); triage policy: docs/SUPPLY_CHAIN.md.
+audit:
+    node scripts/npm-audit-gate.mjs
+    bash scripts/install-cargo-audit.sh
+    cd sidecar && ../.build/bin/cargo-audit audit
+    cd sidecar && ../.build/bin/cargo-audit audit --file fuzz/Cargo.lock
+
+# Offline supply-chain gate (issue #89): the repo-side wiring the networked
+# audits cannot see — maturity floor, build-script allowlist, audit/SBOM
+# workflow wiring, pinned fuzz toolchain. Part of `just check` and of the
+# CI npm-audit job.
+check-supply-chain:
+    node scripts/supply-chain-gate.mjs
+
+# CycloneDX SBOM over the npm and Rust trees (issue #89, S-4), written to
+# dist-packages/SBOM-tuxbooks-<version>.cdx.json. Release builds publish it
+# next to SHA256SUMS.txt (docs/RELEASE.md).
+sbom:
+    node scripts/generate-sbom.mjs
+
 # Unit tests: rust + frontend, concurrently (different toolchains — cargo
 # and node never contend). fetch-pdfium first so PDF cover tests exercise a
 # real render, not a skip.
@@ -302,6 +325,7 @@ check:
         'frontend-types: just typecheck' \
         'format: just format-check-frontend' \
         'fixtures: just check-epub-fixtures' \
+        'supply-chain: just check-supply-chain' \
         'workflows: just lint-workflows'
     @echo "check: OK"
 

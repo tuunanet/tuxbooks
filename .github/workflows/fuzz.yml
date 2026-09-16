@@ -25,7 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@nightly
+      # Pinned nightly (issue #89, S-1): a floating nightly is an
+      # uncontrolled dependency. Bump the date deliberately, one bump per
+      # change, and run `just fuzz-ci` locally once before pushing.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-15
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

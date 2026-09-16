@@ -1,0 +1,99 @@
+name: Audit
+
+# Issue #89 (S-1/S-2): dependency advisories are audited continuously, not
+# one-time — every dependency-touching change plus a weekly sweep. The npm
+# gate blocks on untriaged high/critical advisories; the RustSec gate
+# blocks on untriaged cargo-audit findings. Triage policy and the current
+# triage table: docs/SUPPLY_CHAIN.md. The offline repo-side wiring checks
+# (docs/SUPPLY_CHAIN.md "Gates") run inside the npm job.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "sidecar/Cargo.toml"
+      - "sidecar/Cargo.lock"
+      - "sidecar/fuzz/Cargo.toml"
+      - "sidecar/fuzz/Cargo.lock"
+      - "sidecar/.cargo/audit.toml"
+      - "scripts/npm-audit-gate.mjs"
+      - "scripts/supply-chain-gate.mjs"
+      - "scripts/install-cargo-audit.sh"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "**/package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "sidecar/Cargo.toml"
+      - "sidecar/Cargo.lock"
+      - "sidecar/fuzz/Cargo.toml"
+      - "sidecar/fuzz/Cargo.lock"
+      - "sidecar/.cargo/audit.toml"
+      - "scripts/npm-audit-gate.mjs"
+      - "scripts/supply-chain-gate.mjs"
+      - "scripts/install-cargo-audit.sh"
+      - ".github/workflows/audit.yml"
+  # Continuous auditing (S-1/S-2): the weekly sweep catches advisories
+  # published against an unchanged tree.
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  npm-audit:
+    name: npm audit (pnpm)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Supply-chain gate (offline wiring checks)
+        run: node scripts/supply-chain-gate.mjs
+
+      - name: npm audit gate
+        run: node scripts/npm-audit-gate.mjs
+
+  cargo-audit:
+    name: RustSec audit (cargo-audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cargo-audit (pinned)
+        run: bash scripts/install-cargo-audit.sh
+
+      - name: Audit sidecar lockfile
+        working-directory: sidecar
+        run: ../.build/bin/cargo-audit audit
+
+      - name: Audit fuzz lockfile
+        working-directory: sidecar
+        run: ../.build/bin/cargo-audit audit --file fuzz/Cargo.lock
