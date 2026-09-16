@@ -299,18 +299,19 @@ fn pdf_to_new_book(path: &Path, book: &crate::pdf::PdfBook, cover_path: Option<S
     }
 }
 
-/// Rasterize page 1 of a PDF and persist it as the book's cover.
+/// Rasterize page 1 of a PDF and persist it as the book's cover. PDFium
+/// runs only in the document worker (P-1); a worker failure stays an
+/// indeterminate cover outcome, never an import failure.
 fn pdf_cover_path(
     path: &Path,
     covers_dir: &Path,
     pdfium_dirs: &[PathBuf],
     previous_cover: Option<&str>,
 ) -> Result<Option<String>, AppError> {
-    let rendered = crate::pdf::render_first_page_cover(
-        path,
-        pdfium_dirs,
-        &crate::limits::ResourceLimits::DEFAULTS,
-    );
+    let client = crate::worker::WorkerClient::locate()?;
+    let rendered = client
+        .pdf_cover(path, pdfium_dirs, &crate::limits::ResourceLimits::DEFAULTS)
+        .map_err(|err| crate::pdf::PdfError::Render(err.to_string()));
     pdf_cover_from_result(rendered, covers_dir, previous_cover, path)
 }
 

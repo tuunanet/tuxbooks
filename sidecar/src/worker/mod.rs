@@ -232,7 +232,7 @@ fn dispatch(job: &WorkerJob, document: &mut std::fs::File) -> Result<WorkerRespo
             let bytes = read_fd_bounded(document, limits)?;
             let pdfium = crate::pdf::render::loaded_pdfium()
                 .ok_or_else(|| JobError::parse("pdfium library is unavailable".to_string()))?;
-            let cover = crate::pdf::render::render_first_page_cover_bytes(&pdfium, &bytes, limits)?;
+            let cover = crate::pdf::render::render_first_page_cover_bytes(pdfium, &bytes, limits)?;
             done_optional_bytes(cover)
         }
         WorkerOp::EpubEmbed => match &job.metadata {

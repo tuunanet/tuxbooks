@@ -4,20 +4,10 @@
 
 use tuxbooks_lib::limits::ResourceLimits;
 use tuxbooks_lib::worker::client::{WorkerClient, WorkerError};
-use tuxbooks_lib::worker::proto::{LandlockStatus, WorkerJob, WorkerOp};
+use tuxbooks_lib::worker::proto::LandlockStatus;
 
 fn client() -> WorkerClient {
     WorkerClient::locate().expect("worker binary built by cargo test")
-}
-
-fn self_test_job() -> WorkerJob {
-    WorkerJob {
-        op: WorkerOp::SelfTest,
-        limits: ResourceLimits::DEFAULTS,
-        member: None,
-        metadata: None,
-        pdfium_dirs: Vec::new(),
-    }
 }
 
 #[test]

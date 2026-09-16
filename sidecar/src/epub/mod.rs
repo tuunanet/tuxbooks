@@ -1,3 +1,8 @@
+//! EPUB parsing is worker-internal (ADR 0001 D5): the path-based entry
+//! points exist for tests and as thin wrappers over the reader cores, and
+//! services must reach parsing only through the worker client
+//! (`worker::WorkerClient`), never these functions directly.
+
 pub mod metadata;
 pub mod parser;
 pub mod session;
@@ -5,8 +10,8 @@ pub mod writer;
 
 pub use metadata::EpubMetadata;
 pub use parser::{
-    parse_epub, parse_epub_reader, read_file_properties, read_file_properties_reader, CoverImage,
-    EpubBook,
+    file_properties_from_metadata, parse_epub, parse_epub_reader, read_file_properties,
+    read_file_properties_reader, CoverImage, EpubBook,
 };
 pub use session::{
     build_session, build_session_reader, guess_member_media_type, read_member, read_member_reader,

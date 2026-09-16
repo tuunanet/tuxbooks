@@ -1,3 +1,8 @@
+//! PDF parsing and cover rendering are worker-internal (ADR 0001 D5): the
+//! path-based entry points exist for tests and as thin wrappers over the
+//! bytes-based cores, and services must reach parsing only through the
+//! worker client (`worker::WorkerClient`), never these functions directly.
+
 pub mod parser;
 pub mod render;
 pub mod writer;

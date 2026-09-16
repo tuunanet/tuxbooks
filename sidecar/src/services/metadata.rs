@@ -114,6 +114,7 @@ pub async fn get_book_metadata(
 /// Read-only native metadata of a book's source file, answered fresh from
 /// disk for the detail view's "Original File Metadata" panel. `None` for
 /// unknown ids; a missing file is an explicit error, not a fake empty view.
+/// The parse runs in the sandboxed document worker (W-1).
 pub async fn get_book_file_properties(
     pool: &SqlitePool,
     book_id: i64,
@@ -127,13 +128,15 @@ pub async fn get_book_file_properties(
             "the book file is missing; reconnect it to read its metadata".into(),
         ));
     }
+    let client = crate::worker::WorkerClient::locate()?;
     let format = crate::domain::BookFormat::from_path(&book.path);
     let raw = match format {
         crate::domain::BookFormat::Epub => {
-            crate::epub::read_file_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
+            let book = client.epub_parse(path, &crate::limits::ResourceLimits::DEFAULTS)?;
+            crate::epub::file_properties_from_metadata(book.metadata)
         }
         crate::domain::BookFormat::Pdf => {
-            crate::pdf::read_file_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
+            client.pdf_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
         }
     };
     Ok(Some(FileProperties {
@@ -401,6 +404,9 @@ pub async fn embed_book_metadata(
         .ok_or(AppError::NotFound)?
         .effective;
 
+    // The rewrite runs in the document worker (the parse-heavy half); the
+    // sidecar keeps the only write authority: backup + atomic replace.
+    let client = crate::worker::WorkerClient::locate()?;
     match crate::domain::BookFormat::from_path(&book.path) {
         crate::domain::BookFormat::Epub => {
             let epub_metadata = crate::epub::EpubMetadata {
@@ -417,7 +423,13 @@ pub async fn embed_book_metadata(
                 series: desired.series.clone(),
                 series_index: desired.series_index,
             };
-            crate::epub::write_metadata(&path, &epub_metadata)?;
+            let bytes = client.epub_embed(
+                &path,
+                &epub_metadata,
+                &crate::limits::ResourceLimits::DEFAULTS,
+            )?;
+            crate::backup_file_once(&path)?;
+            crate::atomic_replace(&path, &bytes)?;
         }
         crate::domain::BookFormat::Pdf => {
             let author = if desired.authors.is_empty() {
@@ -425,14 +437,17 @@ pub async fn embed_book_metadata(
             } else {
                 Some(desired.authors.join(", "))
             };
-            crate::pdf::write_metadata(
+            let bytes = client.pdf_embed(
                 &path,
                 &crate::pdf::PdfMetadata {
                     title: desired.title.clone(),
                     author,
                     description: desired.description.clone(),
                 },
+                &crate::limits::ResourceLimits::DEFAULTS,
             )?;
+            crate::backup_file_once(&path)?;
+            crate::atomic_replace(&path, &bytes)?;
         }
     }
 

@@ -6,6 +6,7 @@
 //!   4. sandbox apply          (Task 6: Landlock, seccomp, rlimits)
 //!   5. document fd 3          (W-5: the only file this process reads)
 //!   6. run the job, respond, exit
+//!
 //! Until Task 6 lands this binary is exercised only by tests; the sidecar
 //! flips to it in Task 7.
 

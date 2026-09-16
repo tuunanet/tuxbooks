@@ -133,10 +133,10 @@ pub fn probe_socket_denied() -> bool {
 }
 
 pub fn self_verify(report: &SandboxReport) -> Result<(), String> {
-    if matches!(report.landlock, LandlockStatus::Applied { .. }) {
-        if File::open("/proc/self/status").is_ok() {
-            return Err("self-verification failed: filesystem denial not in effect".to_string());
-        }
+    if matches!(report.landlock, LandlockStatus::Applied { .. })
+        && File::open("/proc/self/status").is_ok()
+    {
+        return Err("self-verification failed: filesystem denial not in effect".to_string());
     }
     // C3: socket denial is claimed whenever seccomp applied (always on
     // Linux), so the probe must observe it unconditionally. There is no
@@ -614,7 +614,7 @@ mod tests {
         let mut status = 0;
         assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
         assert!(
-            unsafe { libc::WIFEXITED(status) } && unsafe { libc::WEXITSTATUS(status) } == 0,
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
             "socket() must be denied under the filter"
         );
     }

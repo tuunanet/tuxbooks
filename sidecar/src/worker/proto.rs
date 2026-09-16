@@ -37,6 +37,9 @@ pub enum WorkerOp {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// The variants' size difference is fine: one payload rides one JSON job
+// line, never a hot allocation path.
+#[allow(clippy::large_enum_variant)]
 pub enum MetadataPayload {
     Epub(crate::epub::EpubMetadata),
     Pdf(crate::pdf::PdfMetadata),

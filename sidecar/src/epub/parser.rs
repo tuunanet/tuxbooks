@@ -112,7 +112,15 @@ pub fn read_file_properties_reader<R: Read + Seek>(
     reader: BufReader<R>,
     limits: &ResourceLimits,
 ) -> Result<Vec<(String, String)>, EpubError> {
-    let metadata = parse_epub_reader(reader, limits)?.metadata;
+    let book = parse_epub_reader(reader, limits)?;
+    Ok(file_properties_from_metadata(book.metadata))
+}
+
+/// Display projection of already-parsed EPUB metadata (no hostile input is
+/// touched here — the parse itself happens in the document worker). Shared
+/// by the path-based test wrapper and the metadata service, which receives
+/// the parsed book from the worker client.
+pub fn file_properties_from_metadata(metadata: super::EpubMetadata) -> Vec<(String, String)> {
     let mut entries = Vec::new();
     let mut push = |key: &str, value: Option<String>| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
@@ -140,7 +148,7 @@ pub fn read_file_properties_reader<R: Read + Seek>(
         };
         entries.push(("Series".to_string(), value));
     }
-    Ok(entries)
+    entries
 }
 
 fn read_mimetype<R: Read + Seek>(

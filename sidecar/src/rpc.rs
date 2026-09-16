@@ -87,7 +87,16 @@ impl RpcError {
 
 impl From<AppError> for RpcError {
     fn from(err: AppError) -> Self {
-        Self::app(err)
+        // Worker-sourced failures map by kind (Task 2 ledger): deadline
+        // -32001, limit -32002, sandbox -32003, other worker failures
+        // -32004. All other app errors keep the generic -32000.
+        match err {
+            AppError::Worker(worker) => Self {
+                code: worker.rpc_code(),
+                message: worker.to_string(),
+            },
+            other => Self::app(other),
+        }
     }
 }
 
@@ -861,5 +870,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(answered, json!("pong"));
+    }
+
+    #[test]
+    fn worker_failures_map_to_typed_rpc_codes() {
+        use crate::worker::client::WorkerError;
+        assert_eq!(WorkerError::Deadline.rpc_code(), -32001);
+        assert_eq!(
+            WorkerError::Limit(crate::limits::LimitExceeded {
+                limit: "max_parse_seconds",
+                detail: "x".into(),
+            })
+            .rpc_code(),
+            -32002
+        );
+        assert_eq!(WorkerError::Sandbox("no".into()).rpc_code(), -32003);
+        assert_eq!(
+            WorkerError::Unavailable("missing".into()).rpc_code(),
+            -32004
+        );
+    }
+
+    #[test]
+    fn app_error_worker_branch_carries_the_worker_code() {
+        let err = AppError::Worker(crate::worker::client::WorkerError::Deadline);
+        let rpc = RpcError::from(err);
+        assert_eq!(rpc.code, -32001);
     }
 }
