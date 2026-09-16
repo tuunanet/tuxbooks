@@ -29,8 +29,10 @@ export const MAX_SIDECAR_REQUEST_BYTES = 8 << 20;
  * the largest legitimate line: the sidecar's 1 GiB source-file quota is
  * ~1.4 GiB as base64 inside the JSON envelope, so 2 GiB bounds runaway
  * growth without clipping a legal read. Keep above the sidecar quota.
+ * (Written as multiplication, not `2 << 30`: the 32-bit signed shift
+ * overflows to a negative cap, which drops every line.)
  */
-export const MAX_RESPONSE_LINE_BYTES = 2 << 30;
+export const MAX_RESPONSE_LINE_BYTES = 2 * 1024 * 1024 * 1024;
 
 const BOOK_ID_PATTERN = /^\d+$/;
 

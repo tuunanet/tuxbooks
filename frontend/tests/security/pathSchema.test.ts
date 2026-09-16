@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   IPC_CHANNELS,
+  MAX_IPC_PARAM_BYTES,
   MAX_MEMBER_PATH_LENGTH,
+  MAX_RESPONSE_LINE_BYTES,
+  MAX_SIDECAR_REQUEST_BYTES,
   PRIVILEGED_SCHEMES,
   SIDECAR_METHODS,
   bookSourceMime,
@@ -239,6 +242,17 @@ describe("isValidBookFormat (T-2: query schema)", () => {
     expect(isValidBookFormat("")).toBe(false);
     expect(isValidBookFormat(42)).toBe(false);
     expect(isValidBookFormat(null)).toBe(false);
+  });
+});
+
+describe("payload bound constants (T-6)", () => {
+  it("stays positive and above the largest legitimate payloads", () => {
+    // A 32-bit signed shift (2 << 30) overflows to a negative cap, which
+    // makes the line buffer drop every response; pin the real values.
+    expect(MAX_RESPONSE_LINE_BYTES).toBe(2_147_483_648);
+    expect(MAX_SIDECAR_REQUEST_BYTES).toBe(8_388_608);
+    expect(MAX_IPC_PARAM_BYTES).toBe(8_388_608);
+    expect(MAX_RESPONSE_LINE_BYTES).toBeGreaterThan(1_073_741_824); // 1 GiB book
   });
 });
 
