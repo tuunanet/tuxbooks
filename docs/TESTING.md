@@ -373,6 +373,34 @@ pass.
   absent (bare `cargo test` on a fresh clone), those tests print a notice
   and skip instead of failing.
 
+## Security corpus (issue #87)
+
+A dedicated negative-input corpus and boundary-test layer, separate from the
+functional suites. Everything is generated at runtime; no hostile file is
+committed. When a fuzzing run or review finds a minimized crashing input,
+it comes back here as a builder, not a blob.
+
+| Side     | Location                                   | Contents                                                                              |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Rust     | `sidecar/tests/fixtures/security/`         | Hostile EPUB/PDF fixture builders (README inside documents the layout)                |
+| Rust     | `sidecar/tests/security_corpus.rs`         | Corpus index target: one test per invariant, hostile shapes through the real worker   |
+| Frontend | `frontend/tests/security/corpus/`          | Per-invariant index (`index.ts`), hostile EPUB builders (`hostileEpub.ts`), pins test |
+| Frontend | `frontend/tests/security/attackVectors.ts` | The shared vector arrays (traversal, scheme confusion, scripted fragments, ...)       |
+
+What each test asserts is fail-closed behavior, not just "does not crash":
+a typed error (`LimitExceeded`, `EpubError`, `PdfError`, `WorkerError`) or a
+bounded, inert result. The corpus index in `frontend/tests/security/corpus/
+index.ts` maps every invariant (E-1..E-5, R-1..R-3, T-1..T-7, the W-2/W-3/
+W-5/W-8/W-9 boundary subset, P-1) to its vectors and the tests that enforce
+them, pointing at tests that already exist instead of duplicating them.
+Worker boundary tests drive hostile documents through the real
+`tuxbooks-worker` and pin that the typed error comes back and the worker
+still serves the next benign job.
+
+`just test` and `just check` run the corpus layers with everything else
+(`security_corpus.rs` on the Rust stream, the corpus vitest file on the
+frontend stream); no extra command is needed.
+
 ## EPUB fixture corpus (three tiers)
 
 The dedicated EPUB corpus lives in `tests/fixtures/epub/` (see its
