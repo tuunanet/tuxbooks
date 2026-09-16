@@ -1276,11 +1276,10 @@ mod tests {
             2,
             "the javascript: entry must be dropped: {toc:?}"
         );
-        assert!(serde_json::to_string(toc)
+        assert!(!serde_json::to_string(toc)
             .unwrap()
             .to_lowercase()
-            .find("javascript:")
-            .is_none());
+            .contains("javascript:"));
     }
 
     #[test]
