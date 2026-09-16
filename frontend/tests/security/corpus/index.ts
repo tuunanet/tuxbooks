@@ -76,7 +76,7 @@ export const SECURITY_CORPUS: readonly CorpusRow[] = [
     vectors: "sidecar/tests/fixtures/security/hostile_pdf.rs (runtime builders)",
     enforcedBy: [
       "sidecar/src/pdf/parser.rs tests (pages, node/depth budgets, metadata caps)",
-      "sidecar/tests/security_corpus.rs (malformed xref shapes, cyclic page tree, decompression bomb containment, bounded hostile render)",
+      "sidecar/tests/security_corpus.rs (malformed xref shapes, cyclic page tree, decompression bomb typed trip, bounded hostile render)",
     ],
   },
   {

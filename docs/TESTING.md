@@ -399,14 +399,13 @@ still serves the next benign job.
 
 One known soft spot, kept honest rather than papered over: the PDF
 decompression-bomb fixture (`pdf_decompression_bomb_is_contained_by_the_worker`)
-asserts containment (a typed worker outcome, bounded time, sidecar alive),
-not a specific trip, because the component that answers the bomb is inside
-lopdf/the allocator, not tuxbooks code. The trip-level obligation belongs
-to #88: fuzzing hunts minimized bombs and lands them here as builders with
-trip-level assertions. The concrete candidate the corpus work surfaced:
-lopdf's `LoadOptions::max_decompressed_size` bounds exactly this class
-(eager xref/object-stream inflation) and the parse path leaves it unset;
-wiring it would turn the containment into a typed trip.
+trips typed for the eager-load class: lopdf answers cross-reference and
+object-stream inflation past `max_stream_decompressed_bytes` with the
+limits table's typed error (`stream_inflation_over_the_decompression_cap_fails_typed`
+pins the trip directly). Inflation lopdf does not bound (content streams
+decoded by PDFium at render time, for example) is still containment-only,
+answered by the worker's RLIMIT_AS and deadline; #88 fuzzing hunts those
+residual classes and lands minimized inputs here as builders.
 
 `just test` and `just check` run the corpus layers with everything else
 (`security_corpus.rs` on the Rust stream, the corpus vitest file on the
