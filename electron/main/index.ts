@@ -1,12 +1,12 @@
 import { protocol, app, BrowserWindow, Menu, nativeImage, ipcMain, dialog, shell } from "electron";
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { locateSidecar, Sidecar, SidecarError } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
-import { handleProtocolRequest, type BookSources } from "./protocolHandler";
+import { handleProtocolRequest } from "./protocolHandler";
+import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import {
   APP_ORIGIN,
@@ -169,41 +169,8 @@ function registerAppProtocol(): void {
   });
 }
 
-/**
- * Read one artwork-cache cover file by its flat name. Containment is
- * checked twice: lexically against the cache root, then against the
- * realpath of both root and file, so a symlink planted in the cache cannot
- * point the read elsewhere (issue #84 T-2).
- */
-async function readCoverFile(root: string, name: string): Promise<Uint8Array> {
-  const resolved = path.resolve(root, name);
-  if (!resolved.startsWith(root + path.sep)) {
-    throw new Error("outside covers root");
-  }
-  const [realRoot, realFile] = await Promise.all([fsp.realpath(root), fsp.realpath(resolved)]);
-  if (realFile !== realRoot && !realFile.startsWith(realRoot + path.sep)) {
-    throw new Error("outside covers root");
-  }
-  return fsp.readFile(realFile);
-}
-
 function registerProtocol(sidecar: Sidecar): void {
-  const sources: BookSources = {
-    getBookBytes: (bookId, offset, length) =>
-      sidecar.call("get_book_bytes", { bookId, offset, length }) as Promise<{
-        data: string;
-        offset: number;
-        total: number;
-      }>,
-    getBookResource: (bookId, member, offset, length) =>
-      sidecar.call("get_book_resource", { bookId, path: member, offset, length }) as Promise<{
-        data: string;
-        offset: number;
-        total: number;
-        mediaType: string;
-      }>,
-    readCover: (name) => readCoverFile(coversDir(), name),
-  };
+  const sources = makeProtocolSources(sidecar, coversDir());
   protocol.handle("tuxbooks", (request) => {
     if (process.env.TUXBOOKS_DEBUG_IPC === "1") {
       console.log(`[tuxbooks://] ${request.method} ${request.url}`);

@@ -86,7 +86,10 @@ export function isAllowedSenderUrl(raw: string, devServerUrl: string | undefined
 **Files:**
 
 - Create: `electron/main/protocolHandler.ts`
+- Create: `electron/main/protocolSources.ts` (sidecar/cover byte sources with
+  `RpcFailure`/ENOENT-to-`NotFoundError` translation; cover realpath containment)
 - Create: `frontend/tests/security/protocolHandler.test.ts`
+- Create: `frontend/tests/security/protocolSources.test.ts`
 
 **Interfaces produced:**
 
@@ -118,7 +121,7 @@ Behavior: scheme/host allowlist (only `tuxbooks://book`, `tuxbooks://cover`; any
 
 - [x] RED: `protocolHandler.test.ts` covering the full negative matrix (host allowlist, decode errors, ids, members, covers, ranges, error mapping, MIME pinning) plus happy paths; observe import failure.
 - [x] GREEN: implement; tests pass.
-- [x] Wire in `electron/main/index.ts`: delete the in-file `parseRange`/MIME maps/`SIDECAR_METHODS` (now imported), replace `registerProtocol` body with a `handleProtocolRequest` delegation whose `readCover` does resolve + startsWith + realpath containment, and whose sidecar calls map `RpcFailure` to `NotFoundError`.
+- [x] Wire in `electron/main/index.ts`: delete the in-file `parseRange`/MIME maps/`SIDECAR_METHODS` (now imported), replace `registerProtocol` body with a `handleProtocolRequest` delegation whose sources come from `makeProtocolSources` (sidecar calls mapped `RpcFailure` to `NotFoundError`; cover reads with resolve + startsWith + realpath containment).
 
 ### Task 3: IPC policy (`electron/main/ipcPolicy.ts`)
 
