@@ -60,8 +60,11 @@ Harness details worth knowing:
   directory. Filesystem-path parameters (`scan_library`, `import_paths`,
   `reconnect_book`, `set_book_cover`) are pinned into the scratch directory
   before the request executes, so mutated paths can never leave the
-  workspace; `create_collection` names are pinned because that table is the
-  one place a fuzz run could grow the database without bound. Non-string
+  workspace; `create_collection` names are pinned because collections and
+  annotations are the two tables a fuzz run could grow without bound
+  (each successful call inserts a row; annotations are not gated, and the
+  wipe at init keeps that growth from persisting across runs).
+  Non-string
   shapes stay untouched, so -32602 parameter decoding stays reachable.
   Every produced response line is asserted to be valid JSON; a violation
   would surface as a crash.
@@ -112,8 +115,8 @@ Committed under `sidecar/fuzz/seeds/<target>/`, all small and benign:
   valid shapes the parser tests use.
 - `pdf-parse/`: `minimal.pdf` copied from the checked-in fixture.
 - `json-rpc/`: one request per file (ping, list, search, progress,
-  collection, annotation, missing method, unknown method, bad params,
-  truncated JSON).
+  collection, annotation, book bytes, book resource, missing method,
+  unknown method, bad params, truncated JSON).
 
 No hostile blob is committed, matching the #87 convention that hostile
 material is generated at runtime; hostile shapes are one mutation away
@@ -169,3 +172,59 @@ plan. The workflow passes actionlint (`just lint-workflows`).
   PDFium decodes at render time are not lopdf-bounded and remain
   containment-only (worker RLIMIT_AS plus deadline). Fuzzing that class
   belongs to PDFium/OSS-Fuzz, not this harness.
+
+## Fix report (post-review)
+
+Commits after 324cce7: the range seeds, the cargo-fuzz pin, and this
+report fix.
+
+### 1. Range seeds (Important finding)
+
+`get_book_bytes` and `get_book_resource` had no seed, so the range-decode
+path relied on libFuzzer inventing a 14-character method name plus valid
+params. Two seeds now cover both range methods:
+
+- `seeds/json-rpc/get_book_bytes.json`:
+  `{"jsonrpc":"2.0","id":11,"method":"get_book_bytes","params":{"bookId":1,"offset":0,"length":1024}}`
+- `seeds/json-rpc/get_book_resource.json`:
+  `{"jsonrpc":"2.0","id":12,"method":"get_book_resource","params":{"bookId":1,"path":"chapter1.xhtml","offset":0,"length":512}}`
+
+Covering evidence, differential coverage (the fuzz binary run once over
+each input set with `-runs=0`; `cov` is libFuzzer's covered-edge count):
+
+| Input set                                            | cov  |
+| ---------------------------------------------------- | ---- |
+| `ping.json` (baseline)                               | 427  |
+| same range methods, `bookId` typed as string (decode fails, -32602 before dispatch) | 634  |
+| the two range seeds (valid params)                   | 2804 |
+
+The 2,170-edge delta over the decode-failure variant is the param-decode
+to dispatch to reader path executing; a single seed run also takes about
+35 ms (real SQLite work), against near-zero for decode rejects. Covering
+command:
+
+```
+RUSTUP_TOOLCHAIN=nightly cargo fuzz run json-rpc /tmp/opencode/fz/range -- -runs=0
+#2 INITED cov: 2804 ft: 2997 corp: 2/224b
+```
+
+Then the bounded run with the seeds in the corpus
+(`just fuzz json-rpc 30`): seeds copied in and byte-identical in
+`fuzz/corpus/json-rpc/`, `Done 69768 runs in 31 second(s)`, no crash.
+
+### 2. cargo-fuzz pin (minor)
+
+`fuzz.yml` installs with `cargo install cargo-fuzz --version 0.13.2
+--locked`, matching the version the local runs used. The nightly
+toolchain pin stays with Task 9.
+
+### 3. Report correction (minor)
+
+The claim that `create_collection` is "the one place" the scratch DB
+grows is corrected above: `create_annotation` also inserts per call and
+is not gated. Correctness holds because the scratch is wiped at init;
+no code change.
+
+`docs/TESTING.md` picked up the same correction in its json-rpc harness
+paragraph. The seed list there does not enumerate methods, so the new
+seeds needed no doc change beyond that.

@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":12,"method":"get_book_resource","params":{"bookId":1,"path":"chapter1.xhtml","offset":0,"length":512}}

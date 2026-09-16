@@ -470,9 +470,10 @@ workspace: `sidecar/fuzz/corpus/<target>/` (runtime corpus) and
   Filesystem-path parameters (`scan_library`, `import_paths`,
   `reconnect_book`, `set_book_cover`) are pinned into the scratch
   directory before the request executes, and `create_collection` names
-  are pinned so the scratch database cannot grow without bound;
-  non-string shapes stay untouched, so -32602 parameter decoding stays
-  reachable. Every produced response line is asserted to be valid JSON.
+  are pinned; without the pins, collections and annotations would grow
+  the scratch database without bound. Non-string shapes stay untouched,
+  so -32602 parameter decoding stays reachable. Every produced response
+  line is asserted to be valid JSON.
 
 ### Crash triage
 

@@ -35,7 +35,7 @@ jobs:
             sidecar/fuzz
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
 
       - name: Install just
         uses: extractions/setup-just@v4
