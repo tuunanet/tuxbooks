@@ -101,7 +101,7 @@ pub fn build_session(
     deadline.check()?;
 
     let manifest_json = build_manifest_json(&package, &spine, &toc, &opf_xml)?;
-    let positions_json = build_positions_json(&mut zip, &spine, limits)?;
+    let positions_json = build_positions_json(&mut zip, &spine, limits, &deadline)?;
     deadline.check()?;
 
     Ok(EpubReadingSession {
@@ -724,15 +724,25 @@ fn build_positions_json<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     spine: &[SpineEntry],
     limits: &ResourceLimits,
+    deadline: &Deadline,
 ) -> Result<String, EpubError> {
     let mut item_texts: Vec<(String, usize)> = Vec::with_capacity(spine.len());
+    // The declared-size pre-scan caps honest archives; this running total
+    // caps what this stage can actually decompress when a header lies about
+    // its size, so repeated reads cannot exceed the archive byte budget.
+    let mut bytes_read: u64 = 0;
     for entry in spine {
+        deadline.check()?;
         let chars =
             if entry.media_type == "application/xhtml+xml" || entry.media_type == "text/html" {
                 match read_entry(zip, &entry.zip_path, limits)? {
-                    Some(bytes) => extract_visible_text(&String::from_utf8_lossy(&bytes))
-                        .chars()
-                        .count(),
+                    Some(bytes) => {
+                        bytes_read += bytes.len() as u64;
+                        limits.check_total_uncompressed(bytes_read)?;
+                        extract_visible_text(&String::from_utf8_lossy(&bytes))
+                            .chars()
+                            .count()
+                    }
                     None => 0,
                 }
             } else {
@@ -866,6 +876,99 @@ mod tests {
         };
         let err = read_member(&path, "big.bin", &tight).unwrap_err();
         assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    /// Patch a ZIP entry's declared uncompressed size down to `new_size` in
+    /// both the local header and the central directory, leaving the deflate
+    /// stream and CRC intact: the header lies about its size, a hostile-file
+    /// shape the zip crate's writer cannot produce.
+    fn patch_declared_size(zip: &mut [u8], entry_name: &str, new_size: u32) {
+        let name = entry_name.as_bytes();
+        let mut i = 0;
+        while i + 30 <= zip.len() {
+            match &zip[i..i + 4] {
+                b"PK\x03\x04" => {
+                    let name_len = u16::from_le_bytes([zip[i + 26], zip[i + 27]]) as usize;
+                    if i + 30 + name_len <= zip.len() && &zip[i + 30..i + 30 + name_len] == name {
+                        zip[i + 22..i + 26].copy_from_slice(&new_size.to_le_bytes());
+                    }
+                }
+                b"PK\x01\x02" => {
+                    let name_len = u16::from_le_bytes([zip[i + 28], zip[i + 29]]) as usize;
+                    if i + 46 + name_len <= zip.len() && &zip[i + 46..i + 46 + name_len] == name {
+                        zip[i + 24..i + 28].copy_from_slice(&new_size.to_le_bytes());
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn build_session_bounds_cumulative_reads_against_lying_headers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("lying.epub");
+        let opf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:uuid:x</dc:identifier>
+    <dc:title>Lying Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c3" href="chapter3.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/></spine>
+</package>"#;
+        // 1 MiB of text per chapter deflates to ~1 KiB; the declared sizes
+        // are then patched down to 10 bytes, so the declared archive total
+        // passes while the actual per-chapter read is 1 MiB.
+        let chapters: Vec<(String, Vec<u8>)> = ["one", "two", "three"]
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                (
+                    format!("chapter{}.xhtml", i + 1),
+                    format!("<html><body>{}</body></html>", label.repeat(1 << 20)).into_bytes(),
+                )
+            })
+            .collect();
+        let static_entries: Vec<(String, Vec<u8>)> = vec![
+            ("mimetype", b"application/epub+zip".to_vec()),
+            (
+                "META-INF/container.xml",
+                br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#.to_vec(),
+            ),
+            ("content.opf", opf.as_bytes().to_vec()),
+        ]
+        .into_iter()
+        .map(|(name, data)| (name.to_string(), data))
+        .collect();
+        let entries: Vec<(String, Vec<u8>)> = static_entries.into_iter().chain(chapters).collect();
+        let borrowed: Vec<(&str, &[u8])> = entries
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_slice()))
+            .collect();
+        write_zip(&path, &borrowed);
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        for name in ["chapter1.xhtml", "chapter2.xhtml", "chapter3.xhtml"] {
+            patch_declared_size(&mut bytes, name, 10);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+
+        let tight = ResourceLimits {
+            max_total_uncompressed_bytes: 2_000,
+            ..ResourceLimits::DEFAULTS
+        };
+        match build_session(&path, &tight) {
+            Err(EpubError::Limit(err)) => assert_eq!(err.limit, "max_total_uncompressed_bytes"),
+            Ok(_) => panic!("build_session accepted lying headers past the byte budget"),
+            Err(other) => panic!("expected limit error, got: {other:?}"),
+        }
     }
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
