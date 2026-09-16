@@ -23,32 +23,33 @@
 
 ## Invariant-to-enforcement map
 
-| Quota (spec wording) | Field | Enforced at |
-| --- | --- | --- |
-| EPUB source file size | `max_source_file_bytes` | `parse_epub`, `build_session`, `read_member` |
-| ZIP entry count | `max_entries` | `parse_epub`, `build_session`, `read_member` |
-| Compressed member size | `max_compressed_member_bytes` | every ZIP read via `read_entry`/`read_mimetype` |
-| Uncompressed member size | `max_decompressed_bytes` | declared size checked before read + `read_bounded` cap during read |
-| Total uncompressed archive size | `max_total_uncompressed_bytes` | `parse_epub`, `build_session` (declared-size pre-scan) |
-| XML/OPF/document size | `max_xml_bytes` | `parse_container_xml`, `parse_opf`, nav + NCX parsers |
-| Metadata string length | `max_metadata_string_bytes` | `parse_opf` values; PDF info-dict strings |
-| Image/font size incl. decoded | member caps on every read | Rust never decodes images/fonts (cover bytes cached verbatim); documented in `docs/RESOURCE_LIMITS.md` |
-| XML depth | `max_xml_depth` | `parse_container_xml`, `parse_opf`, nav + NCX stacks |
-| PDF source file size | `max_source_file_bytes` | `parse_pdf`, `read_file_properties`, `render_first_page_cover` |
-| PDF page count | `max_pages` | budgeted page-tree walk in `pdf::parser` |
-| Structural/object traversal work | `max_page_tree_nodes` | page-tree walk stops at the node budget |
-| Recursion depth | `max_page_tree_depth` | page-tree walk is iterative with a depth cap |
-| Decoded image dimensions/bytes | `max_cover_png_bytes` | render output capped; dimensions fixed by `COVER_WIDTH_PX` render config |
-| Cover-render work | deadline + source cap + fixed 600px target + PNG cap | `render_first_page_cover` |
-| Wall clock (both formats, R-3) | `max_parse_seconds` | `Deadline` checked between stages |
-| CPU (R-3) | same deadline | parses are synchronous and single-threaded, so the wall-clock deadline is the CPU bound; true per-parse CPU accounting moves into the killable worker (#81). Documented. |
-| Memory (R-3) | size quotas + `read_bounded` | no unbounded allocation remains on any parse path |
+| Quota (spec wording)             | Field                                                | Enforced at                                                                                                                                                              |
+| -------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| EPUB source file size            | `max_source_file_bytes`                              | `parse_epub`, `build_session`, `read_member`                                                                                                                             |
+| ZIP entry count                  | `max_entries`                                        | `parse_epub`, `build_session`, `read_member`                                                                                                                             |
+| Compressed member size           | `max_compressed_member_bytes`                        | every ZIP read via `read_entry`/`read_mimetype`                                                                                                                          |
+| Uncompressed member size         | `max_decompressed_bytes`                             | declared size checked before read + `read_bounded` cap during read                                                                                                       |
+| Total uncompressed archive size  | `max_total_uncompressed_bytes`                       | `parse_epub`, `build_session` (declared-size pre-scan)                                                                                                                   |
+| XML/OPF/document size            | `max_xml_bytes`                                      | `parse_container_xml`, `parse_opf`, nav + NCX parsers                                                                                                                    |
+| Metadata string length           | `max_metadata_string_bytes`                          | `parse_opf` values; PDF info-dict strings                                                                                                                                |
+| Image/font size incl. decoded    | member caps on every read                            | Rust never decodes images/fonts (cover bytes cached verbatim); documented in `docs/RESOURCE_LIMITS.md`                                                                   |
+| XML depth                        | `max_xml_depth`                                      | `parse_container_xml`, `parse_opf`, nav + NCX stacks                                                                                                                     |
+| PDF source file size             | `max_source_file_bytes`                              | `parse_pdf`, `read_file_properties`, `render_first_page_cover`                                                                                                           |
+| PDF page count                   | `max_pages`                                          | budgeted page-tree walk in `pdf::parser`                                                                                                                                 |
+| Structural/object traversal work | `max_page_tree_nodes`                                | page-tree walk stops at the node budget                                                                                                                                  |
+| Recursion depth                  | `max_page_tree_depth`                                | page-tree walk is iterative with a depth cap                                                                                                                             |
+| Decoded image dimensions/bytes   | `max_cover_png_bytes`                                | render output capped; dimensions fixed by `COVER_WIDTH_PX` render config                                                                                                 |
+| Cover-render work                | deadline + source cap + fixed 600px target + PNG cap | `render_first_page_cover`                                                                                                                                                |
+| Wall clock (both formats, R-3)   | `max_parse_seconds`                                  | `Deadline` checked between stages                                                                                                                                        |
+| CPU (R-3)                        | same deadline                                        | parses are synchronous and single-threaded, so the wall-clock deadline is the CPU bound; true per-parse CPU accounting moves into the killable worker (#81). Documented. |
+| Memory (R-3)                     | size quotas + `read_bounded`                         | no unbounded allocation remains on any parse path                                                                                                                        |
 
 ---
 
 ### Task 1: `limits` module core
 
 **Files:**
+
 - Create: `sidecar/src/limits.rs`
 - Modify: `sidecar/src/lib.rs` (add `pub mod limits;`)
 
@@ -426,6 +427,7 @@ Expected: all `limits::` tests pass, pristine output.
 ### Task 2: EPUB parse-path enforcement (source size, entries, totals, members, deadline)
 
 **Files:**
+
 - Modify: `sidecar/src/epub/mod.rs` (add `EpubError::Limit` + `From<ReadBoundedError>`), `sidecar/src/epub/parser.rs` (entry-point limits), `sidecar/src/epub/session.rs` (entry-point limits), `sidecar/src/epub/writer.rs` (pass `DEFAULTS`), `sidecar/src/services/reader.rs` and `sidecar/src/services/library_scanner.rs` (pass `DEFAULTS`), `sidecar/tests/epub_corpus.rs`, `sidecar/tests/extended_epub.rs` (pass `DEFAULTS`)
 - Test: `sidecar/src/epub/parser.rs` `mod tests`
 
@@ -717,6 +719,7 @@ pub(crate) fn read_entry<R: Read + Seek>(
 `session.rs`: `build_session(path, limits)` mirrors `parse_epub` (source size, deadline, `check_archive_totals`, member-capped reads via the updated `read_entry`, `read_mimetype(&mut zip, limits)`); `read_member(path, member, limits)` checks source size then calls `read_entry(zip, &member, limits)`; the private session callers (`parse_toc`, `build_positions_json`) thread `limits` through. Session tests in `session.rs` update mechanically to pass `&ResourceLimits::DEFAULTS` (import `crate::limits::ResourceLimits`).
 
 Mechanical call-site updates (pass `&ResourceLimits::DEFAULTS`, import `tuxbooks_lib::limits::ResourceLimits` / `crate::limits::ResourceLimits` where needed):
+
 - `epub/writer.rs:33-36` — `read_entry(&mut archive, ..., &DEFAULTS)` (two calls), `parse_container_xml` unchanged in this task
 - `services/reader.rs:29,42` — `build_session(path, &DEFAULTS)`, `read_member(path, resource, &DEFAULTS)`
 - `services/library_scanner.rs:62` — `parse_epub(path, &DEFAULTS)`
@@ -733,6 +736,7 @@ Expected: full suite passes; the new tests pass; pristine output.
 ### Task 3: EPUB XML bounds (size, depth, metadata strings)
 
 **Files:**
+
 - Modify: `sidecar/src/epub/metadata.rs` (`parse_opf`), `sidecar/src/epub/parser.rs` (`parse_container_xml`), `sidecar/src/epub/session.rs` (`parse_nav_document`, `parse_ncx_document`), `sidecar/src/epub/writer.rs` (`parse_container_xml` caller)
 - Test: `sidecar/src/epub/parser.rs` + `sidecar/src/epub/metadata.rs` test modules
 
@@ -822,6 +826,7 @@ Expected: full suite passes, pristine output.
 ### Task 4: PDF limits (source size, page tree, strings, deadline, cover render)
 
 **Files:**
+
 - Modify: `sidecar/src/pdf/mod.rs` (add `PdfError::Limit`), `sidecar/src/pdf/parser.rs`, `sidecar/src/pdf/render.rs`, `sidecar/src/services/library_scanner.rs`, `sidecar/src/services/book_importer.rs`, `sidecar/src/services/metadata.rs`, `sidecar/src/pdf/writer.rs` tests
 - Test: `sidecar/src/pdf/parser.rs` + `sidecar/src/pdf/render.rs` test modules
 
@@ -1085,6 +1090,7 @@ Expected: full suite passes, pristine output.
 ### Task 5: Documentation and full verification
 
 **Files:**
+
 - Create: `docs/RESOURCE_LIMITS.md`
 - Modify: `docs/ARCHITECTURE.md` (module table row + doc link), `AGENTS.md` (working-documents list line)
 
