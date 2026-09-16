@@ -119,9 +119,19 @@ pub fn build_session(
     limits: &ResourceLimits,
 ) -> Result<EpubReadingSession, EpubError> {
     limits.check_source_file(std::fs::metadata(path)?.len())?;
+    build_session_reader(BufReader::new(File::open(path)?), limits)
+}
+
+/// Reader-based session core: same behavior as [`build_session`] for any
+/// seekable source. The source-size quota is the path wrapper's job (see
+/// `parser::parse_epub_reader`); the worker checks the fd metadata against
+/// the job's quota table before handing the reader over.
+pub fn build_session_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    limits: &ResourceLimits,
+) -> Result<EpubReadingSession, EpubError> {
     let deadline = Deadline::start(limits);
-    let file = File::open(path)?;
-    let mut zip = ZipArchive::new(BufReader::new(file))?;
+    let mut zip = ZipArchive::new(reader)?;
     super::parser::check_archive_totals(&mut zip, limits)?;
     deadline.check()?;
 
@@ -163,7 +173,18 @@ pub fn read_member(
     limits: &ResourceLimits,
 ) -> Result<Option<Vec<u8>>, EpubError> {
     limits.check_source_file(std::fs::metadata(path)?.len())?;
-    let mut zip = ZipArchive::new(BufReader::new(File::open(path)?))?;
+    read_member_reader(BufReader::new(File::open(path)?), member, limits)
+}
+
+/// Reader-based member core: same behavior as [`read_member`] for any
+/// seekable source; the source-size quota is the path wrapper's job (see
+/// `parser::parse_epub_reader`).
+pub fn read_member_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    member: &str,
+    limits: &ResourceLimits,
+) -> Result<Option<Vec<u8>>, EpubError> {
+    let mut zip = ZipArchive::new(reader)?;
     super::parser::check_archive_totals(&mut zip, limits)?;
     if member.is_empty() {
         return Ok(None);

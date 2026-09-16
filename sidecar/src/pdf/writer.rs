@@ -13,11 +13,28 @@ use std::path::Path;
 use lopdf::{Dictionary, Document, Object, StringFormat};
 
 use super::{PdfError, PdfMetadata};
+use crate::limits::ResourceLimits;
 
 /// Rewrite `/Title`, `/Author`, and `/Subject`, preserving every other Info
 /// entry. Replaces the file at `path` atomically.
 pub fn write_metadata(path: &Path, metadata: &PdfMetadata) -> Result<(), PdfError> {
-    let mut document = Document::load(path).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let buffer = rewrite_pdf_bytes(&std::fs::read(path)?, metadata, &ResourceLimits::DEFAULTS)?;
+    crate::backup_file_once(path)?;
+    crate::atomic_replace(path, &buffer)?;
+    Ok(())
+}
+
+/// Bytes-based rewrite core: returns the full rewritten PDF bytes. The
+/// caller owns the write (the sidecar keeps `backup_file_once` +
+/// `atomic_replace`; the worker only returns the buffer). Enforces the
+/// source quota before loading the document.
+pub fn rewrite_pdf_bytes(
+    bytes: &[u8],
+    metadata: &PdfMetadata,
+    limits: &ResourceLimits,
+) -> Result<Vec<u8>, PdfError> {
+    limits.check_source_file(bytes.len() as u64)?;
+    let mut document = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
 
     let mut info = existing_info(&document).unwrap_or_default();
     set_required(&mut info, b"Title", &metadata.title);
@@ -41,9 +58,7 @@ pub fn write_metadata(path: &Path, metadata: &PdfMetadata) -> Result<(), PdfErro
     document
         .save_to(&mut buffer)
         .map_err(|err| PdfError::Parse(err.to_string()))?;
-    crate::backup_file_once(path)?;
-    crate::atomic_replace(path, &buffer)?;
-    Ok(())
+    Ok(buffer)
 }
 
 /// The existing Info dictionary, following one indirect-reference hop.

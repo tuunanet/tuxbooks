@@ -139,7 +139,10 @@ mod tests {
         };
         let line = serde_json::to_string(&failed).unwrap();
         assert!(line.contains(r#""kind":"limit""#), "{line}");
-        assert_eq!(serde_json::from_str::<WorkerResponse>(&line).unwrap(), failed);
+        assert_eq!(
+            serde_json::from_str::<WorkerResponse>(&line).unwrap(),
+            failed
+        );
     }
 
     #[test]

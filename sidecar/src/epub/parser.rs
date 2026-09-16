@@ -32,9 +32,19 @@ pub struct EpubBook {
 /// limit error instead of unbounded work.
 pub fn parse_epub(path: &Path, limits: &ResourceLimits) -> Result<EpubBook, EpubError> {
     limits.check_source_file(source_len(path)?)?;
+    parse_epub_reader(BufReader::new(File::open(path)?), limits)
+}
+
+/// Reader-based parse core: same behavior as [`parse_epub`] for any
+/// seekable source. The source-size quota is the path wrapper's job (an
+/// fd or an in-memory source has no stat); the worker checks the fd
+/// metadata against the job's quota table before handing the reader over.
+pub fn parse_epub_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    limits: &ResourceLimits,
+) -> Result<EpubBook, EpubError> {
     let deadline = Deadline::start(limits);
-    let file = File::open(path)?;
-    let mut zip = ZipArchive::new(BufReader::new(file))?;
+    let mut zip = ZipArchive::new(reader)?;
     check_archive_totals(&mut zip, limits)?;
     deadline.check()?;
 
@@ -93,7 +103,16 @@ pub fn read_file_properties(
     path: &Path,
     limits: &ResourceLimits,
 ) -> Result<Vec<(String, String)>, EpubError> {
-    let metadata = parse_epub(path, limits)?.metadata;
+    read_file_properties_reader(BufReader::new(File::open(path)?), limits)
+}
+
+/// Reader-based core of [`read_file_properties`]; the path wrapper owns the
+/// source-size quota check (see [`parse_epub_reader`]).
+pub fn read_file_properties_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    limits: &ResourceLimits,
+) -> Result<Vec<(String, String)>, EpubError> {
+    let metadata = parse_epub_reader(reader, limits)?.metadata;
     let mut entries = Vec::new();
     let mut push = |key: &str, value: Option<String>| {
         if let Some(value) = value.filter(|v| !v.is_empty()) {
@@ -348,6 +367,7 @@ pub(crate) mod tests_support {
 mod tests {
     use super::tests_support::{fixture_epub, write_zip};
     use super::*;
+    use crate::epub::{read_member, read_member_reader};
     use crate::limits::ResourceLimits;
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -467,6 +487,56 @@ mod tests {
         };
         let err = parse_epub(&path, &tight).unwrap_err();
         assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_epub_reader_matches_parse_epub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("equivalent.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                (
+                    "META-INF/container.xml",
+                    br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#,
+                ),
+                ("content.opf", OPF.as_bytes()),
+            ],
+        );
+        let via_path = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let via_reader = parse_epub_reader(
+            std::io::BufReader::new(std::io::Cursor::new(bytes)),
+            &ResourceLimits::DEFAULTS,
+        )
+        .unwrap();
+        assert_eq!(via_path.metadata.title, via_reader.metadata.title);
+        assert_eq!(via_path.spine, via_reader.spine);
+        assert_eq!(via_path.cover.is_some(), via_reader.cover.is_some());
+    }
+
+    #[test]
+    fn read_member_reader_serves_the_same_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("member.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", b"<container/>".as_slice()),
+            ],
+        );
+        let via_path =
+            read_member(&path, "META-INF/container.xml", &ResourceLimits::DEFAULTS).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let via_reader = read_member_reader(
+            std::io::BufReader::new(std::io::Cursor::new(bytes)),
+            "META-INF/container.xml",
+            &ResourceLimits::DEFAULTS,
+        )
+        .unwrap();
+        assert_eq!(via_path, via_reader);
     }
 
     #[test]

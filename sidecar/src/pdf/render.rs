@@ -42,20 +42,34 @@ pub fn render_first_page_cover(
     library_dirs: &[PathBuf],
     limits: &crate::limits::ResourceLimits,
 ) -> Result<Option<Vec<u8>>, PdfError> {
+    let Some(pdfium) = pdfium(library_dirs) else {
+        return Ok(None);
+    };
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    let bytes = std::fs::read(path)?;
+    render_first_page_cover_bytes(pdfium, &bytes, limits)
+}
+
+/// Bytes-based render core: same behavior as [`render_first_page_cover`]
+/// for an in-memory source (the worker's shape; the fd is buffered under
+/// the source quota before this call). Holds the render lock, enforces the
+/// source quota and deadline, and checks the PNG output size.
+pub fn render_first_page_cover_bytes(
+    pdfium: &Pdfium,
+    bytes: &[u8],
+    limits: &crate::limits::ResourceLimits,
+) -> Result<Option<Vec<u8>>, PdfError> {
     // Held across load, render, and the document's drop so no other thread
     // interleaves a PDFium call anywhere in the sequence (RENDER_LOCK).
     let _serial = RENDER_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    limits.check_source_file(bytes.len() as u64)?;
     let deadline = crate::limits::Deadline::start(limits);
     deadline.check()?;
-    let Some(pdfium) = pdfium(library_dirs) else {
-        return Ok(None);
-    };
 
     let document = pdfium
-        .load_pdf_from_file(path, None)
+        .load_pdf_from_byte_slice(bytes, None)
         .map_err(|err| PdfError::Render(err.to_string()))?;
     deadline.check()?;
     let pages = document.pages();

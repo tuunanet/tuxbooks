@@ -29,19 +29,27 @@ pub struct PdfBook {
 /// `limits` quotas (issue #83) and fails fast with a typed limit error.
 pub fn parse_pdf(path: &Path, limits: &ResourceLimits) -> Result<PdfBook, PdfError> {
     limits.check_source_file(std::fs::metadata(path)?.len())?;
+    let mut book = parse_pdf_bytes(&std::fs::read(path)?, limits)?;
+    if book.metadata.title.is_empty() {
+        book.metadata.title = fallback_title(path);
+    }
+    Ok(book)
+}
+
+/// Bytes-based parse core: same behavior as [`parse_pdf`] for an in-memory
+/// source, without the file-name title fallback (an fd has no name; the
+/// client reapplies it after decoding). The core returns the parsed title
+/// even when empty.
+pub fn parse_pdf_bytes(bytes: &[u8], limits: &ResourceLimits) -> Result<PdfBook, PdfError> {
+    limits.check_source_file(bytes.len() as u64)?;
     let deadline = Deadline::start(limits);
     deadline.check()?;
-    let doc = Document::load(path).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let doc = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
     deadline.check()?;
     count_pages_bounded(&doc, limits)?;
     deadline.check()?;
 
-    let info = doc
-        .trailer
-        .get(b"Info")
-        .ok()
-        .and_then(|obj| resolve(&doc, obj))
-        .and_then(|obj| obj.as_dict().ok().cloned());
+    let info = info_dict(&doc);
 
     let read = |key: &[u8]| -> Result<Option<String>, PdfError> {
         let value = info
@@ -62,7 +70,7 @@ pub fn parse_pdf(path: &Path, limits: &ResourceLimits) -> Result<PdfBook, PdfErr
 
     Ok(PdfBook {
         metadata: PdfMetadata {
-            title: read(b"Title")?.unwrap_or_else(|| fallback_title(path)),
+            title: read(b"Title")?.unwrap_or_default(),
             author: read(b"Author")?,
             description: read(b"Subject")?,
         },
@@ -131,19 +139,24 @@ pub fn read_file_properties(
     limits: &ResourceLimits,
 ) -> Result<Vec<(String, String)>, PdfError> {
     limits.check_source_file(std::fs::metadata(path)?.len())?;
+    read_file_properties_bytes(&std::fs::read(path)?, limits)
+}
+
+/// Bytes-based core of [`read_file_properties`]; the path wrapper owns the
+/// source-size quota check before the file is read (see `parse_pdf_bytes`).
+pub fn read_file_properties_bytes(
+    bytes: &[u8],
+    limits: &ResourceLimits,
+) -> Result<Vec<(String, String)>, PdfError> {
+    limits.check_source_file(bytes.len() as u64)?;
     let deadline = Deadline::start(limits);
     deadline.check()?;
-    let doc = Document::load(path).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let doc = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
     deadline.check()?;
     count_pages_bounded(&doc, limits)?;
     deadline.check()?;
 
-    let info = doc
-        .trailer
-        .get(b"Info")
-        .ok()
-        .and_then(|obj| resolve(&doc, obj))
-        .and_then(|obj| obj.as_dict().ok().cloned());
+    let info = info_dict(&doc);
 
     let read = |key: &[u8]| -> Result<Option<String>, PdfError> {
         let value = info
@@ -216,6 +229,15 @@ fn resolve<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Object> {
     }
 }
 
+/// The Info dictionary from a document's trailer, following one indirect hop.
+fn info_dict(doc: &Document) -> Option<lopdf::Dictionary> {
+    doc.trailer
+        .get(b"Info")
+        .ok()
+        .and_then(|obj| resolve(doc, obj))
+        .and_then(|obj| obj.as_dict().ok().cloned())
+}
+
 /// PDF strings are either UTF-16BE (marked with a `FE FF` byte-order mark)
 /// or PDFDocEncoding, which matches Latin-1 for the characters that matter
 /// in bibliographic metadata. Decoding is best-effort, never lossy-panicking.
@@ -235,7 +257,7 @@ fn decode_pdf_string(bytes: &[u8]) -> String {
 
 /// Titles are mandatory in the library schema; a PDF without one is indexed
 /// under a humanized file name rather than being rejected.
-fn fallback_title(path: &Path) -> String {
+pub(crate) fn fallback_title(path: &Path) -> String {
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
@@ -394,6 +416,24 @@ mod tests {
         };
         let err = parse_pdf(&path, &tight).unwrap_err();
         assert!(matches!(err, PdfError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_pdf_bytes_matches_parse_pdf() {
+        let bytes = tests_support::build_pdf(&[("Title", "Reader Title")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("equivalent.pdf");
+        std::fs::write(&path, &bytes).unwrap();
+        let via_path = parse_pdf(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let via_bytes = parse_pdf_bytes(&bytes, &ResourceLimits::DEFAULTS).unwrap();
+        assert_eq!(via_path.metadata.title, "Reader Title");
+        assert_eq!(via_bytes.metadata.title, "Reader Title");
+    }
+
+    #[test]
+    fn parse_pdf_bytes_rejects_garbage() {
+        let err = parse_pdf_bytes(b"not a pdf", &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, PdfError::Parse(_)), "got: {err:?}");
     }
 
     #[test]
