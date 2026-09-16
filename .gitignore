@@ -49,6 +49,13 @@ dist-packages/
 # Fetched PDFium shared library for cover extraction (scripts/fetch-pdfium.sh)
 sidecar/pdfium/
 
+# Fuzzing (issue #88): libFuzzer build output, runtime corpus, and crash
+# artifacts are disposable. The committed seeds live in sidecar/fuzz/seeds/.
+sidecar/fuzz/target/
+sidecar/fuzz/corpus/
+sidecar/fuzz/artifacts/
+sidecar/fuzz/coverage/
+
 *.swp
 electron/dist/
 

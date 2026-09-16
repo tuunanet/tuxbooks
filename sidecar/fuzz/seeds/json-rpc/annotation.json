@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":6,"method":"create_annotation","params":{"bookId":1,"annotation":{"kind":"highlight","text":"seed highlight","color":"yellow","chapterHref":"chapter1.xhtml"}}}

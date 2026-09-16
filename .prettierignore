@@ -13,3 +13,7 @@ LICENSE.md
 # EPUB fixture corpus: source trees + READMEs are generated/script-owned and
 # must stay byte-stable for the determinism check (just make-epub-fixtures)
 tests/fixtures/epub
+
+# Fuzz seeds (issue #88): libFuzzer corpus units, one input per file — not
+# app code, and byte-stable seeds keep fuzz runs comparable
+sidecar/fuzz
