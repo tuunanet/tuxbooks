@@ -4,7 +4,7 @@
 
 **Goal:** All hostile-document parsing, extraction, and cover rendering (EPUB ZIP/XML, PDF via lopdf, covers via PDFium) runs in a dedicated, sandboxed, one-shot worker process; a parser compromise ends at the worker as a typed error plus a fresh spawn, never in the sidecar.
 
-**Architecture:** A second binary `tuxbooks-worker` in the `sidecar/` crate links the existing `tuxbooks_lib`. The sidecar resolves the document path (book id to database to stored file, T-1 unchanged), opens it read-only, and spawns the worker with the fd passed as fd 3 (`pre_exec` + `dup2`, POSIX) and an empty environment. The worker reads one JSON job line from stdin, applies its own sandbox (PDEATHSIG, PDFium preload when needed, Landlock deny-all-FS plus network, seccomp deny-list, rlimits, self-verification), runs one operation against the fd, writes one JSON response to stdout, and exits. The sidecar supervises with a wall-clock deadline kill and caps the response at 2 GiB. Design rationale and rejected alternatives: `docs/adr/0001-sandboxed-document-worker.md`.
+**Architecture:** A second binary `tuxbooks-worker` in the `sidecar/` crate links the existing `tuxbooks_lib`. The sidecar resolves the document path (book id to database to stored file, T-1 unchanged), opens it read-only, and spawns the worker with the fd passed as fd 3 (`pre_exec` + `dup2`, POSIX) and an empty environment. The worker reads one JSON job line from stdin, applies its own sandbox (PDEATHSIG, PDFium preload when needed, fs-only Landlock denying all filesystem access, seccomp deny-list that denies socket creation unconditionally, rlimits, self-verification), runs one operation against the fd, writes one JSON response to stdout, and exits. The sidecar supervises with a wall-clock deadline kill and caps the response at 2 GiB. Design rationale and rejected alternatives: `docs/adr/0001-sandboxed-document-worker.md`.
 
 **Tech Stack:** Rust only (std, libc, serde, base64, thiserror, and the existing zip/quick-xml/lopdf/pdfium-render/image stack). No new crate dependencies. Landlock and seccomp are hand-rolled syscall FFI on `libc`.
 
@@ -664,6 +664,10 @@ pub struct WorkerClient {
 pub enum WorkerError {
     #[error("document worker unavailable: {0}")]
     Unavailable(String),
+    /// The sidecar could not open the document at all: distinct from a
+    /// missing worker binary (M4), same -32004 code.
+    #[error("document could not be opened by the sidecar: {0}")]
+    Document(String),
     #[error("document worker protocol error: {0}")]
     Protocol(String),
     #[error("resource limit exceeded: {0}")]
@@ -879,6 +883,11 @@ fn crash_error(status: &std::process::ExitStatus, detail: &str) -> WorkerError {
     ))
 }
 ```
+
+Two residual-risk notes for this client sketch:
+
+- The `child.wait()` after a well-formed response must stay bounded: a worker that wrote its response, closed stdout, and then hangs would otherwise block the client past the wall-clock budget on the wait. The implementer either escalates with a grace kill after a short grace period or uses a timed wait, so the total time past the deadline-kill is capped, not unbounded.
+- `recvmsg`/`sendmsg` stay un-denied in the seccomp list, and that is acceptable: they operate on an existing socket fd, and since `socket`/`socketpair` are denied (and the fd contract leaves no inherited descriptors beyond 0-3, W-7), no socket fd can exist for them to touch.
 
 `sidecar/src/worker/mod.rs` gains:
 
