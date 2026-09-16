@@ -163,7 +163,7 @@ pub const MAX_WORKER_RESPONSE_BYTES: usize = 2 << 30;
 pub const MAX_EMBED_SOURCE_BYTES: u64 = 512 << 20;
 ```
 
-- [ ] **Step 1: Write the failing tests** in `sidecar/src/worker/proto.rs` (create the file with just the test module and imports; `sidecar/src/worker/mod.rs` and the `lib.rs` line are added so the module resolves)
+- [x] **Step 1: Write the failing tests** in `sidecar/src/worker/proto.rs` (create the file with just the test module and imports; `sidecar/src/worker/mod.rs` and the `lib.rs` line are added so the module resolves)
 
 ```rust
 #[cfg(test)]
@@ -239,12 +239,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml worker::proto`
 Expected: compile failure, unresolved `WorkerJob`, `WorkerResponse`, `WorkerErrorKind`, `MetadataPayload`, `LandlockStatus`, `SandboxSelfTest`, `MAX_WORKER_RESPONSE_BYTES`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `sidecar/src/worker/mod.rs`:
 
@@ -267,12 +267,12 @@ pub use proto::{
 
 `sidecar/src/lib.rs`: add `pub mod worker;` after `pub mod services;`.
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml worker::proto`
 Expected: four tests pass.
 
-- [ ] **Step 5: Commit** — `feat(rust): define the document worker wire protocol`
+- [x] **Step 5: Commit** — `feat(rust): define the document worker wire protocol`
 
 ### Task 2: Reader-based parse entry points (fd-ready, in-process)
 
@@ -310,7 +310,7 @@ pub fn render_first_page_cover_bytes(pdfium: &Pdfium, bytes: &[u8], limits: &Res
 pub fn rewrite_pdf_bytes(bytes: &[u8], metadata: &PdfMetadata, limits: &ResourceLimits) -> Result<Vec<u8>, PdfError>;
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `epub/parser.rs` tests (`write_zip` and the `OPF` constant already exist there):
 
@@ -387,12 +387,12 @@ Append to `pdf/parser.rs` tests (the `tests_support::build_pdf` helper already e
     }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml parse_epub_reader parse_pdf_bytes`
 Expected: compile failure, unresolved functions.
 
-- [ ] **Step 3: Implement** each split mechanically:
+- [x] **Step 3: Implement** each split mechanically:
 
 - `epub/parser.rs`: move the body of `parse_epub` into `parse_epub_reader(reader: BufReader<R>, limits)` where `File::open(path)` + `BufReader::new(file)` are replaced by the passed reader; `parse_epub` becomes `parse_epub_reader(BufReader::new(File::open(path)?), limits)`. Same split for `read_file_properties` / `read_file_properties_reader`.
 - `epub/session.rs`: same split for `build_session` / `read_member` into `build_session_reader` / `read_member_reader`; the internals (`check_archive_totals`, `read_mimetype`, `read_entry`, `parse_toc`) already take `R: Read + Seek` generics, so only the file opening moves into the wrappers.
@@ -401,12 +401,12 @@ Expected: compile failure, unresolved functions.
 - `pdf/render.rs`: `render_first_page_cover_bytes(pdfium: &Pdfium, bytes: &[u8], limits)` holds `RENDER_LOCK`, runs `limits.check_source_file(bytes.len() as u64)` and the deadline checks, loads with `pdfium.load_pdf_from_byte_slice(bytes, None)`, renders at `COVER_WIDTH_PX`, encodes PNG, and applies `check_cover_png`. `render_first_page_cover(path, ...)` keeps its probe logic, reads the file, and calls the bytes variant; Task 7 removes its last sidecar caller.
 - `pdf/writer.rs`: `rewrite_pdf_bytes(bytes, metadata, limits)` = `limits.check_source_file(bytes.len() as u64)?` + `Document::load_mem(bytes.to_vec())` + the existing Info-dictionary edit + `save_to(&mut buffer)`, returning the buffer. `write_metadata(path, metadata)` reads the file, calls the bytes variant, then does `backup_file_once` + `atomic_replace`.
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml`
 Expected: full suite passes unchanged plus the new equivalence tests.
 
-- [ ] **Step 5: Commit** — `refactor(rust): split parse entry points into reader and path variants`
+- [x] **Step 5: Commit** — `refactor(rust): split parse entry points into reader and path variants`
 
 ### Task 3: Worker binary, fd handoff, and the sidecar client
 
@@ -479,7 +479,7 @@ impl WorkerClient {
 pub fn run_job(job: &WorkerJob, document: Option<&mut std::fs::File>) -> WorkerResponse;
 ```
 
-- [ ] **Step 1: Write the failing tests** in `sidecar/src/worker/client.rs` `mod tests`:
+- [x] **Step 1: Write the failing tests** in `sidecar/src/worker/client.rs` `mod tests`:
 
 ```rust
 #[cfg(test)]
@@ -626,12 +626,12 @@ fn parsing_ops_refuse_to_run_without_a_document_fd() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml worker`
 Expected: compile failure (no client module items, no `tuxbooks-worker` bin).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `sidecar/src/worker/client.rs`:
 
@@ -1046,12 +1046,12 @@ fn fail(kind: WorkerErrorKind, message: String) -> i32 {
 
 `sidecar/src/pdf/render.rs` gains `probe_and_load(dirs: &[String])` (same probe order as the existing `pdfium()` helper, accepting `String` dirs from the job, caching into the existing `PDFIUM` `OnceLock`; a failed bind is silent here and surfaces as `Ok(None)`/render error at use time, matching today's behavior).
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml worker`
 Expected: client supervision tests (deadline, crash, cap, locate) and both integration handoff tests pass.
 
-- [ ] **Step 5: Commit** — `feat(rust): add the sandboxed document worker binary and client`
+- [x] **Step 5: Commit** — `feat(rust): add the sandboxed document worker binary and client`
 
 ### Task 4: EPUB and PDF parse ops through the worker
 
@@ -1076,7 +1076,7 @@ impl WorkerClient {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests** in `sidecar/tests/worker_ops.rs`:
+- [x] **Step 1: Write the failing tests** in `sidecar/tests/worker_ops.rs`:
 
 ```rust
 //! End-to-end ops against the real worker binary (W-1, P-1): the sidecar
@@ -1183,12 +1183,12 @@ fn pdf_cover_renders_when_pdfium_is_available() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_ops`
 Expected: compile failure, no `epub_parse`/`pdf_cover` wrappers.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `sidecar/src/worker/mod.rs` replaces the stub with the real engine:
 
@@ -1429,12 +1429,12 @@ Typed wrappers in `client.rs` (the member wrapper shows the pattern; the others 
 
 `pdf/render.rs`: extract `pub fn loaded_pdfium() -> Option<&'static Pdfium>` and `pub fn pdfium_is_available(dirs: &[PathBuf]) -> bool` from the existing probe (shared by the worker and tests; `render_first_page_cover` keeps its behavior).
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_ops`
 Expected: all worker_ops tests pass (the PDF cover test skips with a notice when PDFium is unfetched).
 
-- [ ] **Step 5: Commit** — `feat(rust): run epub and pdf parsing inside the document worker`
+- [x] **Step 5: Commit** — `feat(rust): run epub and pdf parsing inside the document worker`
 
 ### Task 5: Embed ops: the worker rewrites, the sidecar writes
 
@@ -1455,7 +1455,7 @@ impl WorkerClient {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests** in `sidecar/tests/worker_embed.rs`:
+- [x] **Step 1: Write the failing tests** in `sidecar/tests/worker_embed.rs`:
 
 ```rust
 //! Embed round trip through the real worker: bytes in, rewritten bytes out.
@@ -1531,12 +1531,12 @@ fn embed_sources_over_the_cap_are_refused_without_reading() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_embed`
 Expected: compile failure, no `epub_embed` wrapper.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `dispatch` gains the two arms and drops the embed stubs from the catch-all:
 
@@ -1620,12 +1620,12 @@ fn enforce_embed_cap(document: &std::fs::File) -> Result<(), JobError> {
 
 (`pdf_embed` mirrors it with `MetadataPayload::Pdf(metadata.clone())`.)
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml`
 Expected: full suite green including the embed tests.
 
-- [ ] **Step 5: Commit** — `feat(rust): move metadata rewrites into the document worker`
+- [x] **Step 5: Commit** — `feat(rust): move metadata rewrites into the document worker`
 
 ### Task 6: The sandbox module: Landlock, seccomp, rlimits, self-verification
 
@@ -1668,7 +1668,7 @@ pub fn prepare(limits: &ResourceLimits) -> Result<SandboxReport, String>;
 
 **Seccomp deny-list** (classic BPF, action `SECCOMP_RET_ERRNO | EPERM`, default `SECCOMP_RET_ALLOW`, syscall numbers from `libc` `SYS_*` constants, arch-checked against `AUDIT_ARCH_X86_64` / `AUDIT_ARCH_AARCH64` by build target): `execve`, `execveat`, `fork`, `vfork`, `clone`/`clone3` where the flag word carries any of `CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS` (plain thread clones pass), `unshare`, `setns`, `mount`, `umount2`, `ptrace`, `bpf`, `keyctl`, `kexec_load`, `kexec_file_load`, `open_by_handle_at`, `name_to_handle_at`, `reboot`, `swapon`, `swapoff`, `init_module`, `finit_module`, `delete_module`; and `socket`, `socketpair`, `connect`, `bind`, `listen`, `accept`, `accept4`, `sendto`, `recvfrom` unconditionally. Denying `socket` outright is what owns W-3: one rule closes TCP, UDP, AF_UNIX, and netlink creation on every supported kernel, which is why Landlock's network ABI (TCP bind/connect only, kernel 6.7+) was dropped.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `sidecar/src/worker/sandbox.rs` (pure logic and thread-scoped enforcement; no filter is ever installed in the test process):
 
@@ -1810,12 +1810,12 @@ fn worker_refuses_to_parse_when_the_sandbox_cannot_apply() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml sandbox`
 Expected: compile failure, no `sandbox` module items (`check`, `apply_landlock_deny_all`, `build_seccomp_program`, `install_seccomp_program` missing).
 
-- [ ] **Step 3: Implement** `sidecar/src/worker/sandbox.rs`:
+- [x] **Step 3: Implement** `sidecar/src/worker/sandbox.rs`:
 
 ```rust
 //! The worker's own OS containment (ADR 0001 D3, W-2..W-5, W-10, W-11).
@@ -2283,12 +2283,12 @@ fn self_test_response() -> Result<WorkerResponse, JobError> {
     }
 ```
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml sandbox`
 Expected: the pure tests pass on any kernel; the enforcement tests pass on CI (ubuntu-22.04/24.04) and skip with notices where the kernel lacks Landlock.
 
-- [ ] **Step 5: Commit** — `feat(rust): sandbox the document worker with landlock seccomp and rlimits`
+- [x] **Step 5: Commit** — `feat(rust): sandbox the document worker with landlock seccomp and rlimits`
 
 ### Task 7: Route the sidecar through the worker and type the RPC codes
 
@@ -2328,7 +2328,7 @@ pub enum BookParseError {
 // all other AppErrors keep -32000.
 ```
 
-- [ ] **Step 1: Write the failing tests** in `sidecar/tests/worker_routing.rs`:
+- [x] **Step 1: Write the failing tests** in `sidecar/tests/worker_routing.rs`:
 
 ```rust
 //! The sidecar's parse surface routes through the worker (W-1, P-1). These
@@ -2410,12 +2410,12 @@ In `sidecar/src/rpc.rs` tests:
     }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_routing rpc::`
 Expected: compile failure (`parse_book` still parses in-process; no `Worker` variants).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `error.rs`: add the `Worker` variant.
 - `library_scanner.rs`: `parse_book` calls `crate::worker::WorkerClient::locate().map_err(BookParseError::Worker)?` once, then dispatches `epub_parse` / `pdf_parse` on the extension; worker errors flow through the new `BookParseError::Worker` variant.
@@ -2425,12 +2425,12 @@ Expected: compile failure (`parse_book` still parses in-process; no `Worker` var
 - `rpc.rs`: the `From<AppError> for RpcError` impl special-cases `AppError::Worker(err)` to use `err.rpc_code()`; all other app errors keep -32000.
 - `epub/mod.rs` / `pdf/mod.rs`: module doc lines stating the parse functions are worker-internal, path wrappers exist for tests, and services must reach parsing only through the worker client.
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml`
 Expected: full suite green; the routing tests pass; the scanner/watcher/vertical-slice integration tests still pass (they now exercise the real worker end to end).
 
-- [ ] **Step 5: Commit** — `feat(rust): route sidecar parsing through the sandboxed worker`
+- [x] **Step 5: Commit** — `feat(rust): route sidecar parsing through the sandboxed worker`
 
 ### Task 8: Containment, caps, and boundary pins
 
@@ -2571,24 +2571,24 @@ fn hostile_documents_never_outlive_their_deadline() {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests** (above).
+- [x] **Step 1: Write the failing tests** (above).
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_containment`
 Expected: failures where client or worker behavior is incomplete.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Fix any behavior gap the containment tests expose (for example a cap-check ordering bug in the client) minimally in `client.rs` / `worker_main.rs`.
 - The deadline kill path stays under 10 seconds of wall time for a 1-second budget (asserted).
 
-- [ ] **Step 4: Run and verify GREEN**
+- [x] **Step 4: Run and verify GREEN**
 
 Run: `cargo test --manifest-path sidecar/Cargo.toml --test worker_containment`
 Expected: all containment tests pass.
 
-- [ ] **Step 5: Commit** — `test(rust): pin worker containment deadline kill and response caps`
+- [x] **Step 5: Commit** — `test(rust): pin worker containment deadline kill and response caps`
 
 ### Task 9: Packaging, docs, and full verification
 
@@ -2603,7 +2603,7 @@ Expected: all containment tests pass.
 - Modify: `docs/PERFORMANCE.md` (PERF-13 note: worker spawn per parse op)
 - Modify: `docs/RELEASE.md` (worker in the packaged artifacts list, wherever it enumerates them)
 
-- [ ] **Step 1: Packaging**
+- [x] **Step 1: Packaging**
 
 `electron-builder.yml` extraResources gains, next to the existing sidecar entry:
 
@@ -2621,7 +2621,7 @@ Expected: all containment tests pass.
 
 and the final OK line mentions the worker.
 
-- [ ] **Step 2: Docs**
+- [x] **Step 2: Docs**
 
 - `docs/ARCHITECTURE.md`: the process diagram gains the worker box under the sidecar; the "Process and boundary" section gains one paragraph: the sidecar spawns `tuxbooks-worker` one process per parse job, hands the document over as a pre-opened read-only fd, enforces the wall-clock deadline, and treats any worker outcome as a typed per-job error; on Linux the worker applies Landlock, a seccomp deny-list, and rlimits itself (ADR 0001); the parse modules (`epub/`, `pdf/`) are worker-internal and services reach them only through the worker client. The Rust module table's `epub/` and `pdf/` rows note "worker-internal".
 - `docs/RESOURCE_LIMITS.md`: replace the "Two stages run to completion once started" paragraph with: those stages now run in the killable worker; the sidecar kills at the wall-clock deadline and `RLIMIT_CPU`/`RLIMIT_AS` backstop inside the worker; in-process parsing remains only in tests.
@@ -2630,7 +2630,7 @@ and the final OK line mentions the worker.
 - `docs/PERFORMANCE.md`: PERF-13's Status column gains: "parse/extraction ops pay one fork and exec into the per-job document worker (ADR 0001); reader byte-range paths do not; measure with `just bench-reader` before and after any worker transport change".
 - `AGENTS.md`: no new list entry; ARCHITECTURE.md links ADR 0001.
 
-- [ ] **Step 3: Full verification**
+- [x] **Step 3: Full verification**
 
 Run: `just format && just check`
 Expected: green (fmt, clippy, cargo tests, vitest, eslint, tsc, prettier).
@@ -2641,4 +2641,4 @@ Expected: green, single invocation. From the renderer's perspective nothing chan
 Run: `just test-e2e-release`
 Expected: green; proves the packaged sidecar locates its packaged worker.
 
-- [ ] **Step 4: Commit** — `docs: describe the sandboxed document worker in the process model`
+- [x] **Step 4: Commit** — `docs: describe the sandboxed document worker in the process model`

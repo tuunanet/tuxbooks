@@ -21,12 +21,16 @@ fn env_lock() -> MutexGuard<'static, ()> {
 
 #[test]
 fn parse_book_routes_epub_through_the_worker() {
+    // locate() reads TUXBOOKS_WORKER, which the missing-binary test below
+    // mutates; every test here holds the same lock while doing so.
+    let _guard = env_lock();
     let scanned = library_scanner::parse_book(&fixture("minimal.epub")).unwrap();
     assert!(matches!(scanned, library_scanner::ScannedBook::Epub(_)));
 }
 
 #[test]
 fn parse_book_routes_pdf_through_the_worker() {
+    let _guard = env_lock();
     let scanned = library_scanner::parse_book(&fixture("minimal.pdf")).unwrap();
     assert!(matches!(scanned, library_scanner::ScannedBook::Pdf(_)));
 }
