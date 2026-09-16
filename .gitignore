@@ -57,3 +57,6 @@ electron/dist/
 
 # Local debugging fixture (issue #67 follow-up) — temporary copy, never commit.
 tests/fixtures/ai-engineering.pdf
+
+# Git worktrees (superpowers workflow)
+.worktrees/
