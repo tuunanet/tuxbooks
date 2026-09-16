@@ -28,6 +28,12 @@ pub struct ResourceLimits {
     pub max_decompressed_bytes: u64,
     /// Sum of declared uncompressed sizes across one archive (R-1).
     pub max_total_uncompressed_bytes: u64,
+    /// What one PDF stream may inflate to while lopdf loads the document
+    /// (R-2, decompression bombs in cross-reference and object streams).
+    /// lopdf decodes those streams eagerly during load, so this cap is the
+    /// typed trip for the inflation class; it sits below the worker's
+    /// RLIMIT_AS memory ceiling so the typed error wins the race.
+    pub max_stream_decompressed_bytes: u64,
     /// Size of one XML document (container.xml, OPF, nav, NCX) (R-1).
     pub max_xml_bytes: usize,
     /// XML nesting depth in OPF/container/nav/NCX documents (R-1).
@@ -58,6 +64,7 @@ impl ResourceLimits {
         max_compressed_member_bytes: 256 << 20,
         max_decompressed_bytes: 512 << 20,
         max_total_uncompressed_bytes: 2 << 30,
+        max_stream_decompressed_bytes: 512 << 20,
         max_xml_bytes: 32 << 20,
         max_xml_depth: 512,
         max_metadata_string_bytes: 1 << 20,
@@ -154,6 +161,17 @@ impl ResourceLimits {
             })
     }
 
+    /// The PDF load-time stream-inflation quota (R-2). lopdf enforces it
+    /// internally via `max_decompressed_size`; this helper pins the quota in
+    /// the table's own tests.
+    pub fn check_stream_decompressed(&self, len: u64) -> Result<(), LimitExceeded> {
+        (len <= self.max_stream_decompressed_bytes)
+            .then_some(())
+            .ok_or_else(|| {
+                LimitExceeded::new("max_stream_decompressed_bytes", format!("{len} bytes"))
+            })
+    }
+
     pub fn check_xml_bytes(&self, len: usize) -> Result<(), LimitExceeded> {
         (len <= self.max_xml_bytes)
             .then_some(())
@@ -241,6 +259,7 @@ mod tests {
             max_compressed_member_bytes: 1_000,
             max_decompressed_bytes: 1_000,
             max_total_uncompressed_bytes: 2_000,
+            max_stream_decompressed_bytes: 1_000,
             max_xml_bytes: 100,
             max_xml_depth: 4,
             max_metadata_string_bytes: 50,
@@ -365,6 +384,7 @@ mod tests {
         d.check_entries(5_000).unwrap();
         d.check_member(64 << 20, 128 << 20).unwrap();
         d.check_total_uncompressed(1_500 << 20).unwrap();
+        d.check_stream_decompressed(256 << 20).unwrap();
         d.check_xml_bytes(4 << 20).unwrap();
         d.check_xml_depth(64).unwrap();
         d.check_metadata_string(&"x".repeat(100_000)).unwrap();

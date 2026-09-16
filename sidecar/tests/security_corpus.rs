@@ -161,14 +161,13 @@ fn malformed_pdf_xref_shapes_fail_typed() {
 
 #[test]
 fn pdf_decompression_bomb_is_contained_by_the_worker() {
-    // Containment-level teeth, not trip-level: no deterministic trip exists
-    // to assert, because the parse path reads metadata before any stream
-    // inflation and the component that answers the bomb (lopdf's decode,
-    // the allocator, the sandbox) is not ours. This test pins the weaker,
-    // still-binding claim: the ~19 MB to 4095 MiB bomb is answered by some
-    // typed worker outcome within the deadline, and the sidecar keeps
-    // working afterwards. A trip-level bomb fixture belongs to #88
-    // (fuzzing), per docs/TESTING.md.
+    // Trip-level for this class: lopdf answers the ~19 MB to 4095 MiB
+    // xref-stream inflation with the typed limit from the limits table
+    // (wired as `max_decompressed_size`), well inside the deadline, and the
+    // sidecar keeps serving afterwards. The worker's RLIMIT_AS stays the
+    // containment backstop for inflation lopdf does not bound (content
+    // streams decoded by PDFium, for example); #88 fuzzing still hunts
+    // those residual classes, per docs/TESTING.md.
     let client = WorkerClient::locate().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("bomb.pdf");
@@ -198,6 +197,25 @@ fn pdf_decompression_bomb_is_contained_by_the_worker() {
         .pdf_parse(&fixture("minimal.pdf"), &ResourceLimits::DEFAULTS)
         .unwrap();
     assert!(!good.metadata.title.is_empty());
+}
+
+#[test]
+fn stream_inflation_over_the_decompression_cap_fails_typed() {
+    // R-1/R-2 trip-level bomb coverage: a 64 MiB xref-stream inflation
+    // against a 1 MiB cap must fail as the typed limit error from the
+    // limits table, not as a structural parse error and not only through
+    // worker containment.
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("bomb-small.pdf");
+    std::fs::write(&path, hostile_pdf::inflation_bomb_at(64)).unwrap();
+    let tight = ResourceLimits {
+        max_stream_decompressed_bytes: 1 << 20,
+        ..ResourceLimits::DEFAULTS
+    };
+    match parse_pdf(&path, &tight).unwrap_err() {
+        PdfError::Limit(err) => assert_eq!(err.limit, "max_stream_decompressed_bytes"),
+        other => panic!("expected the lopdf decompression cap to trip typed, got: {other:?}"),
+    }
 }
 
 #[test]

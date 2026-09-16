@@ -34,7 +34,8 @@ pub fn rewrite_pdf_bytes(
     limits: &ResourceLimits,
 ) -> Result<Vec<u8>, PdfError> {
     limits.check_source_file(bytes.len() as u64)?;
-    let mut document = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let mut document = Document::load_mem_with_options(bytes, super::parser::load_options(limits))
+        .map_err(super::parser::load_error)?;
 
     let mut info = existing_info(&document).unwrap_or_default();
     set_required(&mut info, b"Title", &metadata.title);

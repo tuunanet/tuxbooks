@@ -78,14 +78,22 @@ pub(crate) fn bad_startxref() -> Vec<u8> {
 
 /// A decompression bomb: ~19 MB of zlib-wrapped DEFLATE that inflates to
 /// 4095 MiB, wired as a PDF 1.5 cross-reference stream so lopdf must
-/// decompress it during load (it decodes xref streams eagerly). The parse
-/// path leaves lopdf's own `max_decompressed_size` unset, so the worker's
-/// 3 GiB RLIMIT_AS is what answers the allocation. Construction is
-/// deterministic and cheap: the zero run is compressed by the zip crate
-/// (the only deflate available to test code, at level 1) and the raw
-/// DEFLATE bytes are reused as the stream payload.
+/// decompress it during load (it decodes xref streams eagerly). The worker's
+/// limits table caps that inflation (`max_stream_decompressed_bytes`, wired
+/// into lopdf's `max_decompressed_size`), with the worker's 3 GiB RLIMIT_AS
+/// behind it as the containment backstop. Construction is deterministic and
+/// cheap: the zero run is compressed by the zip crate (the only deflate
+/// available to test code, at level 1) and the raw DEFLATE bytes are reused
+/// as the stream payload.
 pub(crate) fn inflation_bomb() -> Vec<u8> {
-    let raw = deflate_zeros(4095 * (1 << 20));
+    inflation_bomb_at(4095)
+}
+
+/// `inflation_bomb()` at a caller-chosen inflated size (in MiB), for tests
+/// that pin the typed limit trip with a tight cap and must not allocate the
+/// full output.
+pub(crate) fn inflation_bomb_at(mib: usize) -> Vec<u8> {
+    let raw = deflate_zeros(mib * (1 << 20));
     let mut pdf = Vec::new();
     pdf.extend_from_slice(b"%PDF-1.5\n");
     pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");

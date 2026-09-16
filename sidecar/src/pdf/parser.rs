@@ -3,7 +3,36 @@ use std::path::Path;
 use lopdf::{Document, Object};
 
 use super::PdfError;
-use crate::limits::{Deadline, ResourceLimits};
+use crate::limits::{Deadline, LimitExceeded, ResourceLimits};
+
+/// lopdf load options for a hostile document: the limits table's stream
+/// inflation cap (`max_stream_decompressed_bytes`) becomes lopdf's
+/// `max_decompressed_size`, so a cross-reference or object stream that
+/// inflates past the cap fails the load with a typed limit error instead of
+/// an unbounded allocation (R-2).
+pub(crate) fn load_options(limits: &ResourceLimits) -> lopdf::LoadOptions {
+    lopdf::LoadOptions {
+        max_decompressed_size: Some(
+            usize::try_from(limits.max_stream_decompressed_bytes).unwrap_or(usize::MAX),
+        ),
+        ..lopdf::LoadOptions::default()
+    }
+}
+
+/// Map a lopdf load failure to the typed error: the decompression cap trip
+/// is a limit error (the quota is ours), everything else stays a parse
+/// error.
+pub(crate) fn load_error(err: lopdf::Error) -> PdfError {
+    match err {
+        lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { limit }) => {
+            PdfError::Limit(LimitExceeded {
+                limit: "max_stream_decompressed_bytes",
+                detail: format!("a document stream inflates past the {limit} byte load cap"),
+            })
+        }
+        other => PdfError::Parse(other.to_string()),
+    }
+}
 
 /// Bibliographic metadata extracted from a PDF's document information
 /// dictionary. PDFs carry no publisher/ISBN/language fields reliably, so
@@ -44,7 +73,7 @@ pub fn parse_pdf_bytes(bytes: &[u8], limits: &ResourceLimits) -> Result<PdfBook,
     limits.check_source_file(bytes.len() as u64)?;
     let deadline = Deadline::start(limits);
     deadline.check()?;
-    let doc = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let doc = Document::load_mem_with_options(bytes, load_options(limits)).map_err(load_error)?;
     deadline.check()?;
     count_pages_bounded(&doc, limits)?;
     deadline.check()?;
@@ -151,7 +180,7 @@ pub fn read_file_properties_bytes(
     limits.check_source_file(bytes.len() as u64)?;
     let deadline = Deadline::start(limits);
     deadline.check()?;
-    let doc = Document::load_mem(bytes).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let doc = Document::load_mem_with_options(bytes, load_options(limits)).map_err(load_error)?;
     deadline.check()?;
     count_pages_bounded(&doc, limits)?;
     deadline.check()?;
