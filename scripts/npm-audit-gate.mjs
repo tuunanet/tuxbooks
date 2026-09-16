@@ -35,6 +35,18 @@ export function evaluate(advisories, triage = TRIAGE) {
   return { blocked, accepted, informational };
 }
 
+// Shape guard for the `pnpm audit --json` report. A missing or malformed
+// advisories key is a tool error (exit 2), never an empty audit: pnpm has
+// moved audit output before, and silently reading zero advisories would
+// fail the gate open exactly when the output format changed under us.
+export function extractAdvisories(report) {
+  const advisories = report?.advisories;
+  if (advisories === null || typeof advisories !== "object" || Array.isArray(advisories)) {
+    throw new Error("unexpected pnpm audit --json shape: no advisories object");
+  }
+  return advisories;
+}
+
 function selfTest() {
   const cases = [
     { name: "clean audit passes", advisories: {}, triage: [], wantBlocked: 0 },
@@ -79,6 +91,30 @@ function selfTest() {
       console.log(`ok   ${c.name}`);
     }
   }
+  const shapeCases = [
+    {
+      name: "advisories object passes the shape guard",
+      report: { advisories: {} },
+      wantThrow: false,
+    },
+    { name: "missing advisories key is a tool error", report: {}, wantThrow: true },
+    { name: "null advisories is a tool error", report: { advisories: null }, wantThrow: true },
+    { name: "array advisories is a tool error", report: { advisories: [] }, wantThrow: true },
+  ];
+  for (const c of shapeCases) {
+    let threw = false;
+    try {
+      extractAdvisories(c.report);
+    } catch {
+      threw = true;
+    }
+    if (threw !== c.wantThrow) {
+      console.error(`FAIL ${c.name}`);
+      failed++;
+    } else {
+      console.log(`ok   ${c.name}`);
+    }
+  }
   return failed;
 }
 
@@ -110,7 +146,14 @@ function main() {
     console.error("npm-audit-gate: could not parse pnpm audit --json output");
     process.exit(2);
   }
-  const { blocked, accepted, informational } = evaluate(report.advisories);
+  let advisories;
+  try {
+    advisories = extractAdvisories(report);
+  } catch (err) {
+    console.error(`npm-audit-gate: ${err.message}`);
+    process.exit(2);
+  }
+  const { blocked, accepted, informational } = evaluate(advisories);
   for (const a of accepted) {
     console.log(`triaged: ${a.module_name} ${a.severity} ${a.title ?? ""}`);
   }

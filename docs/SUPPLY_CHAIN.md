@@ -20,9 +20,11 @@ build-script allowlists are unchanged (S-3), the audit workflow exists with
 its schedule (S-2), the release workflow builds and uploads the SBOM (S-4),
 and the fuzz workflow's nightly toolchain is date-pinned.
 
-`scripts/npm-audit-gate.mjs --self-test` exercises the gate logic itself
-against inline fixtures, including the fail-on-vulnerable case, so the
-gate's behaviour is tested offline as part of `just check`.
+Both gate scripts carry offline self-tests (`scripts/npm-audit-gate.mjs
+--self-test`, `scripts/supply-chain-gate.mjs --self-test`): the npm gate
+exercises the fail-on-vulnerable decision and the audit report shape
+guard, the supply-chain gate exercises the workspace parsing, and both
+suites also run inside `just check`.
 
 ## S-1: high-risk dependencies stay current
 
