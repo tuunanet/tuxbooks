@@ -166,7 +166,7 @@ The app inherits the runner's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set before the first Electron launch
 (globalSetup; the fixture re-asserts them) — keep that ordering.
 
-Four isolated invocations per run:
+Five isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
@@ -193,7 +193,14 @@ Four isolated invocations per run:
    share a worker with other suites. The crash-count → arming step is
    pinned by the policy unit tests (injecting real GPU-process crashes is
    not possible deterministically headlessly).
-4. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
+4. **security** (`test:security`) — fresh scratch env, empty library; the
+   EPUB content fencing smoke (`epub-content-security.e2e.ts`, issue #82):
+   hostile EPUBs are generated at runtime into the scratch library — a
+   scripted book fails to open (sidecar gate), and a book carrying active
+   content opens with sanitized, CSP-fenced frames and no completed
+   external network request. Own phase so the hostile books never appear in
+   the seeded suites' book counts.
+5. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
    library; the app imports them on startup. Runs `books.e2e.ts` (library
