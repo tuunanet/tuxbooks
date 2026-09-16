@@ -10,9 +10,11 @@
 use std::io::Read;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 /// Quota table enforced by every parser entry point. `DEFAULTS` is the
 /// documented baseline; tests and the future worker override fields freely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceLimits {
     /// Source file size on disk (EPUB or PDF).
     pub max_source_file_bytes: u64,

@@ -11,7 +11,7 @@ use crate::limits::ResourceLimits;
 /// entities, milestone 7); `author` stays as the first creator for the
 /// flat display column. `subtitle` is read from an EPUB 3 title refines
 /// link (`title-type` = subtitle), the shape the writer emits.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EpubMetadata {
     pub title: String,
     pub subtitle: Option<String>,

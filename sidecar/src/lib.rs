@@ -8,6 +8,7 @@ pub mod pdf;
 pub mod repository;
 pub mod rpc;
 pub mod services;
+pub mod worker;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -8,7 +8,7 @@ use crate::limits::{Deadline, ResourceLimits};
 /// Bibliographic metadata extracted from a PDF's document information
 /// dictionary. PDFs carry no publisher/ISBN/language fields reliably, so
 /// those stay unset and the UI shows its placeholders.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PdfMetadata {
     /// `/Title`, falling back to a cleaned-up file name when absent.
     pub title: String,
@@ -18,7 +18,7 @@ pub struct PdfMetadata {
 }
 
 /// Runtime- and database-independent representation of a parsed PDF.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PdfBook {
     pub metadata: PdfMetadata,
 }
