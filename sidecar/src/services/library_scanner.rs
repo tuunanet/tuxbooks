@@ -57,7 +57,9 @@ pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
     {
-        parse_pdf(path).map(ScannedBook::Pdf).map_err(Into::into)
+        parse_pdf(path, &crate::limits::ResourceLimits::DEFAULTS)
+            .map(ScannedBook::Pdf)
+            .map_err(Into::into)
     } else {
         parse_epub(path, &crate::limits::ResourceLimits::DEFAULTS)
             .map(|book| ScannedBook::Epub(Box::new(book)))

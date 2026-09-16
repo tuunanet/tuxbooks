@@ -132,7 +132,9 @@ pub async fn get_book_file_properties(
         crate::domain::BookFormat::Epub => {
             crate::epub::read_file_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
         }
-        crate::domain::BookFormat::Pdf => crate::pdf::read_file_properties(path)?,
+        crate::domain::BookFormat::Pdf => {
+            crate::pdf::read_file_properties(path, &crate::limits::ResourceLimits::DEFAULTS)?
+        }
     };
     Ok(Some(FileProperties {
         book_id,
@@ -1520,7 +1522,8 @@ mod tests {
         assert!(view.overridden.series, "PDF cannot hold a series");
         assert_eq!(view.effective.series.as_deref(), Some("A Series"));
 
-        let parsed_after = crate::pdf::parse_pdf(&pdf_path).unwrap();
+        let parsed_after =
+            crate::pdf::parse_pdf(&pdf_path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed_after.metadata.title, "New Title");
         assert_eq!(parsed_after.metadata.author.as_deref(), Some("New Author"));
     }

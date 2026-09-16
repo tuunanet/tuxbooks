@@ -306,7 +306,11 @@ fn pdf_cover_path(
     pdfium_dirs: &[PathBuf],
     previous_cover: Option<&str>,
 ) -> Result<Option<String>, AppError> {
-    let rendered = crate::pdf::render_first_page_cover(path, pdfium_dirs);
+    let rendered = crate::pdf::render_first_page_cover(
+        path,
+        pdfium_dirs,
+        &crate::limits::ResourceLimits::DEFAULTS,
+    );
     pdf_cover_from_result(rendered, covers_dir, previous_cover, path)
 }
 

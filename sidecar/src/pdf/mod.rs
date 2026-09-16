@@ -15,4 +15,6 @@ pub enum PdfError {
     Parse(String),
     #[error("cover rendering failed: {0}")]
     Render(String),
+    #[error("{0}")]
+    Limit(#[from] crate::limits::LimitExceeded),
 }

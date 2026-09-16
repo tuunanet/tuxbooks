@@ -107,7 +107,7 @@ mod tests {
         )
         .unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "New Title");
         assert_eq!(parsed.metadata.author.as_deref(), Some("New Author"));
         assert_eq!(parsed.metadata.description.as_deref(), Some("A subject"));
@@ -139,7 +139,7 @@ mod tests {
 
         write_metadata(&path, &metadata("Added Title", Some("Someone"), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Added Title");
         assert_eq!(parsed.metadata.author.as_deref(), Some("Someone"));
         assert_eq!(parsed.metadata.description, None);
@@ -156,7 +156,7 @@ mod tests {
 
         write_metadata(&path, &metadata("T", Some("   "), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.author, None);
         assert_eq!(parsed.metadata.description, None);
     }
@@ -168,7 +168,7 @@ mod tests {
 
         write_metadata(&path, &metadata("Übermensch — naïve", Some("Åsa"), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Übermensch — naïve");
         assert_eq!(parsed.metadata.author.as_deref(), Some("Åsa"));
     }
