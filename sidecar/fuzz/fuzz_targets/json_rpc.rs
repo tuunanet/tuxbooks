@@ -14,16 +14,18 @@ use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
 use tuxbooks_lib::AppState;
 
 struct FuzzEnv {
-    _scratch: tempfile::TempDir,
     library_dir: PathBuf,
     state: Arc<AppState>,
     events: EventEmitter,
     runtime: tokio::runtime::Runtime,
 }
 
-/// One process-lifetime service state in a scratch tempdir: empty library
+/// One process-lifetime service state in a scratch directory: empty library
 /// directory, seeded book row, real SQLite schema. Mutated requests run
-/// against it exactly like they would against the sidecar.
+/// against it exactly like they would against the sidecar. The scratch
+/// stays inside the fuzz target dir (in-workspace, gitignored) and is wiped
+/// at init, so repeated runs never accumulate and nothing is written
+/// outside the workspace.
 fn env() -> &'static FuzzEnv {
     static ENV: OnceLock<FuzzEnv> = OnceLock::new();
     ENV.get_or_init(|| {
@@ -31,12 +33,13 @@ fn env() -> &'static FuzzEnv {
             .enable_all()
             .build()
             .expect("fuzz runtime");
-        let scratch = tempfile::tempdir().expect("fuzz scratch dir");
-        let library_dir = scratch.path().join("library");
+        let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/json-rpc-scratch");
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).expect("fuzz scratch dir");
+        let library_dir = scratch.join("library");
         std::fs::create_dir_all(&library_dir).expect("fuzz library dir");
-        let state = runtime.block_on(build_state(scratch.path(), &library_dir));
+        let state = runtime.block_on(build_state(&scratch, &library_dir));
         FuzzEnv {
-            _scratch: scratch,
             library_dir,
             state: Arc::new(state),
             events: EventEmitter::new(|_, _| {}),
