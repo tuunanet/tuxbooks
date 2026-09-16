@@ -111,6 +111,10 @@ fn count_pages_bounded(doc: &Document, limits: &ResourceLimits) -> Result<usize,
                         }
                     }
                 }
+                // Visited plus pending is everything the walk can still do:
+                // checking it here keeps a wide Kids array from stacking
+                // entries past the node budget before any pop is counted.
+                limits.check_page_tree_node(visited + stack.len())?;
             }
         }
     }
@@ -311,6 +315,32 @@ mod tests {
         };
         let err = parse_pdf(&path, &tight).unwrap_err();
         assert!(matches!(err, PdfError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_pdf_rejects_kids_array_over_node_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("wide.pdf");
+        // One Pages node whose Kids array alone holds 500 references (all to
+        // one page): the node budget must trip at push time, before the walk
+        // stacks the array, not only when the pops are counted one by one.
+        let kids = "3 0 R ".repeat(500);
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            format!("<< /Type /Pages /Kids [{kids}] /Count 500 >>"),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_string(),
+        ];
+        std::fs::write(&path, tests_support::assemble_pdf(objects, "")).unwrap();
+        let tight = ResourceLimits {
+            max_page_tree_nodes: 100,
+            max_pages: 50,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = parse_pdf(&path, &tight).unwrap_err();
+        match err {
+            PdfError::Limit(err) => assert_eq!(err.limit, "max_page_tree_nodes"),
+            other => panic!("expected limit error, got: {other:?}"),
+        }
     }
 
     #[test]
