@@ -61,6 +61,8 @@ dpkg-deb -x "$deb" "$payload"
 [ -x "$payload/opt/TuxBooks/tuxbooks" ] || fail "opt/TuxBooks/tuxbooks missing or not executable"
 [ -x "$payload/opt/TuxBooks/resources/sidecar/tuxbooks" ] ||
   fail "bundled sidecar missing or not executable (resources/sidecar/tuxbooks)"
+[ -x "$payload/opt/TuxBooks/resources/sidecar/tuxbooks-worker" ] ||
+  fail "bundled document worker missing or not executable (resources/sidecar/tuxbooks-worker)"
 [ -f "$payload/opt/TuxBooks/resources/sidecar/libpdfium.so" ] ||
   fail "bundled PDFium resource missing (resources/sidecar/libpdfium.so)"
 # The native window/taskbar icon at runtime (electron/main/index.ts
@@ -87,4 +89,4 @@ else
   echo "check-deb: desktop-file-validate not installed; skipped (structure still checked)"
 fi
 
-echo "check-deb: OK (version $version, $arch, $icon_count icons, sidecar + PDFium bundled)"
+echo "check-deb: OK (version $version, $arch, $icon_count icons, sidecar + document worker + PDFium bundled)"

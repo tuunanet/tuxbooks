@@ -52,7 +52,12 @@ watchdog arms).
 ## Rust (`cargo test`)
 
 - Tests live next to the code (`#[cfg(test)] mod tests`) plus the
-  integration tests (`sidecar/tests/`).
+  integration tests (`sidecar/tests/`). The worker integration tests
+  (`worker_handoff`, `worker_ops`, `worker_embed`, `worker_sandbox`,
+  `worker_routing`, `worker_containment`) spawn the real
+  `tuxbooks-worker` binary; the kernel-gated sandbox tests skip with a
+  printed notice on kernels without Landlock (5.13+), mirroring the
+  PDFium skip convention — production fails closed there instead.
 - Property tests (`proptest`): `parse_epub` never panics on arbitrary
   bytes; the scanner only ever reports `*.epub` files. Keep those
   invariants intact.

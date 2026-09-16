@@ -51,6 +51,11 @@ the root `package.json` is the released version. Layout in every bundle:
   the asar — it is a real process), with `libpdfium.so` next to it; the
   sidecar probes the executable's directory for PDFium
   (`sidecar/src/lib.rs pdfium_library_dirs`).
+- `resources/sidecar/tuxbooks-worker`: the sandboxed document worker
+  (ADR 0001). It is built by the same `cargo build` as the sidecar (a
+  second `[[bin]]` in the `sidecar/` crate) and located at runtime via the
+  `TUXBOOKS_WORKER` override or next to the sidecar binary
+  (`worker::client::locate`).
 - Linux installs to `/opt/tuxbooks`, with the desktop entry at
   `usr/share/applications/tuxbooks.desktop` and hicolor icons from
   `build/icons/` (regenerate from `scripts/icon-source.png`, see

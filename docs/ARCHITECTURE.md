@@ -21,8 +21,11 @@ describes the current contract.
 │                                                                       │
 │  Rust sidecar (native service)                                        │
 │  ├─ services/ (application ops)   ├─ repository/ (SQL)                │
-│  ├─ epub/ (parsing)               ├─ pdf/ (parsing)                   │
-│  └─ db/ (SQLite + migrations)                                         │
+│  ├─ worker/ (worker client,       ├─ db/ (SQLite + migrations)       │
+│  │  proto, sandbox)                │                                 │
+│  └─ spawns per parse job ─────►    tuxbooks-worker (one-shot)        │
+│                                    ├─ epub/ + pdf/ (parsing)         │
+│                                    └─ Landlock + seccomp + rlimits   │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,6 +76,20 @@ buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
 are rejected by the sidecar with typed JSON-RPC errors and never crash it
 (pinned by `sidecar/src/rpc.rs` tests).
 
+### Document worker (issue #81, ADR 0001)
+
+The sidecar spawns `tuxbooks-worker` one process per parse job, hands the
+document over as a pre-opened read-only fd (fd 3, no path crosses the
+boundary), enforces the wall-clock deadline by killing, and treats any
+worker outcome as a typed per-job error (deadline -32001, limit -32002,
+sandbox -32003, other worker failures -32004). On Linux the worker applies
+Landlock (all filesystem access denied), a seccomp deny-list (including
+socket creation, which owns network denial), and rlimits itself, then
+self-verifies before parsing (ADR 0001). There is no in-process fallback:
+a missing worker binary is a typed error, never silent in-process parsing.
+The parse modules (`epub/`, `pdf/`) are worker-internal; services reach
+them only through the worker client (`sidecar/src/worker/client.rs`).
+
 ## Gotchas
 
 Each has bitten before (or is a known trap of the Electron stack):
@@ -86,16 +103,17 @@ Each has bitten before (or is a known trap of the Electron stack):
 
 ## Rust module contract
 
-| Module        | May depend on                               | Must never import     |
-| ------------- | ------------------------------------------- | --------------------- |
-| `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri, electron glue  |
-| `limits/`     | std, thiserror                              | runtime crates, sqlx  |
-| `epub/`       | std, zip, quick-xml, limits                 | tauri, sqlx, electron |
-| `pdf/`        | std, lopdf, limits                          | tauri, sqlx, electron |
-| `db/`         | sqlx, migrations                            | tauri, electron       |
-| `repository/` | sqlx, domain                                | tauri, epub, pdf      |
-| `services/`   | domain, repository, epub, pdf, db           | tauri, electron       |
-| method table  | services, domain                            | sqlx details          |
+| Module                    | May depend on                                                                                         | Must never import             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `domain/`                 | std, serde, chrono, sqlx (row mapping only)                                                           | tauri, electron glue          |
+| `limits/`                 | std, thiserror                                                                                        | runtime crates, sqlx          |
+| `epub/` (worker-internal) | std, zip, quick-xml, limits                                                                           | tauri, sqlx, electron         |
+| `pdf/` (worker-internal)  | std, lopdf, pdfium-render, limits                                                                     | tauri, sqlx, electron         |
+| `worker/`                 | limits, epub, pdf, libc, serde, base64                                                                | sqlx, notify, tauri, electron |
+| `db/`                     | sqlx, migrations                                                                                      | tauri, electron               |
+| `repository/`             | sqlx, domain                                                                                          | tauri, epub, pdf              |
+| `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points) | tauri, electron               |
+| method table              | services, domain                                                                                      | sqlx details                  |
 
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /

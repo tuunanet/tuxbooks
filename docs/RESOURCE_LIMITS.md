@@ -60,20 +60,16 @@ deadline is also the CPU bound: each interruptible stage's cost is linear in
 an input that the size quotas above cap. Memory is bounded by the size
 quotas, `read_bounded` (caps bytes actually delivered regardless of what a
 header declared), and the running cumulative check in the positions loop
-(caps what one stage can decompress when headers lie). True per-parse
-CPU-time accounting is not attempted here (process-wide and per-thread
-rusage would be polluted by concurrent import workers); it moves into the
-sandboxed worker (#81), which can simply kill an over-budget job.
+(caps what one stage can decompress when headers lie).
 
-Two stages run to completion once started and cannot be interrupted
-mid-stage: `Document::load` (lopdf parses the whole file) and the PDFium
-cover render. Before they start, the source-size cap and the deadline bound
-what they can be handed; after the render, the PNG-size check applies. But
-inside them, only the source-size cap applies: a file that passes the
-pre-stage checks can burn work up to that budget inside one of these stages
-before any error surfaces. Stopping them mid-flight needs the killable
-worker (#81); until that lands, this is a documented gap, not an enforced
-bound.
+Those stages now run in the killable document worker (#81): `Document::load`
+and the PDFium cover render execute inside `tuxbooks-worker`, which the
+sidecar kills at the wall-clock deadline and which carries kernel backstops
+of its own (`RLIMIT_CPU` at the job's parse budget, `RLIMIT_AS` at a 3 GiB
+cap, `RLIMIT_FSIZE` 0). A stage that cannot be interrupted in-process is
+therefore still bounded by a kill, mid-stage if needed. In-process parsing
+remains only in tests (the reader- and bytes-based cores, driven directly);
+the sidecar's services parse exclusively through the worker (ADR 0001).
 
 ## Tests
 

@@ -29,16 +29,16 @@
 
 ## Invariant-to-task map
 
-| Invariant group | Proven by |
-| --------------- | --------- |
-| W-1, P-1 (parse/extract/cover in the worker) | Tasks 3-5 (ops), Task 7 (sidecar routing flips traffic) |
-| W-5 (opaque handle, no FS authority) | Tasks 3-5 (fd handoff), Task 6 (Landlock deny-all + self-verification) |
-| W-2, W-3, W-4 (no DB/network/spawn) | Task 6 (Landlock FS denial, seccomp incl. unconditional socket denial, selftest probes) |
-| W-6, W-8 (bounded typed results, limits) | Tasks 1, 3, 8 (typed response, quotas in the job, deadline kill, rlimits, SIGXCPU mapped to a typed limit, embed source cap, response cap) |
-| W-7 (minimal privileges/environment) | Task 3 (env_clear, fd set, argv) |
-| W-9 (killable, restartable, sidecar survives) | Task 3 (client kill/crash handling), Task 8 (service-level containment) |
-| W-10 (Linux sandbox layer) | Task 6 (Landlock, seccomp, rlimits, fail closed) |
-| W-11 (PDEATHSIG kept, not a boundary) | Task 6 (worker sets it first; documented as lifecycle only) |
+| Invariant group                               | Proven by                                                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| W-1, P-1 (parse/extract/cover in the worker)  | Tasks 3-5 (ops), Task 7 (sidecar routing flips traffic)                                                                                    |
+| W-5 (opaque handle, no FS authority)          | Tasks 3-5 (fd handoff), Task 6 (Landlock deny-all + self-verification)                                                                     |
+| W-2, W-3, W-4 (no DB/network/spawn)           | Task 6 (Landlock FS denial, seccomp incl. unconditional socket denial, selftest probes)                                                    |
+| W-6, W-8 (bounded typed results, limits)      | Tasks 1, 3, 8 (typed response, quotas in the job, deadline kill, rlimits, SIGXCPU mapped to a typed limit, embed source cap, response cap) |
+| W-7 (minimal privileges/environment)          | Task 3 (env_clear, fd set, argv)                                                                                                           |
+| W-9 (killable, restartable, sidecar survives) | Task 3 (client kill/crash handling), Task 8 (service-level containment)                                                                    |
+| W-10 (Linux sandbox layer)                    | Task 6 (Landlock, seccomp, rlimits, fail closed)                                                                                           |
+| W-11 (PDEATHSIG kept, not a boundary)         | Task 6 (worker sets it first; documented as lifecycle only)                                                                                |
 
 ---
 
@@ -1587,6 +1587,7 @@ fn enforce_embed_cap(document: &std::fs::File) -> Result<(), JobError> {
     }
 }
 ```
+
 `client.rs` wrappers (same shape as `epub_parse`, `bytes_b64` required):
 
 ```rust
@@ -2607,8 +2608,8 @@ Expected: all containment tests pass.
 `electron-builder.yml` extraResources gains, next to the existing sidecar entry:
 
 ```yaml
-  - from: sidecar/target/release/tuxbooks-worker
-    to: sidecar/tuxbooks-worker
+- from: sidecar/target/release/tuxbooks-worker
+  to: sidecar/tuxbooks-worker
 ```
 
 `scripts/check-deb.sh` gains, beside the sidecar check at lines 62-63:

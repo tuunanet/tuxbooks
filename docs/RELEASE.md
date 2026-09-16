@@ -19,9 +19,10 @@ are unchanged from the earlier releases.
 
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
-PDFium resource. Releases are marked pre-release until 1.0, and the site
-links to the releases list (not `/releases/latest`, which ignores
-pre-releases).
+document worker (`resources/sidecar/tuxbooks-worker`) plus PDFium resource.
+`scripts/check-deb.sh` gates the worker's presence. Releases are marked
+pre-release until 1.0, and the site links to the releases list (not
+`/releases/latest`, which ignores pre-releases).
 
 ### Desktop identity (branding vs technical identifiers)
 
