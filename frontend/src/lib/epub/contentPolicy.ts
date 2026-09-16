@@ -241,9 +241,11 @@ type FetchInput = string | URL | Request;
  * Every request the toolkit issues for a resource must stay inside the
  * session base, and every document response is fenced
  * (`sanitizePublicationText` + frame CSP meta) before anything can parse
- * it. Non-document responses pass through byte-identically; any failure in
- * the fencing pipeline degrades to the unmodified response, which the
- * sidecar's own script gates already bounded.
+ * it — including documents whose prolog names an encoding the platform
+ * refuses, which decode through a byte-preservingly safe fallback
+ * (`fenceDocumentResponse`). Non-document responses pass through
+ * byte-identically; failures in the fencing pipeline propagate, so the
+ * frame fails closed instead of rendering unfenced bytes.
  */
 export function policyFetchClient(
   baseUrl: string,
@@ -264,33 +266,46 @@ export function policyFetchClient(
   };
 }
 
+/**
+ * Sanitize and CSP-fence one document response. The prolog's declared
+ * encoding decides the decoder; a label the platform refuses (utf-7 and
+ * the replacement bucket) falls back to windows-1252, which decodes bytes
+ * byte-preservingly so the fence still applies — the toolkit's own frame
+ * CSP allows inline scripts, so unfenced bytes are executable content.
+ * Clean documents keep their original bytes; failures propagate so a frame
+ * fails closed instead of rendering unfenced markup.
+ */
 async function fenceDocumentResponse(response: Response): Promise<Response> {
   const bytes = await response.arrayBuffer();
-  const passthrough = () =>
-    new Response(bytes, {
+  const contentType = response.headers.get("content-type") ?? "";
+  const sniffable = new TextDecoder("latin1").decode(bytes.slice(0, 200));
+  const decoder = safeDecoder(declaredEncoding(sniffable) ?? "utf-8");
+  const text = decoder.decode(bytes);
+  const isXml = contentType.includes("xhtml") || contentType.includes("svg");
+  const sanitized = sanitizePublicationText(text, isXml);
+  const fenced = insertFrameCspMeta(sanitized, isXml);
+  if (fenced === text) {
+    return new Response(bytes, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders(response),
     });
+  }
+  const output = isXml
+    ? declareUtf8Prolog(fenced)
+    : fenced.replace(/<meta[^>]+charset[^>]*>/gi, `<meta charset="utf-8">`);
+  return new Response(output, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders(response),
+  });
+}
+
+function safeDecoder(label: string): TextDecoder {
   try {
-    const contentType = response.headers.get("content-type") ?? "";
-    const label =
-      declaredEncoding(new TextDecoder("latin1").decode(bytes.slice(0, 200))) ?? "utf-8";
-    const text = new TextDecoder(label).decode(bytes);
-    const isXml = contentType.includes("xhtml") || contentType.includes("svg");
-    const sanitized = sanitizePublicationText(text, isXml);
-    const fenced = insertFrameCspMeta(sanitized, isXml);
-    if (fenced === text) return passthrough();
-    const output = isXml
-      ? declareUtf8Prolog(fenced)
-      : fenced.replace(/<meta[^>]+charset[^>]*>/gi, `<meta charset="utf-8">`);
-    return new Response(output, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: responseHeaders(response),
-    });
+    return new TextDecoder(label);
   } catch {
-    return passthrough();
+    return new TextDecoder("windows-1252");
   }
 }
 

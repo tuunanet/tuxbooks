@@ -5,6 +5,7 @@ import {
   DANGEROUS_SCHEME_HREFS,
   EXTERNAL_RESOURCE_URLS,
   SCRIPTED_HTML_SNIPPETS,
+  UNSUPPORTED_ENCODING_PROLOGS,
 } from "./attackVectors";
 import {
   classifyPublicationHref,
@@ -248,6 +249,18 @@ describe("the publication fetch client (E-3)", () => {
     expect(response.headers.get("content-type")).toBe("application/xhtml+xml");
     expect((await response.text()).toLowerCase()).not.toContain("<iframe");
   });
+
+  it.each(UNSUPPORTED_ENCODING_PROLOGS)(
+    "fences a document whose prolog names an undecodable encoding (%s)",
+    async (prolog) => {
+      const doc = `${prolog}<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><div onload="alert(1)">x</div></body></html>`;
+      const client = policyFetchClient(base, async () => xhtmlResponse(doc));
+      const text = await (await client(`${base}chapter1.xhtml`)).text();
+      expect(text.toLowerCase()).not.toContain("onload=");
+      expect(text).toContain(`http-equiv="Content-Security-Policy"`);
+      expect(text).toContain("script-src blob:");
+    },
+  );
 });
 
 describe("the mounted-frame belt", () => {

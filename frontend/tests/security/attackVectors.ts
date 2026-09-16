@@ -202,3 +202,18 @@ export const DANGEROUS_SCHEME_HREFS: readonly string[] = [
   "chrome://settings",
   "//evil.example/protocol-relative",
 ];
+
+/**
+ * XML prologs naming encodings the platform refuses to decode (E-1): the
+ * classic utf-7 XSS smuggling family plus the WHATWG replacement-bucket
+ * labels. A fence that passes such documents through unfenced hands the
+ * toolkit's permissive frame CSP (`script-src … 'unsafe-inline'`) an
+ * inline-handler vector, so the fence must fail closed instead.
+ */
+export const UNSUPPORTED_ENCODING_PROLOGS: readonly string[] = [
+  `<?xml version="1.0" encoding="utf-7"?>`,
+  `<?xml version="1.0" encoding="unicode-1-1-utf-7"?>`,
+  `<?xml version="1.0" encoding="csunicode11utf7"?>`,
+  `<?xml version="1.0" encoding="hz-gb-2312"?>`,
+  `<?xml version="1.0" encoding="iso-2022-kr"?>`,
+];

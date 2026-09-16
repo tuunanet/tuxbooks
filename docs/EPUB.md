@@ -266,7 +266,11 @@ publication's `HttpFetcher`: requests outside the session base
 (`tuxbooks://book/<id>/`) are rejected before any fetch, and HTML/XHTML/SVG
 responses are sanitized (script elements, `on*` handlers, `javascript:`
 URLs, `object`/`embed`/`iframe` and kin removed) with a strict frame CSP
-meta injected before the document parses. The toolkit injects its own
+meta injected before the document parses. A prolog naming an encoding the
+platform refuses to decode (utf-7 and the replacement-bucket labels) falls
+back to a byte-preservingly safe decoder so the fence still applies;
+failures in the pipeline fail closed instead of rendering unfenced bytes.
+The toolkit injects its own
 permissive frame CSP; browsers enforce all policies together, so the
 stricter one wins: `script-src blob:` (no inline scripts, handlers,
 `javascript:` URLs, or script files), `object-src`/`frame-src`/

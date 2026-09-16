@@ -12,7 +12,7 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test } from "../fixtures/electron-app.js";
+import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { libraryDir } from "../setup/environment.js";
 import { returnToLibrary } from "./helpers.js";
@@ -108,7 +108,7 @@ function buildZip(entries: { name: string; data: string }[]): Buffer {
   return Buffer.concat([...locals, centralBytes, end]);
 }
 
-function hostileEpub(title: string, chapterBody: string): Buffer {
+function hostileEpub(title: string, chapterBody: string, chapterEncoding = "UTF-8"): Buffer {
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -122,7 +122,7 @@ function hostileEpub(title: string, chapterBody: string): Buffer {
   <spine><itemref idref="c1"/></spine>
 </package>`;
   const container = `<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>`;
-  const chapter = `<?xml version="1.0" encoding="UTF-8"?>
+  const chapter = `<?xml version="1.0" encoding="${chapterEncoding}"?>
 <html xmlns="http://www.w3.org/1999/xhtml"><head><title>c</title></head><body>${chapterBody}</body></html>`;
   return buildZip([
     { name: "mimetype", data: "application/epub+zip" },
@@ -147,6 +147,31 @@ interface FrameProbe {
   handlers: number;
   jsHrefs: number;
   hasText: boolean;
+}
+
+/** Probes the mounted section frame for active content and the fence. */
+async function frameProbe(page: Page, textMarker: string): Promise<FrameProbe | null> {
+  return page.evaluate((marker) => {
+    const frame = document.querySelector("[data-epub-host] iframe") as HTMLIFrameElement | null;
+    const doc = frame?.contentDocument;
+    if (!doc || !doc.body) return null;
+    return {
+      csp: Array.from(doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]'))
+        .map((meta) => meta.getAttribute("content") ?? "")
+        .filter((content) => content.includes("script-src")),
+      // The toolkit's own injected scripts are marked data-readium
+      // and are the only scripts a fenced frame may carry.
+      scripts: Array.from(doc.querySelectorAll("script")).filter(
+        (script) => !script.hasAttribute("data-readium"),
+      ).length,
+      active: doc.querySelectorAll("iframe, object, embed").length,
+      handlers: doc.querySelectorAll("[onclick],[onerror],[onload]").length,
+      jsHrefs: Array.from(doc.querySelectorAll("a")).filter((a) =>
+        (a.getAttribute("href") ?? "").trim().toLowerCase().startsWith("javascript:"),
+      ).length,
+      hasText: (doc.body.textContent ?? "").includes(marker),
+    } satisfies FrameProbe;
+  }, textMarker);
 }
 
 test.describe("epub content fencing (issue #82)", () => {
@@ -187,36 +212,10 @@ test.describe("epub content fencing (issue #82)", () => {
     });
 
     await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            const frame = document.querySelector(
-              "[data-epub-host] iframe",
-            ) as HTMLIFrameElement | null;
-            const doc = frame?.contentDocument;
-            if (!doc || !doc.body) return null;
-            return {
-              csp: Array.from(doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]'))
-                .map((meta) => meta.getAttribute("content") ?? "")
-                .filter((content) => content.includes("script-src")),
-              // The toolkit's own injected scripts are marked data-readium
-              // and are the only scripts a fenced frame may carry.
-              scripts: Array.from(doc.querySelectorAll("script")).filter(
-                (script) => !script.hasAttribute("data-readium"),
-              ).length,
-              active: doc.querySelectorAll("iframe, object, embed").length,
-              handlers: doc.querySelectorAll("[onclick],[onerror],[onload]").length,
-              jsHrefs: Array.from(doc.querySelectorAll("a")).filter((a) =>
-                (a.getAttribute("href") ?? "").trim().toLowerCase().startsWith("javascript:"),
-              ).length,
-              hasText: (doc.body.textContent ?? "").includes("visible chapter text"),
-            } satisfies FrameProbe;
-          }),
-        {
-          timeout: 15000,
-          message: "the section frame never mounted with readable text",
-        },
-      )
+      .poll(async () => frameProbe(page, "visible chapter text"), {
+        timeout: 15000,
+        message: "the section frame never mounted with readable text",
+      })
       .toEqual({
         csp: expect.arrayContaining([expect.stringContaining("script-src blob:")]),
         scripts: 0,
@@ -249,6 +248,43 @@ test.describe("epub content fencing (issue #82)", () => {
     await page.getByTestId("detail-continue").click();
     await expect(page.getByTestId("epub-error")).toBeVisible({ timeout: 30000 });
     await expect(page.locator('[data-epub-state="ready"]')).toHaveCount(0);
+
+    await returnToLibrary(page);
+  });
+
+  test("an undecodable-prolog book still renders fenced frames", async ({ page }) => {
+    // The prolog names utf-7, which TextDecoder refuses: the fence must
+    // still sanitize and apply, never pass the bytes through unfenced.
+    writeFileSync(
+      path.join(libraryDir, "hostile-encoding.epub"),
+      hostileEpub(
+        "Hostile Encoding Book",
+        `<p>readable under any decoder</p><div onclick="alert(1)">styled</div>`,
+        "utf-7",
+      ),
+    );
+    const card = page.locator('[aria-label="Hostile Encoding Book (EPUB)"]');
+    await card.waitFor({ state: "visible", timeout: 30000 });
+
+    await card.dblclick();
+    await page.getByTestId("detail-continue").click();
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+      timeout: 30000,
+    });
+
+    await expect
+      .poll(async () => frameProbe(page, "readable under any decoder"), {
+        timeout: 15000,
+        message: "the utf-7-prolog frame never mounted",
+      })
+      .toEqual({
+        csp: expect.arrayContaining([expect.stringContaining("script-src blob:")]),
+        scripts: 0,
+        active: 0,
+        handlers: 0,
+        jsHrefs: 0,
+        hasText: true,
+      });
 
     await returnToLibrary(page);
   });
