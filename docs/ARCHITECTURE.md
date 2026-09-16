@@ -76,6 +76,42 @@ buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
 are rejected by the sidecar with typed JSON-RPC errors and never crash it
 (pinned by `sidecar/src/rpc.rs` tests).
 
+The sidecar transport bounds both directions: requests over 8 MB are
+rejected before write (`electron/main/sidecarTransport.ts`), and response
+lines beyond the largest legitimate book payload are discarded instead of
+buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
+are rejected by the sidecar with typed JSON-RPC errors and never crash it
+(pinned by `sidecar/src/rpc.rs` tests).
+
+### Window hardening (issue #85, invariants X-1..X-5)
+
+The Electron window and session are hardened by four more unit-tested
+modules (`frontend/tests/security/`):
+
+- `electron/main/windowSecurity.ts`: the X-1 isolation set
+  (`contextIsolation`, `nodeIntegration: false`, `sandbox`,
+  `webSecurity`), asserted at window creation so a drifted flag fails
+  startup; the X-3 top-frame navigation allowlist (the app origin's entry
+  point and assets, plus the dev server origin while one is configured;
+  `file://` and everything else is prevented); and the X-4 permission
+  policy: deny by default, the single grant being fullscreen from the
+  app's own origin (the reader's presentation mode). Note that
+  `new URL().origin` is `"null"` for custom schemes, so app-scheme
+  request origins must be reconstructed from the host
+  (`originOfRequestUrl`).
+- `electron/shared/appCsp.ts`: the X-2 CSP for the app UI, served as a
+  header on every `app://bundle` response and on the Vite dev server (the
+  dev variant adds the three allowances HMR needs). The reader's blob:
+  section frames inherit this policy, so it carries the frame grants the
+  reader architecture requires (blob: toolkit scripts, ReadiumCSS inline
+  and blob: styles, the `tuxbooks://` publication base URI). The shipped
+  policy must not be stricter than the frame CSP in `contentPolicy.ts`,
+  or the reader renders broken.
+- `electron/shared/linkPolicy.ts`: the X-5 seam. The only inputs that
+  reach `shell.openExternal` are canonical http(s) URLs re-serialized by
+  `parseExternalHttpUrl`; scripts, data/file/custom schemes, credentials,
+  control characters, and over-long strings are dropped.
+
 ### Document worker (issue #81, ADR 0001)
 
 The sidecar spawns `tuxbooks-worker` one process per parse job, hands the

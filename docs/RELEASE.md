@@ -50,6 +50,21 @@ image), so launcher/taskbar icon identity flows through the desktop entry
 (`Icon=tuxbooks` + `StartupWMClass=tuxbooks`) — which is what the
 packaging gate asserts.
 
+## Packaging and the hardening checks
+
+The packaged app is covered by two checks beyond the packaging gate
+(issue #85, X-1..X-5):
+
+- The boot probe doubles as the packaged hardening smoke: run the
+  `dist-packages/linux-unpacked/tuxbooks` binary (or the installed deb)
+  with `TUXBOOKS_BOOT_PROBE=1` and scratch `TEST_DATABASE_PATH` /
+  `TEST_LIBRARY_PATH` overrides. A healthy run prints
+  `[boot] renderer mounted` and the `tuxbooks://` probe results.
+- The renderer-isolation flags, the app UI CSP, the deny-by-default
+  permission handlers, the navigation allowlist, and the external-link
+  seam all ship in `app.asar`; the security E2E phase proves them live on
+  the same `app://bundle` load path the packaged app uses.
+
 ## The packaging gate
 
 `scripts/check-deb.sh` is the packaging gate: it verifies the built deb's

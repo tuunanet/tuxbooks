@@ -198,13 +198,19 @@ Five isolated invocations per run:
    share a worker with other suites. The crash-count → arming step is
    pinned by the policy unit tests (injecting real GPU-process crashes is
    not possible deterministically headlessly).
-4. **security** (`test:security`) — fresh scratch env, empty library; the
-   EPUB content fencing smoke (`epub-content-security.e2e.ts`, issue #82):
-   hostile EPUBs are generated at runtime into the scratch library — a
-   scripted book fails to open (sidecar gate), and a book carrying active
-   content opens with sanitized, CSP-fenced frames and no completed
-   external network request. Own phase so the hostile books never appear in
-   the seeded suites' book counts.
+4. **security** (`test:security`) — fresh scratch env, empty library; two
+   specs. `epub-content-security.e2e.ts` (issue #82): hostile EPUBs are
+   generated at runtime into the scratch library, a scripted book fails to
+   open (sidecar gate), and a book carrying active content opens with
+   sanitized, CSP-fenced frames and no completed external network request.
+   `app-hardening.e2e.ts` (issue #85): the X-1..X-5 window hardening proven
+   live on the production load path, no Node.js in the renderer, the app
+   UI's CSP present and enforcing (inline scripts and external fetches
+   blocked by the policy), permissions denied by default with fullscreen
+   still granted to the reader, unsafe `window.open` targets spawning
+   nothing, and renderer-initiated top-frame navigation unable to leave the
+   app origin. Own phase so the hostile books never appear in the seeded
+   suites' book counts.
 5. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
