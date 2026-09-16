@@ -39,7 +39,7 @@ Benchmarking real corpora and tuning is follow-up work (R-4).
 | ZIP entry count                 | `max_entries`                                         | `parse_epub`, `build_session`, `read_member` (central-directory pre-scan)                                                                                |
 | Compressed member size          | `max_compressed_member_bytes`                         | every ZIP read via `read_entry` / `read_mimetype`                                                                                                        |
 | Uncompressed member size        | `max_decompressed_bytes`                              | declared size checked before read; the read is additionally capped by `limits::read_bounded`, so a header that lies about its size cannot bypass the cap |
-| Total uncompressed archive size | `max_total_uncompressed_bytes`                        | declared-size pre-scan in `parse_epub`, `build_session`, `read_member`                                                                                   |
+| Total uncompressed archive size | `max_total_uncompressed_bytes`                        | declared-size pre-scan in `parse_epub`, `build_session`, `read_member`; running actual-read total in the EPUB positions loop (catches lying headers)     |
 | XML/OPF/document size           | `max_xml_bytes`                                       | `parse_container_xml`, `parse_opf`, nav + NCX parsers                                                                                                    |
 | Metadata string length          | `max_metadata_string_bytes`                           | `parse_opf` extracted values; PDF info-dictionary strings                                                                                                |
 | Image/font size, incl. decoded  | member caps on every read                             | the Rust side never decodes images or fonts: cover bytes are cached verbatim and fonts/images are served as bytes to the renderer                        |
@@ -49,23 +49,31 @@ Benchmarking real corpora and tuning is follow-up work (R-4).
 | Structural traversal work       | `max_page_tree_nodes`                                 | page-tree walk stops at the node budget                                                                                                                  |
 | Recursion depth                 | `max_page_tree_depth`                                 | page-tree walk is iterative with a depth cap                                                                                                             |
 | Decoded image dimensions/bytes  | `max_cover_png_bytes`                                 | rendered cover PNG size checked; output dimensions are fixed by the render config (`COVER_WIDTH_PX` = 600)                                               |
-| Cover-render work               | deadline + source cap + fixed 600 px target + PNG cap | `render_first_page_cover`                                                                                                                                |
+| Cover-render work               | deadline + source cap + fixed 600 px target + PNG cap | `render_first_page_cover` (runs to completion once started; see R-3 section)                                                                             |
 
 ## Time and memory bounds (R-3)
 
 The wall-clock deadline (`max_parse_seconds`, `limits::Deadline`) is checked
-between parsing stages of every entry point. EPUB and PDF parses are
-synchronous and single-threaded, so that deadline is also the CPU bound:
-every stage's cost is linear in an input that the size quotas above already
-cap. Memory is bounded by the size quotas plus `read_bounded`, which caps
-bytes actually delivered regardless of what a header declared. True
-per-parse CPU-time accounting is not attempted here (process-wide and
-per-thread rusage would be polluted by concurrent import workers); it moves
-into the sandboxed worker (#81), which can simply kill an over-budget job.
+between parsing stages of every entry point and inside the EPUB positions
+read loop. EPUB and PDF parses are synchronous and single-threaded, so that
+deadline is also the CPU bound: each interruptible stage's cost is linear in
+an input that the size quotas above cap. Memory is bounded by the size
+quotas, `read_bounded` (caps bytes actually delivered regardless of what a
+header declared), and the running cumulative check in the positions loop
+(caps what one stage can decompress when headers lie). True per-parse
+CPU-time accounting is not attempted here (process-wide and per-thread
+rusage would be polluted by concurrent import workers); it moves into the
+sandboxed worker (#81), which can simply kill an over-budget job.
 
-The PDFium cover render is the one stage that cannot be interrupted: it is
-bounded by the source-size cap, the fixed 600 px output target, and the
-PNG-size check after encoding.
+Two stages run to completion once started and cannot be interrupted
+mid-stage: `Document::load` (lopdf parses the whole file) and the PDFium
+cover render. Before they start, the source-size cap and the deadline bound
+what they can be handed; after the render, the PNG-size check applies. But
+inside them, only the source-size cap applies: a file that passes the
+pre-stage checks can burn work up to that budget inside one of these stages
+before any error surfaces. Stopping them mid-flight needs the killable
+worker (#81); until that lands, this is a documented gap, not an enforced
+bound.
 
 ## Tests
 
