@@ -138,6 +138,15 @@ fn pdfium(library_dirs: &[PathBuf]) -> Option<&'static Pdfium> {
     }
 }
 
+/// Probe and bind PDFium from the job's candidate directories (worker entry,
+/// ADR 0001 D3 ordering): the same probe order as the internal `pdfium`
+/// helper, accepting the job's `String` dirs. A failed bind is silent here
+/// and surfaces as an error at use time, matching the sidecar's behavior.
+pub fn probe_and_load(dirs: &[String]) {
+    let dirs: Vec<PathBuf> = dirs.iter().map(PathBuf::from).collect();
+    let _ = pdfium(&dirs);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
