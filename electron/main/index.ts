@@ -204,7 +204,12 @@ function registerProtocol(sidecar: Sidecar): void {
       }>,
     readCover: (name) => readCoverFile(coversDir(), name),
   };
-  protocol.handle("tuxbooks", (request) => handleProtocolRequest(request, sources));
+  protocol.handle("tuxbooks", (request) => {
+    if (process.env.TUXBOOKS_DEBUG_IPC === "1") {
+      console.log(`[tuxbooks://] ${request.method} ${request.url}`);
+    }
+    return handleProtocolRequest(request, sources);
+  });
 }
 
 /**
