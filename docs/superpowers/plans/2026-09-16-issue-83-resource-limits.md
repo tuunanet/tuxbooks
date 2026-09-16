@@ -247,7 +247,8 @@ pub struct ResourceLimits {
 
 /// Documented baseline (docs/RESOURCE_LIMITS.md). Generous against real
 /// books, provisional until benchmarked (R-4 follow-up).
-pub const DEFAULTS: ResourceLimits = ResourceLimits {
+impl ResourceLimits {
+    pub const DEFAULTS: ResourceLimits = ResourceLimits {
     max_source_file_bytes: 1 << 30,
     max_entries: 100_000,
     max_compressed_member_bytes: 256 << 20,
@@ -261,7 +262,8 @@ pub const DEFAULTS: ResourceLimits = ResourceLimits {
     max_page_tree_depth: 128,
     max_cover_png_bytes: 16 << 20,
     max_parse_seconds: 30,
-};
+    };
+}
 
 /// A tripped quota. Typed so callers can react to bounded-resource failure
 /// without parsing error strings.
@@ -429,7 +431,7 @@ Expected: all `limits::` tests pass, pristine output.
 **Files:**
 
 - Modify: `sidecar/src/epub/mod.rs` (add `EpubError::Limit` + `From<ReadBoundedError>`), `sidecar/src/epub/parser.rs` (entry-point limits), `sidecar/src/epub/session.rs` (entry-point limits), `sidecar/src/epub/writer.rs` (pass `DEFAULTS`), `sidecar/src/services/reader.rs` and `sidecar/src/services/library_scanner.rs` (pass `DEFAULTS`), `sidecar/tests/epub_corpus.rs`, `sidecar/tests/extended_epub.rs` (pass `DEFAULTS`)
-- Test: `sidecar/src/epub/parser.rs` `mod tests`
+- Test: `sidecar/src/epub/session.rs` `mod tests` (the `read_member` test) — `parse_epub` tests live in `sidecar/src/epub/parser.rs` `mod tests`
 
 **Interfaces changed:**
 
@@ -838,7 +840,7 @@ pub fn read_file_properties(path: &Path, limits: &ResourceLimits) -> Result<Vec<
 pub fn render_first_page_cover(path: &Path, library_dirs: &[PathBuf], limits: &ResourceLimits) -> Result<Option<Vec<u8>>, PdfError>;
 ```
 
-- [ ] **Step 1: Write the failing tests** in `pdf/parser.rs` tests (plus a `tests_support::assemble_pdf(objects) -> Vec<u8>` extraction from `build_pdf` so page-tree fixtures can be built; `build_pdf` becomes a thin wrapper)
+- [ ] **Step 1: Write the failing tests** in `pdf/parser.rs` tests (plus a `tests_support::assemble_pdf(objects, trailer_extra) -> Vec<u8>` extraction from `build_pdf` so page-tree fixtures can be built; `build_pdf` passes its `/Info` reference as `trailer_extra`, the page-tree helpers pass `""`)
 
 ```rust
     /// A structurally valid PDF whose page tree holds `count` leaf pages
@@ -852,20 +854,21 @@ pub fn render_first_page_cover(path: &Path, library_dirs: &[PathBuf], limits: &R
         for _ in 0..count {
             objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_string());
         }
-        tests_support::assemble_pdf(objects)
+        tests_support::assemble_pdf(objects, "")
     }
 
     /// A structurally valid PDF whose page tree is a chain `depth` levels
-    /// deep ending in one page leaf.
+    /// deep ending in one page leaf: object 1 = catalog, objects 2..=depth+1
+    /// = chained Pages nodes, object depth+2 = the page leaf.
     fn build_pdf_with_deep_tree(depth: usize) -> Vec<u8> {
         // 1 = catalog, 2 = root pages node, 3.. = chained nodes, last kid = page leaf
         let mut objects = vec!["<< /Type /Catalog /Pages 2 0 R >>".to_string()];
         for node in 2..(depth as u32) + 2 {
-            let next = if node == (depth as u32) + 1 { (depth as u32) + 3 } else { node + 1 };
+            let next = if node == (depth as u32) + 1 { (depth as u32) + 2 } else { node + 1 };
             objects.push(format!("<< /Type /Pages /Kids [{next} 0 R] >>"));
         }
         objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_string());
-        tests_support::assemble_pdf(objects)
+        tests_support::assemble_pdf(objects, "")
     }
 ```
 
