@@ -84,7 +84,7 @@ const CHARS_PER_POSITION: usize = 128;
 /// consumes plus the positions list it cannot operate without
 /// (navigator docs: "In the absence of a positions argument, EpubNavigator
 /// will ... not operate").
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EpubReadingSession {
     /// Serialized RWPM (`application/webpub+json`).
     pub manifest_json: String,

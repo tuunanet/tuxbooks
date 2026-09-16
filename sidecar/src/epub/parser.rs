@@ -11,14 +11,14 @@ use super::EpubError;
 use crate::limits::{read_bounded, Deadline, ResourceLimits};
 
 /// Cover image bytes with their media type (e.g. `image/png`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CoverImage {
     pub media_type: String,
     pub data: Vec<u8>,
 }
 
 /// Runtime- and database-independent representation of a parsed EPUB.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EpubBook {
     pub metadata: super::EpubMetadata,
     /// Manifest hrefs in spine/reading order.

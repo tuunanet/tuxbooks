@@ -97,8 +97,15 @@ pub fn render_first_page_cover_bytes(
 /// True when a PDFium library loads from the given candidate directories.
 /// Callers use it to degrade gracefully (tests skip; imports proceed
 /// without covers) when the library was never installed.
-pub fn pdfium_available(library_dirs: &[PathBuf]) -> bool {
+pub fn pdfium_is_available(library_dirs: &[PathBuf]) -> bool {
     pdfium(library_dirs).is_some()
+}
+
+/// The already-bound process-wide PDFium handle, without probing (the
+/// worker's entry: `probe_and_load` must have run before the sandbox
+/// lockdown). `None` means no library was bound.
+pub fn loaded_pdfium() -> Option<&'static Pdfium> {
+    PDFIUM.get()
 }
 
 /// Bind to the first loadable PDFium library from the candidate directories
@@ -169,7 +176,7 @@ mod tests {
     /// Skip guard for tests that need a real PDFium library: absent when the
     /// dev checkout was never fetched via `just fetch-pdfium` (docs/BUILD.md).
     pub(crate) fn pdfium_is_available() -> bool {
-        pdfium_available(&[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium")])
+        super::pdfium_is_available(&[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium")])
     }
 
     fn png_dimensions(png: &[u8]) -> (u32, u32) {

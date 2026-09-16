@@ -4,6 +4,7 @@
 //! `MAX_WORKER_RESPONSE_BYTES`. Sync by design: every caller already runs
 //! inside a blocking context (spawn_blocking or the import semaphore task).
 
+use base64::Engine as _;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -124,7 +125,16 @@ impl WorkerClient {
                 // end state is identical: the worker execs holding exactly
                 // fds 0-3. (The plan's sketch closed before the dup2, which
                 // can close the document fd itself when it is >= 4.)
-                if libc::dup2(fd, 3) == -1 {
+                // dup2 with oldfd == newfd is a documented no-op that does
+                // NOT clear CLOEXEC, so the equal-fd case must clear the
+                // flag via fcntl or the document dies at execve (the fd
+                // number the source file lands on depends on the parent's
+                // fd table at spawn time).
+                if fd == 3 {
+                    if libc::fcntl(3, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                } else if libc::dup2(fd, 3) == -1 {
                     return Err(std::io::Error::last_os_error());
                 }
                 #[cfg(target_os = "linux")]
@@ -249,6 +259,180 @@ impl WorkerClient {
             WorkerResponse::Done { .. } => Err(WorkerError::Protocol(
                 "selftest returned no payload".to_string(),
             )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Parse one EPUB in the worker (W-1): typed book back over the wire.
+    pub fn epub_parse(
+        &self,
+        document: &Path,
+        limits: &ResourceLimits,
+    ) -> Result<crate::epub::EpubBook, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::EpubParse,
+            limits: *limits,
+            member: None,
+            metadata: None,
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                json: Some(value), ..
+            } => {
+                serde_json::from_value(value).map_err(|err| WorkerError::Protocol(err.to_string()))
+            }
+            WorkerResponse::Done { json: None, .. } => Err(WorkerError::Protocol(
+                "epub_parse returned no payload".to_string(),
+            )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Build the EPUB reading session (RWPM + positions) in the worker.
+    pub fn epub_session(
+        &self,
+        document: &Path,
+        limits: &ResourceLimits,
+    ) -> Result<crate::epub::EpubReadingSession, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::EpubSession,
+            limits: *limits,
+            member: None,
+            metadata: None,
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                json: Some(value), ..
+            } => {
+                serde_json::from_value(value).map_err(|err| WorkerError::Protocol(err.to_string()))
+            }
+            WorkerResponse::Done { json: None, .. } => Err(WorkerError::Protocol(
+                "epub_session returned no payload".to_string(),
+            )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Extract one EPUB member by path in the worker; `None` for a miss.
+    pub fn epub_member(
+        &self,
+        document: &Path,
+        member: &str,
+        limits: &ResourceLimits,
+    ) -> Result<Option<Vec<u8>>, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::EpubMember,
+            limits: *limits,
+            member: Some(member.to_string()),
+            metadata: None,
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                bytes_b64: Some(b64),
+                ..
+            } => Ok(Some(
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|err| WorkerError::Protocol(err.to_string()))?,
+            )),
+            WorkerResponse::Done {
+                bytes_b64: None, ..
+            } => Ok(None),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Parse one PDF in the worker. An empty parsed title falls back to the
+    /// humanized file stem (the fd has no name; the client holds the path).
+    pub fn pdf_parse(
+        &self,
+        document: &Path,
+        limits: &ResourceLimits,
+    ) -> Result<crate::pdf::PdfBook, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::PdfParse,
+            limits: *limits,
+            member: None,
+            metadata: None,
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                json: Some(value), ..
+            } => {
+                let mut book: crate::pdf::PdfBook = serde_json::from_value(value)
+                    .map_err(|err| WorkerError::Protocol(err.to_string()))?;
+                if book.metadata.title.is_empty() {
+                    book.metadata.title = crate::pdf::parser::fallback_title(document);
+                }
+                Ok(book)
+            }
+            WorkerResponse::Done { json: None, .. } => Err(WorkerError::Protocol(
+                "pdf_parse returned no payload".to_string(),
+            )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Read the PDF's native Info-dictionary entries in the worker.
+    pub fn pdf_properties(
+        &self,
+        document: &Path,
+        limits: &ResourceLimits,
+    ) -> Result<Vec<(String, String)>, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::PdfProperties,
+            limits: *limits,
+            member: None,
+            metadata: None,
+            pdfium_dirs: Vec::new(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                json: Some(value), ..
+            } => {
+                serde_json::from_value(value).map_err(|err| WorkerError::Protocol(err.to_string()))
+            }
+            WorkerResponse::Done { json: None, .. } => Err(WorkerError::Protocol(
+                "pdf_properties returned no payload".to_string(),
+            )),
+            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
+        }
+    }
+
+    /// Render page 1 as a PNG cover in the worker (PDFium runs only there,
+    /// P-1). `Ok(None)` when no library binds or the document has no pages.
+    pub fn pdf_cover(
+        &self,
+        document: &Path,
+        pdfium_dirs: &[PathBuf],
+        limits: &ResourceLimits,
+    ) -> Result<Option<Vec<u8>>, WorkerError> {
+        let job = WorkerJob {
+            op: WorkerOp::PdfCover,
+            limits: *limits,
+            member: None,
+            metadata: None,
+            pdfium_dirs: pdfium_dirs
+                .iter()
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .collect(),
+        };
+        match self.run(&job, document)? {
+            WorkerResponse::Done {
+                bytes_b64: Some(b64),
+                ..
+            } => Ok(Some(
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|err| WorkerError::Protocol(err.to_string()))?,
+            )),
+            WorkerResponse::Done {
+                bytes_b64: None, ..
+            } => Ok(None),
             WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
         }
     }
