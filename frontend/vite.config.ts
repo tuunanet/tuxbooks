@@ -51,7 +51,13 @@ export default defineConfig({
     // X-2 (issue #85) in dev too: the same policy builder the app:// header
     // uses, with the development variant's documented allowances for
     // Vite's HMR (inline refresh preamble, injected styles, ws socket).
-    headers: { "Content-Security-Policy": appUiCsp("development") },
+    headers: {
+      "Content-Security-Policy": appUiCsp("development"),
+      // Dev servers reload policy changes only if the shell is not cached:
+      // Electron's HTTP cache kept the old index.html (with the old CSP
+      // header) across dev-server restarts and re-applied a stale policy.
+      "Cache-Control": "no-store",
+    },
     watch: {
       ignored: ["**/sidecar/**"],
     },

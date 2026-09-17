@@ -28,9 +28,11 @@ const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
     // stricter there than the frame CSP (contentPolicy.ts) already is.
     "script-src 'self' 'wasm-unsafe-eval' blob:",
     // 'unsafe-inline' styles and blob: stylesheets are ReadiumCSS inside
-    // the reader frames (same inheritance); styles are not script
-    // execution, and the frame CSP grants them already.
-    "style-src 'self' blob: 'unsafe-inline'",
+    // the reader frames (same inheritance); tuxbooks: styles are the
+    // publication's own linked stylesheets (the frame meta grants them,
+    // and the intersection must not be stricter than the frame CSP).
+    // Styles are not script execution.
+    "style-src 'self' tuxbooks: blob: 'unsafe-inline'",
     // Covers resolve over the resource protocol; data: and blob: cover
     // bundled icons, reader fonts/media, and locally generated images.
     "img-src 'self' tuxbooks: data: blob:",
@@ -56,7 +58,7 @@ const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
     // the React-refresh preamble is an inline module script, HMR injects
     // <style> elements, and the HMR socket is a websocket.
     "script-src 'self' 'wasm-unsafe-eval' blob: 'unsafe-inline'",
-    "style-src 'self' blob: 'unsafe-inline'",
+    "style-src 'self' tuxbooks: blob: 'unsafe-inline'",
     "connect-src 'self' tuxbooks: ws:",
   ],
 };

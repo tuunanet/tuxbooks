@@ -227,6 +227,20 @@ describe("the publication fetch client (E-3)", () => {
     expect(text).toContain('http-equiv="Content-Security-Policy"');
   });
 
+  it("fences XML-declared XHTML XML-safely even when transported as text/html", async () => {
+    // Real-world EPUBs keep XHTML content in .html members; the transport
+    // maps those to text/html while the publication manifest still declares
+    // application/xhtml+xml — the toolkit then strict-parses the member as
+    // XML, so the injected CSP meta must be XML-self-closed.
+    const doc = `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/></head><body><p>x</p></body></html>`;
+    const client = policyFetchClient(base, () =>
+      Promise.resolve(new Response(doc, { status: 200, headers: { "content-type": "text/html" } })),
+    );
+    const text = await (await client(`${base}copyright.html`)).text();
+    const reparsed = new DOMParser().parseFromString(text, "application/xhtml+xml");
+    expect(reparsed.querySelector("parsererror")).toBeNull();
+  });
+
   it.each(["image/png", "text/css", "font/woff2", "application/octet-stream"])(
     "leaves %s responses untouched",
     async (contentType) => {

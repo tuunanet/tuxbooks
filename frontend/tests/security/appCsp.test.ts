@@ -33,6 +33,14 @@ describe("appUiCsp (X-2: strict CSP for the application UI)", () => {
     expect(styleSrc).toContain("'unsafe-inline'");
   });
 
+  it("does not intersect away the frame CSP's tuxbooks: style grant", () => {
+    // Publication frames set their document base to tuxbooks://book/<id>/
+    // and content links relative stylesheets there; the frame meta grants
+    // style-src tuxbooks:, and blob: frames inherit this app policy, so the
+    // intersection must keep it or the reader renders unstyled.
+    expect(directive(APP_UI_CSP, "style-src")).toContain("tuxbooks:");
+  });
+
   it("keeps publication resources fetchable from the app origin", () => {
     const connectSrc = directive(APP_UI_CSP, "connect-src");
     expect(connectSrc).toContain("'self'");

@@ -281,7 +281,10 @@ async function fenceDocumentResponse(response: Response): Promise<Response> {
   const sniffable = new TextDecoder("latin1").decode(bytes.slice(0, 200));
   const decoder = safeDecoder(declaredEncoding(sniffable) ?? "utf-8");
   const text = decoder.decode(bytes);
-  const isXml = contentType.includes("xhtml") || contentType.includes("svg");
+  const isXml =
+    contentType.includes("xhtml") ||
+    contentType.includes("svg") ||
+    text.trimStart().startsWith("<?xml");
   const sanitized = sanitizePublicationText(text, isXml);
   const fenced = insertFrameCspMeta(sanitized, isXml);
   if (fenced === text) {

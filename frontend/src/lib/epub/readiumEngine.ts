@@ -382,7 +382,10 @@ export class ReadiumEpubHandle {
       const outcome = await Promise.race([
         navigator.load().then(
           () => "ok" as const,
-          () => "error" as const,
+          (err: unknown) => {
+            console.error("epub navigator.load rejected:", err);
+            return "error" as const;
+          },
         ),
         new Promise<"timeout">((resolve) =>
           window.setTimeout(() => resolve("timeout"), EPUB_LOAD_TIMEOUT_MS),
