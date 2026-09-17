@@ -459,7 +459,7 @@ export function LibraryView({ section }: LibraryViewProps) {
             const el = scrollElRef.current;
             if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
           }}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
         >
           {unvirtualized ? (
             <div>
