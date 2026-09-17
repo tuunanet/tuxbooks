@@ -4,14 +4,7 @@
  * the failure-artifact directory. Nothing here ever touches a real user
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
