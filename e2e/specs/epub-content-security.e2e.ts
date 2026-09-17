@@ -203,10 +203,14 @@ test.describe("epub content fencing (issue #82)", () => {
 
     // "wx" + 0600: the scratch library lives in the shared temp tree, so
     // hostile fixtures must be created exclusively and owner-only.
-    writeFileSync(path.join(libraryDir, "hostile-active.epub"), hostileEpub("Hostile Active Book", ACTIVE_BODY), {
-      flag: "wx",
-      mode: 0o600,
-    });
+    writeFileSync(
+      path.join(libraryDir, "hostile-active.epub"),
+      hostileEpub("Hostile Active Book", ACTIVE_BODY),
+      {
+        flag: "wx",
+        mode: 0o600,
+      },
+    );
     const card = page.locator('[aria-label="Hostile Active Book (EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });
 
