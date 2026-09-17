@@ -49,11 +49,14 @@ const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
     "frame-ancestors 'none'",
   ],
   development: [
-    // Vite's React-refresh preamble is an inline module script and HMR
-    // injects <style> elements; both are dev-only allowances.
-    "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
-    // The HMR socket.
+    // Overrides of the production list: the builder keeps every production
+    // directive not named here, so the reader-frame grants (blob: scripts
+    // and styles, tuxbooks: media, the frame/base allowances) carry into
+    // dev untouched. Only the three Vite hot-reload needs are added:
+    // the React-refresh preamble is an inline module script, HMR injects
+    // <style> elements, and the HMR socket is a websocket.
+    "script-src 'self' 'wasm-unsafe-eval' blob: 'unsafe-inline'",
+    "style-src 'self' blob: 'unsafe-inline'",
     "connect-src 'self' tuxbooks: ws:",
   ],
 };

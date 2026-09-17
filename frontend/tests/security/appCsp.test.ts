@@ -69,4 +69,15 @@ describe("appUiCsp (X-2: strict CSP for the application UI)", () => {
     expect(directive(dev, "connect-src")).toContain("ws:");
     expect(directive(dev, "default-src")).toBe("'none'");
   });
+
+  it("keeps the reader-frame grants in the dev variant (blob: frames inherit the dev policy)", () => {
+    const dev = appUiCsp("development");
+    expect(directive(dev, "script-src")).toContain("blob:");
+    expect(directive(dev, "style-src")).toContain("blob:");
+    expect(directive(dev, "frame-src")).toContain("blob:");
+    expect(directive(dev, "img-src")).toContain("tuxbooks:");
+    expect(directive(dev, "font-src")).toContain("tuxbooks:");
+    expect(directive(dev, "connect-src")).toContain("tuxbooks:");
+    expect(directive(dev, "base-uri")).toContain("tuxbooks:");
+  });
 });
