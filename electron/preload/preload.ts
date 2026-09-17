@@ -1,17 +1,21 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
+import { IPC_CHANNELS, isValidBookFormat, isValidBookId } from "../shared/pathSchema";
+
 /**
  * The preload bridge (docs/ARCHITECTURE.md): the renderer's entire view of
  * the outside world. contextIsolation is on, the sandbox is on, and this
  * surface is explicitly enumerated — no raw ipcRenderer passthrough, no
- * arbitrary method names. The renderer-side typed wrappers live in
+ * arbitrary method names. Arguments to identity-bearing calls are validated
+ * against the shared path/query schema before they ever reach the main
+ * process. The renderer-side typed wrappers live in
  * `frontend/src/lib/bridge.ts`.
  */
 
 const api = {
   /** One whitelisted JSON-RPC call to the Rust service. */
   invoke(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    return ipcRenderer.invoke("tuxbooks:invoke", method, params ?? {});
+    return ipcRenderer.invoke(IPC_CHANNELS.invoke, method, params ?? {});
   },
 
   /**
@@ -23,33 +27,36 @@ const api = {
     const listener = (_event: unknown, eventName: string, payload: unknown): void => {
       if (eventName === name) callback(payload);
     };
-    ipcRenderer.on("tuxbooks:event", listener);
-    return () => ipcRenderer.removeListener("tuxbooks:event", listener);
+    ipcRenderer.on(IPC_CHANNELS.event, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.event, listener);
   },
 
   /** Native folder picker; null when cancelled. */
   pickDirectory(): Promise<string | null> {
-    return ipcRenderer.invoke("tuxbooks:dialog", "directory");
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "directory");
   },
 
   /** Native single-file picker (relocate a missing book); null when cancelled. */
   pickBookFile(): Promise<string | null> {
-    return ipcRenderer.invoke("tuxbooks:dialog", "book-file");
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "book-file");
   },
 
   /** Native multi-file picker (Import Files…); empty when cancelled. */
   pickBookFiles(): Promise<string[]> {
-    return ipcRenderer.invoke("tuxbooks:dialog", "book-files");
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "book-files");
   },
 
   /** Native image picker for cover overrides; null when cancelled. */
   pickCoverImage(): Promise<string | null> {
-    return ipcRenderer.invoke("tuxbooks:dialog", "cover-image");
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "cover-image");
   },
 
-  /** Reveal a file in the system file manager (does not open it). */
-  revealInFileManager(path: string): Promise<void> {
-    return ipcRenderer.invoke("tuxbooks:reveal", path);
+  /** Reveal a stored book's file in the system file manager (by book id). */
+  revealBook(bookId: number): Promise<void> {
+    if (!isValidBookId(bookId)) {
+      return Promise.reject(new TypeError(`invalid book id: ${String(bookId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.reveal, bookId);
   },
 
   /**
@@ -57,6 +64,9 @@ const api = {
    * `tuxbooks://` protocol (range-capable, never base64 through IPC).
    */
   async fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer> {
+    if (!isValidBookId(bookId) || !isValidBookFormat(format)) {
+      throw new TypeError(`invalid book request: ${String(bookId)} ${String(format)}`);
+    }
     const response = await fetch(`tuxbooks://book/${bookId}?format=${format}`);
     if (!response.ok) {
       throw new Error(`failed to load book ${bookId}: ${response.status}`);

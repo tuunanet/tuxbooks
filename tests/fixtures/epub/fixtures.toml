@@ -329,6 +329,50 @@ size_bytes = 3006
 sha256 = "566c16cd3267d466397ad3651965d4aad50f6b83c4e2584b3d66bbfe8fba0370"
 
 [[fixture]]
+id = "epub3-reader-html-entities"
+path = "core/epub3/reader-html-entities.epub"
+opf_version = "3.0"
+kind = "valid"
+title = "Reader HTML Entities"
+description = "XHTML chapters with named HTML entities that fail strict XML parsing."
+license = "TuxBooks original fixture content; repository GPLv3 applies"
+size_bytes = 2301
+sha256 = "986ae55ad6f4b6146cc32e65d06ace91f08b7e4ad60ef0e4be1bf4a36f0cd1b1"
+
+[[fixture]]
+id = "epub3-reader-html-members"
+path = "core/epub3/reader-html-members.epub"
+opf_version = "3.0"
+kind = "valid"
+title = "Reader HTML Members"
+description = "Manifest-XHTML sections in .html files without XML declarations."
+license = "TuxBooks original fixture content; repository GPLv3 applies"
+size_bytes = 2504
+sha256 = "1534e3aef9227d1e1047a7edfe497ef78985788649580b75381bacfa299c5c70"
+
+[[fixture]]
+id = "epub3-reader-mangled-prolog"
+path = "core/epub3/reader-mangled-prolog.epub"
+opf_version = "3.0"
+kind = "valid"
+title = "Reader Mangled Prolog"
+description = "Well-formed XHTML whose declaration is escaped as a comment, mid-book."
+license = "TuxBooks original fixture content; repository GPLv3 applies"
+size_bytes = 2592
+sha256 = "edfe987a6db8d156ddeaf4514d7c1c0d35cf8edb8c1c8793c5f1a0b996089349"
+
+[[fixture]]
+id = "epub3-reader-theme-sections"
+path = "core/epub3/reader-theme-sections.epub"
+opf_version = "3.0"
+kind = "valid"
+title = "Reader Theme Sections"
+description = "Six spine sections with publisher CSS; theming must survive rebuilds."
+license = "TuxBooks original fixture content; repository GPLv3 applies"
+size_bytes = 4022
+sha256 = "b79c207c888428505642cd4f0a089dae7a4a2f0b0a8b26afd35e13785e41e6ff"
+
+[[fixture]]
 id = "epub3-styling"
 path = "core/epub3/styling.epub"
 opf_version = "3.0"

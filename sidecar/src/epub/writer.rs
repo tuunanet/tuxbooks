@@ -11,7 +11,7 @@
 //! manifest, spine, resources, and the cover image are copied untouched.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, Seek, Write};
 use std::path::Path;
 
 use quick_xml::events::Event;
@@ -22,17 +22,36 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use super::metadata::{attribute, local_name, EpubMetadata};
 use super::parser::{parse_container_xml, read_entry};
 use super::EpubError;
+use crate::limits::ResourceLimits;
 
 /// Rewrite the package document's metadata to match `metadata`, preserving
 /// everything else in the EPUB. Replaces the file at `path` atomically.
 pub fn write_metadata(path: &Path, metadata: &EpubMetadata) -> Result<(), EpubError> {
-    let source = File::open(path)?;
-    let mut archive = ZipArchive::new(BufReader::new(source))?;
+    let buffer = rewrite_epub_bytes(
+        BufReader::new(File::open(path)?),
+        metadata,
+        &ResourceLimits::DEFAULTS,
+    )?;
+    crate::backup_file_once(path)?;
+    crate::atomic_replace(path, &buffer)?;
+    Ok(())
+}
 
-    let container =
-        read_entry(&mut archive, "META-INF/container.xml")?.ok_or(EpubError::MissingContainer)?;
-    let opf_path = parse_container_xml(&container)?;
-    let opf_bytes = read_entry(&mut archive, &opf_path)?
+/// Reader-based rewrite core: returns the full rewritten EPUB bytes. The
+/// caller owns the write (the sidecar keeps `backup_file_once` +
+/// `atomic_replace`; the worker only returns the buffer). The archive reads
+/// enforce the passed `limits` quotas (issue #83).
+pub fn rewrite_epub_bytes<R: Read + Seek>(
+    reader: BufReader<R>,
+    metadata: &EpubMetadata,
+    limits: &ResourceLimits,
+) -> Result<Vec<u8>, EpubError> {
+    let mut archive = ZipArchive::new(reader)?;
+
+    let container = read_entry(&mut archive, "META-INF/container.xml", limits)?
+        .ok_or(EpubError::MissingContainer)?;
+    let opf_path = parse_container_xml(&container, limits)?;
+    let opf_bytes = read_entry(&mut archive, &opf_path, limits)?
         .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
 
@@ -64,10 +83,7 @@ pub fn write_metadata(path: &Path, metadata: &EpubMetadata) -> Result<(), EpubEr
         }
         writer.finish()?;
     }
-
-    crate::backup_file_once(path)?;
-    crate::atomic_replace(path, &buffer)?;
-    Ok(())
+    Ok(buffer)
 }
 
 /// Rewrite the `<metadata>` children of one OPF document.
@@ -319,7 +335,8 @@ mod tests {
 
         write_metadata(&path, &metadata()).unwrap();
 
-        let parsed = super::super::parse_epub(&path).unwrap();
+        let parsed =
+            super::super::parse_epub(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Curated Title");
         assert_eq!(
             parsed.metadata.authors,
@@ -382,7 +399,8 @@ mod tests {
         };
         write_metadata(&path, &with_subtitle).unwrap();
 
-        let parsed = super::super::parse_epub(&path).unwrap();
+        let parsed =
+            super::super::parse_epub(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Curated Title");
         assert_eq!(parsed.metadata.subtitle.as_deref(), Some("A Subtitle"));
     }

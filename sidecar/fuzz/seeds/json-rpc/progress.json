@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":4,"method":"save_reading_progress","params":{"bookId":1,"progress":{"progressPercent":42.5}}}

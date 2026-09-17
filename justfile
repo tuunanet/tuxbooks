@@ -114,6 +114,29 @@ package TARGETS="deb rpm AppImage": build
 check-deb:
     bash scripts/check-deb.sh
 
+# Dependency audits (issue #89, S-2): the npm gate (untriaged high/critical
+# advisories fail) plus RustSec cargo-audit over the sidecar and fuzz
+# lockfiles. Networked. CI runs the same gates (.github/workflows/audit.yml,
+# weekly sweep included); triage policy: docs/SUPPLY_CHAIN.md.
+audit:
+    node scripts/npm-audit-gate.mjs
+    bash scripts/install-cargo-audit.sh
+    cd sidecar && ../.build/bin/cargo-audit audit
+    cd sidecar && ../.build/bin/cargo-audit audit --file fuzz/Cargo.lock
+
+# Offline supply-chain gate (issue #89): the repo-side wiring the networked
+# audits cannot see — maturity floor, build-script allowlist, audit/SBOM
+# workflow wiring, pinned fuzz toolchain. Part of `just check` and of the
+# CI npm-audit job.
+check-supply-chain:
+    node scripts/supply-chain-gate.mjs
+
+# CycloneDX SBOM over the npm and Rust trees (issue #89, S-4), written to
+# dist-packages/SBOM-tuxbooks-<version>.cdx.json. Release builds publish it
+# next to SHA256SUMS.txt (docs/RELEASE.md).
+sbom:
+    node scripts/generate-sbom.mjs
+
 # Unit tests: rust + frontend, concurrently (different toolchains — cargo
 # and node never contend). fetch-pdfium first so PDF cover tests exercise a
 # real render, not a skip.
@@ -155,7 +178,9 @@ test-e2e: build-debug
     just test-e2e-empty
     just test-e2e-shell
     just test-e2e-gpu
+    just test-e2e-security
     just test-e2e-seeded
+    just test-e2e-regressions
 
 test-e2e-empty:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
@@ -179,6 +204,11 @@ test-e2e-headed-shell: build-debug
 test-e2e-seeded:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
+# Reader-regression corpus (licensed-corpus survey): the five seeded books
+# plus the committed real-world-shape miniatures the regression spec needs.
+test-e2e-regressions: build-debug
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=regressions E2E_SEED_LIBRARY=1 pnpm --filter e2e test:regressions
+
 # GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): the app boots
 # software-rendered when a previous session recorded repeated GPU-process
 # crashes, reading keeps working in that mode, and a stable session clears
@@ -186,6 +216,13 @@ test-e2e-seeded:
 # different marker states. Seeded: the degraded-mode test opens the PDF.
 test-e2e-gpu: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=gpu E2E_SEED_LIBRARY=1 pnpm --filter e2e test:gpu
+
+# EPUB content fencing smoke (issue #82): runtime-generated hostile EPUBs
+# in an otherwise empty scratch library — a scripted book fails to open,
+# an opened book's frames are sanitized, CSP-fenced, and request-silent.
+# Own phase so the hostile books never pollute the seeded suites' counts.
+test-e2e-security: build-debug
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=security E2E_SEED_LIBRARY= pnpm --filter e2e test:security
 
 # High-DPI configuration (docs/PERFORMANCE.md reference conditions name dpr
 # 2.0): the seeded reader scenarios against an app forced to
@@ -294,6 +331,7 @@ check:
         'frontend-types: just typecheck' \
         'format: just format-check-frontend' \
         'fixtures: just check-epub-fixtures' \
+        'supply-chain: just check-supply-chain' \
         'workflows: just lint-workflows'
     @echo "check: OK"
 
@@ -303,3 +341,38 @@ check:
 coverage:
     node scripts/coverage-gate.mjs
     pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+
+# Fuzzing (issue #88, docs/TESTING.md "Fuzzing"). libFuzzer via cargo-fuzz:
+# needs the nightly toolchain and the cargo-fuzz subcommand
+# (`rustup toolchain install nightly --profile minimal && cargo install
+# cargo-fuzz --locked`). The run is time-boxed with -max_total_time and all
+# artifacts stay inside the workspace: crash files land in
+# sidecar/fuzz/artifacts/, the runtime corpus in sidecar/fuzz/corpus/
+# (both gitignored; committed seeds are copied in per run).
+
+# Fuzz one target for SECONDS seconds. First run compiles the instrumented
+# build (minutes); later runs are incremental.
+fuzz TARGET SECONDS="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}/sidecar"
+    export RUSTUP_TOOLCHAIN=nightly
+    mkdir -p "fuzz/corpus/{{TARGET}}"
+    cp fuzz/seeds/{{TARGET}}/* "fuzz/corpus/{{TARGET}}/"
+    cargo fuzz run {{TARGET}} "fuzz/corpus/{{TARGET}}" -- \
+        -max_total_time={{SECONDS}} -rss_limit_mb=4096 -timeout=25
+
+# Short bounded pass over all four targets (the local proof run).
+fuzz-smoke:
+    just fuzz epub-parse 30
+    just fuzz opf-xml 30
+    just fuzz pdf-parse 30
+    just fuzz json-rpc 30
+
+# Nightly cadence (docs/TESTING.md): five minutes per target, run by
+# .github/workflows/fuzz.yml. Never per-PR.
+fuzz-ci:
+    just fuzz epub-parse 300
+    just fuzz opf-xml 300
+    just fuzz pdf-parse 300
+    just fuzz json-rpc 300

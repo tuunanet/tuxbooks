@@ -3,6 +3,7 @@
   "version": "0.0.6",
   "private": true,
   "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/tuunanet/tuxbooks",
   "description": "Local-first ebook library manager (bookshelf style) built with Electron + React + a Rust sidecar.",
   "main": "electron/dist/main.cjs",
   "scripts": {

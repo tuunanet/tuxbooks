@@ -36,6 +36,62 @@ export const largePdfFixture = path.join(repoRoot, "tests", "fixtures", "books",
 export const mixedPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "mixed.pdf");
 export const smartPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "smart.pdf");
 
+/**
+ * Reader-regression fixtures (generated corpus, tests/fixtures/epub): each
+ * pins a real-world EPUB shape that blanked pages or lost theming in UAT.
+ * Seeded alongside the minimal book for the reader-regression spec.
+ */
+export const readerRegressionFixtures = [
+  {
+    path: path.join(
+      repoRoot,
+      "tests",
+      "fixtures",
+      "epub",
+      "core",
+      "epub3",
+      "reader-html-members.epub",
+    ),
+    title: "Reader HTML Members",
+  },
+  {
+    path: path.join(
+      repoRoot,
+      "tests",
+      "fixtures",
+      "epub",
+      "core",
+      "epub3",
+      "reader-mangled-prolog.epub",
+    ),
+    title: "Reader Mangled Prolog",
+  },
+  {
+    path: path.join(
+      repoRoot,
+      "tests",
+      "fixtures",
+      "epub",
+      "core",
+      "epub3",
+      "reader-html-entities.epub",
+    ),
+    title: "Reader HTML Entities",
+  },
+  {
+    path: path.join(
+      repoRoot,
+      "tests",
+      "fixtures",
+      "epub",
+      "core",
+      "epub3",
+      "reader-theme-sections.epub",
+    ),
+    title: "Reader Theme Sections",
+  },
+] as const;
+
 export const seededBookTitles = {
   epub: "A Minimal Book",
   pdf: "A Minimal Manual",

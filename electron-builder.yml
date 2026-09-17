@@ -32,6 +32,10 @@ files:
 extraResources:
   - from: sidecar/target/release/tuxbooks
     to: sidecar/tuxbooks
+  # The sandboxed document worker (ADR 0001): the sidecar locates it next
+  # to its own binary (worker::client::locate).
+  - from: sidecar/target/release/tuxbooks-worker
+    to: sidecar/tuxbooks-worker
   - from: sidecar/pdfium/libpdfium.so
     to: sidecar/libpdfium.so
   # The native window/taskbar icon at runtime (electron/main/index.ts

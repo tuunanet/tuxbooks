@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":11,"method":"get_book_bytes","params":{"bookId":1,"offset":0,"length":1024}}

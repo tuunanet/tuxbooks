@@ -77,6 +77,10 @@ Read the one that fits the task; each is short.
 - `docs/EPUB.md` / `docs/PDF.md` — reader layer contracts (Readium / MuPDF.js).
 - `docs/PERFORMANCE.md` — reader performance budgets/metrics and verification;
   check before touching reader rendering.
+- `docs/RESOURCE_LIMITS.md` — parser resource quotas (issue #83), the
+  `ResourceLimits` table every EPUB/PDF parse path enforces.
 - `docs/TESTING.md` — test layers, agent rules, and E2E infrastructure.
 - `docs/COVERAGE.md` — per-category coverage floors and exclusions.
 - `docs/RELEASE.md` — packaging and cutting releases.
+- `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script and
+  maturity policies (issue #89); run `just audit` before releases.

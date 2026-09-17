@@ -33,23 +33,45 @@ static RENDER_LOCK: Mutex<()> = Mutex::new(());
 /// loaded from `library_dirs` or the system loader: covers are best-effort
 /// and must never fail an import. Callers pass candidate directories that
 /// may contain the platform library (see `pdfium_library_dirs` in `lib.rs`
-/// and `docs/BUILD.md`).
+/// and `docs/BUILD.md`). Source size, wall-clock budget, and PNG output
+/// size are bounded by `limits` (issue #83); the native render itself is
+/// uninterruptible, so it is bounded instead by the source-size cap and the
+/// fixed `COVER_WIDTH_PX` target.
 pub fn render_first_page_cover(
     path: &Path,
     library_dirs: &[PathBuf],
+    limits: &crate::limits::ResourceLimits,
+) -> Result<Option<Vec<u8>>, PdfError> {
+    let Some(pdfium) = pdfium(library_dirs) else {
+        return Ok(None);
+    };
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    let bytes = std::fs::read(path)?;
+    render_first_page_cover_bytes(pdfium, &bytes, limits)
+}
+
+/// Bytes-based render core: same behavior as [`render_first_page_cover`]
+/// for an in-memory source (the worker's shape; the fd is buffered under
+/// the source quota before this call). Holds the render lock, enforces the
+/// source quota and deadline, and checks the PNG output size.
+pub fn render_first_page_cover_bytes(
+    pdfium: &Pdfium,
+    bytes: &[u8],
+    limits: &crate::limits::ResourceLimits,
 ) -> Result<Option<Vec<u8>>, PdfError> {
     // Held across load, render, and the document's drop so no other thread
     // interleaves a PDFium call anywhere in the sequence (RENDER_LOCK).
     let _serial = RENDER_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(pdfium) = pdfium(library_dirs) else {
-        return Ok(None);
-    };
+    limits.check_source_file(bytes.len() as u64)?;
+    let deadline = crate::limits::Deadline::start(limits);
+    deadline.check()?;
 
     let document = pdfium
-        .load_pdf_from_file(path, None)
+        .load_pdf_from_byte_slice(bytes, None)
         .map_err(|err| PdfError::Render(err.to_string()))?;
+    deadline.check()?;
     let pages = document.pages();
     if pages.is_empty() {
         return Ok(None);
@@ -67,14 +89,23 @@ pub fn render_first_page_cover(
     image
         .write_to(&mut png, image::ImageFormat::Png)
         .map_err(|err| PdfError::Render(err.to_string()))?;
-    Ok(Some(png.into_inner()))
+    let png = png.into_inner();
+    limits.check_cover_png(png.len())?;
+    Ok(Some(png))
 }
 
 /// True when a PDFium library loads from the given candidate directories.
 /// Callers use it to degrade gracefully (tests skip; imports proceed
 /// without covers) when the library was never installed.
-pub fn pdfium_available(library_dirs: &[PathBuf]) -> bool {
+pub fn pdfium_is_available(library_dirs: &[PathBuf]) -> bool {
     pdfium(library_dirs).is_some()
+}
+
+/// The already-bound process-wide PDFium handle, without probing (the
+/// worker's entry: `probe_and_load` must have run before the sandbox
+/// lockdown). `None` means no library was bound.
+pub fn loaded_pdfium() -> Option<&'static Pdfium> {
+    PDFIUM.get()
 }
 
 /// Bind to the first loadable PDFium library from the candidate directories
@@ -114,9 +145,19 @@ fn pdfium(library_dirs: &[PathBuf]) -> Option<&'static Pdfium> {
     }
 }
 
+/// Probe and bind PDFium from the job's candidate directories (worker entry,
+/// ADR 0001 D3 ordering): the same probe order as the internal `pdfium`
+/// helper, accepting the job's `String` dirs. A failed bind is silent here
+/// and surfaces as an error at use time, matching the sidecar's behavior.
+pub fn probe_and_load(dirs: &[String]) {
+    let dirs: Vec<PathBuf> = dirs.iter().map(PathBuf::from).collect();
+    let _ = pdfium(&dirs);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::ResourceLimits;
     use std::path::PathBuf;
 
     /// The dev checkout's library directory (scripts/fetch-pdfium.sh), the
@@ -135,7 +176,7 @@ mod tests {
     /// Skip guard for tests that need a real PDFium library: absent when the
     /// dev checkout was never fetched via `just fetch-pdfium` (docs/BUILD.md).
     pub(crate) fn pdfium_is_available() -> bool {
-        pdfium_available(&[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium")])
+        super::pdfium_is_available(&[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium")])
     }
 
     fn png_dimensions(png: &[u8]) -> (u32, u32) {
@@ -152,9 +193,13 @@ mod tests {
             return;
         }
 
-        let png = render_first_page_cover(&fixture("minimal.pdf"), &library_dirs())
-            .unwrap()
-            .expect("fixture PDF must render");
+        let png = render_first_page_cover(
+            &fixture("minimal.pdf"),
+            &library_dirs(),
+            &ResourceLimits::DEFAULTS,
+        )
+        .unwrap()
+        .expect("fixture PDF must render");
 
         let (width, height) = png_dimensions(&png);
         assert_eq!(width, COVER_WIDTH_PX as u32);
@@ -172,7 +217,38 @@ mod tests {
         let path = tmp.path().join("garbage.pdf");
         std::fs::write(&path, b"this is not a pdf at all").unwrap();
 
-        let err = render_first_page_cover(&path, &library_dirs()).unwrap_err();
+        let err =
+            render_first_page_cover(&path, &library_dirs(), &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, PdfError::Render(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn render_rejects_expired_deadline() {
+        if !pdfium_is_available() {
+            eprintln!("skipping: no pdfium library fetched (just fetch-pdfium)");
+            return;
+        }
+        let tight = ResourceLimits {
+            max_parse_seconds: 0,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err =
+            render_first_page_cover(&fixture("minimal.pdf"), &library_dirs(), &tight).unwrap_err();
+        assert!(matches!(err, PdfError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn render_rejects_oversized_cover_png() {
+        if !pdfium_is_available() {
+            eprintln!("skipping: no pdfium library fetched (just fetch-pdfium)");
+            return;
+        }
+        let tight = ResourceLimits {
+            max_cover_png_bytes: 1,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err =
+            render_first_page_cover(&fixture("minimal.pdf"), &library_dirs(), &tight).unwrap_err();
+        assert!(matches!(err, PdfError::Limit(_)), "got: {err:?}");
     }
 }

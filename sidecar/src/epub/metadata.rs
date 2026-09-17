@@ -4,13 +4,14 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use super::EpubError;
+use crate::limits::ResourceLimits;
 
 /// Bibliographic metadata extracted from the OPF `<metadata>` section.
 /// Author/subject lists keep every `dc:creator`/`dc:subject` (normalized
 /// entities, milestone 7); `author` stays as the first creator for the
 /// flat display column. `subtitle` is read from an EPUB 3 title refines
 /// link (`title-type` = subtitle), the shape the writer emits.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EpubMetadata {
     pub title: String,
     pub subtitle: Option<String>,
@@ -54,11 +55,15 @@ pub struct OpfPackage {
     pub legacy_cover_id: Option<String>,
 }
 
-/// Parse an EPUB package document (OPF) from XML text.
-pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
+/// Parse an EPUB package document (OPF) from XML text. Document size,
+/// nesting depth, and every extracted metadata string are bounded by
+/// `limits` (R-1).
+pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
+    let mut depth = 0usize;
     let mut metadata = EpubMetadata::default();
     let mut manifest: HashMap<String, ManifestItem> = HashMap::new();
     let mut spine = Vec::new();
@@ -81,6 +86,8 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
+                depth += 1;
+                limits.check_xml_depth(depth)?;
                 let local = local_name(e.name().into_inner());
                 match (section.as_deref(), local) {
                     (None, "metadata") | (None, "manifest") | (None, "spine") => {
@@ -115,7 +122,12 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                     }
                     (Some("metadata"), "meta") => {
                         handle_legacy_cover_meta(e, &mut legacy_cover_id);
-                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
+                        handle_calibre_meta(
+                            e,
+                            limits,
+                            &mut metadata.series,
+                            &mut series_index_raw,
+                        )?;
                         if attribute(&e.attributes(), "property").as_deref() == Some("title-type") {
                             text_target = Some("meta-title-type");
                             pending_refines = attribute(&e.attributes(), "refines");
@@ -138,7 +150,12 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                 match (section.as_deref(), local) {
                     (Some("metadata"), "meta") => {
                         handle_legacy_cover_meta(e, &mut legacy_cover_id);
-                        handle_calibre_meta(e, &mut metadata.series, &mut series_index_raw);
+                        handle_calibre_meta(
+                            e,
+                            limits,
+                            &mut metadata.series,
+                            &mut series_index_raw,
+                        )?;
                     }
                     (Some("manifest"), "item") => {
                         insert_manifest_item(&mut manifest, e)?;
@@ -151,20 +168,22 @@ pub fn parse_opf(xml: &str) -> Result<OpfPackage, EpubError> {
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if text_target.is_some() {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
             }
             Ok(Event::End(ref e)) => {
+                depth = depth.saturating_sub(1);
                 let local = local_name(e.name().into_inner());
                 if let Some(target) = text_target.take() {
                     let value = text_buf.trim().to_string();
                     let element_id = text_element_id.take();
                     let refines = pending_refines.take();
                     if !value.is_empty() {
+                        limits.check_metadata_string(&value)?;
                         match target {
                             "title" => titles.push((element_id, value)),
                             "creator" => metadata.authors.push(value),
@@ -271,28 +290,34 @@ fn handle_legacy_cover_meta(
 /// `<meta name="calibre:series" content="..."/>` and
 /// `<meta name="calibre:series_index" content="3"/>`. The index is kept raw
 /// until the end of the parse so a missing/invalid value simply stays unset.
+/// Attribute-derived values are still metadata strings (M-1): each is
+/// checked against `max_metadata_string_bytes` before it is kept.
 fn handle_calibre_meta(
     e: &quick_xml::events::BytesStart<'_>,
+    limits: &ResourceLimits,
     series: &mut Option<String>,
     series_index_raw: &mut Option<String>,
-) {
+) -> Result<(), EpubError> {
     let name = attribute(&e.attributes(), "name");
     let content = attribute(&e.attributes(), "content");
     match (name.as_deref(), content) {
         (Some("calibre:series"), Some(value)) => {
             let value = value.trim();
             if !value.is_empty() {
+                limits.check_metadata_string(value)?;
                 *series = Some(value.to_string());
             }
         }
         (Some("calibre:series_index"), Some(value)) => {
             let value = value.trim();
             if !value.is_empty() {
+                limits.check_metadata_string(value)?;
                 *series_index_raw = Some(value.to_string());
             }
         }
         _ => {}
     }
+    Ok(())
 }
 
 /// Series indexes are decimal numbers, sometimes written with a trailing
@@ -342,16 +367,62 @@ pub(crate) fn attribute(
     attrs.clone().flatten().find_map(|attr| {
         let key = local_name(attr.key.as_ref());
         if key.eq_ignore_ascii_case(name) {
-            attr.unescape_value().ok().map(|v| v.to_string())
+            attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.to_string())
         } else {
             None
         }
     })
 }
 
+/// Text content of a text-like event for accumulation into a buffer.
+///
+/// quick-xml 0.40+ reports general entity references as their own
+/// `Event::GeneralRef` instead of leaving them inside `Event::Text`, so
+/// every text-accumulating parser must resolve them explicitly. Only
+/// predefined XML entities and numeric character references resolve;
+/// anything else (custom entities need a DTD, which is never fetched) is
+/// dropped, and character references outside the XML 1.0 character set
+/// fail closed. This keeps the pre-0.40 `unescape()` semantics for
+/// well-formed documents without re-merging reference resolution into the
+/// reader.
+pub(crate) fn text_event_content<'a>(event: &'a Event<'_>) -> Option<std::borrow::Cow<'a, str>> {
+    match event {
+        Event::Text(t) => t.html_content().ok(),
+        Event::GeneralRef(r) => resolve_entity_ref(r),
+        _ => None,
+    }
+}
+
+fn resolve_entity_ref<'a>(
+    r: &'a quick_xml::events::BytesRef<'_>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let raw = std::str::from_utf8(r.as_ref()).ok()?;
+    if let Some(hex) = raw.strip_prefix("#x").or_else(|| raw.strip_prefix("#X")) {
+        let code = u32::from_str_radix(hex, 16).ok()?;
+        char_ref(code)
+    } else if let Some(dec) = raw.strip_prefix('#') {
+        let code: u32 = dec.parse().ok()?;
+        char_ref(code)
+    } else {
+        quick_xml::escape::resolve_xml_entity(raw).map(std::borrow::Cow::Borrowed)
+    }
+}
+
+fn char_ref(code: u32) -> Option<std::borrow::Cow<'static, str>> {
+    match code {
+        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF => {
+            char::from_u32(code).map(|c| std::borrow::Cow::Owned(c.to_string()))
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::limits::ResourceLimits;
 
     const MINIMAL_OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
@@ -385,7 +456,7 @@ mod tests {
 
     #[test]
     fn parses_all_metadata_fields() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.title, "A Minimal Book");
         assert_eq!(opf.metadata.author.as_deref(), Some("Ada Lovelace"));
         assert_eq!(
@@ -416,25 +487,25 @@ mod tests {
                 "",
             )
             .replace(r#"<meta name="calibre:series_index" content="2"/>"#, "");
-        let opf = parse_opf(&without).unwrap();
+        let opf = parse_opf(&without, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series, None);
         assert_eq!(opf.metadata.series_index, None);
 
         // A non-numeric index is dropped, not an error.
         let odd = MINIMAL_OPF.replace(r#"content="2""#, r#"content="two""#);
-        let opf = parse_opf(&odd).unwrap();
+        let opf = parse_opf(&odd, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series.as_deref(), Some("Analytical Engines"));
         assert_eq!(opf.metadata.series_index, None);
 
         // A comma decimal separator parses.
         let comma = MINIMAL_OPF.replace(r#"content="2""#, r#"content="2,5""#);
-        let opf = parse_opf(&comma).unwrap();
+        let opf = parse_opf(&comma, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series_index, Some(2.5));
     }
 
     #[test]
     fn parses_manifest_and_spine() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.spine, vec!["c1".to_string(), "c2".to_string()]);
         let c1 = opf.manifest.get("c1").unwrap();
         assert_eq!(c1.href, "chapter1.xhtml");
@@ -445,20 +516,24 @@ mod tests {
 
     #[test]
     fn detects_legacy_epub2_cover_meta() {
-        let opf = parse_opf(MINIMAL_OPF).unwrap();
+        let opf = parse_opf(MINIMAL_OPF, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.legacy_cover_id.as_deref(), Some("cover-image"));
     }
 
     #[test]
     fn missing_title_is_an_error() {
         let opf = MINIMAL_OPF.replace("<dc:title>A Minimal Book</dc:title>", "");
-        let err = parse_opf(&opf).unwrap_err();
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingTitle), "got: {err:?}");
     }
 
     #[test]
     fn malformed_xml_is_an_error() {
-        let err = parse_opf("<package><metadata></metdata></package>").unwrap_err();
+        let err = parse_opf(
+            "<package><metadata></metdata></package>",
+            &ResourceLimits::DEFAULTS,
+        )
+        .unwrap_err();
         assert!(matches!(err, EpubError::OpfXml(_)), "got: {err:?}");
     }
 
@@ -466,8 +541,53 @@ mod tests {
     fn html_entities_in_text_are_unescaped() {
         let opf = parse_opf(
             r#"<package version="3.0"><metadata><dc:title>A &amp; B</dc:title></metadata></package>"#,
+            &ResourceLimits::DEFAULTS,
         )
         .unwrap();
         assert_eq!(opf.metadata.title, "A & B");
+    }
+
+    #[test]
+    fn parse_opf_rejects_deeply_nested_xml() {
+        let nest_open: String = "<d>".repeat(600);
+        let nest_close: String = "</d>".repeat(600);
+        let opf = format!(
+            r#"<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">{nest_open}<dc:title>Deep</dc:title>{nest_close}</metadata></package>"#
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_opf_rejects_oversized_metadata_string() {
+        let title = "x".repeat(2 << 20);
+        let opf = format!(
+            r#"<package version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title></metadata></package>"#
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    /// M-1/#86: the calibre series is attribute-derived, so it bypasses the
+    /// text-target cap unless the attribute value is checked too. A hostile
+    /// OPF must not smuggle an unbounded series (or index) string into the
+    /// library and the renderer.
+    #[test]
+    fn parse_opf_rejects_oversized_calibre_series_attribute() {
+        let big = "x".repeat(2 << 20);
+        let opf = MINIMAL_OPF.replace(
+            r#"content="Analytical Engines""#,
+            &format!(r#"content="{big}""#),
+        );
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn parse_opf_rejects_oversized_calibre_series_index_attribute() {
+        let big = "9".repeat(2 << 20);
+        let opf = MINIMAL_OPF.replace(r#"content="2""#, &format!(r#"content="{big}""#));
+        let err = parse_opf(&opf, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
     }
 }

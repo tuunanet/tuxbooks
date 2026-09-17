@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::epub::{parse_epub, EpubBook, EpubError};
-use crate::pdf::{parse_pdf, PdfBook, PdfError};
+use crate::epub::{EpubBook, EpubError};
+use crate::pdf::{PdfBook, PdfError};
 
 /// One discovered book file together with its parse outcome.
 /// Files that fail to parse are reported, not skipped silently.
@@ -28,6 +28,8 @@ pub enum BookParseError {
     Epub(#[from] EpubError),
     #[error(transparent)]
     Pdf(#[from] PdfError),
+    #[error("{0}")]
+    Worker(#[from] crate::worker::client::WorkerError),
 }
 
 /// Errors that make the whole scan meaningless (as opposed to a single bad file).
@@ -52,14 +54,21 @@ fn has_book_extension(path: &Path) -> bool {
 
 /// Parse a single book file, dispatching on its extension. Shared by the
 /// directory scan and the watcher reconciliation so both paths stay in sync.
+/// Every parse runs in the sandboxed document worker (W-1, P-1); there is
+/// no in-process fallback (ADR 0001 D5).
 pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
+    let client = crate::worker::WorkerClient::locate().map_err(BookParseError::Worker)?;
     if path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
     {
-        parse_pdf(path).map(ScannedBook::Pdf).map_err(Into::into)
+        client
+            .pdf_parse(path, &crate::limits::ResourceLimits::DEFAULTS)
+            .map(ScannedBook::Pdf)
+            .map_err(Into::into)
     } else {
-        parse_epub(path)
+        client
+            .epub_parse(path, &crate::limits::ResourceLimits::DEFAULTS)
             .map(|book| ScannedBook::Epub(Box::new(book)))
             .map_err(Into::into)
     }
@@ -123,6 +132,7 @@ pub fn scan_directory(root: &Path) -> Result<Vec<ScannedEntry>, ScanError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::worker::client::WorkerError;
 
     fn write_file(path: &Path, data: &[u8]) {
         if let Some(parent) = path.parent() {
@@ -199,8 +209,13 @@ mod tests {
             .iter()
             .find(|entry| entry.path.ends_with("broken.pdf"))
             .unwrap();
+        // Parsing now runs in the document worker, so garbage surfaces as a
+        // typed worker parse error instead of an in-process PdfError.
         assert!(
-            matches!(broken.book, Err(BookParseError::Pdf(_))),
+            matches!(
+                broken.book,
+                Err(BookParseError::Worker(WorkerError::Parse(_)))
+            ),
             "garbage pdf fails to parse: {:?}",
             broken.book
         );
@@ -254,8 +269,10 @@ mod tests {
         let entries = scan_directory(root).unwrap();
         assert_eq!(entries.len(), 1);
         let err = entries[0].book.as_ref().unwrap_err();
+        // Parsing now runs in the document worker, so garbage surfaces as a
+        // typed worker parse error instead of an in-process ZipError.
         assert!(
-            matches!(err, BookParseError::Epub(EpubError::Zip(_))),
+            matches!(err, BookParseError::Worker(WorkerError::Parse(_))),
             "got: {err:?}"
         );
     }

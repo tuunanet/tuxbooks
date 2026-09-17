@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use tuxbooks_lib::epub::parse_epub;
+use tuxbooks_lib::limits::ResourceLimits;
 
 fn corpus_dir(tier: &str) -> Option<PathBuf> {
     let env_key = format!("{}_EPUB_ROOT", tier.to_uppercase());
@@ -66,7 +67,7 @@ fn exercise_corpus(tier: &str) {
 
     let mut failures = Vec::new();
     for path in &files {
-        match parse_epub(path) {
+        match parse_epub(path, &ResourceLimits::DEFAULTS) {
             Ok(book) => {
                 if book.metadata.title.is_empty() {
                     failures.push(format!("{}: parsed with an empty title", path.display()));

@@ -21,8 +21,11 @@ describes the current contract.
 │                                                                       │
 │  Rust sidecar (native service)                                        │
 │  ├─ services/ (application ops)   ├─ repository/ (SQL)                │
-│  ├─ epub/ (parsing)               ├─ pdf/ (parsing)                   │
-│  └─ db/ (SQLite + migrations)                                         │
+│  ├─ worker/ (worker client,       ├─ db/ (SQLite + migrations)       │
+│  │  proto, sandbox)                │                                 │
+│  └─ spawns per parse job ─────►    tuxbooks-worker (one-shot)        │
+│                                    ├─ epub/ + pdf/ (parsing)         │
+│                                    └─ Landlock + seccomp + rlimits   │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,6 +44,105 @@ describes the current contract.
   app's origin only) — never an arbitrary local HTTP server; paths never
   cross into the renderer.
 
+### Renderer-facing boundary (issue #84, invariants T-1..T-7)
+
+The Chromium-facing boundary is enforced in four modules, all unit-tested
+in `frontend/tests/security/`:
+
+- `electron/shared/pathSchema.ts` — the validated path/query schema shared
+  by main, preload, and tests: book ids, EPUB member paths, cover names,
+  absolute-path shape checks, range headers, fixed MIME tables, the sidecar
+  method allowlist, IPC channel names, the privileged-scheme table, and the
+  sender-origin policy.
+- `electron/main/protocolHandler.ts` — the pure `tuxbooks://` handler:
+  scheme/host allowlist (`book`, `cover` only), strict URL parsing that
+  fails closed (400/404/405/416), and fixed MIME types. Cover URLs carry
+  the artwork-cache file name, never a path; main resolves the name inside
+  the cache with lexical + realpath containment. The sidecar's wire
+  media-type string is ignored for headers. Error bodies are fixed strings
+  (`not found`, `internal error`, plus one per typed sidecar failure);
+  upstream messages never leak. Typed sidecar codes keep their meaning at
+  the protocol boundary: limit 413, sandbox 503, deadline 504, and 404
+  only for genuine misses.
+- `electron/main/ipcPolicy.ts` — the `tuxbooks:invoke` policy: sender must
+  be the app page (`app://bundle` or the dev server), method allowlist,
+  per-method param schemas, and an 8 MB params cap. `scan_library`,
+  `reconnect_book`, and `set_book_cover` accept only paths main itself
+  issued through a native dialog; `import_paths` also accepts drag-and-drop
+  paths (shape-checked). Reveal takes a book id and resolves the path via
+  the sidecar.
+- `electron/main/ipcHandlers.ts` — the ipcMain handler wiring: invoke, the
+  native dialogs, and reveal. Every channel gates its sender (the same
+  app-page rule) before touching anything native, because the preload
+  bridge is exposed to sandboxed publication frames. Registration and the
+  native surfaces are injected, so the gate is tested without Electron.
+
+The sidecar transport bounds both directions: requests over 8 MB are
+rejected before write (`electron/main/sidecarTransport.ts`), and response
+lines beyond the largest legitimate book payload are discarded instead of
+buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
+are rejected by the sidecar with typed JSON-RPC errors and never crash it
+(pinned by `sidecar/src/rpc.rs` tests).
+
+### Window hardening (issue #85, invariants X-1..X-5)
+
+The Electron window and session are hardened by four more unit-tested
+modules (`frontend/tests/security/`):
+
+- `electron/main/windowSecurity.ts`: the X-1 isolation set
+  (`contextIsolation`, `nodeIntegration: false`, `sandbox`,
+  `webSecurity`), asserted at window creation so a drifted flag fails
+  startup; the X-3 top-frame navigation allowlist (the app origin's entry
+  point and assets, plus the dev server origin while one is configured;
+  `file://` and everything else is prevented); and the X-4 permission
+  policy: deny by default, the single grant being fullscreen from the
+  app's own origin (the reader's presentation mode). Note that
+  `new URL().origin` is `"null"` for custom schemes, so app-scheme
+  request origins must be reconstructed from the host
+  (`originOfRequestUrl`).
+- `electron/shared/appCsp.ts`: the X-2 CSP for the app UI, served as a
+  header on every `app://bundle` response and on the Vite dev server (the
+  dev variant adds the three allowances HMR needs). The reader's blob:
+  section frames inherit this policy, so it carries the frame grants the
+  reader architecture requires (blob: toolkit scripts, ReadiumCSS inline
+  and blob: styles, the `tuxbooks://` publication base URI). The shipped
+  policy must not be stricter than the frame CSP in `contentPolicy.ts`,
+  or the reader renders broken.
+- `electron/shared/linkPolicy.ts`: the X-5 seam. The only inputs that
+  reach `shell.openExternal` are canonical http(s) URLs re-serialized by
+  `parseExternalHttpUrl`; scripts, data/file/custom schemes, credentials,
+  control characters, and over-long strings are dropped.
+
+### Metadata and annotation neutrality (issue #86, invariants M-1, M-2)
+
+Publication-derived and user-stored strings (metadata fields, annotation
+text/notes/locators, search hits, collection names, reader profile data) are
+rendered only through React text nodes and escaped attributes; the renderer
+has no `dangerouslySetInnerHTML`, no dynamic `href`, and no
+`document.title`/clipboard/notifications fed from data. The single URL-carrying
+sink is the stored cover path, which `lib/bridge.ts coverFileUrl` reduces to a
+percent-encoded file name under the fixed `tuxbooks://cover/` scheme. Reader
+profile values from localStorage are snapped back onto the supported scales on
+read (`lib/readerSettings.ts`). Attack side: parse-time caps bound the strings
+(`docs/RESOURCE_LIMITS.md`, including the attribute-derived calibre series
+values), and the hostile-fixture tests in
+`frontend/tests/security/metadataNeutrality.test.tsx` pin every sink above.
+External navigation stays behind the X-5 `linkPolicy` gate.
+
+### Document worker (issue #81, ADR 0001)
+
+The sidecar spawns `tuxbooks-worker` one process per parse job, hands the
+document over as a pre-opened read-only fd (fd 3, no path crosses the
+boundary), enforces the wall-clock deadline by killing, and treats any
+worker outcome as a typed per-job error (deadline -32001, limit -32002,
+sandbox -32003, other worker failures -32004). On Linux the worker applies
+Landlock (all filesystem access denied), a seccomp deny-list (including
+socket creation, which owns network denial), and rlimits itself, then
+self-verifies before parsing (ADR 0001). There is no in-process fallback:
+a missing worker binary is a typed error, never silent in-process parsing.
+The parse modules (`epub/`, `pdf/`) are worker-internal; services reach
+them only through the worker client (`sidecar/src/worker/client.rs`).
+
 ## Gotchas
 
 Each has bitten before (or is a known trap of the Electron stack):
@@ -54,15 +156,17 @@ Each has bitten before (or is a known trap of the Electron stack):
 
 ## Rust module contract
 
-| Module        | May depend on                               | Must never import     |
-| ------------- | ------------------------------------------- | --------------------- |
-| `domain/`     | std, serde, chrono, sqlx (row mapping only) | tauri, electron glue  |
-| `epub/`       | std, zip, quick-xml                         | tauri, sqlx, electron |
-| `pdf/`        | std, lopdf                                  | tauri, sqlx, electron |
-| `db/`         | sqlx, migrations                            | tauri, electron       |
-| `repository/` | sqlx, domain                                | tauri, epub, pdf      |
-| `services/`   | domain, repository, epub, pdf, db           | tauri, electron       |
-| method table  | services, domain                            | sqlx details          |
+| Module                    | May depend on                                                                                         | Must never import             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `domain/`                 | std, serde, chrono, sqlx (row mapping only)                                                           | tauri, electron glue          |
+| `limits/`                 | std, thiserror                                                                                        | runtime crates, sqlx          |
+| `epub/` (worker-internal) | std, zip, quick-xml, limits                                                                           | tauri, sqlx, electron         |
+| `pdf/` (worker-internal)  | std, lopdf, pdfium-render, limits                                                                     | tauri, sqlx, electron         |
+| `worker/`                 | limits, epub, pdf, libc, serde, base64                                                                | sqlx, notify, tauri, electron |
+| `db/`                     | sqlx, migrations                                                                                      | tauri, electron               |
+| `repository/`             | sqlx, domain                                                                                          | tauri, epub, pdf              |
+| `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points) | tauri, electron               |
+| method table              | services, domain                                                                                      | sqlx details                  |
 
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /
@@ -82,7 +186,8 @@ require a live database. See [DATABASE.md](DATABASE.md).
 ## EPUB layer
 
 Import-time parsing stays in Rust (`epub/`, ZIP + OPF XML into a plain
-`EpubBook`). Reader rendering belongs to **Readium TS Toolkit** in the
+`EpubBook`) under the shared resource limits (`docs/RESOURCE_LIMITS.md`).
+Reader rendering belongs to **Readium TS Toolkit** in the
 renderer, behind the single-module seam `lib/epub/readiumEngine.ts` —
 publication parsing, navigator state, pagination, locators, selection, and
 navigation are Readium's; React owns only the surrounding UI. EPUB
@@ -92,7 +197,8 @@ resources load through `tuxbooks://`. See [EPUB.md](EPUB.md).
 
 Import-time metadata stays in Rust (`pdf/` via `lopdf`; page-1 cover
 rasterization via `pdfium-render` — retained unless MuPDF in the renderer
-provably replaces it, see [PDF.md](PDF.md)). Reader rendering belongs to
+provably replaces it, see [PDF.md](PDF.md)), under the shared resource
+limits ([RESOURCE_LIMITS.md](RESOURCE_LIMITS.md)). Reader rendering belongs to
 **MuPDF.js/WASM** in the renderer behind `lib/pdf/pdfEngine.ts` (the only
 MuPDF import site); `components/reader/pdf/` owns layout, virtualization,
 the render queue, and persistence. Byte access flows through

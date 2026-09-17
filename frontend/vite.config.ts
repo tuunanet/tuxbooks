@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
 import path from "node:path";
 
+import { appUiCsp } from "../electron/shared/appCsp";
+
 /**
  * Emits the MuPDF WASM bundle as a build asset and serves it in dev,
  * exposing its URL through a virtual module. The package does not export
@@ -46,6 +48,16 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // X-2 (issue #85) in dev too: the same policy builder the app:// header
+    // uses, with the development variant's documented allowances for
+    // Vite's HMR (inline refresh preamble, injected styles, ws socket).
+    headers: {
+      "Content-Security-Policy": appUiCsp("development"),
+      // Dev servers reload policy changes only if the shell is not cached:
+      // Electron's HTTP cache kept the old index.html (with the old CSP
+      // header) across dev-server restarts and re-applied a stale policy.
+      "Cache-Control": "no-store",
+    },
     watch: {
       ignored: ["**/sidecar/**"],
     },
@@ -95,13 +107,14 @@ export default defineConfig({
         "src/App.tsx": { lines: 80 },
         "src/components/library/**": { lines: 80 },
         "src/components/books/**": { lines: 80 },
-        "src/components/reader/**": { lines: 80 },
+        "src/components/reader/**": { lines: 92 },
         "src/components/search/**": { lines: 80 },
         "src/components/collections/**": { lines: 100 },
         "src/components/settings/**": { lines: 80 },
         "src/components/layout/**": { lines: 80 },
-        "src/state/**": { lines: 80 },
+        "src/state/**": { lines: 92 },
         "src/hooks/**": { lines: 80 },
+        "src/lib/epub/**": { lines: 95 },
         "src/lib/**": { lines: 80 },
       },
     },

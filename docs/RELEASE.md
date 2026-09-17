@@ -10,18 +10,20 @@ are unchanged from the earlier releases.
 
 ## Artifacts
 
-| Artifact                       | Built by               | Purpose                                                            |
-| ------------------------------ | ---------------------- | ------------------------------------------------------------------ |
-| `tuxbooks_<version>_amd64.deb` | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`   |
-| `tuxbooks-<version>.AppImage`  | release workflow (tag) | Portable single-file build for other Linux setups, no installation |
-| `SHA256SUMS.txt`               | release workflow (tag) | Checksums for both artifacts                                       |
-| deb + rpm + AppImage           | `just package` (local) | Local packaging verification; rpm is not published                 |
+| Artifact                           | Built by               | Purpose                                                               |
+| ---------------------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `tuxbooks_<version>_amd64.deb`     | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`      |
+| `tuxbooks-<version>.AppImage`      | release workflow (tag) | Portable single-file build for other Linux setups, no installation    |
+| `SBOM-tuxbooks-<version>.cdx.json` | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md |
+| `SHA256SUMS.txt`                   | release workflow (tag) | Checksums for both artifacts and the SBOM                             |
+| deb + rpm + AppImage               | `just package` (local) | Local packaging verification; rpm is not published                    |
 
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
-PDFium resource. Releases are marked pre-release until 1.0, and the site
-links to the releases list (not `/releases/latest`, which ignores
-pre-releases).
+document worker (`resources/sidecar/tuxbooks-worker`) plus PDFium resource.
+`scripts/check-deb.sh` gates the worker's presence. Releases are marked
+pre-release until 1.0, and the site links to the releases list (not
+`/releases/latest`, which ignores pre-releases).
 
 ### Desktop identity (branding vs technical identifiers)
 
@@ -48,6 +50,21 @@ in packaged builds). Modern Chromium no longer writes the legacy X11
 image), so launcher/taskbar icon identity flows through the desktop entry
 (`Icon=tuxbooks` + `StartupWMClass=tuxbooks`) — which is what the
 packaging gate asserts.
+
+## Packaging and the hardening checks
+
+The packaged app is covered by two checks beyond the packaging gate
+(issue #85, X-1..X-5):
+
+- The boot probe doubles as the packaged hardening smoke: run the
+  `dist-packages/linux-unpacked/tuxbooks` binary (or the installed deb)
+  with `TUXBOOKS_BOOT_PROBE=1` and scratch `TEST_DATABASE_PATH` /
+  `TEST_LIBRARY_PATH` overrides. A healthy run prints
+  `[boot] renderer mounted` and the `tuxbooks://` probe results.
+- The renderer-isolation flags, the app UI CSP, the deny-by-default
+  permission handlers, the navigation allowlist, and the external-link
+  seam all ship in `app.asar`; the security E2E phase proves them live on
+  the same `app://bundle` load path the packaged app uses.
 
 ## The packaging gate
 
@@ -77,23 +94,27 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
      real-binary E2E suites (`just test`, `just test-e2e`), so a tag never
      publishes what has not been proven;
    - **publish** — refuses to run unless the tag exactly matches the
-     version in the packaging manifest, builds deb + AppImage, writes
-     `SHA256SUMS.txt`, and publishes a pre-release with install
-     instructions.
+     version in the packaging manifest, builds deb + AppImage, generates
+     the SBOM (`just sbom`), writes `SHA256SUMS.txt` over the installers
+     and the SBOM, and publishes a pre-release with install instructions.
+
+Before tagging, run `just audit`: release builds must be free of
+untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
 
 ## AppImage specifics
 
 Electron AppImages bundle the whole runtime (Electron + Chromium + Node).
 electron-builder creates them without FUSE; users need FUSE or an
 extract-run environment only to _execute_ the AppImage.
-environment only to _execute_ the AppImage).
 
 ## Deliberate deferrals
 
 - **Signed artifacts:** `SHA256SUMS.txt` only. GPG/(sigstore) signing waits
   until there is key infrastructure and a distribution channel that
   consumes it; checksums over HTTPS from the GitHub release are the
-  pre-1.0 baseline.
+  pre-1.0 baseline. Provenance today: every release artifact is built by
+  the release workflow from an immutable `v*` tag of this repository, with
+  the SBOM (S-4) publishing the exact dependency set the build resolved.
 - **Update strategy:** none built. deb installs upgrade in place via `apt`
   (same package name and identifier), AppImage is replaced by downloading
   the newer file. If auto-update is ever required, that is

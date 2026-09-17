@@ -22,11 +22,53 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use zip::ZipArchive;
 
-use super::metadata::{attribute, local_name, parse_opf, OpfPackage};
+use super::metadata::{attribute, local_name, parse_opf, text_event_content, OpfPackage};
 use super::parser::{
     normalize_path, parse_container_xml, percent_decode, read_entry, resolve_zip_path,
 };
 use super::EpubError;
+use crate::limits::{Deadline, ResourceLimits};
+
+/// Media types the reader refuses to serve (E-1): scripts are not a
+/// supported publication feature, so a book declaring them fails to open
+/// instead of reaching a frame.
+const SCRIPT_MEDIA_TYPES: &[&str] = &[
+    "text/javascript",
+    "application/javascript",
+    "application/x-javascript",
+    "text/ecmascript",
+    "application/ecmascript",
+    "text/jscript",
+    "application/wasm",
+];
+
+/// TOC href schemes that are dropped outright (E-3): they can never be
+/// legitimate navigation targets. Remote web links are kept and intercepted
+/// as external links by the renderer.
+const DANGEROUS_TOC_SCHEMES: &[&str] = &[
+    "javascript:",
+    "vbscript:",
+    "data:",
+    "file:",
+    "blob:",
+    "filesystem:",
+];
+
+/// True when `href` starts with an explicit URI scheme (`http:`, `js:`…).
+/// Percent-encoded references (`%3a…`) do not match, matching URI grammar.
+fn has_explicit_scheme(href: &str) -> bool {
+    let Some(colon) = href.find(':') else {
+        return false;
+    };
+    if colon == 0 {
+        return false;
+    }
+    let mut scheme = href[..colon].chars();
+    if !scheme.next().is_some_and(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    scheme.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
 
 /// Media type the Readium toolkit looks up to find the positions list.
 pub const POSITIONS_MEDIA_TYPE: &str = "application/vnd.readium.position-list+json";
@@ -42,7 +84,7 @@ const CHARS_PER_POSITION: usize = 128;
 /// consumes plus the positions list it cannot operate without
 /// (navigator docs: "In the absence of a positions argument, EpubNavigator
 /// will ... not operate").
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EpubReadingSession {
     /// Serialized RWPM (`application/webpub+json`).
     pub manifest_json: String,
@@ -70,25 +112,49 @@ pub struct TocItem {
 }
 
 /// Build the reading session for an EPUB file: container → OPF → RWPM
-/// manifest + estimated positions list.
-pub fn build_session(path: &Path) -> Result<EpubReadingSession, EpubError> {
-    let file = File::open(path)?;
-    let mut zip = ZipArchive::new(BufReader::new(file))?;
+/// manifest + estimated positions list. Every stage enforces the `limits`
+/// quotas (issue #83).
+pub fn build_session(
+    path: &Path,
+    limits: &ResourceLimits,
+) -> Result<EpubReadingSession, EpubError> {
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    build_session_reader(BufReader::new(File::open(path)?), limits)
+}
 
-    read_mimetype(&mut zip)?;
-    let container =
-        read_entry(&mut zip, "META-INF/container.xml")?.ok_or(EpubError::MissingContainer)?;
-    let opf_path = parse_container_xml(&container)?;
-    let opf_bytes =
-        read_entry(&mut zip, &opf_path)?.ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
+/// Reader-based session core: same behavior as [`build_session`] for any
+/// seekable source. The source-size quota is the path wrapper's job (see
+/// `parser::parse_epub_reader`); the worker checks the fd metadata against
+/// the job's quota table before handing the reader over.
+pub fn build_session_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    limits: &ResourceLimits,
+) -> Result<EpubReadingSession, EpubError> {
+    let deadline = Deadline::start(limits);
+    let mut zip = ZipArchive::new(reader)?;
+    super::parser::check_archive_totals(&mut zip, limits)?;
+    deadline.check()?;
+
+    read_mimetype(&mut zip, limits)?;
+    deadline.check()?;
+    let container = read_entry(&mut zip, "META-INF/container.xml", limits)?
+        .ok_or(EpubError::MissingContainer)?;
+    let opf_path = parse_container_xml(&container, limits)?;
+    deadline.check()?;
+    let opf_bytes = read_entry(&mut zip, &opf_path, limits)?
+        .ok_or_else(|| EpubError::MissingOpf(opf_path.clone()))?;
     let opf_xml = String::from_utf8(opf_bytes).map_err(|e| EpubError::OpfXml(e.to_string()))?;
-    let package = parse_opf(&opf_xml)?;
+    let package = parse_opf(&opf_xml, limits)?;
+    validate_manifest(&package)?;
+    deadline.check()?;
 
     let spine = resolve_spine_entries(&package, &opf_path)?;
-    let toc = parse_toc(&mut zip, &opf_path, &package)?;
+    let toc = parse_toc(&mut zip, &opf_path, &package, limits)?;
+    deadline.check()?;
 
     let manifest_json = build_manifest_json(&package, &spine, &toc, &opf_xml)?;
-    let positions_json = build_positions_json(&mut zip, &spine)?;
+    let positions_json = build_positions_json(&mut zip, &spine, limits, &deadline)?;
+    deadline.check()?;
 
     Ok(EpubReadingSession {
         manifest_json,
@@ -97,16 +163,38 @@ pub fn build_session(path: &Path) -> Result<EpubReadingSession, EpubError> {
 }
 
 /// Read one ZIP entry by path. The path must already be decoded;
-/// `normalize_path` collapses `.`/`..`, so a member path can never traverse
-/// above the archive root.
-pub fn read_member(path: &Path, member: &str) -> Result<Option<Vec<u8>>, EpubError> {
-    let file = File::open(path)?;
-    let mut zip = ZipArchive::new(BufReader::new(file))?;
+/// `validate_member_path` rejects hostile shapes outright (E-5) and
+/// `normalize_path` collapses `.`/`..`, so a member path can never
+/// traverse above the archive root. Member reads enforce the `limits`
+/// quotas (R-1).
+pub fn read_member(
+    path: &Path,
+    member: &str,
+    limits: &ResourceLimits,
+) -> Result<Option<Vec<u8>>, EpubError> {
+    limits.check_source_file(std::fs::metadata(path)?.len())?;
+    read_member_reader(BufReader::new(File::open(path)?), member, limits)
+}
+
+/// Reader-based member core: same behavior as [`read_member`] for any
+/// seekable source; the source-size quota is the path wrapper's job (see
+/// `parser::parse_epub_reader`).
+pub fn read_member_reader<R: Read + Seek>(
+    reader: BufReader<R>,
+    member: &str,
+    limits: &ResourceLimits,
+) -> Result<Option<Vec<u8>>, EpubError> {
+    let mut zip = ZipArchive::new(reader)?;
+    super::parser::check_archive_totals(&mut zip, limits)?;
+    if member.is_empty() {
+        return Ok(None);
+    }
+    super::parser::validate_member_path(member)?;
     let member = normalize_path(member);
     if member.is_empty() {
         return Ok(None);
     }
-    read_entry(&mut zip, &member)
+    read_entry(&mut zip, &member, limits)
 }
 
 /// Best-effort media type for a stored ZIP member, by extension. Frame
@@ -141,18 +229,48 @@ pub fn guess_member_media_type(member: &str) -> &'static str {
     }
 }
 
-fn read_mimetype<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<(), EpubError> {
+fn read_mimetype<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    limits: &ResourceLimits,
+) -> Result<(), EpubError> {
     if zip.is_empty() {
         return Err(EpubError::MissingMimetype);
     }
-    let mut first = zip.by_index(0)?;
+    let first = zip.by_index(0)?;
     if first.name() != "mimetype" {
         return Err(EpubError::MissingMimetype);
     }
+    limits.check_member(first.compressed_size(), first.size())?;
     let mut value = String::new();
-    first.read_to_string(&mut value)?;
+    first
+        .take(limits.max_decompressed_bytes.saturating_add(1))
+        .read_to_string(&mut value)?;
+    if value.len() as u64 > limits.max_decompressed_bytes {
+        return Err(EpubError::Limit(crate::limits::LimitExceeded {
+            limit: "max_decompressed_bytes",
+            detail: "mimetype member over cap".to_string(),
+        }));
+    }
     if value != "application/epub+zip" {
         return Err(EpubError::InvalidMimetype);
+    }
+    Ok(())
+}
+
+/// Manifest-level fences (E-1, E-3) applied before anything is served:
+/// script media types and non-local hrefs fail the session.
+fn validate_manifest(package: &OpfPackage) -> Result<(), EpubError> {
+    for (id, item) in &package.manifest {
+        let media_type = item.media_type.trim().to_ascii_lowercase();
+        if SCRIPT_MEDIA_TYPES.contains(&media_type.as_str()) {
+            return Err(EpubError::ScriptedContent(format!(
+                "manifest item `{id}` declares media type `{}`",
+                item.media_type
+            )));
+        }
+        if has_explicit_scheme(&item.href) {
+            return Err(EpubError::ExternalRef(format!("manifest item `{id}`")));
+        }
     }
     Ok(())
 }
@@ -169,6 +287,9 @@ fn resolve_spine_entries(
                 .manifest
                 .get(idref)
                 .ok_or_else(|| EpubError::BrokenSpine(idref.clone()))?;
+            if has_explicit_scheme(&item.href) {
+                return Err(EpubError::ExternalRef(format!("spine item `{idref}`")));
+            }
             let zip_path = resolve_zip_path(opf_path, &item.href);
             Ok(SpineEntry {
                 encoded: encoded_href(&zip_path),
@@ -310,6 +431,7 @@ fn parse_toc<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     opf_path: &str,
     package: &OpfPackage,
+    limits: &ResourceLimits,
 ) -> Result<Vec<TocItem>, EpubError> {
     if let Some(item) = package
         .manifest
@@ -317,9 +439,9 @@ fn parse_toc<R: Read + Seek>(
         .find(|item| item.has_property("nav"))
     {
         let nav_zip_path = resolve_zip_path(opf_path, &item.href);
-        if let Some(bytes) = read_entry(zip, &nav_zip_path)? {
+        if let Some(bytes) = read_entry(zip, &nav_zip_path, limits)? {
             let xml = String::from_utf8_lossy(&bytes).into_owned();
-            return parse_nav_document(&xml, &nav_zip_path);
+            return parse_nav_document(&xml, &nav_zip_path, limits);
         }
     }
 
@@ -333,9 +455,9 @@ fn parse_toc<R: Read + Seek>(
     if let Some(ncx_id) = ncx_id {
         if let Some(item) = package.manifest.get(&ncx_id) {
             let ncx_zip_path = resolve_zip_path(opf_path, &item.href);
-            if let Some(bytes) = read_entry(zip, &ncx_zip_path)? {
+            if let Some(bytes) = read_entry(zip, &ncx_zip_path, limits)? {
                 let xml = String::from_utf8_lossy(&bytes).into_owned();
-                return parse_ncx_document(&xml, &ncx_zip_path);
+                return parse_ncx_document(&xml, &ncx_zip_path, limits);
             }
         }
     }
@@ -343,10 +465,26 @@ fn parse_toc<R: Read + Seek>(
     Ok(Vec::new())
 }
 
+/// True when a raw TOC href uses a scheme the reader never navigates
+/// (E-3): script/data/file targets are dropped at the source. Remote web
+/// links are kept — the renderer reports them as intercepted external
+/// links.
+fn is_dangerous_toc_href(href: &str) -> bool {
+    let lower = href.trim().to_ascii_lowercase();
+    DANGEROUS_TOC_SCHEMES
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
+}
+
 /// EPUB 3 navigation document: the `<nav epub:type="toc">` list (or, when
 /// none is typed, the first `<nav>`), parsed as nested `ol > li > a` trees.
 /// Other navs (landmarks, page-list) are ignored.
-fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, EpubError> {
+fn parse_nav_document(
+    xml: &str,
+    nav_zip_path: &str,
+    limits: &ResourceLimits,
+) -> Result<Vec<TocItem>, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let nav_dir = match nav_zip_path.rfind('/') {
         Some(idx) => &nav_zip_path[..=idx],
         None => "",
@@ -354,13 +492,22 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
 
     #[derive(Debug)]
     enum Scope {
-        Nav { is_toc: bool, items: Vec<TocItem> },
-        Ol { items: Vec<TocItem> },
-        Li { item: TocItem, label_done: bool },
+        Nav {
+            is_toc: bool,
+            items: Vec<TocItem>,
+        },
+        Ol {
+            items: Vec<TocItem>,
+        },
+        Li {
+            item: TocItem,
+            label_done: bool,
+            skip: bool,
+        },
     }
 
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut stack: Vec<Scope> = Vec::new();
     let mut finished: Vec<(bool, Vec<TocItem>)> = Vec::new();
@@ -377,7 +524,10 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                             .clone()
                             .flatten()
                             .filter(|attr| local_name(attr.key.as_ref()) == "type")
-                            .filter_map(|attr| attr.unescape_value().ok())
+                            .filter_map(|attr| {
+                                attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                                    .ok()
+                            })
                             .any(|value| {
                                 value
                                     .split_whitespace()
@@ -393,9 +543,11 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                         Some(Scope::Nav { .. }) | Some(Scope::Ol { .. }) | Some(Scope::Li { .. })
                     ) =>
                     {
+                        limits.check_xml_depth(stack.len() + 1)?;
                         stack.push(Scope::Ol { items: Vec::new() });
                     }
                     "li" if matches!(stack.last(), Some(Scope::Ol { .. })) => {
+                        limits.check_xml_depth(stack.len() + 1)?;
                         stack.push(Scope::Li {
                             item: TocItem {
                                 label: String::new(),
@@ -403,14 +555,24 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                                 children: Vec::new(),
                             },
                             label_done: false,
+                            skip: false,
                         });
                     }
                     "a" | "span" if matches!(stack.last(), Some(Scope::Li { .. })) => {
                         if local == "a" {
                             if let Some(href) = attribute(&e.attributes(), "href") {
-                                if let Some(Scope::Li { item, label_done }) = stack.last_mut() {
+                                if let Some(Scope::Li {
+                                    item,
+                                    label_done,
+                                    skip,
+                                }) = stack.last_mut()
+                                {
                                     if !*label_done {
-                                        item.href = resolve_nav_href(nav_dir, &href);
+                                        if is_dangerous_toc_href(&href) {
+                                            *skip = true;
+                                        } else {
+                                            item.href = resolve_nav_href(nav_dir, &href);
+                                        }
                                     }
                                 }
                             }
@@ -420,7 +582,7 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if matches!(
                     stack.last(),
                     Some(Scope::Li {
@@ -428,7 +590,7 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                         ..
                     })
                 ) {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
@@ -437,7 +599,10 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                 let local = local_name(e.name().into_inner());
                 match local {
                     "a" | "span" => {
-                        if let Some(Scope::Li { item, label_done }) = stack.last_mut() {
+                        if let Some(Scope::Li {
+                            item, label_done, ..
+                        }) = stack.last_mut()
+                        {
                             if !*label_done {
                                 item.label = text_buf.trim().to_string();
                                 *label_done = true;
@@ -446,7 +611,10 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                         text_buf.clear();
                     }
                     "li" => {
-                        if let Some(Scope::Li { item, .. }) = stack.pop() {
+                        if let Some(Scope::Li { item, skip, .. }) = stack.pop() {
+                            if skip {
+                                continue;
+                            }
                             if let Some(Scope::Ol { items }) = stack.last_mut() {
                                 items.push(item);
                             }
@@ -461,7 +629,11 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
                             // nested list, or the nav itself for the top-level
                             // toc list.
                             match stack.last_mut() {
-                                Some(Scope::Li { item, .. }) => item.children = items,
+                                Some(Scope::Li { item, skip, .. }) => {
+                                    if !*skip {
+                                        item.children = items;
+                                    }
+                                }
                                 Some(Scope::Nav {
                                     items: nav_items, ..
                                 }) => nav_items.extend(items),
@@ -494,18 +666,26 @@ fn parse_nav_document(xml: &str, nav_zip_path: &str) -> Result<Vec<TocItem>, Epu
 
 /// EPUB 2 NCX table of contents: `navMap > navPoint > (navLabel > text,
 /// content[src])`, nested `navPoint` children.
-fn parse_ncx_document(xml: &str, ncx_zip_path: &str) -> Result<Vec<TocItem>, EpubError> {
+fn parse_ncx_document(
+    xml: &str,
+    ncx_zip_path: &str,
+    limits: &ResourceLimits,
+) -> Result<Vec<TocItem>, EpubError> {
+    limits.check_xml_bytes(xml.len())?;
     let ncx_dir = match ncx_zip_path.rfind('/') {
         Some(idx) => &ncx_zip_path[..=idx],
         None => "",
     };
 
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut roots: Vec<TocItem> = Vec::new();
     // Open navPoints, outermost first; each closing navPoint completes one.
     let mut open_points: Vec<TocItem> = Vec::new();
+    // Parallel to open_points: navPoints whose content src is dangerous are
+    // completed but dropped (E-3).
+    let mut open_skips: Vec<bool> = Vec::new();
     let mut text_buf = String::new();
     let mut in_nav_label = false;
 
@@ -515,26 +695,34 @@ fn parse_ncx_document(xml: &str, ncx_zip_path: &str) -> Result<Vec<TocItem>, Epu
                 let local = local_name(e.name().into_inner());
                 match local {
                     "navPoint" => {
+                        limits.check_xml_depth(open_points.len() + 1)?;
                         open_points.push(TocItem {
                             label: String::new(),
                             href: String::new(),
                             children: Vec::new(),
                         });
+                        open_skips.push(false);
                     }
                     "navLabel" => in_nav_label = true,
                     "content" => {
                         if let Some(point) = open_points.last_mut() {
                             if let Some(src) = attribute(&e.attributes(), "src") {
-                                point.href = resolve_nav_href(ncx_dir, &src);
+                                if is_dangerous_toc_href(&src) {
+                                    if let Some(skip) = open_skips.last_mut() {
+                                        *skip = true;
+                                    }
+                                } else {
+                                    point.href = resolve_nav_href(ncx_dir, &src);
+                                }
                             }
                         }
                     }
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if in_nav_label {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         text_buf.push_str(&decoded);
                     }
                 }
@@ -550,7 +738,11 @@ fn parse_ncx_document(xml: &str, ncx_zip_path: &str) -> Result<Vec<TocItem>, Epu
                         text_buf.clear();
                     }
                     "navPoint" => {
+                        let skip = open_skips.pop().unwrap_or(false);
                         if let Some(point) = open_points.pop() {
+                            if skip {
+                                continue;
+                            }
                             match open_points.last_mut() {
                                 Some(parent) => parent.children.push(point),
                                 None => roots.push(point),
@@ -591,7 +783,7 @@ fn resolve_nav_href(base_dir: &str, href: &str) -> String {
 /// per-itemref `layout="pre-paginated"` on every spine item).
 fn detect_fixed_layout(opf_xml: &str) -> bool {
     let mut reader = Reader::from_str(opf_xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let mut capturing_rendition_meta = false;
     let mut rendition_layout: Option<String> = None;
@@ -623,9 +815,9 @@ fn detect_fixed_layout(opf_xml: &str) -> bool {
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if capturing_rendition_meta {
-                    if let Ok(value) = t.unescape() {
+                    if let Some(value) = text_event_content(&event) {
                         rendition_layout = Some(value.trim().to_string());
                     }
                 }
@@ -648,7 +840,7 @@ fn detect_fixed_layout(opf_xml: &str) -> bool {
 /// The spine's declared page progression (`page-progression-direction`).
 fn detect_page_progression(opf_xml: &str) -> &'static str {
     let mut reader = Reader::from_str(opf_xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
@@ -678,15 +870,26 @@ fn detect_page_progression(opf_xml: &str) -> &'static str {
 fn build_positions_json<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     spine: &[SpineEntry],
+    limits: &ResourceLimits,
+    deadline: &Deadline,
 ) -> Result<String, EpubError> {
     let mut item_texts: Vec<(String, usize)> = Vec::with_capacity(spine.len());
+    // The declared-size pre-scan caps honest archives; this running total
+    // caps what this stage can actually decompress when a header lies about
+    // its size, so repeated reads cannot exceed the archive byte budget.
+    let mut bytes_read: u64 = 0;
     for entry in spine {
+        deadline.check()?;
         let chars =
             if entry.media_type == "application/xhtml+xml" || entry.media_type == "text/html" {
-                match read_entry(zip, &entry.zip_path)? {
-                    Some(bytes) => extract_visible_text(&String::from_utf8_lossy(&bytes))
-                        .chars()
-                        .count(),
+                match read_entry(zip, &entry.zip_path, limits)? {
+                    Some(bytes) => {
+                        bytes_read += bytes.len() as u64;
+                        limits.check_total_uncompressed(bytes_read)?;
+                        extract_visible_text(&String::from_utf8_lossy(&bytes), &entry.encoded)?
+                            .chars()
+                            .count()
+                    }
                     None => 0,
                 }
             } else {
@@ -753,8 +956,10 @@ fn clamp01(value: f64) -> f64 {
 }
 
 /// Visible text of an XHTML document: everything outside `head`, `title`,
-/// `style`, and `script`, entities unescaped, whitespace collapsed.
-fn extract_visible_text(xml: &str) -> String {
+/// `style`, and `script`, entities unescaped, whitespace collapsed. A
+/// `<script>` element anywhere in the document fails the session (E-1):
+/// scripted EPUBs are not a supported feature, so the book never opens.
+fn extract_visible_text(xml: &str, label: &str) -> Result<String, EpubError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
 
@@ -765,13 +970,19 @@ fn extract_visible_text(xml: &str) -> String {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                if skip_depth > 0 || is_skipped_element(local_name(e.name().into_inner())) {
+                let name = local_name(e.name().into_inner());
+                if name == "script" && skip_depth == 0 {
+                    return Err(EpubError::ScriptedContent(format!(
+                        "spine document `{label}` contains a `<script>` element"
+                    )));
+                }
+                if skip_depth > 0 || is_skipped_element(name) {
                     skip_depth += 1;
                 }
             }
-            Ok(Event::Text(ref t)) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if skip_depth == 0 {
-                    if let Ok(decoded) = t.unescape() {
+                    if let Some(decoded) = text_event_content(&event) {
                         for word in decoded.split_whitespace() {
                             if !out.is_empty() {
                                 out.push(' ');
@@ -790,7 +1001,7 @@ fn extract_visible_text(xml: &str) -> String {
         }
     }
 
-    out
+    Ok(out)
 }
 
 fn is_skipped_element(name: &str) -> bool {
@@ -801,6 +1012,328 @@ fn is_skipped_element(name: &str) -> bool {
 mod tests {
     use super::super::parser::tests_support::write_zip;
     use super::*;
+    use crate::limits::ResourceLimits;
+
+    #[test]
+    fn read_member_rejects_oversized_member() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("member.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("big.bin", &vec![0u8; 4 << 10]),
+            ],
+        );
+        let tight = ResourceLimits {
+            max_decompressed_bytes: 1_024,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = read_member(&path, "big.bin", &tight).unwrap_err();
+        assert!(matches!(err, EpubError::Limit(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn read_member_rejects_hostile_member_paths_e5() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("members.epub");
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                (
+                    "OEBPS/chapter1.xhtml",
+                    b"<html><body>hi</body></html>".as_slice(),
+                ),
+            ],
+        );
+        for member in [
+            "../secret.txt",
+            "OEBPS/../../../etc/passwd",
+            "..\\windows\\system32",
+            "OEBPS\\..\\x",
+            "/etc/passwd",
+            "C:/Windows/system32/config",
+            "a\0b",
+            "OEBPS/\x01x",
+            "line\nbreak",
+        ] {
+            let err = read_member(&path, member, &ResourceLimits::DEFAULTS).unwrap_err();
+            assert!(
+                matches!(err, EpubError::InvalidMemberPath(_)),
+                "`{member}`: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_documents_leak_no_filesystem_paths_e4() {
+        let (tmp, path) = session_book();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let file_path = path.to_string_lossy().into_owned();
+        let dir_path = tmp.path().to_string_lossy().into_owned();
+        for document in [&session.manifest_json, &session.positions_json] {
+            assert!(!document.contains(&file_path), "{document}");
+            assert!(!document.contains(&dir_path), "{document}");
+        }
+    }
+
+    /// Patch a ZIP entry's declared uncompressed size down to `new_size` in
+    /// both the local header and the central directory, leaving the deflate
+    /// stream and CRC intact: the header lies about its size, a hostile-file
+    /// shape the zip crate's writer cannot produce.
+    fn patch_declared_size(zip: &mut [u8], entry_name: &str, new_size: u32) {
+        let name = entry_name.as_bytes();
+        let mut i = 0;
+        while i + 30 <= zip.len() {
+            match &zip[i..i + 4] {
+                b"PK\x03\x04" => {
+                    let name_len = u16::from_le_bytes([zip[i + 26], zip[i + 27]]) as usize;
+                    if i + 30 + name_len <= zip.len() && &zip[i + 30..i + 30 + name_len] == name {
+                        zip[i + 22..i + 26].copy_from_slice(&new_size.to_le_bytes());
+                    }
+                }
+                b"PK\x01\x02" => {
+                    let name_len = u16::from_le_bytes([zip[i + 28], zip[i + 29]]) as usize;
+                    if i + 46 + name_len <= zip.len() && &zip[i + 46..i + 46 + name_len] == name {
+                        zip[i + 24..i + 28].copy_from_slice(&new_size.to_le_bytes());
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn build_session_bounds_cumulative_reads_against_lying_headers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("lying.epub");
+        let opf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:uuid:x</dc:identifier>
+    <dc:title>Lying Book</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c3" href="chapter3.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/></spine>
+</package>"#;
+        // 1 MiB of text per chapter deflates to ~1 KiB; the declared sizes
+        // are then patched down to 10 bytes, so the declared archive total
+        // passes while the actual per-chapter read is 1 MiB.
+        let chapters: Vec<(String, Vec<u8>)> = ["one", "two", "three"]
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                (
+                    format!("chapter{}.xhtml", i + 1),
+                    format!("<html><body>{}</body></html>", label.repeat(1 << 20)).into_bytes(),
+                )
+            })
+            .collect();
+        let static_entries: Vec<(String, Vec<u8>)> = vec![
+            ("mimetype", b"application/epub+zip".to_vec()),
+            (
+                "META-INF/container.xml",
+                br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>"#.to_vec(),
+            ),
+            ("content.opf", opf.as_bytes().to_vec()),
+        ]
+        .into_iter()
+        .map(|(name, data)| (name.to_string(), data))
+        .collect();
+        let entries: Vec<(String, Vec<u8>)> = static_entries.into_iter().chain(chapters).collect();
+        let borrowed: Vec<(&str, &[u8])> = entries
+            .iter()
+            .map(|(name, data)| (name.as_str(), data.as_slice()))
+            .collect();
+        write_zip(&path, &borrowed);
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        for name in ["chapter1.xhtml", "chapter2.xhtml", "chapter3.xhtml"] {
+            patch_declared_size(&mut bytes, name, 10);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+
+        let tight = ResourceLimits {
+            max_total_uncompressed_bytes: 2_000,
+            ..ResourceLimits::DEFAULTS
+        };
+        match build_session(&path, &tight) {
+            Err(EpubError::Limit(err)) => assert_eq!(err.limit, "max_total_uncompressed_bytes"),
+            Ok(_) => panic!("build_session accepted lying headers past the byte budget"),
+            Err(other) => panic!("expected limit error, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_rejects_script_media_types_e1() {
+        for media_type in [
+            "text/javascript",
+            "application/javascript",
+            "application/x-javascript",
+            "text/ecmascript",
+            "application/ecmascript",
+            "text/jscript",
+            "application/wasm",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("scripted.epub");
+            let opf = OPF.replace(
+                r#"<item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>"#,
+                &format!(
+                    r#"<item id="c2" href="chapter2.xhtml" media-type="application/xhtml+xml"/><item id="js" href="evil.js" media-type="{media_type}"/>"#
+                ),
+            );
+            write_zip(
+                &path,
+                &[
+                    ("mimetype", "application/epub+zip".as_bytes()),
+                    ("META-INF/container.xml", container()),
+                    ("content.opf", opf.as_bytes()),
+                    ("nav.xhtml", NAV.as_bytes()),
+                    ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                    ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+                    ("evil.js", b"alert(1)".as_slice()),
+                ],
+            );
+            let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+            assert!(
+                matches!(err, EpubError::ScriptedContent(_)),
+                "media type {media_type}: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_rejects_spine_documents_containing_scripts_e1() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("inline-script.epub");
+        let scripted = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><p>hi</p><script>alert(1)</script></body></html>"#;
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", scripted.as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn session_rejects_remote_spine_hrefs_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remote.epub");
+        let opf = OPF.replace(
+            r#"href="chapter2.xhtml""#,
+            r#"href="https://evil.example/x.xhtml""#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", opf.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ExternalRef(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn session_rejects_script_scheme_spine_hrefs_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("scheme.epub");
+        let opf = OPF.replace(r#"href="chapter2.xhtml""#, r#"href="javascript:alert(1)""#);
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", opf.as_bytes()),
+                ("nav.xhtml", NAV.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(matches!(err, EpubError::ExternalRef(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn toc_entries_with_dangerous_schemes_are_dropped_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("evil-toc.epub");
+        let nav = NAV.replace(
+            r#"<li><a href="chapter2.xhtml">Two</a>"#,
+            r#"<li><a href="javascript:alert(1)">Evil</a></li><li><a href="chapter2.xhtml">Two</a>"#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", nav.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
+        let toc = manifest["toc"].as_array().unwrap();
+        assert_eq!(
+            toc.len(),
+            2,
+            "the javascript: entry must be dropped: {toc:?}"
+        );
+        assert!(!serde_json::to_string(toc)
+            .unwrap()
+            .to_lowercase()
+            .contains("javascript:"));
+    }
+
+    #[test]
+    fn toc_keeps_remote_links_for_external_interception_e3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remote-toc.epub");
+        let nav = NAV.replace(
+            r#"<li><a href="chapter2.xhtml">Two</a>"#,
+            r#"<li><a href="https://vendor.example/book">Buy</a></li><li><a href="chapter2.xhtml">Two</a>"#,
+        );
+        write_zip(
+            &path,
+            &[
+                ("mimetype", "application/epub+zip".as_bytes()),
+                ("META-INF/container.xml", container()),
+                ("content.opf", OPF.as_bytes()),
+                ("nav.xhtml", nav.as_bytes()),
+                ("chapter1.xhtml", long_chapter("One", 4).as_bytes()),
+                ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
+            ],
+        );
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
+        let toc = manifest["toc"].as_array().unwrap();
+        assert_eq!(
+            toc.len(),
+            3,
+            "remote toc links stay for interception: {toc:?}"
+        );
+    }
 
     const OPF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
@@ -865,7 +1398,7 @@ mod tests {
     #[test]
     fn builds_manifest_with_reading_order_and_toc() {
         let (_tmp, path) = session_book();
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
 
         assert_eq!(manifest["metadata"]["title"], "Session Book");
@@ -898,7 +1431,7 @@ mod tests {
     #[test]
     fn builds_positions_across_spine() {
         let (_tmp, path) = session_book();
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let list: serde_json::Value = serde_json::from_str(&session.positions_json).unwrap();
 
         let positions = list["positions"].as_array().unwrap();
@@ -958,7 +1491,7 @@ mod tests {
                 ),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(
             manifest["readingOrder"][0]["href"],
@@ -987,7 +1520,7 @@ mod tests {
                 ("chapter2.xhtml", b"<html><body>y</body></html>".as_slice()),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(manifest["metadata"]["layout"], "fixed");
     }
@@ -1008,14 +1541,26 @@ mod tests {
             ],
         );
         assert_eq!(
-            read_member(&path, "OEBPS/chapter1.xhtml").unwrap().unwrap(),
+            read_member(&path, "OEBPS/chapter1.xhtml", &ResourceLimits::DEFAULTS)
+                .unwrap()
+                .unwrap(),
             b"<html><body>hi</body></html>"
         );
-        let png = read_member(&path, "OEBPS/img/pic.png").unwrap().unwrap();
+        let png = read_member(&path, "OEBPS/img/pic.png", &ResourceLimits::DEFAULTS)
+            .unwrap()
+            .unwrap();
         assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
-        // Traversal collapses to the root and misses instead of escaping.
-        assert!(read_member(&path, "../etc/passwd").unwrap().is_none());
-        assert!(read_member(&path, "OEBPS/missing.xhtml").unwrap().is_none());
+        // Traversal is rejected outright, not merely missed.
+        let err = read_member(&path, "../etc/passwd", &ResourceLimits::DEFAULTS).unwrap_err();
+        assert!(
+            matches!(err, EpubError::InvalidMemberPath(_)),
+            "got: {err:?}"
+        );
+        assert!(
+            read_member(&path, "OEBPS/missing.xhtml", &ResourceLimits::DEFAULTS)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1033,10 +1578,20 @@ mod tests {
     }
 
     #[test]
-    fn visible_text_excludes_head_and_scripts() {
+    fn visible_text_excludes_head_and_styles() {
         let xml = r#"<html><head><title>Do not leak</title><style>p { color: red }</style></head>
-            <body><p>Hello   world</p><script>ignored()</script><p>Second &amp; last</p></body></html>"#;
-        assert_eq!(extract_visible_text(xml), "Hello world Second & last");
+            <body><p>Hello   world</p><p>Second &amp; last</p></body></html>"#;
+        assert_eq!(
+            extract_visible_text(xml, "chapter1.xhtml").unwrap(),
+            "Hello world Second & last"
+        );
+    }
+
+    #[test]
+    fn visible_text_reports_spine_documents_with_scripts() {
+        let xml = r#"<html><body><p>Hello</p><script>alert(1)</script></body></html>"#;
+        let err = extract_visible_text(xml, "chapter1.xhtml").unwrap_err();
+        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
     }
 
     #[test]
@@ -1072,7 +1627,7 @@ mod tests {
                 ("c1.xhtml", b"<html><body>c</body></html>".as_slice()),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         let toc = manifest["toc"].as_array().unwrap();
         assert_eq!(toc.len(), 1);
@@ -1106,7 +1661,7 @@ mod tests {
                 ),
             ],
         );
-        let session = build_session(&path).unwrap();
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&session.manifest_json).unwrap();
         assert_eq!(manifest["toc"].as_array().unwrap().len(), 0);
         let list: serde_json::Value = serde_json::from_str(&session.positions_json).unwrap();
@@ -1122,7 +1677,7 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let path = tmp.path().join("fuzz.epub");
             std::fs::write(&path, &data).unwrap();
-            let _ = build_session(&path);
+            let _ = build_session(&path, &ResourceLimits::DEFAULTS);
         }
     }
 }

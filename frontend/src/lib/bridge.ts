@@ -43,7 +43,7 @@ export interface TuxbooksApi {
   pickBookFile(): Promise<string | null>;
   pickBookFiles(): Promise<string[]>;
   pickCoverImage(): Promise<string | null>;
-  revealInFileManager(path: string): Promise<void>;
+  revealBook(bookId: number): Promise<void>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
 }
@@ -294,9 +294,9 @@ export function pickBookFiles(): Promise<string[]> {
   return tuxbooks().pickBookFiles();
 }
 
-/** Reveal a file in the system file manager (does not open it). */
-export function revealInFileManager(path: string): Promise<void> {
-  return tuxbooks().revealInFileManager(path);
+/** Reveal a stored book's file in the system file manager (by book id). */
+export function revealBook(bookId: number): Promise<void> {
+  return tuxbooks().revealBook(bookId);
 }
 
 /** Absolute filesystem path of a dropped File (sandboxed preload helper). */
@@ -304,7 +304,13 @@ export function pathForFile(file: File): string {
   return tuxbooks().pathForFile(file);
 }
 
-/** `tuxbooks://cover/<encoded path>` for an extracted cover image on disk. */
+/**
+ * `tuxbooks://cover/<name>` for an extracted cover image. Only the cover's
+ * file name crosses the protocol boundary; main resolves it inside the
+ * artwork cache, so the stored absolute path never round-trips through the
+ * renderer (issue #84 T-1).
+ */
 export function coverFileUrl(coverPath: string): string {
-  return `tuxbooks://cover/${encodeURIComponent(coverPath)}`;
+  const lastSeparator = Math.max(coverPath.lastIndexOf("/"), coverPath.lastIndexOf("\\"));
+  return `tuxbooks://cover/${encodeURIComponent(coverPath.slice(lastSeparator + 1))}`;
 }

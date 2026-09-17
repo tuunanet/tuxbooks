@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tuxbooks_lib::epub::parse_epub;
+use tuxbooks_lib::limits::ResourceLimits;
 
 fn corpus_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/epub")
@@ -59,7 +60,7 @@ fn valid_core_fixtures_parse_for_both_generations() {
             fixtures.len()
         );
         for path in fixtures {
-            let book = parse_epub(&path).unwrap_or_else(|err| {
+            let book = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_or_else(|err| {
                 panic!("core fixture {} must parse, got: {err:?}", path.display())
             });
             assert!(
@@ -86,7 +87,7 @@ fn malformed_core_fixtures_are_rejected_for_both_generations() {
             fixtures.len()
         );
         for path in fixtures {
-            let result = parse_epub(&path);
+            let result = parse_epub(&path, &ResourceLimits::DEFAULTS);
             assert!(
                 result.is_err(),
                 "malformed fixture {} must be rejected, but parsed successfully",

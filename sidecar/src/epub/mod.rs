@@ -1,12 +1,23 @@
+//! EPUB parsing is worker-internal (ADR 0001 D5): the path-based entry
+//! points exist for tests and as thin wrappers over the reader cores, and
+//! services must reach parsing only through the worker client
+//! (`worker::WorkerClient`), never these functions directly.
+
 pub mod metadata;
 pub mod parser;
 pub mod session;
 pub mod writer;
 
 pub use metadata::EpubMetadata;
-pub use parser::{parse_epub, read_file_properties, CoverImage, EpubBook};
-pub use session::{build_session, guess_member_media_type, read_member, EpubReadingSession};
-pub use writer::write_metadata;
+pub use parser::{
+    file_properties_from_metadata, parse_container_xml, parse_epub, parse_epub_reader,
+    read_file_properties, read_file_properties_reader, CoverImage, EpubBook,
+};
+pub use session::{
+    build_session, build_session_reader, guess_member_media_type, read_member, read_member_reader,
+    EpubReadingSession,
+};
+pub use writer::{rewrite_epub_bytes, write_metadata};
 
 /// Errors that can occur while opening or parsing an EPUB file.
 #[derive(Debug, thiserror::Error)]
@@ -35,11 +46,29 @@ pub enum EpubError {
     BrokenSpine(String),
     #[error("manifest item `{0}` has no href")]
     ManifestItemWithoutHref(String),
+    #[error("EPUB carries scripted content, which the reader does not support: {0}")]
+    ScriptedContent(String),
+    #[error("EPUB references a non-local resource: {0}")]
+    ExternalRef(String),
+    #[error("invalid EPUB member path: {0}")]
+    InvalidMemberPath(String),
+    #[error("{0}")]
+    Limit(#[from] crate::limits::LimitExceeded),
+}
+
+impl From<crate::limits::ReadBoundedError> for EpubError {
+    fn from(err: crate::limits::ReadBoundedError) -> Self {
+        match err {
+            crate::limits::ReadBoundedError::Limit(limit) => EpubError::Limit(limit),
+            crate::limits::ReadBoundedError::Io(io) => EpubError::Io(io),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::epub::parser::tests_support::write_zip;
+    use crate::limits::ResourceLimits;
 
     use super::*;
 
@@ -48,7 +77,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("garbage.epub");
         std::fs::write(&path, b"definitely not a zip archive").unwrap();
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::Zip(_)), "got: {err:?}");
     }
 
@@ -57,7 +86,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("empty.epub");
         write_zip(&path, &[]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingMimetype), "got: {err:?}");
     }
 
@@ -66,7 +95,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("wrong.epub");
         write_zip(&path, &[("mimetype", b"application/zip")]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::InvalidMimetype), "got: {err:?}");
     }
 
@@ -81,7 +110,7 @@ mod tests {
                 ("mimetype", "application/epub+zip".as_bytes()),
             ],
         );
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingMimetype), "got: {err:?}");
     }
 
@@ -90,7 +119,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nocontainer.epub");
         write_zip(&path, &[("mimetype", "application/epub+zip".as_bytes())]);
-        let err = parse_epub(&path).unwrap_err();
+        let err = parse_epub(&path, &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(matches!(err, EpubError::MissingContainer), "got: {err:?}");
     }
 }

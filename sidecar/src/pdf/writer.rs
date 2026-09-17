@@ -13,11 +13,29 @@ use std::path::Path;
 use lopdf::{Dictionary, Document, Object, StringFormat};
 
 use super::{PdfError, PdfMetadata};
+use crate::limits::ResourceLimits;
 
 /// Rewrite `/Title`, `/Author`, and `/Subject`, preserving every other Info
 /// entry. Replaces the file at `path` atomically.
 pub fn write_metadata(path: &Path, metadata: &PdfMetadata) -> Result<(), PdfError> {
-    let mut document = Document::load(path).map_err(|err| PdfError::Parse(err.to_string()))?;
+    let buffer = rewrite_pdf_bytes(&std::fs::read(path)?, metadata, &ResourceLimits::DEFAULTS)?;
+    crate::backup_file_once(path)?;
+    crate::atomic_replace(path, &buffer)?;
+    Ok(())
+}
+
+/// Bytes-based rewrite core: returns the full rewritten PDF bytes. The
+/// caller owns the write (the sidecar keeps `backup_file_once` +
+/// `atomic_replace`; the worker only returns the buffer). Enforces the
+/// source quota before loading the document.
+pub fn rewrite_pdf_bytes(
+    bytes: &[u8],
+    metadata: &PdfMetadata,
+    limits: &ResourceLimits,
+) -> Result<Vec<u8>, PdfError> {
+    limits.check_source_file(bytes.len() as u64)?;
+    let mut document = Document::load_mem_with_options(bytes, super::parser::load_options(limits))
+        .map_err(super::parser::load_error)?;
 
     let mut info = existing_info(&document).unwrap_or_default();
     set_required(&mut info, b"Title", &metadata.title);
@@ -41,9 +59,7 @@ pub fn write_metadata(path: &Path, metadata: &PdfMetadata) -> Result<(), PdfErro
     document
         .save_to(&mut buffer)
         .map_err(|err| PdfError::Parse(err.to_string()))?;
-    crate::backup_file_once(path)?;
-    crate::atomic_replace(path, &buffer)?;
-    Ok(())
+    Ok(buffer)
 }
 
 /// The existing Info dictionary, following one indirect-reference hop.
@@ -107,7 +123,7 @@ mod tests {
         )
         .unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "New Title");
         assert_eq!(parsed.metadata.author.as_deref(), Some("New Author"));
         assert_eq!(parsed.metadata.description.as_deref(), Some("A subject"));
@@ -139,7 +155,7 @@ mod tests {
 
         write_metadata(&path, &metadata("Added Title", Some("Someone"), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Added Title");
         assert_eq!(parsed.metadata.author.as_deref(), Some("Someone"));
         assert_eq!(parsed.metadata.description, None);
@@ -156,7 +172,7 @@ mod tests {
 
         write_metadata(&path, &metadata("T", Some("   "), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.author, None);
         assert_eq!(parsed.metadata.description, None);
     }
@@ -168,7 +184,7 @@ mod tests {
 
         write_metadata(&path, &metadata("Übermensch — naïve", Some("Åsa"), None)).unwrap();
 
-        let parsed = parse_pdf(&path).unwrap();
+        let parsed = parse_pdf(&path, &crate::limits::ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(parsed.metadata.title, "Übermensch — naïve");
         assert_eq!(parsed.metadata.author.as_deref(), Some("Åsa"));
     }

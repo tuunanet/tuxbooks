@@ -1,0 +1,14 @@
+# cargo-audit triage (issue #89, S-2): every ignored advisory carries the
+# RUSTSEC id, the reason it is accepted, and a revisit date. Findings
+# without an entry here fail the gate (.github/workflows/audit.yml,
+# `just audit`). Policy: docs/SUPPLY_CHAIN.md.
+[advisories]
+ignore = [
+  # 2026-09-16: RUSTSEC-2023-0071, Marvin key-recovery timing side channel
+  # (medium, no fixed release). `rsa` enters Cargo.lock only as an optional
+  # dependency of sqlx-mysql; the sidecar builds sqlx with the sqlite
+  # feature only, so the crate is never compiled into any shipped binary
+  # and no RSA operation is reachable. Revisit when sqlx drops sqlx-mysql
+  # from its dependency tree or an rsa fix ships.
+  "RUSTSEC-2023-0071",
+]

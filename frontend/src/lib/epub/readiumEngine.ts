@@ -16,8 +16,12 @@
  * convert through `lib/epub/progressMigration.ts` at restore/jump time.
  *
  * Content renders in same-origin sandboxed iframes (blob: URLs built by the
- * navigator); scripted EPUB content is blocked by the application CSP, and
- * external links are intercepted by `handleLocator`, never navigated.
+ * navigator). Every document the navigator reads flows through the content
+ * policy (`lib/epub/contentPolicy.ts`): requests are confined to the
+ * session base, document text is sanitized and a strict frame CSP is
+ * injected before anything parses it, loaded frames get a DOM belt, and
+ * scripted EPUB content is blocked by the intersecting CSPs. External links
+ * are intercepted by `handleLocator`, never navigated.
  */
 
 import { HttpFetcher, Link, Locator, Manifest, Publication } from "@readium/shared";
@@ -28,6 +32,12 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
+import {
+  classifyPublicationHref,
+  policyFetchClient,
+  publicationBaseUrl,
+  sanitizeFrameDocument,
+} from "./contentPolicy";
 import {
   epubFontSizeRatio,
   epubFontFamilyPreference,
@@ -217,6 +227,10 @@ export class ReadiumEpubHandle {
   private readonly fetcher: HttpFetcher;
   private readonly positions: Locator[];
   private readonly mediaTypes: Map<string, string>;
+  /** Appearance last submitted through setAppearance; re-applied after a
+   * navigator rebuild, which starts every new navigator with empty
+   * preferences and would otherwise drop the user theme mid-session. */
+  private lastAppearance: EpubAppearance | null = null;
   private navigator: EpubNavigator | null = null;
   private readonly host: HTMLDivElement;
   private readonly container: HTMLDivElement;
@@ -248,13 +262,20 @@ export class ReadiumEpubHandle {
 
   private constructor(bookId: number, manifestJson: unknown, positionsJson: unknown) {
     this.bookId = bookId;
-    const sessionBaseUrl = `tuxbooks://book/${bookId}/`;
+    const sessionBaseUrl = publicationBaseUrl(bookId);
 
     const manifest = Manifest.deserialize(manifestJson);
     if (!manifest) throw new Error("EPUB session manifest is not a valid webpub manifest");
     manifest.setSelfLink(`${sessionBaseUrl}manifest.json`);
 
-    const fetcher = new HttpFetcher(undefined, sessionBaseUrl);
+    const fetcher = new HttpFetcher(
+      policyFetchClient(
+        sessionBaseUrl,
+        undefined,
+        (memberHref) => this.mediaTypes.get(memberHref) ?? this.fuzzyMediaType(memberHref),
+      ),
+      sessionBaseUrl,
+    );
     this.fetcher = fetcher;
     this.publication = new Publication({ manifest, fetcher });
 
@@ -287,6 +308,35 @@ export class ReadiumEpubHandle {
 
     this.toc = mapToc(this.publication.toc?.items ?? []);
     this.collectTocLabels(this.toc);
+  }
+
+  /**
+   * Manifest media type for a member href when the exact key missed: the
+   * toolkit requests resolved URLs whose href may differ from the manifest
+   * spelling by a path prefix or percent-encoding, and the fence's
+   * XML-vs-HTML decision (and locator deserialization) must follow the
+   * manifest type, not the transport header.
+   */
+  private fuzzyMediaType(memberHref: string): string | null {
+    let decoded = memberHref;
+    try {
+      decoded = decodeURIComponent(memberHref);
+    } catch {
+      /* keep the raw form */
+    }
+    for (const [href, type] of this.mediaTypes) {
+      if (href === memberHref || href.endsWith(memberHref) || decoded.endsWith(href)) {
+        return type;
+      }
+      let decodedKey = href;
+      try {
+        decodedKey = decodeURIComponent(href);
+      } catch {
+        /* keep the raw form */
+      }
+      if (decodedKey === decoded) return type;
+    }
+    return null;
   }
 
   /** Fetches the session and prepares the publication. Not yet rendering. */
@@ -364,6 +414,7 @@ export class ReadiumEpubHandle {
         { preferences: {}, defaults: {} },
       );
       this.navigator = navigator;
+      if (this.lastAppearance !== null) void this.setAppearance(this.lastAppearance);
       // The toolkit's frame-comms handshake can drop an ack under load,
       // leaving load() unsettled forever (the reader wedges on a blank
       // surface). Bound each attempt; a fresh navigator re-runs the whole
@@ -372,7 +423,10 @@ export class ReadiumEpubHandle {
       const outcome = await Promise.race([
         navigator.load().then(
           () => "ok" as const,
-          () => "error" as const,
+          (err: unknown) => {
+            console.error("epub navigator.load rejected:", err);
+            return "error" as const;
+          },
         ),
         new Promise<"timeout">((resolve) =>
           window.setTimeout(() => resolve("timeout"), EPUB_LOAD_TIMEOUT_MS),
@@ -480,7 +534,7 @@ export class ReadiumEpubHandle {
     const type =
       typeof record.type === "string" && record.type.length > 0
         ? record.type
-        : (this.mediaTypes.get(href) ?? XHTML_TYPE);
+        : (this.mediaTypes.get(href) ?? this.fuzzyMediaType(href) ?? XHTML_TYPE);
     const locator = Locator.deserialize({ ...(json as object), type }) ?? undefined;
     return locator === undefined ? undefined : this.snapToPosition(locator);
   }
@@ -595,6 +649,7 @@ export class ReadiumEpubHandle {
 
   private handleFrameLoaded(wnd: Window): void {
     const doc = wnd.document;
+    sanitizeFrameDocument(doc);
     const href = this.currentLocator?.href ?? "";
     const index = this.sectionIndexOf(href);
     for (const handler of this.loadHandlers) {
@@ -603,17 +658,17 @@ export class ReadiumEpubHandle {
   }
 
   /**
-   * The engine routes unhandled hrefs here: absolute web targets
-   * (http/mailto/tel) are external links — reported, never navigated —
-   * and in-book anchors are handed back to the engine (return false).
+   * The engine routes unhandled hrefs here. Classification decides: in-book
+   * targets go back to the engine (return false); web/mail/tel targets are
+   * external links — reported, never navigated — and every other absolute
+   * target (file:, javascript:, data:, custom protocols, protocol-relative)
+   * is blocked outright, also reported and never navigated.
    */
   private handleLocator(locator: Locator): boolean {
     const href = locator.href ?? "";
-    if (/^(https?:|mailto:|tel:)/i.test(href)) {
-      for (const handler of this.externalLinkHandlers) handler(href);
-      return true;
-    }
-    return false;
+    if (classifyPublicationHref(href) === "in-book") return false;
+    for (const handler of this.externalLinkHandlers) handler(href);
+    return true;
   }
 
   private handleTextSelected(selection: BasicTextSelection): void {
@@ -692,6 +747,8 @@ export class ReadiumEpubHandle {
   /**
    * Navigate to an app-level locator: a spine index (number), a serialized
    * locator JSON, or a legacy foliate CFI (annotations migrate on the fly).
+   * A string target carrying a non-in-book href (a remote TOC entry, a
+   * dangerous scheme) is reported as an external link instead of navigated.
    */
   async goTo(target: string | number): Promise<void> {
     await this.settled(async () => {
@@ -702,9 +759,27 @@ export class ReadiumEpubHandle {
         if (link) navigator.goLink(link, false, () => {});
         return;
       }
+      if (this.reportNonLocalTarget(target)) return;
       const locator = await this.toLocator(target);
       if (locator) navigator.go(locator, false, () => {});
     });
+  }
+
+  /**
+   * True when `target` names a non-in-book href: it was reported through the
+   * external-link handlers and must not be navigated.
+   */
+  private reportNonLocalTarget(target: string): boolean {
+    let href: string | null = null;
+    try {
+      const json = JSON.parse(target) as { href?: unknown };
+      if (typeof json?.href === "string") href = json.href;
+    } catch {
+      return false;
+    }
+    if (href === null || classifyPublicationHref(href) === "in-book") return false;
+    for (const handler of this.externalLinkHandlers) handler(href);
+    return true;
   }
 
   /** Serialized locator of the current position (what a bookmark persists). */
@@ -844,6 +919,7 @@ export class ReadiumEpubHandle {
       ]);
     }
     await this.navigatorLoad(locator);
+    if (this.lastAppearance !== null) void this.setAppearance(this.lastAppearance);
     await this.applyHighlights();
   }
 
@@ -878,6 +954,7 @@ export class ReadiumEpubHandle {
    * restored.
    */
   async setAppearance(appearance: EpubAppearance): Promise<void> {
+    this.lastAppearance = appearance;
     if (!this.navigator) return;
     // The neutral default submits explicit nulls: the toolkit's preference
     // merging copies nulls (clearing a previously applied theme so

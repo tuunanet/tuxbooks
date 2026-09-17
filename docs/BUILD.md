@@ -19,6 +19,16 @@ any frontend precondition.
   output in `dist-packages/`. The rpm needs the `rpm` package (rpmbuild)
   installed; the deb and AppImage targets are self-contained.
 - `just check-deb` — the packaging gate (below).
+- `just audit` — the dependency audits (issue #89): the npm audit gate plus
+  RustSec `cargo audit` over the sidecar and fuzz lockfiles. Networked.
+  The same gates run in CI (.github/workflows/audit.yml, with a weekly
+  sweep); triage policy and the current triage table: docs/SUPPLY_CHAIN.md.
+- `just check-supply-chain` — the offline supply-chain gate: maturity
+  floor, build-script allowlists, audit/SBOM workflow wiring, pinned fuzz
+  toolchain. Runs as part of `just check`.
+- `just sbom` — writes the CycloneDX SBOM
+  (`dist-packages/SBOM-tuxbooks-<version>.cdx.json`) over the npm and Rust
+  trees; releases publish it (docs/RELEASE.md).
 
 ## Electron runtime binary
 
@@ -51,6 +61,11 @@ the root `package.json` is the released version. Layout in every bundle:
   the asar — it is a real process), with `libpdfium.so` next to it; the
   sidecar probes the executable's directory for PDFium
   (`sidecar/src/lib.rs pdfium_library_dirs`).
+- `resources/sidecar/tuxbooks-worker`: the sandboxed document worker
+  (ADR 0001). It is built by the same `cargo build` as the sidecar (a
+  second `[[bin]]` in the `sidecar/` crate) and located at runtime via the
+  `TUXBOOKS_WORKER` override or next to the sidecar binary
+  (`worker::client::locate`).
 - Linux installs to `/opt/tuxbooks`, with the desktop entry at
   `usr/share/applications/tuxbooks.desktop` and hicolor icons from
   `build/icons/` (regenerate from `scripts/icon-source.png`, see

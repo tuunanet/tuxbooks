@@ -15,6 +15,8 @@ pub enum AppError {
     Pdf(#[from] crate::pdf::PdfError),
     #[error("library scan error: {0}")]
     Scan(#[from] crate::services::library_scanner::ScanError),
+    #[error("{0}")]
+    Worker(#[from] crate::worker::client::WorkerError),
     #[error("not found")]
     NotFound,
     #[error("invalid input: {0}")]

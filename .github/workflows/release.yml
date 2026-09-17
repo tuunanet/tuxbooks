@@ -125,13 +125,19 @@ jobs:
           # would read the second token as another recipe to run.
           just package "deb AppImage"
 
+      # SBOM / dependency inventory (issue #89, S-4): CycloneDX over the
+      # npm and Rust trees, uploaded with the release and covered by
+      # SHA256SUMS.txt (docs/SUPPLY_CHAIN.md).
+      - name: SBOM
+        run: just sbom
+
       - name: Packaging gate
         run: just check-deb
 
       - name: Checksums
         run: |
           cd dist-packages
-          sha256sum tuxbooks_*.deb tuxbooks-*.AppImage > SHA256SUMS.txt
+          sha256sum tuxbooks_*.deb tuxbooks-*.AppImage SBOM-tuxbooks-*.cdx.json > SHA256SUMS.txt
 
       - name: Publish GitHub release
         env:
@@ -164,4 +170,5 @@ jobs:
             --notes-file "$notes_file" \
             "dist-packages/tuxbooks_${version}_amd64.deb" \
             "dist-packages/tuxbooks-${version}.AppImage" \
+            "dist-packages/SBOM-tuxbooks-${version}.cdx.json" \
             "dist-packages/SHA256SUMS.txt"

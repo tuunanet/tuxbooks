@@ -52,7 +52,12 @@ watchdog arms).
 ## Rust (`cargo test`)
 
 - Tests live next to the code (`#[cfg(test)] mod tests`) plus the
-  integration tests (`sidecar/tests/`).
+  integration tests (`sidecar/tests/`). The worker integration tests
+  (`worker_handoff`, `worker_ops`, `worker_embed`, `worker_sandbox`,
+  `worker_routing`, `worker_containment`) spawn the real
+  `tuxbooks-worker` binary; the kernel-gated sandbox tests skip with a
+  printed notice on kernels without Landlock (5.13+), mirroring the
+  PDFium skip convention — production fails closed there instead.
 - Property tests (`proptest`): `parse_epub` never panics on arbitrary
   bytes; the scanner only ever reports `*.epub` files. Keep those
   invariants intact.
@@ -166,7 +171,7 @@ The app inherits the runner's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set before the first Electron launch
 (globalSetup; the fixture re-asserts them) — keep that ordering.
 
-Four isolated invocations per run:
+Five isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
@@ -193,7 +198,20 @@ Four isolated invocations per run:
    share a worker with other suites. The crash-count → arming step is
    pinned by the policy unit tests (injecting real GPU-process crashes is
    not possible deterministically headlessly).
-4. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
+4. **security** (`test:security`) — fresh scratch env, empty library; two
+   specs. `epub-content-security.e2e.ts` (issue #82): hostile EPUBs are
+   generated at runtime into the scratch library, a scripted book fails to
+   open (sidecar gate), and a book carrying active content opens with
+   sanitized, CSP-fenced frames and no completed external network request.
+   `app-hardening.e2e.ts` (issue #85): the X-1..X-5 window hardening proven
+   live on the production load path, no Node.js in the renderer, the app
+   UI's CSP present and enforcing (inline scripts and external fetches
+   blocked by the policy), permissions denied by default with fullscreen
+   still granted to the reader, unsafe `window.open` targets spawning
+   nothing, and renderer-initiated top-frame navigation unable to leave the
+   app origin. Own phase so the hostile books never appear in the seeded
+   suites' book counts.
+5. **seeded** (`test:seeded`, `E2E_SEED_LIBRARY=1`) — copies the committed
    fixtures (`minimal.epub`, `minimal.pdf`, `large.pdf` — 100 pages with a
    nested 15-entry outline, `mixed.pdf` — six page sizes) into the scratch
    library; the app imports them on startup. Runs `books.e2e.ts` (library
@@ -360,6 +378,134 @@ pass.
   automatic in the justfile flows — see `docs/BUILD.md`). When it is
   absent (bare `cargo test` on a fresh clone), those tests print a notice
   and skip instead of failing.
+
+## Security corpus (issue #87)
+
+A dedicated negative-input corpus and boundary-test layer, separate from the
+functional suites. Everything is generated at runtime; no hostile file is
+committed. When a fuzzing run or review finds a minimized crashing input,
+it comes back here as a builder, not a blob.
+
+| Side     | Location                                   | Contents                                                                              |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Rust     | `sidecar/tests/fixtures/security/`         | Hostile EPUB/PDF fixture builders (README inside documents the layout)                |
+| Rust     | `sidecar/tests/security_corpus.rs`         | Corpus index target: one test per invariant, hostile shapes through the real worker   |
+| Frontend | `frontend/tests/security/corpus/`          | Per-invariant index (`index.ts`), hostile EPUB builders (`hostileEpub.ts`), pins test |
+| Frontend | `frontend/tests/security/attackVectors.ts` | The shared vector arrays (traversal, scheme confusion, scripted fragments, ...)       |
+
+What each test asserts is fail-closed behavior, not just "does not crash":
+a typed error (`LimitExceeded`, `EpubError`, `PdfError`, `WorkerError`) or a
+bounded, inert result. The corpus index in `frontend/tests/security/corpus/
+index.ts` maps every invariant (E-1..E-5, R-1..R-3, T-1..T-7, the W-2/W-3/
+W-5/W-8/W-9 boundary subset, P-1) to its vectors and the tests that enforce
+them, pointing at tests that already exist instead of duplicating them.
+Worker boundary tests drive hostile documents through the real
+`tuxbooks-worker` and pin that the typed error comes back and the worker
+still serves the next benign job.
+
+One known soft spot, kept honest rather than papered over: the PDF
+decompression-bomb fixture (`pdf_decompression_bomb_is_contained_by_the_worker`)
+trips typed for the eager-load class: lopdf answers cross-reference and
+object-stream inflation past `max_stream_decompressed_bytes` with the
+limits table's typed error (`stream_inflation_over_the_decompression_cap_fails_typed`
+pins the trip directly). Inflation lopdf does not bound (content streams
+decoded by PDFium at render time, for example) is still containment-only,
+answered by the worker's RLIMIT_AS and deadline; #88 fuzzing hunts those
+residual classes and lands minimized inputs here as builders.
+
+`just test` and `just check` run the corpus layers with everything else
+(`security_corpus.rs` on the Rust stream, the corpus vitest file on the
+frontend stream); no extra command is needed.
+
+## Fuzzing (issue #88)
+
+Four libFuzzer targets (cargo-fuzz) cover the highest-risk parser and
+boundary surfaces from #81-#83, proving the P, R, and T invariants under
+mutation. Nightly CI cadence, never per-PR.
+
+| Target       | Surface                                    | Entry points (`sidecar/src`)                                                                         |
+| ------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `epub-parse` | EPUB ZIP/member/path handling              | `epub/parser.rs` `parse_epub_reader`; `epub/session.rs` `read_member_reader`, `build_session_reader` |
+| `opf-xml`    | OPF/XML manifest parsing                   | `epub/metadata.rs` `parse_opf`; `epub/parser.rs` `parse_container_xml`                               |
+| `pdf-parse`  | PDF object parsing and metadata extraction | `pdf/parser.rs` `parse_pdf_bytes` (lopdf load + bounded page-tree walk)                              |
+| `json-rpc`   | JSON-RPC parameter decoding (T-6)          | `rpc.rs` `handle_request_line` against a real scratch `AppState`                                     |
+
+### Running locally
+
+Prerequisites (nightly toolchain + cargo-fuzz):
+
+```sh
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz --locked
+```
+
+Bounded runs (`just fuzz <target> <seconds>`, default 60):
+
+```sh
+just fuzz epub-parse 60      # one target, time-boxed
+just fuzz-smoke              # 30s per target, the end-to-end proof run
+just fuzz-ci                 # the nightly cadence: 300s per target
+```
+
+The first invocation compiles the instrumented build (minutes); later runs
+are incremental. Every run is time-boxed with `-max_total_time`, capped with
+`-rss_limit_mb=4096` and `-timeout=25` per exec, and writes only inside the
+workspace: `sidecar/fuzz/corpus/<target>/` (runtime corpus) and
+`sidecar/fuzz/artifacts/` (crash files), both gitignored.
+
+### Seeds and harness shape
+
+- Seeds are committed under `sidecar/fuzz/seeds/<target>/`: derived from the
+  checked-in fixtures (`tests/fixtures/books/minimal.epub` /
+  `minimal.pdf`), the parser tests' valid OPF/container XML, and one
+  JSON-RPC request per seed file. `just fuzz` copies them into the runtime
+  corpus at the start of each run.
+- `epub-parse` dispatches on the first input byte: `0x00` +
+  NUL-terminated member path + archive bytes drives the member lookup
+  (E-5 path gate), `0x01` + archive bytes drives the reading-session
+  build, anything else is the import parse. Real EPUB files seed the
+  default mode directly.
+- Fuzz runs use a tightened quota table
+  (`fuzz/fuzz_targets/fuzz_limits.rs`): the production `ResourceLimits`
+  with byte caps around 1 MiB, so hostile archives trip a quota in
+  microseconds instead of inflating toward the 512 MiB production
+  ceilings. Quota trips are typed errors, not hangs.
+- `json-rpc` builds one process-lifetime scratch state (SQLite in the
+  gitignored fuzz target dir, seeded book row, real schema) and drives
+  `handle_request_line`, the exact boundary code `handle_line` runs.
+  Filesystem-path parameters (`scan_library`, `import_paths`,
+  `reconnect_book`, `set_book_cover`) are pinned into the scratch
+  directory before the request executes, and `create_collection` names
+  are pinned; without the pins, collections and annotations would grow
+  the scratch database without bound. Non-string shapes stay untouched,
+  so -32602 parameter decoding stays reachable. Every produced response
+  line is asserted to be valid JSON.
+
+### Crash triage
+
+A crash stops the target and writes
+`sidecar/fuzz/artifacts/<target>/crash-*` (named by input hash). Reproduce
+and minimize from `sidecar/` with the nightly toolchain active (or
+`RUSTUP_TOOLCHAIN=nightly` exported):
+
+```sh
+cargo fuzz run <target> <crash-file>                        # reproduce
+cargo fuzz run <target> -- -minimize_crash=1 <crash-file>   # minimize
+```
+
+A confirmed crash lands as a deterministic builder in
+`sidecar/tests/fixtures/security/` (never a blob — see that directory's
+README) with the fix referencing the fuzz case that found it, per issue
+#88's acceptance criteria.
+
+Hangs vs limits: a libFuzzer `-timeout` hit in these targets is a bug —
+the tightened quota table bounds decompression and parsing work, so
+unbounded behavior cannot hide behind a quota. The one known residual
+class stays outside these targets by construction: content streams that
+PDFium decodes at render time are not bounded by lopdf and remain
+containment-only (worker RLIMIT_AS + deadline, docs/RESOURCE_LIMITS.md);
+fuzzing that class is PDFium/OSS-Fuzz work, not sidecar-harness work.
+Renderer (TypeScript) surfaces are out of scope for #88.
 
 ## EPUB fixture corpus (three tiers)
 

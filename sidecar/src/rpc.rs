@@ -87,7 +87,16 @@ impl RpcError {
 
 impl From<AppError> for RpcError {
     fn from(err: AppError) -> Self {
-        Self::app(err)
+        // Worker-sourced failures map by kind (Task 2 ledger): deadline
+        // -32001, limit -32002, sandbox -32003, other worker failures
+        // -32004. All other app errors keep the generic -32000.
+        match err {
+            AppError::Worker(worker) => Self {
+                code: worker.rpc_code(),
+                message: worker.to_string(),
+            },
+            other => Self::app(other),
+        }
     }
 }
 
@@ -478,20 +487,26 @@ pub async fn serve() -> i32 {
     0
 }
 
-/// Parse one request line and dispatch it. Malformed JSON without an id
-/// cannot be answered (JSON-RPC id is required here), so it is logged.
-fn handle_line(
+/// Outcome of one request line through the boundary logic.
+pub enum RequestLineOutcome {
+    /// A formatted JSON-RPC response line (result or error object).
+    Response(String),
+    /// Not decodable JSON: nothing is answerable. `handle_line` logs it.
+    Malformed(String),
+}
+
+/// One request line taken through decode, envelope validation, dispatch,
+/// and response formatting. Split out from `handle_line` so the fuzz
+/// target (issue #88) drives the exact boundary code instead of a mirror
+/// of it.
+pub async fn handle_request_line(
     state: &Arc<AppState>,
     events: &EventEmitter,
-    tx: &mpsc::UnboundedSender<String>,
     line: &str,
-) {
+) -> RequestLineOutcome {
     let request: Value = match serde_json::from_str(line) {
         Ok(value) => value,
-        Err(err) => {
-            eprintln!("malformed request: {err}");
-            return;
-        }
+        Err(err) => return RequestLineOutcome::Malformed(err.to_string()),
     };
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = match request.get("method").and_then(Value::as_str) {
@@ -501,21 +516,36 @@ fn handle_line(
                 code: -32600,
                 message: "request is missing the method field".into(),
             };
-            let _ignored = tx.send(format!("{}\n", err.error_response(id)));
-            return;
+            return RequestLineOutcome::Response(format!("{}\n", err.error_response(id)));
         }
     };
     let params = request.get("params").cloned().unwrap_or(json!({}));
+    let body = match dispatch(state, events, &method, params).await {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
+        Err(err) => err.error_response(id).to_string(),
+    };
+    RequestLineOutcome::Response(format!("{body}\n"))
+}
 
+/// Parse one request line and dispatch it. Malformed JSON without an id
+/// cannot be answered (JSON-RPC id is required here), so it is logged.
+fn handle_line(
+    state: &Arc<AppState>,
+    events: &EventEmitter,
+    tx: &mpsc::UnboundedSender<String>,
+    line: &str,
+) {
     let state = state.clone();
     let events = events.clone();
     let tx = tx.clone();
+    let line = line.to_string();
     tokio::spawn(async move {
-        let line = match dispatch(&state, &events, &method, params).await {
-            Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
-            Err(err) => err.error_response(id).to_string(),
-        };
-        let _ignored = tx.send(format!("{line}\n"));
+        match handle_request_line(&state, &events, &line).await {
+            RequestLineOutcome::Response(response) => {
+                let _ignored = tx.send(response);
+            }
+            RequestLineOutcome::Malformed(err) => eprintln!("malformed request: {err}"),
+        }
     });
 }
 
@@ -801,5 +831,91 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(malformed.code, -32602);
+    }
+
+    /// Pull one response line off the channel (or None on timeout/close).
+    async fn next_response(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Option<Value> {
+        let line = tokio::time::timeout(std::time::Duration::from_millis(2_000), rx.recv())
+            .await
+            .ok()??;
+        serde_json::from_str(&line).ok()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_json_lines_are_ignored_without_crashing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(&state, &test_events(), &tx, "{not json");
+        handle_line(&state, &test_events(), &tx, "");
+        // Nothing answerable was sent; no response may be produced.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(150), rx.recv())
+                .await
+                .is_err()
+        );
+        // And the service is still alive.
+        let answered = dispatch(&state, &test_events(), "ping", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(answered, json!("pong"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn requests_without_a_method_field_are_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(&state, &test_events(), &tx, r#"{"jsonrpc":"2.0","id":9}"#);
+        let response = next_response(&mut rx).await.expect("error response");
+        assert_eq!(response["id"], json!(9));
+        assert_eq!(response["error"]["code"], json!(-32600));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_params_are_rejected_and_the_service_stays_alive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        handle_line(
+            &state,
+            &test_events(),
+            &tx,
+            r#"{"jsonrpc":"2.0","id":3,"method":"scan_library","params":{"path":42}}"#,
+        );
+        let response = next_response(&mut rx).await.expect("error response");
+        assert_eq!(response["id"], json!(3));
+        assert_eq!(response["error"]["code"], json!(-32602));
+        // Same channel, next request: the sidecar is unaffected.
+        let answered = dispatch(&state, &test_events(), "ping", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(answered, json!("pong"));
+    }
+
+    #[test]
+    fn worker_failures_map_to_typed_rpc_codes() {
+        use crate::worker::client::WorkerError;
+        assert_eq!(WorkerError::Deadline.rpc_code(), -32001);
+        assert_eq!(
+            WorkerError::Limit(crate::limits::LimitExceeded {
+                limit: "max_parse_seconds",
+                detail: "x".into(),
+            })
+            .rpc_code(),
+            -32002
+        );
+        assert_eq!(WorkerError::Sandbox("no".into()).rpc_code(), -32003);
+        assert_eq!(
+            WorkerError::Unavailable("missing".into()).rpc_code(),
+            -32004
+        );
+    }
+
+    #[test]
+    fn app_error_worker_branch_carries_the_worker_code() {
+        let err = AppError::Worker(crate::worker::client::WorkerError::Deadline);
+        let rpc = RpcError::from(err);
+        assert_eq!(rpc.code, -32001);
     }
 }

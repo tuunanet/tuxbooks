@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
-import { revealInFileManager } from "@/lib/bridge";
+import { revealBook } from "@/lib/bridge";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { EmptyCollectionState } from "./EmptyCollectionState";
 import { EmptyLibraryState } from "./EmptyLibraryState";
@@ -115,13 +115,9 @@ export function LibraryView({ section }: LibraryViewProps) {
     (next: string) => dispatch({ type: "set-library-query", query: next }),
     [dispatch],
   );
-  const handleReveal = useCallback(
-    (bookId: number) => {
-      const target = books.find((book) => book.id === bookId);
-      if (target) void revealInFileManager(target.path);
-    },
-    [books],
-  );
+  const handleReveal = useCallback((bookId: number) => {
+    void revealBook(bookId);
+  }, []);
 
   const visible = useMemo(() => {
     let scoped =
@@ -463,7 +459,7 @@ export function LibraryView({ section }: LibraryViewProps) {
             const el = scrollElRef.current;
             if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
           }}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
         >
           {unvirtualized ? (
             <div>

@@ -17,6 +17,7 @@ import {
   benchPdfFixture,
   electronDistPath,
   epubFixture,
+  readerRegressionFixtures,
   largePdfFixture,
   mixedPdfFixture,
   pdfFixture,
@@ -36,6 +37,9 @@ export const runId = process.env.E2E_RUN_ID;
 export const artifactsDir = path.join(repoRoot, "artifacts", "e2e", runId);
 
 /** Isolated scratch environment the app runs against. */
+// The run id embeds pid + timestamp, so the scratch name is not reusable
+// across runs; prepareEnvironment additionally creates the tree 0700 (its
+// files land with "wx" + 0600), which is what makes shared-tmp writes safe.
 export const scratchDir = path.join(os.tmpdir(), `tuxbooks-e2e-${runId}`);
 export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
@@ -125,13 +129,20 @@ export function prepareEnvironment(seeded: boolean): void {
   pruneOldArtifacts();
   pruneOldScratchDirs();
 
-  rmSync(scratchDir, { recursive: true, force: true });
-  mkdirSync(libraryDir, { recursive: true });
-  mkdirSync(configDir, { recursive: true });
-  mkdirSync(artifactsDir, { recursive: true });
+  mkdirSync(libraryDir, { recursive: true, mode: 0o700 });
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
 
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
+    // The regression corpus gets its own phase: the seeded specs pin the
+    // five-book library, and the reader-regression spec needs these four
+    // real-world-shape miniatures alongside them.
+    if (process.env.E2E_PHASE === "regressions") {
+      for (const fixture of readerRegressionFixtures) {
+        copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
+      }
+    }
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));

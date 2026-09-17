@@ -62,6 +62,15 @@ describe("parseFoliateCfi", () => {
     expect(parsed?.docSteps).toEqual([{ value: 4, isText: false }]);
   });
 
+  it("rejects char offsets and odd item steps on the spine path", () => {
+    // A text offset on the itemref step itself, and odd/undersized spine
+    // values, are not spine locators. (Offsets on post-bang steps are text
+    // positions, which are valid.)
+    expect(parseFoliateCfi("epubcfi(/6/2:5!/4/2)")).toBeNull();
+    expect(parseFoliateCfi("epubcfi(/6/2!/4/0)")).toBeNull();
+    expect(parseFoliateCfi("epubcfi(/6/2!/4/x)")).toBeNull();
+  });
+
   it("skips bracket id assertions foliate emits", () => {
     const parsed = parseFoliateCfi("epubcfi(/6/4[chapter2]!/4[body]/2[para],/1:0,/1:5)");
     expect(parsed?.spineIndex).toBe(1);
@@ -130,6 +139,25 @@ describe("convertFoliateRow fallback hierarchy", () => {
     if (target?.tier !== "cfi") return;
     const locator = JSON.parse(target.locator) as { text?: { highlight?: string } };
     expect(locator.text?.highlight).toContain("distinctive");
+  });
+
+  it("tier cfi: an empty element among siblings falls back to a css selector", async () => {
+    const html = `<!DOCTYPE html><html><head><title>t</title></head><body><h1>Heading</h1><p>one</p><div class="mark"></div><p>two</p></body></html>`;
+    const source = makeSource([new DOMParser().parseFromString(html, "application/xhtml+xml")]);
+    // html(/4) -> body(/4) -> p(/2), p(/4), div(/6): the empty div is the
+    // 3rd child; the locator must carry an nth-of-type css selector.
+    const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/2!/4/4/6)" }), source);
+    expect(target?.tier).toBe("cfi");
+    if (target?.tier !== "cfi") return;
+    const locator = JSON.parse(target.locator) as { locations: { cssSelector?: string } };
+    expect(locator.locations.cssSelector).toContain("nth-of-type");
+  });
+
+  it("yields null when the spine slot is out of range and no chapter rescues it", async () => {
+    const source = makeSource([chapterDoc(["Some text."])]);
+    // Item step /8 -> spineIndex 3, past the 3-item spine: no tier applies.
+    const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/8!/4/2)" }), source);
+    expect(target).toBeNull();
   });
 
   it("tier spine: chapter href rescues a CFI whose spine slot is wrong", async () => {
