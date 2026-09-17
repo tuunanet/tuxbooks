@@ -54,7 +54,7 @@ function looksLikeXml(text: string): boolean {
   return (
     XML_PROLOG.test(text.trimStart().slice(0, 128)) ||
     (head.includes("<!DOCTYPE") && head.toUpperCase().includes("XHTML")) ||
-    head.includes("http://www.w3.org/1999/xhtml")
+    /xmlns\s*=\s*["']http:\/\/www\.w3\.org\/1999\/xhtml["']/.test(head)
   );
 }
 

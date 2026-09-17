@@ -166,9 +166,12 @@ async function frameProbe(page: Page, textMarker: string): Promise<FrameProbe | 
       ).length,
       active: doc.querySelectorAll("iframe, object, embed").length,
       handlers: doc.querySelectorAll("[onclick],[onerror],[onload]").length,
-      jsHrefs: Array.from(doc.querySelectorAll("a")).filter((a) =>
-        (a.getAttribute("href") ?? "").trim().toLowerCase().startsWith("javascript:"),
-      ).length,
+      jsHrefs: Array.from(doc.querySelectorAll("a")).filter((a) => {
+        const href = (a.getAttribute("href") ?? "").trim().toLowerCase();
+        return (
+          href.startsWith("javascript:") || href.startsWith("data:") || href.startsWith("vbscript:")
+        );
+      }).length,
       hasText: (doc.body.textContent ?? "").includes(marker),
     } satisfies FrameProbe;
   }, textMarker);
@@ -198,10 +201,12 @@ test.describe("epub content fencing (issue #82)", () => {
       }
     });
 
-    writeFileSync(
-      path.join(libraryDir, "hostile-active.epub"),
-      hostileEpub("Hostile Active Book", ACTIVE_BODY),
-    );
+    // "wx" + 0600: the scratch library lives in the shared temp tree, so
+    // hostile fixtures must be created exclusively and owner-only.
+    writeFileSync(path.join(libraryDir, "hostile-active.epub"), hostileEpub("Hostile Active Book", ACTIVE_BODY), {
+      flag: "wx",
+      mode: 0o600,
+    });
     const card = page.locator('[aria-label="Hostile Active Book (EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });
 
@@ -240,6 +245,7 @@ test.describe("epub content fencing (issue #82)", () => {
     writeFileSync(
       path.join(libraryDir, "hostile-scripted.epub"),
       hostileEpub("Hostile Scripted Book", "<p>x</p><script>alert(1)</script>"),
+      { flag: "wx", mode: 0o600 },
     );
     const card = page.locator('[aria-label="Hostile Scripted Book (EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });
@@ -262,6 +268,7 @@ test.describe("epub content fencing (issue #82)", () => {
         `<p>readable under any decoder</p><div onclick="alert(1)">styled</div>`,
         "utf-7",
       ),
+      { flag: "wx", mode: 0o600 },
     );
     const card = page.locator('[aria-label="Hostile Encoding Book (EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });

@@ -4,7 +4,7 @@
  * the failure-artifact directory. Nothing here ever touches a real user
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -37,6 +37,9 @@ export const runId = process.env.E2E_RUN_ID;
 export const artifactsDir = path.join(repoRoot, "artifacts", "e2e", runId);
 
 /** Isolated scratch environment the app runs against. */
+// The run id embeds pid + timestamp, so the scratch name is not reusable
+// across runs; prepareEnvironment additionally creates the tree 0700 (its
+// files land with "wx" + 0600), which is what makes shared-tmp writes safe.
 export const scratchDir = path.join(os.tmpdir(), `tuxbooks-e2e-${runId}`);
 export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
@@ -126,10 +129,9 @@ export function prepareEnvironment(seeded: boolean): void {
   pruneOldArtifacts();
   pruneOldScratchDirs();
 
-  rmSync(scratchDir, { recursive: true, force: true });
-  mkdirSync(libraryDir, { recursive: true });
-  mkdirSync(configDir, { recursive: true });
-  mkdirSync(artifactsDir, { recursive: true });
+  mkdirSync(libraryDir, { recursive: true, mode: 0o700 });
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
 
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
