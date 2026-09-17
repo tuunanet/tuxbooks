@@ -88,8 +88,8 @@ pub(crate) fn epub_bytes(opf_xml: &str, chapter: &str) -> Vec<(String, Vec<u8>)>
     ]
 }
 
-/// E-1 gate fixture: a manifest item declaring a script media type (not in
-/// the spine, so the manifest gate is the only fence it can trip).
+/// E-1 fixture: a manifest item declaring a script media type (not in the
+/// spine, so it ships a script resource without a scripted spine document).
 pub(crate) fn scripted_manifest_item(path: &Path) {
     write_zip(
         path,

@@ -29,19 +29,6 @@ use super::parser::{
 use super::EpubError;
 use crate::limits::{Deadline, ResourceLimits};
 
-/// Media types the reader refuses to serve (E-1): scripts are not a
-/// supported publication feature, so a book declaring them fails to open
-/// instead of reaching a frame.
-const SCRIPT_MEDIA_TYPES: &[&str] = &[
-    "text/javascript",
-    "application/javascript",
-    "application/x-javascript",
-    "text/ecmascript",
-    "application/ecmascript",
-    "text/jscript",
-    "application/wasm",
-];
-
 /// TOC href schemes that are dropped outright (E-3): they can never be
 /// legitimate navigation targets. Remote web links are kept and intercepted
 /// as external links by the renderer.
@@ -257,17 +244,12 @@ fn read_mimetype<R: Read + Seek>(
     Ok(())
 }
 
-/// Manifest-level fences (E-1, E-3) applied before anything is served:
-/// script media types and non-local hrefs fail the session.
+/// Manifest-level fences (E-3) applied before anything is served: spine
+/// hrefs that name remote or scheme'd targets fail the session. Script
+/// resources are not fenced here. E-1 lives at the engine seam, where
+/// sanitization plus the frame CSP render scripted content inert.
 fn validate_manifest(package: &OpfPackage) -> Result<(), EpubError> {
     for (id, item) in &package.manifest {
-        let media_type = item.media_type.trim().to_ascii_lowercase();
-        if SCRIPT_MEDIA_TYPES.contains(&media_type.as_str()) {
-            return Err(EpubError::ScriptedContent(format!(
-                "manifest item `{id}` declares media type `{}`",
-                item.media_type
-            )));
-        }
         if has_explicit_scheme(&item.href) {
             return Err(EpubError::ExternalRef(format!("manifest item `{id}`")));
         }
@@ -886,7 +868,7 @@ fn build_positions_json<R: Read + Seek>(
                     Some(bytes) => {
                         bytes_read += bytes.len() as u64;
                         limits.check_total_uncompressed(bytes_read)?;
-                        extract_visible_text(&String::from_utf8_lossy(&bytes), &entry.encoded)?
+                        extract_visible_text(&String::from_utf8_lossy(&bytes))?
                             .chars()
                             .count()
                     }
@@ -957,9 +939,11 @@ fn clamp01(value: f64) -> f64 {
 
 /// Visible text of an XHTML document: everything outside `head`, `title`,
 /// `style`, and `script`, entities unescaped, whitespace collapsed. A
-/// `<script>` element anywhere in the document fails the session (E-1):
-/// scripted EPUBs are not a supported feature, so the book never opens.
-fn extract_visible_text(xml: &str, label: &str) -> Result<String, EpubError> {
+/// `<script>` element is skipped like the other inert subtrees. Per EPUB 3
+/// a reading system renders scripted content as if scripting were
+/// disabled, and E-1 (no script execution) is enforced at the engine seam
+/// (content sanitization plus the frame CSP), not by refusing the book.
+fn extract_visible_text(xml: &str) -> Result<String, EpubError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
 
@@ -970,13 +954,7 @@ fn extract_visible_text(xml: &str, label: &str) -> Result<String, EpubError> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                let name = local_name(e.name().into_inner());
-                if name == "script" && skip_depth == 0 {
-                    return Err(EpubError::ScriptedContent(format!(
-                        "spine document `{label}` contains a `<script>` element"
-                    )));
-                }
-                if skip_depth > 0 || is_skipped_element(name) {
+                if skip_depth > 0 || is_skipped_element(local_name(e.name().into_inner())) {
                     skip_depth += 1;
                 }
             }
@@ -1172,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn session_rejects_script_media_types_e1() {
+    fn session_opens_books_with_script_media_type_items_e1() {
         for media_type in [
             "text/javascript",
             "application/javascript",
@@ -1202,16 +1180,19 @@ mod tests {
                     ("evil.js", b"alert(1)".as_slice()),
                 ],
             );
-            let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
+            // E-1 fences scripts at the engine seam (sanitizer + frame CSP),
+            // so script resources in the manifest no longer fail the open.
+            // Per EPUB 3, the book renders as if scripting were disabled.
+            let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
             assert!(
-                matches!(err, EpubError::ScriptedContent(_)),
-                "media type {media_type}: got {err:?}"
+                session.manifest_json.contains("chapter1.xhtml"),
+                "media type {media_type}: session manifest must list the spine"
             );
         }
     }
 
     #[test]
-    fn session_rejects_spine_documents_containing_scripts_e1() {
+    fn session_opens_spine_documents_with_inline_scripts_e1() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("inline-script.epub");
         let scripted = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><p>hi</p><script>alert(1)</script></body></html>"#;
@@ -1226,8 +1207,10 @@ mod tests {
                 ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
             ],
         );
-        let err = build_session(&path, &ResourceLimits::DEFAULTS).unwrap_err();
-        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
+        // The Gutenberg nav-script shape. Inline scripting is stripped
+        // downstream (E-1 lives at the engine seam), so the book opens.
+        let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
+        assert!(session.manifest_json.contains("chapter1.xhtml"));
     }
 
     #[test]
@@ -1582,16 +1565,16 @@ mod tests {
         let xml = r#"<html><head><title>Do not leak</title><style>p { color: red }</style></head>
             <body><p>Hello   world</p><p>Second &amp; last</p></body></html>"#;
         assert_eq!(
-            extract_visible_text(xml, "chapter1.xhtml").unwrap(),
+            extract_visible_text(xml).unwrap(),
             "Hello world Second & last"
         );
     }
 
     #[test]
-    fn visible_text_reports_spine_documents_with_scripts() {
+    fn visible_text_excludes_script_content() {
         let xml = r#"<html><body><p>Hello</p><script>alert(1)</script></body></html>"#;
-        let err = extract_visible_text(xml, "chapter1.xhtml").unwrap_err();
-        assert!(matches!(err, EpubError::ScriptedContent(_)), "got: {err:?}");
+        let text = extract_visible_text(xml).unwrap();
+        assert_eq!(text, "Hello");
     }
 
     #[test]

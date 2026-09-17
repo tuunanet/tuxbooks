@@ -20,8 +20,8 @@ export const SECURITY_CORPUS: readonly CorpusRow[] = [
     enforcedBy: [
       "tests/security/contentPolicy.test.ts (sanitization, frame CSP, encoding prologs)",
       "tests/security/corpus/corpus.test.ts (hostile EPUB documents through the fence)",
-      "sidecar/tests/security_corpus.rs::hostile_epub_fails_typed_through_the_worker",
-      "e2e/specs/epub-content-security.e2e.ts (scripted book fails to open)",
+      "sidecar/tests/security_corpus.rs::hostile_epub_scripted_book_opens_inert_through_the_worker",
+      "e2e/specs/epub-content-security.e2e.ts (scripted book opens with scripts inert)",
     ],
   },
   {

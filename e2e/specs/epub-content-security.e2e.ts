@@ -4,9 +4,10 @@
  * which must not pollute the seeded suites' book counts.
  *
  * Unit tests cover the policy module (`frontend/tests/security/
- * contentPolicy.test.ts`) and the sidecar gates (`epub/session.rs`); this
- * spec proves the whole chain in the real app: a scripted book fails to
- * open, and a book that does open renders frames that are sanitized,
+ * contentPolicy.test.ts`) and the sidecar session (`epub/session.rs`); this
+ * spec proves the whole chain in the real app. A scripted book opens with
+ * its scripts stripped (rendered as if scripting were disabled, per EPUB
+ * 3), and every book that opens renders frames that are sanitized,
  * CSP-fenced, and silent on the network.
  */
 import { writeFileSync } from "node:fs";
@@ -245,10 +246,10 @@ test.describe("epub content fencing (issue #82)", () => {
     await returnToLibrary(page);
   });
 
-  test("a scripted book never opens", async ({ page }) => {
+  test("a scripted book opens with its scripts inert", async ({ page }) => {
     writeFileSync(
       path.join(libraryDir, "hostile-scripted.epub"),
-      hostileEpub("Hostile Scripted Book", "<p>x</p><script>alert(1)</script>"),
+      hostileEpub("Hostile Scripted Book", `<p>scripted chapter text</p><script>alert(1)</script>`),
       { flag: "wx", mode: 0o600 },
     );
     const card = page.locator('[aria-label="Hostile Scripted Book (EPUB)"]');
@@ -256,8 +257,23 @@ test.describe("epub content fencing (issue #82)", () => {
 
     await card.dblclick();
     await page.getByTestId("detail-continue").click();
-    await expect(page.getByTestId("epub-error")).toBeVisible({ timeout: 30000 });
-    await expect(page.locator('[data-epub-state="ready"]')).toHaveCount(0);
+    await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
+      timeout: 30000,
+    });
+
+    await expect
+      .poll(async () => frameProbe(page, "scripted chapter text"), {
+        timeout: 15000,
+        message: "the scripted-book frame never mounted with readable text",
+      })
+      .toEqual({
+        csp: expect.arrayContaining([expect.stringContaining("script-src blob:")]),
+        scripts: 0,
+        active: 0,
+        handlers: 0,
+        jsHrefs: 0,
+        hasText: true,
+      });
 
     await returnToLibrary(page);
   });
