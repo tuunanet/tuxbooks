@@ -368,7 +368,8 @@ pass.
   `just check`/`just test`); the committed `manifest.json` pins every file's
   URL + sha256 + size and `just check-ebooks` verifies the corpus offline
   (docs/free-ebook-fixtures.md). Only `manifest.json` is committed; tests that
-  use the corpus (`sidecar/tests/realistic_library.rs`, bench-reader seeding)
+  use the corpus (`sidecar/tests/realistic_library.rs`,
+  `sidecar/tests/scripted_content.rs`, bench-reader seeding)
   skip with a notice when it is absent; `REALISTIC_LIBRARY_PATH` overrides
   its location.
 - `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` / `REALISTIC_LIBRARY_PATH`
