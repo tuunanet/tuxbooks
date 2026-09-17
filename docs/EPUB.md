@@ -245,12 +245,14 @@ in the navigation drawer.
 Publication content is hostile input and the reader enforces the boundary
 invariants E-1..E-5 (issue #82, see the umbrella #78) in two layers.
 
-**Sidecar pre-serve gates (Rust, `epub/session.rs`).** A book that declares
-script media types (`text/javascript` and kin, `application/wasm`) fails to
-open (`ScriptedContent`), a spine document containing a `<script>` element
-fails the session build, and spine hrefs that name remote or scheme'd
-targets (`https:`, `javascript:`, …) fail with `ExternalRef`: scripted
-EPUBs are not a supported feature and never reach a frame. TOC/NCX entries
+**Sidecar pre-serve gates (Rust, `epub/session.rs`).** Publication scripting
+is handled the way the EPUB 3 spec requires of a reading system without
+scripting support: the book opens and renders as if scripting were disabled.
+Inline `<script>` elements and script media-type manifest items
+(`text/javascript` and kin, `application/wasm`) do not fail the session,
+because E-1 (no script execution) lives at the engine seam below. The
+sidecar's own gates are structural. Spine hrefs that name remote or scheme'd
+targets (`https:`, `javascript:`, …) fail with `ExternalRef` (E-3). TOC/NCX entries
 whose hrefs use dangerous schemes (`javascript:`, `data:`, `vbscript:`,
 `file:`, `blob:`) are dropped at the source; remote web links stay in the
 TOC and are intercepted as external links. `read_member` validates every
@@ -288,7 +290,9 @@ Node.js access (`contextIsolation: true`, `nodeIntegration: false`,
 sandboxed preload). The policy module is unit-tested in
 `frontend/tests/security/contentPolicy.test.ts` over the shared
 `attackVectors` corpus; the sidecar gates are pinned in `epub/session.rs`
-tests named per invariant.
+tests named per invariant, and the scripted-book open is pinned in
+`sidecar/tests/scripted_content.rs` (a real Gutenberg EPUB 3 whose nav
+carries the spec's example script).
 
 ### Presentation mode (issue #64)
 

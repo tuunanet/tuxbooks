@@ -46,8 +46,6 @@ pub enum EpubError {
     BrokenSpine(String),
     #[error("manifest item `{0}` has no href")]
     ManifestItemWithoutHref(String),
-    #[error("EPUB carries scripted content, which the reader does not support: {0}")]
-    ScriptedContent(String),
     #[error("EPUB references a non-local resource: {0}")]
     ExternalRef(String),
     #[error("invalid EPUB member path: {0}")]

@@ -276,20 +276,21 @@ fn hostile_huge_page_cover_render_stays_bounded() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn hostile_epub_fails_typed_through_the_worker_and_the_worker_recovers() {
+fn hostile_epub_scripted_book_opens_inert_through_the_worker_and_the_worker_recovers() {
     let client = WorkerClient::locate().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("scripted.epub");
     hostile_epub::scripted_manifest_item(&path);
 
-    // The reader-open path (session build) is where the scripted-content
-    // gate lives; a book shipping scripts must fail to open, typed.
-    let err = client
+    // E-1 fences scripts at the engine seam (sanitizer + frame CSP), so a
+    // book shipping script resources opens through the worker, rendered as
+    // if scripting were disabled, instead of tripping a sidecar gate.
+    let session = client
         .epub_session(&path, &ResourceLimits::DEFAULTS)
-        .unwrap_err();
+        .unwrap();
     assert!(
-        matches!(&err, WorkerError::Parse(message) if message.contains("scripted content")),
-        "expected the scripted-content gate through the worker, got: {err:?}"
+        session.manifest_json.contains("chapter1.xhtml"),
+        "session manifest must list the spine: {session:?}"
     );
     // W-9: the worker is reusable after hostile input.
     let good = client

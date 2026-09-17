@@ -200,8 +200,8 @@ Five isolated invocations per run:
    not possible deterministically headlessly).
 4. **security** (`test:security`) — fresh scratch env, empty library; two
    specs. `epub-content-security.e2e.ts` (issue #82): hostile EPUBs are
-   generated at runtime into the scratch library, a scripted book fails to
-   open (sidecar gate), and a book carrying active content opens with
+   generated at runtime into the scratch library, a scripted book opens
+   with its scripts inert, and a book carrying active content opens with
    sanitized, CSP-fenced frames and no completed external network request.
    `app-hardening.e2e.ts` (issue #85): the X-1..X-5 window hardening proven
    live on the production load path, no Node.js in the renderer, the app
@@ -368,7 +368,8 @@ pass.
   `just check`/`just test`); the committed `manifest.json` pins every file's
   URL + sha256 + size and `just check-ebooks` verifies the corpus offline
   (docs/free-ebook-fixtures.md). Only `manifest.json` is committed; tests that
-  use the corpus (`sidecar/tests/realistic_library.rs`, bench-reader seeding)
+  use the corpus (`sidecar/tests/realistic_library.rs`,
+  `sidecar/tests/scripted_content.rs`, bench-reader seeding)
   skip with a notice when it is absent; `REALISTIC_LIBRARY_PATH` overrides
   its location.
 - `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH` / `REALISTIC_LIBRARY_PATH`
