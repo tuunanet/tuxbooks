@@ -180,6 +180,7 @@ test-e2e: build-debug
     just test-e2e-gpu
     just test-e2e-security
     just test-e2e-seeded
+    just test-e2e-regressions
 
 test-e2e-empty:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
@@ -202,6 +203,11 @@ test-e2e-headed-shell: build-debug
 
 test-e2e-seeded:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
+
+# Reader-regression corpus (licensed-corpus survey): the five seeded books
+# plus the committed real-world-shape miniatures the regression spec needs.
+test-e2e-regressions: build-debug
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=regressions E2E_SEED_LIBRARY=1 pnpm --filter e2e test:regressions
 
 # GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): the app boots
 # software-rendered when a previous session recorded repeated GPU-process

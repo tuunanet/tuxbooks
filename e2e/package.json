@@ -10,6 +10,7 @@
     "test:gpu": "playwright test --project=gpu",
     "test:security": "playwright test --project=security",
     "test:seeded": "playwright test --project=seeded",
+    "test:regressions": "playwright test --project=regressions",
     "test:hidpi": "playwright test --project=hidpi",
     "test:bench": "playwright test --project=bench"
   },

@@ -307,6 +307,60 @@ def chapter_paragraph(num: int, gen_label: str) -> str:
     )
 
 
+def reader_html_member(
+    title: str, body: str, prolog: str = "clean", with_css: bool = False
+) -> str:
+    """Reader-regression member with control over the XML declaration form.
+
+    Real-world EPUBs keep XHTML in .html members and the publisher toolchains
+    mangle or omit the declaration; the reader's fence and the toolkit's
+    strict XML parse must survive all three forms. `prolog` selects:
+    "clean" (?xml declaration), "mangled" (declaration escaped as an HTML
+    comment, the artifact found in Manning MEAP books), or "none" (no
+    declaration at all; the XHTML namespace alone identifies the document).
+    """
+    head = f"    <title>{title}</title>"
+    if with_css:
+        head += '\n    <link rel="stylesheet" type="text/css" href="style.css"/>'
+    doc = ""
+    if prolog == "clean":
+        doc += '<?xml version="1.0" encoding="UTF-8"?>\n'
+    elif prolog == "mangled":
+        doc += '<!--?xml version="1.0" encoding="UTF-8"?-->\n'
+    doc += "<!DOCTYPE html>\n"
+    doc += '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+    doc += f"  <head>\n{head}\n  </head>\n  <body>\n{body}\n  </body>\n</html>\n"
+    return doc
+
+
+def reader_section_body(label: str, paragraphs: int = 3) -> str:
+    lines = [f"    <h1>{label}</h1>"]
+    for i in range(1, paragraphs + 1):
+        lines.append(
+            f"    <p>{label}, paragraph {i}. Placeholder text long enough to fill a"
+            " paginated page, so arrowing through the book crosses section boundaries"
+            " and exercises the frame-rebuild path with publisher CSS applied.</p>"
+        )
+    return "\n".join(lines)
+
+
+def reader_entities_body(label: str) -> str:
+    """Paragraphs carrying HTML named entities that plain XML cannot resolve.
+
+    Well-formed except for the entities: an XML parser rejects them unless
+    the reading system repairs or resolves them, which is exactly the
+    real-world chapter failure this fixture pins.
+    """
+    return (
+        f"    <h1>{label}</h1>\n"
+        "    <p>Mathematics uses symbols such as &times; and &divide; and the"
+        " trading sign &euro;, plus common punctuation: &mdash; &hellip; &ldquo;quoted&rdquo;.</p>\n"
+        "    <p>Non&#8209;breaking&nbsp;spaces and &lsquo;single&rsquo; quotes and"
+        " &shy;soft hyphens appear constantly in typeset prose.</p>\n"
+        "    <p>Mixed with plain text so a repaired document keeps all of it.</p>"
+    )
+
+
 def build_valid():
     """Return [(fixture_id, gen, title, description, entries)] where entries
     is the complete zip content [(zip_path, str | bytes)]."""
@@ -1107,6 +1161,182 @@ def build_valid():
                 ),
                 ("OEBPS/chapter1.xhtml", xhtml3("Many Scripts", i18n3_body)),
             ],
+        )
+    )
+
+    # -- EPUB 3 reader regressions -----------------------------------------
+    # Each fixture pins one real-world EPUB shape that UAT found blanking
+    # pages or losing theming, per the licensed-corpus survey of 2026-09-17.
+    # The toolkit strict-parses every manifest-XHTML item, so the reader's
+    # fence must emit XML-safe output regardless of the transport content
+    # type or the declaration form. docs/superpowers/plans/ has the survey.
+
+    g = "3.0"
+
+    def nav_entries(names):
+        return [(name, f"{slug}.html", []) for slug, name in names]
+
+    # (a) XHTML kept in .html members without any XML declaration: the
+    # transport serves text/html while the manifest declares
+    # application/xhtml+xml; the fence must still emit XML-safe output.
+    names_a = [
+        ("section1", "Section One"),
+        ("section2", "Section Two"),
+        ("section3", "Section Three"),
+    ]
+    entries_a = [
+        ("mimetype", MIMETYPE),
+        ("META-INF/container.xml", CONTAINER),
+        (
+            "OEBPS/content.opf",
+            opf3(
+                uid(31),
+                "Reader HTML Members",
+                "XHTML in .html members without XML declarations; transport types and manifest types disagree.",
+                [("nav", "nav.xhtml", "application/xhtml+xml", "nav")]
+                + [
+                    (f"section{i}", f"section{i}.html", "application/xhtml+xml", "")
+                    for i in (1, 2, 3)
+                ],
+                [f"section{i}" for i in (1, 2, 3)],
+            ),
+        ),
+        ("OEBPS/nav.xhtml", nav3("Reader HTML Members", nav_entries(names_a))),
+    ] + [
+        (
+            f"OEBPS/section{i}.html",
+            reader_html_member(name, reader_section_body(name), prolog="none"),
+        )
+        for i, (slug, name) in enumerate(names_a, start=1)
+    ]
+    fixtures.append(
+        (
+            "epub3-reader-html-members",
+            g,
+            "Reader HTML Members",
+            "Manifest-XHTML sections in .html files without XML declarations.",
+            entries_a,
+        )
+    )
+
+    # (b) A mangled declaration (escaped into an HTML comment) mid-book: the
+    # document is well-formed XML, but prolog-sniffing misclassifies it and
+    # the fence then emits markup the strict parse rejects.
+    entries_b = [
+        ("mimetype", MIMETYPE),
+        ("META-INF/container.xml", CONTAINER),
+        (
+            "OEBPS/content.opf",
+            opf3(
+                uid(32),
+                "Reader Mangled Prolog",
+                "One section's XML declaration escaped as an HTML comment, mid-book.",
+                [("nav", "nav.xhtml", "application/xhtml+xml", "nav")]
+                + [
+                    (f"section{i}", f"section{i}.html", "application/xhtml+xml", "")
+                    for i in (1, 2, 3)
+                ],
+                [f"section{i}" for i in (1, 2, 3)],
+            ),
+        ),
+        ("OEBPS/nav.xhtml", nav3("Reader Mangled Prolog", nav_entries(names_a))),
+    ] + [
+        (
+            f"OEBPS/section{i}.html",
+            reader_html_member(
+                name,
+                reader_section_body(name),
+                prolog="mangled" if i == 2 else "clean",
+            ),
+        )
+        for i, (slug, name) in enumerate(names_a, start=1)
+    ]
+    fixtures.append(
+        (
+            "epub3-reader-mangled-prolog",
+            g,
+            "Reader Mangled Prolog",
+            "Well-formed XHTML whose declaration is escaped as a comment, mid-book.",
+            entries_b,
+        )
+    )
+
+    # (c) Named HTML entities beyond the XML predefined set: strict XML
+    # parsers reject them, so these chapters fail to render unless the
+    # reader repairs the document before the strict parse.
+    names_c = [
+        ("symbols", "Symbols"),
+        ("prose", "Prose"),
+    ]
+    entries_c = [
+        ("mimetype", MIMETYPE),
+        ("META-INF/container.xml", CONTAINER),
+        (
+            "OEBPS/content.opf",
+            opf3(
+                uid(33),
+                "Reader HTML Entities",
+                "Manifest-XHTML chapters carrying named HTML entities no XML parser resolves.",
+                [("nav", "nav.xhtml", "application/xhtml+xml", "nav")]
+                + [(slug, f"{slug}.html", "application/xhtml+xml", "") for slug, _ in names_c],
+                [slug for slug, _ in names_c],
+            ),
+        ),
+        ("OEBPS/nav.xhtml", nav3("Reader HTML Entities", nav_entries(names_c))),
+    ] + [
+        (f"OEBPS/{slug}.html", reader_html_member(name, reader_entities_body(name)))
+        for slug, name in names_c
+    ]
+    fixtures.append(
+        (
+            "epub3-reader-html-entities",
+            g,
+            "Reader HTML Entities",
+            "XHTML chapters with named HTML entities that fail strict XML parsing.",
+            entries_c,
+        )
+    )
+
+    # (d) Enough sections and per-section text that arrowing crosses spine
+    # boundaries (frame rebuilds) while publisher CSS is linked, so theme
+    # application must survive rebuilds and relative stylesheets must load.
+    css_reader = """body { background: #fdf6e3; color: #073642; font-family: serif; }
+h1 { color: #b58900; }
+"""
+    names_d = [(f"part{i}", f"Part {i}") for i in range(1, 7)]
+    entries_d = [
+        ("mimetype", MIMETYPE),
+        ("META-INF/container.xml", CONTAINER),
+        (
+            "OEBPS/content.opf",
+            opf3(
+                uid(34),
+                "Reader Theme Sections",
+                "Six paginated sections with linked publisher CSS; theme must survive frame rebuilds.",
+                [("nav", "nav.xhtml", "application/xhtml+xml", "nav")]
+                + [(f"part{i}", f"part{i}.html", "application/xhtml+xml", "") for i in range(1, 7)]
+                + [("style", "style.css", "text/css", "")],
+                [f"part{i}" for i in range(1, 7)],
+            ),
+        ),
+        ("OEBPS/nav.xhtml", nav3("Reader Theme Sections", nav_entries(names_d))),
+        ("OEBPS/style.css", css_reader),
+    ] + [
+        (
+            f"OEBPS/part{i}.html",
+            reader_html_member(
+                name, reader_section_body(name, paragraphs=4), prolog="none", with_css=True
+            ),
+        )
+        for i, (_, name) in enumerate(names_d, start=1)
+    ]
+    fixtures.append(
+        (
+            "epub3-reader-theme-sections",
+            g,
+            "Reader Theme Sections",
+            "Six spine sections with publisher CSS; theming must survive rebuilds.",
+            entries_d,
         )
     )
 

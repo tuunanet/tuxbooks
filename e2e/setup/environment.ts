@@ -17,6 +17,7 @@ import {
   benchPdfFixture,
   electronDistPath,
   epubFixture,
+  readerRegressionFixtures,
   largePdfFixture,
   mixedPdfFixture,
   pdfFixture,
@@ -132,6 +133,14 @@ export function prepareEnvironment(seeded: boolean): void {
 
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
+    // The regression corpus gets its own phase: the seeded specs pin the
+    // five-book library, and the reader-regression spec needs these four
+    // real-world-shape miniatures alongside them.
+    if (process.env.E2E_PHASE === "regressions") {
+      for (const fixture of readerRegressionFixtures) {
+        copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
+      }
+    }
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));

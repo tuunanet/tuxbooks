@@ -37,6 +37,7 @@ const SEEDED_EXCLUDE = [
   "app-hardening.e2e.ts",
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
+  "epub-reader-regressions.e2e.ts",
 ];
 
 function project(testMatch: string[], ignore: string[] = []) {
@@ -85,6 +86,7 @@ export default defineConfig({
     { name: "gpu", ...project(["gpu-fallback.e2e.ts"]) },
     { name: "security", ...project(["epub-content-security.e2e.ts", "app-hardening.e2e.ts"]) },
     { name: "seeded", ...project(["*.e2e.ts"], SEEDED_EXCLUDE) },
+    { name: "regressions", ...project(["epub-reader-regressions.e2e.ts"]) },
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts"]) },
   ],
