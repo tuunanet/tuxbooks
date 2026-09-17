@@ -109,30 +109,50 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
   if (!SIDECAR_METHODS.has(method)) {
     throw policyError(`method not allowed: ${method}`);
   }
+  const record = requireObjectParams(params);
+
+  if (ISSUED_PATH_METHODS.has(method)) {
+    validateIssuedPaths(method, record, issued);
+  }
+  validateMethodShape(method, record);
+}
+
+/** Envelope checks shared by every invoke: object shape and size cap. */
+function requireObjectParams(params: unknown): Record<string, unknown> {
   if (params === null || typeof params !== "object" || Array.isArray(params)) {
     throw policyError("params must be an object");
   }
-  const record = params as Record<string, unknown>;
-
   if (JSON.stringify(params).length > MAX_IPC_PARAM_BYTES) {
     throw policyError("params too large");
   }
+  return params as Record<string, unknown>;
+}
 
-  if (ISSUED_PATH_METHODS.has(method)) {
-    if (method === "reconnect_book" || method === "set_book_cover") {
-      requireBookId(record);
-    }
-    if (method === "scan_library") {
-      requireLibraryPath(record.path, "path");
-      requireIssued(issued, "directory", record.path, "path");
-    } else if (method === "reconnect_book") {
-      requireLibraryPath(record.path, "path");
-      requireIssued(issued, "book-file", record.path, "path");
-    } else {
-      requireIssued(issued, "cover-image", record.imagePath, "imagePath");
-    }
+/** Issued-path methods: the book id plus the per-method issued-path claim. */
+function validateIssuedPaths(
+  method: string,
+  record: Record<string, unknown>,
+  issued: IssuedPaths,
+): void {
+  if (method === "scan_library") {
+    requireLibraryPath(record.path, "path");
+    requireIssued(issued, "directory", record.path, "path");
+    return;
   }
+  if (method === "reconnect_book") {
+    requireBookId(record);
+    requireLibraryPath(record.path, "path");
+    requireIssued(issued, "book-file", record.path, "path");
+    return;
+  }
+  if (method === "set_book_cover") {
+    requireBookId(record);
+  }
+  requireIssued(issued, "cover-image", record.imagePath, "imagePath");
+}
 
+/** Per-method parameter shapes that do not carry issued paths. */
+function validateMethodShape(method: string, record: Record<string, unknown>): void {
   if (method === "import_paths") {
     const paths = record.paths;
     if (
@@ -142,27 +162,21 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
     ) {
       throw policyError("invalid paths");
     }
+    return;
   }
-
   if (method === "search_books" && typeof record.query !== "string") {
     throw policyError("invalid query");
   }
-
   if (method === "create_collection" && typeof record.name !== "string") {
     throw policyError("invalid name");
   }
-
   if (BOOK_ID_METHODS.has(method)) {
     requireBookId(record);
   }
-
   if (method === "get_book_resource") {
-    requireBookId(record);
     requireResourcePath(record);
   }
-
   if (method === "get_book_bytes") {
-    requireBookId(record);
     requireByteRange(record);
   }
 }

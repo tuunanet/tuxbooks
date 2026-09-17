@@ -118,10 +118,8 @@ function selfTest() {
   return failed;
 }
 
-function main() {
-  if (process.argv.includes("--self-test")) {
-    process.exit(selfTest() === 0 ? 0 : 1);
-  }
+/** Run pnpm audit and return the parsed report; tool failures exit 2. */
+function runAudit() {
   let raw;
   try {
     raw = execFileSync("pnpm", ["audit", "--json"], {
@@ -132,27 +130,33 @@ function main() {
     // pnpm audit exits nonzero when it finds vulnerabilities; the parsed
     // report still arrives on stdout. Only a parse/run failure is a tool
     // error (exit 2).
-    if (err.stdout) {
-      raw = err.stdout;
-    } else {
-      console.error("npm-audit-gate: pnpm audit failed to run:", err.message);
-      process.exit(2);
-    }
+    if (err.stdout) return JSON.parse(err.stdout);
+    console.error("npm-audit-gate: pnpm audit failed to run:", err.message);
+    process.exit(2);
   }
-  let report;
   try {
-    report = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (err) {
     console.error("npm-audit-gate: could not parse pnpm audit --json output");
     process.exit(2);
   }
-  let advisories;
+}
+
+/** Parse the audit report into advisory records; malformed output exits 2. */
+function readAdvisories() {
   try {
-    advisories = extractAdvisories(report);
+    return extractAdvisories(runAudit());
   } catch (err) {
     console.error(`npm-audit-gate: ${err.message}`);
     process.exit(2);
   }
+}
+
+function main() {
+  if (process.argv.includes("--self-test")) {
+    process.exit(selfTest() === 0 ? 0 : 1);
+  }
+  const advisories = readAdvisories();
   const { blocked, accepted, informational } = evaluate(advisories);
   for (const a of accepted) {
     console.log(`triaged: ${a.module_name} ${a.severity} ${a.title ?? ""}`);

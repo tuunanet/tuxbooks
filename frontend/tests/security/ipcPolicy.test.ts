@@ -133,6 +133,16 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
   });
 
   describe("set_book_cover", () => {
+    it("requires a book id even with an issued image", () => {
+      expect(() =>
+        validateInvokeParams(
+          "set_book_cover",
+          { imagePath: "/tmp/picked.png" },
+          issued({ "cover-image": ["/tmp/picked.png"] }),
+        ),
+      ).toThrow(/invalid bookId/);
+    });
+
     it("accepts a dialog-issued image for a valid book id", () => {
       expect(() =>
         validateInvokeParams(
