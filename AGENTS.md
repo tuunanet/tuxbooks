@@ -23,6 +23,45 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
   format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
 - Do not silently change these architectural conventions.
 
+## Workflow
+
+Feature work in this repo follows the Superpowers skills. Use them in this
+order, invoking each with the `skill` tool.
+
+1. `brainstorming`. Invoke before any creative work (a new feature, a behavior
+   change). It classifies the task as spike, bounded, or architectural and gets
+   the design approved before any code.
+2. `writing-plans`. For architectural work, invoke once the design is approved
+   to turn the spec into a bite-sized implementation plan. Brainstorming hands
+   off here directly; do not run another skill between them.
+3. `using-git-worktrees`. Invoke before executing the plan to create an
+   isolated workspace. The spec and plan live in the repo, so isolate after
+   they are committed.
+4. `subagent-driven-development` or `executing-plans`. Invoke with the approved
+   plan. Use subagent-driven by default here, since the `task` tool provides
+   subagents; use executing-plans when the work continues in a separate
+   session.
+5. `test-driven-development`. Invoke for every task in step 4: write the
+   failing test, watch it fail, then write the minimal code.
+6. `requesting-code-review`. Invoke between tasks and once at the end of the
+   branch.
+7. `finishing-a-development-branch`. Invoke when every task passes. It verifies
+   the test suite and presents the merge, PR, or keep options.
+
+### Exceptions
+
+- `systematic-debugging` starts a task instead of `brainstorming` when the work
+  begins from a bug, a failing test, or unexpected behavior.
+- `verification-before-completion` runs before any completion claim, commit, or
+  PR, on every path. Pair it with `just check`.
+- `receiving-code-review` runs when someone reviews your work, before you act
+  on the feedback.
+- `dispatching-parallel-agents` runs when two or more tasks are independent and
+  share no state.
+- `writing-skills` runs when you create or edit a skill.
+- `using-superpowers` is the entry rule for the system. The plugin injects it
+  automatically, so never invoke it by hand.
+
 ## Writing for humans
 
 Invoke the `unslop` skill over anything a person will read, before you commit, post, or
