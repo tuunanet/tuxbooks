@@ -526,6 +526,15 @@ decoded pixmap is only ever read — the transform runs on a private
 DeviceRGB copy (`convertToColorSpace`), since the decode result is owned
 by MuPDF's per-image cache.
 
+The LRU owns its entries and destroys them on eviction and on clear
+(`TransformedImageCache`, unit-tested without WASM): each entry holds a
+page-scale pixmap, and the worker's GC is too lazy to release one, so an
+LRU that only forgets the key leaks multi-megabyte images into the WASM
+heap per eviction. Scans past the 4M-pixel cap are not cached and are
+destroyed right after the fill operation that consumes them. The retained
+colorspace wrappers read during classification and conversion are released
+the same way.
+
 Color mode is part of the render and cache identity: the worker render
 request carries the palette only in Smart Dark, and the per-document
 bitmap cache (`pdfBitmapCache`) keys entries by `{page, scale, ratio,
