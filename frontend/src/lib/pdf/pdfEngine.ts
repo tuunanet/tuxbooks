@@ -40,6 +40,33 @@ interface WorkerResponse {
 }
 
 /**
+ * Out-of-band worker diagnostic (no request id). The worker reports every
+ * operation's start, finish, and WASM heap size; the engine logs the stream
+ * at debug level, and the main process captures the renderer console, so the
+ * last line survives a renderer crash. A rising `heap` across renders is the
+ * Smart Dark leak signal (docs/PDF.md).
+ */
+interface WorkerDiag {
+  kind: "pdf-worker-diag";
+  phase: "begin" | "end" | "error" | "unhandled";
+  method: string;
+  requestId: number;
+  page?: number;
+  ms?: number;
+  heapBytes: number;
+  message?: string;
+}
+
+/**
+ * A worker request that never returns would otherwise look like a UI freeze
+ * with no trace; the watchdog reports it while it is still in flight (the
+ * engine, not the worker, owns the timer, so it still fires if the worker is
+ * blocked in a synchronous XHR or a WASM loop).
+ */
+const WORKER_STALL_WARN_MS = 10_000;
+const WORKER_STALL_POLL_MS = 5_000;
+
+/**
  * Cancellation marker for renders and text-layer builds that were
  * superseded before completion (page left the virtualization window,
  * unmount, book switch). Expected control flow, never an error.
@@ -75,6 +102,9 @@ function resolveWasmUrl(): string {
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
+  method: string;
+  startedAt: number;
+  warned: boolean;
 }
 
 class WorkerClient {
@@ -83,16 +113,22 @@ class WorkerClient {
   private pending = new Map<number, PendingRequest>();
   private failureListeners = new Set<() => void>();
   private failed = false;
+  private stallTimer: ReturnType<typeof setInterval> | null = null;
+  private lastDiag = "";
 
   constructor() {
     this.worker = new Worker(workerUrl, { type: "module" });
-    this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      const response = event.data;
-      const pending = this.pending.get(response.id);
+    this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerDiag>) => {
+      const data = event.data;
+      if ("kind" in data) {
+        this.recordDiag(data);
+        return;
+      }
+      const pending = this.pending.get(data.id);
       if (!pending) return;
-      this.pending.delete(response.id);
-      if (response.ok) pending.resolve(response.result);
-      else pending.reject(new Error(response.error ?? "MuPDF worker failure"));
+      this.pending.delete(data.id);
+      if (data.ok) pending.resolve(data.result);
+      else pending.reject(new Error(data.error ?? "MuPDF worker failure"));
     };
     this.worker.onerror = (event) => {
       // A dead worker is a diagnostic failure, not cancellation: every
@@ -100,8 +136,13 @@ class WorkerClient {
       // about it exactly once so recovery can start.
       const pending = [...this.pending.values()];
       this.pending.clear();
+      this.stopStallWatch();
       this.failed = true;
       const failure = new Error(event.message || "MuPDF worker failed to load");
+      console.error(
+        `[pdf-engine] worker gone: ${failure.message}` +
+          (this.lastDiag ? `; last operation ${this.lastDiag}` : ""),
+      );
       for (const request of pending) {
         request.reject(failure);
       }
@@ -111,6 +152,42 @@ class WorkerClient {
         listener();
       }
     };
+    this.stallTimer = setInterval(() => this.reportStalls(), WORKER_STALL_POLL_MS);
+  }
+
+  /** Log one worker breadcrumb and remember it for the death/crash report. */
+  private recordDiag(diag: WorkerDiag): void {
+    const segments = [
+      diag.method,
+      diag.page !== undefined ? `page=${diag.page}` : null,
+      diag.phase,
+      diag.ms !== undefined ? `${Math.round(diag.ms)}ms` : null,
+      `heap=${(diag.heapBytes / 1048576).toFixed(1)}MB`,
+      diag.message ?? null,
+    ].filter((segment): segment is string => segment !== null);
+    this.lastDiag = segments.join(" ");
+    console.debug(`[pdf-worker] ${this.lastDiag}`);
+  }
+
+  /** Warn once per request that has been in flight past the stall budget. */
+  private reportStalls(): void {
+    const now = performance.now();
+    for (const [id, pending] of this.pending) {
+      if (pending.warned || now - pending.startedAt < WORKER_STALL_WARN_MS) continue;
+      pending.warned = true;
+      console.warn(
+        `[pdf-engine] worker request stalled: ${pending.method} #${id}` +
+          ` running ${Math.round(now - pending.startedAt)}ms` +
+          (this.lastDiag ? `; last completed ${this.lastDiag}` : ""),
+      );
+    }
+  }
+
+  private stopStallWatch(): void {
+    if (this.stallTimer !== null) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
   }
 
   /** Registers a one-shot worker-death listener; returns the unsubscribe fn. */
@@ -127,7 +204,13 @@ class WorkerClient {
   request(method: string, params: unknown, transfer: Transferable[] = []): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, {
+        resolve,
+        reject,
+        method,
+        startedAt: performance.now(),
+        warned: false,
+      });
       this.worker.postMessage({ id, method, params }, transfer);
     });
   }
@@ -140,6 +223,9 @@ class WorkerClient {
     let cancelled = false;
     const result = new Promise((resolve, reject) => {
       this.pending.set(id, {
+        method,
+        startedAt: performance.now(),
+        warned: false,
         resolve: (value) => {
           if (cancelled) {
             reject(new PdfRenderCancelledError());
@@ -168,6 +254,7 @@ class WorkerClient {
   }
 
   terminate(): void {
+    this.stopStallWatch();
     this.worker.terminate();
   }
 }

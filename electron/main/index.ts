@@ -267,6 +267,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
   });
 
   window.webContents.on("did-finish-load", () => bootElapsed("renderer did-finish-load"));
+  window.webContents.on("console-message", (details) => recordRendererConsole(details));
   window.webContents.on("render-process-gone", (_event, details) => logRenderProcessGone(details));
 
   // Dev-only DevTools access (the dev server runs only via `just dev`):
@@ -561,11 +562,44 @@ app.on("child-process-gone", (_event, details) => {
   }
 });
 
+/**
+ * Renderer console tail (crash survival): renderer and worker diagnostics
+ * are lost the moment the renderer crashes, so main mirrors every console
+ * message and replays the most recent ones when the process dies. Warnings
+ * and errors are also echoed live — they are rare and usually the signal.
+ * The buffer is small on purpose: enough to hold the operations in flight
+ * (the engine logs one breadcrumb pair per worker request), never a log sink.
+ */
+const RENDERER_CONSOLE_LIMIT = 200;
+const RENDERER_CONSOLE_TAIL = 40;
+const rendererConsole: string[] = [];
+
+function recordRendererConsole(details: {
+  message: string;
+  level: string;
+  lineNumber: number;
+  sourceId: string;
+}): void {
+  const line = `[renderer:${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})`;
+  rendererConsole.push(line);
+  if (rendererConsole.length > RENDERER_CONSOLE_LIMIT) rendererConsole.shift();
+  // Echo errors live; warnings are common (React) and stay buffered for the
+  // crash dump unless something actually fails.
+  if (details.level === "error") console.error(line);
+}
+
 // Renderer deaths are fatal to the page but distinct from GPU failures;
-// Electron restarts nothing here, so the log must carry the failure mode.
+// Electron restarts nothing here, so the log must carry the failure mode
+// plus whatever the renderer logged before dying.
 function logRenderProcessGone(details: Electron.RenderProcessGoneDetails): void {
   console.error(
     `[electron] renderer gone: reason=${details.reason} exitCode=${details.exitCode}` +
       ` electron=${process.versions.electron} chromium=${process.versions.chrome}`,
   );
+  if (rendererConsole.length === 0) return;
+  console.error(
+    `[electron] last ${Math.min(rendererConsole.length, RENDERER_CONSOLE_TAIL)} renderer messages:`,
+  );
+  for (const line of rendererConsole.slice(-RENDERER_CONSOLE_TAIL)) console.error(`  ${line}`);
+  rendererConsole.length = 0;
 }

@@ -62,12 +62,51 @@ interface WorkerResponse {
   error?: string;
 }
 
+/**
+ * Out-of-band worker diagnostic, sent without a request id so it never
+ * resolves a request. The engine forwards these to the renderer console,
+ * which the main process captures; the last one therefore survives a
+ * renderer crash and pins the operation in flight (and the WASM heap at
+ * that point — `wasmHeapBytes` is the leak signal).
+ */
+interface WorkerDiag {
+  kind: "pdf-worker-diag";
+  phase: "begin" | "end" | "error" | "unhandled";
+  method: string;
+  requestId: number;
+  page?: number;
+  ms?: number;
+  heapBytes: number;
+  message?: string;
+}
+
 type MupdfModule = typeof import("mupdf");
 type MupdfDocument = InstanceType<MupdfModule["Document"]>;
 type MupdfColor = import("mupdf").Color;
 
 let mupdf: MupdfModule | null = null;
 let document: MupdfDocument | null = null;
+
+/**
+ * Byte length of the MuPDF WASM linear memory. Emscripten populates HEAPU8
+ * on the module config object we hand it; the heap never shrinks, so a
+ * monotonically rising value across renders means native objects are not
+ * being released. Zero before the engine loads.
+ */
+function wasmHeapBytes(): number {
+  const heap = (globalThis as { $libmupdf_wasm_Module?: { HEAPU8?: Uint8Array } })
+    .$libmupdf_wasm_Module?.HEAPU8;
+  return heap ? heap.buffer.byteLength : 0;
+}
+
+/** Post one diagnostic; never throws (the worker may be tearing down). */
+function postDiag(diag: WorkerDiag): void {
+  try {
+    (self as unknown as Worker).postMessage(diag);
+  } catch {
+    // Structured-clone failure or a closing worker: diagnostics are optional.
+  }
+}
 
 /**
  * Generation of the open document, mixed into the per-image decision keys so
@@ -509,12 +548,27 @@ function buildRecoloredImage(
 }
 
 /**
+ * Release the objects the engine's JS-device binding wrapped for one
+ * callback. The binding keeps a native reference per argument
+ * (`_wasm_keep_path` and friends) and expects JavaScript garbage collection
+ * to drop it; under the worker's allocation profile that never keeps up, so
+ * the WASM heap grows with every operation until the renderer dies. Dropping
+ * each wrapper right after it has been forwarded balances the reference
+ * deterministically. `Shade` is the one borrowed argument (no keep) and must
+ * not be dropped here.
+ */
+function releaseDeviceArgs(...objects: { destroy(): void }[]): void {
+  for (const object of objects) object.destroy();
+}
+
+/**
  * The Smart Dark render device: a MuPDF JavaScript Device that forwards
  * every operation to a DrawDevice painting the target pixmap, remapping
  * fill/stroke/text/image-mask paint colors onto the dark palette and
  * leaving ordinary raster images untouched. Every callback must forward —
  * an omitted callback is a no-op on the native side, which would silently
- * drop clips, groups, masks, and tiles.
+ * drop clips, groups, masks, and tiles. Every callback must also release
+ * its arguments (see `releaseDeviceArgs`) or the WASM heap leaks per op.
  */
 function makeSmartRecolorDevice(
   draw: InstanceType<MupdfModule["DrawDevice"]>,
@@ -529,32 +583,52 @@ function makeSmartRecolorDevice(
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.fillPath(path, evenOdd, ctm, mapped.colorspace, mapped.color, alpha);
       else draw.fillPath(path, evenOdd, ctm, colorspace, color as MupdfColor, alpha);
+      releaseDeviceArgs(path, colorspace);
     },
     strokePath: (path, stroke, ctm, colorspace, color, alpha) => {
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.strokePath(path, stroke, ctm, mapped.colorspace, mapped.color, alpha);
       else draw.strokePath(path, stroke, ctm, colorspace, color as MupdfColor, alpha);
+      releaseDeviceArgs(path, stroke, colorspace);
     },
-    clipPath: (path, evenOdd, ctm) => draw.clipPath(path, evenOdd, ctm),
-    clipStrokePath: (path, stroke, ctm) => draw.clipStrokePath(path, stroke, ctm),
+    clipPath: (path, evenOdd, ctm) => {
+      draw.clipPath(path, evenOdd, ctm);
+      releaseDeviceArgs(path);
+    },
+    clipStrokePath: (path, stroke, ctm) => {
+      draw.clipStrokePath(path, stroke, ctm);
+      releaseDeviceArgs(path, stroke);
+    },
     fillText: (text, ctm, colorspace, color, alpha) => {
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.fillText(text, ctm, mapped.colorspace, mapped.color, alpha);
       else draw.fillText(text, ctm, colorspace, color as MupdfColor, alpha);
+      releaseDeviceArgs(text, colorspace);
     },
     strokeText: (text, stroke, ctm, colorspace, color, alpha) => {
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.strokeText(text, stroke, ctm, mapped.colorspace, mapped.color, alpha);
       else draw.strokeText(text, stroke, ctm, colorspace, color as MupdfColor, alpha);
+      releaseDeviceArgs(text, stroke, colorspace);
     },
-    clipText: (text, ctm) => draw.clipText(text, ctm),
-    clipStrokeText: (text, stroke, ctm) => draw.clipStrokeText(text, stroke, ctm),
-    ignoreText: (text, ctm) => draw.ignoreText(text, ctm),
+    clipText: (text, ctm) => {
+      draw.clipText(text, ctm);
+      releaseDeviceArgs(text);
+    },
+    clipStrokeText: (text, stroke, ctm) => {
+      draw.clipStrokeText(text, stroke, ctm);
+      releaseDeviceArgs(text, stroke);
+    },
+    ignoreText: (text, ctm) => {
+      draw.ignoreText(text, ctm);
+      releaseDeviceArgs(text);
+    },
     fillShade: (shade, ctm, alpha) => draw.fillShade(shade, ctm, alpha),
     fillImage: (image, ctm, alpha) => {
       const standIn = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
       if (standIn) draw.fillImage(standIn, ctm, alpha);
       else draw.fillImage(image, ctm, alpha);
+      releaseDeviceArgs(image);
     },
     fillImageMask: (image, ctm, colorspace, color, alpha) => {
       // Image masks are stencil shapes painted a flat color (faxed text,
@@ -563,17 +637,24 @@ function makeSmartRecolorDevice(
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.fillImageMask(image, ctm, mapped.colorspace, mapped.color, alpha);
       else draw.fillImageMask(image, ctm, colorspace, color as MupdfColor, alpha);
+      releaseDeviceArgs(image, colorspace);
     },
-    clipImageMask: (image, ctm) => draw.clipImageMask(image, ctm),
+    clipImageMask: (image, ctm) => {
+      draw.clipImageMask(image, ctm);
+      releaseDeviceArgs(image);
+    },
     popClip: () => draw.popClip(),
     beginMask: (area, luminosity, colorspace, color) => {
       const mapped = recoloredColor(palette, color, colorspace);
       if (mapped) draw.beginMask(area, luminosity, mapped.colorspace, mapped.color);
       else draw.beginMask(area, luminosity, colorspace, color as MupdfColor);
+      releaseDeviceArgs(colorspace);
     },
     endMask: () => draw.endMask(),
-    beginGroup: (area, colorspace, isolated, knockout, blendmode, alpha) =>
-      draw.beginGroup(area, colorspace, isolated, knockout, blendmode, alpha),
+    beginGroup: (area, colorspace, isolated, knockout, blendmode, alpha) => {
+      draw.beginGroup(area, colorspace, isolated, knockout, blendmode, alpha);
+      releaseDeviceArgs(colorspace);
+    },
     endGroup: () => draw.endGroup(),
     beginTile: (area, view, xstep, ystep, ctm, id, docId) =>
       draw.beginTile(area, view, xstep, ystep, ctm, id, docId),
@@ -618,18 +699,22 @@ async function renderSmartPage(
       pixmap.clear(0);
       const draw = new mupdf.DrawDevice(ctm, pixmap);
       const backgroundPath = new mupdf.Path();
-      backgroundPath.rect(x0, y0, x1, y1);
-      // The path is already in page space and the draw device concatenates
-      // its own page→device transform internally, so the identity matrix is
-      // the correct in_ctm here — the render ctm would double-scale.
-      draw.fillPath(
-        backgroundPath,
-        false,
-        mupdf.Matrix.identity,
-        mupdf.ColorSpace.DeviceRGB,
-        palette.background,
-        1,
-      );
+      try {
+        backgroundPath.rect(x0, y0, x1, y1);
+        // The path is already in page space and the draw device concatenates
+        // its own page→device transform internally, so the identity matrix is
+        // the correct in_ctm here — the render ctm would double-scale.
+        draw.fillPath(
+          backgroundPath,
+          false,
+          mupdf.Matrix.identity,
+          mupdf.ColorSpace.DeviceRGB,
+          palette.background,
+          1,
+        );
+      } finally {
+        backgroundPath.destroy();
+      }
       const smart = makeSmartRecolorDevice(draw, palette, page, pageWidth * pageHeight);
       try {
         loaded.run(smart, mupdf.Matrix.identity);
@@ -637,6 +722,11 @@ async function renderSmartPage(
         // fz_close_device: flushes pending groups/masks/blends, matching the
         // plain path's toPixmap internals.
         smart.close();
+        // Free the JS device and its draw target now: relying on worker GC
+        // leaves the whole device graph (and the pixmap reference it holds)
+        // in the WASM heap for the life of the worker.
+        smart.destroy();
+        draw.destroy();
       }
       const pixels = new Uint8ClampedArray(pixmap.getPixels());
       const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
@@ -772,11 +862,30 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const respond = (response: WorkerResponse, transfer: Transferable[] = []): void => {
     (self as unknown as Worker).postMessage(response, transfer);
   };
+  const page = (request.params as { page?: number } | undefined)?.page;
+  const startedAt = performance.now();
+  postDiag({
+    kind: "pdf-worker-diag",
+    phase: "begin",
+    method: request.method,
+    requestId: request.id,
+    page,
+    heapBytes: wasmHeapBytes(),
+  });
   try {
     const method = methods[request.method as keyof typeof methods];
     if (!method) throw new Error(`unknown method ${request.method}`);
     const params = request.params as never;
     const result = (await (method as (p: never) => unknown)(params)) as { bitmap?: ImageBitmap };
+    postDiag({
+      kind: "pdf-worker-diag",
+      phase: "end",
+      method: request.method,
+      requestId: request.id,
+      page,
+      ms: performance.now() - startedAt,
+      heapBytes: wasmHeapBytes(),
+    });
     if (result?.bitmap instanceof ImageBitmap) {
       // The bitmap is transferred in place: the structured clone keeps the
       // property, the transfer list moves the pixel buffer itself.
@@ -785,10 +894,41 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     }
     respond({ id: request.id, ok: true, result });
   } catch (error: unknown) {
-    respond({
-      id: request.id,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
+    const message = error instanceof Error ? error.message : String(error);
+    postDiag({
+      kind: "pdf-worker-diag",
+      phase: "error",
+      method: request.method,
+      requestId: request.id,
+      page,
+      ms: performance.now() - startedAt,
+      heapBytes: wasmHeapBytes(),
+      message,
     });
+    respond({ id: request.id, ok: false, error: message });
   }
 };
+
+// A worker that dies to an uncaught error reports the operation in flight
+// (and the heap state) before the engine's request rejection surfaces; the
+// worker console itself would be lost with the renderer.
+self.addEventListener("unhandledrejection", (event) => {
+  postDiag({
+    kind: "pdf-worker-diag",
+    phase: "unhandled",
+    method: "unhandledrejection",
+    requestId: 0,
+    heapBytes: wasmHeapBytes(),
+    message: event.reason instanceof Error ? event.reason.message : String(event.reason),
+  });
+});
+self.addEventListener("error", (event) => {
+  postDiag({
+    kind: "pdf-worker-diag",
+    phase: "unhandled",
+    method: "error",
+    requestId: 0,
+    heapBytes: wasmHeapBytes(),
+    message: event.message,
+  });
+});
