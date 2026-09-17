@@ -430,6 +430,34 @@ open-path ordering (page 1 first, then adjacent pages, then outline and
 thumbnails) is enforced on the main thread — see "Open-timeline
 telemetry" above.
 
+### Diagnostics
+
+The worker posts an out-of-band breadcrumb for every request it starts,
+finishes, or fails (`{ kind: "pdf-worker-diag", … }`, no request id) that
+carries the method, page, elapsed time, and the current MuPDF WASM heap
+size; the engine logs the stream at debug level and keeps the last line.
+A worker request in flight past `WORKER_STALL_WARN_MS` (10 s) is reported
+by a main-thread watchdog while it is still running, so a blocked worker
+(Smart Dark OOM, a synchronous range read) leaves a trace instead of
+looking like a frozen UI. The main process mirrors the renderer console
+and replays its tail on `render-process-gone` (`electron/main/index.ts`),
+because a renderer crash takes the whole console with it. The heap line is
+the leak signal: it must stay flat across repeated renders of one
+document.
+
+Releasing the device objects stops the heap leak, but the engine's JS
+callback Device can still corrupt MuPDF's internal state after enough Smart
+Dark renders: on shading-heavy pages a re-render starts throwing
+`Unexpected mesh type` and then `exception stack overflow` while the heap
+stays flat. So a range-backed document bounds its worker lifetime: after
+`SMART_RENDER_RECYCLE_LIMIT` (180) Smart Dark renders it opens a replacement
+worker on the same source before swapping, routes new work to it, and lets
+the old worker drain its in-flight requests before terminating it
+(`MuPdfDocument.recycleWorker`). The swap is invisible to the reader — the
+document handle, page sizes, text cache, and bitmap cache all survive — and
+in-memory opens (no retained bytes to reopen) never recycle. Non-smart
+renders do not count toward the budget because they never use the device.
+
 ### Appearance and color modes (issue #67)
 
 PDFs are fixed-layout rasters: the reader's reflow controls (font size,
@@ -454,6 +482,18 @@ theme, which for PDFs is really a set of **color modes**
   pre-filled with the dark background (PDFs do not paint their own page
   background; viewers supply the white). Image-mask paints follow the
   text rules (masks are stencil shapes, not photos).
+
+  The callback device is the one place the reader touches the engine's JS
+  device binding, and that binding keeps a native reference per argument it
+  passes (path, colorspace, text, stroke, image) expecting JavaScript GC to
+  drop it. In a worker the GC never keeps up, so the Smart Dark path must
+  release each argument right after forwarding it and destroy the device,
+  its `DrawDevice`, and the background path per render
+  (`releaseDeviceArgs`); `Shade` is the exception (a borrowed pointer) and
+  must not be dropped. Without this the WASM heap grows on every render
+  until the renderer dies (see "Diagnostics" for the heap breadcrumb that
+  catches it).
+
 - **Invert** — the explicit full-page negative (`invert(1)
 hue-rotate(180deg)`, the recipe Foliate popularized), kept from the old
   Dark behavior for users who actually want inversion. A CSS filter over
