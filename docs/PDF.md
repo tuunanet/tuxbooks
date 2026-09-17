@@ -445,6 +445,19 @@ because a renderer crash takes the whole console with it. The heap line is
 the leak signal: it must stay flat across repeated renders of one
 document.
 
+Releasing the device objects stops the heap leak, but the engine's JS
+callback Device can still corrupt MuPDF's internal state after enough Smart
+Dark renders: on shading-heavy pages a re-render starts throwing
+`Unexpected mesh type` and then `exception stack overflow` while the heap
+stays flat. So a range-backed document bounds its worker lifetime: after
+`SMART_RENDER_RECYCLE_LIMIT` (180) Smart Dark renders it opens a replacement
+worker on the same source before swapping, routes new work to it, and lets
+the old worker drain its in-flight requests before terminating it
+(`MuPdfDocument.recycleWorker`). The swap is invisible to the reader — the
+document handle, page sizes, text cache, and bitmap cache all survive — and
+in-memory opens (no retained bytes to reopen) never recycle. Non-smart
+renders do not count toward the budget because they never use the device.
+
 ### Appearance and color modes (issue #67)
 
 PDFs are fixed-layout rasters: the reader's reflow controls (font size,

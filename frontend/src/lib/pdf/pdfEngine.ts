@@ -67,6 +67,25 @@ const WORKER_STALL_WARN_MS = 10_000;
 const WORKER_STALL_POLL_MS = 5_000;
 
 /**
+ * Smart Dark drives each page through the engine's JS callback Device, and
+ * that path corrupts MuPDF's internal state after enough renders on some
+ * documents (the WASM heap stays flat once the device objects are released,
+ * but shading-heavy pages start throwing `Unexpected mesh type` and then
+ * `exception stack overflow`). Bound the damage: after this many Smart Dark
+ * renders the document trades its worker for a fresh one, which reopens from
+ * the range-backed source with an empty WASM heap and clean MuPDF state.
+ */
+const SMART_RENDER_RECYCLE_LIMIT = 180;
+/** Grace for the old worker's in-flight requests before its teardown. */
+const RECYCLE_DRAIN_GRACE_MS = 2_000;
+
+/** Open request retained by a range-backed document for worker recycling. */
+interface WorkerOpenRequest {
+  wasmUrl: string;
+  bookUrl: string;
+}
+
+/**
  * Cancellation marker for renders and text-layer builds that were
  * superseded before completion (page left the virtualization window,
  * unmount, book switch). Expected control flow, never an error.
@@ -112,7 +131,9 @@ class WorkerClient {
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private failureListeners = new Set<() => void>();
+  private idleResolvers = new Set<() => void>();
   private failed = false;
+  private terminated = false;
   private stallTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiag = "";
 
@@ -129,6 +150,7 @@ class WorkerClient {
       this.pending.delete(data.id);
       if (data.ok) pending.resolve(data.result);
       else pending.reject(new Error(data.error ?? "MuPDF worker failure"));
+      this.notifyIdle();
     };
     this.worker.onerror = (event) => {
       // A dead worker is a diagnostic failure, not cancellation: every
@@ -138,6 +160,7 @@ class WorkerClient {
       this.pending.clear();
       this.stopStallWatch();
       this.failed = true;
+      this.notifyIdle();
       const failure = new Error(event.message || "MuPDF worker failed to load");
       console.error(
         `[pdf-engine] worker gone: ${failure.message}` +
@@ -188,6 +211,22 @@ class WorkerClient {
       clearInterval(this.stallTimer);
       this.stallTimer = null;
     }
+  }
+
+  /**
+   * Resolves once no request is in flight. A recycling document lets the old
+   * worker finish its queued renders before terminating it, so the swap is
+   * invisible to callers; a terminated worker resolves immediately.
+   */
+  whenIdle(): Promise<void> {
+    if (this.terminated || this.pending.size === 0) return Promise.resolve();
+    return new Promise((resolve) => this.idleResolvers.add(resolve));
+  }
+
+  private notifyIdle(): void {
+    if (this.pending.size > 0) return;
+    for (const resolve of this.idleResolvers) resolve();
+    this.idleResolvers.clear();
   }
 
   /** Registers a one-shot worker-death listener; returns the unsubscribe fn. */
@@ -248,14 +287,17 @@ class WorkerClient {
         if (pending) {
           this.pending.delete(id);
           pending.reject(new PdfRenderCancelledError());
+          this.notifyIdle();
         }
       },
     };
   }
 
   terminate(): void {
+    this.terminated = true;
     this.stopStallWatch();
     this.worker.terminate();
+    this.notifyIdle();
   }
 }
 
@@ -307,14 +349,19 @@ export interface PdfDocument {
 
 class MuPdfDocument implements PdfDocument {
   readonly numPages: number;
-  private readonly client: WorkerClient;
+  private client: WorkerClient;
   private readonly pageSizes = new Map<number, { width: number; height: number }>();
   private readonly textLines = new Map<number, Promise<EngineTextLine[]>>();
+  private readonly reopen: WorkerOpenRequest | null;
+  private smartRenders = 0;
+  private recycling = false;
+  private draining: WorkerClient | null = null;
   private destroyed = false;
 
-  constructor(client: WorkerClient, numPages: number) {
+  constructor(client: WorkerClient, numPages: number, reopen: WorkerOpenRequest | null = null) {
     this.client = client;
     this.numPages = numPages;
+    this.reopen = reopen;
   }
 
   private assertAlive(): void {
@@ -363,8 +410,65 @@ class MuPdfDocument implements PdfDocument {
       } finally {
         bitmap.close();
       }
+      if (smartColors) {
+        this.smartRenders += 1;
+        this.maybeRecycle();
+      }
     });
     return { promise, cancel };
+  }
+
+  /**
+   * Recycle the worker once Smart Dark has rendered enough pages to risk
+   * MuPDF state corruption (see `SMART_RENDER_RECYCLE_LIMIT`). The
+   * replacement opens the same range-backed source and takes over new work;
+   * the old worker drains its queue first, so no in-flight render is lost.
+   */
+  private maybeRecycle(): void {
+    if (!this.reopen || this.destroyed || this.recycling) return;
+    if (this.smartRenders < SMART_RENDER_RECYCLE_LIMIT) return;
+    this.recycling = true;
+    void this.recycleWorker();
+  }
+
+  private async recycleWorker(): Promise<void> {
+    const reopen = this.reopen;
+    if (!reopen) {
+      this.recycling = false;
+      return;
+    }
+    const replacement = new WorkerClient();
+    try {
+      await replacement.request("open", reopen);
+      if (this.destroyed) {
+        replacement.terminate();
+        return;
+      }
+      const previous = this.client;
+      this.client = replacement;
+      this.smartRenders = 0;
+      this.draining = previous;
+      console.info("[pdf-engine] recycled MuPDF worker after Smart Dark render budget");
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, RECYCLE_DRAIN_GRACE_MS);
+        void previous.whenIdle().then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    } catch (error: unknown) {
+      replacement.terminate();
+      // Keep the current worker; reset the budget so the next batch retries
+      // instead of spinning on a failing reopen.
+      this.smartRenders = 0;
+      console.warn(
+        `[pdf-engine] worker recycle failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      this.draining?.terminate();
+      this.draining = null;
+      this.recycling = false;
+    }
   }
 
   async getOutline(): Promise<RawPdfOutline[] | null> {
@@ -393,6 +497,8 @@ class MuPdfDocument implements PdfDocument {
     if (this.destroyed) return;
     this.destroyed = true;
     this.client.terminate();
+    this.draining?.terminate();
+    this.draining = null;
   }
 }
 
@@ -492,12 +598,13 @@ export async function openPdfDocumentFromBook(
   format: BookFormat,
 ): Promise<PdfDocument> {
   const client = takePrewarmedClient() ?? new WorkerClient();
+  const reopen: WorkerOpenRequest = {
+    wasmUrl: resolveWasmUrl(),
+    bookUrl: `tuxbooks://book/${bookId}?format=${format}`,
+  };
   try {
-    const { pageCount } = (await client.request("open", {
-      wasmUrl: resolveWasmUrl(),
-      bookUrl: `tuxbooks://book/${bookId}?format=${format}`,
-    })) as { pageCount: number };
-    return new MuPdfDocument(client, pageCount);
+    const { pageCount } = (await client.request("open", reopen)) as { pageCount: number };
+    return new MuPdfDocument(client, pageCount, reopen);
   } catch (error: unknown) {
     client.terminate();
     throw error;
