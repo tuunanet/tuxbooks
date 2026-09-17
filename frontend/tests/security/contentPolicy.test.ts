@@ -54,9 +54,23 @@ describe("publication content sanitization (E-1, E-2)", () => {
     expect(out.toLowerCase()).not.toContain("evil.example");
   });
 
-  it("returns a clean document byte-identically", () => {
-    const doc = xhtml(`<p>Hello <em>world</em></p><img src="img/pic.png" alt="p">`);
+  it("returns a clean, well-formed document byte-identically", () => {
+    const doc = xhtml(`<p>Hello <em>world</em></p><img src="img/pic.png" alt="p"/>`);
     expect(sanitizePublicationText(doc, true)).toBe(doc);
+  });
+
+  it("repairs a clean but not-well-formed manifest-XHTML document", () => {
+    // The toolkit strict-parses manifest-XHTML, so a clean-but-sloppy
+    // document (HTML-style unclosed img) cannot be returned raw: the fence
+    // re-serializes it into XML the strict parse accepts. The HTML parser
+    // represents a leading XML declaration as a comment; the repair keeps
+    // it as such, which stays well-formed.
+    const doc = xhtml(`<p>Hello <em>world</em></p><img src="img/pic.png" alt="p">`);
+    const out = sanitizePublicationText(doc, true);
+    const reparsed = new DOMParser().parseFromString(out, "application/xhtml+xml");
+    expect(reparsed.querySelector("parsererror")).toBeNull();
+    expect(reparsed.querySelector("img")?.getAttribute("src")).toBe("img/pic.png");
+    expect(reparsed.querySelector("em")?.textContent).toBe("world");
   });
 
   it("keeps publisher styling and images intact", () => {
@@ -239,6 +253,59 @@ describe("the publication fetch client (E-3)", () => {
     const text = await (await client(`${base}copyright.html`)).text();
     const reparsed = new DOMParser().parseFromString(text, "application/xhtml+xml");
     expect(reparsed.querySelector("parsererror")).toBeNull();
+  });
+
+  it("passes non-ok and non-document responses through untouched", async () => {
+    const inner = vi.fn(
+      async () => new Response("nope", { status: 404, headers: { "content-type": "text/html" } }),
+    );
+    const client = policyFetchClient(base, inner);
+    const response = await client(`${base}missing.html`);
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("nope");
+  });
+
+  it("accepts URL and Request inputs and keeps the manifest href decoding", async () => {
+    const seen: string[] = [];
+    const doc = xhtml(`<p>x</p>`);
+    const client = policyFetchClient(
+      base,
+      (input) => {
+        seen.push(
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+        );
+        return Promise.resolve(
+          new Response(doc, { status: 200, headers: { "content-type": "text/html" } }),
+        );
+      },
+      (memberHref) => {
+        // Manifest lookup receives the percent-decoded member href.
+        expect(memberHref).toBe("chap ter 1.html");
+        return "application/xhtml+xml";
+      },
+    );
+    await client(`${base}chap%20ter%201.html`);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("returns the original bytes for a headless fragment the fence cannot scope", async () => {
+    const raw = new TextEncoder().encode("<p>fragment</p>");
+    const client = policyFetchClient(base, () =>
+      Promise.resolve(
+        new Response(raw.buffer as ArrayBuffer, {
+          status: 200,
+          headers: { "content-type": "application/xhtml+xml" },
+        }),
+      ),
+    );
+    const response = await client(`${base}fragment.xhtml`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(Array.from(bytes)).toEqual(Array.from(raw));
+  });
+
+  it("rejects requests outside the base via URL objects too", async () => {
+    const client = policyFetchClient(base);
+    await expect(client(new URL("https://evil.example/x.html"))).rejects.toThrow();
   });
 
   it.each(["image/png", "text/css", "font/woff2", "application/octet-stream"])(

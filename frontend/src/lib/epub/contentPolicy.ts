@@ -44,6 +44,20 @@ export function isSanitizableContentType(contentType: string | null): boolean {
 
 const XML_PROLOG = /^<\?xml[^>]*\?>/;
 
+/** True when the document identifies as XML: declaration, XHTML doctype, or
+ * the XHTML namespace in the head region. Publisher toolchains escape the
+ * declaration into an HTML comment and drop declarations entirely, and the
+ * transport content type disagrees with the manifest, so all three markers
+ * matter. */
+function looksLikeXml(text: string): boolean {
+  const head = text.slice(0, 1024);
+  return (
+    XML_PROLOG.test(text.trimStart().slice(0, 128)) ||
+    (head.includes("<!DOCTYPE") && head.toUpperCase().includes("XHTML")) ||
+    head.includes("http://www.w3.org/1999/xhtml")
+  );
+}
+
 /** The `encoding` declared by an XML prolog, or null. */
 export function declaredEncoding(text: string): string | null {
   const prolog = XML_PROLOG.exec(text)?.[0];
@@ -110,6 +124,25 @@ export function sanitizePublicationText(text: string, isXml: boolean): string {
     if (xml.querySelector("parsererror") === null && xml.documentElement !== null) {
       return stripActiveContent(xml, true) ?? text;
     }
+    // Sloppy manifest-XHTML (unclosed tags, named HTML entities): the HTML
+    // parser repairs it, and the HTML parser already puts every element in
+    // the XHTML namespace, so XMLSerializer emits well-formed XML the
+    // toolkit's strict parse accepts - named entities decode to characters
+    // here, which is what makes entity-laden chapters renderable at all.
+    // Re-serialize even when nothing was stripped: the raw bytes fail the
+    // strict parse, so "unchanged" is not an option for this class.
+    const html = new DOMParser().parseFromString(text, "text/html");
+    for (const element of html.querySelectorAll("*")) {
+      // The HTML parser both namespaces every element and keeps a literal
+      // xmlns attribute; XMLSerializer emits both and strict XML rejects
+      // the duplicate declaration. The namespace survives on the element.
+      for (const attribute of Array.from(element.attributes)) {
+        if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")) {
+          element.removeAttribute(attribute.name);
+        }
+      }
+    }
+    return stripActiveContent(html, true) ?? serializeXml(html);
   }
   const html = new DOMParser().parseFromString(text, "text/html");
   return stripActiveContent(html, false) ?? text;
@@ -250,6 +283,7 @@ type FetchInput = string | URL | Request;
 export function policyFetchClient(
   baseUrl: string,
   fetchImpl?: (input: FetchInput, init?: RequestInit) => Promise<Response>,
+  mediaTypeFor?: (memberHref: string) => string | null,
 ): (input: FetchInput, init?: RequestInit) => Promise<Response> {
   const inner =
     fetchImpl ??
@@ -262,8 +296,25 @@ export function policyFetchClient(
     const response = await inner(input, init);
     const contentType = response.headers.get("content-type");
     if (!response.ok || !isSanitizableContentType(contentType)) return response;
-    return fenceDocumentResponse(response);
+    // The manifest media type is what the toolkit's strict parse follows,
+    // not the transport header: real books keep application/xhtml+xml
+    // content in .html members, which the resource protocol serves as
+    // text/html. Resolve through the publication manifest when available.
+    const memberHref = safeMemberHref(raw, baseUrl);
+    const declared = memberHref === null ? null : (mediaTypeFor?.(memberHref) ?? null);
+    return fenceDocumentResponse(response, declared);
   };
+}
+
+/** The manifest-relative href a publication request addresses, or null. */
+function safeMemberHref(raw: string, baseUrl: string): string | null {
+  if (!raw.startsWith(baseUrl)) return null;
+  const rest = raw.slice(baseUrl.length);
+  try {
+    return decodeURIComponent(rest);
+  } catch {
+    return rest;
+  }
 }
 
 /**
@@ -275,16 +326,19 @@ export function policyFetchClient(
  * Clean documents keep their original bytes; failures propagate so a frame
  * fails closed instead of rendering unfenced markup.
  */
-async function fenceDocumentResponse(response: Response): Promise<Response> {
+async function fenceDocumentResponse(
+  response: Response,
+  declaredType: string | null,
+): Promise<Response> {
   const bytes = await response.arrayBuffer();
   const contentType = response.headers.get("content-type") ?? "";
   const sniffable = new TextDecoder("latin1").decode(bytes.slice(0, 200));
   const decoder = safeDecoder(declaredEncoding(sniffable) ?? "utf-8");
   const text = decoder.decode(bytes);
   const isXml =
-    contentType.includes("xhtml") ||
-    contentType.includes("svg") ||
-    text.trimStart().startsWith("<?xml");
+    declaredType !== null
+      ? declaredType.includes("xhtml") || declaredType.includes("svg")
+      : contentType.includes("xhtml") || contentType.includes("svg") || looksLikeXml(text);
   const sanitized = sanitizePublicationText(text, isXml);
   const fenced = insertFrameCspMeta(sanitized, isXml);
   if (fenced === text) {
