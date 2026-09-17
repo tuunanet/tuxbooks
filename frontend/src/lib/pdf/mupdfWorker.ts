@@ -30,6 +30,7 @@ import {
   type SmartPalette,
   type RasterImageTreatment,
 } from "./smartColors";
+import { TransformedImageCache } from "./transformedImageCache";
 
 type WorkerRequest =
   | {
@@ -305,12 +306,15 @@ function extractLines(doc: MupdfDocument, page: number): TextLine[] {
 const imageDecisions = new Map<string, RasterImageTreatment>();
 const IMAGE_DECISIONS_CAP = 4096;
 
-/** Transformed (recolored) scan images reused across a document's renders. */
-interface TransformedImage {
-  image: InstanceType<MupdfModule["Image"]>;
-}
-const transformedImages = new Map<string, TransformedImage>();
+/**
+ * Transformed (recolored) scan images reused across a document's renders.
+ * The cache owns the MuPDF images and frees them on eviction: they hold a
+ * page-scale pixmap each, which the worker's GC is too lazy to release.
+ */
 const TRANSFORMED_IMAGE_ENTRIES = 2;
+const transformedImages = new TransformedImageCache<InstanceType<MupdfModule["Image"]>>(
+  TRANSFORMED_IMAGE_ENTRIES,
+);
 /** Images above this pixel count are transformed per render, never cached. */
 const TRANSFORMED_IMAGE_MAX_PIXELS = 4 * 1024 * 1024;
 
@@ -384,24 +388,15 @@ function decisionFor(
   return decision;
 }
 
-/** LRU lookup that refreshes recency on hit. */
-function cachedTransformedImage(key: string): TransformedImage | null {
-  const cached = transformedImages.get(key);
-  if (!cached) return null;
-  transformedImages.delete(key);
-  transformedImages.set(key, cached);
-  return cached;
-}
-
-/** LRU store with count-based eviction. */
-function storeTransformedImage(key: string, entry: TransformedImage): void {
-  transformedImages.delete(key);
-  transformedImages.set(key, entry);
-  while (transformedImages.size > TRANSFORMED_IMAGE_ENTRIES) {
-    const oldest = transformedImages.keys().next().value;
-    if (oldest === undefined) break;
-    transformedImages.delete(oldest);
-  }
+/**
+ * A recolored image to draw, plus who owns it. Cached images live in the LRU
+ * and must not be freed by the caller; a transient one (a scan past the pixel
+ * cap, transformed per render) is owned by the caller and must be destroyed
+ * after the fill operation, or its pixmap leaks until GC.
+ */
+interface ImageTreatment {
+  image: InstanceType<MupdfModule["Image"]>;
+  transient: boolean;
 }
 
 function treatImage(
@@ -411,7 +406,7 @@ function treatImage(
   ordinal: number,
   pageArea: number,
   palette: SmartPalette,
-): InstanceType<MupdfModule["Image"]> | null {
+): ImageTreatment | null {
   // Page-space area of the image rect ÷ page area = coverage.
   const ctmDet = Math.abs((ctm[0] ?? 0) * (ctm[3] ?? 0) - (ctm[1] ?? 0) * (ctm[2] ?? 0));
   const coverage = pageArea > 0 ? ctmDet / pageArea : 0;
@@ -428,14 +423,16 @@ function treatImage(
   // page-sized scans so a pathological image cannot pin the cache.
   const cacheable = image.getWidth() * image.getHeight() <= TRANSFORMED_IMAGE_MAX_PIXELS;
   if (cacheable) {
-    const cached = cachedTransformedImage(decisionKey);
-    if (cached) return cached.image;
+    const cached = transformedImages.get(decisionKey);
+    if (cached) return { image: cached, transient: false };
   }
   const transformed = buildRecoloredImage(image, palette);
-  if (transformed && cacheable) {
-    storeTransformedImage(decisionKey, transformed);
+  if (!transformed) return null;
+  if (cacheable) {
+    transformedImages.set(decisionKey, transformed);
+    return { image: transformed, transient: false };
   }
-  return transformed?.image ?? null;
+  return { image: transformed, transient: true };
 }
 
 /** Decode + classify one page-covering image (stats only, read-only). */
@@ -444,9 +441,10 @@ function classifyRasterized(
   coverage: number,
 ): RasterImageTreatment {
   let source: InstanceType<MupdfModule["Pixmap"]> | null = null;
+  let colorspace: InstanceType<MupdfModule["ColorSpace"]> | null = null;
   try {
     source = image.toPixmap();
-    const colorspace = source.getColorSpace();
+    colorspace = source.getColorSpace();
     if (!colorspace) return "preserve";
     const type = colorspace.getType();
     if (type !== "RGB" && type !== "Gray" && type !== "BGR") {
@@ -462,6 +460,7 @@ function classifyRasterized(
   } catch {
     return "preserve";
   } finally {
+    colorspace?.destroy();
     source?.destroy();
   }
 }
@@ -477,8 +476,10 @@ function classifyFromPixmap(
   const stride = pixmap.getStride();
   const alpha = pixmap.getAlpha();
   const components = pixmap.getNumberOfComponents() + alpha;
+  // Retained wrapper: read the type, then release it (only the type is used).
   const colorspace = pixmap.getColorSpace();
   const type = colorspace?.getType() ?? "RGB";
+  colorspace?.destroy();
   const total = width * height;
   if (total === 0 || stride === 0 || components <= 0) return "preserve";
   // Deterministic stride sampling: every `step`-th pixel in linear order,
@@ -513,12 +514,15 @@ function classifyFromPixmap(
 function buildRecoloredImage(
   image: InstanceType<MupdfModule["Image"]>,
   palette: SmartPalette,
-): TransformedImage | null {
+): InstanceType<MupdfModule["Image"]> | null {
   let source: InstanceType<MupdfModule["Pixmap"]> | null = null;
   try {
     source = image.toPixmap();
+    // getColorSpace() returns a retained wrapper; it is only a presence check
+    // here, so release it before the conversion.
     const colorspace = source.getColorSpace();
     if (!colorspace) return null;
+    colorspace.destroy();
     const keepAlpha = source.getAlpha() === 1;
     // Always through a private copy: the decoded pixmap returned by
     // toPixmap() is owned by MuPDF's per-image decode cache, so mutating it
@@ -535,8 +539,7 @@ function buildRecoloredImage(
         copy.getHeight(),
         palette,
       );
-      const recolored = new mupdf!.Image(copy);
-      return { image: recolored };
+      return new mupdf!.Image(copy);
     } finally {
       copy.destroy();
     }
@@ -625,10 +628,13 @@ function makeSmartRecolorDevice(
     },
     fillShade: (shade, ctm, alpha) => draw.fillShade(shade, ctm, alpha),
     fillImage: (image, ctm, alpha) => {
-      const standIn = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
-      if (standIn) draw.fillImage(standIn, ctm, alpha);
-      else draw.fillImage(image, ctm, alpha);
+      const treatment = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
+      draw.fillImage(treatment?.image ?? image, ctm, alpha);
       releaseDeviceArgs(image);
+      // A transient recoloring (a scan past the pixel cap) is ours alone; the
+      // draw device has consumed it, so free its pixmap now instead of
+      // waiting for a GC that never runs.
+      if (treatment?.transient) treatment.image.destroy();
     },
     fillImageMask: (image, ctm, colorspace, color, alpha) => {
       // Image masks are stencil shapes painted a flat color (faxed text,
