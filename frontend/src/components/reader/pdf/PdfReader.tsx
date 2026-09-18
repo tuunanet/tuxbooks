@@ -43,11 +43,14 @@ import {
   renderBufferBytes,
 } from "./pdfRenderPolicy";
 import {
+  clampZoom,
   DEFAULT_ZOOM_LEVEL,
-  ZOOM_LADDER,
+  MAX_ZOOM,
+  MIN_ZOOM,
   displayedSizes,
   layoutSlots,
   stepZoomLevel,
+  type FitZoomMode,
   type ZoomMode,
 } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
@@ -237,7 +240,7 @@ interface PdfReaderProps {
   highlights?: Annotation[];
   /**
    * Presentation mode (issue #65): fullscreen, distraction-free, one page
-   * at a time at a dynamic fit-height scale. The shell owns the toggle
+   * at a time at a dynamic fit-page scale. The shell owns the toggle
    * (Ctrl+L), the chrome hiding, and the fullscreen request; this
    * component rescales the document and swaps the controls.
    */
@@ -926,8 +929,8 @@ export function PdfReader({
     [bitmapCache],
   );
 
-  // Manual zoom (ladder stepping): the effective scale snaps onto the
-  // nearest rung first, so zooming out of a fit mode continues from where
+  // Manual zoom (preset stepping): the effective scale snaps onto the
+  // nearest preset first, so zooming out of a fit mode continues from where
   // the page actually is (issue #65).
   const zoomBySteps = useCallback(
     (steps: 1 | -1) => {
@@ -939,9 +942,22 @@ export function PdfReader({
     () => applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL }),
     [applyZoom],
   );
+  // Typed/preset zoom: clamp onto the supported range and skip a no-op apply
+  // so re-selecting the current level never clears the render set.
+  const setCustomZoom = useCallback(
+    (next: number) => {
+      const level = clampZoom(next);
+      if (zoom.mode === "custom" && Math.abs(zoom.level - level) < 1e-9) return;
+      applyZoom({ mode: "custom", level });
+    },
+    [applyZoom, zoom.mode, zoom.level],
+  );
   const setZoomMode = useCallback(
-    (mode: ZoomMode) => applyZoom({ mode, level: zoom.level }),
-    [applyZoom, zoom.level],
+    (mode: FitZoomMode) => {
+      if (zoom.mode === mode) return;
+      applyZoom({ mode, level: zoom.level });
+    },
+    [applyZoom, zoom.mode, zoom.level],
   );
 
   // Latest handlers for the keyboard/wheel registrations below (the
@@ -954,7 +970,7 @@ export function PdfReader({
   useEffect(() => {
     resetZoomRef.current = resetZoom;
   });
-  const setZoomModeRef = useRef<(mode: ZoomMode) => void>(() => {});
+  const setZoomModeRef = useRef<(mode: FitZoomMode) => void>(() => {});
   useEffect(() => {
     setZoomModeRef.current = setZoomMode;
   });
@@ -972,7 +988,7 @@ export function PdfReader({
   useShortcut("mod+0", () => resetZoomRef.current());
   useShortcut("mod+1", () => setZoomModeRef.current("fit-page"));
   useShortcut("mod+2", () => setZoomModeRef.current("fit-width"));
-  useShortcut("mod+3", () => setZoomModeRef.current("fit-height"));
+  useShortcut("mod+3", () => setZoomModeRef.current("fit-auto"));
 
   // Ctrl + mouse wheel zooms (and trackpad pinch, which Chromium reports as
   // a ctrl-modified wheel): the scroller never zooms the page natively, so
@@ -1071,25 +1087,20 @@ export function PdfReader({
   // by the shell; the document instead carries the minimal floating bar
   // (prev/next, the page indicator, exit) so the workflow stays
   // pointer-accessible without leaving the mode (§ issue #65).
-  const zoomPercent = Math.round(scale * 100);
   const controls = (
     <PdfToolbar
       pageNumber={currentPage}
       pageCount={effectivePageCount}
       zoomMode={zoom.mode}
-      zoomPercent={zoomPercent}
-      canZoomIn={
-        zoom.mode !== "custom" || zoom.level < (ZOOM_LADDER[ZOOM_LADDER.length - 1] as number)
-      }
-      canZoomOut={zoom.mode !== "custom" || zoom.level > (ZOOM_LADDER[0] as number)}
+      zoomScale={scale}
+      canZoomIn={scale < MAX_ZOOM - 1e-9}
+      canZoomOut={scale > MIN_ZOOM + 1e-9}
       onPrev={() => goToPage(currentPage - 1)}
       onNext={() => goToPage(currentPage + 1)}
       onZoomIn={() => zoomByStepsRef.current(1)}
       onZoomOut={() => zoomByStepsRef.current(-1)}
-      onResetZoom={resetZoom}
-      onFitPage={() => setZoomMode("fit-page")}
-      onFitWidth={() => setZoomMode("fit-width")}
-      onFitHeight={() => setZoomMode("fit-height")}
+      onSelectFit={setZoomMode}
+      onSetZoom={setCustomZoom}
       onTogglePresentation={onTogglePresentation}
       presentationActive={presentationMode}
     />

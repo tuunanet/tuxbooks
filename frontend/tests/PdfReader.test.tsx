@@ -1108,7 +1108,7 @@ describe("PdfReader fit width and zoom anchoring", () => {
     expect(slot(1)).toHaveStyle({ width: "1224px" });
     // The zoom indicator shows the effective page zoom (scale × 100), not a
     // multiplier: the fit-width scale here is 2× the page's point size.
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("200%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200");
   });
 
   it("recomputes the fit scale when the window resizes", async () => {
@@ -1149,13 +1149,15 @@ describe("PdfReader fit width and zoom anchoring", () => {
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
 
-    // Zoom to 150%: page 2 moves to top 1196 (scaled height 1188 + the
+    // Zoom to 150%: on Okular's preset ladder that is two steps
+    // (100 → 125 → 150). Page 2 moves to top 1196 (scaled height 1188 + the
     // unscaled 8px gap); the anchor must land at 1196 + 0.3535…*1188 = 1616
     // → scrollTop = 1616 - 180 = 1436. The in-page fraction is preserved
     // exactly.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await waitFor(() => expect(container.scrollTop).toBe(1436));
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
     view.unmount();
   });
 
@@ -1169,11 +1171,11 @@ describe("PdfReader fit width and zoom anchoring", () => {
 
     await renderLoadedReader();
     fireEvent.keyDown(window, { key: "+" });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
     fireEvent.keyDown(window, { key: "-" });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
     fireEvent.keyDown(window, { key: "-" });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("75%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("75");
   });
 });
 
@@ -1230,14 +1232,14 @@ describe("PdfReader hardening", () => {
     });
 
     await renderLoadedReader();
-    for (let i = 0; i < 6; i++) fireEvent.keyDown(window, { key: "-" });
-    // The zoom ladder floor is 25%.
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("25%");
+    for (let i = 0; i < 12; i++) fireEvent.keyDown(window, { key: "-" });
+    // The preset ladder floor is 12% (Okular's kZoomValues[0]).
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("12");
     expect(screen.getByTestId("pdf-zoom-out")).toBeDisabled();
 
-    for (let i = 0; i < 10; i++) fireEvent.keyDown(window, { key: "+" });
-    // The zoom ladder ceiling is 400%.
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("400%");
+    for (let i = 0; i < 20; i++) fireEvent.keyDown(window, { key: "+" });
+    // The preset ladder ceiling is 10000% (Okular's tiled cap).
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("10000");
     expect(screen.getByTestId("pdf-zoom-in")).toBeDisabled();
   });
 });
@@ -1404,10 +1406,10 @@ describe("PdfReader zoom", () => {
     expect(pending).toHaveLength(1);
     const [freshRender] = pending.splice(0) as [(page: unknown) => void];
 
-    // The NEWER render resolves first and paints at 150%…
+    // The NEWER render resolves first and paints at 125%…
     freshRender(gatedPage);
     await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5)),
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25)),
     );
     expect(gatedPage.render).toHaveBeenCalledTimes(1);
 
@@ -1416,10 +1418,10 @@ describe("PdfReader zoom", () => {
     // mirrored page fragments blitted over pages while scrolling).
     staleRender(gatedPage);
     await waitFor(() => expect(gatedPage.render).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5));
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25));
   });
 
-  it("steps through the zoom ladder and re-renders the viewport", async () => {
+  it("steps through the zoom presets and re-renders the viewport", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
@@ -1428,42 +1430,35 @@ describe("PdfReader zoom", () => {
     });
 
     await renderLoadedReader();
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
     expect(screen.getByTestId("pdf-zoom-out")).toBeEnabled();
 
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25)),
+    );
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+    expect(doc.scales).toContain(1.25);
+
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    await waitFor(() =>
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5)),
     );
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
-    expect(doc.scales).toContain(1.5);
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
     // Zoom rescales the whole document layout, not just the canvas.
     expect(slot(1)).toHaveStyle({ width: "918px" });
     expect(slot(3)).toHaveStyle({ height: "1188px" });
 
-    // The ladder tops out at 400%: the in control disables only there.
-    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 2)),
-    );
-    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 3)),
-    );
-    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 4)),
-    );
-    expect(screen.getByTestId("pdf-zoom-in")).toBeDisabled();
-
-    // Stepping back down walks the same rungs.
-    await userEvent.click(screen.getByTestId("pdf-zoom-out"));
-    await userEvent.click(screen.getByTestId("pdf-zoom-out"));
+    // Stepping back down walks the same presets.
     await userEvent.click(screen.getByTestId("pdf-zoom-out"));
     await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5)),
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25)),
     );
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    await userEvent.click(screen.getByTestId("pdf-zoom-out"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612)),
+    );
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
   });
 });
 
@@ -1732,33 +1727,66 @@ describe("PdfReader zoom modes (issue #65)", () => {
   it("resets to 100% with Ctrl+0 after manual zooming", async () => {
     await renderZoomableReader(document.createElement("div"));
     fireEvent.keyDown(window, { key: "+" });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
 
     fireEvent.keyDown(window, { key: "0", ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
   });
 
-  it("switches into the fit modes with Ctrl+1/2/3 and marks them active", async () => {
+  it("switches into the fit modes with Ctrl+1/2/3", async () => {
     await renderZoomableReader(document.createElement("div"));
+    const toolbar = screen.getByTestId("pdf-toolbar");
 
     fireEvent.keyDown(window, { key: "1", ctrlKey: true });
-    expect(screen.getByTestId("pdf-fit-page")).toHaveAttribute("aria-pressed", "true");
+    expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-page");
     fireEvent.keyDown(window, { key: "2", ctrlKey: true });
-    expect(screen.getByTestId("pdf-fit-width")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("pdf-fit-page")).toHaveAttribute("aria-pressed", "false");
+    expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-width");
     fireEvent.keyDown(window, { key: "3", ctrlKey: true });
-    expect(screen.getByTestId("pdf-fit-height")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("pdf-fit-width")).toHaveAttribute("aria-pressed", "false");
+    expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-auto");
   });
 
-  it("steps the ladder with the Ctrl-modified zoom keys", async () => {
+  it("applies a preset and a fit mode from the zoom dropdown", async () => {
+    await renderZoomableReader(document.createElement("div"));
+    const toolbar = screen.getByTestId("pdf-toolbar");
+
+    await userEvent.click(screen.getByTestId("pdf-zoom-menu"));
+    await userEvent.click(await screen.findByTestId("pdf-zoom-preset-200"));
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200");
+    expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "custom");
+
+    await userEvent.click(screen.getByTestId("pdf-zoom-menu"));
+    await userEvent.click(await screen.findByTestId("pdf-zoom-fit-auto"));
+    expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-auto");
+  });
+
+  it("applies a typed percentage, clamps it, and reverts invalid input", async () => {
+    await renderZoomableReader(document.createElement("div"));
+    const input = screen.getByTestId("pdf-zoom-input");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "137{Enter}");
+    expect(input).toHaveValue("137");
+    expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
+
+    // Above the cap: clamped to 10000%.
+    await userEvent.clear(input);
+    await userEvent.type(input, "99999{Enter}");
+    expect(input).toHaveValue("10000");
+
+    // Unparseable: the current value is kept.
+    await userEvent.clear(input);
+    await userEvent.type(input, "abc{Enter}");
+    expect(input).toHaveValue("10000");
+  });
+
+  it("steps the presets with the Ctrl-modified zoom keys", async () => {
     await renderZoomableReader(document.createElement("div"));
     fireEvent.keyDown(window, { key: "+", ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
     fireEvent.keyDown(window, { key: "=", ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("200%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
     fireEvent.keyDown(window, { key: "-", ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
   });
 
   it("zooms with Ctrl + mouse wheel (and trackpad pinch)", async () => {
@@ -1768,16 +1796,16 @@ describe("PdfReader zoom modes (issue #65)", () => {
     // Small deltas accumulate onto one step: two sub-threshold gestures
     // zoom once, a single larger one zooms immediately.
     fireEvent.wheel(container, { deltaY: -30, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
     fireEvent.wheel(container, { deltaY: -30, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
 
     fireEvent.wheel(container, { deltaY: 120, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
 
     // Plain wheel events scroll; they never zoom.
     fireEvent.wheel(container, { deltaY: -120 });
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("100%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
   });
 });
 
@@ -1847,7 +1875,7 @@ describe("PdfReader presentation mode (issue #65)", () => {
     // Measure page 2 (landscape) as the visible observer would.
     fireVisible(slot(2) as Element, true);
     // The 1224pt-wide page is width-bound: the contain scale is 1, so it is
-    // exactly as wide as the area and never clips (fit-height alone would
+    // exactly as wide as the area and never clips (a height-only fit would
     // have made it 1584px wide).
     await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1224px", height: "612px" }));
   });
@@ -1858,10 +1886,11 @@ describe("PdfReader presentation mode (issue #65)", () => {
     const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
 
-    // Land on page 2 and zoom to 150% before entering.
+    // Land on page 2 and zoom to 150% before entering (two preset steps).
     await userEvent.click(screen.getByTestId("pdf-next"));
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
 
     view.rerenderBook({ presentationMode: true });
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-presentation", "true");
@@ -1879,7 +1908,7 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull();
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
     // The pre-presentation zoom state is restored exactly.
-    expect(screen.getByTestId("pdf-zoom-reset")).toHaveTextContent("150%");
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
   });
 
   it("navigates and exits through the presentation bar", async () => {

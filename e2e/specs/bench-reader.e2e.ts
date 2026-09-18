@@ -10,6 +10,7 @@ import {
   openInReader,
   openReaderNavigation,
   pdfSurfaceMemory,
+  inputValueOf,
   returnToLibrary,
   scrollToSlot,
   textOf,
@@ -695,11 +696,11 @@ test.describe("reader performance benchmark", () => {
       for (let i = 0; i < 2; i++) {
         const button = page.getByTestId(`pdf-zoom-${direction}`);
         if ((await button.getAttribute("disabled")) !== null) break;
-        const before = await textOf(page, "pdf-zoom-reset");
+        const before = await inputValueOf(page, "pdf-zoom-input");
         const after = await interactionLatency(
           page,
           () => button.click(),
-          async () => (await textOf(page, "pdf-zoom-reset")) !== before,
+          async () => (await inputValueOf(page, "pdf-zoom-input")) !== before,
         );
         report.pdf.zoomLatencyMs.push(after);
       }
