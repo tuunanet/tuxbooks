@@ -123,9 +123,10 @@ describe("computePdfScale", () => {
     ).toBe(1.5);
   });
 
-  it("fit-heights the current page in presentation mode, whatever the mode", () => {
+  it("fits the whole current page inside the area in presentation mode, whatever the mode", () => {
     // Mixed-size document: page 2 is landscape — presentation rescales per
-    // page from the page being read.
+    // page from the page being read, and both axes clamp so any page shape
+    // stays fully visible.
     const landscape = { width: 1224, height: 612 };
     expect(
       computePdfScale(
@@ -141,6 +142,24 @@ describe("computePdfScale", () => {
         612,
       ),
     ).toBe(1);
+    // A portrait page on the same landscape area is height-bound: 612 / 792.
+    const portrait = { width: 612, height: 792 };
+    expect(
+      computePdfScale(
+        { mode: "custom", level: 3, reference, presentationPage: portrait },
+        1224,
+        612,
+      ),
+    ).toBe(612 / 792);
+    // A page wider than the area is width-bound instead of overflowing.
+    const wide = { width: 2448, height: 612 };
+    expect(
+      computePdfScale(
+        { mode: "fit-height", level: 1, reference, presentationPage: wide },
+        1224,
+        612,
+      ),
+    ).toBe(0.5);
   });
 
   it("falls back to 1 before geometry is known", () => {

@@ -56,6 +56,11 @@ interface PdfDocumentViewProps {
   /** Color-mode variant keyed into the bitmap cache ("original"|"smart"). */
   renderVariant?: string;
   /**
+   * Presentation mode lays out a single page and centres it in the viewport
+   * (both axes); the default is the top-anchored continuous document.
+   */
+  presentation?: boolean;
+  /**
    * CSS background for the page wrapper while the page's raster is pending
    * (issue #67 follow-up): Smart Dark must not flash white before the dark
    * bitmap blits. Undefined keeps the paper-white placeholder.
@@ -68,6 +73,7 @@ interface PdfDocumentViewProps {
  * (the whole document reserves its space up front) with canvases only on the
  * bounded render set. Slot geometry comes from the layout layer; DOM flow
  * reproduces it exactly, so computed offsets and real offsets never disagree.
+ * Presentation mode passes a single slot and centres it in the viewport.
  */
 export function PdfDocumentView({
   document,
@@ -91,6 +97,7 @@ export function PdfDocumentView({
   themeTint,
   smartColors,
   renderVariant = "original",
+  presentation = false,
   pageBackground,
 }: PdfDocumentViewProps) {
   const canvasPages = useMemo(() => new Set(renderPages), [renderPages]);
@@ -105,7 +112,7 @@ export function PdfDocumentView({
       // width feeds back into usePdfScale's measurement — the fit
       // scale then oscillates and re-anchoring yanks the viewport
       // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
-      className="flex min-h-0 w-full justify-center"
+      className={`flex min-h-0 w-full justify-center${presentation ? " h-full items-center" : ""}`}
     >
       <div
         ref={documentRef}
