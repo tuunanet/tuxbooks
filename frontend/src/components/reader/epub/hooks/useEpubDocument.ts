@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
 
 export type EpubDocumentStatus = "loading" | "ready" | "error";
@@ -37,7 +37,7 @@ export function useEpubDocument(bookId: number): EpubDocumentState {
     setSnapshot({ bookId, status: "loading", handle: null, error: null });
   }
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     let opened: ReadiumEpubHandle | null = null;
 
@@ -64,7 +64,6 @@ export function useEpubDocument(bookId: number): EpubDocumentState {
 
     return () => {
       cancelled = true;
-      opened?.prepareClose();
       void opened?.close();
     };
   }, [bookId]);
