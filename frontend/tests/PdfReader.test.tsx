@@ -1789,7 +1789,14 @@ describe("PdfReader presentation mode (issue #65)", () => {
     return container;
   }
 
-  async function renderPresentingReader(props: PdfReaderProps = {}, book?: Book) {
+  /** Content-area width the presentation fit-page scale measures against. */
+  const PRESENT_AREA_WIDTH = 1224;
+
+  async function renderPresentingReader(
+    props: PdfReaderProps = {},
+    book?: Book,
+    areaWidth: number = PRESENT_AREA_WIDTH,
+  ) {
     openDocumentMock.mockResolvedValue(
       makeFakePdfDocument(3, (pageNumber) =>
         pageNumber === 2 ? { width: 1224, height: 612 } : { width: 612, height: 792 },
@@ -1807,34 +1814,48 @@ describe("PdfReader presentation mode (issue #65)", () => {
       book: book ?? pdfBook,
     });
     await screen.findByTestId("pdf-canvas");
+    if (areaWidth > 0) {
+      const area = screen.getByTestId("pdf-content-area");
+      Object.defineProperty(area, "clientWidth", { value: areaWidth, configurable: true });
+      window.dispatchEvent(new Event("resize"));
+    }
     return view;
   }
 
-  it("presents one page at a time at the fit-height scale", async () => {
+  it("presents only the selected page, fit inside the area", async () => {
     await renderPresentingReader();
 
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-presentation", "true");
-    // The letter page fits the 792px viewport exactly: scale 1.
+    // The single-page surface mounts just the current slot, so no neighbour
+    // can show through the scroll container.
     expect(slot(1)).toHaveStyle({ height: "792px" });
+    expect(slot(2)).toBeNull();
+    expect(slot(3)).toBeNull();
   });
 
-  it("rescales when the next page has different dimensions", async () => {
+  it("fits a landscape page to the area width instead of overflowing", async () => {
     await renderPresentingReader();
 
-    // Measure page 2 (landscape) through the preload path, like the
-    // virtualizer does when it approaches visibility.
-    firePreload(slot(2) as Element, true);
-    await waitFor(() => expect(slot(2)).toHaveStyle({ height: "612px" }));
-
     await userEvent.click(screen.getByTestId("pdf-pres-next"));
-    // Fit height for the landscape page: 792 / 612 → the page is
-    // 1584px wide and exactly fills the viewport height again.
-    await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1584px", height: "792px" }));
-    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    // The flipped-to page is now the only slot in the document.
+    expect(slot(1)).toBeNull();
+    expect(slot(3)).toBeNull();
+
+    // Measure page 2 (landscape) as the visible observer would.
+    fireVisible(slot(2) as Element, true);
+    // The 1224pt-wide page is width-bound: the contain scale is 1, so it is
+    // exactly as wide as the area and never clips (fit-height alone would
+    // have made it 1584px wide).
+    await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1224px", height: "612px" }));
   });
 
   it("keeps the current page on enter and restores the zoom state on exit", async () => {
-    const view = await renderPresentingReader({ presentationMode: false });
+    // No measured area width: the pre-presentation fit-width scale falls
+    // back to 1× so the zoom step below lands on 150%.
+    const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
 
     // Land on page 2 and zoom to 150% before entering.
@@ -1847,9 +1868,11 @@ describe("PdfReader presentation mode (issue #65)", () => {
     // The header toolbar is gone; the floating bar carries the controls.
     expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
     expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
-    // Page and fit-height scale are preserved (792px viewport, letter
-    // page → scale 1).
-    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+    // Page is preserved. Page 2 is still the page-1 estimate in jsdom, so
+    // the contain scale is 1× and the slot keeps the letter geometry.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
     expect(slot(2)).toHaveStyle({ height: "792px" });
 
     view.rerenderBook({ presentationMode: false });

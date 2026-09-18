@@ -32,19 +32,20 @@ export interface PdfScaleRequest {
   /** Document-wide reference page (page 1); null before geometry is known. */
   reference: Pick<PageSize, "width" | "height"> | null;
   /**
-   * The current page's own size while presentation mode is active: fit
-   * height is computed from the page being read, so mixed-size documents
-   * rescale per page.
+   * The current page's own size while presentation mode is active: the page
+   * is fit inside the area (both axes) from the page being read, so
+   * mixed-size documents rescale per page and any page shape stays visible.
    */
   presentationPage: Pick<PageSize, "width" | "height"> | null;
 }
 
 /**
  * The layout scale for one render pass (pure — unit-tested without a
- * browser). Presentation mode always fit-heights the current page; every
- * other mode is document-wide (page-1 reference) so ordinary navigation
- * never rescales the layout mid-document. Unmeasurable inputs fall back
- * to 1 so callers never render at a zero scale.
+ * browser). Presentation mode fits the whole current page inside the
+ * measured area (both axes, page-keyed) so any page shape stays fully
+ * visible; every other mode is document-wide (page-1 reference) so ordinary
+ * navigation never rescales the layout mid-document. Unmeasurable inputs
+ * fall back to 1 so callers never render at a zero scale.
  */
 export function computePdfScale(
   request: PdfScaleRequest,
@@ -52,7 +53,12 @@ export function computePdfScale(
   viewportHeight: number,
 ): number {
   if (request.presentationPage) {
-    return fitHeightScale(viewportHeight, request.presentationPage.height);
+    return fitPageScale(
+      areaWidth,
+      viewportHeight,
+      request.presentationPage.width,
+      request.presentationPage.height,
+    );
   }
   const reference = request.reference;
   if (!reference) return 1;
@@ -91,8 +97,8 @@ export function fitWidthScale(availableWidth: number, referencePageWidth: number
 
 /**
  * Scale that fits a page of `referencePageHeight` page units into
- * `availableHeight` CSS pixels (dynamic fit-height mode — presentation
- * mode and the Ctrl+3 zoom mode). Falls back to 1 when unmeasurable.
+ * `availableHeight` CSS pixels (dynamic fit-height mode, Ctrl+3). Falls back
+ * to 1 when unmeasurable.
  */
 export function fitHeightScale(availableHeight: number, referencePageHeight: number): number {
   if (availableHeight <= 0 || referencePageHeight <= 0) return 1;

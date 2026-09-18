@@ -323,10 +323,10 @@ export function PdfReader({
   const layoutReady = status === "ready" && sizes !== null;
 
   // Layout scale from the zoom state (§ issue #65): fit modes recompute
-  // from the measured content area and viewport; presentation mode
-  // fit-heights the page being read so mixed-size documents rescale per
-  // page. The request object is memoized — it is the scale hook's effect
-  // dependency.
+  // from the measured content area and viewport; presentation mode fits the
+  // whole page being read inside the area (both axes) so mixed-size
+  // documents rescale per page and any page shape stays fully visible. The
+  // request object is memoized — it is the scale hook's effect dependency.
   const referencePage = sizes?.[0] ?? null;
   const presentationPage = presentationMode && sizes ? (sizes[currentPage - 1] ?? null) : null;
   const scaleRequest = useMemo(
@@ -590,6 +590,15 @@ export function PdfReader({
     [sizes, scale],
   );
 
+  // Presentation mode is a single-page surface: only the current page's slot
+  // is laid out, so no neighbour can peek in from the scroll container. The
+  // document view centres that one page in the viewport. Outside
+  // presentation the full continuous document is used.
+  const documentSlots = useMemo(
+    () => (presentationMode ? slots.filter((slot) => slot.pageNumber === currentPage) : slots),
+    [presentationMode, slots, currentPage],
+  );
+
   // Rendering policy, modeled on the classic viewer render queues,
   // adjusted for what the MuPDF worker actually parallelizes — see
   // MAX_CONCURRENT_RENDERS below:
@@ -620,7 +629,7 @@ export function PdfReader({
     // PERF-4: slice by each slot's capped buffer bytes (CSS size ×
     // effective ratio² × 4, Phase 1's policy) before the count fallback.
     // The anchor survives any budget (capByBytes keeps the first page).
-    const slotsByPage = new Map(slots.map((slot) => [slot.pageNumber, slot]));
+    const slotsByPage = new Map(documentSlots.map((slot) => [slot.pageNumber, slot]));
     const dpr = window.devicePixelRatio || 1;
     const bufferBytes = (page: number): number => {
       const slot = slotsByPage.get(page);
@@ -629,7 +638,7 @@ export function PdfReader({
       return renderBufferBytes(slot.width, slot.height, ratio);
     };
     return capByBytes(active, bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(0, MAX_ACTIVE_CANVASES);
-  }, [currentPage, visiblePages, preloadPages, slots, scale]);
+  }, [currentPage, visiblePages, preloadPages, documentSlots, scale]);
 
   // The render set, derived purely from the priority order and the
   // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
@@ -765,10 +774,10 @@ export function PdfReader({
   // scroll back. The scroll tracker stamps every page it reports; if the
   // observed change matches the last scroll report, it is the user's own
   // scroll and re-anchoring is skipped. A scale change alone (zoom, fit
-  // recalculation, presentation rescale) re-anchors by fraction; a page
-  // change from navigation (presentation flips, toolbar, restore) lands on
-  // the new page's top edge — which is also what presentation mode wants
-  // when the scale changes because the next page has different dimensions.
+  // recalculation) re-anchors by fraction; a page change from navigation
+  // (toolbar, restore) lands on the new page's top edge. Presentation mode
+  // lays out one centred page, so there is nothing to scroll: the effect
+  // only keeps its page/scale bookkeeping current.
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
@@ -779,6 +788,12 @@ export function PdfReader({
       mountedRef.current = true;
       return;
     }
+    if (presentationMode) {
+      // Scroll tracking is off here, so keep the re-anchor anchor on the
+      // flipped-to page; exiting the mode then restores that page.
+      if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
+      return;
+    }
     if (scaleChanged && !pageChanged) {
       reanchorRef.current();
       return;
@@ -787,7 +802,7 @@ export function PdfReader({
       return;
     }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
-  }, [currentPage, scale]);
+  }, [currentPage, scale, presentationMode]);
 
   // Scroll-driven position reporting: the anchor rule decides the page, the
   // position is written back to ReaderProvider so the shell (footer, keyboard
@@ -803,7 +818,9 @@ export function PdfReader({
     containerRef: scrollContainerRef ?? { current: null },
     documentRef,
     slots,
-    enabled: layoutReady,
+    // Presentation lays out a single centred page, so scroll position does
+    // not name the current page there; flips come from navigation only.
+    enabled: layoutReady && !presentationMode,
     onPageChange: handleScrollPageChange,
     anchorInfoRef,
   });
@@ -981,8 +998,8 @@ export function PdfReader({
     return () => container.removeEventListener("wheel", onWheel);
   }, [scrollContainerRef]);
 
-  // Presentation mode is a dynamic fit-height mode (§ issue #65): entering
-  // saves the previous zoom state and switches to fit-height (the current
+  // Presentation mode is a dynamic page-fit mode (§ issue #65): entering
+  // saves the previous zoom state and switches to fit-page (the current
   // page and its position are untouched — the scale hook derives the scale
   // per page); leaving restores exactly what was saved. Render-phase
   // adjustment: the prop flip is the trigger, so the zoom state adjusts in
@@ -998,7 +1015,7 @@ export function PdfReader({
     const saved = presentationMode ? zoom : presentationSync.saved;
     setPresentationSync({ active: presentationMode, saved: presentationMode ? zoom : null });
     setZoom(
-      presentationMode ? { mode: "fit-height", level: DEFAULT_ZOOM_LEVEL } : (saved as ZoomState),
+      presentationMode ? { mode: "fit-page", level: DEFAULT_ZOOM_LEVEL } : (saved as ZoomState),
     );
     setRenderedPages(new Set());
     setFailedPages(new Set());
@@ -1089,7 +1106,7 @@ export function PdfReader({
       {...openTelemetry}
       className={
         presentationMode
-          ? "flex flex-col items-stretch p-0"
+          ? "flex h-full flex-col items-stretch p-0"
           : "flex flex-col items-stretch px-6 py-4"
       }
     >
@@ -1107,7 +1124,7 @@ export function PdfReader({
       {!presentationMode && !controlsHost && controls}
       <PdfDocumentView
         document={pdfDocument}
-        slots={slots}
+        slots={documentSlots}
         renderPages={canvasPages}
         anchorPage={currentPage}
         scale={scale}
@@ -1127,6 +1144,7 @@ export function PdfReader({
         themeTint={treatment.tint}
         smartColors={treatment.smart}
         renderVariant={renderVariant}
+        presentation={presentationMode}
         pageBackground={treatment.pageBackground}
       />
       {sidebarHost &&

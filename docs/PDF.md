@@ -219,15 +219,17 @@ distraction-free one-page view:
   the layout inside the normal window), and exits the mode on `Esc` and on
   a native fullscreen exit (`fullscreenchange`). The mode never outlives
   the open book.
-- The reader switches to a **dynamic fit-height mode keyed to the page
-  being read**: the scale is recomputed per page from its real dimensions,
-  so mixed-size documents rescale as you flip (the whole document relayouts
-  at the current page's scale). Entering preserves the current page and
-  position; leaving restores the pre-presentation zoom state exactly.
-- Page navigation lands on the page's top edge, so `PageDown`/`Space`/
-  `PageUp`/`Shift+Space`/arrows (page-based shell steps, not percentage
-  stepping — rounding error would map midpoints back onto the previous
-  page) flip whole pages without touching zoom controls. The floating
+- The reader switches to a **dynamic fit-page mode keyed to the page
+  being read**: the page is scaled to fit inside the available area on both
+  axes (contain), so mixed-size documents rescale as you flip and any page
+  shape (portrait, landscape, or wide slides) stays fully visible. Only the
+  selected page is laid out, centred in the viewport, so neighbours never
+  show through. Entering preserves the current page; leaving restores the
+  pre-presentation zoom state exactly.
+- Page flips come from navigation rather than scrolling. `PageDown`/`Space`/
+  `PageUp`/`Shift+Space`/arrows step whole pages (the shell's page-based
+  steps, not percentage stepping, so rounding error cannot map a midpoint
+  back onto the previous page) without touching zoom controls. The floating
   `PdfPresentationBar` mirrors prev/next/indicator and adds the exit
   control.
 
