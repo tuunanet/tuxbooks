@@ -1,75 +1,41 @@
 # AGENTS.md
 
-Instructions for coding agents in this repository. Verified commands only —
-run them, don't assume. Each layer's non-obvious gotchas live in its doc
-under `docs/` — read it before touching that layer. This file loads into
-every session, so high-signal detail belongs in `docs/`: use an existing doc
-before adding anything here, create one in `docs/` if none fits; update docs
-when you change module boundaries, schema, or reader layers.
-
-## What this project is
-
-Local-first desktop ebook library (bookshelf style). **Rust is the
-application/domain language; React/TypeScript is only the presentation
-layer; Chromium (via Electron) is the sole desktop web runtime.**
-
-- Business logic in Rust (`domain/`, `services/`), UI logic in TypeScript, SQL
-  only in `repository/` — boundaries and process model: `docs/ARCHITECTURE.md`.
-- Electron `main`/`preload` are plumbing only; the renderer never sees Node.js.
-  The Rust sidecar (`sidecar/`) owns DB, filesystem, scanner, and metadata.
-- Reader engines behind single-module seams: only
-  `frontend/src/lib/epub/readiumEngine.ts` imports Readium, only
-  `frontend/src/lib/pdf/pdfEngine.ts` imports MuPDF; components use the
-  format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
-- Do not silently change these architectural conventions.
-
-## Workflow
-
-Feature work in this repo follows the Superpowers skills. Use them in this
-order, invoking each with the `skill` tool.
-
-1. `brainstorming`. Invoke before any creative work (a new feature, a behavior
-   change). It classifies the task as spike, bounded, or architectural and gets
-   the design approved before any code.
-2. `writing-plans`. For architectural work, invoke once the design is approved
-   to turn the spec into a bite-sized implementation plan. Brainstorming hands
-   off here directly; do not run another skill between them.
-3. `using-git-worktrees`. Invoke before executing the plan to create an
-   isolated workspace. The spec and plan live in the repo, so isolate after
-   they are committed.
-4. `subagent-driven-development` or `executing-plans`. Invoke with the approved
-   plan. Use subagent-driven by default here, since the `task` tool provides
-   subagents; use executing-plans when the work continues in a separate
-   session.
-5. `test-driven-development`. Invoke for every task in step 4: write the
-   failing test, watch it fail, then write the minimal code.
-6. `requesting-code-review`. Invoke between tasks and once at the end of the
-   branch.
-7. `finishing-a-development-branch`. Invoke when every task passes. It verifies
-   the test suite and presents the merge, PR, or keep options.
-
-### Exceptions
-
-- `systematic-debugging` starts a task instead of `brainstorming` when the work
-  begins from a bug, a failing test, or unexpected behavior.
-- `verification-before-completion` runs before any completion claim, commit, or
-  PR, on every path. Pair it with `just check`.
-- `receiving-code-review` runs when someone reviews your work, before you act
-  on the feedback.
-- `dispatching-parallel-agents` runs when two or more tasks are independent and
-  share no state.
-- `writing-skills` runs when you create or edit a skill.
-- `using-superpowers` is the entry rule for the system. The plugin injects it
-  automatically, so never invoke it by hand.
-
 ## Writing for humans
 
-Invoke the `unslop` skill over anything a person will read, before you commit, post, or
-send it: commit messages, the PR title and body, README and doc edits, code
-comments, and the closing reply. It strips AI tells (em dashes, filler,
+Invoke the `unslop` skill over anything a person will read, before you commit,
+post, or send it: commit messages, the PR title and body, README and doc edits,
+code comments, and the closing reply. It strips AI tells (em dashes, filler,
 hedging, chatbot phrases, puffery, bold-label lists) and replaces fancy
 words with plain ones and passive voice with active. Apply it to text you
 wrote or changed, not to prose you didn't touch.
+
+## Feature work
+
+- Every new feature starts in a fresh Git worktree branched from `origin/main`
+  so agents can work in parallel without conflicts. Never build on `main`.
+  Place new worktrees inside `.worktrees/` directory and remove the worktree
+  after PR has been completed/merged.
+
+## Completing a task
+
+1. Keep changes limited to the assigned task.
+2. Run the repo's checks: `just check` (format+lint+typecheck+unit tests;
+   run `just format` first if you touched formatting-sensitive code).
+3. Assemble the evidence captured along the way into before/after pairs.
+4. Commit with a clear message, rebase onto the latest `origin/main`, and
+   rerun the checks.
+5. Push (`git push -u origin <branch>`; after rebasing an already-pushed
+   branch, `--force-with-lease`).
+6. Open the PR. The body must explain what changed, how it was tested (every
+   claim backed by evidence), before/after proof, and any risks or follow-up
+   work. Run the title and body through with `unslop` skill before posting.
+
+## Issue tracking
+
+This project uses bd (beads) for issue tracking. Do not use markdown TODO lists for
+task tracking. Use the `beads` skill for Beads workflow guidance, then use the `bd` CLI
+for issue operations. Use `bd remember "insight"` for persistent project memory; do not
+create MEMORY.md files.
 
 ## Commands
 
@@ -79,14 +45,22 @@ The live command set is in the justfile — check `just --list` and
 run `just format` if you touched formatting-sensitive code.
 
 ```sh
-pnpm install          # first thing after cloning
-just check            # format+lint+typecheck+unit tests, parallel streams
-just dev              # launch the app (Electron + Vite hot reload)
-just test-e2e         # real-app desktop E2E, headless on Linux (builds first)
-just test             # unit tests, rust + frontend concurrently
-just test-rust        # cargo test (service crate)
-just test-frontend    # vitest run (CI mode)
-just bump X.Y.Z       # apply a release version to all versioned files
+pnpm install                 # first thing after cloning
+just check                   # format+lint+typecheck+unit tests, parallel streams
+just dev                     # launch the app (Electron + Vite hot reload)
+just test-e2e                # real-app desktop E2E, headless on Linux (builds first)
+just test                    # unit tests, rust + frontend concurrently
+just test-rust               # cargo test (service crate)
+just test-frontend           # vitest run (CI mode)
+just bump X.Y.Z              # apply a release version to all versioned files
+just audit                   # maturity policies, run this before releases.
+bd ready`                    # List tasks with no open blockers.
+bd create "Title" -p 0`      # Create a P0 task.
+bd update <id> --claim`      # Atomically claim a task (sets assignee + in_progress).
+bd dep add <child> <parent>` # Link tasks (blocks, related, parent-child).
+bd show <id>`                # View task details and audit trail.
+bd prime`                    # Print agent workflow context and persistent memories.
+bd remember "insight"`       # Store project memory that `bd prime` injects later.
 pnpm --filter frontend exec vitest run <file-or-pattern>
 ```
 
@@ -97,13 +71,6 @@ When repository context alone is insufficient, prefer the most specific source:
 dependency internals and undocumented runtime behavior; **Firecrawl**
 (`firecrawl-search`) → the public web. Cross-check when multiple apply; don't
 guess. Full policy: `docs/RESEARCH.md`.
-
-### E2E for agents
-
-`just test-e2e` is safe from automated environments (SSH/CI/agent, headless)
-and always terminates, leaving failure artifacts behind — full contract,
-isolation gate, and opt-in flavors in `docs/TESTING.md`. Never run two E2E
-invocations concurrently.
 
 ## Working documents
 
@@ -121,5 +88,7 @@ Read the one that fits the task; each is short.
 - `docs/TESTING.md` — test layers, agent rules, and E2E infrastructure.
 - `docs/COVERAGE.md` — per-category coverage floors and exclusions.
 - `docs/RELEASE.md` — packaging and cutting releases.
-- `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script and
-  maturity policies (issue #89); run `just audit` before releases.
+- `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script.
+- `docs/ABOUT.md` — basic information regarding what this project is.
+
+Remember to update and evolve information within `./docs` when something important changes.
