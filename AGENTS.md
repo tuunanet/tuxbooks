@@ -1,11 +1,5 @@
 # AGENTS.md
 
-Each layer's non-obvious gotchas live in its doc under `docs/` — read it before
-touching that layer. This file loads into every session, so high-signal detail 
-belongs in `docs/`: use an existing doc before adding anything here, create one 
-in `docs/` if none fits; update docs when you change module boundaries, schema, 
-or reader layers.
-
 ## Writing for humans
 
 Invoke the `unslop` skill over anything a person will read, before you commit,
@@ -15,11 +9,33 @@ hedging, chatbot phrases, puffery, bold-label lists) and replaces fancy
 words with plain ones and passive voice with active. Apply it to text you
 wrote or changed, not to prose you didn't touch.
 
+## Feature work
+
+- Every new feature starts in a fresh Git worktree branched from `origin/main`
+  so agents can work in parallel without conflicts. Never build on `main`.
+  Place new worktrees inside `.worktrees/` directory and remove the worktree
+  after PR has been completed/merged.
+
+## Completing a task
+
+1. Keep changes limited to the assigned task.
+2. Run the repo's checks: `just check` (format+lint+typecheck+unit tests;
+   run `just format` first if you touched formatting-sensitive code).
+3. Assemble the evidence captured along the way into before/after pairs.
+4. Commit with a clear message, rebase onto the latest `origin/main`, and
+   rerun the checks.
+5. Push (`git push -u origin <branch>`; after rebasing an already-pushed
+   branch, `--force-with-lease`).
+6. Open the PR. The body must explain what changed, how it was tested (every
+   claim backed by evidence), before/after proof, and any risks or follow-up
+   work. Run the title and body through with `unslop` skill before posting.
+
 ## Issue tracking
 
 This project uses bd (beads) for issue tracking. Do not use markdown TODO lists for
-task tracking. Use `beads` skill to learn more about beads for issue tracking.
-Use `bd remember "insight"` for persistent project memory; do not create MEMORY.md files.
+task tracking. Use the `beads` skill for Beads workflow guidance, then use the `bd` CLI
+for issue operations. Use `bd remember "insight"` for persistent project memory; do not 
+create MEMORY.md files.
 
 ## Commands
 
@@ -74,3 +90,5 @@ Read the one that fits the task; each is short.
 - `docs/RELEASE.md` — packaging and cutting releases.
 - `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script.
 - `docs/ABOUT.md` — basic information regarding what this project is.
+
+Remember to update and evolve information within `./docs` when something important changes.

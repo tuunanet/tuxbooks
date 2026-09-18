@@ -14,40 +14,31 @@ touching a Rust module's behavior or tests.
 
 ## Required coverage by category
 
-| Category            | Scope                                         | Required | Baseline (2026-09-02) |
-| ------------------- | --------------------------------------------- | -------- | --------------------- |
-| EPUB parser         | `sidecar/src/epub/`                           | 80%      | 94.2%                 |
-| PDF parser          | `sidecar/src/pdf/`                            | 80%      | 99.4%                 |
-| Services            | `sidecar/src/services/`                       | 80%      | 98.5%                 |
-| Repository          | `sidecar/src/repository/`                     | 80%      | 96.5%                 |
-| Database            | `sidecar/src/db/`                             | 80%      | 97.0%                 |
-| Domain models       | `sidecar/src/domain/`                         | 80%      | 100.0%                |
-| Library view        | `frontend/src/components/library/`            | 80%      | 98.6%                 |
-| Book cards/detail   | `frontend/src/components/books/`              | 80%      | 96.9%                 |
-| Reader (EPUB + PDF) | `frontend/src/components/reader/`             | 92%      | 95.0%                 |
-| Reader state        | `frontend/src/state/`                         | 92%      | 95.5%                 |
-| EPUB reader lib     | `frontend/src/lib/epub/`                      | 95%      | new row               |
-| Search              | `frontend/src/components/search/`             | 80%      | 98.3%                 |
-| Collections         | `frontend/src/components/collections/`        | 80%      | 100.0%                |
-| Settings            | `frontend/src/components/settings/`           | 80%      | 100.0%                |
-| App shell           | `frontend/src/components/layout/` + `App.tsx` | 80%      | 94.4%                 |
-| Hooks               | `frontend/src/hooks/`                         | 80%      | 94.8%                 |
-| Frontend lib        | `frontend/src/lib/`                           | 80%      | 91.3%                 |
+| Category            | Scope                                         | Required |
+| ------------------- | --------------------------------------------- | -------- |
+| EPUB parser         | `sidecar/src/epub/`                           | 80%      |
+| PDF parser          | `sidecar/src/pdf/`                            | 80%      |
+| Services            | `sidecar/src/services/`                       | 80%      |
+| Repository          | `sidecar/src/repository/`                     | 80%      |
+| Database            | `sidecar/src/db/`                             | 80%      |
+| Domain models       | `sidecar/src/domain/`                         | 80%      |
+| Library view        | `frontend/src/components/library/`            | 80%      |
+| Book cards/detail   | `frontend/src/components/books/`              | 80%      |
+| Reader (EPUB + PDF) | `frontend/src/components/reader/`             | 92%      |
+| Reader state        | `frontend/src/state/`                         | 92%      |
+| EPUB reader lib     | `frontend/src/lib/epub/`                      | 95%      |
+| Search              | `frontend/src/components/search/`             | 80%      |
+| Collections         | `frontend/src/components/collections/`        | 80%      |
+| Settings            | `frontend/src/components/settings/`           | 80%      |
+| App shell           | `frontend/src/components/layout/` + `App.tsx` | 80%      |
+| Hooks               | `frontend/src/hooks/`                         | 80%      |
+| Frontend lib        | `frontend/src/lib/`                           | 80%      |
 
-Floor changes and reasons:
+Automatically adjust Required percentage for a category **lower** if the percentage is too tight 
+and would result in writing non-meaningful tests.
 
-- 2026-09-17, from 80% to 95%, then to the landed values: Reader (EPUB + PDF)
-  and Reader state at 92%, and the new EPUB reader lib row
-  (`frontend/src/lib/epub/`, carved out of Frontend lib) at 95% (reached).
-  UAT on real-world EPUBs found blank pages when paginating, lost dark-mode
-  theming when paging back, and a fence misclassification that blanked whole
-  books — none of which the 80% floors ever forced tests for. The reader
-  lib/epub fence layer reached 95% with the fixture regression suite; the
-  component and provider layers settle at 92% (component trees are covered
-  end to end by the E2E reader suites; forcing the last per-branch percent
-  there duplicates them).
-- The sidecar parser floors stay at 80%: the reported defects were
-  renderer-side; the sidecar parser rows are not implicated.
+Automatically adjust Required percentage **higher** if simple failures during development related
+to that category seem too frequent or there are very obvious gaps in test coverage you noticed.
 
 Baselines are a snapshot, not a promise: the gate is the Required column.
 Numbers drift as code changes; rerun `just coverage` for current values

@@ -16,17 +16,17 @@ describes the current contract.
 │  React + TypeScript + Vite         window, dialogs/shell            │
 │                                    ├─ tuxbooks:// protocol handler  │
 │  window.tuxbooks (preload) ─────►  ├─ spawns + proxies the Rust     │
-│  typed Promise result ◄─────────   │   sidecar (JSON-RPC, stdio)    │
+│  typed Promise result  ◄─────────  │   sidecar (JSON-RPC, stdio)    │
 │                                    └─ resource byte serving         │
-│                                                                       │
-│  Rust sidecar (native service)                                        │
-│  ├─ services/ (application ops)   ├─ repository/ (SQL)                │
-│  ├─ worker/ (worker client,       ├─ db/ (SQLite + migrations)       │
-│  │  proto, sandbox)                │                                 │
-│  └─ spawns per parse job ─────►    tuxbooks-worker (one-shot)        │
-│                                    ├─ epub/ + pdf/ (parsing)         │
-│                                    └─ Landlock + seccomp + rlimits   │
-└───────────────────────────────────────────────────────────────────────┘
+│                                                                     │
+│  Rust sidecar (native service)                                      │
+│  ├─ services/ (application ops)    ├─ repository/ (SQL)             │
+│  ├─ worker/ (worker client,        ├─ db/ (SQLite + migrations)     │
+│  │  proto, sandbox)                │                                │
+│  └─ spawns per parse job ─────►    tuxbooks-worker (one-shot)       │
+│                                    ├─ epub/ + pdf/ (parsing)        │
+│                                    └─ Landlock + seccomp + rlimits  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 - The renderer never touches Node.js (`nodeIntegration: false`),
