@@ -82,7 +82,7 @@ A completed change has passed the required checks and been verified. Report inte
 
 ## Issue Tracking
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. 
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking.
 
 ### Beads issue tracking basic rules
 

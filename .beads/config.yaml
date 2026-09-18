@@ -67,4 +67,4 @@
 
 sync.remote: "git+https://github.com/tuunanet/tuxbooks.git"
 export:
-    auto: true
+  auto: true

@@ -34,7 +34,7 @@ wrote or changed, not to prose you didn't touch.
 
 This project uses bd (beads) for issue tracking. Do not use markdown TODO lists for
 task tracking. Use the `beads` skill for Beads workflow guidance, then use the `bd` CLI
-for issue operations. Use `bd remember "insight"` for persistent project memory; do not 
+for issue operations. Use `bd remember "insight"` for persistent project memory; do not
 create MEMORY.md files.
 
 ## Commands

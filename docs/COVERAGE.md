@@ -34,7 +34,7 @@ touching a Rust module's behavior or tests.
 | Hooks               | `frontend/src/hooks/`                         | 80%      |
 | Frontend lib        | `frontend/src/lib/`                           | 80%      |
 
-Automatically adjust Required percentage for a category **lower** if the percentage is too tight 
+Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.
 
 Automatically adjust Required percentage **higher** if simple failures during development related
