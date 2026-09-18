@@ -47,11 +47,40 @@ dev:
         (exec 3<>/dev/tcp/::1/1420) 2>/dev/null && { exec 3>&- 3<&-; return 0; }
         return 1
     }
-    # A stale dev server (crashed run, leftover terminal) holds the port and
-    # Vite would die with a cryptic bind error — fail with the fix instead.
+    # A stale dev server (crashed run, leftover terminal, or a killed
+    # agent-driven run) holds the port and Vite would die with a cryptic
+    # bind error. Reclaim the port when the holders are this repo's Vite;
+    # refuse when anything else owns it.
     if port_open; then
-        echo "dev: port 1420 is already in use — stop the other tuxbooks dev server first." >&2
-        exit 1
+        holders=$(fuser 1420/tcp 2>/dev/null | xargs || true)
+        if [ -z "$holders" ]; then
+            echo "dev: port 1420 is already in use; stop the other process first." >&2
+            exit 1
+        fi
+        for pid in $holders; do
+            if ! ps -ww -o args= -p "$pid" 2>/dev/null | grep -q vite; then
+                echo "dev: port 1420 is held by a process that is not this project's dev server:" >&2
+                ps -ww -o pid=,args= -p "$pid" >&2 || true
+                exit 1
+            fi
+        done
+        echo "dev: reclaiming port 1420 from a stale dev server (pids: ${holders// /, })." >&2
+        kill -TERM $holders 2>/dev/null || true
+        for _ in $(seq 1 40); do
+            port_open || break
+            sleep 0.25
+        done
+        if port_open; then
+            kill -KILL $holders 2>/dev/null || true
+            for _ in $(seq 1 20); do
+                port_open || break
+                sleep 0.25
+            done
+        fi
+        if port_open; then
+            echo "dev: port 1420 is still in use; stop the holder manually." >&2
+            exit 1
+        fi
     fi
     cargo build --manifest-path sidecar/Cargo.toml
     node scripts/build-electron.mjs
