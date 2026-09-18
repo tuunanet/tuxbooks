@@ -50,6 +50,14 @@ const appArgs = ["--no-sandbox", "--ozone-platform=x11"];
 if (Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0) {
   appArgs.push(`--force-device-scale-factor=${deviceScaleFactor}`);
 }
+// X-4 (issue #85) pins that a real getUserMedia request is denied. A host
+// without a capture device fails device enumeration first, so Chromium
+// rejects with NotFoundError before the permission handler is consulted.
+// The security phase gets a fake capture device so the deny handler is what
+// the test actually exercises. No other phase touches media capture.
+if (process.env.E2E_PHASE === "security") {
+  appArgs.push("--use-fake-device-for-media-stream");
+}
 
 /** Renderer + main console lines land in per-run files, prefixed. */
 function logLine(file: string, line: string): void {
