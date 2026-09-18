@@ -182,6 +182,12 @@ export function ReaderShell() {
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
+  // The auto-hiding progress footer (issue #68, PR #71) is a PDF affordance:
+  // in the EPUB scrolled flow its bottom hover zone and overlay react with
+  // the engine's own scroll observers. The EPUB footer is always visible and
+  // stacks below the document instead.
+  const autohideFooter = isPdf;
+  const footerVisible = autohideFooter ? progressVisible : true;
   // Persistent annotations of the open book: bookmarks, highlights, notes.
   const { annotations, create, remove, update } = useAnnotations(book?.id ?? null);
   const epubToc =
@@ -649,36 +655,48 @@ export function ReaderShell() {
         </main>
       </div>
 
-      {/* Auto-hiding progress footer: overlays the document so the reading
-          area keeps the footer's former layout space. A slim hover zone at
-          the window's bottom edge reveals it (a hidden surface cannot be
-          hovered); the footer stays up while the cursor is over it and
-          fades back out a beat after it leaves. `data-progress-visible`
-          makes the state assertable in jsdom, where Tailwind classes carry
-          no computed styles. */}
+      {/* Progress footer. PDF: auto-hiding, overlays the document so the
+          reading area keeps the footer's former layout space; a slim hover
+          zone at the window's bottom edge reveals it (a hidden surface
+          cannot be hovered); it fades back a beat after the cursor leaves.
+          EPUB: always visible and stacked below the document, so the
+          scrolled flow owns the whole reading area with the bar in view.
+          `data-progress-visible` makes the state assertable in jsdom, where
+          Tailwind classes carry no computed styles. */}
       {!presentation && (
         <>
-          <div
-            data-testid="reader-footer-hover-zone"
-            aria-hidden="true"
-            className={cn(
-              "absolute inset-x-0 bottom-0 z-10 h-4",
-              progressVisible && "pointer-events-none",
-            )}
-            onPointerEnter={showProgress}
-            onPointerLeave={scheduleProgressHide}
-          />
+          {autohideFooter && (
+            <div
+              data-testid="reader-footer-hover-zone"
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-x-0 bottom-0 z-10 h-4",
+                progressVisible && "pointer-events-none",
+              )}
+              onPointerEnter={showProgress}
+              onPointerLeave={scheduleProgressHide}
+            />
+          )}
           <footer
             data-testid="reader-footer"
-            data-progress-visible={progressVisible}
-            onPointerEnter={showProgress}
-            onPointerLeave={scheduleProgressHide}
-            style={{ backgroundColor: "var(--reader-chrome-surface, var(--background))" }}
+            data-progress-visible={footerVisible}
+            onPointerEnter={autohideFooter ? showProgress : undefined}
+            onPointerLeave={autohideFooter ? scheduleProgressHide : undefined}
+            style={
+              autohideFooter
+                ? { backgroundColor: "var(--reader-chrome-surface, var(--background))" }
+                : undefined
+            }
             className={cn(
-              "absolute inset-x-0 bottom-0 z-10 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2 transition-[opacity,translate] duration-300 ease-out",
-              progressVisible
-                ? "translate-y-0 opacity-100"
-                : "pointer-events-none translate-y-2 opacity-0",
+              "border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2",
+              autohideFooter
+                ? cn(
+                    "absolute inset-x-0 bottom-0 z-10 transition-[opacity,translate] duration-300 ease-out",
+                    footerVisible
+                      ? "translate-y-0 opacity-100"
+                      : "pointer-events-none translate-y-2 opacity-0",
+                  )
+                : "shrink-0",
             )}
           >
             <div className="mx-auto flex max-w-3xl items-center gap-3">
@@ -716,6 +734,7 @@ export function ReaderShell() {
         onSearchPick={pickSearchMatch}
         tab={nav.tab}
         onTabChange={(tab) => setNav((prev) => ({ ...prev, tab }))}
+        theme={preferences.theme}
       />
 
       <SelectionToolbar

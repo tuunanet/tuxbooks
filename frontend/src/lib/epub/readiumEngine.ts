@@ -436,7 +436,7 @@ export class ReadiumEpubHandle {
       console.warn(`epub engine load ${outcome}; retrying`, attempt);
       this.container.replaceChildren();
       await Promise.race([
-        navigator.destroy().catch(() => {}),
+        this.destroyNavigator(navigator).catch(() => {}),
         new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
       ]);
     }
@@ -914,7 +914,7 @@ export class ReadiumEpubHandle {
     this.clearSearch();
     if (stale !== null) {
       await Promise.race([
-        stale.destroy().catch(() => {}),
+        this.destroyNavigator(stale).catch(() => {}),
         new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
       ]);
     }
@@ -1175,6 +1175,25 @@ export class ReadiumEpubHandle {
     });
   }
 
+  /**
+   * Synchronously detach the rendering surface before React removes the
+   * reader view. The toolkit's frame modules (snapper and decoration
+   * ResizeObservers on the content-frame documents) are only destroyed by the
+   * async `close()`, which runs after the view is already unmounted: by then
+   * the host has collapsed, the frame documents resize, and those observers
+   * report a resize loop ("ResizeObserver loop completed with undelivered
+   * notifications"). Disconnecting the navigator's own observer and clearing
+   * the frames here, while the view is still mounted, stops it. Idempotent;
+   * `close()` calls it too.
+   */
+  prepareClose(): void {
+    const navigator = this.navigator;
+    if (navigator !== null) {
+      (navigator as unknown as { resizeObserver?: ResizeObserver }).resizeObserver?.disconnect();
+    }
+    this.container.replaceChildren();
+  }
+
   /** Destroys the navigator and frees the publication. */
   async close(): Promise<void> {
     this.searchGeneration += 1;
@@ -1182,11 +1201,22 @@ export class ReadiumEpubHandle {
     this.loadHandlers.clear();
     this.externalLinkHandlers.clear();
     this.selectionHandlers.clear();
+    this.prepareClose();
     const navigator = this.navigator;
     this.navigator = null;
     if (navigator) await navigator.destroy();
     this.fetcher.close();
     this.host.remove();
+  }
+
+  /**
+   * Destroy a navigator, disconnecting the ResizeObserver the toolkit leaks.
+   * Used by the recovery paths (retry and rebuild); the normal close path
+   * detaches through `prepareClose()` first.
+   */
+  private async destroyNavigator(navigator: EpubNavigator): Promise<void> {
+    (navigator as unknown as { resizeObserver?: ResizeObserver }).resizeObserver?.disconnect();
+    await navigator.destroy();
   }
 
   // TOC --------------------------------------------------------------------------

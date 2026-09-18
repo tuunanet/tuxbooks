@@ -26,6 +26,7 @@ export interface FakeEpubHandle {
   hostElement: HTMLDivElement;
   init: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  prepareClose: ReturnType<typeof vi.fn>;
   goTo: ReturnType<typeof vi.fn>;
   goToTotalProgression: ReturnType<typeof vi.fn>;
   next: ReturnType<typeof vi.fn>;
@@ -68,6 +69,7 @@ function makeFakeHandle(toc: EpubTocItem[]): FakeEpubHandle {
     hostElement: document.createElement("div"),
     init: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
+    prepareClose: vi.fn(),
     goTo: vi.fn(async () => {}),
     goToTotalProgression: vi.fn(async () => {}),
     next: vi.fn(async () => {}),
