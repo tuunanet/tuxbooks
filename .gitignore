@@ -67,3 +67,8 @@ tests/fixtures/ai-engineering.pdf
 
 # Git worktrees (superpowers workflow)
 .worktrees/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+.beads-credential-key
+.beads/proxieddb/

@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "tuxbooks",
+  "project_id": "241a2760-1529-4df8-bf1d-64909ff77fde"
+}
