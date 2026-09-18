@@ -10,7 +10,9 @@ any frontend precondition.
 ## Commands
 
 - `just dev` — Vite dev server (port 1420, hot reload) + debug sidecar +
-  the Electron shell pointed at `VITE_DEV_SERVER_URL`.
+  the Electron shell pointed at `VITE_DEV_SERVER_URL`. A stale dev server
+  still holding port 1420 is reclaimed when the holder is this project's
+  Vite; anything else on the port is reported and left running.
 - `just build` — renderer bundle, Electron main/preload bundles, release
   sidecar binary (`fetch-pdfium` runs first so packaging has the library).
 - `just build-debug` — same, with the debug sidecar (what E2E runs against).

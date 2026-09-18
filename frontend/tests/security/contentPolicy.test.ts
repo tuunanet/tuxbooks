@@ -85,6 +85,33 @@ describe("publication content sanitization (E-1, E-2)", () => {
     expect(out).toContain(`href="chapter2.xhtml"`);
   });
 
+  it("keeps the inert fallback of an unsupported object (E-2)", () => {
+    // A reading system without support for an object's media type must render
+    // its fallback (EPUB 3; the figure-gallery sample's spine is one document
+    // whose only content is an object fallback). The object element and its
+    // URL go, the inert children stay.
+    const doc = xhtml(
+      `<object data="gallery.xml" type="application/x-epub-figure-gallery">` +
+        `<figure><img src="images/moon.jpg"/><figcaption>New Moon</figcaption></figure>` +
+        `</object>`,
+    );
+    const out = sanitizePublicationText(doc, true);
+    expect(out.toLowerCase()).not.toContain("<object");
+    expect(out).not.toContain("gallery.xml");
+    expect(out).toContain("<figure");
+    expect(out).toContain(`src="images/moon.jpg"`);
+    expect(out).toContain("New Moon");
+  });
+
+  it("does not leave object-only param children behind (E-2)", () => {
+    const doc = xhtml(
+      `<object data="page.xhtml" type="application/xhtml+xml"><param name="src" value="page.xhtml"/></object>`,
+    );
+    const out = sanitizePublicationText(doc, true);
+    expect(out.toLowerCase()).not.toContain("<object");
+    expect(out.toLowerCase()).not.toContain("<param");
+  });
+
   it("sanitizes HTML documents without an XML prolog", () => {
     const html = `<!DOCTYPE html><html><head><title>t</title></head><body><script>alert(1)</script><p>ok</p></body></html>`;
     const out = sanitizePublicationText(html, false);
@@ -352,6 +379,9 @@ describe("the mounted-frame belt", () => {
       xhtml(
         `<p id="keep">t</p><script>content()</script>` +
           `<div onclick="x()"></div><iframe src="page.xhtml"></iframe>` +
+          `<object data="gallery.xml" type="application/x-epub-figure-gallery">` +
+          `<figure id="fallback-fig"><img src="images/moon.jpg"/></figure>` +
+          `</object>` +
           `<svg data-readium="true"><script>toolkit()</script></svg>`,
       ),
       "application/xhtml+xml",
@@ -366,6 +396,8 @@ describe("the mounted-frame belt", () => {
     expect(doc.querySelector("script")?.textContent).toBe("toolkit()");
     expect(doc.querySelectorAll("iframe")).toHaveLength(0);
     expect(doc.querySelector("#keep")?.hasAttribute("onclick")).toBe(false);
+    expect(doc.querySelectorAll("object")).toHaveLength(0);
+    expect(doc.querySelector("#fallback-fig")).not.toBeNull();
   });
 
   it("removes refresh metas and external SVG use from content only", () => {

@@ -76,8 +76,30 @@ function hasScriptScheme(value: string): boolean {
 }
 
 /**
+ * Neutralize one content-authored active element (E-2). An `object` element
+ * carries fallback content for a reading system that does not support its
+ * media type (EPUB 3 renders the fallback); scripts are already gone and the
+ * surrounding sweep re-scrubs everything lifted here, so the object and its
+ * URL disappear while the inert fallback stays. Every other active element
+ * (`embed`, `iframe`, `frame`, `frameset`, `base`, `script`) has no
+ * renderable fallback and is removed outright.
+ */
+function neutralizeActiveElement(element: Element): void {
+  if (element.localName !== "object") {
+    element.remove();
+    return;
+  }
+  // `param` only configures the object that is going away; drop it so no
+  // orphan remnant of the active element survives the unwrap.
+  for (const param of element.querySelectorAll("param")) param.remove();
+  element.replaceWith(...Array.from(element.childNodes));
+}
+
+/**
  * Post-mount belt for a loaded section document (E-1, E-2): remove any
- * content-authored active node that survived to the live frame. The
+ * content-authored active node that survived to the live frame. An `object`
+ * is unwrapped to its inert fallback instead of deleted, so fallback content
+ * for an unsupported media type still reads. The
  * toolkit's own injected nodes are marked `data-readium` and are left
  * alone — a forged marker can only preserve an inert node, since the
  * frame CSP and the sidecar's script gates run independently of this
@@ -91,7 +113,7 @@ export function sanitizeFrameDocument(doc: Document): void {
     return false;
   };
   for (const active of doc.querySelectorAll(REMOVED_ELEMENTS + ", script")) {
-    if (!owned(active)) active.remove();
+    if (!owned(active)) neutralizeActiveElement(active);
   }
   for (const meta of doc.querySelectorAll("meta[http-equiv]")) {
     if (!owned(meta) && meta.getAttribute("http-equiv")?.trim().toLowerCase() === "refresh") {
@@ -111,7 +133,8 @@ export function sanitizeFrameDocument(doc: Document): void {
 /**
  * Strip active content from a publication document: script elements
  * anywhere in the tree (XHTML, SVG, inline or sourced), active-content
- * elements (`object`/`embed`/`iframe` and kin), inline event handler
+ * elements (`embed`/`iframe` and kin; an `object` is unwrapped to its inert
+ * fallback, the EPUB 3 no-support rendering), inline event handler
  * attributes, and script-scheme URLs on URL-bearing attributes. Hostile
  * "XHTML" is frequently not well-formed XML, so a failed XML parse falls
  * back to HTML parsing — the same fallback the reading engine itself
@@ -155,7 +178,7 @@ function stripActiveContent(doc: Document, isXml: boolean): string | null {
     changed = true;
   }
   for (const active of doc.querySelectorAll(REMOVED_ELEMENTS)) {
-    active.remove();
+    neutralizeActiveElement(active);
     changed = true;
   }
   for (const meta of doc.querySelectorAll("meta[http-equiv]")) {

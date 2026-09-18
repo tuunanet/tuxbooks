@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { epubSurfaceTheme, readerPopoverVariables, type ReaderTheme } from "@/lib/epub/appearance";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationPatch } from "@/types/domain";
@@ -46,6 +47,8 @@ interface ReaderNavigationProps {
   /** The selected navigation tab (controlled by the shell). */
   tab: ReaderNavTab;
   onTabChange: (tab: ReaderNavTab) => void;
+  /** Active reader theme; the portaled sheet re-themes its app tokens to it. */
+  theme: ReaderTheme;
 }
 
 /** Flattens a TOC tree into rows with their nesting depth. */
@@ -101,6 +104,7 @@ export function ReaderNavigation({
   onSearchPick,
   tab,
   onTabChange,
+  theme,
 }: ReaderNavigationProps) {
   const isEpub = book.format === "epub";
   const bookmarks = annotations.filter((annotation) => annotation.kind === "bookmark");
@@ -142,7 +146,15 @@ export function ReaderNavigation({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent data-testid="reader-nav" side="left" className="flex w-80 flex-col gap-0 p-0">
+      <SheetContent
+        data-testid="reader-nav"
+        side="left"
+        className="flex w-80 flex-col gap-0 p-0"
+        // Portaled outside the reader root: redefine the app tokens in the
+        // sheet's scope so it follows the reader theme instead of the global
+        // light/dark mode (same treatment as the appearance popover).
+        style={readerPopoverVariables(epubSurfaceTheme(theme))}
+      >
         <SheetHeader className="border-b px-4 py-3">
           <SheetTitle>{book.title}</SheetTitle>
           <SheetDescription className="sr-only">Reading navigation</SheetDescription>

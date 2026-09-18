@@ -24,6 +24,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 });
 
 import { AppShell } from "@/components/layout/AppShell";
+import { ReaderNavigation } from "@/components/reader/ReaderNavigation";
 import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
@@ -96,8 +97,8 @@ async function openNavigation() {
 }
 
 describe("Reader progress footer auto-hide", () => {
-  it("hides by default, reveals on bottom-edge hover, and fades back after a delay", async () => {
-    renderReader();
+  it("hides by default, reveals on bottom-edge hover, and fades back after a delay (PDF)", async () => {
+    renderReader("pdf");
     await screen.findByTestId("reader-view");
 
     const footer = screen.getByTestId("reader-footer");
@@ -132,6 +133,14 @@ describe("Reader progress footer auto-hide", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the EPUB footer always visible without a hover zone", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+
+    expect(screen.getByTestId("reader-footer")).toHaveAttribute("data-progress-visible", "true");
+    expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
   });
 });
 
@@ -563,6 +572,37 @@ describe("ReaderNavigation", () => {
 
     fireEvent.keyDown(window, { key: "PageUp" });
     expect(container.scrollTop).toBe(648);
+  });
+
+  it("themes the portaled drawer with the active reader theme", async () => {
+    render(
+      <ReaderNavigation
+        open
+        onOpenChange={() => {}}
+        book={makeBook()}
+        pageCount={0}
+        onJump={() => {}}
+        epubToc={null}
+        pdfOutline={null}
+        annotations={[]}
+        onAnnotationJump={() => {}}
+        onDeleteAnnotation={() => {}}
+        onUpdateAnnotation={() => {}}
+        search={null}
+        onSearch={() => {}}
+        onSearchPick={() => {}}
+        tab="contents"
+        onTabChange={() => {}}
+        theme="dark"
+      />,
+    );
+
+    // The drawer is portaled outside the reader root, so the reader theme's
+    // token overrides must live on the sheet itself; otherwise bg-popover
+    // falls back to the app's light/dark mode (UAT: white drawer over a
+    // dark book).
+    const drawer = await screen.findByTestId("reader-nav");
+    expect(drawer.getAttribute("style")).toContain("--popover: #101013");
   });
 });
 

@@ -436,7 +436,7 @@ export class ReadiumEpubHandle {
       console.warn(`epub engine load ${outcome}; retrying`, attempt);
       this.container.replaceChildren();
       await Promise.race([
-        navigator.destroy().catch(() => {}),
+        this.destroyNavigator(navigator).catch(() => {}),
         new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
       ]);
     }
@@ -914,7 +914,7 @@ export class ReadiumEpubHandle {
     this.clearSearch();
     if (stale !== null) {
       await Promise.race([
-        stale.destroy().catch(() => {}),
+        this.destroyNavigator(stale).catch(() => {}),
         new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
       ]);
     }
@@ -1182,11 +1182,31 @@ export class ReadiumEpubHandle {
     this.loadHandlers.clear();
     this.externalLinkHandlers.clear();
     this.selectionHandlers.clear();
+    // Detach synchronously before the async toolkit teardown. The frame
+    // modules' ResizeObservers (snapper and decoration, on the content-frame
+    // documents) are only destroyed by `destroy()`, which awaits the frame
+    // pool; by then React has removed the reader view, the frames have
+    // collapsed, and Chromium reports a resize loop ("ResizeObserver loop
+    // completed with undelivered notifications"). Disconnecting the
+    // navigator's own observer and clearing the frames first stops it.
     const navigator = this.navigator;
     this.navigator = null;
+    if (navigator !== null) this.disconnectNavigatorObserver(navigator);
+    this.container.replaceChildren();
     if (navigator) await navigator.destroy();
     this.fetcher.close();
     this.host.remove();
+  }
+
+  /** The navigator's ResizeObserver survives the toolkit's `destroy()`. */
+  private disconnectNavigatorObserver(navigator: EpubNavigator): void {
+    (navigator as unknown as { resizeObserver?: ResizeObserver }).resizeObserver?.disconnect();
+  }
+
+  /** Destroy a recovery-path navigator (load retry, rebuild). */
+  private async destroyNavigator(navigator: EpubNavigator): Promise<void> {
+    this.disconnectNavigatorObserver(navigator);
+    await navigator.destroy();
   }
 
   // TOC --------------------------------------------------------------------------

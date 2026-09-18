@@ -1,4 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { expect, test, type ElectronApplication, type Page } from "../fixtures/electron-app.js";
+import { artifactsDir } from "../setup/environment.js";
 
 import {
   firstPdfCanvas,
@@ -45,6 +49,17 @@ async function openReadyEpub(page: Page): Promise<void> {
   const host = page.locator("div[data-epub-host]");
   await host.waitFor({ state: "attached", timeout: 30000 });
   await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+}
+
+/** Renderer ResizeObserver-loop notifications the main process has logged. */
+function resizeLoopCount(): number {
+  try {
+    const log = fs.readFileSync(path.join(artifactsDir, "electron-main.log"), "utf8");
+    return (log.match(/ResizeObserver loop completed with undelivered notifications/g) ?? [])
+      .length;
+  } catch {
+    return 0;
+  }
 }
 
 test.describe("tuxbooks reader lifecycle hardening", () => {
@@ -214,5 +229,17 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
       await setBounds(electronApp, original);
     }
     await returnToLibrary(page);
+  });
+
+  test("closing an EPUB does not loop the toolkit's resize observers", async ({ page }) => {
+    // Regression: the toolkit's frame modules (snapper and decoration
+    // ResizeObservers) live on the content frames. Without a synchronous
+    // detach they resize as the reader view collapses, and Chromium reports
+    // a resize loop on every frame of the transition.
+    const before = resizeLoopCount();
+    await openReadyEpub(page);
+    await returnToLibrary(page);
+    await page.waitForTimeout(1500);
+    expect(resizeLoopCount() - before).toBe(0);
   });
 });

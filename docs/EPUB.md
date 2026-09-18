@@ -216,6 +216,14 @@ Readium locators, validated against the actual EPUB:
   hop at a section boundary (the toolkit's ScrollSnapper stubs
   `go_next`/`go_prev` to false, so a raw `goForward` would skip whole
   chapters).
+- Teardown is synchronous first: `ReadiumEpubHandle.prepareClose()` (called
+  by `close()` and by the document hook's layout-effect cleanup) disconnects
+  the navigator's `ResizeObserver` and clears the content frames before React
+  removes the reader view. The toolkit's frame modules (snapper and
+  decoration `ResizeObserver`s on the frame documents) are only destroyed by
+  the async `destroy()`, so without the early detach they watch the frames
+  collapse and Chromium logs "ResizeObserver loop completed with undelivered
+  notifications" on every frame of the transition.
 
 ### In-book search
 
@@ -267,7 +275,8 @@ the navigator reads flows through a policy fetch client wrapped around the
 publication's `HttpFetcher`: requests outside the session base
 (`tuxbooks://book/<id>/`) are rejected before any fetch, and HTML/XHTML/SVG
 responses are sanitized (script elements, `on*` handlers, `javascript:`
-URLs, `object`/`embed`/`iframe` and kin removed) with a strict frame CSP
+URLs, `embed`/`iframe` and kin removed; an `object` is unwrapped so its inert
+fallback renders, the EPUB 3 no-support behavior) with a strict frame CSP
 meta injected before the document parses. A prolog naming an encoding the
 platform refuses to decode (utf-7 and the replacement-bucket labels) falls
 back to a byte-preservingly safe decoder so the fence still applies;
