@@ -23,6 +23,13 @@ export async function textOf(page: Page, testId: string): Promise<string> {
   return (await element.first().textContent()) ?? "";
 }
 
+/** Current value of an input test id ("" when absent). */
+export async function inputValueOf(page: Page, testId: string): Promise<string> {
+  const element = page.getByTestId(testId);
+  if ((await element.count()) === 0) return "";
+  return element.first().inputValue();
+}
+
 export async function waitForLibraryView(page: Page): Promise<void> {
   await expect(page.getByTestId("library-view")).toBeVisible({ timeout: 30000 });
 }

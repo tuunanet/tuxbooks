@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_FIT_ASPECT_RATIO_RELATION,
+  autoFitScale,
   clampOffset,
+  clampZoom,
   compensateOffset,
   computePdfScale,
   documentHeight,
@@ -9,13 +12,17 @@ import {
   fitHeightScale,
   fitPageScale,
   fitWidthScale,
+  formatZoomPercent,
   layoutSlots,
+  MAX_ZOOM,
+  MIN_ZOOM,
   offsetForPage,
   pageAtOffset,
   PAGE_GAP_PX,
+  parseZoomPercent,
   stepZoomLevel,
   thumbnailGeometry,
-  ZOOM_LADDER,
+  ZOOM_PRESETS,
   type LayoutSlot,
   type PageSize,
 } from "@/components/reader/pdf/pdfLayout";
@@ -67,25 +74,96 @@ describe("fitPageScale", () => {
 });
 
 describe("stepZoomLevel", () => {
-  it("steps up and down the ladder from an exact rung", () => {
-    expect(stepZoomLevel(1, 1)).toBe(1.5);
-    expect(stepZoomLevel(1.5, 1)).toBe(2);
-    expect(stepZoomLevel(1.5, -1)).toBe(1);
+  it("steps up and down the presets from an exact preset", () => {
+    expect(stepZoomLevel(1, 1)).toBe(1.25);
+    expect(stepZoomLevel(1.25, 1)).toBe(1.5);
+    expect(stepZoomLevel(1.25, -1)).toBe(1);
     expect(stepZoomLevel(1, -1)).toBe(0.75);
   });
 
-  it("snaps an off-ladder scale onto the nearest rung before stepping", () => {
+  it("snaps an off-preset scale onto the nearest preset before stepping", () => {
     // Zooming out of a fit mode continues from where the page actually is.
-    expect(stepZoomLevel(1.2, 1)).toBe(1.5);
+    expect(stepZoomLevel(1.2, 1)).toBe(1.25);
     expect(stepZoomLevel(1.2, -1)).toBe(1);
-    expect(stepZoomLevel(2.6, 1)).toBe(3);
+    expect(stepZoomLevel(2.6, 1)).toBe(4);
   });
 
-  it("clamps at both ladder bounds", () => {
-    const floor = ZOOM_LADDER[0] as number;
-    const ceiling = ZOOM_LADDER[ZOOM_LADDER.length - 1] as number;
+  it("clamps at both ends of the preset range", () => {
+    const floor = ZOOM_PRESETS[0] as number;
+    const ceiling = ZOOM_PRESETS[ZOOM_PRESETS.length - 1] as number;
     expect(stepZoomLevel(floor, -1)).toBe(floor);
     expect(stepZoomLevel(ceiling, 1)).toBe(ceiling);
+    // Below/above the range still clamps to the end preset.
+    expect(stepZoomLevel(0.05, -1)).toBe(MIN_ZOOM);
+    expect(stepZoomLevel(500, 1)).toBe(MAX_ZOOM);
+  });
+});
+
+describe("clampZoom", () => {
+  it("clamps onto the supported range", () => {
+    expect(clampZoom(0.05)).toBe(MIN_ZOOM);
+    expect(clampZoom(1.5)).toBe(1.5);
+    expect(clampZoom(500)).toBe(MAX_ZOOM);
+  });
+
+  it("resets unmeasurable values to 100%", () => {
+    expect(clampZoom(0)).toBe(1);
+    expect(clampZoom(Number.NaN)).toBe(1);
+    expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+});
+
+describe("parseZoomPercent", () => {
+  it("reads a percentage with or without the sign and accelerator", () => {
+    expect(parseZoomPercent("150")).toBe(1.5);
+    expect(parseZoomPercent("150%")).toBe(1.5);
+    expect(parseZoomPercent(" 12.5 % ")).toBe(0.125);
+    expect(parseZoomPercent("&125%")).toBe(1.25);
+  });
+
+  it("rejects empty, non-numeric, and non-positive input", () => {
+    expect(parseZoomPercent("")).toBeNull();
+    expect(parseZoomPercent("  ")).toBeNull();
+    expect(parseZoomPercent("fit width")).toBeNull();
+    expect(parseZoomPercent("0%")).toBeNull();
+    expect(parseZoomPercent("-50")).toBeNull();
+  });
+});
+
+describe("formatZoomPercent", () => {
+  it("shows whole percentages without a trailing decimal", () => {
+    expect(formatZoomPercent(1)).toBe("100");
+    expect(formatZoomPercent(0.33)).toBe("33");
+    expect(formatZoomPercent(2)).toBe("200");
+  });
+
+  it("keeps one decimal for off-preset scales", () => {
+    expect(formatZoomPercent(0.125)).toBe("12.5");
+    expect(formatZoomPercent(1.234)).toBe("123.4");
+  });
+});
+
+describe("autoFitScale", () => {
+  it("contains the page when the area and page aspects are close", () => {
+    // Letter page in a 1224×1584 area: both aspects ≈ 1.29, so fit page (2×).
+    expect(autoFitScale(1224, 1584, 612, 792)).toBe(2);
+  });
+
+  it("fits the width when the area is relatively much wider than the page", () => {
+    // areaAspect = 1030/1000 = 1.03, pageAspect = 792/612 ≈ 1.294:
+    // relation ≈ 0.796 < 1/1.25, so the width binds.
+    expect(autoFitScale(1000, 1030, 612, 792)).toBeCloseTo(1000 / 612, 10);
+  });
+
+  it("switches to contain at Okular's aspect threshold", () => {
+    expect(AUTO_FIT_ASPECT_RATIO_RELATION).toBe(1.25);
+    // areaAspect = 1100/1000 = 1.1 → relation ≈ 0.85, above the threshold.
+    expect(autoFitScale(1000, 1100, 612, 792)).toBeCloseTo(fitPageScale(1000, 1100, 612, 792), 10);
+  });
+
+  it("falls back to 1 for degenerate page units", () => {
+    expect(autoFitScale(1224, 1584, 0, 792)).toBe(1);
+    expect(autoFitScale(1224, 1584, 612, 0)).toBe(1);
   });
 });
 
@@ -102,7 +180,7 @@ describe("computePdfScale", () => {
     ).toBe(2);
     expect(
       computePdfScale(
-        { mode: "fit-height", level: 1, reference, presentationPage: null },
+        { mode: "fit-auto", level: 1, reference, presentationPage: null },
         1224,
         1584,
       ),
@@ -154,11 +232,7 @@ describe("computePdfScale", () => {
     // A page wider than the area is width-bound instead of overflowing.
     const wide = { width: 2448, height: 612 };
     expect(
-      computePdfScale(
-        { mode: "fit-height", level: 1, reference, presentationPage: wide },
-        1224,
-        612,
-      ),
+      computePdfScale({ mode: "fit-auto", level: 1, reference, presentationPage: wide }, 1224, 612),
     ).toBe(0.5);
   });
 

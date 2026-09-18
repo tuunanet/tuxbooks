@@ -16,13 +16,15 @@ export interface PageSize {
   height: number;
 }
 
+/** The three dynamic fit modes: scale recomputed from the measured viewport. */
+export type FitZoomMode = "fit-width" | "fit-page" | "fit-auto";
+
 /**
  * Zoom mode of the PDF reader. The fit modes are dynamic: the scale is
  * continuously recomputed from the measured viewport (resize, sidebar
- * toggles) and never stored. `custom` is a fixed level on the zoom ladder
- * (1 = 100%).
+ * toggles) and never stored. `custom` is a fixed scale (1 = 100%).
  */
-export type ZoomMode = "fit-width" | "fit-page" | "fit-height" | "custom";
+export type ZoomMode = FitZoomMode | "custom";
 
 /** Request for {@link computePdfScale}: the zoom state plus page references. */
 export interface PdfScaleRequest {
@@ -67,10 +69,10 @@ export function computePdfScale(
       return fitWidthScale(areaWidth, reference.width);
     case "fit-page":
       return fitPageScale(areaWidth, viewportHeight, reference.width, reference.height);
-    case "fit-height":
-      return fitHeightScale(viewportHeight, reference.height);
+    case "fit-auto":
+      return autoFitScale(areaWidth, viewportHeight, reference.width, reference.height);
     case "custom":
-      return request.level > 0 ? request.level : 1;
+      return clampZoom(request.level);
   }
 }
 
@@ -97,8 +99,8 @@ export function fitWidthScale(availableWidth: number, referencePageWidth: number
 
 /**
  * Scale that fits a page of `referencePageHeight` page units into
- * `availableHeight` CSS pixels (dynamic fit-height mode, Ctrl+3). Falls back
- * to 1 when unmeasurable.
+ * `availableHeight` CSS pixels — the height axis of fit page and Auto Fit.
+ * Falls back to 1 when unmeasurable.
  */
 export function fitHeightScale(availableHeight: number, referencePageHeight: number): number {
   if (availableHeight <= 0 || referencePageHeight <= 0) return 1;
@@ -123,32 +125,96 @@ export function fitPageScale(
 }
 
 /**
- * Discrete zoom ladder for the manual (custom) zoom mode. `Ctrl + +` /
- * `Ctrl + -` step between neighbors; the effective scale snaps onto the
- * nearest rung first, so zooming out of a fit mode continues from where
- * the page actually is.
+ * Auto Fit scale (Okular's `ZoomFitAuto` in continuous mode): fit the page
+ * width when the area is relatively much wider than the page, otherwise fit
+ * the whole page. `AUTO_FIT_ASPECT_RATIO_RELATION` is Okular's 1.25: below
+ * its reciprocal the area's aspect differs enough from the page's to prefer
+ * width, elsewhere contain. Falls back to 1 when unmeasurable.
  */
-export const ZOOM_LADDER = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
+export const AUTO_FIT_ASPECT_RATIO_RELATION = 1.25;
+
+export function autoFitScale(
+  availableWidth: number,
+  availableHeight: number,
+  pageWidth: number,
+  pageHeight: number,
+): number {
+  if (pageWidth <= 0 || pageHeight <= 0) return 1;
+  const areaAspect = availableHeight / availableWidth;
+  const pageAspect = pageHeight / pageWidth;
+  const relation = areaAspect / pageAspect;
+  if (relation < 1 / AUTO_FIT_ASPECT_RATIO_RELATION) {
+    return fitWidthScale(availableWidth, pageWidth);
+  }
+  return fitPageScale(availableWidth, availableHeight, pageWidth, pageHeight);
+}
+
+/**
+ * Okular's zoom presets (`kZoomValues`), as scales (1 = 100%): the
+ * percentages offered in the zoom dropdown, 12% through 10000%. Typed
+ * values may sit between presets; the list seeds the dropdown and the
+ * keyboard stepping.
+ */
+export const ZOOM_PRESETS = [
+  0.12, 0.25, 0.33, 0.5, 0.66, 0.75, 1, 1.25, 1.5, 2, 4, 8, 16, 25, 50, 100,
+] as const;
+
+/** Smallest custom scale (12%, Okular's floor). */
+export const MIN_ZOOM = 0.12;
+
+/** Largest custom scale (10000%, matching Okular's tiled-document cap). */
+export const MAX_ZOOM = 100;
 
 /** The Ctrl+0 reset level (100%). */
 export const DEFAULT_ZOOM_LEVEL = 1;
 
+/** Clamp a custom scale onto the supported range; unmeasurable values reset to 100%. */
+export function clampZoom(scale: number): number {
+  if (!Number.isFinite(scale) || scale <= 0) return DEFAULT_ZOOM_LEVEL;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+}
+
 /**
- * Nearest ladder entry at or above/below `scale`, stepping `direction`
- * (+1 in, -1 out) rungs from there. Clamps at both ends of the ladder so
- * rapid input never escapes the bounds.
+ * Parse a typed zoom percentage into a scale, Okular-style: a trailing `%`
+ * (or its Arabic spelling) and stray `&` accelerators are dropped before the
+ * number is read. Returns null for anything that is not a positive number,
+ * so callers can keep the current zoom.
+ */
+export function parseZoomPercent(text: string): number | null {
+  const normalized = text.replace(/[%٪&]/g, "").trim();
+  if (normalized === "") return null;
+  const percent = Number(normalized);
+  if (!Number.isFinite(percent) || percent <= 0) return null;
+  return percent / 100;
+}
+
+/**
+ * Format a scale as the display percentage: at most one decimal, no trailing
+ * `.0` (Okular's `makePrettyZoomString`). 0.125 → "12.5", 2 → "200".
+ */
+export function formatZoomPercent(scale: number): string {
+  const percent = Math.round(scale * 1000) / 10;
+  return Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
+}
+
+/**
+ * Nearest preset at or above/below `scale`, stepping `direction` (+1 in,
+ * -1 out) entries from there. Clamps at both ends so rapid input never
+ * escapes the range. Off-preset scales (a dynamic fit scale, a typed value)
+ * snap onto the nearest preset first, so zooming out of a fit mode continues
+ * from where the page actually is.
  */
 export function stepZoomLevel(scale: number, direction: 1 | -1): number {
   let index = 0;
-  for (let i = 0; i < ZOOM_LADDER.length; i++) {
-    if ((ZOOM_LADDER[i] as number) <= scale) index = i;
+  for (let i = 0; i < ZOOM_PRESETS.length; i++) {
+    if ((ZOOM_PRESETS[i] as number) <= scale) index = i;
   }
   if (direction === 1) {
-    while (index < ZOOM_LADDER.length - 1 && (ZOOM_LADDER[index] as number) <= scale) index++;
+    while (index < ZOOM_PRESETS.length - 1 && (ZOOM_PRESETS[index] as number) <= scale) index++;
   } else {
-    while (index > 0 && (ZOOM_LADDER[index] as number) >= scale) index--;
+    while (index > 0 && (ZOOM_PRESETS[index] as number) >= scale) index--;
   }
-  return ZOOM_LADDER[index] as number;
+  return ZOOM_PRESETS[index] as number;
 }
 
 /** Fill the whole document with an estimate derived from one known page. */

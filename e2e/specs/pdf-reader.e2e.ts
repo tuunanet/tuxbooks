@@ -71,6 +71,39 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // Okular-style zoom control: an editable percentage plus a presets
+  // dropdown (fit modes and percentages) replace the fixed ladder.
+  test("zooms to a typed percentage and a dropdown preset", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    const canvas = firstPdfCanvas(page);
+    await canvas.waitFor({ state: "attached", timeout: 30000 });
+    const toolbar = page.getByTestId("pdf-toolbar");
+    const input = page.getByTestId("pdf-zoom-input");
+    const widthAtFit = Number(await canvas.getAttribute("width"));
+
+    // A typed percentage becomes the zoom (the field reports the effective
+    // scale, so 250 reads back as "250").
+    await input.fill("250");
+    await input.press("Enter");
+    await expect(input).toHaveValue("250");
+    await expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "custom");
+    await expect
+      .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
+      .toBeGreaterThan(widthAtFit);
+
+    // An unparseable value leaves the current zoom in place.
+    await input.fill("abc");
+    await input.press("Enter");
+    await expect(input).toHaveValue("250");
+
+    // The dropdown's fit entries switch the mode back.
+    await page.getByTestId("pdf-zoom-menu").click();
+    await page.getByTestId("pdf-zoom-fit-width").click();
+    await expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-width");
+
+    await returnToLibrary(page);
+  });
+
   // The appearance controls are reflow-only (issue #46 UAT): a fixed-layout
   // PDF exposes exactly the theme — applied as a CSS filter over the
   // rendered pages (the Foliate fixed-content approach) — and none of the
@@ -288,9 +321,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     // Zoom invalidates every cached bitmap; the visible page must converge
     // to a freshly rendered canvas at the new scale.
-    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
+    const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+    await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelBefore, {
       timeout: 30000,
     });
     await expect.poll(() => canvasIsNonBlank(page, 11), { timeout: 30000 }).toBe(true);
@@ -374,9 +407,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     // Zoom rescales every slot; the current page must stay rendered and
     // visible rather than leaving a stale viewport offset (UAT regression).
-    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
+    const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+    await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelBefore, {
       timeout: 30000,
     });
     await waitForRendered(page, 87);

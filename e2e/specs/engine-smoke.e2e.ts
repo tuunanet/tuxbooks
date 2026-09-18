@@ -116,17 +116,17 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
     // is at or below the fit scale, never a fixed value.
     const canvas = firstPdfCanvas(page);
     const widthBefore = Number(await canvas.getAttribute("width"));
-    const levelBefore = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
+    const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();
-    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelBefore, {
+    await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelBefore, {
       timeout: 30000,
     });
-    const levelZoomed = (await page.getByTestId("pdf-zoom-reset").textContent()) ?? "";
+    const levelZoomed = await page.getByTestId("pdf-zoom-input").inputValue();
     await expect
       .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
       .toBeGreaterThan(widthBefore);
     await page.getByTestId("pdf-zoom-out").click();
-    await expect(page.getByTestId("pdf-zoom-reset")).not.toHaveText(levelZoomed, {
+    await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelZoomed, {
       timeout: 30000,
     });
     await expect

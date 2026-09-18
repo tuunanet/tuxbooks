@@ -147,7 +147,7 @@ environment, and a failed prewarm only means the next open starts cold.
 - `hooks/usePdfScale` — layout scale from the zoom state (issue #65): the
   fit modes recompute continuously from the measured content area and the
   shell's scroll container (ResizeObserver pair + window resize), custom
-  mode is a fixed ladder level. Pure scale selection lives in
+  mode is a fixed scale. Pure scale selection lives in
   `pdfLayout.computePdfScale`; unmeasurable dimensions fall back to 1.
 - shared `components/reader/useReaderProgress` — debounced save +
   restore-once (below); one persistence core for both formats, with PDF
@@ -168,15 +168,16 @@ environment, and a failed prewarm only means the next open starts cold.
   attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
   and diagnostics.
 - `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`;
-  the zoom cluster `− % +` whose indicator doubles as the Ctrl+0 reset; the
-  fit page/width/height toggles with `aria-pressed` state; the
-  presentation-mode toggle — issue #65), docked through a portal into a
+  the Okular-style zoom combo — `−`, an editable percent input, a presets
+  dropdown (Fit Width / Fit Page / Auto Fit plus `ZOOM_PRESETS`), `+` — and
+  the presentation-mode toggle — issue #65), docked through a portal into a
   header slot owned by ReaderShell — the same pattern as PdfSidebar, with
   an inline fallback when no host is provided (standalone renders, e.g.
-  unit tests). Native `title` tooltips instead of Radix Tooltip: the
-  toolbar also renders standalone, where no TooltipProvider exists. No
-  control row renders above the document, so its vertical space goes to
-  the pages; the reader keeps owning the zoom and position state.
+  unit tests). The toolbar carries `data-pdf-zoom-mode` (the active mode)
+  for tests and diagnostics. Native `title` tooltips instead of Radix
+  Tooltip: the toolbar also renders standalone, where no TooltipProvider
+  exists. No control row renders above the document, so its vertical space
+  goes to the pages; the reader keeps owning the zoom and position state.
 - `PdfPresentationBar` — the floating in-presentation controls (prev/next,
   page indicator, exit), fixed to the bottom edge of the document while
   the shell's chrome is hidden (issue #65).
@@ -191,22 +192,27 @@ The zoom state is `{ mode, level }` — never a bare multiplier:
   reference vs. the content area. Wider pages in mixed documents overflow
   horizontally instead of shrinking the fit reference.
 - **Fit page** (Ctrl+1) — the binding axis wins (min of fit width/height).
-- **Fit height** (Ctrl+3) — viewport height vs. the page-1 reference
-  height.
-- **Custom** — a fixed rung on `ZOOM_LADDER` (25–400%; 1 = 100%). Ctrl+0
-  resets to 100%. `Ctrl`+`+`/`-` (also bare `+`/`=`/`-`) snap the current
-  effective scale onto the nearest rung and step from there, so leaving a
-  fit mode continues from where the page actually is.
+- **Auto Fit** (Ctrl+3) — Okular's aspect-ratio rule: fit the width when the
+  area is relatively much wider than the page, otherwise contain
+  (`autoFitScale`; threshold `AUTO_FIT_ASPECT_RATIO_RELATION`, 1.25).
+- **Custom** — any typed or preset percentage. The editable input shows the
+  effective scale; typing a value (with or without `%`) and pressing Enter,
+  or leaving the field, applies it, and an unparseable value reverts. The
+  dropdown lists the presets in `ZOOM_PRESETS` (Okular's `kZoomValues`,
+  12%–10000%) plus the three fit modes. Custom scales clamp to
+  `[MIN_ZOOM, MAX_ZOOM]` (12%–10000%; 1 = 100%). Ctrl+0 resets to 100%.
+  `Ctrl`+`+`/`-` (also bare `+`/`=`/`-`) snap the current effective scale
+  onto the nearest preset and step from there, so leaving a fit mode
+  continues from where the page actually is.
 
 The fit modes are dynamic: the scale is recomputed from the measured
-viewport whenever it changes (window resize, sidebar toggle), and the
-indicator shows the effective page zoom (`scale × 100`). Any zoom or
-mode change invalidates rendered canvases and the scale-keyed bitmap
-cache. `Ctrl` + mouse wheel zooms (trackpad pinch arrives as the same
-ctrl-modified wheel in Chromium): the deltas accumulate onto ladder steps
-(`WHEEL_STEP_PX`, 40). The toolbar's zoom indicator doubles as the reset
-control. A scale change alone re-anchors by the reading anchor's in-page
-fraction; a page change from navigation lands on the new page's top edge.
+viewport whenever it changes (window resize, sidebar toggle), and the input
+shows the effective page zoom (`scale × 100`). Any zoom or mode change
+invalidates rendered canvases and the scale-keyed bitmap cache. `Ctrl` +
+mouse wheel zooms (trackpad pinch arrives as the same ctrl-modified wheel in
+Chromium): the deltas accumulate onto preset steps (`WHEEL_STEP_PX`, 40). A
+scale change alone re-anchors by the reading anchor's in-page fraction; a
+page change from navigation lands on the new page's top edge.
 
 ### Presentation mode (issue #65)
 

@@ -139,7 +139,7 @@ export function ReaderShell() {
   // Presentation mode (issues #65 PDF / #64 EPUB): the shell owns the toggle
   // (Ctrl+L), the chrome hiding (header, footer, thumbnails sidebar), and
   // the fullscreen request; the open reader owns the format-specific
-  // rescale/layout (PDF fit-height, EPUB none — the engine reflows) and the
+  // rescale/layout (PDF fit modes, EPUB none — the engine reflows) and the
   // floating in-mode bar. Presentation always ends with the book — a book
   // switch must never carry the mode (and its hidden chrome) into the next.
   const [presentation, setPresentation] = useState(false);
