@@ -17,3 +17,8 @@ tests/fixtures/epub
 # Fuzz seeds (issue #88): libFuzzer corpus units, one input per file — not
 # app code, and byte-stable seeds keep fuzz runs comparable
 sidecar/fuzz
+
+# Vendored agent skills: installed from upstream and hash-locked in
+# skills-lock.json. Reformatting them desyncs the lock and diverges from
+# upstream, so keep the checked-in copies byte-stable. See AGENTS.md.
+.agents/skills
