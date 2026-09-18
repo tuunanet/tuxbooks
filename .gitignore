@@ -37,6 +37,9 @@ coverage/
 .tavily/
 .firecrawl/
 
+# Agent session logs (opencode runtime output)
+.opencode/session_logs/
+
 # Realistic user-created test library (real copyrighted books; never commit).
 # Tests that use it skip automatically when the path is absent.
 tests/fixtures/books/EBooks/*
@@ -72,3 +75,6 @@ tests/fixtures/ai-engineering.pdf
 .dolt/
 .beads-credential-key
 .beads/proxieddb/
+
+# Beads passive JSONL export (regenerated from the Dolt DB; export.auto=true)
+.beads/issues.jsonl
