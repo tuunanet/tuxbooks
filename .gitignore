@@ -78,3 +78,6 @@ tests/fixtures/ai-engineering.pdf
 
 # Beads passive JSONL export (regenerated from the Dolt DB; export.auto=true)
 .beads/issues.jsonl
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

@@ -22,8 +22,8 @@ wrote or changed, not to prose you didn't touch.
 2. Run the repo's checks: `just check` (format+lint+typecheck+unit tests;
    run `just format` first if you touched formatting-sensitive code).
 3. Assemble the evidence captured along the way into before/after pairs.
-4. Commit with a clear message, rebase onto the latest `origin/main`, and
-   rerun the checks.
+4. Commit with a clear message (conventional commits), rebase onto the latest
+   `origin/main`, and rerun the checks.
 5. Push (`git push -u origin <branch>`; after rebasing an already-pushed
    branch, `--force-with-lease`).
 6. Open the PR. The body must explain what changed, how it was tested (every
@@ -36,6 +36,14 @@ This project uses bd (beads) for issue tracking. Do not use markdown TODO lists 
 task tracking. Use the `beads` skill for Beads workflow guidance, then use the `bd` CLI
 for issue operations. Use `bd remember "insight"` for persistent project memory; do not
 create MEMORY.md files.
+
+## Graft — repo context graph
+
+Besides project memory mentioned above, this repo is indexed in `graft/`: small linked
+markdown nodes with exact `file:line` spans, kept in sync with the code. For any task,
+get context from the graph before grepping or opening source files — it is faster and cheaper.
+New to the repo? Run `graft map` first. Use the `graft` skill for the tool guide. Conventions
+and details: `docs/STANDARDS.md` (Graft — repo context graph).
 
 ## Commands
 

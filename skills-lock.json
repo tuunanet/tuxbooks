@@ -43,6 +43,12 @@
       "skillPath": "skills/misc/git-guardrails-claude-code/SKILL.md",
       "computedHash": "ccf581d304132095c2787b0a3bcb7b4ff125863c9f796fb16311d8f1cacef470"
     },
+    "graft": {
+      "source": "trailhq/graft",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/graft/SKILL.md",
+      "computedHash": "0cbf7dc1f228bef00ef78ea656e4186c1c7dad7a6a8ba9f4332557dd7c6ee34d"
+    },
     "grill-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
