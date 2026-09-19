@@ -1,7 +1,6 @@
 import { expect, test } from "../fixtures/electron-app.js";
 
 import {
-  firstPdfCanvas,
   canvasIsNonBlank,
   epubSectionTotal,
   openInReader,
@@ -114,7 +113,12 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
     // from the current effective scale (issue #65): zoom-in snaps onto the
     // next rung above the fit, zoom-out steps back down the ladder — which
     // is at or below the fit scale, never a fixed value.
-    const canvas = firstPdfCanvas(page);
+    const canvas = page.locator('[data-testid=pdf-canvas][data-pdf-page="1"]');
+    // Wait for page 1's raster to land: right after navigating back the
+    // canvas list can still lead with another page's not-yet-rendered canvas.
+    await expect
+      .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
+      .toBeGreaterThan(0);
     const widthBefore = Number(await canvas.getAttribute("width"));
     const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();

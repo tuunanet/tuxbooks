@@ -225,8 +225,8 @@ Ctrl+L (shell-owned toggle, shared with the EPUB mode — issue #64; also the
 toolbar's Presentation button) turns the PDF reader into a fullscreen,
 distraction-free one-page view:
 
-- The shell hides the normal chrome (header, progress footer, thumbnails
-  sidebar), requests fullscreen best-effort (a denied request still gives
+- The shell hides the normal chrome (header, thumbnails sidebar), requests
+  fullscreen best-effort (a denied request still gives
   the layout inside the normal window), and exits the mode on `Esc` and on
   a native fullscreen exit (`fullscreenchange`). The mode never outlives
   the open book.
@@ -356,7 +356,10 @@ thumbnails, and restore.
 `save_reading_progress` / `get_reading_progress` methods store
 `reading_progress` rows (migration `0003` added `page_number` and
 `scroll_offset`). For PDFs the page number is the stable position;
-`progress_percent` feeds the shell footer. The reader restores exactly once
+`progress_percent` still persists (the library grid/list cards read it), but
+the PDF reader shows no footer — a fixed-layout page has no meaningful
+percent-read. The shell exposes the tracked position as `data-reader-position`
+for tests. The reader restores exactly once
 after the layout is ready — invalid values degrade to page 1 — saves are
 debounced (1s) so scrolling never writes per event, the first armed run is
 skipped so opening a book writes nothing, and unmount flushes the final
