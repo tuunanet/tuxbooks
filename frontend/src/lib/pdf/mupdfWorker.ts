@@ -710,14 +710,12 @@ function makeSmartRecolorDevice(
       draw.ignoreText(text, ctm);
       releaseDeviceArgs(text);
     },
-    // Shadings (gradients, meshes) are dropped rather than forwarded through
-    // this JS device. MuPDF renders the recoloring device's shadings flat
-    // anyway — an object-aware palette has no shading representation — and
-    // forwarding the shade object corrupts the worker on pages with mesh
-    // shadings, crashing the renderer a render or two later (observed on
-    // GeoTopo page 35). Dropping them keeps the pre-existing flat appearance
-    // without the corruption.
-    fillShade: () => {},
+    // Shadings (gradients, meshes) pass through unchanged: the palette has
+    // no recoloring for them, and dropping them flattened every shaded figure
+    // in Smart Dark (e.g. GeoTopo page 35's sphere). The worker corruption
+    // seen on that page is handled by recycling the worker after a Smart Dark
+    // clipped render (pdfEngine's forceRecycle).
+    fillShade: (shade, ctm, alpha) => draw.fillShade(shade, ctm, alpha),
     fillImage: (image, ctm, alpha) => {
       const treatment = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
       draw.fillImage(treatment?.image ?? image, ctm, alpha);
