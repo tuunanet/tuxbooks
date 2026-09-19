@@ -98,6 +98,42 @@ let mupdf: MupdfModule | null = null;
 let document: MupdfDocument | null = null;
 
 /**
+ * Per-page display lists: the page is interpreted once and every clipped
+ * region render replays the list. Re-reading the page per render is what made
+ * each deep-zoom region cost seconds; replay skips interpretation and only
+ * executes the drawing ops inside the clip.
+ */
+const displayLists = new Map<number, InstanceType<MupdfModule["DisplayList"]>>();
+const DISPLAY_LIST_CACHE_LIMIT = 12;
+
+function getDisplayList(page: number): InstanceType<MupdfModule["DisplayList"]> {
+  if (!mupdf || !document) throw new Error("no document open");
+  const cached = displayLists.get(page);
+  if (cached) {
+    // Refresh recency.
+    displayLists.delete(page);
+    displayLists.set(page, cached);
+    return cached;
+  }
+  const loaded = document.loadPage(page - 1);
+  let list: InstanceType<MupdfModule["DisplayList"]>;
+  try {
+    list = loaded.toDisplayList(true);
+  } finally {
+    loaded.destroy();
+  }
+  if (displayLists.size >= DISPLAY_LIST_CACHE_LIMIT) {
+    const oldest = displayLists.keys().next();
+    if (!oldest.done) {
+      displayLists.get(oldest.value)?.destroy();
+      displayLists.delete(oldest.value);
+    }
+  }
+  displayLists.set(page, list);
+  return list;
+}
+
+/**
  * Byte length of the MuPDF WASM linear memory. Emscripten populates HEAPU8
  * on the module config object we hand it; the heap never shrinks, so a
  * monotonically rising value across renders means native objects are not
@@ -793,31 +829,33 @@ async function renderPlainRegion(
 ): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
   if (!mupdf || !document) throw new Error("no document open");
   const loaded = document.loadPage(page - 1);
+  let bounds: [number, number, number, number];
   try {
-    const { ctm, bbox } = regionTransform(loaded.getBounds(), clip, width, height);
-    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
-    try {
-      // A PDF page paints no background of its own; a plain page reads white.
-      // Clear to opaque white (this binding's `clear` leaves the alpha
-      // channel opaque, so clearing to 0 would bake in black, not
-      // transparency).
-      pixmap.clear(0xff);
-      const draw = new mupdf.DrawDevice(ctm, pixmap);
-      try {
-        loaded.run(draw, mupdf.Matrix.identity);
-      } finally {
-        draw.close();
-        draw.destroy();
-      }
-      const pixels = new Uint8ClampedArray(pixmap.getPixels());
-      const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
-      const bitmap = await createImageBitmap(imageData);
-      return { width: bitmap.width, height: bitmap.height, bitmap };
-    } finally {
-      pixmap.destroy();
-    }
+    bounds = loaded.getBounds();
   } finally {
     loaded.destroy();
+  }
+  const { ctm, bbox } = regionTransform(bounds, clip, width, height);
+  const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
+  try {
+    // A PDF page paints no background of its own; a plain page reads white.
+    // Clear to opaque white (this binding's `clear` leaves the alpha
+    // channel opaque, so clearing to 0 would bake in black, not
+    // transparency).
+    pixmap.clear(0xff);
+    const draw = new mupdf.DrawDevice(ctm, pixmap);
+    try {
+      getDisplayList(page).run(draw, mupdf.Matrix.identity);
+    } finally {
+      draw.close();
+      draw.destroy();
+    }
+    const pixels = new Uint8ClampedArray(pixmap.getPixels());
+    const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
+    const bitmap = await createImageBitmap(imageData);
+    return { width: bitmap.width, height: bitmap.height, bitmap };
+  } finally {
+    pixmap.destroy();
   }
 }
 
@@ -831,45 +869,47 @@ async function renderSmartRegion(
 ): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
   if (!mupdf || !document) throw new Error("no document open");
   const loaded = document.loadPage(page - 1);
+  let bounds: [number, number, number, number];
   try {
-    const bounds = loaded.getBounds();
-    const [x0, y0, x1, y1] = bounds;
-    const { ctm, bbox } = regionTransform(bounds, clip, width, height);
-    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
-    try {
-      pixmap.clear(0);
-      const draw = new mupdf.DrawDevice(ctm, pixmap);
-      const backgroundPath = new mupdf.Path();
-      try {
-        backgroundPath.rect(x0, y0, x1, y1);
-        draw.fillPath(
-          backgroundPath,
-          false,
-          mupdf.Matrix.identity,
-          mupdf.ColorSpace.DeviceRGB,
-          palette.background,
-          1,
-        );
-      } finally {
-        backgroundPath.destroy();
-      }
-      const smart = makeSmartRecolorDevice(draw, palette, page, (x1 - x0) * (y1 - y0));
-      try {
-        loaded.run(smart, mupdf.Matrix.identity);
-      } finally {
-        smart.close();
-        smart.destroy();
-        draw.destroy();
-      }
-      const pixels = new Uint8ClampedArray(pixmap.getPixels());
-      const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
-      const bitmap = await createImageBitmap(imageData);
-      return { width: bitmap.width, height: bitmap.height, bitmap };
-    } finally {
-      pixmap.destroy();
-    }
+    bounds = loaded.getBounds();
   } finally {
     loaded.destroy();
+  }
+  const list = getDisplayList(page);
+  const [x0, y0, x1, y1] = bounds;
+  const { ctm, bbox } = regionTransform(bounds, clip, width, height);
+  const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
+  try {
+    pixmap.clear(0);
+    const draw = new mupdf.DrawDevice(ctm, pixmap);
+    const backgroundPath = new mupdf.Path();
+    try {
+      backgroundPath.rect(x0, y0, x1, y1);
+      draw.fillPath(
+        backgroundPath,
+        false,
+        mupdf.Matrix.identity,
+        mupdf.ColorSpace.DeviceRGB,
+        palette.background,
+        1,
+      );
+    } finally {
+      backgroundPath.destroy();
+    }
+    const smart = makeSmartRecolorDevice(draw, palette, page, (x1 - x0) * (y1 - y0));
+    try {
+      list.run(smart, mupdf.Matrix.identity);
+    } finally {
+      smart.close();
+      smart.destroy();
+      draw.destroy();
+    }
+    const pixels = new Uint8ClampedArray(pixmap.getPixels());
+    const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
+    const bitmap = await createImageBitmap(imageData);
+    return { width: bitmap.width, height: bitmap.height, bitmap };
+  } finally {
+    pixmap.destroy();
   }
 }
 
@@ -894,6 +934,8 @@ const methods = {
     // guard makes cross-document collisions impossible by construction).
     documentGeneration += 1;
     transformedImages.clear();
+    for (const list of displayLists.values()) list.destroy();
+    displayLists.clear();
     if (params.bookUrl !== undefined) {
       // Range-backed open: MuPDF pulls only the ranges it needs (xref trail
       // first, page 1 content next) straight off tuxbooks://.
