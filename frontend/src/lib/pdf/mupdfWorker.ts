@@ -108,9 +108,19 @@ const DISPLAY_LIST_CACHE_LIMIT = 12;
 
 /**
  * Pages whose content cannot be recorded as a display list (recording throws,
- * e.g. unsupported mesh shadings). They render by running the page directly.
+ * e.g. unsupported mesh shadings). They render by rasterizing the whole page
+ * (the proven-correct path) and cropping the region out of it.
  */
 const displayListFailures = new Set<number>();
+
+/**
+ * Whole-page rasters for pages that render via the crop fallback, keyed by
+ * page and per-axis scale (and color path): scrolling within such a page at a
+ * fixed zoom crops new regions from the cached raster instead of re-running
+ * the page. Capped small — these are full-page buffers.
+ */
+const wholePagePixmaps = new Map<string, InstanceType<MupdfModule["Pixmap"]>>();
+const WHOLE_PAGE_PIXMAP_LIMIT = 2;
 
 function getDisplayList(page: number): InstanceType<MupdfModule["DisplayList"]> | null {
   if (!mupdf || !document) throw new Error("no document open");
@@ -840,6 +850,108 @@ function regionTransform(
  * Clipped region raster with no recoloring: transparent background, content
  * run through a draw device whose matrix places the region at the origin.
  */
+/**
+ * Fallback for pages whose display list is unusable: rasterize the whole page
+ * once (the device geometry the whole-page paths use — no region clip, which
+ * is what makes shadings render) and crop the wanted region out of the
+ * pixmap. The raster is cached per page+scale, so scrolling within such a
+ * page crops new regions cheaply and only a zoom change re-rasterizes.
+ */
+async function renderRegionByWholePage(
+  page: number,
+  width: number,
+  height: number,
+  clip: PageClip,
+  palette: SmartPalette | null,
+): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+  if (!mupdf || !document) throw new Error("no document open");
+  const loaded = document.loadPage(page - 1);
+  try {
+    const bounds = loaded.getBounds();
+    const sx = width / clip[2];
+    const sy = height / clip[3];
+    const ctm: MupdfMatrix = [sx, 0, 0, sy, 0, 0];
+    const bbox = mupdf.Rect.transform(bounds, ctm);
+    const activePalette = palette;
+    const key = `${page}:${sx.toFixed(4)}:${sy.toFixed(4)}:${palette ? "smart" : "plain"}`;
+    let pixmap = wholePagePixmaps.get(key);
+    if (!pixmap) {
+      const built = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
+      try {
+        built.clear(activePalette ? 0 : 0xff);
+        const draw = new mupdf.DrawDevice(ctm, built);
+        const backgroundPath = activePalette ? new mupdf.Path() : null;
+        const backgroundColor = activePalette ? activePalette.background : null;
+        const smart = activePalette
+          ? makeSmartRecolorDevice(
+              draw,
+              activePalette,
+              page,
+              (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]),
+            )
+          : null;
+        try {
+          if (backgroundPath && backgroundColor) {
+            backgroundPath.rect(bounds[0], bounds[1], bounds[2], bounds[3]);
+            draw.fillPath(
+              backgroundPath,
+              false,
+              mupdf.Matrix.identity,
+              mupdf.ColorSpace.DeviceRGB,
+              backgroundColor,
+              1,
+            );
+          }
+          if (smart) loaded.run(smart, mupdf.Matrix.identity);
+          else loaded.run(draw, mupdf.Matrix.identity);
+        } finally {
+          if (smart) {
+            smart.close();
+            smart.destroy();
+          }
+          if (backgroundPath) backgroundPath.destroy();
+          draw.close();
+          draw.destroy();
+        }
+        wholePagePixmaps.set(key, built);
+        while (wholePagePixmaps.size > WHOLE_PAGE_PIXMAP_LIMIT) {
+          const oldest = wholePagePixmaps.keys().next();
+          if (oldest.done) break;
+          if (oldest.value === key) break;
+          wholePagePixmaps.get(oldest.value)?.destroy();
+          wholePagePixmaps.delete(oldest.value);
+        }
+      } catch (err) {
+        built.destroy();
+        throw err;
+      }
+      pixmap = built;
+    }
+    // Crop the region out of the cached whole-page raster (RGBA, padded
+    // stride).
+    const regionX = Math.max(
+      0,
+      Math.round((bounds[0] + clip[0]) * sx) - pixmap.getX(),
+    );
+    const regionY = Math.max(
+      0,
+      Math.round((bounds[1] + clip[1]) * sy) - pixmap.getY(),
+    );
+    const src = pixmap.getPixels();
+    const stride = pixmap.getStride();
+    const out = new Uint8ClampedArray(width * height * 4);
+    for (let row = 0; row < height; row++) {
+      const start = (regionY + row) * stride + regionX * 4;
+      out.set(src.subarray(start, start + width * 4), row * width * 4);
+    }
+    const imageData = new ImageData(out, width, height);
+    const bitmap = await createImageBitmap(imageData);
+    return { width: bitmap.width, height: bitmap.height, bitmap };
+  } finally {
+    loaded.destroy();
+  }
+}
+
 async function renderPlainRegion(
   page: number,
   width: number,
@@ -876,8 +988,8 @@ async function renderPlainRegion(
     };
     // Fast path: replay the cached display list. Recording or replaying can
     // fail for pages whose content the list recorder cannot represent (e.g.
-    // "Unexpected mesh type"); such a page falls back to running the page
-    // directly, and is remembered so later renders skip the list.
+    // "Unexpected mesh type"); such a page falls back to rasterizing the
+    // whole page and cropping, which draws shadings the clipped device drops.
     const list = getDisplayList(page);
     if (list) {
       try {
@@ -891,11 +1003,11 @@ async function renderPlainRegion(
           requestId: 0,
           page,
           heapBytes: wasmHeapBytes(),
-          message: `region display-list replay failed, page renders directly: ${err instanceof Error ? err.message : String(err)}`,
+          message: `region display-list replay failed, page renders via whole-page crop: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
-    return await paint((device) => loaded.run(device, mupdf!.Matrix.identity));
+    return await renderRegionByWholePage(page, width, height, clip, null);
   } finally {
     loaded.destroy();
   }
@@ -951,8 +1063,8 @@ async function renderSmartRegion(
       }
     };
     // Same display-list fast path and per-page fallback as the plain render:
-    // a page the list recorder cannot represent renders by running the page
-    // directly (through the recoloring device).
+    // a page the list recorder/replayer cannot handle rasterizes via the
+    // whole-page crop (through the recoloring device).
     const list = getDisplayList(page);
     if (list) {
       try {
@@ -966,11 +1078,11 @@ async function renderSmartRegion(
           requestId: 0,
           page,
           heapBytes: wasmHeapBytes(),
-          message: `region display-list replay failed, page renders directly: ${err instanceof Error ? err.message : String(err)}`,
+          message: `region display-list replay failed, page renders via whole-page crop: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
-    return await paint((device) => loaded.run(device, mupdf!.Matrix.identity));
+    return await renderRegionByWholePage(page, width, height, clip, palette);
   } finally {
     loaded.destroy();
   }
@@ -1000,6 +1112,8 @@ const methods = {
     for (const list of displayLists.values()) list.destroy();
     displayLists.clear();
     displayListFailures.clear();
+    for (const pixmap of wholePagePixmaps.values()) pixmap.destroy();
+    wholePagePixmaps.clear();
     if (params.bookUrl !== undefined) {
       // Range-backed open: MuPDF pulls only the ranges it needs (xref trail
       // first, page 1 content next) straight off tuxbooks://.
