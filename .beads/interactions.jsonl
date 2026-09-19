@@ -1,1 +1,2 @@
 {"id":"int-4610e38138f43cb84b37aac829a518d7","kind":"field_change","created_at":"2026-09-18T17:00:37.206950831Z","actor":"Tuomo Tuunanen","issue_id":"tuxbooks-cay","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-329e8f41920543f1094b68d2150cc89a","kind":"field_change","created_at":"2026-09-19T11:37:26.496100833Z","actor":"Tuomo Tuunanen","issue_id":"tuxbooks-a52","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
