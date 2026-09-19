@@ -175,6 +175,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(Math.abs(geometry.bufferRatio - geometry.dpr)).toBeLessThan(0.02);
     expect(Math.max(geometry.w, geometry.h)).toBeLessThanOrEqual(8192);
 
+    // The region must carry page pixels, not just a sized box (a wrong clip
+    // transform renders an empty/background-only canvas).
+    const regionPage = Number(await region.getAttribute("data-pdf-page"));
+    expect(await canvasIsNonBlank(page, regionPage)).toBe(true);
+
     await returnToLibrary(page);
   });
 
