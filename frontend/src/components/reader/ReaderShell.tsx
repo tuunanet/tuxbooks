@@ -43,6 +43,7 @@ import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
 import { ReaderAppearance } from "./ReaderAppearance";
 import { SelectionToolbar } from "./SelectionToolbar";
+import { useAxisLockedWheel } from "./useAxisLockedWheel";
 import {
   appendSearchGroup,
   emptySearchState,
@@ -152,6 +153,10 @@ export function ReaderShell() {
   const readerViewRef = useRef<HTMLDivElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
+  // Keep a wheel gesture on the axis it began on: releasing Shift while a
+  // free-spinning wheel is still going must not flip horizontal scrolling to
+  // vertical (see useAxisLockedWheel).
+  useAxisLockedWheel(readerContentRef);
   // Auto-hiding progress footer: hidden by default, a slim hover zone at
   // the window's bottom edge reveals it, and it fades back once the cursor
   // has been away for a beat. The document gains the footer's layout space
