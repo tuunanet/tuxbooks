@@ -20,11 +20,14 @@ import {
   pageAtOffset,
   PAGE_GAP_PX,
   parseZoomPercent,
+  regionCovers,
   stepZoomLevel,
   thumbnailGeometry,
+  visiblePageRegion,
   ZOOM_PRESETS,
   type LayoutSlot,
   type PageSize,
+  type Rect,
 } from "@/components/reader/pdf/pdfLayout";
 
 const LETTER = { width: 612, height: 792 };
@@ -399,6 +402,48 @@ describe("compensateOffset", () => {
 
   it("handles an empty document", () => {
     expect(compensateOffset(10, [], [])).toBe(10);
+  });
+});
+
+describe("visiblePageRegion", () => {
+  const page: Rect = { top: 100, left: 0, width: 600, height: 800 };
+  const viewport: Rect = { top: 300, left: 0, width: 400, height: 400 };
+
+  it("returns the visible intersection in page-local CSS pixels", () => {
+    expect(visiblePageRegion(page, viewport, 0)).toEqual({
+      top: 200,
+      left: 0,
+      width: 400,
+      height: 400,
+    });
+  });
+
+  it("expands by overscan but never past the page edges", () => {
+    expect(visiblePageRegion(page, viewport, 150)).toEqual({
+      top: 50,
+      left: 0,
+      width: 550,
+      height: 700,
+    });
+  });
+
+  it("returns null when the page is off-screen", () => {
+    expect(visiblePageRegion(page, { top: 1000, left: 0, width: 400, height: 400 }, 0)).toBeNull();
+    expect(visiblePageRegion(page, { top: 0, left: 700, width: 400, height: 400 }, 0)).toBeNull();
+  });
+
+  it("snaps outward to the grid to keep the region stable", () => {
+    expect(visiblePageRegion(page, { top: 333, left: 44, width: 100, height: 100 }, 0, 64)).toEqual(
+      { top: 192, left: 0, width: 192, height: 192 },
+    );
+  });
+});
+
+describe("regionCovers", () => {
+  it("is true only when the rendered region contains the wanted one", () => {
+    const rendered: Rect = { top: 0, left: 0, width: 100, height: 100 };
+    expect(regionCovers(rendered, { top: 10, left: 10, width: 50, height: 50 })).toBe(true);
+    expect(regionCovers(rendered, { top: 10, left: 10, width: 200, height: 50 })).toBe(false);
   });
 });
 

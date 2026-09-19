@@ -326,3 +326,65 @@ export function compensateOffset(
   if (!previousSlot || !updatedSlot) return offset;
   return offset + (updatedSlot.top - previousSlot.top);
 }
+
+/** A rectangle in one coordinate space: document scroll coords or page-local CSS px. */
+export interface Rect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The part of one page the reader should rasterize: the page's intersection
+ * with the scroll viewport, expanded by `overscanPx` on every side, clamped to
+ * the page, then snapped outward to a `stepPx` grid. Returns null when the page
+ * does not intersect the viewport. `page` and `viewport` are in the same
+ * coordinate space (document scroll coordinates); the result is page-local CSS
+ * pixels, the space the slot wrapper and the text layer use.
+ *
+ * The overscan keeps a small scroll from forcing a new raster, and the grid
+ * keeps the region (and with it the render key) stable across sub-step
+ * scrolling. `stepPx` of 0 disables snapping.
+ */
+export function visiblePageRegion(
+  page: Rect,
+  viewport: Rect,
+  overscanPx: number,
+  stepPx = 0,
+): Rect | null {
+  const top = Math.max(page.top, viewport.top - overscanPx);
+  const bottom = Math.min(page.top + page.height, viewport.top + viewport.height + overscanPx);
+  if (bottom <= top) return null;
+  const left = Math.max(page.left, viewport.left - overscanPx);
+  const right = Math.min(page.left + page.width, viewport.left + viewport.width + overscanPx);
+  if (right <= left) return null;
+
+  let localLeft = left - page.left;
+  let localTop = top - page.top;
+  let localRight = right - page.left;
+  let localBottom = bottom - page.top;
+  if (stepPx > 0) {
+    localLeft = Math.max(0, Math.floor(localLeft / stepPx) * stepPx);
+    localTop = Math.max(0, Math.floor(localTop / stepPx) * stepPx);
+    localRight = Math.min(page.width, Math.ceil(localRight / stepPx) * stepPx);
+    localBottom = Math.min(page.height, Math.ceil(localBottom / stepPx) * stepPx);
+  }
+  return {
+    left: localLeft,
+    top: localTop,
+    width: Math.max(1, localRight - localLeft),
+    height: Math.max(1, localBottom - localTop),
+  };
+}
+
+/** True when `rendered` already covers `wanted` (skips a redundant region raster). */
+export function regionCovers(rendered: Rect, wanted: Rect): boolean {
+  const tolerance = 0.5;
+  return (
+    rendered.left <= wanted.left + tolerance &&
+    rendered.top <= wanted.top + tolerance &&
+    rendered.left + rendered.width >= wanted.left + wanted.width - tolerance &&
+    rendered.top + rendered.height >= wanted.top + wanted.height - tolerance
+  );
+}

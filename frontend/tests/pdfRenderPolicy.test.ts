@@ -7,6 +7,8 @@ import {
   MAX_RENDER_PIXELS_HARD,
   capByBytes,
   effectiveRenderRatio,
+  needsRegionRender,
+  regionRenderRatio,
   renderBufferBytes,
 } from "@/components/reader/pdf/pdfRenderPolicy";
 
@@ -163,5 +165,35 @@ describe("render window byte budget (PERF-4)", () => {
     const sizes = [10, 20, 30, 40, 50];
     const kept = capByBytes(sizes, (bytes) => bytes, 60);
     expect(kept).toEqual([10, 20, 30]);
+  });
+});
+
+describe("needsRegionRender", () => {
+  it("is false when the whole-page ratio reaches the device ratio", () => {
+    // Small viewport, caps inert: the whole-page raster is already crisp.
+    expect(needsRegionRender(LETTER.width, LETTER.height, 1, 1)).toBe(false);
+    expect(needsRegionRender(LETTER.width, LETTER.height, 1.5, 2)).toBe(false);
+  });
+
+  it("is true once a budget tier pushes the ratio below the device ratio", () => {
+    // 100x a Letter page: the area/dimension budgets bind far below dpr.
+    expect(needsRegionRender(LETTER.width, LETTER.height, 100, 1)).toBe(true);
+    expect(needsRegionRender(LETTER.width, LETTER.height, 100, 2)).toBe(true);
+  });
+});
+
+describe("regionRenderRatio", () => {
+  it("targets the device ratio for a viewport-sized region", () => {
+    expect(regionRenderRatio(1000, 700, 2)).toBe(2);
+    expect(regionRenderRatio(1000, 700, 1)).toBe(1);
+  });
+
+  it("clamps to the hard dimension budget for an oversized region", () => {
+    expect(regionRenderRatio(20000, 1000, 2)).toBeCloseTo(8192 / 20000, 10);
+  });
+
+  it("falls back to 1 for unmeasurable inputs", () => {
+    expect(regionRenderRatio(0, 700, 2)).toBe(1);
+    expect(regionRenderRatio(1000, 700, 0)).toBe(1);
   });
 });

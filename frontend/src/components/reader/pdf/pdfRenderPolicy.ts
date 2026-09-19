@@ -85,6 +85,42 @@ export function effectiveRenderRatio(
   return Math.min(dpr, Math.max(candidate, floor));
 }
 
+/**
+ * True when the whole-page raster would fall below the display's device
+ * resolution — a budget tier binds, so the page would be CSS-upscaled and its
+ * text softened. The reader then renders only the visible region at device
+ * resolution instead. Fit width (and anything else where the caps are inert)
+ * returns false, so its whole-page path is untouched.
+ */
+export function needsRegionRender(
+  width: number,
+  height: number,
+  scale: number,
+  dpr: number,
+  options: RenderRatioOptions = {},
+): boolean {
+  return effectiveRenderRatio(width, height, scale, dpr, options) < dpr - 1e-9;
+}
+
+/**
+ * Device-pixels-per-CSS-pixel ratio for a viewport region raster: aims at the
+ * display's devicePixelRatio and clamps to the same hard budgets as a page, so
+ * a region buffer can never exceed them. A region is a viewport-sized piece,
+ * so the caps are inert in practice; they are the safety net.
+ */
+export function regionRenderRatio(
+  width: number,
+  height: number,
+  dpr: number,
+  options: RenderRatioOptions = {},
+): number {
+  const { maxDimension = MAX_RENDER_DIMENSION, hardMaxPixels = MAX_RENDER_PIXELS_HARD } = options;
+  if (!(width > 0) || !(height > 0) || !(dpr > 0)) return 1;
+  const hard = Math.sqrt(hardMaxPixels / (width * height));
+  const dimensionRatio = Math.min(maxDimension / width, maxDimension / height);
+  return Math.max(0.01, Math.min(dpr, hard, dimensionRatio));
+}
+
 /** RGBA bytes a render buffer occupies at the given CSS size and ratio. */
 export function renderBufferBytes(width: number, height: number, ratio: number): number {
   return width * height * ratio * ratio * 4;

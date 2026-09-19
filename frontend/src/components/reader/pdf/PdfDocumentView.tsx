@@ -6,7 +6,7 @@ import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
 import { PdfPageTextLayer } from "./PdfPageTextLayer";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
-import type { LayoutSlot } from "./pdfLayout";
+import type { LayoutSlot, Rect } from "./pdfLayout";
 
 interface PdfDocumentViewProps {
   document: PdfDocument;
@@ -21,6 +21,12 @@ interface PdfDocumentViewProps {
   anchorPage: number;
   /** Render scale for the canvases. */
   scale: number;
+  /**
+   * Visible page-local region per page (CSS px). Consulted only by canvases
+   * whose whole-page ratio would fall below device resolution; other pages
+   * ignore it and render whole.
+   */
+  pageRegions?: Map<number, Rect>;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
   /** Shared per-document cache of finished page bitmaps. */
@@ -81,6 +87,7 @@ export function PdfDocumentView({
   renderPages,
   anchorPage,
   scale,
+  pageRegions,
   renderedPages,
   failedPages,
   bitmapCache = null,
@@ -179,6 +186,7 @@ export function PdfDocumentView({
                     width={slot.width}
                     height={slot.height}
                     scale={scale}
+                    region={pageRegions?.get(slot.pageNumber)}
                     preview={previewAnchorRender && slot.pageNumber === anchorPage}
                     smartColors={smartColors}
                     renderVariant={renderVariant}

@@ -104,6 +104,80 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // Viewport clipping above the whole-page budget (deep zoom): the canvas
+  // rasterizes only the visible region at device resolution, so it stays
+  // sharp and never allocates a page-sized buffer. Deterministic DOM
+  // contract; no timing assertions.
+  test("rasterizes only the visible region above the whole-page budget", async ({ page }) => {
+    await openInReader(page, "A Large Fixture (PDF)");
+    const canvas = firstPdfCanvas(page);
+    await canvas.waitFor({ state: "attached", timeout: 30000 });
+
+    // Fit width keeps the whole-page path untouched.
+    await expect(canvas).toHaveAttribute("data-pdf-render-region", "full");
+
+    const input = page.getByTestId("pdf-zoom-input");
+    await input.fill("1600");
+    await input.press("Enter");
+    await expect(input).toHaveValue("1600");
+
+    // The visible page re-renders as a clipped region at device resolution.
+    const region = page
+      .locator(
+        '[data-testid=pdf-canvas][data-pdf-render-region]:not([data-pdf-render-region="full"])',
+      )
+      .first();
+    await expect(region).toBeVisible({ timeout: 30000 });
+
+    // Wait for the region raster to land: until the atomic blit, the canvas
+    // still carries the previous (fit-width) geometry. Assert consistency
+    // against the element's own current region attribute, since the attribute
+    // updates a render before the slower blit.
+    await expect
+      .poll(
+        () =>
+          region.evaluate((el) => {
+            const canvas = el as HTMLCanvasElement;
+            const w = Number(
+              (canvas.getAttribute("data-pdf-render-region") ?? "0,0,0,0").split(",")[2],
+            );
+            return canvas.style.width === `${w}px` && canvas.width >= Math.max(1, w);
+          }),
+        { timeout: 30000 },
+      )
+      .toBe(true);
+
+    const geometry = await region.evaluate((el) => {
+      const canvas = el as HTMLCanvasElement;
+      const [x, y, w, h] = (canvas.getAttribute("data-pdf-render-region") ?? "")
+        .split(",")
+        .map(Number);
+      const dpr = window.devicePixelRatio || 1;
+      return {
+        x,
+        y,
+        w,
+        h,
+        left: canvas.style.left,
+        top: canvas.style.top,
+        cssWidth: canvas.style.width,
+        cssHeight: canvas.style.height,
+        bufferRatio: canvas.width / w,
+        dpr,
+      };
+    });
+    expect(geometry.left).toBe(`${geometry.x}px`);
+    expect(geometry.top).toBe(`${geometry.y}px`);
+    expect(geometry.cssWidth).toBe(`${geometry.w}px`);
+    expect(geometry.cssHeight).toBe(`${geometry.h}px`);
+    // The backing store is at display resolution (within rounding), not a
+    // CSS-upscaled low-ratio layer, and within the PERF-1 dimension budget.
+    expect(Math.abs(geometry.bufferRatio - geometry.dpr)).toBeLessThan(0.02);
+    expect(Math.max(geometry.w, geometry.h)).toBeLessThanOrEqual(8192);
+
+    await returnToLibrary(page);
+  });
+
   // The appearance controls are reflow-only (issue #46 UAT): a fixed-layout
   // PDF exposes exactly the theme — applied as a CSS filter over the
   // rendered pages (the Foliate fixed-content approach) — and none of the

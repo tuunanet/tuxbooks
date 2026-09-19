@@ -1779,6 +1779,34 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(input).toHaveValue("10000");
   });
 
+  it("switches to a viewport-clipped region above the whole-page budget", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientHeight", { value: 792, configurable: true });
+    Object.defineProperty(container, "clientWidth", { value: 1224, configurable: true });
+    await renderZoomableReader(container);
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    // Fit width keeps the whole-page path.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-region", "full"),
+    );
+
+    const input = screen.getByTestId("pdf-zoom-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "1600{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas").getAttribute("data-pdf-render-region")).toMatch(
+        /^\d+,\d+,\d+,\d+$/,
+      ),
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    const [x, y, w] = (canvas.getAttribute("data-pdf-render-region") ?? "").split(",").map(Number);
+    expect(canvas).toHaveStyle({ left: `${x}px`, top: `${y}px`, width: `${w}px` });
+  });
+
   it("steps the presets with the Ctrl-modified zoom keys", async () => {
     await renderZoomableReader(document.createElement("div"));
     fireEvent.keyDown(window, { key: "+", ctrlKey: true });

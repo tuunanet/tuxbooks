@@ -51,6 +51,12 @@ type WorkerRequest =
         height: number;
         /** Smart Dark recoloring palette (issue #67); absent = render as-is. */
         smart?: { background: number[]; text: number[] };
+        /**
+         * Viewport-clipped region render: the visible part of the page, in
+         * page units relative to the page bounds origin, as
+         * `[x, y, width, height]`. Absent renders the whole page.
+         */
+        clip?: [number, number, number, number];
       };
     }
   | { id: number; method: "text"; params: { page: number } }
@@ -84,6 +90,9 @@ interface WorkerDiag {
 type MupdfModule = typeof import("mupdf");
 type MupdfDocument = InstanceType<MupdfModule["Document"]>;
 type MupdfColor = import("mupdf").Color;
+type MupdfMatrix = ReturnType<MupdfModule["Matrix"]["scale"]>;
+/** Region rect in page units relative to the page bounds origin. */
+type PageClip = [number, number, number, number];
 
 let mupdf: MupdfModule | null = null;
 let document: MupdfDocument | null = null;
@@ -746,6 +755,111 @@ async function renderSmartPage(
   }
 }
 
+/**
+ * Page-space to region-device-pixel matrix for a clipped render: scale by
+ * `width / clipWidth` and translate the clip origin to (0,0). `bounds` is the
+ * page's bounds, whose origin may be non-zero.
+ */
+function regionMatrix(
+  bounds: [number, number, number, number],
+  clip: PageClip,
+  width: number,
+  height: number,
+): MupdfMatrix {
+  const [x0, y0] = bounds;
+  const sx = width / clip[2];
+  const sy = height / clip[3];
+  return [sx, 0, 0, sy, -(x0 + clip[0]) * sx, -(y0 + clip[1]) * sy];
+}
+
+/**
+ * Clipped region raster with no recoloring: transparent background, content
+ * run through a draw device whose matrix places the region at the origin.
+ */
+async function renderPlainRegion(
+  page: number,
+  width: number,
+  height: number,
+  clip: PageClip,
+): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+  if (!mupdf || !document) throw new Error("no document open");
+  const loaded = document.loadPage(page - 1);
+  try {
+    const ctm = regionMatrix(loaded.getBounds(), clip, width, height);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], true);
+    try {
+      pixmap.clear(0);
+      const draw = new mupdf.DrawDevice(ctm, pixmap);
+      try {
+        loaded.run(draw, mupdf.Matrix.identity);
+      } finally {
+        draw.close();
+        draw.destroy();
+      }
+      const pixels = new Uint8ClampedArray(pixmap.getPixels());
+      const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
+      const bitmap = await createImageBitmap(imageData);
+      return { width: bitmap.width, height: bitmap.height, bitmap };
+    } finally {
+      pixmap.destroy();
+    }
+  } finally {
+    loaded.destroy();
+  }
+}
+
+/** Smart Dark raster of a clipped region (see {@link renderSmartPage}). */
+async function renderSmartRegion(
+  page: number,
+  width: number,
+  height: number,
+  clip: PageClip,
+  palette: SmartPalette,
+): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+  if (!mupdf || !document) throw new Error("no document open");
+  const loaded = document.loadPage(page - 1);
+  try {
+    const bounds = loaded.getBounds();
+    const [x0, y0, x1, y1] = bounds;
+    const ctm = regionMatrix(bounds, clip, width, height);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], true);
+    try {
+      pixmap.clear(0);
+      const draw = new mupdf.DrawDevice(ctm, pixmap);
+      const backgroundPath = new mupdf.Path();
+      try {
+        backgroundPath.rect(x0, y0, x1, y1);
+        draw.fillPath(
+          backgroundPath,
+          false,
+          mupdf.Matrix.identity,
+          mupdf.ColorSpace.DeviceRGB,
+          palette.background,
+          1,
+        );
+      } finally {
+        backgroundPath.destroy();
+      }
+      const smart = makeSmartRecolorDevice(draw, palette, page, (x1 - x0) * (y1 - y0));
+      try {
+        loaded.run(smart, mupdf.Matrix.identity);
+      } finally {
+        smart.close();
+        smart.destroy();
+        draw.destroy();
+      }
+      const pixels = new Uint8ClampedArray(pixmap.getPixels());
+      const imageData = new ImageData(pixels, pixmap.getWidth(), pixmap.getHeight());
+      const bitmap = await createImageBitmap(imageData);
+      return { width: bitmap.width, height: bitmap.height, bitmap };
+    } finally {
+      pixmap.destroy();
+    }
+  } finally {
+    loaded.destroy();
+  }
+}
+
 const methods = {
   async prewarm({ wasmUrl }: { wasmUrl: string }): Promise<{ ready: boolean }> {
     // Engine load only: no document, no allocation, no rasterization.
@@ -801,14 +915,21 @@ const methods = {
     width,
     height,
     smart,
+    clip,
   }: {
     page: number;
     width: number;
     height: number;
     smart?: { background: number[]; text: number[] };
+    clip?: PageClip;
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!mupdf || !document) throw new Error("no document open");
     const palette = normalizeSmartPalette(smart);
+    if (clip) {
+      return palette
+        ? renderSmartRegion(page, width, height, clip, palette)
+        : renderPlainRegion(page, width, height, clip);
+    }
     if (palette) {
       return renderSmartPage(page, width, height, palette);
     }

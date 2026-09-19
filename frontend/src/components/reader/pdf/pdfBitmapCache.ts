@@ -33,6 +33,13 @@ const DEFAULT_MAX_ENTRIES = 8;
 
 export interface PdfBitmap {
   readonly pageNumber: number;
+  /**
+   * Identity of the page region the buffer covers: "full" for a whole-page
+   * raster, or a stable `x,y,w,h` key for a viewport-clipped region (see
+   * PdfPageCanvas). Part of the cache key, so a page can retain both a
+   * whole-page bitmap and the current region without them colliding.
+   */
+  readonly regionKey?: string;
   /** The render scale the buffer was rasterized at. */
   readonly scale: number;
   /**
@@ -56,8 +63,13 @@ function bitmapBytes(buffer: HTMLCanvasElement): number {
   return buffer.width * buffer.height * 4;
 }
 
+/** Composite map key: one page may hold a whole-page and a region bitmap. */
+function cacheKey(pageNumber: number, regionKey = "full"): string {
+  return `${pageNumber}\u0000${regionKey}`;
+}
+
 export class PdfBitmapCache {
-  #entries = new Map<number, PdfBitmap>();
+  #entries = new Map<string, PdfBitmap>();
   #bytes = 0;
   readonly #maxBytes: number;
   readonly #maxEntries: number;
@@ -72,27 +84,35 @@ export class PdfBitmapCache {
    * color-mode `variant`, or null. A successful lookup refreshes the
    * entry's recency.
    */
-  get(pageNumber: number, scale: number, ratio: number, variant: string): PdfBitmap | null {
-    const hit = this.#entries.get(pageNumber);
+  get(
+    pageNumber: number,
+    scale: number,
+    ratio: number,
+    variant: string,
+    regionKey = "full",
+  ): PdfBitmap | null {
+    const key = cacheKey(pageNumber, regionKey);
+    const hit = this.#entries.get(key);
     if (!hit || hit.scale !== scale || hit.ratio !== ratio || hit.variant !== variant) return null;
-    this.#entries.delete(pageNumber);
-    this.#entries.set(pageNumber, hit);
+    this.#entries.delete(key);
+    this.#entries.set(key, hit);
     return hit;
   }
 
   /** Store a rendered bitmap, evicting the least recently used over budget. */
   put(bitmap: PdfBitmap): void {
-    this.remove(bitmap.pageNumber);
-    this.#entries.set(bitmap.pageNumber, bitmap);
+    this.remove(bitmap.pageNumber, bitmap.regionKey);
+    this.#entries.set(cacheKey(bitmap.pageNumber, bitmap.regionKey), bitmap);
     this.#bytes += bitmapBytes(bitmap.buffer);
     this.#trim();
   }
 
-  remove(pageNumber: number): void {
-    const existing = this.#entries.get(pageNumber);
+  remove(pageNumber: number, regionKey = "full"): void {
+    const key = cacheKey(pageNumber, regionKey);
+    const existing = this.#entries.get(key);
     if (!existing) return;
     this.#bytes -= bitmapBytes(existing.buffer);
-    this.#entries.delete(pageNumber);
+    this.#entries.delete(key);
   }
 
   /** Drop every entry (zoom change, document switch, reader teardown). */
@@ -116,7 +136,9 @@ export class PdfBitmapCache {
       if (this.#bytes <= this.#maxBytes && this.#entries.size <= this.#maxEntries) break;
       const oldest = this.#entries.keys().next();
       if (oldest.done) break;
-      this.remove(oldest.value);
+      const existing = this.#entries.get(oldest.value);
+      if (existing) this.#bytes -= bitmapBytes(existing.buffer);
+      this.#entries.delete(oldest.value);
     }
   }
 }

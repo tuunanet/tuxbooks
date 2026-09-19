@@ -323,6 +323,14 @@ export interface PdfPage {
     viewport: { width: number; height: number };
     transform?: number[];
     smartColors?: SmartPalette;
+    /**
+     * Viewport-clipped region render: the visible part of the page in CSS
+     * pixels relative to the page's top-left, with `viewport` still the full
+     * page's CSS size (so page units can be recovered). The returned bitmap
+     * and the caller's canvas are region-sized. Absent renders the whole
+     * page.
+     */
+    region?: { x: number; y: number; width: number; height: number };
   }): { promise: Promise<void>; cancel(): void };
 }
 
@@ -380,26 +388,47 @@ class MuPdfDocument implements PdfDocument {
     }
     return {
       getViewport: ({ scale }) => ({ width: size.width * scale, height: size.height * scale }),
-      render: ({ canvas, viewport, transform, smartColors }) =>
-        this.renderPage(pageNumber, canvas, viewport, transform, smartColors),
+      render: ({ canvas, viewport, transform, smartColors, region }) =>
+        this.renderPage(pageNumber, size, canvas, viewport, transform, smartColors, region),
     };
   }
 
   private renderPage(
     pageNumber: number,
+    size: { width: number; height: number },
     canvas: HTMLCanvasElement,
     viewport: { width: number; height: number },
     transform: number[] | undefined,
     smartColors: SmartPalette | undefined,
+    region: { x: number; y: number; width: number; height: number } | undefined,
   ): { promise: Promise<void>; cancel(): void } {
     const ratio = transform ? (transform[0] ?? 1) : 1;
-    const width = Math.floor(viewport.width * ratio);
-    const height = Math.floor(viewport.height * ratio);
+    let width: number;
+    let height: number;
+    let clip: [number, number, number, number] | undefined;
+    if (region) {
+      width = Math.max(1, Math.round(region.width * ratio));
+      height = Math.max(1, Math.round(region.height * ratio));
+      // The viewport is the full page's CSS size, so CSS pixels convert to
+      // page units by the page-units-per-CSS ratio.
+      const pageUnitsPerCss =
+        size.width > 0 && viewport.width > 0 ? size.width / viewport.width : 1;
+      clip = [
+        region.x * pageUnitsPerCss,
+        region.y * pageUnitsPerCss,
+        region.width * pageUnitsPerCss,
+        region.height * pageUnitsPerCss,
+      ];
+    } else {
+      width = Math.floor(viewport.width * ratio);
+      height = Math.floor(viewport.height * ratio);
+    }
     const { result, cancel } = this.client.requestCancellable("render", {
       page: pageNumber,
       width,
       height,
       smart: smartColors,
+      clip,
     });
     const promise = result.then((raw) => {
       const { bitmap } = raw as { bitmap: ImageBitmap };

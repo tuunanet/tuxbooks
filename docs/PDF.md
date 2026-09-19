@@ -157,7 +157,8 @@ environment, and a failed prewarm only means the next open starts cold.
   geometry); unit-tested without a browser.
 - `pdfRenderPolicy.ts` — pure render-budget math: the effective render
   ratio per page (devicePixelRatio capped by the backing-store budgets, CSS
-  upscales beyond) and the byte cap over the live render window.
+  upscales beyond), the byte cap over the live render window, and the
+  deep-zoom region switch (`needsRegionRender`/`regionRenderRatio`).
 - `pdfOutline.ts` — pure outline normalization: the engine's raw outline
   resolves to a tree of `{ title, page (1-based | null), items }`;
   unresolvable entries degrade to inert rows, never errors. Re-exported
@@ -166,7 +167,11 @@ environment, and a failed prewarm only means the next open starts cold.
   per page for the entire document; canvases only for the bounded render
   set. Slots carry `data-pdf-slot` + `data-render-state` lifecycle
   attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
-  and diagnostics.
+  and diagnostics. Above the whole-page budget, a canvas rasterizes only the
+  page's visible region at device resolution (`usePdfViewport` +
+  `visiblePageRegion`, the `mupdfWorker` clip) and positions itself in the
+  slot, so text stays sharp and no page-sized buffer is allocated; the
+  canvas carries `data-pdf-render-region` (`full` or the region rect).
 - `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`;
   the Okular-style zoom combo — `−`, an editable percent input, a presets
   dropdown (Fit Width / Fit Page / Auto Fit plus `ZOOM_PRESETS`), `+` — and
