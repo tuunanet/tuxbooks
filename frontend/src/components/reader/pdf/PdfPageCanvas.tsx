@@ -89,6 +89,17 @@ class CancelledRender extends Error {
 const RENDER_MS_SAMPLE_COUNT = 5;
 
 /**
+ * Quiet period a superseding change waits out before it starts a raster.
+ * MuPDF rasterizes synchronously inside its worker and cancellation is only
+ * checked between requests, so a heavy render cannot be interrupted mid-way:
+ * starting one per intermediate zoom step or scroll-driven region move
+ * queues multi-second rasters and reads as a freeze. Only the first render of
+ * a canvas instance starts immediately; every later one coalesces, so rapid
+ * input settles to a single raster at the final scale/region.
+ */
+const RENDER_SETTLE_MS = 150;
+
+/**
  * Imperative page renderer: draws one page (or, above the whole-page budget,
  * one viewport region of it) into one canvas at a fixed size.
  *
@@ -141,6 +152,9 @@ export function PdfPageCanvas({
   // change means the mounted canvas still holds the previous mode's opaque
   // bitmap, which must be cleared before the new-mode render starts.
   const previousVariantRef = useRef(renderVariant);
+  // True once this canvas instance has rasterized at least once: the first
+  // render starts immediately (open latency), later ones coalesce.
+  const renderedOnceRef = useRef(false);
 
   const dpr = window.devicePixelRatio || 1;
   // Region primitives keep the effect dependencies stable: the parent may
@@ -261,6 +275,15 @@ export function PdfPageCanvas({
       // Stop the previous generation's work early; it renders into its own
       // buffer, so there is no shared state to wait for.
       taskRef.current?.cancel();
+
+      // Coalesce superseding changes (see RENDER_SETTLE_MS). The timeout is
+      // intentionally not cleared: it is short, and the `cancelled` check
+      // after it is what discards a superseded generation.
+      if (renderedOnceRef.current) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RENDER_SETTLE_MS));
+        if (cancelled) throw new CancelledRender();
+      }
+      renderedOnceRef.current = true;
 
       const firstBuffer = await renderInto(previewRatio);
       canvas.setAttribute("data-pdf-render-quality", needsRefinement ? "preview" : "final");

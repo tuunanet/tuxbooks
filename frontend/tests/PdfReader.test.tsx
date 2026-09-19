@@ -1403,7 +1403,8 @@ describe("PdfReader zoom", () => {
     // Zoom supersedes the in-flight render: cleanup runs for the first
     // effect, and the second effect requests the page again.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    expect(pending).toHaveLength(1);
+    // A superseding render coalesces a short quiet period before it starts.
+    await waitFor(() => expect(pending).toHaveLength(1));
     const [freshRender] = pending.splice(0) as [(page: unknown) => void];
 
     // The NEWER render resolves first and paints at 125%…
@@ -1797,14 +1798,13 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "1600{Enter}");
 
-    await waitFor(() =>
-      expect(screen.getByTestId("pdf-canvas").getAttribute("data-pdf-render-region")).toMatch(
-        /^\d+,\d+,\d+,\d+$/,
-      ),
-    );
-    const canvas = screen.getByTestId("pdf-canvas");
-    const [x, y, w] = (canvas.getAttribute("data-pdf-render-region") ?? "").split(",").map(Number);
-    expect(canvas).toHaveStyle({ left: `${x}px`, top: `${y}px`, width: `${w}px` });
+    await waitFor(() => {
+      const canvas = screen.getByTestId("pdf-canvas");
+      const region = canvas.getAttribute("data-pdf-render-region") ?? "";
+      expect(region).toMatch(/^\d+,\d+,\d+,\d+$/);
+      const [x, y, w] = region.split(",").map(Number);
+      expect(canvas).toHaveStyle({ left: `${x}px`, top: `${y}px`, width: `${w}px` });
+    });
   });
 
   it("steps the presets with the Ctrl-modified zoom keys", async () => {

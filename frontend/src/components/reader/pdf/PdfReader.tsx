@@ -106,8 +106,8 @@ const WHEEL_STEP_PX = 40;
  * region edges to a grid so sub-step scrolling reuses the same region key.
  * Both in page-local CSS pixels, which are 1:1 with screen pixels.
  */
-const REGION_OVERSCAN_PX = 768;
-const REGION_STEP_PX = 256;
+const REGION_OVERSCAN_PX = 256;
+const REGION_STEP_PX = 128;
 
 /**
  * A settled selection's outcome (issue: the pointerup handler defers by a
