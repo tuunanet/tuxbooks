@@ -30,16 +30,26 @@ wrote or changed, not to prose you didn't touch.
    claim backed by evidence), before/after proof, and any risks or follow-up
    work. Run the title and body through with `unslop` skill before posting.
 
-## Issue tracking
+## Agent skills
 
-This project uses bd (beads) for issue tracking. Do not use markdown TODO lists for
-task tracking. Use the `beads` skill for Beads workflow guidance, then use the `bd` CLI
-for issue operations. Use `bd remember "insight"` for persistent project memory; do not
-create MEMORY.md files.
+### Issue tracker
+
+Issues and specs live in bd (Beads), the repo's existing tracker; use the `bd`
+CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles use their default label strings, as bd labels.
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` plus `docs/adr/` at the repo root. See
+`docs/agents/domain.md`.
 
 ## Graft — repo context graph
 
-Besides project memory mentioned above, this repo is indexed in `graft/`: small linked
+This repo is indexed in `graft/`: small linked
 markdown nodes with exact `file:line` spans, kept in sync with the code. For any task,
 get context from the graph before grepping or opening source files — it is faster and cheaper.
 New to the repo? Run `graft map` first. Use the `graft` skill for the tool guide. Conventions
@@ -62,15 +72,11 @@ just test-rust               # cargo test (service crate)
 just test-frontend           # vitest run (CI mode)
 just bump X.Y.Z              # apply a release version to all versioned files
 just audit                   # maturity policies, run this before releases.
-bd ready`                    # List tasks with no open blockers.
-bd create "Title" -p 0`      # Create a P0 task.
-bd update <id> --claim`      # Atomically claim a task (sets assignee + in_progress).
-bd dep add <child> <parent>` # Link tasks (blocks, related, parent-child).
-bd show <id>`                # View task details and audit trail.
-bd prime`                    # Print agent workflow context and persistent memories.
-bd remember "insight"`       # Store project memory that `bd prime` injects later.
 pnpm --filter frontend exec vitest run <file-or-pattern>
 ```
+
+Task tracking is bd (Beads) — command reference in
+`docs/agents/issue-tracker.md`.
 
 ### External knowledge & source research
 

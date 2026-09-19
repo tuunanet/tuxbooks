@@ -80,16 +80,6 @@ reading progress command`, `fix: keep FTS index in sync on book update`,
 
 A completed change has passed the required checks and been verified. Report intentional gaps, unexpected findings, and unverified behavior plainly.
 
-## Issue Tracking
-
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking.
-
-### Beads issue tracking basic rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists, task lists, or other tracking methods.
-- Run `bd prime` when Beads context is missing or stale.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
 ## Graft — repo context graph
 
 This repo is indexed in `graft/`: small linked markdown nodes that explain each
