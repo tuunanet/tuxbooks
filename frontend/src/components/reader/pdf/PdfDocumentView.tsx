@@ -178,7 +178,15 @@ export function PdfDocumentView({
                 <div
                   data-pdf-page-wrapper={slot.pageNumber}
                   className="relative overflow-hidden rounded-sm border bg-white"
-                  style={pageBackground ? { backgroundColor: pageBackground } : undefined}
+                  style={{
+                    // The wrapper owns the page geometry: in region mode the
+                    // canvas is position:absolute, so without an explicit size
+                    // the wrapper collapses to 1px and overflow-hidden clips
+                    // the whole page away (blank viewport at deep zoom).
+                    width: slot.width,
+                    height: slot.height,
+                    ...(pageBackground ? { backgroundColor: pageBackground } : {}),
+                  }}
                 >
                   <PdfPageCanvas
                     document={document}
