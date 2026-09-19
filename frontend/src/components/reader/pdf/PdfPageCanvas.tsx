@@ -67,12 +67,20 @@ function blit(
   buffer: HTMLCanvasElement,
   width: number,
   height: number,
+  left?: number,
+  top?: number,
 ): void {
   // Reassigning width/height reallocates the backing store (and clears it);
   // when the size is unchanged — a cache-hit blit, or a re-render at the
   // same geometry — draw straight into the existing store instead.
   if (canvas.width !== buffer.width) canvas.width = buffer.width;
   if (canvas.height !== buffer.height) canvas.height = buffer.height;
+  // Region mode: the offset moves together with the pixels, inside the same
+  // atomic paint. React must not own left/top — it re-applies them on every
+  // scroll-driven re-render, which would parade the stale bitmap around the
+  // page (a ~10% jump) until the new raster lands.
+  if (left !== undefined) canvas.style.left = `${left}px`;
+  if (top !== undefined) canvas.style.top = `${top}px`;
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
@@ -170,6 +178,11 @@ export function PdfPageCanvas({
     : "full";
   const cssWidth = regionMode ? regionWidth : width;
   const cssHeight = regionMode ? regionHeight : height;
+  // Applied imperatively at blit time (never through React's style prop), so
+  // a scroll-driven re-render cannot move the stale bitmap before its
+  // replacement is ready.
+  const blitLeft = regionMode ? regionLeft : undefined;
+  const blitTop = regionMode ? regionTop : undefined;
 
   const publishRenderMs = (canvas: HTMLCanvasElement, ms: number) => {
     const samples = [...renderMsRef.current, ms].slice(-RENDER_MS_SAMPLE_COUNT);
@@ -217,7 +230,7 @@ export function PdfPageCanvas({
     if (cached) {
       const startedAt = performance.now();
       canvas.setAttribute("data-pdf-render-quality", "final");
-      blit(canvas, cached.buffer, cssWidth, cssHeight);
+      blit(canvas, cached.buffer, cssWidth, cssHeight, blitLeft, blitTop);
       publishRenderMs(canvas, performance.now() - startedAt);
       renderedRef.current?.(pageNumber);
       return;
@@ -287,7 +300,7 @@ export function PdfPageCanvas({
 
       const firstBuffer = await renderInto(previewRatio);
       canvas.setAttribute("data-pdf-render-quality", needsRefinement ? "preview" : "final");
-      blit(canvas, firstBuffer, cssWidth, cssHeight);
+      blit(canvas, firstBuffer, cssWidth, cssHeight, blitLeft, blitTop);
       renderedRef.current?.(pageNumber);
 
       if (!needsRefinement) {
@@ -324,7 +337,7 @@ export function PdfPageCanvas({
         regionKey,
         buffer: refinedBuffer,
       });
-      blit(canvas, refinedBuffer, cssWidth, cssHeight);
+      blit(canvas, refinedBuffer, cssWidth, cssHeight, blitLeft, blitTop);
     })().catch((err: unknown) => {
       if (cancelled || isRenderingCancelled(err) || err instanceof CancelledRender) return;
       errorRef.current?.(pageNumber, err);
@@ -363,11 +376,7 @@ export function PdfPageCanvas({
       // Deterministic region identity for tests/diagnostics: "full" for a
       // whole-page raster, else the page-local `x,y,w,h` of the region.
       data-pdf-render-region={regionKey}
-      style={
-        regionMode
-          ? { position: "absolute", left: `${regionLeft}px`, top: `${regionTop}px` }
-          : undefined
-      }
+      style={regionMode ? { position: "absolute" } : undefined}
       // PERF-6: no decorations here — the canvas is a page-sized layer and
       // any filter/effect on it is per-frame compositing work. Page chrome
       // lives on the cheap wrapper (PdfDocumentView).
