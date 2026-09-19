@@ -120,7 +120,17 @@ const displayListFailures = new Set<number>();
  * the page. Capped small — these are full-page buffers.
  */
 const wholePagePixmaps = new Map<string, InstanceType<MupdfModule["Pixmap"]>>();
-const WHOLE_PAGE_PIXMAP_LIMIT = 2;
+const WHOLE_PAGE_PIXMAP_LIMIT = 1;
+
+/**
+ * Pixel cap for a whole-page fallback raster (2²³ ≈ 33 MB RGBA). At deep zoom
+ * an uncapped whole-page buffer is tens of megabytes in the wasm heap and
+ * holding more than one crashed the renderer (observed: heap 47.9MB → 109.4MB,
+ * then the next render aborted the process). The cropped region is scaled up
+ * to the canvas, so the fallback is slightly softer than a native render —
+ * the trade for rendering pages the display list cannot handle at all.
+ */
+const WHOLE_PAGE_PIXMAP_MAX_PIXELS = 2 ** 23;
 
 function getDisplayList(page: number): InstanceType<MupdfModule["DisplayList"]> | null {
   if (!mupdf || !document) throw new Error("no document open");
@@ -700,7 +710,14 @@ function makeSmartRecolorDevice(
       draw.ignoreText(text, ctm);
       releaseDeviceArgs(text);
     },
-    fillShade: (shade, ctm, alpha) => draw.fillShade(shade, ctm, alpha),
+    // Shadings (gradients, meshes) are dropped rather than forwarded through
+    // this JS device. MuPDF renders the recoloring device's shadings flat
+    // anyway — an object-aware palette has no shading representation — and
+    // forwarding the shade object corrupts the worker on pages with mesh
+    // shadings, crashing the renderer a render or two later (observed on
+    // GeoTopo page 35). Dropping them keeps the pre-existing flat appearance
+    // without the corruption.
+    fillShade: () => {},
     fillImage: (image, ctm, alpha) => {
       const treatment = treatImage(image, ctm, page, imageOrdinal++, pageArea, palette);
       draw.fillImage(treatment?.image ?? image, ctm, alpha);
@@ -868,8 +885,18 @@ async function renderRegionByWholePage(
   const loaded = document.loadPage(page - 1);
   try {
     const bounds = loaded.getBounds();
-    const sx = width / clip[2];
-    const sy = height / clip[3];
+    const scaleX = width / clip[2];
+    const scaleY = height / clip[3];
+    // Bound the whole-page raster (see WHOLE_PAGE_PIXMAP_MAX_PIXELS).
+    const rasterWidth = (bounds[2] - bounds[0]) * scaleX;
+    const rasterHeight = (bounds[3] - bounds[1]) * scaleY;
+    const rasterPixels = rasterWidth * rasterHeight;
+    const shrink =
+      rasterPixels > WHOLE_PAGE_PIXMAP_MAX_PIXELS
+        ? Math.sqrt(WHOLE_PAGE_PIXMAP_MAX_PIXELS / rasterPixels)
+        : 1;
+    const sx = scaleX * shrink;
+    const sy = scaleY * shrink;
     const ctm: MupdfMatrix = [sx, 0, 0, sy, 0, 0];
     const bbox = mupdf.Rect.transform(bounds, ctm);
     const activePalette = palette;
@@ -928,17 +955,20 @@ async function renderRegionByWholePage(
       pixmap = built;
     }
     // Crop the region out of the cached whole-page raster (RGBA, padded
-    // stride).
+    // stride). At the capped raster scale the crop is smaller than the
+    // requested device region; the engine stretches it onto the canvas.
+    const cropWidth = Math.max(1, Math.round(clip[2] * sx));
+    const cropHeight = Math.max(1, Math.round(clip[3] * sy));
     const regionX = Math.max(0, Math.round((bounds[0] + clip[0]) * sx) - pixmap.getX());
     const regionY = Math.max(0, Math.round((bounds[1] + clip[1]) * sy) - pixmap.getY());
     const src = pixmap.getPixels();
     const stride = pixmap.getStride();
-    const out = new Uint8ClampedArray(width * height * 4);
-    for (let row = 0; row < height; row++) {
+    const out = new Uint8ClampedArray(cropWidth * cropHeight * 4);
+    for (let row = 0; row < cropHeight; row++) {
       const start = (regionY + row) * stride + regionX * 4;
-      out.set(src.subarray(start, start + width * 4), row * width * 4);
+      out.set(src.subarray(start, start + cropWidth * 4), row * cropWidth * 4);
     }
-    const imageData = new ImageData(out, width, height);
+    const imageData = new ImageData(out, cropWidth, cropHeight);
     const bitmap = await createImageBitmap(imageData);
     return { width: bitmap.width, height: bitmap.height, bitmap };
   } finally {
@@ -951,7 +981,7 @@ async function renderPlainRegion(
   width: number,
   height: number,
   clip: PageClip,
-): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+): Promise<{ width: number; height: number; bitmap: ImageBitmap; recovered?: boolean }> {
   if (!mupdf || !document) throw new Error("no document open");
   const loaded = document.loadPage(page - 1);
   try {
@@ -1001,7 +1031,10 @@ async function renderPlainRegion(
         });
       }
     }
-    return await renderRegionByWholePage(page, width, height, clip, null);
+    const crop = await renderRegionByWholePage(page, width, height, clip, null);
+    // Signal the engine that this page bypassed the display list, so it can
+    // escape a worker the fallback may have left in a bad state.
+    return { ...crop, recovered: true };
   } finally {
     loaded.destroy();
   }
@@ -1014,7 +1047,7 @@ async function renderSmartRegion(
   height: number,
   clip: PageClip,
   palette: SmartPalette,
-): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
+): Promise<{ width: number; height: number; bitmap: ImageBitmap; recovered?: boolean }> {
   if (!mupdf || !document) throw new Error("no document open");
   const loaded = document.loadPage(page - 1);
   try {
@@ -1056,13 +1089,18 @@ async function renderSmartRegion(
         pixmap.destroy();
       }
     };
-    // Same display-list fast path and per-page fallback as the plain render:
-    // a page the list recorder/replayer cannot handle rasterizes via the
-    // whole-page crop (through the recoloring device).
+    // Same display-list fast path as the plain render. Smart Dark does NOT
+    // use the whole-page crop fallback: running a full page through the
+    // recoloring device is the heavy Smart Dark render path this engine
+    // already recycles workers for, and it crashed the renderer on a page
+    // this large (whole-page raster at deep zoom + smart recolor). The cropped
+    // region is drawn directly instead — its shading is flat in Smart Dark
+    // either way (pre-existing), so nothing is lost.
     const list = getDisplayList(page);
     if (list) {
       try {
-        return await paint((device) => list.run(device, mupdf!.Matrix.identity));
+        const rendered = await paint((device) => list.run(device, mupdf!.Matrix.identity));
+        return { ...rendered, recovered: true };
       } catch (err) {
         displayListFailures.add(page);
         postDiag({
@@ -1072,11 +1110,14 @@ async function renderSmartRegion(
           requestId: 0,
           page,
           heapBytes: wasmHeapBytes(),
-          message: `region display-list replay failed, page renders via whole-page crop: ${err instanceof Error ? err.message : String(err)}`,
+          message: `region display-list replay failed, page renders directly: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
-    return await renderRegionByWholePage(page, width, height, clip, palette);
+    const direct = await paint((device) => loaded.run(device, mupdf!.Matrix.identity));
+    // Signal the engine that this page bypassed the display list, so it can
+    // escape a worker the fallback may have left in a bad state.
+    return { ...direct, recovered: true };
   } finally {
     loaded.destroy();
   }
