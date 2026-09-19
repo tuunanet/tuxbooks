@@ -106,8 +106,17 @@ const WHEEL_STEP_PX = 40;
  * region edges to a grid so sub-step scrolling reuses the same region key.
  * Both in page-local CSS pixels, which are 1:1 with screen pixels.
  */
-const REGION_OVERSCAN_PX = 256;
-const REGION_STEP_PX = 128;
+/**
+ * Region rasterization (high zoom): rasterize a margin beyond the visible
+ * area so scrolling does not immediately run past the painted region, and
+ * snap region edges to a grid so sub-step scrolling reuses the same region
+ * key. Both in page-local CSS pixels, which are 1:1 with screen pixels. The
+ * margin is cheap: a clipped render's cost is dominated by interpreting the
+ * page's content (identical for any region of that page), not by the region's
+ * area, so a wide margin buys coverage without adding raster time.
+ */
+const REGION_OVERSCAN_PX = 768;
+const REGION_STEP_PX = 256;
 
 /**
  * A settled selection's outcome (issue: the pointerup handler defers by a
