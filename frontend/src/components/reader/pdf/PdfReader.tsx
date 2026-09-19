@@ -29,6 +29,7 @@ import {
   usePdfScrollTracking,
   type PdfAnchorInfo,
 } from "./hooks/usePdfScrollTracking";
+import { usePdfViewport } from "./hooks/usePdfViewport";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
@@ -50,7 +51,9 @@ import {
   displayedSizes,
   layoutSlots,
   stepZoomLevel,
+  visiblePageRegion,
   type FitZoomMode,
+  type Rect,
   type ZoomMode,
 } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
@@ -96,6 +99,24 @@ const MAX_CONCURRENT_RENDERS = 2;
  * accumulating keeps one gesture at one ladder step.
  */
 const WHEEL_STEP_PX = 40;
+
+/**
+ * Region rasterization (high zoom): rasterize a margin beyond the visible
+ * area so a short scroll does not immediately force a new raster, and snap
+ * region edges to a grid so sub-step scrolling reuses the same region key.
+ * Both in page-local CSS pixels, which are 1:1 with screen pixels.
+ */
+/**
+ * Region rasterization (high zoom): rasterize a margin beyond the visible
+ * area so scrolling does not immediately run past the painted region, and
+ * snap region edges to a grid so sub-step scrolling reuses the same region
+ * key. Both in page-local CSS pixels, which are 1:1 with screen pixels. The
+ * margin is cheap: a clipped render's cost is dominated by interpreting the
+ * page's content (identical for any region of that page), not by the region's
+ * area, so a wide margin buys coverage without adding raster time.
+ */
+const REGION_OVERSCAN_PX = 768;
+const REGION_STEP_PX = 256;
 
 /**
  * A settled selection's outcome (issue: the pointerup handler defers by a
@@ -807,6 +828,47 @@ export function PdfReader({
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
   }, [currentPage, scale, presentationMode]);
 
+  // Viewport clipping (high zoom): sample the scroll frame and derive each
+  // laid-out page's visible region. Only canvases whose whole-page ratio
+  // would fall below device resolution consume it (PdfPageCanvas decides),
+  // so at fit width this is inert.
+  const pdfViewport = usePdfViewport(
+    scrollContainerRef ?? { current: null },
+    documentRef,
+    interactive && !presentationMode,
+  );
+  const documentWidth = useMemo(
+    () => documentSlots.reduce((max, slot) => Math.max(max, slot.width), 0),
+    [documentSlots],
+  );
+  const pageRegions = useMemo(() => {
+    if (!interactive || presentationMode || pdfViewport.width <= 0 || documentSlots.length === 0) {
+      return undefined;
+    }
+    const viewport: Rect = {
+      top: pdfViewport.scrollTop,
+      left: pdfViewport.scrollLeft,
+      width: pdfViewport.width,
+      height: pdfViewport.height,
+    };
+    const regions = new Map<number, Rect>();
+    for (const slot of documentSlots) {
+      const region = visiblePageRegion(
+        {
+          top: pdfViewport.documentTop + slot.top,
+          left: pdfViewport.documentLeft + (documentWidth - slot.width) / 2,
+          width: slot.width,
+          height: slot.height,
+        },
+        viewport,
+        REGION_OVERSCAN_PX,
+        REGION_STEP_PX,
+      );
+      if (region) regions.set(slot.pageNumber, region);
+    }
+    return regions;
+  }, [interactive, presentationMode, pdfViewport, documentSlots, documentWidth]);
+
   // Scroll-driven position reporting: the anchor rule decides the page, the
   // position is written back to ReaderProvider so the shell (footer, keyboard
   // stepping, pages drawer) stays consistent with what the user sees.
@@ -1139,6 +1201,7 @@ export function PdfReader({
         renderPages={canvasPages}
         anchorPage={currentPage}
         scale={scale}
+        pageRegions={pageRegions}
         renderedPages={renderedPages}
         failedPages={failedPages}
         bitmapCache={bitmapCache}

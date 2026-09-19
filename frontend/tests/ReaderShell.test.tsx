@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Annotation } from "@/types/domain";
 
@@ -96,43 +96,16 @@ async function openNavigation() {
   return screen.findByTestId("reader-nav");
 }
 
-describe("Reader progress footer auto-hide", () => {
-  it("hides by default, reveals on bottom-edge hover, and fades back after a delay (PDF)", async () => {
+describe("Reader progress footer", () => {
+  it("shows no progress footer for PDF", async () => {
     renderReader("pdf");
     await screen.findByTestId("reader-view");
 
-    const footer = screen.getByTestId("reader-footer");
-    expect(footer).toHaveAttribute("data-progress-visible", "false");
-
-    // Hovering the slim bottom-edge zone reveals the footer.
-    fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
-    expect(footer).toHaveAttribute("data-progress-visible", "true");
-
-    // The footer fades back only after the cursor has been away for the
-    // full delay (1500ms); a return before that cancels the fade.
-    vi.useFakeTimers();
-    try {
-      fireEvent.pointerLeave(footer);
-      act(() => {
-        vi.advanceTimersByTime(1499);
-      });
-      expect(footer).toHaveAttribute("data-progress-visible", "true");
-      act(() => {
-        vi.advanceTimersByTime(1);
-      });
-      expect(footer).toHaveAttribute("data-progress-visible", "false");
-
-      fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
-      expect(footer).toHaveAttribute("data-progress-visible", "true");
-      fireEvent.pointerLeave(footer);
-      fireEvent.pointerEnter(screen.getByTestId("reader-footer-hover-zone"));
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
-      expect(footer).toHaveAttribute("data-progress-visible", "true");
-    } finally {
-      vi.useRealTimers();
-    }
+    // A fixed-layout PDF has no meaningful "percent read", so the PDF reader
+    // has no bottom footer at all (no bar, readout, or reveal zone).
+    expect(screen.queryByTestId("reader-footer")).toBeNull();
+    expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
+    expect(screen.queryByTestId("reader-progress")).toBeNull();
   });
 
   it("keeps the EPUB footer always visible without a hover zone", async () => {
@@ -470,7 +443,11 @@ describe("ReaderNavigation", () => {
     expect(vi.mocked(openPdfDocumentFromBook)).toHaveBeenCalledWith(1, "pdf");
 
     await userEvent.click(screen.getByTestId("nav-page-2"));
-    expect(await screen.findByTestId("reader-position")).toHaveTextContent("50%");
+    // PDF has no footer, so the shell exposes the position as a deterministic
+    // attribute for tests instead.
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "50"),
+    );
 
     // Re-open for the Outline tab (Radix unmounts inactive tab content).
     await openNavigation();
@@ -481,7 +458,9 @@ describe("ReaderNavigation", () => {
     expect(screen.getByTestId("nav-outline-item-2")).toHaveTextContent("Section Two-A");
 
     await userEvent.click(screen.getByTestId("nav-outline-item-2"));
-    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("100%"));
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "100"),
+    );
     expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument();
   });
 
@@ -610,7 +589,8 @@ describe("Reader presentation mode (issue #65)", () => {
   it("toggles with Ctrl+L, hides the chrome, and exits with Esc", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
-    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    // PDF has no bottom footer at all.
+    expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "l", ctrlKey: true });
@@ -627,7 +607,7 @@ describe("Reader presentation mode (issue #65)", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
-    expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
+    expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
   });
 
@@ -1342,7 +1322,7 @@ describe("Reader book switching", () => {
     // book's table of contents (the shell's bookId-tagged state guard).
     await screen.findByTestId("pdf-canvas");
     expect(screen.queryByTestId("epub-reader")).not.toBeInTheDocument();
-    expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "0");
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-outline"));
     expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Part One");

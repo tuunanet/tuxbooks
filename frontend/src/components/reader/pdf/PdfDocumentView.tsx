@@ -6,7 +6,7 @@ import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageSlot, type PdfPageLifecycle } from "./PdfPageSlot";
 import { PdfPageTextLayer } from "./PdfPageTextLayer";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
-import type { LayoutSlot } from "./pdfLayout";
+import type { LayoutSlot, Rect } from "./pdfLayout";
 
 interface PdfDocumentViewProps {
   document: PdfDocument;
@@ -21,6 +21,12 @@ interface PdfDocumentViewProps {
   anchorPage: number;
   /** Render scale for the canvases. */
   scale: number;
+  /**
+   * Visible page-local region per page (CSS px). Consulted only by canvases
+   * whose whole-page ratio would fall below device resolution; other pages
+   * ignore it and render whole.
+   */
+  pageRegions?: Map<number, Rect>;
   renderedPages: ReadonlySet<number>;
   failedPages: ReadonlySet<number>;
   /** Shared per-document cache of finished page bitmaps. */
@@ -81,6 +87,7 @@ export function PdfDocumentView({
   renderPages,
   anchorPage,
   scale,
+  pageRegions,
   renderedPages,
   failedPages,
   bitmapCache = null,
@@ -112,13 +119,18 @@ export function PdfDocumentView({
       // width feeds back into usePdfScale's measurement — the fit
       // scale then oscillates and re-anchoring yanks the viewport
       // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
-      className={`flex min-h-0 w-full justify-center${presentation ? " h-full items-center" : ""}`}
+      // The document centers itself with auto margins below: flex
+      // `justify-center` would center an overflowing document so its left
+      // overflow lands at negative coordinates, which scrollLeft can never
+      // reach — the page's left edge would be cut off with the scrollbar
+      // already at its end.
+      className={`flex min-h-0 w-full${presentation ? " h-full items-center" : ""}`}
     >
       <div
         ref={documentRef}
         data-testid="pdf-document"
         style={{ width: `${documentWidth}px`, filter: themeFilter }}
-        className="relative flex flex-col items-center"
+        className="relative mx-auto flex flex-col items-center"
       >
         {/* Paper-style themes multiply-tint the opaque white pages down to
             the theme color (white × tint = tint, black stays black). The
@@ -171,7 +183,15 @@ export function PdfDocumentView({
                 <div
                   data-pdf-page-wrapper={slot.pageNumber}
                   className="relative overflow-hidden rounded-sm border bg-white"
-                  style={pageBackground ? { backgroundColor: pageBackground } : undefined}
+                  style={{
+                    // The wrapper owns the page geometry: in region mode the
+                    // canvas is position:absolute, so without an explicit size
+                    // the wrapper collapses to 1px and overflow-hidden clips
+                    // the whole page away (blank viewport at deep zoom).
+                    width: slot.width,
+                    height: slot.height,
+                    ...(pageBackground ? { backgroundColor: pageBackground } : {}),
+                  }}
                 >
                   <PdfPageCanvas
                     document={document}
@@ -179,6 +199,7 @@ export function PdfDocumentView({
                     width={slot.width}
                     height={slot.height}
                     scale={scale}
+                    region={pageRegions?.get(slot.pageNumber)}
                     preview={previewAnchorRender && slot.pageNumber === anchorPage}
                     smartColors={smartColors}
                     renderVariant={renderVariant}

@@ -323,6 +323,14 @@ export interface PdfPage {
     viewport: { width: number; height: number };
     transform?: number[];
     smartColors?: SmartPalette;
+    /**
+     * Viewport-clipped region render: the visible part of the page in CSS
+     * pixels relative to the page's top-left, with `viewport` still the full
+     * page's CSS size (so page units can be recovered). The returned bitmap
+     * and the caller's canvas are region-sized. Absent renders the whole
+     * page.
+     */
+    region?: { x: number; y: number; width: number; height: number };
   }): { promise: Promise<void>; cancel(): void };
 }
 
@@ -356,6 +364,8 @@ class MuPdfDocument implements PdfDocument {
   private smartRenders = 0;
   private recycling = false;
   private draining: WorkerClient | null = null;
+  /** Resolves when a forced recycle has swapped in the replacement worker. */
+  private recyclePromise: Promise<void> | null = null;
   private destroyed = false;
 
   constructor(client: WorkerClient, numPages: number, reopen: WorkerOpenRequest | null = null) {
@@ -380,42 +390,113 @@ class MuPdfDocument implements PdfDocument {
     }
     return {
       getViewport: ({ scale }) => ({ width: size.width * scale, height: size.height * scale }),
-      render: ({ canvas, viewport, transform, smartColors }) =>
-        this.renderPage(pageNumber, canvas, viewport, transform, smartColors),
+      render: ({ canvas, viewport, transform, smartColors, region }) =>
+        this.renderPage(pageNumber, size, canvas, viewport, transform, smartColors, region),
     };
   }
 
   private renderPage(
     pageNumber: number,
+    size: { width: number; height: number },
     canvas: HTMLCanvasElement,
     viewport: { width: number; height: number },
     transform: number[] | undefined,
     smartColors: SmartPalette | undefined,
+    region: { x: number; y: number; width: number; height: number } | undefined,
   ): { promise: Promise<void>; cancel(): void } {
     const ratio = transform ? (transform[0] ?? 1) : 1;
-    const width = Math.floor(viewport.width * ratio);
-    const height = Math.floor(viewport.height * ratio);
-    const { result, cancel } = this.client.requestCancellable("render", {
-      page: pageNumber,
-      width,
-      height,
-      smart: smartColors,
-    });
+    let width: number;
+    let height: number;
+    let clip: [number, number, number, number] | undefined;
+    if (region) {
+      width = Math.max(1, Math.round(region.width * ratio));
+      height = Math.max(1, Math.round(region.height * ratio));
+      // The viewport is the full page's CSS size, so CSS pixels convert to
+      // page units by the page-units-per-CSS ratio.
+      const pageUnitsPerCss =
+        size.width > 0 && viewport.width > 0 ? size.width / viewport.width : 1;
+      clip = [
+        region.x * pageUnitsPerCss,
+        region.y * pageUnitsPerCss,
+        region.width * pageUnitsPerCss,
+        region.height * pageUnitsPerCss,
+      ];
+    } else {
+      width = Math.floor(viewport.width * ratio);
+      height = Math.floor(viewport.height * ratio);
+    }
+    const start = (): { result: Promise<unknown>; cancel: () => void } => {
+      const handle = this.client.requestCancellable("render", {
+        page: pageNumber,
+        width,
+        height,
+        smart: smartColors,
+        clip,
+      });
+      return handle as { result: Promise<unknown>; cancel: () => void };
+    };
+    // Hold new rasters while a worker replacement is in flight: the previous
+    // worker can be left in a corrupted state by a fallback Smart Dark
+    // render, and sending it another raster crashes the renderer.
+    let cancelled = false;
+    let cancelRequest: (() => void) | null = null;
+    const begin = (): Promise<unknown> => {
+      if (cancelled) return Promise.reject(new PdfRenderCancelledError());
+      const handle = start();
+      cancelRequest = handle.cancel;
+      return handle.result;
+    };
+    const result = this.recyclePromise ? this.recyclePromise.then(begin) : begin();
     const promise = result.then((raw) => {
-      const { bitmap } = raw as { bitmap: ImageBitmap };
+      const { bitmap, recovered } = raw as { bitmap: ImageBitmap; recovered?: boolean };
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Canvas 2D context is unavailable");
       try {
-        context.drawImage(bitmap, 0, 0);
+        // The worker normally returns a bitmap at the canvas's exact backing
+        // size. The whole-page fallback for unlistable pages returns a
+        // smaller crop (its raster is pixel-capped to protect the wasm heap),
+        // so stretch to the backing store rather than blitting 1:1.
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       } finally {
         bitmap.close();
       }
       if (smartColors) {
         this.smartRenders += 1;
-        this.maybeRecycle();
+        // A page that had to bypass the display list also bypasses the
+        // recoloring device's normal path and has been observed to corrupt
+        // MuPDF state (renderer crash a raster later). Escape that worker
+        // immediately instead of waiting for the render budget.
+        if (recovered) this.forceRecycle();
+        else this.maybeRecycle();
       }
     });
-    return { promise, cancel };
+    return {
+      promise,
+      cancel: () => {
+        cancelled = true;
+        cancelRequest?.();
+      },
+    };
+  }
+
+  /**
+   * Replace the worker as soon as a Smart Dark render took the display-list
+   * fallback. Those pages corrupt the worker's MuPDF state, and the next
+   * raster on it crashes the renderer; a fresh worker escapes that. Renders
+   * started meanwhile wait for the swap (`recyclePromise`), so the corrupted
+   * worker never serves another raster.
+   */
+  private forceRecycle(): void {
+    if (!this.reopen || this.destroyed || this.recycling) return;
+    this.recycling = true;
+    this.recyclePromise = new Promise<void>((resolve) => {
+      // Forced recycles happen after the offending render finished, so the
+      // old worker has no in-flight work: terminate it at the swap instead of
+      // waiting out the graceful drain.
+      void this.recycleWorker(resolve, false);
+    }).finally(() => {
+      this.recyclePromise = null;
+    });
   }
 
   /**
@@ -431,7 +512,7 @@ class MuPdfDocument implements PdfDocument {
     void this.recycleWorker();
   }
 
-  private async recycleWorker(): Promise<void> {
+  private async recycleWorker(onSwapped?: () => void, drainGraceful = true): Promise<void> {
     const reopen = this.reopen;
     if (!reopen) {
       this.recycling = false;
@@ -449,13 +530,21 @@ class MuPdfDocument implements PdfDocument {
       this.smartRenders = 0;
       this.draining = previous;
       console.info("[pdf-engine] recycled MuPDF worker after Smart Dark render budget");
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, RECYCLE_DRAIN_GRACE_MS);
-        void previous.whenIdle().then(() => {
-          clearTimeout(timer);
-          resolve();
+      // New work may go to the replacement immediately; the gate on
+      // `recyclePromise` opens here, not after the old worker drains.
+      onSwapped?.();
+      if (drainGraceful) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, RECYCLE_DRAIN_GRACE_MS);
+          void previous.whenIdle().then(() => {
+            clearTimeout(timer);
+            resolve();
+          });
         });
-      });
+      } else {
+        previous.terminate();
+        this.draining = null;
+      }
     } catch (error: unknown) {
       replacement.terminate();
       // Keep the current worker; reset the budget so the next batch retries
@@ -465,6 +554,9 @@ class MuPdfDocument implements PdfDocument {
         `[pdf-engine] worker recycle failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
+      // Always open the render gate, whether the swap happened, the reopen
+      // failed, or the document was destroyed mid-recycle.
+      onSwapped?.();
       this.draining?.terminate();
       this.draining = null;
       this.recycling = false;

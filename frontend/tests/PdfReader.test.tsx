@@ -1403,7 +1403,8 @@ describe("PdfReader zoom", () => {
     // Zoom supersedes the in-flight render: cleanup runs for the first
     // effect, and the second effect requests the page again.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    expect(pending).toHaveLength(1);
+    // A superseding render coalesces a short quiet period before it starts.
+    await waitFor(() => expect(pending).toHaveLength(1));
     const [freshRender] = pending.splice(0) as [(page: unknown) => void];
 
     // The NEWER render resolves first and paints at 125%…
@@ -1777,6 +1778,33 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "abc{Enter}");
     expect(input).toHaveValue("10000");
+  });
+
+  it("switches to a viewport-clipped region above the whole-page budget", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientHeight", { value: 792, configurable: true });
+    Object.defineProperty(container, "clientWidth", { value: 1224, configurable: true });
+    await renderZoomableReader(container);
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    // Fit width keeps the whole-page path.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-region", "full"),
+    );
+
+    const input = screen.getByTestId("pdf-zoom-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "1600{Enter}");
+
+    await waitFor(() => {
+      const canvas = screen.getByTestId("pdf-canvas");
+      const region = canvas.getAttribute("data-pdf-render-region") ?? "";
+      expect(region).toMatch(/^\d+,\d+,\d+,\d+$/);
+      const [x, y, w] = region.split(",").map(Number);
+      expect(canvas).toHaveStyle({ left: `${x}px`, top: `${y}px`, width: `${w}px` });
+    });
   });
 
   it("steps the presets with the Ctrl-modified zoom keys", async () => {

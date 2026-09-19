@@ -9,12 +9,14 @@ function bitmap(
   height: number,
   ratio = 1,
   variant = "original",
+  regionKey = "full",
 ): PdfBitmap {
   return {
     pageNumber,
     scale,
     ratio,
     variant,
+    regionKey,
     buffer: { width, height } as HTMLCanvasElement,
   };
 }
@@ -119,6 +121,16 @@ describe("PdfBitmapCache", () => {
     expect(cache.size).toBe(2);
     expect(cache.get(1, 6.2, 1.334, "original")).not.toBeNull();
     expect(cache.get(2, 6.2, 1.334, "original")).not.toBeNull();
+  });
+
+  it("keys a region separately from the whole page", () => {
+    const cache = new PdfBitmapCache();
+    cache.put(bitmap(1, 1, 8, 8, 1, "original", "full"));
+    cache.put(bitmap(1, 1, 4, 4, 1, "original", "0,0,4,4"));
+    expect(cache.size).toBe(2);
+    expect(cache.get(1, 1, 1, "original", "full")).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original", "0,0,4,4")).not.toBeNull();
+    expect(cache.get(1, 1, 1, "original", "9,9,4,4")).toBeNull();
   });
 
   it("remove and clear drop entries and bytes", () => {

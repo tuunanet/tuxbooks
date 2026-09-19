@@ -43,6 +43,7 @@ import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
 import { ReaderAppearance } from "./ReaderAppearance";
 import { SelectionToolbar } from "./SelectionToolbar";
+import { useAxisLockedWheel } from "./useAxisLockedWheel";
 import {
   appendSearchGroup,
   emptySearchState,
@@ -69,9 +70,6 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
   "blue-contrast": "bg-[#181842] text-white",
   "mint-contrast": "bg-[#c5e7cd] text-black",
 };
-
-/** Delay before the progress footer fades back out after the cursor leaves. */
-const PROGRESS_HIDE_DELAY_MS = 1500;
 
 /**
  * Full-window reading mode: no sidebar, its own visual language, and a
@@ -152,42 +150,14 @@ export function ReaderShell() {
   const readerViewRef = useRef<HTMLDivElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
-  // Auto-hiding progress footer: hidden by default, a slim hover zone at
-  // the window's bottom edge reveals it, and it fades back once the cursor
-  // has been away for a beat. The document gains the footer's layout space
-  // because the footer overlays it instead of stacking above it.
-  const [progressVisible, setProgressVisible] = useState(false);
-  const progressHideTimerRef = useRef<number | null>(null);
-  const showProgress = useCallback(() => {
-    if (progressHideTimerRef.current !== null) {
-      window.clearTimeout(progressHideTimerRef.current);
-      progressHideTimerRef.current = null;
-    }
-    setProgressVisible(true);
-  }, []);
-  const scheduleProgressHide = useCallback(() => {
-    if (progressHideTimerRef.current !== null) window.clearTimeout(progressHideTimerRef.current);
-    progressHideTimerRef.current = window.setTimeout(() => {
-      progressHideTimerRef.current = null;
-      setProgressVisible(false);
-    }, PROGRESS_HIDE_DELAY_MS);
-  }, []);
-  useEffect(
-    () => () => {
-      if (progressHideTimerRef.current !== null) window.clearTimeout(progressHideTimerRef.current);
-    },
-    [],
-  );
+  // Keep a wheel gesture on the axis it began on: releasing Shift while a
+  // free-spinning wheel is still going must not flip horizontal scrolling to
+  // vertical (see useAxisLockedWheel).
+  useAxisLockedWheel(readerContentRef);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
-  // The auto-hiding progress footer (issue #68, PR #71) is a PDF affordance:
-  // in the EPUB scrolled flow its bottom hover zone and overlay react with
-  // the engine's own scroll observers. The EPUB footer is always visible and
-  // stacks below the document instead.
-  const autohideFooter = isPdf;
-  const footerVisible = autohideFooter ? progressVisible : true;
   // Persistent annotations of the open book: bookmarks, highlights, notes.
   const { annotations, create, remove, update } = useAnnotations(book?.id ?? null);
   const epubToc =
@@ -456,6 +426,7 @@ export function ReaderShell() {
       ref={readerViewRef}
       data-testid="reader-view"
       data-theme={preferences.theme}
+      data-reader-position={Math.round(position)}
       data-pdf-presentation={isPdf && presentation ? "true" : undefined}
       data-epub-presentation={isEpub && presentation ? "true" : undefined}
       className={cn(
@@ -655,66 +626,31 @@ export function ReaderShell() {
         </main>
       </div>
 
-      {/* Progress footer. PDF: auto-hiding, overlays the document so the
-          reading area keeps the footer's former layout space; a slim hover
-          zone at the window's bottom edge reveals it (a hidden surface
-          cannot be hovered); it fades back a beat after the cursor leaves.
-          EPUB: always visible and stacked below the document, so the
-          scrolled flow owns the whole reading area with the bar in view.
-          `data-progress-visible` makes the state assertable in jsdom, where
-          Tailwind classes carry no computed styles. */}
-      {!presentation && (
-        <>
-          {autohideFooter && (
-            <div
-              data-testid="reader-footer-hover-zone"
-              aria-hidden="true"
-              className={cn(
-                "absolute inset-x-0 bottom-0 z-10 h-4",
-                progressVisible && "pointer-events-none",
-              )}
-              onPointerEnter={showProgress}
-              onPointerLeave={scheduleProgressHide}
+      {/* Progress footer: EPUB only. A fixed-layout PDF has no meaningful
+          "percent read", so the PDF reader shows no bottom bar at all; the
+          scrolled EPUB flow keeps an always-visible bar stacked below the
+          document. */}
+      {!presentation && isEpub && (
+        <footer
+          data-testid="reader-footer"
+          data-progress-visible="true"
+          className="shrink-0 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2"
+        >
+          <div className="mx-auto flex max-w-3xl items-center gap-3">
+            <Progress
+              data-testid="reader-progress"
+              aria-label="Reading position"
+              value={position}
+              className="flex-1"
             />
-          )}
-          <footer
-            data-testid="reader-footer"
-            data-progress-visible={footerVisible}
-            onPointerEnter={autohideFooter ? showProgress : undefined}
-            onPointerLeave={autohideFooter ? scheduleProgressHide : undefined}
-            style={
-              autohideFooter
-                ? { backgroundColor: "var(--reader-chrome-surface, var(--background))" }
-                : undefined
-            }
-            className={cn(
-              "border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2",
-              autohideFooter
-                ? cn(
-                    "absolute inset-x-0 bottom-0 z-10 transition-[opacity,translate] duration-300 ease-out",
-                    footerVisible
-                      ? "translate-y-0 opacity-100"
-                      : "pointer-events-none translate-y-2 opacity-0",
-                  )
-                : "shrink-0",
-            )}
-          >
-            <div className="mx-auto flex max-w-3xl items-center gap-3">
-              <Progress
-                data-testid="reader-progress"
-                aria-label="Reading position"
-                value={position}
-                className="flex-1"
-              />
-              <span
-                data-testid="reader-position"
-                className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
-              >
-                {Math.round(position)}%
-              </span>
-            </div>
-          </footer>
-        </>
+            <span
+              data-testid="reader-position"
+              className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
+            >
+              {Math.round(position)}%
+            </span>
+          </div>
+        </footer>
       )}
 
       <ReaderNavigation

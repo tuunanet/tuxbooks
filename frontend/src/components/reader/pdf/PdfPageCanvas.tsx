@@ -5,7 +5,8 @@ import {
   type PdfRenderTask,
   type SmartPalette,
 } from "@/lib/pdf/pdfEngine";
-import { effectiveRenderRatio } from "./pdfRenderPolicy";
+import type { Rect } from "./pdfLayout";
+import { effectiveRenderRatio, needsRegionRender, regionRenderRatio } from "./pdfRenderPolicy";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 
 interface PdfPageCanvasProps {
@@ -20,6 +21,14 @@ interface PdfPageCanvasProps {
   height: number;
   /** Render scale (displayed pixels / page units). */
   scale: number;
+  /**
+   * The visible part of the page, in CSS pixels relative to its top-left.
+   * When the whole-page ratio would fall below device resolution
+   * (`needsRegionRender`) this canvas rasterizes only the region at full
+   * resolution and positions itself inside the page; otherwise the region is
+   * ignored and the whole page renders as before.
+   */
+  region?: Rect;
   /**
    * Two-stage first paint: render a readable preview at ratio ≤ 1, blit it,
    * then refine to the full effective ratio in the background (§ first
@@ -58,12 +67,20 @@ function blit(
   buffer: HTMLCanvasElement,
   width: number,
   height: number,
+  left?: number,
+  top?: number,
 ): void {
   // Reassigning width/height reallocates the backing store (and clears it);
   // when the size is unchanged — a cache-hit blit, or a re-render at the
   // same geometry — draw straight into the existing store instead.
   if (canvas.width !== buffer.width) canvas.width = buffer.width;
   if (canvas.height !== buffer.height) canvas.height = buffer.height;
+  // Region mode: the offset moves together with the pixels, inside the same
+  // atomic paint. React must not own left/top — it re-applies them on every
+  // scroll-driven re-render, which would parade the stale bitmap around the
+  // page (a ~10% jump) until the new raster lands.
+  if (left !== undefined) canvas.style.left = `${left}px`;
+  if (top !== undefined) canvas.style.top = `${top}px`;
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
@@ -80,7 +97,19 @@ class CancelledRender extends Error {
 const RENDER_MS_SAMPLE_COUNT = 5;
 
 /**
- * Imperative page renderer: draws one page into one canvas at a fixed size.
+ * Quiet period a superseding change waits out before it starts a raster.
+ * MuPDF rasterizes synchronously inside its worker and cancellation is only
+ * checked between requests, so a heavy render cannot be interrupted mid-way:
+ * starting one per intermediate zoom step or scroll-driven region move
+ * queues multi-second rasters and reads as a freeze. Only the first render of
+ * a canvas instance starts immediately; every later one coalesces, so rapid
+ * input settles to a single raster at the final scale/region.
+ */
+const RENDER_SETTLE_MS = 150;
+
+/**
+ * Imperative page renderer: draws one page (or, above the whole-page budget,
+ * one viewport region of it) into one canvas at a fixed size.
  *
  * Every render paints into a private offscreen buffer; the visible canvas is
  * only ever touched by the final one-shot blit of a completed render. This
@@ -96,6 +125,15 @@ const RENDER_MS_SAMPLE_COUNT = 5;
  * re-enters the virtualization window after eviction blits instantly
  * instead of re-running the full raster — the dominant cost of scrolling
  * back and forth across a heavy (image-laden) page.
+ *
+ * Region mode (viewport clipping): when the effective whole-page ratio drops
+ * below the display's device pixel ratio (a PERF-1 budget tier binds at high
+ * zoom), rasterizing the whole page would be both wasteful and soft — CSS
+ * upscales a low-resolution layer. Instead the visible region rasterizes at
+ * device resolution into a region-sized canvas that is absolutely positioned
+ * inside the page at the region offset, so text stays sharp and the worker
+ * never allocates a page-sized buffer at deep zoom. The cache key gains the
+ * region, so the whole-page and region bitmaps never collide.
  */
 export function PdfPageCanvas({
   document,
@@ -103,6 +141,7 @@ export function PdfPageCanvas({
   width,
   height,
   scale,
+  region,
   preview = false,
   smartColors,
   renderVariant = "original",
@@ -121,6 +160,29 @@ export function PdfPageCanvas({
   // change means the mounted canvas still holds the previous mode's opaque
   // bitmap, which must be cleared before the new-mode render starts.
   const previousVariantRef = useRef(renderVariant);
+  // True once this canvas instance has rasterized at least once: the first
+  // render starts immediately (open latency), later ones coalesce.
+  const renderedOnceRef = useRef(false);
+
+  const dpr = window.devicePixelRatio || 1;
+  // Region primitives keep the effect dependencies stable: the parent may
+  // hand a fresh object each render, but the effect only re-runs when the
+  // numbers (or the mode) actually change.
+  const regionMode = region != null && needsRegionRender(width / scale, height / scale, scale, dpr);
+  const regionLeft = region?.left ?? 0;
+  const regionTop = region?.top ?? 0;
+  const regionWidth = region?.width ?? 0;
+  const regionHeight = region?.height ?? 0;
+  const regionKey = regionMode
+    ? `${regionLeft},${regionTop},${regionWidth},${regionHeight}`
+    : "full";
+  const cssWidth = regionMode ? regionWidth : width;
+  const cssHeight = regionMode ? regionHeight : height;
+  // Applied imperatively at blit time (never through React's style prop), so
+  // a scroll-driven re-render cannot move the stale bitmap before its
+  // replacement is ready.
+  const blitLeft = regionMode ? regionLeft : undefined;
+  const blitTop = regionMode ? regionTop : undefined;
 
   const publishRenderMs = (canvas: HTMLCanvasElement, ms: number) => {
     const samples = [...renderMsRef.current, ms].slice(-RENDER_MS_SAMPLE_COUNT);
@@ -157,20 +219,18 @@ export function PdfPageCanvas({
       canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    // Fast path: a bitmap rendered at this scale and ratio is already
-    // retained from an earlier visit — blit it and report completion. No
-    // page request, no raster, no worker round-trip.
-    const ratio = effectiveRenderRatio(
-      width / scale,
-      height / scale,
-      scale,
-      window.devicePixelRatio || 1,
-    );
-    const cached = bitmapCache?.get(pageNumber, scale, ratio, renderVariant);
+    const ratio = regionMode
+      ? regionRenderRatio(regionWidth, regionHeight, dpr)
+      : effectiveRenderRatio(width / scale, height / scale, scale, dpr);
+
+    // Fast path: a bitmap rendered at this scale, ratio, region, and variant
+    // is already retained from an earlier visit — blit it and report
+    // completion. No page request, no raster, no worker round-trip.
+    const cached = bitmapCache?.get(pageNumber, scale, ratio, renderVariant, regionKey);
     if (cached) {
       const startedAt = performance.now();
       canvas.setAttribute("data-pdf-render-quality", "final");
-      blit(canvas, cached.buffer, width, height);
+      blit(canvas, cached.buffer, cssWidth, cssHeight, blitLeft, blitTop);
       publishRenderMs(canvas, performance.now() - startedAt);
       renderedRef.current?.(pageNumber);
       return;
@@ -189,14 +249,19 @@ export function PdfPageCanvas({
       if (cancelled) throw new CancelledRender();
       const viewport = page.getViewport({ scale });
 
+      // Full mode keeps the engine viewport dimensions for the buffer (the
+      // historical behavior); region mode sizes to the region.
+      const bufferWidth = regionMode ? regionWidth : viewport.width;
+      const bufferHeight = regionMode ? regionHeight : viewport.height;
       const buffer = canvas.ownerDocument.createElement("canvas");
-      buffer.width = Math.floor(viewport.width * targetRatio);
-      buffer.height = Math.floor(viewport.height * targetRatio);
+      buffer.width = Math.floor(bufferWidth * targetRatio);
+      buffer.height = Math.floor(bufferHeight * targetRatio);
       const bufferContext = buffer.getContext("2d");
       if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
       // The transform maps viewport units onto device pixels at the
-      // (possibly capped) ratio.
+      // (possibly capped) ratio. In region mode the engine converts the
+      // region to page units and clips the raster to it.
       // Timed from the raster's start (the paint loop is time-sliced across
       // the await) to the blit — the user-visible render→blit latency of
       // PERF-2.
@@ -206,6 +271,9 @@ export function PdfPageCanvas({
         viewport,
         transform: targetRatio !== 1 ? [targetRatio, 0, 0, targetRatio, 0, 0] : undefined,
         smartColors,
+        region: regionMode
+          ? { x: regionLeft, y: regionTop, width: regionWidth, height: regionHeight }
+          : undefined,
       });
       taskRef.current = task;
       await task.promise;
@@ -221,9 +289,18 @@ export function PdfPageCanvas({
       // buffer, so there is no shared state to wait for.
       taskRef.current?.cancel();
 
+      // Coalesce superseding changes (see RENDER_SETTLE_MS). The timeout is
+      // intentionally not cleared: it is short, and the `cancelled` check
+      // after it is what discards a superseded generation.
+      if (renderedOnceRef.current) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RENDER_SETTLE_MS));
+        if (cancelled) throw new CancelledRender();
+      }
+      renderedOnceRef.current = true;
+
       const firstBuffer = await renderInto(previewRatio);
       canvas.setAttribute("data-pdf-render-quality", needsRefinement ? "preview" : "final");
-      blit(canvas, firstBuffer, width, height);
+      blit(canvas, firstBuffer, cssWidth, cssHeight, blitLeft, blitTop);
       renderedRef.current?.(pageNumber);
 
       if (!needsRefinement) {
@@ -232,6 +309,7 @@ export function PdfPageCanvas({
           scale,
           ratio: previewRatio,
           variant: renderVariant,
+          regionKey,
           buffer: firstBuffer,
         });
         return;
@@ -246,12 +324,20 @@ export function PdfPageCanvas({
         scale,
         ratio: previewRatio,
         variant: renderVariant,
+        regionKey,
         buffer: firstBuffer,
       });
       const refinedBuffer = await renderInto(ratio);
       canvas.setAttribute("data-pdf-render-quality", "final");
-      bitmapCache?.put({ pageNumber, scale, ratio, variant: renderVariant, buffer: refinedBuffer });
-      blit(canvas, refinedBuffer, width, height);
+      bitmapCache?.put({
+        pageNumber,
+        scale,
+        ratio,
+        variant: renderVariant,
+        regionKey,
+        buffer: refinedBuffer,
+      });
+      blit(canvas, refinedBuffer, cssWidth, cssHeight, blitLeft, blitTop);
     })().catch((err: unknown) => {
       if (cancelled || isRenderingCancelled(err) || err instanceof CancelledRender) return;
       errorRef.current?.(pageNumber, err);
@@ -271,6 +357,15 @@ export function PdfPageCanvas({
     smartColors,
     renderVariant,
     bitmapCache,
+    regionMode,
+    regionLeft,
+    regionTop,
+    regionWidth,
+    regionHeight,
+    regionKey,
+    cssWidth,
+    cssHeight,
+    dpr,
   ]);
 
   return (
@@ -278,6 +373,10 @@ export function PdfPageCanvas({
       ref={canvasRef}
       data-testid={testId}
       data-pdf-page={pageNumber}
+      // Deterministic region identity for tests/diagnostics: "full" for a
+      // whole-page raster, else the page-local `x,y,w,h` of the region.
+      data-pdf-render-region={regionKey}
+      style={regionMode ? { position: "absolute" } : undefined}
       // PERF-6: no decorations here — the canvas is a page-sized layer and
       // any filter/effect on it is per-frame compositing work. Page chrome
       // lives on the cheap wrapper (PdfDocumentView).
