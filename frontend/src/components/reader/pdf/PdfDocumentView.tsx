@@ -119,13 +119,18 @@ export function PdfDocumentView({
       // width feeds back into usePdfScale's measurement — the fit
       // scale then oscillates and re-anchoring yanks the viewport
       // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
-      className={`flex min-h-0 w-full justify-center${presentation ? " h-full items-center" : ""}`}
+      // The document centers itself with auto margins below: flex
+      // `justify-center` would center an overflowing document so its left
+      // overflow lands at negative coordinates, which scrollLeft can never
+      // reach — the page's left edge would be cut off with the scrollbar
+      // already at its end.
+      className={`flex min-h-0 w-full${presentation ? " h-full items-center" : ""}`}
     >
       <div
         ref={documentRef}
         data-testid="pdf-document"
         style={{ width: `${documentWidth}px`, filter: themeFilter }}
-        className="relative flex flex-col items-center"
+        className="relative mx-auto flex flex-col items-center"
       >
         {/* Paper-style themes multiply-tint the opaque white pages down to
             the theme color (white × tint = tint, black stays black). The

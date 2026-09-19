@@ -929,14 +929,8 @@ async function renderRegionByWholePage(
     }
     // Crop the region out of the cached whole-page raster (RGBA, padded
     // stride).
-    const regionX = Math.max(
-      0,
-      Math.round((bounds[0] + clip[0]) * sx) - pixmap.getX(),
-    );
-    const regionY = Math.max(
-      0,
-      Math.round((bounds[1] + clip[1]) * sy) - pixmap.getY(),
-    );
+    const regionX = Math.max(0, Math.round((bounds[0] + clip[0]) * sx) - pixmap.getX());
+    const regionY = Math.max(0, Math.round((bounds[1] + clip[1]) * sy) - pixmap.getY());
     const src = pixmap.getPixels();
     const stride = pixmap.getStride();
     const out = new Uint8ClampedArray(width * height * 4);
