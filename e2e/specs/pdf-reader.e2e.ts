@@ -175,10 +175,35 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(Math.abs(geometry.bufferRatio - geometry.dpr)).toBeLessThan(0.02);
     expect(Math.max(geometry.w, geometry.h)).toBeLessThanOrEqual(8192);
 
-    // The region must carry page pixels, not just a sized box (a wrong clip
-    // transform renders an empty/background-only canvas).
-    const regionPage = Number(await region.getAttribute("data-pdf-page"));
-    expect(await canvasIsNonBlank(page, regionPage)).toBe(true);
+    // The region must carry page ink over the page background, not a sized
+    // but blank or black box (a wrong clip transform, or an opaque clear,
+    // bakes a uniform region). Composite over the white page wrapper.
+    const stats = await region.evaluate((el) => {
+      const canvas = el as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d");
+      if (!ctx || !canvas.width || !canvas.height) return { light: -1, ink: -1 };
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let light = 0;
+      let ink = 0;
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4 * 16) {
+        total += 1;
+        const alpha = data[i + 3] / 255;
+        const lum =
+          (data[i] * alpha +
+            255 * (1 - alpha) +
+            data[i + 1] * alpha +
+            255 * (1 - alpha) +
+            data[i + 2] * alpha +
+            255 * (1 - alpha)) /
+          3;
+        if (lum > 200) light += 1;
+        else if (lum < 128) ink += 1;
+      }
+      return { light: light / total, ink: ink / total };
+    });
+    expect(stats.light).toBeGreaterThan(0.5);
+    expect(stats.ink).toBeGreaterThan(0.002);
 
     await returnToLibrary(page);
   });

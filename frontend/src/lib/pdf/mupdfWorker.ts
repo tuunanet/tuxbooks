@@ -756,20 +756,29 @@ async function renderSmartPage(
 }
 
 /**
- * Page-space to region-device-pixel matrix for a clipped render: scale by
- * `width / clipWidth` and translate the clip origin to (0,0). `bounds` is the
- * page's bounds, whose origin may be non-zero.
+ * Device matrix and pixmap bbox for a clipped render. Mirrors the whole-page
+ * path: the matrix scales page units to device pixels (no translation) and
+ * the pixmap bbox carries the clip origin in device space, so the draw device
+ * clips to the region while content stays in the same coordinate space it
+ * would occupy on the full page. Translating the matrix instead (and making a
+ * [0,0,w,h] pixmap) puts the content outside the pixmap's clip and yields an
+ * empty raster.
  */
-function regionMatrix(
+function regionTransform(
   bounds: [number, number, number, number],
   clip: PageClip,
   width: number,
   height: number,
-): MupdfMatrix {
+): { ctm: MupdfMatrix; bbox: [number, number, number, number] } {
   const [x0, y0] = bounds;
   const sx = width / clip[2];
   const sy = height / clip[3];
-  return [sx, 0, 0, sy, -(x0 + clip[0]) * sx, -(y0 + clip[1]) * sy];
+  const originX = (x0 + clip[0]) * sx;
+  const originY = (y0 + clip[1]) * sy;
+  return {
+    ctm: [sx, 0, 0, sy, 0, 0],
+    bbox: [originX, originY, originX + width, originY + height],
+  };
 }
 
 /**
@@ -785,10 +794,14 @@ async function renderPlainRegion(
   if (!mupdf || !document) throw new Error("no document open");
   const loaded = document.loadPage(page - 1);
   try {
-    const ctm = regionMatrix(loaded.getBounds(), clip, width, height);
-    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], true);
+    const { ctm, bbox } = regionTransform(loaded.getBounds(), clip, width, height);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
     try {
-      pixmap.clear(0);
+      // A PDF page paints no background of its own; a plain page reads white.
+      // Clear to opaque white (this binding's `clear` leaves the alpha
+      // channel opaque, so clearing to 0 would bake in black, not
+      // transparency).
+      pixmap.clear(0xff);
       const draw = new mupdf.DrawDevice(ctm, pixmap);
       try {
         loaded.run(draw, mupdf.Matrix.identity);
@@ -821,8 +834,8 @@ async function renderSmartRegion(
   try {
     const bounds = loaded.getBounds();
     const [x0, y0, x1, y1] = bounds;
-    const ctm = regionMatrix(bounds, clip, width, height);
-    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], true);
+    const { ctm, bbox } = regionTransform(bounds, clip, width, height);
+    const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, true);
     try {
       pixmap.clear(0);
       const draw = new mupdf.DrawDevice(ctm, pixmap);
