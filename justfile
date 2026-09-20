@@ -119,12 +119,21 @@ dev:
 # these bounds; a wedged run is killed instead of blocking development.
 _test_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
 
+# Build the release sidecar + document worker against the pinned glibc
+# floor (ubuntu:22.04, glibc 2.35) in a container, so the packaged app runs
+# on distros older than the build host (docs/BUILD.md). Requires docker or
+# podman; set TUXBOOKS_SIDECAR_HOST_BUILD=1 to force a non-portable host
+# build for a quick local check.
+sidecar-release:
+    bash scripts/build-sidecar-release.sh
+
 # Build everything the packaged app needs: renderer bundle, Electron
-# main/preload bundles, and the release sidecar binary.
+# main/preload bundles, and the release sidecar binary (portable glibc
+# floor via `just sidecar-release`).
 build: fetch-pdfium
     pnpm --filter frontend build
     node scripts/build-electron.mjs
-    cargo build --manifest-path sidecar/Cargo.toml --release
+    just sidecar-release
 
 # Package the distributable Linux bundles with electron-builder
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs

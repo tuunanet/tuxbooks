@@ -14,7 +14,9 @@ any frontend precondition.
   still holding port 1420 is reclaimed when the holder is this project's
   Vite; anything else on the port is reported and left running.
 - `just build` — renderer bundle, Electron main/preload bundles, release
-  sidecar binary (`fetch-pdfium` runs first so packaging has the library).
+  sidecar binary built against the pinned glibc floor
+  (`just sidecar-release`; needs docker or podman; see "Release sidecar
+  ABI floor" below). `fetch-pdfium` runs first so packaging has the library.
 - `just build-debug` — same, with the debug sidecar (what E2E runs against).
 - `just package [targets]` — electron-builder (`electron-builder.yml`)
   over the `just build` artifacts; default targets deb + rpm + AppImage,
@@ -52,6 +54,25 @@ test-e2e` rely on. If pnpm ever reports a missing
 bundle; asset paths in main resolve relative to its own `__dirname`
 (`frontend/dist` for the renderer, `resources/sidecar` for the packaged
 sidecar).
+
+## Release sidecar ABI floor (glibc 2.35)
+
+The release sidecar and document worker are built by `just sidecar-release`
+inside a digest-pinned `ubuntu:22.04` container
+(`scripts/sidecar-build.Dockerfile`), not on the host. Building on a newer
+glibc is a silent, breaking change: Rust's weak `pidfd_spawnp`/`pidfd_getpid`
+references bind to the host's versioned symbols, and on the ubuntu-24.04 CI
+runner that records a hard `GLIBC_2.39` requirement. The packaged app then
+dies the moment it starts the sidecar on Ubuntu 22.04 / Debian 12 with
+`version 'GLIBC_2.39' not found`. Against glibc 2.35 those references stay
+unversioned, so the binary's floor is 2.34.
+
+`just build` (and therefore `just package`) goes through the container, so
+docker or podman is required for packaging. `TUXBOOKS_SIDECAR_HOST_BUILD=1`
+forces a host build for a quick local check (not portable).
+`scripts/check-deb.sh` enforces the 2.35 ceiling on the packaged binaries and
+fails the build when either needs newer symbols. To raise or lower the floor,
+bump the base image digest deliberately and re-run the packaging gate.
 
 ## Packaging (electron-builder)
 
