@@ -145,13 +145,13 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_file="$(mktemp)"
-          # The glibc line is specific to 0.0.10; revisit it when the next
-          # release is cut.
+          # The "New since" line is specific to 0.0.11; revisit it when the
+          # next release is cut.
           cat > "$notes_file" <<EOF
           Development snapshot — TuxBooks is pre-1.0 and in active development.
 
-          Fixed since 0.0.9: the bundled sidecar no longer requires glibc 2.39,
-          so the app starts on Ubuntu 22.04 and Debian 12.
+          New since 0.0.10: continuous Ctrl+wheel zoom in the PDF reader,
+          committed on idle so the page stays sharp.
 
           Install on Ubuntu/Debian:
 
