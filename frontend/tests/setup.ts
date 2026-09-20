@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, afterEach } from "vitest";
+import { beforeAll, beforeEach, afterEach, afterAll } from "vitest";
 import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import {
@@ -11,7 +11,25 @@ import { installMockResizeObserver, resetResizeObservers } from "./mocks/resizeO
 // otherwise makes waitFor-based tests flaky exactly when the gate matters.
 configure({ asyncUtilTimeout: 2000 });
 
+// @tanstack/react-virtual arms a real `setTimeout` scroll-end debounce
+// (`isScrollingResetDelay`, 150ms) whose timer id is trapped in the
+// `debounce` closure, so unmounting cannot cancel it. When the last test in
+// a file scrolls a virtualized list, that timer can fire after Vitest tears
+// jsdom down, and React then throws "window is not defined" (the coverage
+// job hit exactly this). Drain it in afterAll while the environment is still
+// alive; files that never scrolled skip the wait.
+const VIRTUALIZER_SCROLL_DRAIN_MS = 250;
+let virtualizerScrolled = false;
+const markVirtualizerScrolled = () => {
+  virtualizerScrolled = true;
+};
+
 beforeAll(() => {
+  virtualizerScrolled = false;
+  // Capture phase: scroll events do not bubble, but they still travel down
+  // the tree, so this sees every virtualized list's scroll.
+  document.addEventListener("scroll", markVirtualizerScrolled, true);
+
   // jsdom lacks the pointer-capture plumbing Radix primitives rely on.
   if (!Element.prototype.hasPointerCapture) {
     Element.prototype.hasPointerCapture = () => false;
@@ -97,4 +115,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+afterAll(async () => {
+  document.removeEventListener("scroll", markVirtualizerScrolled, true);
+  if (virtualizerScrolled) {
+    await new Promise((resolve) => setTimeout(resolve, VIRTUALIZER_SCROLL_DRAIN_MS));
+  }
 });
