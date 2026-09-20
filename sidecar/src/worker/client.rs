@@ -160,10 +160,25 @@ impl WorkerClient {
             serde_json::to_string(job).map_err(|err| WorkerError::Protocol(err.to_string()))?;
         {
             let mut stdin = child.stdin.take().expect("piped stdin");
-            stdin
+            let write = stdin
                 .write_all(job_line.as_bytes())
-                .and_then(|_| stdin.write_all(b"\n"))
-                .map_err(|err| WorkerError::Protocol(format!("job write: {err}")))?;
+                .and_then(|_| stdin.write_all(b"\n"));
+            if let Err(err) = write {
+                // A broken pipe means the worker closed stdin without reading
+                // its job, i.e. it died during startup. The exit status is the
+                // real event and the pipe error is only a symptom, so report the
+                // crash instead of a protocol failure. This also closes the
+                // race where a worker exits before the parent's write lands:
+                // the same death must not be a Crash or a Protocol depending
+                // on scheduling.
+                drop(stdin);
+                if err.kind() == std::io::ErrorKind::BrokenPipe {
+                    let status = wait_bounded(&mut child, Duration::from_secs(2))
+                        .map_err(|err| WorkerError::Protocol(format!("worker wait: {err}")))?;
+                    return Err(crash_error(&status, "worker exited before reading its job"));
+                }
+                return Err(WorkerError::Protocol(format!("job write: {err}")));
+            }
         } // stdin drops: the worker sees EOF after its single job line
 
         // Read the (single) response on a thread so the deadline can kill.
@@ -609,10 +624,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("doc.bin");
         std::fs::write(&path, b"x").unwrap();
+        // The worker exits before it can read the job, so the parent's write
+        // races process death: it gets a broken pipe when the exit wins, a
+        // clean EOF otherwise. Both have to surface as the same typed crash.
         let (_sdir, client) = client_with("exit 3");
         let err = client
             .run(&self_test_job(ResourceLimits::DEFAULTS), &path)
             .unwrap_err();
+        assert!(matches!(err, WorkerError::Crash(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn a_worker_that_dies_before_reading_its_job_reports_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.bin");
+        std::fs::write(&path, b"x").unwrap();
+        // A job larger than the pipe buffer makes the parent block inside
+        // write; the worker then exits without reading, so the blocked write
+        // returns EPIPE once the read end is gone. That is the deterministic
+        // form of the startup-crash race the flaky `exit 3` test hits by
+        // timing. The job must surface as a Crash, not a Protocol error.
+        let (_sdir, client) = client_with("sleep 0.5; exit 3");
+        let mut job = self_test_job(ResourceLimits::DEFAULTS);
+        job.member = Some("x".repeat(512 * 1024));
+        let err = client.run(&job, &path).unwrap_err();
         assert!(matches!(err, WorkerError::Crash(_)), "got: {err:?}");
     }
 
