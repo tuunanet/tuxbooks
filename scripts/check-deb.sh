@@ -70,6 +70,28 @@ dpkg-deb -x "$deb" "$payload"
 [ -f "$payload/opt/TuxBooks/resources/icons/512x512.png" ] ||
   fail "bundled window icon missing (resources/icons/512x512.png)"
 
+# --- portability (glibc ABI floor) ------------------------------------------
+# The sidecar + worker are built in the pinned ubuntu:22.04 container
+# (scripts/sidecar-build.Dockerfile, glibc 2.35). A host build on a newer
+# distro silently records the host's glibc as a hard requirement. On the
+# ubuntu-24.04 CI runner Rust's pidfd_spawnp/pidfd_getpid become GLIBC_2.39,
+# and the app dies at sidecar launch on Ubuntu 22.04 / Debian 12. Fail the
+# package when either binary needs newer symbols than the floor.
+GLIBC_MAX="2.35"
+command -v readelf >/dev/null 2>&1 ||
+  fail "readelf is required for the glibc portability check (install binutils)"
+for bin in tuxbooks tuxbooks-worker; do
+  bin_path="$payload/opt/TuxBooks/resources/sidecar/$bin"
+  max_glibc="$(readelf --version-info "$bin_path" 2>/dev/null |
+    grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n1 || true)"
+  [ -n "$max_glibc" ] ||
+    fail "no glibc version requirements found in $bin (unexpected; not a dynamic binary?)"
+  if [ "$(printf '%s\n%s\n' "${max_glibc#GLIBC_}" "$GLIBC_MAX" | sort -V | tail -n1)" != "$GLIBC_MAX" ]; then
+    objdump -T "$bin_path" | grep -- "$max_glibc" >&2 || true
+    fail "$bin requires $max_glibc, above the GLIBC_$GLIBC_MAX floor (built against a newer glibc; use \`just sidecar-release\`; docs/BUILD.md)"
+  fi
+done
+
 desktop="$payload/usr/share/applications/tuxbooks.desktop"
 [ -f "$desktop" ] || fail "desktop entry missing (usr/share/applications/tuxbooks.desktop)"
 grep -q '^Exec=' "$desktop" || fail "desktop entry has no Exec line"
@@ -89,4 +111,4 @@ else
   echo "check-deb: desktop-file-validate not installed; skipped (structure still checked)"
 fi
 
-echo "check-deb: OK (version $version, $arch, $icon_count icons, sidecar + document worker + PDFium bundled)"
+echo "check-deb: OK (version $version, $arch, $icon_count icons, sidecar + document worker + PDFium bundled, glibc <= $GLIBC_MAX)"

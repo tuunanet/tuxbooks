@@ -71,11 +71,12 @@ The packaged app is covered by two checks beyond the packaging gate
 `scripts/check-deb.sh` is the packaging gate: it verifies the built deb's
 control metadata (package name, exact version match, description, and no
 webkit dependency), the extracted payload (Electron binary + executable
-sidecar + PDFium resource + the runtime window icon), the desktop entry
-(structure, `Name=TuxBooks`, `Icon=tuxbooks`, plus `desktop-file-validate`
-when installed), and hicolor icons. CI builds the deb target and runs the
-gate on every push; the release workflow builds the published deb +
-AppImage and runs the same gate before publishing.
+sidecar + PDFium resource + the runtime window icon), the glibc ABI floor
+for the sidecar and worker (<= 2.35; docs/BUILD.md "Release sidecar ABI
+floor"), the desktop entry (structure, `Name=TuxBooks`, `Icon=tuxbooks`,
+plus `desktop-file-validate` when installed), and hicolor icons. CI builds
+the deb target and runs the gate on every push; the release workflow builds
+the published deb + AppImage and runs the same gate before publishing.
 
 ## Cutting a release
 
