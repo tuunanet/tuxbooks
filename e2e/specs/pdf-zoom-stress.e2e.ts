@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs";
+
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
+import { benchPdfFixture } from "../setup/fixtures.js";
 import {
   canvasIsNonBlank,
   firstPdfCanvas,
@@ -128,6 +131,69 @@ test.describe("PDF Smart Dark zoom churn", () => {
     // genuine display-list bypass (fixture pages with unrecordable content)
     // may escape a worker once — dozens per session is the regression.
     expect(recycleCount).toBeLessThanOrEqual(1);
+    await expectRendererAlive(page);
+  });
+
+  // The exact book of the 2026-09-20 crash report: page 35's mesh shadings
+  // corrupt a Smart Dark worker's wasm heap (node repro: replays "succeed"
+  // then the heap dies on a later free). The throw is state-dependent and
+  // did not fire in this harness, so the engine's escape-on-throw CONTRACT
+  // is pinned at the fake-worker seam (pdfWorkerRecycle.test.ts); this spec
+  // is the real-book guard: the reader must keep converging through the
+  // churn and the renderer must stay alive. Needs the fetched corpus
+  // (just fetch-ebooks); skipped when GeoTopo.pdf is not on disk.
+  test("recovers GeoTopo page 35 under Smart Dark zoom churn", async ({ page }) => {
+    if (!existsSync(benchPdfFixture)) {
+      test.skip(true, "GeoTopo.pdf not fetched (just fetch-ebooks)");
+    }
+    test.setTimeout(300_000);
+    await openInReader(page, "Geometrie und Topologie (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 117", {
+      timeout: 30_000,
+    });
+
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("pref-theme").getByText("Smart dark", { exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 10_000 });
+
+    await scrollToSlot(page, 35);
+    await waitForRendered(page, 35, 60_000);
+
+    // Zoom wobble across the shading page: commits re-render its region at
+    // successive scales, driving the device path that corrupts the heap.
+    // The anchor may drift to neighbouring pages while zooming (the
+    // cursor point stays fixed, the shown page can change), so every round
+    // asserts on whatever page the reader finally shows.
+    const input = page.getByTestId("pdf-zoom-input");
+    for (let round = 1; round <= 8; round++) {
+      await input.fill(round % 2 === 0 ? "10000" : "800");
+      await input.press("Enter");
+      await waitForRendered(page, await shownPage(page), 60_000);
+      await wheelBurst(page, 5, 120);
+      await page.waitForTimeout(400);
+      await expectRendererAlive(page);
+      await wheelBurst(page, 4, -120);
+      await page.waitForTimeout(600);
+      await expectRendererAlive(page);
+      await expect
+        .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.transform), {
+          timeout: 30_000,
+        })
+        .toBe("");
+      await page.waitForTimeout(500);
+      await waitForRendered(page, await shownPage(page), 60_000);
+      process.stdout.write(`geotopo churn round ${round} survived\n`);
+    }
+
+    // The page the reader ends on must be sharp and the renderer alive:
+    // a thrown render escapes the worker instead of leaving the reader
+    // stuck on failed pages.
+    const shown = await shownPage(page);
+    await waitForRendered(page, shown, 60_000);
+    expect(await canvasIsNonBlank(page, shown)).toBe(true);
     await expectRendererAlive(page);
   });
 });

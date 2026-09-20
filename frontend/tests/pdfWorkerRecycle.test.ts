@@ -18,10 +18,11 @@ class FakeImageBitmap {
     this.closed = true;
   }
 }
-
 class FakeWorker {
   terminated = false;
   posted = 0;
+  /** Render requests fail (worker-state corruption simulation). */
+  failRenders = false;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: ((event: { message: string }) => void) | null = null;
 
@@ -38,6 +39,10 @@ class FakeWorker {
       else if (method === "pageSize")
         this.respond({ id, ok: true, result: { width: 100, height: 200 } });
       else if (method === "render") {
+        if (this.failRenders) {
+          this.respond({ id, ok: false, error: "Unexpected mesh type 0" });
+          return;
+        }
         const bitmap = new FakeImageBitmap();
         bitmap.width = params?.width ?? 0;
         bitmap.height = params?.height ?? 0;
@@ -57,7 +62,6 @@ class FakeWorker {
   terminate(): void {
     this.terminated = true;
   }
-
   private respond(data: unknown): void {
     this.onmessage?.({ data });
   }
@@ -131,5 +135,48 @@ describe("Smart Dark worker recycling", () => {
     expect(workers).toHaveLength(2);
     await pdf.destroy();
     expect(workers.every((worker) => worker.terminated)).toBe(true);
+  });
+
+  test("escapes the worker once when a Smart Dark render throws, re-arms after success", async () => {
+    const pdf = await openPdfDocumentFromBook(4, "pdf");
+
+    // A healthy render first: the failing worker below has served the
+    // device, which is what makes its throw a corruption signal.
+    await renderOnce(pdf, SMART);
+    workers[0]!.failRenders = true;
+    await expect(renderOnce(pdf, SMART)).rejects.toThrow("Unexpected mesh type 0");
+
+    // The first throw escapes the worker: the replacement takes over.
+    await expect.poll(() => workers.length).toBe(2);
+    await expect.poll(() => workers[0]!.terminated).toBe(true);
+
+    // A second failure on the FRESH worker is a content incompatibility:
+    // no further swaps, or every zoom commit clearing the failed flag
+    // would recycle the worker again.
+    workers[1]!.failRenders = true;
+    await expect(renderOnce(pdf, SMART)).rejects.toThrow("Unexpected mesh type 0");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(workers).toHaveLength(2);
+
+    // One clean render proves the worker is healthy: the escape re-arms,
+    // so a LATER degradation still gets out.
+    workers[1]!.failRenders = false;
+    await renderOnce(pdf, SMART);
+    workers[1]!.failRenders = true;
+    await expect(renderOnce(pdf, SMART)).rejects.toThrow("Unexpected mesh type 0");
+    await expect.poll(() => workers.length).toBe(3);
+    await expect.poll(() => workers[1]!.terminated).toBe(true);
+
+    await pdf.destroy();
+    expect(workers.every((worker) => worker.terminated)).toBe(true);
+  });
+
+  test("a thrown PLAIN render never escapes the worker", async () => {
+    const pdf = await openPdfDocumentFromBook(5, "pdf");
+    workers[0]!.failRenders = true;
+    await expect(renderOnce(pdf, undefined)).rejects.toThrow("Unexpected mesh type 0");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(workers).toHaveLength(1);
+    await pdf.destroy();
   });
 });

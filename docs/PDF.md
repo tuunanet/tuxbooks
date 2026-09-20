@@ -473,6 +473,12 @@ the old worker drain its in-flight requests before terminating it
 document handle, page sizes, text cache, and bitmap cache all survive — and
 in-memory opens (no retained bytes to reopen) never recycle. Non-smart
 renders do not count toward the budget because they never use the device.
+Two signals escape a worker ahead of the budget: a render that bypassed the
+display list (`recovered`), and a Smart Dark render that throws
+(`Unexpected mesh type` is that corruption surfacing). The failure escape
+fires once per worker and re-arms after any successful render; a page that
+fails again before any success is content the device cannot render, so it
+shows its retry state rather than swapping the worker on every zoom commit.
 
 ### Appearance and color modes (issue #67)
 
