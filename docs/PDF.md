@@ -480,6 +480,16 @@ fires once per worker and re-arms after any successful render; a page that
 fails again before any success is content the device cannot render, so it
 shows its retry state rather than swapping the worker on every zoom commit.
 
+#### What the worker budget does not fix
+
+The corruption itself is in mupdf.js shading handling under a JS device, not
+something the reader can prevent, so the engine contains it by trading
+workers rather than stopping it. The `Unexpected mesh type` throw is
+state-dependent and did not reproduce in the e2e harness, so the escape
+contract is pinned at the unit seam while the e2e guards the real-book crash
+class. A follow-up worth considering: render shading-heavy pages through the
+plain path instead of the recolor device, which is the actual poison vector.
+
 ### Appearance and color modes (issue #67)
 
 PDFs are fixed-layout rasters: the reader's reflow controls (font size,
