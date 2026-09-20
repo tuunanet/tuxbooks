@@ -5,11 +5,14 @@
 #                            from oracle/expected/geometry.json
 #   oracle/run.sh --update   rewrite oracle/expected/geometry.json in place
 #
-# The harness is test-only: this script never touches the product build.
+# The harness is test-only: this script never touches the product build. It
+# drives the real GNOME Papers PpsView widget, which needs a display, so the
+# run goes through xvfb-run.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(git -C "$here" rev-parse --show-toplevel)"
+builddir="$here/harness/build/papers-build"
 
 pinned="dd693ee21726fdc08b135183e104b67c0e59b332"
 actual="$(git -C "$root/vendor/papers" rev-parse HEAD 2>/dev/null || true)"
@@ -21,9 +24,20 @@ fi
 
 bash "$here/harness/build.sh"
 
+if ! command -v xvfb-run >/dev/null; then
+  echo "error: xvfb-run is required to run the GTK harness headless" >&2
+  exit 1
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-"$here/harness/build/oracle" "$tmp"
+
+export PPS_BACKENDS_DIR="$builddir/libdocument/backend"
+export LD_LIBRARY_PATH="$builddir/libview:$builddir/libdocument${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export GSETTINGS_SCHEMA_DIR="$builddir/data"
+export LC_ALL=C
+
+xvfb-run -a "$here/harness/build/oracle" "$here/fixtures" "$tmp"
 
 expected="$here/expected/geometry.json"
 if [[ "${1:-}" == "--update" ]]; then

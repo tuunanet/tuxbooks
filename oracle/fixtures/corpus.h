@@ -2,7 +2,10 @@
 #ifndef ORACLE_CORPUS_H
 #define ORACLE_CORPUS_H
 
-#include "pps_view_geometry.h"
+typedef struct {
+  double width;
+  double height;
+} OraclePageSize;
 
 typedef struct {
   const char *name;
