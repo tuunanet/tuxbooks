@@ -58,6 +58,30 @@ impl WorkerError {
     }
 }
 
+/// Retry `op` while it fails with `ETXTBSY`, a bounded number of times.
+///
+/// `execve` returns `ETXTBSY` while any process holds the target open for
+/// writing, and a concurrent `fork` in another thread can inherit the write
+/// descriptor this process just opened (a test's stand-in worker script, or a
+/// package manager replacing the worker binary mid-upgrade). The child keeps
+/// that descriptor only until its own `execve`, so the condition clears in
+/// microseconds and a short retry absorbs it.
+fn retry_etxtbsy<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    const ATTEMPTS: u32 = 20;
+    const BACKOFF: Duration = Duration::from_millis(5);
+    let mut attempt = 1;
+    loop {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(err) if err.raw_os_error() == Some(libc::ETXTBSY) && attempt < ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(BACKOFF);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 impl WorkerClient {
     pub fn new(binary_path: PathBuf) -> Self {
         Self { binary_path }
@@ -149,8 +173,7 @@ impl WorkerClient {
                 Ok(())
             });
         }
-        let mut child = command
-            .spawn()
+        let mut child = retry_etxtbsy(|| command.spawn())
             .map_err(|err| WorkerError::Unavailable(format!("worker spawn: {err}")))?;
         // `file` stays open while the pre_exec closure may still run; the
         // drop after spawn closes only the parent's copy of the descriptor.
@@ -661,5 +684,63 @@ mod tests {
             .run(&self_test_job(ResourceLimits::DEFAULTS), &path)
             .unwrap_err();
         assert!(matches!(err, WorkerError::Protocol(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn a_held_write_descriptor_makes_execve_report_etxtbsy() {
+        // The condition the spawn retry targets: while a write descriptor to
+        // the executable is open, execve fails with ETXTBSY.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stand-in.sh");
+        std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let held = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let err = Command::new(&path).spawn().unwrap_err();
+        assert_eq!(
+            err.raw_os_error(),
+            Some(libc::ETXTBSY),
+            "a held writer must surface as ETXTBSY, got: {err:?}"
+        );
+        drop(held);
+    }
+
+    #[test]
+    fn retry_etxtbsy_recovers_after_transient_failures() {
+        let mut calls = 0;
+        let value = retry_etxtbsy(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(std::io::Error::from_raw_os_error(libc::ETXTBSY))
+            } else {
+                Ok(7)
+            }
+        })
+        .unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_etxtbsy_is_bounded_and_propagates_other_errors() {
+        // A non-ETXTBSY error is returned without retrying.
+        let mut calls = 0;
+        let err = retry_etxtbsy(|| -> std::io::Result<()> {
+            calls += 1;
+            Err(std::io::Error::from_raw_os_error(libc::ENOENT))
+        })
+        .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
+        assert_eq!(calls, 1);
+
+        // Persistent ETXTBSY is retried a bounded number of times, then
+        // reported instead of spinning forever.
+        let mut calls = 0;
+        let err = retry_etxtbsy(|| -> std::io::Result<()> {
+            calls += 1;
+            Err(std::io::Error::from_raw_os_error(libc::ETXTBSY))
+        })
+        .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::ETXTBSY));
+        assert_eq!(calls, 20);
     }
 }
