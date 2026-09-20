@@ -14,6 +14,7 @@ interface RenderRequest {
   page: number;
   width: number;
   height: number;
+  clip?: number[];
 }
 
 const workers: FakeWorker[] = [];
@@ -90,19 +91,27 @@ describe("PDFium adapter", () => {
     expect(workers[0]!.terminated).toBe(true);
   });
 
-  test("reserves region render for tuxbooks-koe.6", async () => {
+  test("renders a clipped region in page units at the transform ratio", async () => {
     window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
     const page = await pdf.getPage(1);
     const canvas = document.createElement("canvas");
+    canvas.width = 60;
+    canvas.height = 80;
 
-    await expect(
-      page.render({
-        canvas,
-        viewport: { width: 100, height: 150 },
-        region: { x: 0, y: 0, width: 10, height: 10 },
-      }).promise,
-    ).rejects.toThrow("tuxbooks-koe.6");
+    await page.render({
+      canvas,
+      viewport: { width: 100, height: 150 },
+      transform: [2, 0, 0, 2, 0, 0],
+      region: { x: 10, y: 20, width: 30, height: 40 },
+    }).promise;
+
+    // Region buffer is region-sized at the ratio (30×40 CSS × 2), and the
+    // clip converts CSS to page units through the page-units-per-CSS ratio
+    // (200 page units / 100 CSS = 2).
+    expect(workers[0]!.renders).toEqual([
+      { page: 1, width: 60, height: 80, clip: [20, 40, 60, 80] },
+    ]);
     await pdf.destroy();
   });
 

@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 
+import { MAX_RENDER_PIXELS_HARD, regionRenderRatio } from "@/components/reader/pdf/pdfRenderPolicy";
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";
-import { PdfiumEngine } from "@/lib/pdf/pdfiumCore";
+import { PdfiumEngine, type PageClip } from "@/lib/pdf/pdfiumCore";
 
 /**
  * Real PDFium-WASM integration (tuxbooks-koe.5). Loading the browser build
@@ -38,6 +39,23 @@ function countNonWhite(rgba: Uint8ClampedArray<ArrayBuffer>): number {
   return count;
 }
 
+/** Copies a sub-rectangle out of a packed RGBA buffer. */
+function cropRgba(
+  rgba: Uint8ClampedArray<ArrayBuffer>,
+  bufferWidth: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Uint8ClampedArray {
+  const crop = new Uint8ClampedArray(width * height * 4);
+  for (let row = 0; row < height; row += 1) {
+    const from = ((y + row) * bufferWidth + x) * 4;
+    crop.set(rgba.subarray(from, from + width * 4), row * width * 4);
+  }
+  return crop;
+}
+
 let engine: PdfiumEngine | null = null;
 
 afterEach(() => {
@@ -60,6 +78,62 @@ describe("PdfiumEngine (WASM)", () => {
     const rgba = engine.renderRgba(0, 122, 158);
     expect(rgba.length).toBe(122 * 158 * 4);
     expect(countNonWhite(rgba)).toBeGreaterThan(0);
+  });
+
+  test("rasterizes a clipped region aligned to the whole page", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(fixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    // Page 1 text sits at roughly y 243–338; x 72–470 (pdftotext -bbox).
+    const clip: PageClip = [72, 243, 378, 40];
+    const width = 378;
+    const height = 40;
+    const region = engine.renderRgba(0, width, height, clip);
+
+    expect(region.length).toBe(width * height * 4);
+    expect(countNonWhite(region)).toBeGreaterThan(0);
+
+    // The region must match the same crop of a 1:1 whole-page raster: same
+    // content, same page offset, same device scale.
+    const whole = engine.renderRgba(0, 612, 792);
+    const expected = cropRgba(whole, 612, 72, 243, width, height);
+    let mismatches = 0;
+    for (let i = 0; i < region.length; i += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        if (Math.abs(region[i + channel]! - expected[i + channel]!) > 8) {
+          mismatches += 1;
+          break;
+        }
+      }
+    }
+    expect(mismatches / (width * height)).toBeLessThan(0.02);
+
+    // A blank band below the text renders white: the page offset is applied,
+    // not defaulted to the page origin.
+    const blank = engine.renderRgba(0, width, height, [72, 520, 378, 40]);
+    expect(countNonWhite(blank)).toBe(0);
+  });
+
+  test("keeps a deep-zoom region inside the pixel budget", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(fixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    // The reader sizes region buffers with regionRenderRatio (PERF-17); at
+    // deep zoom the ratio stays at dpr instead of the whole-page cap, so the
+    // region-sized buffer never exceeds the hard pixel budget.
+    const regionWidth = 800;
+    const regionHeight = 600;
+    const ratio = regionRenderRatio(regionWidth, regionHeight, 2);
+    const width = Math.max(1, Math.round(regionWidth * ratio));
+    const height = Math.max(1, Math.round(regionHeight * ratio));
+    expect(width * height).toBeLessThanOrEqual(MAX_RENDER_PIXELS_HARD);
+
+    const rgba = engine.renderRgba(0, width, height, [200, 280, regionWidth, regionHeight]);
+    expect(rgba.length).toBe(width * height * 4);
   });
 
   test("opens range-backed through FPDF_FILEACCESS with a chunked source", async () => {
