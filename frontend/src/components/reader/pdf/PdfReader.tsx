@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { useShortcut } from "@/lib/shortcuts";
 import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfEngine";
@@ -25,6 +33,7 @@ import { usePdfScale } from "./hooks/usePdfScale";
 import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
   READING_ANCHOR_RATIO,
+  setScrollLeft,
   setScrollTop,
   usePdfScrollTracking,
   type PdfAnchorInfo,
@@ -52,6 +61,7 @@ import {
   layoutSlots,
   stepZoomLevel,
   visiblePageRegion,
+  wheelZoomScale,
   type FitZoomMode,
   type Rect,
   type ZoomMode,
@@ -94,11 +104,39 @@ const MAX_ACTIVE_CANVASES = 8;
 const MAX_CONCURRENT_RENDERS = 2;
 
 /**
- * Wheel-delta accumulation that maps onto one zoom step (issue #65): a
- * mouse-wheel notch reports ~±100, a trackpad pinch streams small deltas —
- * accumulating keeps one gesture at one ladder step.
+ * Quiet period that ends a Ctrl+wheel zoom gesture (issue: smooth wheel
+ * zoom): the expensive relayout + sharp redraw commits this long after the
+ * last wheel event. pdf.js uses 400ms; meanwhile the page stays visible
+ * under a CSS-transform preview, so nothing re-renders mid-gesture.
  */
-const WHEEL_STEP_PX = 40;
+const WHEEL_SETTLE_MS = 250;
+
+/**
+ * The transient wheel-gesture preview: an absolute scale (like a custom
+ * zoom level) plus the transform origin — the cursor point, in committed
+ * layout pixels local to the document element. Rendered while the gesture
+ * is active; the committed layout scale does not change until settle.
+ */
+interface WheelPreview {
+  scale: number;
+  originX: number;
+  originY: number;
+}
+
+/**
+ * Everything the gesture needs to commit, kept beside the rendered preview:
+ * the last cursor position (viewport coordinates) and where the document
+ * element sat in scroll content when the gesture began. Layout and scroll
+ * are frozen for the whole gesture — every Ctrl+wheel event is prevented —
+ * so the captured geometry stays valid until settle.
+ */
+interface WheelGesture extends WheelPreview {
+  epoch: number;
+  clientX: number;
+  clientY: number;
+  docLeft: number;
+  docTop: number;
+}
 
 /**
  * Region rasterization (high zoom): rasterize a margin beyond the visible
@@ -765,6 +803,92 @@ export function PdfReader({
   const previousScaleRef = useRef(scale);
   const mountedRef = useRef(false);
 
+  // A zoom or fit-mode change invalidates rendered canvases; the new scale
+  // re-renders the visible pages while evicted slots simply resize their
+  // reservations. Cached bitmaps are keyed by scale, so they are dropped
+  // too.
+  const applyZoom = useCallback(
+    (next: ZoomState) => {
+      setZoom(next);
+      setRenderedPages(new Set());
+      setFailedPages(new Set());
+      bitmapCache.clear();
+    },
+    [bitmapCache],
+  );
+
+  // § Ctrl+wheel gesture (smooth zoom): wheel events only move a transient
+  // preview — a CSS transform on the document element about the cursor —
+  // while the committed layout scale stays put. WHEEL_SETTLE_MS after the
+  // last event the preview commits: the zoom state takes the previewed
+  // scale, the cursor point is scrolled back under the cursor, and the
+  // canvases rasterize once, sharp.
+  const [wheelPreview, setWheelPreview] = useState<WheelPreview | null>(null);
+  // Bumped whenever a zoom change happens outside the gesture (currently
+  // the presentation flip): a gesture started before it is stale and its
+  // settle commit must be discarded, not applied over the new state.
+  const [zoomEpoch, setZoomEpoch] = useState(0);
+  const wheelGestureRef = useRef<WheelGesture | null>(null);
+  const wheelSettleRef = useRef<number | null>(null);
+  // Set at commit, applied by the layout effect below once React has
+  // re-laid out at the new scale (the scroll math needs the new geometry),
+  // then consumed by the re-anchor effect so the commit's own scale change
+  // skips the reading-spot re-anchor — the cursor point supersedes it.
+  const wheelScrollFixupRef = useRef<{
+    originX: number;
+    originY: number;
+    ratio: number;
+    clientX: number;
+    clientY: number;
+    applied: boolean;
+  } | null>(null);
+  const committedScaleRef = useRef(scale);
+  const zoomEpochRef = useRef(zoomEpoch);
+  useEffect(() => {
+    committedScaleRef.current = scale;
+  });
+  useEffect(() => {
+    zoomEpochRef.current = zoomEpoch;
+  });
+
+  const clearWheelSettle = useCallback(() => {
+    if (wheelSettleRef.current !== null) {
+      window.clearTimeout(wheelSettleRef.current);
+      wheelSettleRef.current = null;
+    }
+  }, []);
+
+  // A non-wheel zoom action owns the next move: drop the preview (the same
+  // render applies the action's scale, so the page never snaps back).
+  const cancelWheelGesture = useCallback(() => {
+    clearWheelSettle();
+    wheelGestureRef.current = null;
+    setWheelPreview(null);
+  }, [clearWheelSettle]);
+
+  // Commit the previewed scale. Non-wheel actions running first have
+  // already cancelled the gesture; a gesture overtaken by a zoom-epoch bump
+  // (presentation flip) is discarded instead of committing over it.
+  const commitWheelGesture = useCallback(() => {
+    const gesture = wheelGestureRef.current;
+    if (!gesture) return;
+    clearWheelSettle();
+    wheelGestureRef.current = null;
+    setWheelPreview(null);
+    if (gesture.epoch !== zoomEpochRef.current) return;
+    const committed = committedScaleRef.current;
+    if (gesture.scale === committed) return;
+    wheelScrollFixupRef.current = {
+      originX: gesture.originX,
+      originY: gesture.originY,
+      ratio: gesture.scale / committed,
+      clientX: gesture.clientX,
+      clientY: gesture.clientY,
+      applied: false,
+    };
+    applyZoom({ mode: "custom", level: gesture.scale });
+  }, [applyZoom, clearWheelSettle]);
+
   const reanchorByFraction = useCallback(() => {
     const container = scrollContainerRef?.current ?? null;
     const documentEl = documentRef.current;
@@ -807,6 +931,16 @@ export function PdfReader({
     const scaleChanged = previousScaleRef.current !== scale;
     previousPageRef.current = currentPage;
     previousScaleRef.current = scale;
+
+    // A wheel-gesture commit pins the cursor point through its own scroll
+    // fixup, which supersedes the reading-spot anchor for exactly the
+    // render where the committed scale lands (the tracker refreshes the
+    // anchor from the adjusted scroll position right after).
+    if (scaleChanged) {
+      const wheelFixup = wheelScrollFixupRef.current;
+      wheelScrollFixupRef.current = null;
+      if (wheelFixup?.applied) return;
+    }
 
     if (!mountedRef.current) {
       mountedRef.current = true;
@@ -977,49 +1111,40 @@ export function PdfReader({
     goToPageRef.current = goToPage;
   });
 
-  // A zoom or fit-mode change invalidates rendered canvases; the new scale
-  // re-renders the visible pages while evicted slots simply resize their
-  // reservations. Cached bitmaps are keyed by scale, so they are dropped
-  // too.
-  const applyZoom = useCallback(
-    (next: ZoomState) => {
-      setZoom(next);
-      setRenderedPages(new Set());
-      setFailedPages(new Set());
-      bitmapCache.clear();
-    },
-    [bitmapCache],
-  );
-
   // Manual zoom (preset stepping): the effective scale snaps onto the
   // nearest preset first, so zooming out of a fit mode continues from where
-  // the page actually is (issue #65).
+  // the page actually is (issue #65). A live wheel gesture flushes into the
+  // base scale — the previewed zoom, not the stale committed one.
   const zoomBySteps = useCallback(
     (steps: 1 | -1) => {
-      applyZoom({ mode: "custom", level: stepZoomLevel(scale, steps) });
+      const base = wheelGestureRef.current?.scale ?? scale;
+      cancelWheelGesture();
+      applyZoom({ mode: "custom", level: stepZoomLevel(base, steps) });
     },
-    [applyZoom, scale],
+    [applyZoom, cancelWheelGesture, scale],
   );
-  const resetZoom = useCallback(
-    () => applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL }),
-    [applyZoom],
-  );
+  const resetZoom = useCallback(() => {
+    cancelWheelGesture();
+    applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL });
+  }, [applyZoom, cancelWheelGesture]);
   // Typed/preset zoom: clamp onto the supported range and skip a no-op apply
   // so re-selecting the current level never clears the render set.
   const setCustomZoom = useCallback(
     (next: number) => {
       const level = clampZoom(next);
+      cancelWheelGesture();
       if (zoom.mode === "custom" && Math.abs(zoom.level - level) < 1e-9) return;
       applyZoom({ mode: "custom", level });
     },
-    [applyZoom, zoom.mode, zoom.level],
+    [applyZoom, cancelWheelGesture, zoom.mode, zoom.level],
   );
   const setZoomMode = useCallback(
     (mode: FitZoomMode) => {
       if (zoom.mode === mode) return;
+      cancelWheelGesture();
       applyZoom({ mode, level: zoom.level });
     },
-    [applyZoom, zoom.mode, zoom.level],
+    [applyZoom, cancelWheelGesture, zoom.mode, zoom.level],
   );
 
   // Latest handlers for the keyboard/wheel registrations below (the
@@ -1054,27 +1179,103 @@ export function PdfReader({
 
   // Ctrl + mouse wheel zooms (and trackpad pinch, which Chromium reports as
   // a ctrl-modified wheel): the scroller never zooms the page natively, so
-  // the default must be suppressed. Steps accumulate small deltas so one
-  // pinch gesture maps onto one ladder step.
+  // the default must be suppressed. Each event multiplies the previewed
+  // scale continuously (wheelZoomScale); the page re-renders only once the
+  // gesture settles.
   useEffect(() => {
     const container = scrollContainerRef?.current ?? null;
     if (!container) return;
-    let accumulated = 0;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
+      const documentEl = documentRef.current;
+      if (!documentEl) return;
       event.preventDefault();
-      accumulated += event.deltaY;
-      if (accumulated <= -WHEEL_STEP_PX) {
-        accumulated = 0;
-        zoomByStepsRef.current(1);
-      } else if (accumulated >= WHEEL_STEP_PX) {
-        accumulated = 0;
-        zoomByStepsRef.current(-1);
+
+      let gesture = wheelGestureRef.current;
+      if (gesture && gesture.epoch !== zoomEpochRef.current) gesture = null;
+      if (!gesture) {
+        // First tick of the gesture (or a stale one after a zoom-epoch
+        // bump): capture where the document element sits in scroll content,
+        // untransformed. Both layout and scroll stay put for the whole
+        // gesture, so this geometry stays valid until commit.
+        const docRect = documentEl.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        gesture = {
+          scale: committedScaleRef.current,
+          epoch: zoomEpochRef.current,
+          originX: 0,
+          originY: 0,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          docLeft: docRect.left - containerRect.left + container.scrollLeft,
+          docTop: docRect.top - containerRect.top + container.scrollTop,
+        };
       }
+
+      // The origin follows the cursor: the document point under the pointer
+      // is what the zoom keeps fixed (transform-origin on the document).
+      const containerRect = container.getBoundingClientRect();
+      const originX = event.clientX - containerRect.left + container.scrollLeft - gesture.docLeft;
+      const originY = event.clientY - containerRect.top + container.scrollTop - gesture.docTop;
+      const scale = wheelZoomScale(
+        gesture.scale,
+        event.deltaY,
+        event.deltaMode,
+        container.clientHeight || 1,
+      );
+      gesture = {
+        ...gesture,
+        scale,
+        originX,
+        originY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      wheelGestureRef.current = gesture;
+      setWheelPreview({ scale, originX, originY });
+
+      if (wheelSettleRef.current !== null) window.clearTimeout(wheelSettleRef.current);
+      wheelSettleRef.current = window.setTimeout(commitWheelGesture, WHEEL_SETTLE_MS);
     };
     container.addEventListener("wheel", onWheel, { passive: false });
-    return () => container.removeEventListener("wheel", onWheel);
-  }, [scrollContainerRef]);
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      // Flush rather than discard: a reader torn down (or its scroll
+      // container swapped) mid-gesture still lands the previewed zoom.
+      commitWheelGesture();
+      clearWheelSettle();
+    };
+  }, [scrollContainerRef, commitWheelGesture, clearWheelSettle]);
+
+  // Wheel-gesture commit fixup: runs right after React re-lays out at the
+  // committed scale (before the browser paints), scrolling so the document
+  // point that sat under the cursor still sits there. The document element
+  // is read at its new, untransformed layout here; when the document is
+  // narrower than the viewport the centering margins absorb the horizontal
+  // shift instead (scroll is pinned) — the same partial anchor browsers
+  // show for non-scrollable pages.
+  useLayoutEffect(() => {
+    const fixup = wheelScrollFixupRef.current;
+    const container = scrollContainerRef?.current ?? null;
+    const documentEl = documentRef.current;
+    // One application: the anchor effect consumes the fixup at the render
+    // where the layout scale actually lands (usePdfScale derives the scale
+    // an effect-tick after the zoom state, so that is NOT this render).
+    if (!fixup || fixup.applied || !container || !documentEl) return;
+    const containerRect = container.getBoundingClientRect();
+    const documentRect = documentEl.getBoundingClientRect();
+    const docLeft = documentRect.left - containerRect.left + container.scrollLeft;
+    const docTop = documentRect.top - containerRect.top + container.scrollTop;
+    setScrollTop(
+      container,
+      docTop + fixup.originY * fixup.ratio - (fixup.clientY - containerRect.top),
+    );
+    setScrollLeft(
+      container,
+      docLeft + fixup.originX * fixup.ratio - (fixup.clientX - containerRect.left),
+    );
+    wheelScrollFixupRef.current = { ...fixup, applied: true };
+  });
 
   // Presentation mode is a dynamic page-fit mode (§ issue #65): entering
   // saves the previous zoom state and switches to fit-page (the current
@@ -1091,6 +1292,11 @@ export function PdfReader({
   }>(() => ({ active: presentationMode, saved: null }));
   if (presentationSync.active !== presentationMode) {
     const saved = presentationMode ? zoom : presentationSync.saved;
+    // A pending wheel gesture belongs to whichever mode was on screen: drop
+    // its preview and bump the epoch so the settle commit discards it
+    // instead of applying over the restored fit state.
+    setWheelPreview(null);
+    setZoomEpoch((epoch) => epoch + 1);
     setPresentationSync({ active: presentationMode, saved: presentationMode ? zoom : null });
     setZoom(
       presentationMode ? { mode: "fit-page", level: DEFAULT_ZOOM_LEVEL } : (saved as ZoomState),
@@ -1149,14 +1355,17 @@ export function PdfReader({
   // by the shell; the document instead carries the minimal floating bar
   // (prev/next, the page indicator, exit) so the workflow stays
   // pointer-accessible without leaving the mode (§ issue #65).
+  // The toolbar reports the effective scale live: during a wheel gesture
+  // that is the previewed zoom, before any canvas has re-rendered.
+  const displayScale = wheelPreview?.scale ?? scale;
   const controls = (
     <PdfToolbar
       pageNumber={currentPage}
       pageCount={effectivePageCount}
       zoomMode={zoom.mode}
-      zoomScale={scale}
-      canZoomIn={scale < MAX_ZOOM - 1e-9}
-      canZoomOut={scale > MIN_ZOOM + 1e-9}
+      zoomScale={displayScale}
+      canZoomIn={displayScale < MAX_ZOOM - 1e-9}
+      canZoomOut={displayScale > MIN_ZOOM + 1e-9}
       onPrev={() => goToPage(currentPage - 1)}
       onNext={() => goToPage(currentPage + 1)}
       onZoomIn={() => zoomByStepsRef.current(1)}
@@ -1201,6 +1410,15 @@ export function PdfReader({
         renderPages={canvasPages}
         anchorPage={currentPage}
         scale={scale}
+        previewTransform={
+          wheelPreview
+            ? {
+                ratio: wheelPreview.scale / scale,
+                originX: wheelPreview.originX,
+                originY: wheelPreview.originY,
+              }
+            : undefined
+        }
         pageRegions={pageRegions}
         renderedPages={renderedPages}
         failedPages={failedPages}

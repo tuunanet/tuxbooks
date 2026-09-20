@@ -366,6 +366,16 @@ class MuPdfDocument implements PdfDocument {
   private draining: WorkerClient | null = null;
   /** Resolves when a forced recycle has swapped in the replacement worker. */
   private recyclePromise: Promise<void> | null = null;
+  /**
+   * Whether a failure-escape is armed for the current worker. A Smart Dark
+   * render that THREW means the worker's MuPDF state is suspect (shading
+   * pages corrupt the wasm heap through the recolor device — GeoTopo page
+   * 35), so the first throw swaps the worker; the escape re-arms only after
+   * a successful Smart Dark render. A second failure before any success is
+   * a content incompatibility: swapping per attempt would storm the worker
+   * on every zoom commit that clears the page's failed flag.
+   */
+  private escapedOnSmartFailure = false;
   private destroyed = false;
 
   constructor(client: WorkerClient, numPages: number, reopen: WorkerOpenRequest | null = null) {
@@ -447,29 +457,50 @@ class MuPdfDocument implements PdfDocument {
       return handle.result;
     };
     const result = this.recyclePromise ? this.recyclePromise.then(begin) : begin();
-    const promise = result.then((raw) => {
-      const { bitmap, recovered } = raw as { bitmap: ImageBitmap; recovered?: boolean };
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Canvas 2D context is unavailable");
-      try {
-        // The worker normally returns a bitmap at the canvas's exact backing
-        // size. The whole-page fallback for unlistable pages returns a
-        // smaller crop (its raster is pixel-capped to protect the wasm heap),
-        // so stretch to the backing store rather than blitting 1:1.
-        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      } finally {
-        bitmap.close();
-      }
-      if (smartColors) {
-        this.smartRenders += 1;
-        // A page that had to bypass the display list also bypasses the
-        // recoloring device's normal path and has been observed to corrupt
-        // MuPDF state (renderer crash a raster later). Escape that worker
-        // immediately instead of waiting for the render budget.
-        if (recovered) this.forceRecycle();
-        else this.maybeRecycle();
-      }
-    });
+    const promise = result
+      .then((raw) => {
+        const { bitmap, recovered } = raw as { bitmap: ImageBitmap; recovered?: boolean };
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas 2D context is unavailable");
+        try {
+          // The worker normally returns a bitmap at the canvas's exact backing
+          // size. The whole-page fallback for unlistable pages returns a
+          // smaller crop (its raster is pixel-capped to protect the wasm heap),
+          // so stretch to the backing store rather than blitting 1:1.
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        } finally {
+          bitmap.close();
+        }
+        if (smartColors) {
+          this.smartRenders += 1;
+          // A clean render proves this worker is healthy again: re-arm the
+          // failure escape.
+          this.escapedOnSmartFailure = false;
+          // A page that had to bypass the display list also bypasses the
+          // recoloring device's normal path and has been observed to corrupt
+          // MuPDF state (renderer crash a raster later). Escape that worker
+          // immediately instead of waiting for the render budget.
+          if (recovered) this.forceRecycle();
+          else this.maybeRecycle();
+        }
+      })
+      .catch((error: unknown) => {
+        // A Smart Dark render that THREW is the same corruption signal as a
+        // bypass, just further along: shading pages damage the worker's wasm
+        // heap through the recolor device, and every raster after the throw
+        // runs on the damaged heap. Escape this worker on the first failure
+        // so the page's next attempt (Retry, the next zoom/scroll commit)
+        // lands on a fresh one; a second failure before any success is a
+        // content incompatibility, and swapping per attempt would storm the
+        // worker on every zoom commit that clears the page's failed flag.
+        // Cancellations are the reader superseding its own renders — not a
+        // worker-health signal.
+        if (smartColors && !isRenderingCancelled(error) && !this.escapedOnSmartFailure) {
+          this.escapedOnSmartFailure = true;
+          this.forceRecycle();
+        }
+        throw error;
+      });
     return {
       promise,
       cancel: () => {

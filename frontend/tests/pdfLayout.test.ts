@@ -24,6 +24,7 @@ import {
   stepZoomLevel,
   thumbnailGeometry,
   visiblePageRegion,
+  wheelZoomScale,
   ZOOM_PRESETS,
   type LayoutSlot,
   type PageSize,
@@ -113,6 +114,44 @@ describe("clampZoom", () => {
     expect(clampZoom(0)).toBe(1);
     expect(clampZoom(Number.NaN)).toBe(1);
     expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+});
+
+describe("wheelZoomScale", () => {
+  it("multiplies by 1.2 per standard 100px notch, in and out", () => {
+    expect(wheelZoomScale(1, -100, 0)).toBeCloseTo(1.2, 12);
+    expect(wheelZoomScale(1, 100, 0)).toBeCloseTo(1 / 1.2, 12);
+    // Chromium often reports ~±120 per notch; the formula is continuous.
+    expect(wheelZoomScale(1, -120, 0)).toBeCloseTo(1.2 ** 1.2, 12);
+  });
+
+  it("follows small trackpad deltas continuously", () => {
+    expect(wheelZoomScale(1, -10, 0)).toBeCloseTo(1.2 ** 0.1, 12);
+    expect(wheelZoomScale(1, -5, 0)).toBeCloseTo(1.2 ** 0.05, 12);
+  });
+
+  it("normalizes line and page delta modes first", () => {
+    // deltaMode 1 (lines): 5 lines × 16px = 80px.
+    expect(wheelZoomScale(1, -5, 1)).toBeCloseTo(1.2 ** 0.8, 12);
+    // deltaMode 2 (pages): a quarter viewport of 800px = 200px.
+    expect(wheelZoomScale(1, -0.25, 2, 800)).toBeCloseTo(1.2 ** 2, 12);
+    // The ±300px cap applies after normalization, not to the raw delta.
+    expect(wheelZoomScale(1, -0.5, 2, 800)).toBeCloseTo(1.2 ** 3, 12);
+  });
+
+  it("caps one event at three notches (300px of delta)", () => {
+    expect(wheelZoomScale(1, -10_000, 0)).toBeCloseTo(1.2 ** 3, 12);
+    expect(wheelZoomScale(1, 50_000, 1)).toBeCloseTo(1.2 ** -3, 12);
+  });
+
+  it("clamps onto the supported zoom range", () => {
+    expect(wheelZoomScale(90, -100, 0)).toBe(MAX_ZOOM);
+    expect(wheelZoomScale(0.13, 100, 0)).toBe(MIN_ZOOM);
+  });
+
+  it("resets an unmeasurable base scale to 100%", () => {
+    expect(wheelZoomScale(0, -100, 0)).toBe(1);
+    expect(wheelZoomScale(Number.NaN, -100, 0)).toBe(1);
   });
 });
 

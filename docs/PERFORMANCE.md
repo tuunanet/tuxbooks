@@ -95,7 +95,8 @@ Re-run the relevant verifications when editing:
   synthetic scrollbar drags on both readers with a rAF frame-interval
   sampler (p50/p95/max frame time and the dropped-frame share over
   16.7/32/50 ms), interaction latency for the reader's real interaction
-  patterns (PDF rapid page turns, zoom steps, large-document scroll jumps;
+  patterns (PDF rapid page turns, zoom steps, Ctrl+wheel gesture settle
+  (last event → sharp raster), large-document scroll jumps;
   EPUB chapter changes), first-render latency (launch → first rendered
   page), and live canvas memory (PERF-4). The PDF-open timeline
   (PERF-14) extends first-render measurement: the reader element carries
