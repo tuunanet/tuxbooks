@@ -1,0 +1,4 @@
+[submodule "vendor/papers"]
+	path = vendor/papers
+	url = https://github.com/tuxbooks/papers
+	branch = tuxbooks
