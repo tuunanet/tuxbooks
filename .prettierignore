@@ -22,3 +22,10 @@ sidecar/fuzz
 # skills-lock.json. Reformatting them desyncs the lock and diverges from
 # upstream, so keep the checked-in copies byte-stable. See AGENTS.md.
 .agents/skills
+
+# Beads state (written by bd): tracked so teammates can read the tracker, but
+# the bytes belong to bd. Reformatting config.yaml fights bd's writer, and
+# export/audit JSONL is machine output.
+.beads/config.yaml
+.beads/issues.jsonl
+.beads/interactions.jsonl

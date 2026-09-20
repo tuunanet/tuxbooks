@@ -59,6 +59,15 @@ Used by `/wayfinder`. The map is one issue; tickets are its child issues.
 
 ## Sync and commit discipline
 
-Issues live in a local Dolt DB; sync rides `refs/dolt/data` on the git remote,
-and `.beads/issues.jsonl` is a passive export. Do not commit or push bd state
-unless the active profile or the user asks.
+Issues live in a local Dolt DB; branch-aware sync rides `refs/dolt/data` on the
+git remote (`bd dolt push` / `bd dolt pull`). Two files are tracked so a plain
+clone can read the tracker: `.beads/issues.jsonl` (the export) and
+`.beads/interactions.jsonl` (the audit log). Commit both alongside the work
+they describe.
+
+`.beads/config.yaml` enables `export.auto` and `export.git-add`: bd refreshes
+the export and stages it for the next commit. Run
+`bd export -o .beads/issues.jsonl` if it looks stale.
+
+Database files, locks, and credentials stay local; the nested
+`.beads/.gitignore` excludes them.
