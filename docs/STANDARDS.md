@@ -50,6 +50,13 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   the preload API) and the two engine seams
   (`lib/epub/readiumEngine.ts`, `lib/pdf/pdfEngine.ts`) —
   [ARCHITECTURE.md](ARCHITECTURE.md).
+- Only the PDF engine adapters under `frontend/src/lib/pdf/` import an
+  engine package (`mupdf`, `@embedpdf/pdfium`), its worker module, or its
+  WASM URL (`virtual:mupdf-wasm-url`, `virtual:pdfium-wasm-url`). Reader
+  components depend on the seam's re-exported types and helpers, never on
+  an engine directly. ESLint `no-restricted-imports` enforces this (ADR 0002,
+  `tuxbooks-koe.10`); add a new engine package to the rule when the engine
+  changes.
 
 ## Dependencies
 
