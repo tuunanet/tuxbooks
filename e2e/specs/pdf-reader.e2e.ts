@@ -104,6 +104,49 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // Smooth Ctrl+wheel zoom: while the wheel turns, the scale only PREVIEWS —
+  // a CSS transform on the document element with the toolbar tracking it
+  // live, no canvas re-render — and the sharp raster commits once the wheel
+  // settles. Deterministic DOM contract; no timing assertions.
+  test("previews Ctrl+wheel zoom and commits it after the wheel settles", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    const canvas = firstPdfCanvas(page);
+    await canvas.waitFor({ state: "attached", timeout: 30000 });
+    const input = page.getByTestId("pdf-zoom-input");
+    const widthBefore = Number(await canvas.getAttribute("width"));
+    const percentBefore = await input.inputValue();
+
+    // Gesture over the page surface: one notch in.
+    const box = await page.getByTestId("reader-content").boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -120);
+
+    // The preview is visible immediately: the toolbar percentage moved off
+    // the fit value, the document element carries the transform, and no
+    // canvas re-render happened (the backing store keeps its fit geometry).
+    await expect(input).not.toHaveValue(percentBefore);
+    await expect
+      .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.transform))
+      .toContain("scale(");
+    expect(Number(await canvas.getAttribute("width"))).toBe(widthBefore);
+
+    // Settle: the transform clears and the page rasterizes sharp at the
+    // previewed scale.
+    await page.keyboard.up("Control");
+    await expect
+      .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.transform), {
+        timeout: 30000,
+      })
+      .toBe("");
+    await expect
+      .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
+      .toBeGreaterThan(widthBefore);
+    expect(await canvasIsNonBlank(page, 1)).toBe(true);
+
+    await returnToLibrary(page);
+  });
+
   // Viewport clipping above the whole-page budget (deep zoom): the canvas
   // rasterizes only the visible region at device resolution, so it stays
   // sharp and never allocates a page-sized buffer. Deterministic DOM

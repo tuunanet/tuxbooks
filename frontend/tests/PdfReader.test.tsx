@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState, type RefObject } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 vi.mock("@/lib/pdf/pdfEngine", async () => {
@@ -1716,14 +1716,28 @@ describe("PdfReader text layer and highlights", () => {
 
 describe("PdfReader zoom modes (issue #65)", () => {
   async function renderZoomableReader(container: HTMLElement) {
-    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
       get_reading_progress: null,
       save_reading_progress: null,
     });
-    renderPdfReader({ scrollContainerRef: { current: container } });
+    const view = renderPdfReader({ scrollContainerRef: { current: container } });
     await screen.findByTestId("pdf-canvas");
+    return { doc, view };
   }
+
+  /** Real ~WHEEL_SETTLE_MS wait so the trailing commit timer fires. */
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+
+  /** Canvas width within a pixel (canvases floor to whole device pixels). */
+  const expectCanvasWidthNear = (expected: number) =>
+    expect(
+      Math.abs(Number(screen.getByTestId("pdf-canvas").getAttribute("width")) - expected),
+    ).toBeLessThan(1);
 
   it("resets to 100% with Ctrl+0 after manual zooming", async () => {
     await renderZoomableReader(document.createElement("div"));
@@ -1817,23 +1831,137 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
   });
 
-  it("zooms with Ctrl + mouse wheel (and trackpad pinch)", async () => {
+  it("zooms continuously with Ctrl + wheel: live preview, sharp redraw after the wheel settles", async () => {
+    const container = document.createElement("div");
+    const { doc } = await renderZoomableReader(container);
+
+    // One notch previews ×1.2 immediately in the toolbar — no preset snap.
+    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 300 });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("120");
+
+    // The gesture is a CSS transform about the cursor; nothing re-renders.
+    const documentEl = screen.getByTestId("pdf-document");
+    expect(documentEl).toHaveStyle({ transform: "scale(1.2)", transformOrigin: "300px 300px" });
+    expect(doc.scales).not.toContain(1.2);
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "612");
+
+    // Trackpad deltas keep multiplying the preview continuously.
+    fireEvent.wheel(container, { deltaY: -30, ctrlKey: true, clientX: 300, clientY: 300 });
+    expect(Number((screen.getByTestId("pdf-zoom-input") as HTMLInputElement).value)).toBeCloseTo(
+      100 * 1.2 ** 1.3,
+      1,
+    );
+
+    // 250ms after the last event the scale commits and the page rasterizes
+    // sharp at the previewed scale; the preview transform is gone.
+    await settle();
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("126.7");
+    await waitFor(() => expectCanvasWidthNear(612 * 1.2 ** 1.3));
+    expect(doc.scales.some((scale) => Math.abs(scale - 1.2 ** 1.3) < 1e-9)).toBe(true);
+    expect(documentEl.style.transform).toBe("");
+
+    // The committed zoom is the base for the keyboard presets (closest next).
+    fireEvent.keyDown(window, { key: "-" });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+
+    // Plain wheel events still scroll; they never zoom.
+    fireEvent.wheel(container, { deltaY: -120 });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+  });
+
+  it("caps one wheel event at three notches and clamps to the zoom bounds", async () => {
     const container = document.createElement("div");
     await renderZoomableReader(container);
 
-    // Small deltas accumulate onto one step: two sub-threshold gestures
-    // zoom once, a single larger one zooms immediately.
-    fireEvent.wheel(container, { deltaY: -30, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
-    fireEvent.wheel(container, { deltaY: -30, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+    // A huge single event moves at most 300px of delta: 1.2³.
+    fireEvent.wheel(container, { deltaY: -50_000, ctrlKey: true, clientX: 0, clientY: 0 });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("172.8");
+    await settle();
 
-    fireEvent.wheel(container, { deltaY: 120, ctrlKey: true });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
+    // At the 10000% ceiling the wheel cannot push further.
+    const input = screen.getByTestId("pdf-zoom-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "99999{Enter}");
+    expect(input).toHaveValue("10000");
+    fireEvent.wheel(container, { deltaY: -500, ctrlKey: true, clientX: 0, clientY: 0 });
+    expect(input).toHaveValue("10000");
+    await settle();
+    expect(input).toHaveValue("10000");
+  });
 
-    // Plain wheel events scroll; they never zoom.
-    fireEvent.wheel(container, { deltaY: -120 });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
+  it("multiplies the derived fit scale on the first wheel tick out of a fit mode", async () => {
+    const container = document.createElement("div");
+    const { doc } = await renderZoomableReader(container);
+
+    // 1224px content area fits the 612pt reference page at 2× (200%).
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
+
+    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 10, clientY: 10 });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("240");
+    await settle();
+    expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
+    await waitFor(() => expectCanvasWidthNear(612 * 2.4));
+    expect(doc.scales).toContain(2.4);
+  });
+
+  it("flushes a pending wheel gesture immediately when another zoom action runs", async () => {
+    const container = document.createElement("div");
+    const { doc } = await renderZoomableReader(container);
+
+    // Two ticks preview 144%; the toolbar "+" steps from that preview base.
+    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
+    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("144");
+
+    fireEvent.keyDown(window, { key: "+" });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
+    await waitFor(() => expectCanvasWidthNear(612 * 1.5));
+    expect(screen.getByTestId("pdf-document").style.transform).toBe("");
+
+    // The abandoned settle timer must not fire a second commit afterwards.
+    const scalesBefore = doc.scales.length;
+    await settle();
+    expect(doc.scales.length).toBe(scalesBefore);
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
+  });
+
+  it("keeps the point under the cursor fixed when the wheel gesture commits", async () => {
+    const container = document.createElement("div");
+    await renderZoomableReader(container);
+    stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    scrollTo(container, 1000);
+
+    // Cursor 200px into the stubbed viewport while scrolled to 1000: the
+    // document point under the cursor sits at content y 1200 and x 200.
+    // The commit must land those at ×1.2 back under the cursor — absolute
+    // scrollTop 1200·1.2 − 200 = 1240 (the stubbed document starts at
+    // content 0), scrollLeft 200·1.2 − 200 = 40.
+    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 200 });
+    await settle();
+
+    expect(container.scrollTop).toBe(1240);
+    expect(container.scrollLeft).toBe(40);
+  });
+
+  it("unmounts mid-gesture through the commit path without errors", async () => {
+    const container = document.createElement("div");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { view } = await renderZoomableReader(container);
+      fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
+      expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("120");
+
+      // Closing the reader before the settle timer must not throw, warn, or
+      // leave the timer to fire against a dead tree.
+      view.unmount();
+      await settle();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

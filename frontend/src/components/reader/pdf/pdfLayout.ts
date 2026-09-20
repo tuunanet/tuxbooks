@@ -217,6 +217,51 @@ export function stepZoomLevel(scale: number, direction: 1 | -1): number {
   return ZOOM_PRESETS[index] as number;
 }
 
+/** One wheel "line" in CSS pixels, for deltaMode 1 (lines). */
+const WHEEL_LINE_HEIGHT_PX = 16;
+
+/**
+ * Wheel delta in CSS pixels: line (deltaMode 1) and page (deltaMode 2)
+ * deltas are normalized, pixel deltas pass through. `pagePx` is the
+ * scrolling container's viewport height. The same convention the axis-lock
+ * wheel hook applies to scrolling, shared here for the Ctrl+wheel zoom
+ * math.
+ */
+export function wheelDeltaPx(deltaY: number, deltaMode: number, pagePx: number): number {
+  if (deltaMode === 1) return deltaY * WHEEL_LINE_HEIGHT_PX;
+  if (deltaMode === 2) return deltaY * (pagePx > 0 ? pagePx : 1);
+  return deltaY;
+}
+
+/** Zoom-per-event cap: one Ctrl+wheel event moves at most 300px of normalized
+ * delta (three Chromium notches), so a free-spinning wheel or a huge
+ * programmatic delta cannot leap across the whole ladder in one tick.
+ */
+const WHEEL_MAX_DELTA_PX = 300;
+
+/**
+ * Continuous wheel zoom (Okular/pdf.js/Evince feel): the scale multiplies by
+ * 1.2 per standard 100px notch and tracks small trackpad deltas
+ * exponentially, instead of snapping onto the preset ladder. A negative
+ * deltaY (wheel up / pinch out) zooms in. Line (deltaMode 1) and page
+ * (deltaMode 2) deltas are normalized to pixels first — the wheel-scale
+ * normalization shared with useAxisLockedWheel, with the viewport height
+ * passed in as `pagePx` — then clamped to ±300px. The result never leaves
+ * the supported zoom range.
+ */
+export function wheelZoomScale(
+  scale: number,
+  deltaY: number,
+  deltaMode: number,
+  pagePx = 1,
+): number {
+  const deltaPx = Math.min(
+    WHEEL_MAX_DELTA_PX,
+    Math.max(-WHEEL_MAX_DELTA_PX, wheelDeltaPx(deltaY, deltaMode, pagePx)),
+  );
+  return clampZoom(scale * 1.2 ** (-deltaPx / 100));
+}
+
 /** Fill the whole document with an estimate derived from one known page. */
 export function estimatePageSizes(
   pageCount: number,

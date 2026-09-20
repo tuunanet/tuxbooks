@@ -18,6 +18,11 @@ export function setScrollTop(container: HTMLElement, value: number): void {
   container.scrollTop = value;
 }
 
+/** Horizontal counterpart of {@link setScrollTop} (wheel-zoom commit fixup). */
+export function setScrollLeft(container: HTMLElement, value: number): void {
+  container.scrollLeft = value;
+}
+
 /** Where the reading anchor currently is: page plus fraction within it. */
 export interface PdfAnchorInfo {
   page: number;

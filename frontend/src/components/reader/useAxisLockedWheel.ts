@@ -1,13 +1,12 @@
 import { useEffect, type RefObject } from "react";
 
+import { wheelDeltaPx } from "./pdf/pdfLayout";
+
 /**
  * Quiet gap that ends a wheel gesture. Events arriving within this window of
  * each other are one gesture; after it the next event picks its own axis.
  */
 export const AXIS_LOCK_QUIET_MS = 300;
-
-/** One wheel "line" in CSS pixels, for deltaMode 1 (lines). */
-const LINE_HEIGHT_PX = 16;
 
 type Axis = "x" | "y";
 
@@ -32,9 +31,7 @@ function isScrollable(element: HTMLElement): boolean {
 }
 
 function wheelScale(event: WheelEvent, container: HTMLElement): number {
-  if (event.deltaMode === 1) return LINE_HEIGHT_PX;
-  if (event.deltaMode === 2) return container.clientHeight || 1;
-  return 1;
+  return wheelDeltaPx(1, event.deltaMode, container.clientHeight);
 }
 
 /**

@@ -22,6 +22,13 @@ interface PdfDocumentViewProps {
   /** Render scale for the canvases. */
   scale: number;
   /**
+   * Live wheel-zoom gesture preview: the document element carries a CSS
+   * transform scaling it by `ratio` about the cursor point (in committed
+   * layout pixels) until the gesture settles and the scale commits. Purely
+   * visual — nothing inside re-renders.
+   */
+  previewTransform?: { ratio: number; originX: number; originY: number };
+  /**
    * Visible page-local region per page (CSS px). Consulted only by canvases
    * whose whole-page ratio would fall below device resolution; other pages
    * ignore it and render whole.
@@ -87,6 +94,7 @@ export function PdfDocumentView({
   renderPages,
   anchorPage,
   scale,
+  previewTransform,
   pageRegions,
   renderedPages,
   failedPages,
@@ -129,7 +137,16 @@ export function PdfDocumentView({
       <div
         ref={documentRef}
         data-testid="pdf-document"
-        style={{ width: `${documentWidth}px`, filter: themeFilter }}
+        style={{
+          width: `${documentWidth}px`,
+          filter: themeFilter,
+          ...(previewTransform
+            ? {
+                transform: `scale(${previewTransform.ratio})`,
+                transformOrigin: `${previewTransform.originX}px ${previewTransform.originY}px`,
+              }
+            : {}),
+        }}
         className="relative mx-auto flex flex-col items-center"
       >
         {/* Paper-style themes multiply-tint the opaque white pages down to

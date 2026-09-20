@@ -91,6 +91,7 @@ interface BenchReport {
     renderMs: number[];
     pageTurnLatencyMs: number[];
     zoomLatencyMs: number[];
+    wheelSettleMs: number[];
     bigJumpLatencyMs: number[];
     buffers: { page: number; bufferPx: number; maxSide: number }[];
     cacheAfterOscillation: { entries: number; bytes: number } | null;
@@ -123,6 +124,7 @@ const report: BenchReport = {
     renderMs: [],
     pageTurnLatencyMs: [],
     zoomLatencyMs: [],
+    wheelSettleMs: [],
     bigJumpLatencyMs: [],
     buffers: [],
     cacheAfterOscillation: null,
@@ -217,6 +219,7 @@ function appendTrend(): void {
       pageTurnP95: percentile(report.pdf.pageTurnLatencyMs, 0.95),
       zoomP50: percentile(report.pdf.zoomLatencyMs, 0.5),
       zoomP95: percentile(report.pdf.zoomLatencyMs, 0.95),
+      wheelSettleP50: percentile(report.pdf.wheelSettleMs, 0.5),
       bigJumpP50: percentile(report.pdf.bigJumpLatencyMs, 0.5),
       dragP95: report.pdf.drag?.p95 ?? null,
       dragDroppedPct: report.pdf.drag?.pctOver16 ?? null,
@@ -708,6 +711,45 @@ test.describe("reader performance benchmark", () => {
     await zoomSteps("in");
     await zoomSteps("out");
 
+    // Ctrl+wheel gesture settle: the page follows the wheel through a CSS
+    // transform preview; the sharp raster commits WHEEL_SETTLE_MS after the
+    // last event. Samples run after the preset steps so the gesture starts
+    // from a settled layout. Measured: last wheel event → the anchor slot
+    // rasterized at the new scale (settle + first sharp raster).
+    await page.mouse.move(
+      (report.environment.window.width ?? 1280) / 2,
+      (report.environment.window.height ?? 800) / 2,
+    );
+    for (let i = 0; i < 3; i++) {
+      const before = await page.evaluate(() => {
+        const canvas = document.querySelector<HTMLCanvasElement>("[data-testid=pdf-canvas]");
+        return {
+          width: canvas?.getAttribute("width") ?? "",
+          slot: canvas?.closest("[data-pdf-slot]")?.getAttribute("data-pdf-slot") ?? "1",
+        };
+      });
+      const start = Date.now();
+      await page.keyboard.down("Control");
+      for (let tick = 0; tick < 3; tick++) await page.mouse.wheel(0, -120);
+      await page.keyboard.up("Control");
+      await expect
+        .poll(async () => {
+          const state = await page.evaluate((target) => {
+            const slot = document.querySelector(`[data-pdf-slot="${target}"]`);
+            const canvas = slot?.querySelector("canvas");
+            return {
+              rendered: slot?.getAttribute("data-render-state"),
+              width: canvas?.getAttribute("width") ?? "",
+            };
+          }, before.slot);
+          return state.rendered === "rendered" && state.width !== before.width;
+        })
+        .toBe(true);
+      report.pdf.wheelSettleMs.push(Date.now() - start);
+    }
+    // Leave the big-jump walk at a comparable zoom to previous runs.
+    await page.keyboard.press("Control+0");
+
     // Large-document navigation: long scroll jumps across a third of the
     // document — the virtualization + eviction path under displacement.
     const jumpTargets = [
@@ -730,6 +772,9 @@ test.describe("reader performance benchmark", () => {
       `[bench] ${summarize("pdf page-turn latency", frameStats(report.pdf.pageTurnLatencyMs))}`,
     );
     console.log(`[bench] ${summarize("pdf zoom latency", frameStats(report.pdf.zoomLatencyMs))}`);
+    console.log(
+      `[bench] wheel settle ms: ${report.pdf.wheelSettleMs.map((ms) => ms.toFixed(0)).join(", ")}`,
+    );
     console.log(
       `[bench] ${summarize("pdf big-jump nav latency", frameStats(report.pdf.bigJumpLatencyMs))}`,
     );
