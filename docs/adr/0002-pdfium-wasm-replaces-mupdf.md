@@ -1,6 +1,7 @@
 # ADR 0002: PDFium-WASM replaces MuPDF as the PDF engine
 
-Status: proposed, gated on the Phase 0 spike
+Status: accepted
+Gated on: Phase 0 spike `tuxbooks-koe.2` (pass) and the fidelity oracle `tuxbooks-koe.3`
 Date: 2026-09-20
 Decides: the PDF engine used by the reader
 Relates to: ADR 0003, `docs/PDF-VIEW.md`
