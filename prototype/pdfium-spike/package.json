@@ -1,0 +1,15 @@
+{
+  "name": "pdfium-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway Phase 0 spike: PDFium-WASM render, budget, and API capability (tuxbooks-koe.2). Never merged.",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@embedpdf/pdfium": "2.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright-core": "1.63.0"
+  }
+}

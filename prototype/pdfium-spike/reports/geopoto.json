@@ -1,0 +1,179 @@
+{
+  "label": "GeoTopo.pdf (117pp)",
+  "pdfUrl": "http://127.0.0.1:38845/book.pdf",
+  "fileBytes": 5321132,
+  "wasm": {
+    "initMs": 27.100000023841858,
+    "wasmBytes": 4633788
+  },
+  "open": {
+    "ms": 64.40000003576279,
+    "pageCount": 117,
+    "page0": {
+      "width": 595.2760009765625,
+      "height": 841.8900146484375
+    }
+  },
+  "firstPaint": {
+    "firstRenderMs": 99,
+    "firstPaintMs": 190.50000005960464
+  },
+  "range": {
+    "requests": 189,
+    "bytes": 687386,
+    "maxRequestedEnd": 5321132,
+    "ranges": [
+      {
+        "position": 0,
+        "bytes": 4
+      },
+      {
+        "position": 5,
+        "bytes": 512
+      },
+      {
+        "position": 5320612,
+        "bytes": 512
+      },
+      {
+        "position": 5321124,
+        "bytes": 8
+      },
+      {
+        "position": 5309997,
+        "bytes": 512
+      },
+      {
+        "position": 5321090,
+        "bytes": 42
+      },
+      {
+        "position": 5310217,
+        "bytes": 10873
+      },
+      {
+        "position": 5308909,
+        "bytes": 512
+      },
+      {
+        "position": 5309979,
+        "bytes": 512
+      },
+      {
+        "position": 5309004,
+        "bytes": 975
+      },
+      {
+        "position": 5296213,
+        "bytes": 512
+      },
+      {
+        "position": 5299409,
+        "bytes": 512
+      },
+      {
+        "position": 5296309,
+        "bytes": 3100
+      },
+      {
+        "position": 38790,
+        "bytes": 512
+      },
+      {
+        "position": 41125,
+        "bytes": 512
+      },
+      {
+        "position": 38883,
+        "bytes": 2242
+      }
+    ],
+    "wholeFileCrossed": false
+  },
+  "renders": {
+    "whole1x": {
+      "ms": 17.200000047683716,
+      "width": 595,
+      "height": 842,
+      "bytes": 2003960
+    },
+    "wholeReferenceFitWidth": {
+      "scale": 6.450789203160217,
+      "ms": 63.19999998807907,
+      "width": 3840,
+      "height": 5431,
+      "bytes": 83420160
+    },
+    "regionReferenceDpr1": {
+      "scale": 6.450789203160217,
+      "ms": 8.699999988079071,
+      "width": 3840,
+      "height": 2160,
+      "bytes": 33177600
+    },
+    "regionReferenceDpr2": {
+      "scale": 12.901578406320434,
+      "ms": 27,
+      "width": 7680,
+      "height": 4320,
+      "bytes": 132710400
+    }
+  },
+  "wholePageRaster": {
+    "n": 20,
+    "p50": 2.699999988079071,
+    "p95": 10,
+    "max": 10
+  },
+  "referenceRegionRasterDpr2": {
+    "n": 12,
+    "p50": 13.899999976158142,
+    "p95": 71.20000004768372,
+    "max": 71.20000004768372
+  },
+  "text": {
+    "chars": 86,
+    "written": 87,
+    "sample": "Einführung in die\r\nGeometrie und Topologie\r\n0. Auflage, 31. Dezember 2016 Martin Thoma",
+    "empty": false
+  },
+  "search": {
+    "needle": "Geometrie",
+    "found": true,
+    "matchesOnPage": 9,
+    "ms": 0.5,
+    "pageIndex": 0
+  },
+  "outline": {
+    "present": true,
+    "count": 11,
+    "titles": [
+      "1 Topologische Grundbegriffe",
+      "1.1 Topologische Räume",
+      "1.2 Metrische Räume",
+      "1.3 Stetigkeit",
+      "1.4 Zusammenhang",
+      "1.5 Kompaktheit",
+      "1.6 Wege und Knoten",
+      "Übungsaufgaben"
+    ]
+  },
+  "colorScheme": {
+    "ms": 2.899999976158142,
+    "status": 2,
+    "continued": null,
+    "nonWhitePixels": 3552
+  },
+  "package": {
+    "name": "@embedpdf/pdfium",
+    "version": "2.15.0",
+    "license": "MIT",
+    "wasmBytes": 4633788,
+    "workerBundleBytes": 288061,
+    "note": "browser export condition (dist/index.browser.js) bundled as a classic Web Worker"
+  },
+  "server": {
+    "requests": 189,
+    "bytes": 687386
+  }
+}

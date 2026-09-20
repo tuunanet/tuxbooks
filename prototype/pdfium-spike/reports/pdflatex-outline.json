@@ -1,0 +1,171 @@
+{
+  "label": "pdflatex-outline.pdf",
+  "pdfUrl": "http://127.0.0.1:35239/book.pdf",
+  "fileBytes": 48722,
+  "wasm": {
+    "initMs": 24,
+    "wasmBytes": 4633788
+  },
+  "open": {
+    "ms": 43.69999998807907,
+    "pageCount": 4,
+    "page0": {
+      "width": 595.2760009765625,
+      "height": 841.8900146484375
+    }
+  },
+  "firstPaint": {
+    "firstRenderMs": 100.89999997615814,
+    "firstPaintMs": 168.5999999642372
+  },
+  "range": {
+    "requests": 37,
+    "bytes": 58801,
+    "maxRequestedEnd": 48722,
+    "ranges": [
+      {
+        "position": 0,
+        "bytes": 4
+      },
+      {
+        "position": 5,
+        "bytes": 512
+      },
+      {
+        "position": 48202,
+        "bytes": 512
+      },
+      {
+        "position": 48714,
+        "bytes": 8
+      },
+      {
+        "position": 48270,
+        "bytes": 452
+      },
+      {
+        "position": 48480,
+        "bytes": 202
+      },
+      {
+        "position": 45916,
+        "bytes": 512
+      },
+      {
+        "position": 48252,
+        "bytes": 470
+      },
+      {
+        "position": 46008,
+        "bytes": 2244
+      },
+      {
+        "position": 15,
+        "bytes": 512
+      },
+      {
+        "position": 77,
+        "bytes": 181
+      },
+      {
+        "position": 15137,
+        "bytes": 512
+      },
+      {
+        "position": 25237,
+        "bytes": 512
+      },
+      {
+        "position": 15238,
+        "bytes": 9999
+      },
+      {
+        "position": 4103,
+        "bytes": 512
+      },
+      {
+        "position": 15119,
+        "bytes": 512
+      }
+    ],
+    "wholeFileCrossed": true
+  },
+  "renders": {
+    "whole1x": {
+      "ms": 38.5,
+      "width": 595,
+      "height": 842,
+      "bytes": 2003960
+    },
+    "wholeReferenceFitWidth": {
+      "scale": 6.450789203160217,
+      "ms": 3.600000023841858,
+      "width": 3840,
+      "height": 5431,
+      "bytes": 83420160
+    },
+    "regionReferenceDpr1": {
+      "scale": 6.450789203160217,
+      "ms": 1.399999976158142,
+      "width": 3840,
+      "height": 2160,
+      "bytes": 33177600
+    },
+    "regionReferenceDpr2": {
+      "scale": 12.901578406320434,
+      "ms": 2.099999964237213,
+      "width": 7680,
+      "height": 4320,
+      "bytes": 132710400
+    }
+  },
+  "wholePageRaster": {
+    "n": 4,
+    "p50": 2.699999988079071,
+    "p95": 2.899999976158142,
+    "max": 2.899999976158142
+  },
+  "referenceRegionRasterDpr2": {
+    "n": 4,
+    "p50": 26.400000035762787,
+    "p95": 29.80000001192093,
+    "max": 29.80000001192093
+  },
+  "text": {
+    "chars": 92,
+    "written": 93,
+    "sample": "Contents\r\n1 Foo 2\r\n2 Bar 2\r\n3 Baz 2\r\n4 Foo 2\r\n5 Bar 3\r\n6 Baz 3\r\n7 Foo 3\r\n8 Bar 4\r\n9 Baz 4\r\n1",
+    "empty": false
+  },
+  "search": {
+    "needle": "Bar",
+    "found": true,
+    "matchesOnPage": 3,
+    "ms": 0.3999999761581421,
+    "pageIndex": 0
+  },
+  "outline": {
+    "present": true,
+    "count": 9,
+    "titles": ["Foo", "Bar", "Baz", "Foo", "Bar", "Baz", "Foo", "Bar"]
+  },
+  "colorScheme": {
+    "ms": 3.100000023841858,
+    "status": 2,
+    "continued": null,
+    "nonWhitePixels": 1742,
+    "pageIndex": 3
+  },
+  "package": {
+    "name": "@embedpdf/pdfium",
+    "version": "2.15.0",
+    "license": "MIT",
+    "wasmBytes": 4633788,
+    "workerBundleBytes": 288152,
+    "note": "browser export condition (dist/index.browser.js) bundled as a classic Web Worker"
+  },
+  "server": {
+    "requests": 37,
+    "bytes": 58801
+  }
+}

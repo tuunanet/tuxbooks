@@ -1,0 +1,179 @@
+{
+  "label": "ai-engineering.pdf (991pp)",
+  "pdfUrl": "http://127.0.0.1:37965/book.pdf",
+  "fileBytes": 31293058,
+  "wasm": {
+    "initMs": 25.599999964237213,
+    "wasmBytes": 4633788
+  },
+  "open": {
+    "ms": 120.80000001192093,
+    "pageCount": 991,
+    "page0": {
+      "width": 612,
+      "height": 792
+    }
+  },
+  "firstPaint": {
+    "firstRenderMs": 79.5,
+    "firstPaintMs": 225.89999997615814
+  },
+  "range": {
+    "requests": 222,
+    "bytes": 2036782,
+    "maxRequestedEnd": 31293058,
+    "ranges": [
+      {
+        "position": 0,
+        "bytes": 4
+      },
+      {
+        "position": 5,
+        "bytes": 512
+      },
+      {
+        "position": 31292538,
+        "bytes": 512
+      },
+      {
+        "position": 31293050,
+        "bytes": 8
+      },
+      {
+        "position": 31029640,
+        "bytes": 512
+      },
+      {
+        "position": 31292913,
+        "bytes": 145
+      },
+      {
+        "position": 31029640,
+        "bytes": 512
+      },
+      {
+        "position": 31029653,
+        "bytes": 20480
+      },
+      {
+        "position": 31050133,
+        "bytes": 20480
+      },
+      {
+        "position": 31070613,
+        "bytes": 20480
+      },
+      {
+        "position": 31091093,
+        "bytes": 20480
+      },
+      {
+        "position": 31111573,
+        "bytes": 20480
+      },
+      {
+        "position": 31132053,
+        "bytes": 20480
+      },
+      {
+        "position": 31152533,
+        "bytes": 20480
+      },
+      {
+        "position": 31173013,
+        "bytes": 20480
+      },
+      {
+        "position": 31193493,
+        "bytes": 20480
+      }
+    ],
+    "wholeFileCrossed": false
+  },
+  "renders": {
+    "whole1x": {
+      "ms": 48.30000001192093,
+      "width": 612,
+      "height": 792,
+      "bytes": 1938816
+    },
+    "wholeReferenceFitWidth": {
+      "scale": 6.2745098039215685,
+      "ms": 157.30000001192093,
+      "width": 3840,
+      "height": 4969,
+      "bytes": 76323840
+    },
+    "regionReferenceDpr1": {
+      "scale": 6.2745098039215685,
+      "ms": 71.89999997615814,
+      "width": 3840,
+      "height": 2160,
+      "bytes": 33177600
+    },
+    "regionReferenceDpr2": {
+      "scale": 12.549019607843137,
+      "ms": 230.60000002384186,
+      "width": 7680,
+      "height": 4320,
+      "bytes": 132710400
+    }
+  },
+  "wholePageRaster": {
+    "n": 20,
+    "p50": 2.400000035762787,
+    "p95": 28.80000001192093,
+    "max": 28.80000001192093
+  },
+  "referenceRegionRasterDpr2": {
+    "n": 12,
+    "p50": 22.099999964237213,
+    "p95": 225.69999998807907,
+    "max": 225.69999998807907
+  },
+  "text": {
+    "chars": 0,
+    "written": 0,
+    "sample": "",
+    "empty": true
+  },
+  "search": {
+    "needle": "the",
+    "found": true,
+    "matchesOnPage": 3,
+    "ms": 0.6000000238418579,
+    "pageIndex": 1
+  },
+  "outline": {
+    "present": true,
+    "count": 14,
+    "titles": [
+      "Preface",
+      "What This Book Is About",
+      "What This Book Is Not",
+      "Who This Book Is For",
+      "Navigating This Book",
+      "Conventions Used in This Book",
+      "Using Code Examples",
+      "O’Reilly Online Learning"
+    ]
+  },
+  "colorScheme": {
+    "ms": 20.30000001192093,
+    "status": 2,
+    "continued": null,
+    "nonWhitePixels": 6478
+  },
+  "package": {
+    "name": "@embedpdf/pdfium",
+    "version": "2.15.0",
+    "license": "MIT",
+    "wasmBytes": 4633788,
+    "workerBundleBytes": 288061,
+    "note": "browser export condition (dist/index.browser.js) bundled as a classic Web Worker"
+  },
+  "server": {
+    "requests": 222,
+    "bytes": 2036782
+  }
+}
