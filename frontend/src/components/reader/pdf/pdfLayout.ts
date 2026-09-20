@@ -46,13 +46,16 @@ export interface PdfScaleRequest {
  * browser). Presentation mode fits the whole current page inside the
  * measured area (both axes, page-keyed) so any page shape stays fully
  * visible; every other mode is document-wide (page-1 reference) so ordinary
- * navigation never rescales the layout mid-document. Unmeasurable inputs
+ * navigation never rescales the layout mid-document. `spacing` is the Papers
+ * margin reserved on each side of the target (`2 * spacing`); callers pass
+ * the oracle's `spacing` when calibrating against it. Unmeasurable inputs
  * fall back to 1 so callers never render at a zero scale.
  */
 export function computePdfScale(
   request: PdfScaleRequest,
   areaWidth: number,
   viewportHeight: number,
+  spacing = 0,
 ): number {
   if (request.presentationPage) {
     return fitPageScale(
@@ -60,17 +63,18 @@ export function computePdfScale(
       viewportHeight,
       request.presentationPage.width,
       request.presentationPage.height,
+      spacing,
     );
   }
   const reference = request.reference;
   if (!reference) return 1;
   switch (request.mode) {
     case "fit-width":
-      return fitWidthScale(areaWidth, reference.width);
+      return fitWidthScale(areaWidth, reference.width, spacing);
     case "fit-page":
-      return fitPageScale(areaWidth, viewportHeight, reference.width, reference.height);
+      return fitPageScale(areaWidth, viewportHeight, reference.width, reference.height, spacing);
     case "fit-auto":
-      return autoFitScale(areaWidth, viewportHeight, reference.width, reference.height);
+      return autoFitScale(areaWidth, viewportHeight, reference.width, reference.height, spacing);
     case "custom":
       return clampZoom(request.level);
   }
@@ -89,64 +93,76 @@ export const PAGE_GAP_PX = 8;
 
 /**
  * Scale that fits a page of `referencePageWidth` page units into
- * `availableWidth` CSS pixels. Falls back to 1 when either dimension is not
- * measurable (tests, hidden containers) so callers never scale to zero.
+ * `availableWidth` CSS pixels. `spacing` is the margin Papers reserves on
+ * each side (`pps-view.c` `priv->spacing`, subtracted as `2 * spacing` from
+ * the widget width before the ratio), matching `zoom_for_size_fit_width`.
+ * Falls back to 1 when either dimension is not measurable (tests, hidden
+ * containers) so callers never scale to zero.
  */
-export function fitWidthScale(availableWidth: number, referencePageWidth: number): number {
-  if (availableWidth <= 0 || referencePageWidth <= 0) return 1;
-  return availableWidth / referencePageWidth;
+export function fitWidthScale(
+  availableWidth: number,
+  referencePageWidth: number,
+  spacing = 0,
+): number {
+  const targetWidth = availableWidth - 2 * spacing;
+  if (targetWidth <= 0 || referencePageWidth <= 0) return 1;
+  return targetWidth / referencePageWidth;
 }
 
 /**
  * Scale that fits a page of `referencePageHeight` page units into
- * `availableHeight` CSS pixels — the height axis of fit page and Auto Fit.
- * Falls back to 1 when unmeasurable.
+ * `availableHeight` CSS pixels — the height axis of fit page and automatic
+ * fit, `zoom_for_size_fit_height`. Falls back to 1 when unmeasurable.
  */
-export function fitHeightScale(availableHeight: number, referencePageHeight: number): number {
-  if (availableHeight <= 0 || referencePageHeight <= 0) return 1;
-  return availableHeight / referencePageHeight;
+export function fitHeightScale(
+  availableHeight: number,
+  referencePageHeight: number,
+  spacing = 0,
+): number {
+  const targetHeight = availableHeight - 2 * spacing;
+  if (targetHeight <= 0 || referencePageHeight <= 0) return 1;
+  return targetHeight / referencePageHeight;
 }
 
 /**
  * Scale that fits a whole page inside both dimensions at once (Ctrl+1):
- * the binding axis wins. Falls back to 1 when unmeasurable.
+ * the binding axis wins (`zoom_for_size_fit_page`). Falls back to 1 when
+ * unmeasurable.
  */
 export function fitPageScale(
   availableWidth: number,
   availableHeight: number,
   pageWidth: number,
   pageHeight: number,
+  spacing = 0,
 ): number {
   if (pageWidth <= 0 || pageHeight <= 0) return 1;
   return Math.min(
-    fitWidthScale(availableWidth, pageWidth),
-    fitHeightScale(availableHeight, pageHeight),
+    fitWidthScale(availableWidth, pageWidth, spacing),
+    fitHeightScale(availableHeight, pageHeight, spacing),
   );
 }
 
 /**
- * Auto Fit scale (Okular's `ZoomFitAuto` in continuous mode): fit the page
- * width when the area is relatively much wider than the page, otherwise fit
- * the whole page. `AUTO_FIT_ASPECT_RATIO_RELATION` is Okular's 1.25: below
- * its reciprocal the area's aspect differs enough from the page's to prefer
- * width, elsewhere contain. Falls back to 1 when unmeasurable.
+ * Automatic fit (`zoom_for_size_automatic:6759`): fit the width for a
+ * portrait-or-square page, and the lesser of width and height scales for a
+ * landscape page (`doc_height < doc_width`). The oracle fixture
+ * `fit_scales.automatic` is the authority. Falls back to 1 when
+ * unmeasurable.
  */
-export const AUTO_FIT_ASPECT_RATIO_RELATION = 1.25;
-
 export function autoFitScale(
   availableWidth: number,
   availableHeight: number,
   pageWidth: number,
   pageHeight: number,
+  spacing = 0,
 ): number {
   if (pageWidth <= 0 || pageHeight <= 0) return 1;
-  const areaAspect = availableHeight / availableWidth;
-  const pageAspect = pageHeight / pageWidth;
-  const relation = areaAspect / pageAspect;
-  if (relation < 1 / AUTO_FIT_ASPECT_RATIO_RELATION) {
-    return fitWidthScale(availableWidth, pageWidth);
+  const widthScale = fitWidthScale(availableWidth, pageWidth, spacing);
+  if (pageHeight < pageWidth) {
+    return Math.min(widthScale, fitHeightScale(availableHeight, pageHeight, spacing));
   }
-  return fitPageScale(availableWidth, availableHeight, pageWidth, pageHeight);
+  return widthScale;
 }
 
 /**
@@ -274,13 +290,46 @@ export function estimatePageSizes(
   }));
 }
 
-/** Convert page-unit sizes into displayed pixel sizes at a render scale. */
+/**
+ * Papers' integer page sizing (`pps-render-context.c`
+ * `pps_render_context_compute_scaled_size:112`): a scaled page is rounded to
+ * whole pixels with `(int)(points * scale + 0.5)`. Rounding before any scroll
+ * offset is derived is what stops page edges shimmering during a zoom, since
+ * a half-pixel page size changes which pixels the compositor touches.
+ */
+export function scaledPixels(points: number, scale: number): number {
+  return Math.floor(points * scale + 0.5);
+}
+
+/**
+ * Convert page-unit sizes into displayed pixel sizes at a render scale. Each
+ * dimension is rounded to whole pixels ({@link scaledPixels}) so the slots
+ * and the scroll offsets derived from them never carry a sub-pixel
+ * remainder.
+ */
 export function displayedSizes(sizes: PageSize[], scale: number): PageSize[] {
   return sizes.map((size) => ({
     pageNumber: size.pageNumber,
-    width: size.width * scale,
-    height: size.height * scale,
+    width: scaledPixels(size.width, scale),
+    height: scaledPixels(size.height, scale),
   }));
+}
+
+/**
+ * Largest page dimensions in a document, per axis (Papers'
+ * `pps_document_get_max_page_size`). Null for an empty document. The oracle
+ * calibrates the fit formulas against this box, not page 1, so a mixed-size
+ * document's widest and tallest page set the fit reference.
+ */
+export function documentMaxPageSize(sizes: PageSize[]): { width: number; height: number } | null {
+  if (sizes.length === 0) return null;
+  let width = 0;
+  let height = 0;
+  for (const size of sizes) {
+    if (size.width > width) width = size.width;
+    if (size.height > height) height = size.height;
+  }
+  return { width, height };
 }
 
 /**

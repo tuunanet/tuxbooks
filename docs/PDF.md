@@ -197,9 +197,9 @@ The zoom state is `{ mode, level }` — never a bare multiplier:
   reference vs. the content area. Wider pages in mixed documents overflow
   horizontally instead of shrinking the fit reference.
 - **Fit page** (Ctrl+1) — the binding axis wins (min of fit width/height).
-- **Auto Fit** (Ctrl+3) — Okular's aspect-ratio rule: fit the width when the
-  area is relatively much wider than the page, otherwise contain
-  (`autoFitScale`; threshold `AUTO_FIT_ASPECT_RATIO_RELATION`, 1.25).
+- **Auto Fit** (Ctrl+3) — Papers' rule (`zoom_for_size_automatic`): fit the
+  width, except for a landscape page (`height < width`) where the binding of
+  the fit width and fit height scales wins (`autoFitScale`).
 - **Custom** — any typed or preset percentage. The editable input shows the
   effective scale; typing a value (with or without `%`) and pressing Enter,
   or leaving the field, applies it, and an unparseable value reverts. The
