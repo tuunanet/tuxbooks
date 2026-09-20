@@ -1,5 +1,6 @@
 import workerUrl from "./pdfiumWorker?worker&url";
 import wasmUrlRaw from "virtual:pdfium-wasm-url";
+import type { PageClip } from "./pdfiumCore";
 import type { EngineTextLine, PdfDocument, PdfPage, PdfRenderTask } from "./pdfEngineTypes";
 import { WorkerClient } from "./pdfWorkerClient";
 import type { BookFormat } from "@/types/domain";
@@ -10,11 +11,11 @@ import type { BookFormat } from "@/types/domain";
  * Only this module's worker imports the `@embedpdf/pdfium` package, so no
  * reader component touches an engine.
  *
- * Scope of this ticket (`tuxbooks-koe.5`): open, page sizes, whole-page
- * raster, and range-backed open. Region render (`tuxbooks-koe.6`), text
- * (`tuxbooks-koe.7`), outline and search (`tuxbooks-koe.8`), and the dark
- * colour scheme (`tuxbooks-koe.9`) are reserved and fail soft (empty text,
- * no outline, plain raster) so the reader still opens and renders.
+ * Open, page sizes, whole-page raster, range-backed open (`tuxbooks-koe.5`),
+ * and viewport-clipped region render at device resolution (`tuxbooks-koe.6`).
+ * Text (`tuxbooks-koe.7`), outline and search (`tuxbooks-koe.8`), and the
+ * dark colour scheme (`tuxbooks-koe.9`) stay reserved and fail soft (empty
+ * text, no outline, plain raster) so the reader still opens and renders.
  */
 
 /** Configured worker URL; diagnostics for the E2E worker-load assertion. */
@@ -63,12 +64,13 @@ class PdfiumDocument implements PdfDocument {
     }
     return {
       getViewport: ({ scale }) => ({ width: size.width * scale, height: size.height * scale }),
-      render: (options) => this.renderPage(pageNumber, options),
+      render: (options) => this.renderPage(pageNumber, size, options),
     };
   }
 
   private renderPage(
     pageNumber: number,
+    size: { width: number; height: number },
     options: {
       canvas: HTMLCanvasElement;
       viewport: { width: number; height: number };
@@ -78,20 +80,34 @@ class PdfiumDocument implements PdfDocument {
     },
   ): PdfRenderTask {
     this.assertAlive();
-    // Region render is ticket tuxbooks-koe.6; until then a deep-zoom request
-    // must fail loudly rather than paint the wrong pixels.
-    if (options.region) {
-      return {
-        promise: Promise.reject(
-          new Error("PDFium region render is not implemented until tuxbooks-koe.6"),
-        ),
-        cancel: () => {},
-      };
-    }
     const ratio = options.transform ? (options.transform[0] ?? 1) : 1;
-    const width = Math.max(1, Math.floor(options.viewport.width * ratio));
-    const height = Math.max(1, Math.floor(options.viewport.height * ratio));
-    const handle = this.client.requestCancellable("render", { page: pageNumber, width, height });
+    let width: number;
+    let height: number;
+    let clip: PageClip | undefined;
+    if (options.region) {
+      // Region mode: the caller's canvas is region-sized. The viewport is the
+      // full page's CSS size, so CSS pixels convert to page units through the
+      // page-units-per-CSS ratio, exactly as the MuPDF adapter does.
+      width = Math.max(1, Math.round(options.region.width * ratio));
+      height = Math.max(1, Math.round(options.region.height * ratio));
+      const pageUnitsPerCss =
+        size.width > 0 && options.viewport.width > 0 ? size.width / options.viewport.width : 1;
+      clip = [
+        options.region.x * pageUnitsPerCss,
+        options.region.y * pageUnitsPerCss,
+        options.region.width * pageUnitsPerCss,
+        options.region.height * pageUnitsPerCss,
+      ];
+    } else {
+      width = Math.max(1, Math.floor(options.viewport.width * ratio));
+      height = Math.max(1, Math.floor(options.viewport.height * ratio));
+    }
+    const handle = this.client.requestCancellable("render", {
+      page: pageNumber,
+      width,
+      height,
+      clip,
+    });
     const promise = handle.result.then((raw) => {
       const { bitmap } = raw as { bitmap: ImageBitmap };
       const context = options.canvas.getContext("2d");

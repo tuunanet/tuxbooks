@@ -32,6 +32,9 @@ export interface PdfSize {
   height: number;
 }
 
+/** Viewport region in page units: `[left, top, width, height]`. */
+export type PageClip = [number, number, number, number];
+
 export class PdfiumEngine {
   private doc: number | null = null;
   /** Retained WASM-heap copy for an in-memory open; PDFium borrows it. */
@@ -123,8 +126,17 @@ export class PdfiumEngine {
    * Rasterizes one whole page into `width × height` device pixels and
    * returns an RGBA buffer (PDFium's device bitmaps are BGRA). The caller
    * wraps it in an `ImageBitmap` off the main thread.
+   *
+   * With `clip` (region in page units), only that region rasterizes, scaled
+   * so the region fills the region-sized `width × height` bitmap. Deep zoom
+   * then pays for a viewport buffer instead of a page-sized one.
    */
-  renderRgba(index: number, width: number, height: number): Uint8ClampedArray<ArrayBuffer> {
+  renderRgba(
+    index: number,
+    width: number,
+    height: number,
+    clip?: PageClip,
+  ): Uint8ClampedArray<ArrayBuffer> {
     const doc = this.requireDoc();
     const page = this.mod.FPDF_LoadPage(doc, index);
     if (!page) throw new Error(`PDFium: FPDF_LoadPage(${index}) failed`);
@@ -136,28 +148,87 @@ export class PdfiumEngine {
     try {
       // PDFs paint no page background; viewers supply white.
       this.mod.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xffffffff);
-      this.mod.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
-      const buffer = this.mod.FPDFBitmap_GetBuffer(bitmap);
-      const stride = this.mod.FPDFBitmap_GetStride(bitmap);
-      const heap = this.rt.HEAPU8;
-      const rgba = new Uint8ClampedArray(width * height * 4);
-      for (let y = 0; y < height; y += 1) {
-        let source = buffer + y * stride;
-        let target = y * width * 4;
-        for (let x = 0; x < width; x += 1) {
-          rgba[target] = heap[source + 2]!;
-          rgba[target + 1] = heap[source + 1]!;
-          rgba[target + 2] = heap[source]!;
-          rgba[target + 3] = heap[source + 3]!;
-          source += 4;
-          target += 4;
-        }
-      }
-      return rgba;
+      if (clip) this.renderPageRegion(bitmap, page, clip, width, height);
+      else this.mod.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
+      return this.copyBgraToRgba(bitmap, width, height);
     } finally {
       this.mod.FPDFBitmap_Destroy(bitmap);
       this.mod.FPDF_ClosePage(page);
     }
+  }
+
+  /**
+   * Clipped render through `FPDF_RenderPageBitmapWithMatrix`. The matrix maps
+   * page units to the region-sized bitmap (scaling the clip origin to 0,0)
+   * and the clip rect is that bitmap in device coords, so content lands at
+   * the same spot it would occupy on a whole-page raster at the same scale.
+   */
+  private renderPageRegion(
+    bitmap: number,
+    page: number,
+    clip: PageClip,
+    width: number,
+    height: number,
+  ): void {
+    const [left, top, clipWidth, clipHeight] = clip;
+    if (!(clipWidth > 0) || !(clipHeight > 0)) {
+      throw new Error(
+        `PDFium: region render needs a positive size, got ${clipWidth}×${clipHeight}`,
+      );
+    }
+    const scaleX = width / clipWidth;
+    const scaleY = height / clipHeight;
+    const matrix = this.rt.wasmExports.malloc(24);
+    const rect = this.rt.wasmExports.malloc(16);
+    if (!matrix || !rect) {
+      if (matrix) this.rt.wasmExports.free(matrix);
+      if (rect) this.rt.wasmExports.free(rect);
+      throw new Error("PDFium: out of memory for the region transform");
+    }
+    try {
+      const view = new DataView(this.rt.HEAPU8.buffer);
+      // FS_MATRIX [a b c d e f]: scale page units, then shift the clip to 0,0.
+      view.setFloat32(matrix + 0, scaleX, true);
+      view.setFloat32(matrix + 4, 0, true);
+      view.setFloat32(matrix + 8, 0, true);
+      view.setFloat32(matrix + 12, scaleY, true);
+      view.setFloat32(matrix + 16, -left * scaleX, true);
+      view.setFloat32(matrix + 20, -top * scaleY, true);
+      // FS_RECTF clipping is in device coords: the region-sized bitmap.
+      view.setFloat32(rect + 0, 0, true);
+      view.setFloat32(rect + 4, 0, true);
+      view.setFloat32(rect + 8, width, true);
+      view.setFloat32(rect + 12, height, true);
+      this.mod.FPDF_RenderPageBitmapWithMatrix(bitmap, page, matrix, rect, 0);
+    } finally {
+      this.rt.wasmExports.free(matrix);
+      this.rt.wasmExports.free(rect);
+    }
+  }
+
+  /** Copies an RGBA-capable bitmap into a tightly packed RGBA byte array. */
+  private copyBgraToRgba(
+    bitmap: number,
+    width: number,
+    height: number,
+  ): Uint8ClampedArray<ArrayBuffer> {
+    const buffer = this.mod.FPDFBitmap_GetBuffer(bitmap);
+    const stride = this.mod.FPDFBitmap_GetStride(bitmap);
+    const heap = this.rt.HEAPU8;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      let source = buffer + y * stride;
+      let target = y * width * 4;
+      for (let x = 0; x < width; x += 1) {
+        rgba[target] = heap[source + 2]!;
+        rgba[target + 1] = heap[source + 1]!;
+        rgba[target + 2] = heap[source]!;
+        rgba[target + 3] = heap[source + 3]!;
+        source += 4;
+        target += 4;
+      }
+    }
+    return rgba;
   }
 
   /** Closes the document and releases its bytes, keeping the library loaded. */

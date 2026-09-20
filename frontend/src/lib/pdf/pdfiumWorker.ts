@@ -17,7 +17,7 @@
 
 import type { WorkerDiag } from "./pdfWorkerClient";
 import { PdfRangeSource } from "./pdfRangeSource";
-import { PdfiumEngine } from "./pdfiumCore";
+import { PdfiumEngine, type PageClip } from "./pdfiumCore";
 
 type WorkerRequest =
   | { id: number; method: "prewarm"; params: { wasmUrl: string } }
@@ -33,7 +33,11 @@ type WorkerRequest =
       };
     }
   | { id: number; method: "pageSize"; params: { page: number } }
-  | { id: number; method: "render"; params: { page: number; width: number; height: number } };
+  | {
+      id: number;
+      method: "render";
+      params: { page: number; width: number; height: number; clip?: PageClip };
+    };
 
 interface WorkerResponse {
   id: number;
@@ -97,13 +101,15 @@ const methods = {
     page,
     width,
     height,
+    clip,
   }: {
     page: number;
     width: number;
     height: number;
+    clip?: PageClip;
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!engine) throw new Error("no document open");
-    const rgba = engine.renderRgba(page - 1, width, height);
+    const rgba = engine.renderRgba(page - 1, width, height, clip);
     const imageData = new ImageData(rgba, width, height);
     const bitmap = await createImageBitmap(imageData);
     return { width, height, bitmap };
