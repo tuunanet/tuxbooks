@@ -145,13 +145,13 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_file="$(mktemp)"
-          # The "New since" line is specific to 0.0.11; revisit it when the
+          # The "New since" line is specific to 0.0.12; revisit it when the
           # next release is cut.
           cat > "$notes_file" <<EOF
           Development snapshot — TuxBooks is pre-1.0 and in active development.
 
-          New since 0.0.10: continuous Ctrl+wheel zoom in the PDF reader,
-          committed on idle so the page stays sharp.
+          Fixed since 0.0.11: the PDF reader no longer crashes the renderer
+          when zooming over shading-heavy pages in Smart Dark.
 
           Install on Ubuntu/Debian:
 
