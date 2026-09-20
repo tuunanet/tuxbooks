@@ -196,4 +196,60 @@ test.describe("PDF Smart Dark zoom churn", () => {
     expect(await canvasIsNonBlank(page, shown)).toBe(true);
     await expectRendererAlive(page);
   });
+
+  // The shading pages crash the renderer under Ctrl+wheel churn: mupdf.js
+  // wraps the borrowed fz_shade a JS device receives in a wrapper whose
+  // finalizer drops it, so every shading over-dropped and corrupted the WASM
+  // heap. With the thumbnail sidebar open and free-spin zoom over pages 4-7,
+  // the report's book segfaulted the renderer within seconds (exit 139). Needs
+  // the fetched corpus (just fetch-ebooks).
+  test("survives Ctrl+wheel churn over the shading pages under Smart Dark", async ({ page }) => {
+    if (!existsSync(benchPdfFixture)) {
+      test.skip(true, "GeoTopo.pdf not fetched (just fetch-ebooks)");
+    }
+    test.setTimeout(180_000);
+    let crashed = false;
+    page.on("crash", () => {
+      crashed = true;
+    });
+
+    await openInReader(page, "Geometrie und Topologie (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 117", {
+      timeout: 30_000,
+    });
+
+    await page.getByTestId("appearance-trigger").click();
+    await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("pref-theme").getByText("Smart dark", { exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 10_000 });
+
+    await page.getByTestId("reader-sidebar-toggle").click();
+    await expect(page.getByTestId("pdf-thumbnails")).toBeVisible({ timeout: 30_000 });
+
+    const input = page.getByTestId("pdf-zoom-input");
+    for (const pageNumber of [4, 5, 6, 7]) {
+      await scrollToSlot(page, pageNumber);
+      await waitForRendered(page, pageNumber, 30_000);
+
+      // Free-spin in, then out through the region scales, like a fast wheel.
+      await wheelBurst(page, 30, -120);
+      await page.waitForTimeout(400);
+      await wheelBurst(page, 50, 120);
+      await page.waitForTimeout(400);
+
+      // A typed jump to the clamp, then a fast spin out of it.
+      await input.fill("10000");
+      await input.press("Enter");
+      await expect(input).toHaveValue("10000");
+      await waitForRendered(page, await shownPage(page), 60_000);
+      await wheelBurst(page, 45, 120);
+      await page.waitForTimeout(500);
+
+      await expectRendererAlive(page);
+    }
+
+    expect(crashed).toBe(false);
+  });
 });

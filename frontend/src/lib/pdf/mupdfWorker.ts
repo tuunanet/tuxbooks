@@ -207,8 +207,24 @@ async function ensureEngine(wasmUrl: string): Promise<MupdfModule> {
       locateFile: () => wasmUrl,
     };
     mupdf = await import("mupdf");
+    disableBorrowedShadeDrop(mupdf);
   }
   return mupdf;
+}
+
+/**
+ * mupdf.js hands a JS `Device`'s `fillShade` callback a `Shade` wrapper whose
+ * finalizer drops the native pointer, but the C bridge passes that pointer
+ * borrowed (no keep) and `fz_fill_shade` does not take ownership. Letting the
+ * finalizer run over-drops the shading and corrupts the WASM heap, which
+ * crashes the renderer a few renders later (GeoTopo page 3 under Smart Dark:
+ * eight shadings, then a segfault on a later page). Every `Shade` this worker
+ * sees comes from that borrowed dispatch and is owned by MuPDF, so a no-op
+ * drop is correct here. The binding exposes no keep, so neutralizing the
+ * finalizer is the only way to stop the over-drop without dropping shadings.
+ */
+function disableBorrowedShadeDrop(module: MupdfModule): void {
+  (module.Shade as unknown as { _drop: (pointer: number) => void })._drop = () => {};
 }
 
 /**
