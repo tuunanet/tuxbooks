@@ -43,14 +43,34 @@ EOF
   exit 1
 fi
 
+# Retry a command a few times with a short backoff. The image build and the
+# in-container cargo build are the only steps that touch the network, and a
+# registry or crates.io blip must not fail a release: the v0.0.10 publish
+# failed once with "dial tcp [2600:1f18:...]:443: connect: network is
+# unreachable" pulling the pinned image. BuildKit and cargo reuse their
+# caches between attempts, so a retry is cheap.
+retry() {
+  local attempts="$1" delay="$2" attempt=1
+  shift 2
+  until "$@"; do
+    if [ "$attempt" -ge "$attempts" ]; then
+      echo "build-sidecar-release: failed after $attempt attempts: $*" >&2
+      return 1
+    fi
+    echo "build-sidecar-release: attempt $attempt failed, retrying in ${delay}s: $*" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
+
 CARGO_HOME_HOST="${CARGO_HOME:-$HOME/.cargo}"
 mkdir -p "$CARGO_HOME_HOST"
 
-"$ENGINE" build -f "$DOCKERFILE" -t "$IMAGE" "$ROOT/scripts"
+retry 3 5 "$ENGINE" build -f "$DOCKERFILE" -t "$IMAGE" "$ROOT/scripts"
 
 # --user keeps every file cargo writes in the bind-mounted workspace and
 # CARGO_HOME owned by the invoking user, so no root-owned target/ afterward.
-"$ENGINE" run --rm \
+retry 3 5 "$ENGINE" run --rm \
   --user "$(id -u):$(id -g)" \
   -e CARGO_HOME=/cargo \
   -v "$CARGO_HOME_HOST":/cargo \
