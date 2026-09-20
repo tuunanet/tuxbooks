@@ -1,12 +1,14 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  AUTO_FIT_ASPECT_RATIO_RELATION,
   autoFitScale,
   clampOffset,
   clampZoom,
   compensateOffset,
   computePdfScale,
   documentHeight,
+  documentMaxPageSize,
   displayedSizes,
   estimatePageSizes,
   fitHeightScale,
@@ -21,6 +23,7 @@ import {
   PAGE_GAP_PX,
   parseZoomPercent,
   regionCovers,
+  scaledPixels,
   stepZoomLevel,
   thumbnailGeometry,
   visiblePageRegion,
@@ -186,21 +189,24 @@ describe("formatZoomPercent", () => {
 });
 
 describe("autoFitScale", () => {
-  it("contains the page when the area and page aspects are close", () => {
-    // Letter page in a 1224×1584 area: both aspects ≈ 1.29, so fit page (2×).
+  it("fits the width for a portrait page, whatever the area aspect (zoom_for_size_automatic)", () => {
+    // doc_height >= doc_width → automatic is the fit-width scale, so a tall
+    // area does not switch it to contain the way the old Okular rule did.
+    expect(autoFitScale(1000, 1100, 612, 792)).toBeCloseTo(1000 / 612, 10);
     expect(autoFitScale(1224, 1584, 612, 792)).toBe(2);
   });
 
-  it("fits the width when the area is relatively much wider than the page", () => {
-    // areaAspect = 1030/1000 = 1.03, pageAspect = 792/612 ≈ 1.294:
-    // relation ≈ 0.796 < 1/1.25, so the width binds.
-    expect(autoFitScale(1000, 1030, 612, 792)).toBeCloseTo(1000 / 612, 10);
+  it("takes the binding axis for a landscape page", () => {
+    // doc_height < doc_width → MIN(fit width, fit height).
+    expect(autoFitScale(1000, 744, 841.89, 612)).toBeCloseTo(1000 / 841.89, 10);
+    expect(autoFitScale(600, 744, 841.89, 612)).toBeCloseTo(600 / 841.89, 10);
+    expect(autoFitScale(2000, 400, 1000, 500)).toBeCloseTo(0.8, 10);
   });
 
-  it("switches to contain at Okular's aspect threshold", () => {
-    expect(AUTO_FIT_ASPECT_RATIO_RELATION).toBe(1.25);
-    // areaAspect = 1100/1000 = 1.1 → relation ≈ 0.85, above the threshold.
-    expect(autoFitScale(1000, 1100, 612, 792)).toBeCloseTo(fitPageScale(1000, 1100, 612, 792), 10);
+  it("reserves the Papers margin on each side when spacing is given", () => {
+    // target.width = 1024 - 2*12 = 1000, target.height = 768 - 2*12 = 744.
+    expect(autoFitScale(1024, 768, 612, 792, 12)).toBeCloseTo(1000 / 612, 10);
+    expect(autoFitScale(1024, 768, 841.89, 612, 12)).toBeCloseTo(1000 / 841.89, 10);
   });
 
   it("falls back to 1 for degenerate page units", () => {
@@ -292,6 +298,131 @@ describe("computePdfScale", () => {
   });
 });
 
+/**
+ * The committed native oracle (oracle/expected/geometry.json, schema
+ * tuxbooks.papers-oracle/2) is the authority for the port. It records what
+ * the real Papers `PpsView` computes at a 1024x768 viewport with `spacing`
+ * reserved on each side: the three fit scales and the integer page sizes at
+ * the fit-width scale. The formulas here must reproduce both.
+ */
+interface OraclePageSize {
+  index: number;
+  width: number;
+  height: number;
+}
+
+interface OracleDocument {
+  name: string;
+  page_doc_sizes: OraclePageSize[];
+  fit_scales: { fit_width: number; fit_page: number; automatic: number };
+  page_sizes_fit_width: OraclePageSize[];
+}
+
+interface OracleGeometry {
+  schema: string;
+  viewport: { width: number; height: number };
+  spacing: number;
+  documents: OracleDocument[];
+}
+
+// The test runs with the frontend package as cwd (see the other repo-root
+// readers, e.g. tests/security/preloadSurface.test.ts); walk up to the repo
+// root for the committed oracle output.
+const ORACLE: OracleGeometry = JSON.parse(
+  fs.readFileSync(path.resolve(process.cwd(), "..", "oracle", "expected", "geometry.json"), "utf8"),
+) as OracleGeometry;
+
+/** Oracle page sizes as this module's PageSize (1-based page numbers). */
+function oraclePages(entries: OraclePageSize[]): PageSize[] {
+  return entries.map((entry) => ({
+    pageNumber: entry.index + 1,
+    width: entry.width,
+    height: entry.height,
+  }));
+}
+
+describe("Papers fidelity oracle (oracle/expected/geometry.json)", () => {
+  it("carries the expected schema and fixtures", () => {
+    expect(ORACLE.schema).toBe("tuxbooks.papers-oracle/2");
+    expect(ORACLE.documents.length).toBeGreaterThan(0);
+  });
+
+  it("matches the three fit scales on every fixture", () => {
+    for (const doc of ORACLE.documents) {
+      const documentSize = documentMaxPageSize(oraclePages(doc.page_doc_sizes));
+      expect(documentSize, doc.name).not.toBeNull();
+      const base = { reference: documentSize, presentationPage: null };
+      const { width, height } = ORACLE.viewport;
+
+      expect(
+        computePdfScale({ ...base, mode: "fit-width", level: 1 }, width, height, ORACLE.spacing),
+        `${doc.name} fit width`,
+      ).toBeCloseTo(doc.fit_scales.fit_width, 8);
+      expect(
+        computePdfScale({ ...base, mode: "fit-page", level: 1 }, width, height, ORACLE.spacing),
+        `${doc.name} fit page`,
+      ).toBeCloseTo(doc.fit_scales.fit_page, 8);
+      expect(
+        computePdfScale({ ...base, mode: "fit-auto", level: 1 }, width, height, ORACLE.spacing),
+        `${doc.name} automatic`,
+      ).toBeCloseTo(doc.fit_scales.automatic, 8);
+    }
+  });
+
+  it("matches PpsView's whole-pixel page sizes at fit width on every fixture", () => {
+    for (const doc of ORACLE.documents) {
+      const pages = oraclePages(doc.page_doc_sizes);
+      const documentSize = documentMaxPageSize(pages);
+      const scale = computePdfScale(
+        { mode: "fit-width", level: 1, reference: documentSize, presentationPage: null },
+        ORACLE.viewport.width,
+        ORACLE.viewport.height,
+        ORACLE.spacing,
+      );
+      const displayed = displayedSizes(pages, scale);
+      for (const expected of doc.page_sizes_fit_width) {
+        const page = displayed.find((candidate) => candidate.pageNumber === expected.index + 1);
+        expect(page, `${doc.name} page ${expected.index + 1}`).toBeDefined();
+        expect(page?.width, `${doc.name} page ${expected.index + 1} width`).toBe(expected.width);
+        expect(page?.height, `${doc.name} page ${expected.index + 1} height`).toBe(expected.height);
+      }
+    }
+  });
+
+  it("shows no sub-pixel page-size jitter across a zoom sweep", () => {
+    const portrait = ORACLE.documents.find((doc) => doc.name === "portrait");
+    expect(portrait).toBeDefined();
+    const size = portrait?.page_doc_sizes[0];
+    expect(size).toBeDefined();
+    const page: PageSize = { pageNumber: 1, width: size?.width ?? 0, height: size?.height ?? 0 };
+
+    let previousWidth = 0;
+    let rawWasFractional = false;
+    for (let i = 0; i <= 500; i++) {
+      const scale = 0.12 + (i / 500) * (4 - 0.12);
+      if (!Number.isInteger(page.width * scale)) rawWasFractional = true;
+      const [displayed] = displayedSizes([page], scale);
+      expect(displayed).toBeDefined();
+      const width = displayed?.width ?? 0;
+      const height = displayed?.height ?? 0;
+      expect(Number.isInteger(width)).toBe(true);
+      expect(Number.isInteger(height)).toBe(true);
+      expect(width).toBeGreaterThanOrEqual(previousWidth);
+      previousWidth = width;
+    }
+    // The sweep did cross fractional raw products, so the integer sizes
+    // above are the rounding's doing, not a coincidence.
+    expect(rawWasFractional).toBe(true);
+
+    const slots = layoutSlots(displayedSizes([page, { ...page, pageNumber: 2 }], 1.7));
+    for (const slot of slots) {
+      expect(Number.isInteger(slot.top)).toBe(true);
+      expect(Number.isInteger(slot.width)).toBe(true);
+      expect(Number.isInteger(slot.height)).toBe(true);
+    }
+  });
+});
+
 describe("estimatePageSizes", () => {
   it("fills the document with the reference size", () => {
     expect(estimatePageSizes(3, LETTER)).toEqual([
@@ -306,6 +437,19 @@ describe("estimatePageSizes", () => {
   });
 });
 
+describe("scaledPixels", () => {
+  it("rounds points * scale to whole pixels like (int)(points * scale + 0.5)", () => {
+    expect(scaledPixels(612, 2)).toBe(1224);
+    expect(scaledPixels(612, 1.5)).toBe(918);
+    // 612 * (1000/612) = 1000 exactly; a page one point heavier still rounds.
+    expect(scaledPixels(595.276, 1000 / 612)).toBe(973);
+    expect(scaledPixels(841.89, 1000 / 612)).toBe(1376);
+    // The half-up boundary is what removes the sub-pixel remainder.
+    expect(scaledPixels(10, 0.45)).toBe(5);
+    expect(scaledPixels(10, 0.44)).toBe(4);
+  });
+});
+
 describe("displayedSizes", () => {
   it("scales every page by the render scale", () => {
     const scaled = displayedSizes(
@@ -317,6 +461,44 @@ describe("displayedSizes", () => {
     );
     expect(scaled[0]).toEqual({ pageNumber: 1, width: 918, height: 1188 });
     expect(scaled[1]).toEqual({ pageNumber: 2, width: 600, height: 600 });
+  });
+
+  it("rounds every displayed dimension to whole pixels", () => {
+    // Mixed-size pages at the oracle's single-page fit-width scale: the raw
+    // products are fractional, so rounding is observable.
+    const scale = 1000 / 612;
+    const scaled = displayedSizes(
+      sizes([
+        [1, 612, 792],
+        [2, 595.276, 841.89],
+        [3, 419.528, 595.276],
+      ]),
+      scale,
+    );
+    expect(scaled).toEqual([
+      { pageNumber: 1, width: 1000, height: 1294 },
+      { pageNumber: 2, width: 973, height: 1376 },
+      { pageNumber: 3, width: 686, height: 973 },
+    ]);
+  });
+});
+
+describe("documentMaxPageSize", () => {
+  it("takes each axis' maximum independently (pps_document_get_max_page_size)", () => {
+    expect(
+      documentMaxPageSize(
+        sizes([
+          [1, 612, 792],
+          [2, 595.276, 841.89],
+          [3, 612, 1008],
+          [4, 419.528, 595.276],
+        ]),
+      ),
+    ).toEqual({ width: 612, height: 1008 });
+  });
+
+  it("returns null for an empty document", () => {
+    expect(documentMaxPageSize([])).toBeNull();
   });
 });
 

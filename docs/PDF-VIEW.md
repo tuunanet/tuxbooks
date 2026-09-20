@@ -44,7 +44,9 @@ From `pps-view.c`:
 - fit width is `target_width / doc_width` (`zoom_for_size_fit_width:6726`);
 - fit height is `target_height / doc_height` (`zoom_for_size_fit_height:6735`);
 - fit page is `MIN(width_scale, height_scale)` (`zoom_for_size_fit_page:6744`);
-- automatic is `zoom_for_size_automatic` (`:6759`). **Verify** the exact rule.
+- automatic is `zoom_for_size_automatic` (`:6759`): fit the width, except for
+  a landscape page (`doc_height < doc_width`), where the lesser of the width
+  and height scales wins. Verified against the oracle fixtures.
 
 Mode dispatch is `pps_view_zoom_for_size` (`:6944`) with continuous and
 dual-page variants (`:6783` onward), called from `pps_view_size_allocate`
@@ -157,7 +159,6 @@ Papers'. The comparison matters only for the oracle fixtures.
 
 ## Open items for the Phase 0 spike
 
-- The exact automatic-fit rule (`zoom_for_size_automatic`).
 - Whether `FPDF_RenderPageBitmapWithMatrix` covers region rendering as cleanly as
   MuPDF's clip.
 - The comparison tolerance for the oracle.
