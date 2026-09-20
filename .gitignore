@@ -71,13 +71,13 @@ tests/fixtures/ai-engineering.pdf
 # Git worktrees (superpowers workflow)
 .worktrees/
 
-# Beads / Dolt files (added by bd init)
+# Beads: the Dolt database, credentials, and runtime state stay local.
+# `.beads/issues.jsonl` stays tracked so anyone can read the issues from a
+# plain clone without a Dolt database (docs/agents/issue-tracker.md); the
+# nested `.beads/.gitignore` keeps the database and runtime state out.
 .dolt/
 .beads-credential-key
 .beads/proxieddb/
-
-# Beads passive JSONL export (regenerated from the Dolt DB; export.auto=true)
-.beads/issues.jsonl
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
