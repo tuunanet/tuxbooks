@@ -27,8 +27,7 @@ source kept as a pinned reference, and graft the result onto the existing
 TuxBooks reader architecture.
 
 Keep the current reader machinery: geometry slots, render policy and byte
-budgets, bitmap cache, scroll tracking, progress, and the engine seam from ADR
-0002.
+budgets, bitmap cache, scroll tracking, progress, and the engine seam from ADR 0002.
 
 Port only the mathematics and policies, taken from `pps-view.c`:
 

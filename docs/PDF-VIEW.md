@@ -14,14 +14,14 @@ against the native oracle before it becomes a contract.
 
 ## Where it lands
 
-| Concern                    | Papers source                                       | TuxBooks module                        |
-| -------------------------- | --------------------------------------------------- | -------------------------------------- |
-| Fit formulas               | `libview/pps-view.c` `zoom_for_size_*`              | `lib/pdf/pdfLayout.ts`                 |
-| Layout modes, page extents | `pps-view.c` `pps_view_get_page_extents`, etc.      | `lib/pdf/pdfLayout.ts`                 |
-| Focal zoom, scroll policy  | `pps-view.c` `pps_view_update_adjustment_value`     | `usePdfScale`, `usePdfScrollTracking`  |
+| Concern                    | Papers source                                       | TuxBooks module                              |
+| -------------------------- | --------------------------------------------------- | -------------------------------------------- |
+| Fit formulas               | `libview/pps-view.c` `zoom_for_size_*`              | `lib/pdf/pdfLayout.ts`                       |
+| Layout modes, page extents | `pps-view.c` `pps_view_get_page_extents`, etc.      | `lib/pdf/pdfLayout.ts`                       |
+| Focal zoom, scroll policy  | `pps-view.c` `pps_view_update_adjustment_value`     | `usePdfScale`, `usePdfScrollTracking`        |
 | Integer page sizing        | `libdocument/pps-render-context.c` `compute_scales` | `lib/pdf/pdfLayout.ts`, `pdfRenderPolicy.ts` |
-| Smooth zoom                | `libview/pps-view-page.c` snapshot                  | `components/reader/pdf/PdfPageCanvas.tsx` |
-| Preload and cache budget   | `libview/pps-pixbuf-cache.c`                        | `lib/pdf/pdfBitmapCache.ts`            |
+| Smooth zoom                | `libview/pps-view-page.c` snapshot                  | `components/reader/pdf/PdfPageCanvas.tsx`    |
+| Preload and cache budget   | `libview/pps-pixbuf-cache.c`                        | `lib/pdf/pdfBitmapCache.ts`                  |
 
 ## Layout modes
 
