@@ -27,3 +27,11 @@ sidecar/fuzz
 # the bytes belong to bd. bd rewrites them in its own style, and prettier does
 # not read the nested .beads/.gitignore that keeps runtime files out of git.
 .beads/
+
+# Reference-only Papers submodule: upstream GPL source pinned for reading, not
+# ours to reformat. Contains its own blueprints, JSON, and docs.
+vendor/
+
+# Fidelity oracle: C harness plus the PDF fixtures and JSON expected output it
+# generates. Byte-stable output is the determinism check (oracle/run.sh).
+oracle/
