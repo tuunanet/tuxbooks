@@ -1094,11 +1094,17 @@ async function renderSmartRegion(
     // this large (whole-page raster at deep zoom + smart recolor). The cropped
     // region is drawn directly instead — its shading is flat in Smart Dark
     // either way (pre-existing), so nothing is lost.
+    //
+    // A fast-path replay does NOT report `recovered`: that flag means the
+    // page bypassed the display list (the corruption signal that escapes the
+    // worker), and reporting it here recycled the worker after every Smart
+    // Dark region render — a terminate/reopen storm under zoom churn that
+    // froze readers and ended in renderer segfaults (2026-09-20 crash
+    // report). Only the direct draw below escapes the worker.
     const list = getDisplayList(page);
     if (list) {
       try {
-        const rendered = await paint((device) => list.run(device, mupdf!.Matrix.identity));
-        return { ...rendered, recovered: true };
+        return await paint((device) => list.run(device, mupdf!.Matrix.identity));
       } catch (err) {
         displayListFailures.add(page);
         postDiag({

@@ -41,10 +41,18 @@ class FakeWorker {
         const bitmap = new FakeImageBitmap();
         bitmap.width = params?.width ?? 0;
         bitmap.height = params?.height ?? 0;
-        this.respond({ id, ok: true, result: { bitmap } });
+        this.respond({
+          id,
+          ok: true,
+          result:
+            this.reportRecovered && method === "render" ? { bitmap, recovered: true } : { bitmap },
+        });
       } else this.respond({ id, ok: true, result: {} });
     });
   }
+
+  /** Next render responses carry `recovered: true` (display-list bypass). */
+  reportRecovered = false;
 
   terminate(): void {
     this.terminated = true;
@@ -106,5 +114,22 @@ describe("Smart Dark worker recycling", () => {
     for (let i = 0; i < 250; i += 1) await renderOnce(pdf, undefined);
     expect(workers).toHaveLength(1);
     await pdf.destroy();
+  });
+
+  test("escapes the worker immediately when a render bypassed the display list", async () => {
+    const pdf = await openPdfDocumentFromBook(3, "pdf");
+    workers[0]!.reportRecovered = true;
+
+    // One bypass render is the corruption signal: the swap must happen
+    // right away, not after the 180-render budget.
+    await renderOnce(pdf, SMART);
+    await expect.poll(() => workers.length).toBe(2);
+    await expect.poll(() => workers[0]!.terminated).toBe(true);
+
+    // The replacement is clean and keeps serving.
+    await renderOnce(pdf, SMART);
+    expect(workers).toHaveLength(2);
+    await pdf.destroy();
+    expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 });
