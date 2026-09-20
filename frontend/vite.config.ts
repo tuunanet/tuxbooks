@@ -34,8 +34,38 @@ const mupdfWasmUrl: Plugin = {
   },
 };
 
+/**
+ * Emits the PDFium WASM bundle as a build asset and serves it in dev,
+ * exposing its URL through a virtual module. Same reason as the MuPDF
+ * bundle: the engine only ships when a PDF opens, and the main thread
+ * resolves the URL and passes it to the worker (docs/PDF.md, ADR 0002).
+ */
+const pdfiumWasmFile = path.resolve(
+  import.meta.dirname,
+  "node_modules/@embedpdf/pdfium/dist/pdfium.wasm",
+);
+const pdfiumWasmUrl: Plugin = {
+  name: "tuxbooks:pdfium-wasm-url",
+  resolveId(id: string) {
+    return id === "virtual:pdfium-wasm-url" ? id : null;
+  },
+  load(id: string): string | null {
+    if (id !== "virtual:pdfium-wasm-url") return null;
+    if (this.environment.config.command === "build") {
+      const reference: string = this.emitFile({
+        type: "asset",
+        name: "pdfium.wasm",
+        originalFileName: pdfiumWasmFile,
+        source: fs.readFileSync(pdfiumWasmFile),
+      });
+      return `export default import.meta.ROLLUP_FILE_URL_${reference};`;
+    }
+    return `export default "/@fs${pdfiumWasmFile.split("?")[0]}";`;
+  },
+};
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), mupdfWasmUrl],
+  plugins: [react(), tailwindcss(), mupdfWasmUrl, pdfiumWasmUrl],
   clearScreen: false,
   // Electron loads the built renderer over file:// — absolute asset URLs
   // would resolve to the filesystem root, so assets must stay relative.

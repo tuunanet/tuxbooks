@@ -25,6 +25,8 @@ const markVirtualizerScrolled = () => {
 };
 
 beforeAll(() => {
+  // Node-environment tests (e.g. the PDFium WASM integration) have no DOM.
+  if (typeof window === "undefined") return;
   virtualizerScrolled = false;
   // Capture phase: scroll events do not bubble, but they still travel down
   // the tree, so this sees every virtualized list's scroll.
@@ -102,6 +104,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  if (typeof window === "undefined") return;
   cleanup();
   resetIntersectionObservers();
   resetResizeObservers();
@@ -110,14 +113,17 @@ afterEach(() => {
 // Reader appearance and app theme persist through localStorage; clear between
 // tests so one test's preference can never leak into the next.
 beforeEach(() => {
+  if (typeof window === "undefined") return;
   window.localStorage.clear();
 });
 
 afterEach(() => {
+  if (typeof window === "undefined") return;
   cleanup();
 });
 
 afterAll(async () => {
+  if (typeof window === "undefined") return;
   document.removeEventListener("scroll", markVirtualizerScrolled, true);
   if (virtualizerScrolled) {
     await new Promise((resolve) => setTimeout(resolve, VIRTUALIZER_SCROLL_DRAIN_MS));

@@ -14,6 +14,7 @@
     "typecheck": "pnpm -w run typecheck:frontend"
   },
   "dependencies": {
+    "@embedpdf/pdfium": "2.15.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@readium/css": "2.0.5",
     "@readium/decorator": "1.0.2",

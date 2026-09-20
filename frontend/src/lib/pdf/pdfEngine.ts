@@ -2,69 +2,41 @@ import workerUrl from "./mupdfWorker?worker&url";
 import wasmUrlRaw from "virtual:mupdf-wasm-url";
 import { normalizePdfOutline, type PdfOutlineItem, type RawPdfOutline } from "./pdfOutline";
 import { assemblePageText, type PdfTextItem } from "./pdfSearch";
+import { selectPdfEngine } from "./pdfEngineFlag";
+import { PdfRenderCancelledError, isRenderingCancelled } from "./pdfEngineTypes";
+import type { EngineTextLine, PdfDocument, PdfPage } from "./pdfEngineTypes";
+import { WorkerClient } from "./pdfWorkerClient";
+import {
+  cancelPdfiumPrewarm,
+  openPdfiumDocument,
+  openPdfiumDocumentFromBook,
+  pdfiumWorkerSrc,
+  prewarmPdfiumEngine,
+} from "./pdfiumEngine";
 import type { SmartPalette } from "./smartColors";
 import type { BookFormat } from "@/types/domain";
 
+export { PdfRenderCancelledError, isRenderingCancelled } from "./pdfEngineTypes";
+export type { EngineTextLine, PdfDocument, PdfPage, PdfRenderTask } from "./pdfEngineTypes";
+
 /**
- * The single seam between the app and the MuPDF.js/WASM engine. Components
- * depend on these re-exported types and helpers only, never on mupdf
- * directly, so the engine stays swappable and unit tests can mock one
- * module.
+ * The single seam between the app and the PDF engine. Components depend on
+ * these re-exported types and helpers only, never on an engine package, so
+ * the engine stays swappable and unit tests can mock one module.
  *
- * MuPDF rasterizes synchronously, so the engine lives in a dedicated module
- * worker (`mupdfWorker.ts`): every document gets its own worker instance and
- * closing the document terminates it, freeing the whole WASM heap. The
- * worker loads lazily on the first document open, and the WASM bundle stays
- * out of the entry chunk.
+ * The feature flag (`pdfEngineFlag.selectPdfEngine`, ADR 0002) picks the
+ * implementation at the open/prewarm/worker-URL functions below: MuPDF is
+ * the default, PDFium is opt-in (tuxbooks-koe.5). The type contract and the
+ * pure helpers are shared, so no reader component changes when the engine
+ * swaps. Each engine rasterizes synchronously, so both live in a dedicated
+ * module worker (`mupdfWorker.ts`, `pdfiumWorker.ts`): one worker per
+ * document, terminated on close, with the WASM bundle kept out of the entry
+ * chunk.
  *
  * Page geometry is in PDF page units (points) at scale 1: `getViewport({
  * scale })` returns CSS pixels, renders address the backing store through
  * the transform ratio.
  */
-
-/** One structured-text line in page units (points); `y` is the baseline. */
-interface EngineTextLine {
-  text: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  size: number;
-}
-
-interface WorkerResponse {
-  id: number;
-  ok: boolean;
-  result?: unknown;
-  error?: string;
-}
-
-/**
- * Out-of-band worker diagnostic (no request id). The worker reports every
- * operation's start, finish, and WASM heap size; the engine logs the stream
- * at debug level, and the main process captures the renderer console, so the
- * last line survives a renderer crash. A rising `heap` across renders is the
- * Smart Dark leak signal (docs/PDF.md).
- */
-interface WorkerDiag {
-  kind: "pdf-worker-diag";
-  phase: "begin" | "end" | "error" | "unhandled";
-  method: string;
-  requestId: number;
-  page?: number;
-  ms?: number;
-  heapBytes: number;
-  message?: string;
-}
-
-/**
- * A worker request that never returns would otherwise look like a UI freeze
- * with no trace; the watchdog reports it while it is still in flight (the
- * engine, not the worker, owns the timer, so it still fires if the worker is
- * blocked in a synchronous XHR or a WASM loop).
- */
-const WORKER_STALL_WARN_MS = 10_000;
-const WORKER_STALL_POLL_MS = 5_000;
 
 /**
  * Smart Dark drives each page through the engine's JS callback Device, and
@@ -86,25 +58,11 @@ interface WorkerOpenRequest {
 }
 
 /**
- * Cancellation marker for renders and text-layer builds that were
- * superseded before completion (page left the virtualization window,
- * unmount, book switch). Expected control flow, never an error.
+ * Configured worker URL for the active engine; diagnostics for the E2E
+ * worker-load assertion.
  */
-export class PdfRenderCancelledError extends Error {
-  constructor() {
-    super("PDF render cancelled");
-    this.name = "PdfRenderCancelledError";
-  }
-}
-
-/** True when a failure is a cancellation rather than a real error. */
-export function isRenderingCancelled(error: unknown): boolean {
-  return error instanceof PdfRenderCancelledError;
-}
-
-/** Configured worker URL; diagnostics for the E2E worker-load assertion. */
 export function pdfWorkerSrc(): string {
-  return workerUrl;
+  return selectPdfEngine() === "pdfium" ? pdfiumWorkerSrc() : workerUrl;
 }
 
 /**
@@ -116,243 +74,6 @@ export function pdfWorkerSrc(): string {
  */
 function resolveWasmUrl(): string {
   return new URL(wasmUrlRaw, globalThis.location?.href ?? import.meta.url).href;
-}
-
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: unknown) => void;
-  method: string;
-  startedAt: number;
-  warned: boolean;
-}
-
-class WorkerClient {
-  private worker: Worker;
-  private nextId = 1;
-  private pending = new Map<number, PendingRequest>();
-  private failureListeners = new Set<() => void>();
-  private idleResolvers = new Set<() => void>();
-  private failed = false;
-  private terminated = false;
-  private stallTimer: ReturnType<typeof setInterval> | null = null;
-  private lastDiag = "";
-
-  constructor() {
-    this.worker = new Worker(workerUrl, { type: "module" });
-    this.worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerDiag>) => {
-      const data = event.data;
-      if ("kind" in data) {
-        this.recordDiag(data);
-        return;
-      }
-      const pending = this.pending.get(data.id);
-      if (!pending) return;
-      this.pending.delete(data.id);
-      if (data.ok) pending.resolve(data.result);
-      else pending.reject(new Error(data.error ?? "MuPDF worker failure"));
-      this.notifyIdle();
-    };
-    this.worker.onerror = (event) => {
-      // A dead worker is a diagnostic failure, not cancellation: every
-      // pending request rejects, and listeners (the document owner) hear
-      // about it exactly once so recovery can start.
-      const pending = [...this.pending.values()];
-      this.pending.clear();
-      this.stopStallWatch();
-      this.failed = true;
-      this.notifyIdle();
-      const failure = new Error(event.message || "MuPDF worker failed to load");
-      console.error(
-        `[pdf-engine] worker gone: ${failure.message}` +
-          (this.lastDiag ? `; last operation ${this.lastDiag}` : ""),
-      );
-      for (const request of pending) {
-        request.reject(failure);
-      }
-      const listeners = [...this.failureListeners];
-      this.failureListeners.clear();
-      for (const listener of listeners) {
-        listener();
-      }
-    };
-    this.stallTimer = setInterval(() => this.reportStalls(), WORKER_STALL_POLL_MS);
-  }
-
-  /** Log one worker breadcrumb and remember it for the death/crash report. */
-  private recordDiag(diag: WorkerDiag): void {
-    const segments = [
-      diag.method,
-      diag.page !== undefined ? `page=${diag.page}` : null,
-      diag.phase,
-      diag.ms !== undefined ? `${Math.round(diag.ms)}ms` : null,
-      `heap=${(diag.heapBytes / 1048576).toFixed(1)}MB`,
-      diag.message ?? null,
-    ].filter((segment): segment is string => segment !== null);
-    this.lastDiag = segments.join(" ");
-    console.debug(`[pdf-worker] ${this.lastDiag}`);
-  }
-
-  /** Warn once per request that has been in flight past the stall budget. */
-  private reportStalls(): void {
-    const now = performance.now();
-    for (const [id, pending] of this.pending) {
-      if (pending.warned || now - pending.startedAt < WORKER_STALL_WARN_MS) continue;
-      pending.warned = true;
-      console.warn(
-        `[pdf-engine] worker request stalled: ${pending.method} #${id}` +
-          ` running ${Math.round(now - pending.startedAt)}ms` +
-          (this.lastDiag ? `; last completed ${this.lastDiag}` : ""),
-      );
-    }
-  }
-
-  private stopStallWatch(): void {
-    if (this.stallTimer !== null) {
-      clearInterval(this.stallTimer);
-      this.stallTimer = null;
-    }
-  }
-
-  /**
-   * Resolves once no request is in flight. A recycling document lets the old
-   * worker finish its queued renders before terminating it, so the swap is
-   * invisible to callers; a terminated worker resolves immediately.
-   */
-  whenIdle(): Promise<void> {
-    if (this.terminated || this.pending.size === 0) return Promise.resolve();
-    return new Promise((resolve) => this.idleResolvers.add(resolve));
-  }
-
-  private notifyIdle(): void {
-    if (this.pending.size > 0) return;
-    for (const resolve of this.idleResolvers) resolve();
-    this.idleResolvers.clear();
-  }
-
-  /** Registers a one-shot worker-death listener; returns the unsubscribe fn. */
-  onFailed(listener: () => void): () => void {
-    if (this.failed) {
-      // Already gone: notify without registering.
-      listener();
-      return () => {};
-    }
-    this.failureListeners.add(listener);
-    return () => this.failureListeners.delete(listener);
-  }
-
-  request(method: string, params: unknown, transfer: Transferable[] = []): Promise<unknown> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, {
-        resolve,
-        reject,
-        method,
-        startedAt: performance.now(),
-        warned: false,
-      });
-      this.worker.postMessage({ id, method, params }, transfer);
-    });
-  }
-
-  requestCancellable(
-    method: string,
-    params: unknown,
-  ): { result: Promise<unknown>; cancel: () => void } {
-    const id = this.nextId++;
-    let cancelled = false;
-    const result = new Promise((resolve, reject) => {
-      this.pending.set(id, {
-        method,
-        startedAt: performance.now(),
-        warned: false,
-        resolve: (value) => {
-          if (cancelled) {
-            reject(new PdfRenderCancelledError());
-            return;
-          }
-          resolve(value);
-        },
-        reject: (reason) => {
-          reject(cancelled ? new PdfRenderCancelledError() : reason);
-        },
-      });
-      this.worker.postMessage({ id, method, params });
-    });
-    return {
-      result,
-      cancel: () => {
-        if (cancelled) return;
-        cancelled = true;
-        const pending = this.pending.get(id);
-        if (pending) {
-          this.pending.delete(id);
-          pending.reject(new PdfRenderCancelledError());
-          this.notifyIdle();
-        }
-      },
-    };
-  }
-
-  terminate(): void {
-    this.terminated = true;
-    this.stopStallWatch();
-    this.worker.terminate();
-    this.notifyIdle();
-  }
-}
-
-export interface PdfPage {
-  /**
-   * Page dimensions in CSS pixels at the given scale (the viewport shape
-   * the layout math is written against).
-   */
-  getViewport(options: { scale: number }): { width: number; height: number };
-  /**
-   * Rasterizes the page into `canvas` (sized by the caller) at the viewport
-   * size times the transform ratio. Returns a cancellable promise; a
-   * cancelled render rejects with PdfRenderCancelledError and never paints.
-   *
-   * `smartColors` turns on Smart Dark object-aware recoloring in the worker
-   * (issue #67): text/vector/image-mask colors are remapped onto the dark
-   * palette while ordinary images pass through. Undefined renders the page
-   * as-is (Original, and every filter/tint-based theme — those are applied
-   * as CSS over the surface, never at raster time).
-   */
-  render(options: {
-    canvas: HTMLCanvasElement;
-    viewport: { width: number; height: number };
-    transform?: number[];
-    smartColors?: SmartPalette;
-    /**
-     * Viewport-clipped region render: the visible part of the page in CSS
-     * pixels relative to the page's top-left, with `viewport` still the full
-     * page's CSS size (so page units can be recovered). The returned bitmap
-     * and the caller's canvas are region-sized. Absent renders the whole
-     * page.
-     */
-    region?: { x: number; y: number; width: number; height: number };
-  }): { promise: Promise<void>; cancel(): void };
-}
-
-/** Handle of an in-flight render; cancellation is expected control flow. */
-export type PdfRenderTask = { promise: Promise<void>; cancel(): void };
-
-export interface PdfDocument {
-  numPages: number;
-  getPage(pageNumber: number): Promise<PdfPage>;
-  /** Raw engine outline (0-based pages, external links without a page). */
-  getOutline(): Promise<RawPdfOutline[] | null>;
-  /** Structured-text lines of one page, in page units. */
-  getTextLines(pageNumber: number): Promise<EngineTextLine[]>;
-  /**
-   * Registers a one-shot listener for unexpected worker death (not
-   * cancellation, not close): the document owner uses it to re-open the
-   * document from its range-backed source. Optional so test fakes can
-   * omit it.
-   */
-  onWorkerFailed?(callback: () => void): () => void;
-  /** Terminates the document's worker, freeing all WASM resources. */
-  destroy(): Promise<void>;
 }
 
 class MuPdfDocument implements PdfDocument {
@@ -549,7 +270,7 @@ class MuPdfDocument implements PdfDocument {
       this.recycling = false;
       return;
     }
-    const replacement = new WorkerClient();
+    const replacement = new WorkerClient(workerUrl, "MuPDF");
     try {
       await replacement.request("open", reopen);
       if (this.destroyed) {
@@ -640,13 +361,13 @@ let prewarmPromise: Promise<void> | null = null;
  * a failed prewarm just discards the spare worker, and the next open pays
  * the cold start instead. Runs without opening a document or rasterizing.
  */
-export function prewarmPdfEngine(): Promise<void> {
+export function prewarmMuPdfEngine(): Promise<void> {
   if (prewarmPromise) return prewarmPromise;
   if (typeof Worker === "undefined") {
     // Non-worker hosts (unit tests, exotic embeddings): nothing to warm.
     return Promise.resolve();
   }
-  const client = new WorkerClient();
+  const client = new WorkerClient(workerUrl, "MuPDF");
   prewarmedClient = client;
   prewarmPromise = client
     .request("prewarm", { wasmUrl: resolveWasmUrl() })
@@ -675,6 +396,7 @@ export function cancelPdfPrewarm(): void {
     prewarmedClient = null;
   }
   prewarmPromise = null;
+  cancelPdfiumPrewarm();
 }
 
 /** Hand the spare worker to a document open, if one is warm. */
@@ -686,11 +408,12 @@ function takePrewarmedClient(): WorkerClient | null {
 }
 
 /**
- * Open a PDF from in-memory bytes. The underlying buffer is transferred to
- * the document's worker, so callers must not reuse the array afterwards.
+ * Open a PDF from in-memory bytes through the MuPDF engine. The underlying
+ * buffer is transferred to the document's worker, so callers must not reuse
+ * the array afterwards.
  */
-export async function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
-  const client = takePrewarmedClient() ?? new WorkerClient();
+export async function openMuPdfDocument(data: Uint8Array): Promise<PdfDocument> {
+  const client = takePrewarmedClient() ?? new WorkerClient(workerUrl, "MuPDF");
   try {
     const { pageCount } = (await client.request(
       "open",
@@ -716,11 +439,11 @@ export async function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
  * (xref trail, then page 1 content) — the full-file transfer leaves the
  * first-page critical path entirely.
  */
-export async function openPdfDocumentFromBook(
+export async function openMuPdfDocumentFromBook(
   bookId: number,
   format: BookFormat,
 ): Promise<PdfDocument> {
-  const client = takePrewarmedClient() ?? new WorkerClient();
+  const client = takePrewarmedClient() ?? new WorkerClient(workerUrl, "MuPDF");
   const reopen: WorkerOpenRequest = {
     wasmUrl: resolveWasmUrl(),
     bookUrl: `tuxbooks://book/${bookId}?format=${format}`,
@@ -732,6 +455,37 @@ export async function openPdfDocumentFromBook(
     client.terminate();
     throw error;
   }
+}
+
+/**
+ * Engine selection point (ADR 0002). The feature flag picks MuPDF or PDFium
+ * here, so no reader component changes when the engine swaps. MuPDF is the
+ * default until the flip ticket.
+ */
+export function prewarmPdfEngine(): Promise<void> {
+  return selectPdfEngine() === "pdfium" ? prewarmPdfiumEngine() : prewarmMuPdfEngine();
+}
+
+/**
+ * Open a PDF from in-memory bytes through the selected engine. The underlying
+ * buffer is transferred to the document's worker, so callers must not reuse
+ * the array afterwards.
+ */
+export function openPdfDocument(data: Uint8Array): Promise<PdfDocument> {
+  return selectPdfEngine() === "pdfium" ? openPdfiumDocument(data) : openMuPdfDocument(data);
+}
+
+/**
+ * Open a stored book's PDF without ever loading the whole file into the
+ * renderer: the worker opens the document through a random-access stream
+ * over `tuxbooks://book/<id>` and pulls only the ranges it needs (xref
+ * trail, then page 1 content), so the full-file transfer leaves the
+ * first-page critical path entirely.
+ */
+export function openPdfDocumentFromBook(bookId: number, format: BookFormat): Promise<PdfDocument> {
+  return selectPdfEngine() === "pdfium"
+    ? openPdfiumDocumentFromBook(bookId, format)
+    : openMuPdfDocumentFromBook(bookId, format);
 }
 
 /** Terminate a document's worker and release every WASM resource. */
