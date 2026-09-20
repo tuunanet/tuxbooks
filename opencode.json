@@ -1,10 +1,31 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "watcher": {
+    "ignore": [
+      "**/node_modules/**",
+      "**/target/**",
+      "**/dist/**",
+      "**/dist-packages/**",
+      "**/.build/**",
+      "**/artifacts/**",
+      "**/coverage/**",
+      "**/.git/**",
+      "**/.worktrees/**",
+      "**/sidecar/pdfium/**",
+      "**/*.tsbuildinfo",
+      "graft/.cache/**",
+      "graft/.graph/**"
+    ]
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
   "mcp": {
     "graft": {
       "type": "local",
       "command": ["graft", "mcp"],
-      "enabled": true
+      "enabled": false
     }
   }
 }

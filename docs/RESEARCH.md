@@ -8,11 +8,11 @@ specific source for the question rather than a generic web search.
   examples for libraries, frameworks, SDKs, and tools. Prefer Context7 over
   remembered API details.
 
-- **GitHits — source-level investigation:** Use for open-source dependency
-  internals, implementation details, call paths, version changes, existing
-  patterns, and behavior that is unclear or undocumented. Prefer GitHits when
-  debugging how a dependency actually works rather than simply learning its
-  public API.
+- **GitHits — source-level investigation:** Use the GitHits CLI
+  (`npx -y githits@latest <command>`) for open-source dependency internals,
+  implementation details, call paths, version changes, existing patterns, and
+  behavior that is unclear or undocumented. Prefer GitHits when debugging how a
+  dependency actually works rather than simply learning its public API.
 
 - **Firecrawl — web research:** Use `firecrawl-search` whenever information
   must be obtained from the public web, including current information,

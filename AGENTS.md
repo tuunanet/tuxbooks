@@ -1,108 +1,115 @@
 # AGENTS.md
 
+TuxBooks is a local-first ebook library and reader: an Electron + React +
+TypeScript frontend, a Rust sidecar, and Readium/MuPDF.js reader layers. Work
+happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
+never build on `main`. Remove the worktree after the PR merges.
+
+## Route the task, then work
+
+Choose the cheapest path that fits. Do not explore "just in case".
+
+| Task                                        | First move                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| A symbol or behavior you can already name   | Locate it (`graft` or Grep), read only the range you need, edit, run one focused test.      |
+| An unfamiliar area                          | Delegate discovery to the `explore` agent, then read only the files and symbols it returns. |
+| Architecture, security, or reader contracts | Read the one relevant doc (below), then inspect only the affected module.                   |
+| Multi-file refactor                         | Plan first; keep discovery separate from editing.                                           |
+
+Exploration rules:
+
+- `Grep`/`Glob` respect `.gitignore`. Use them. Never `ls -R`, `find`, or crawl the tree.
+- Read the smallest range that answers the question, not whole large files.
+- Never run the same search with reworded queries. If 2-3 searches have not found it, stop and launch `explore`.
+- For structural questions (who calls what, where a behavior lives), use `graft` before grep or a file read.
+
+## Graft: repo context graph
+
+`graft/` is a prebuilt graph of this repo, kept in sync with the code. Use the
+**graft CLI** (the MCP server is off by design); most tasks need one call.
+
+```sh
+graft ask "<question>" --source   # locate + understand; inlines the code crux
+graft skeleton <file>             # a file's API in ~200 tokens
+graft grep "<pattern>"            # exhaustive, ranked by coupling
+graft callers <symbol> --depth 2  # blast radius before a rename or refactor
+graft map                         # orientation in an unfamiliar area
+```
+
+Load the `graft` skill for the full guide. Trust the answer and act; do not
+re-open or re-grep a file to double-check a span graft already gave you.
+
+## Lazy documentation
+
+Do not read docs at session start. Load only the one that matches the task, and
+skip it when `graft` already answers the question.
+
+- Reader rendering and performance: `docs/PERFORMANCE.md`, then `docs/EPUB.md` or `docs/PDF.md`.
+- Parser quotas and limits: `docs/RESOURCE_LIMITS.md`.
+- DB schema or migrations: `docs/DATABASE.md`.
+- Test layers, fixtures, E2E: `docs/TESTING.md`.
+- Build flavors and packaging: `docs/BUILD.md`, `docs/RELEASE.md`.
+- Module boundaries and process model: `docs/ARCHITECTURE.md`.
+- Coding standards: `docs/STANDARDS.md`; coverage floors: `docs/COVERAGE.md`.
+- Dependency and SBOM policy: `docs/SUPPLY_CHAIN.md`; project overview: `docs/ABOUT.md`.
+
+## Commands and verification
+
+Use the narrowest command first. Run the full gate once, near the end, not
+during iteration.
+
+```sh
+# frontend (React + vitest)
+pnpm --filter frontend exec vitest run <file-or-pattern>
+pnpm --filter frontend typecheck && pnpm --filter frontend lint
+
+# rust sidecar
+cargo test --manifest-path sidecar/Cargo.toml <target>
+cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
+
+# electron (main + preload)
+pnpm exec tsc -p electron --noEmit
+
+# full gate, once before you declare done
+just check          # format + lint + typecheck + unit tests, parallel streams
+just format         # only if you touched formatting-sensitive code
+```
+
+Do not run `just check`, `just test`, or `just test-e2e` after every edit.
+Iterate with the single narrowest command, then run the full gate once.
+Area-specific layout and commands live in the nearest `AGENTS.md`
+(`frontend/`, `sidecar/`, `electron/`, `e2e/`) and load automatically in that subtree.
+
 ## Writing for humans
 
-Invoke the `unslop` skill over anything a person will read, before you commit,
+Invoke the `unslop` skill over anything a person will read before you commit,
 post, or send it: commit messages, the PR title and body, README and doc edits,
 code comments, and the closing reply. It strips AI tells (em dashes, filler,
-hedging, chatbot phrases, puffery, bold-label lists) and replaces fancy
-words with plain ones and passive voice with active. Apply it to text you
-wrote or changed, not to prose you didn't touch.
-
-## Feature work
-
-- Every new feature starts in a fresh Git worktree branched from `origin/main`
-  so agents can work in parallel without conflicts. Never build on `main`.
-  Place new worktrees inside `.worktrees/` directory and remove the worktree
-  after PR has been completed/merged.
+hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
+plain ones and passive voice for active. Apply it to text you wrote or changed,
+not to prose you did not touch.
 
 ## Completing a task
 
 1. Keep changes limited to the assigned task.
-2. Run the repo's checks: `just check` (format+lint+typecheck+unit tests;
-   run `just format` first if you touched formatting-sensitive code).
+2. Run the full gate once: `just check` (run `just format` first if needed).
 3. Assemble the evidence captured along the way into before/after pairs.
 4. Commit with a clear message (conventional commits), rebase onto the latest
-   `origin/main`, and rerun the checks.
-5. Push (`git push -u origin <branch>`; after rebasing an already-pushed
-   branch, `--force-with-lease`).
-6. Open the PR. The body must explain what changed, how it was tested (every
-   claim backed by evidence), before/after proof, and any risks or follow-up
-   work. Run the title and body through with `unslop` skill before posting.
+   `origin/main`, and rerun the gate.
+5. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
+   `--force-with-lease`). Open the PR with what changed, how it was tested
+   (every claim backed by evidence), before/after proof, and any risks or
+   follow-up work. Run the title and body through `unslop` before posting.
 
 ## Agent skills
 
-### Issue tracker
+- Issue tracker: bd (Beads), the repo's tracker; use the `bd` CLI. See `docs/agents/issue-tracker.md`.
+- Triage labels: the five canonical roles use their default strings as bd labels. See `docs/agents/triage-labels.md`.
+- Domain docs: single context, one `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
 
-Issues and specs live in bd (Beads), the repo's existing tracker; use the `bd`
-CLI. See `docs/agents/issue-tracker.md`.
+## External knowledge
 
-### Triage labels
-
-The five canonical triage roles use their default label strings, as bd labels.
-See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: one `CONTEXT.md` plus `docs/adr/` at the repo root. See
-`docs/agents/domain.md`.
-
-## Graft — repo context graph
-
-This repo is indexed in `graft/`: small linked
-markdown nodes with exact `file:line` spans, kept in sync with the code. For any task,
-get context from the graph before grepping or opening source files — it is faster and cheaper.
-New to the repo? Run `graft map` first. Use the `graft` skill for the tool guide. Conventions
-and details: `docs/STANDARDS.md` (Graft — repo context graph).
-
-## Commands
-
-The live command set is in the justfile — check `just --list` and
-`docs/BUILD.md` for what is wired up in this migration phase. Run `just check`
-(or at minimum the relevant test layer) before declaring any task complete;
-run `just format` if you touched formatting-sensitive code.
-
-```sh
-pnpm install                 # first thing after cloning
-just check                   # format+lint+typecheck+unit tests, parallel streams
-just dev                     # launch the app (Electron + Vite hot reload)
-just test-e2e                # real-app desktop E2E, headless on Linux (builds first)
-just test                    # unit tests, rust + frontend concurrently
-just test-rust               # cargo test (service crate)
-just test-frontend           # vitest run (CI mode)
-just bump X.Y.Z              # apply a release version to all versioned files
-just audit                   # maturity policies, run this before releases.
-pnpm --filter frontend exec vitest run <file-or-pattern>
-```
-
-Task tracking is bd (Beads) — command reference in
-`docs/agents/issue-tracker.md`.
-
-### External knowledge & source research
-
-When repository context alone is insufficient, prefer the most specific source:
-**Context7** → current, version-specific library/API docs; **GitHits** →
-dependency internals and undocumented runtime behavior; **Firecrawl**
-(`firecrawl-search`) → the public web. Cross-check when multiple apply; don't
-guess. Full policy: `docs/RESEARCH.md`.
-
-## Working documents
-
-Read the one that fits the task; each is short.
-
-- `docs/STANDARDS.md` — coding standards.
-- `docs/ARCHITECTURE.md` — module boundaries, process model, frontend structure.
-- `docs/BUILD.md` — build flavors, dev environment.
-- `docs/DATABASE.md` — schema, migrations, FTS5.
-- `docs/EPUB.md` / `docs/PDF.md` — reader layer contracts (Readium / MuPDF.js).
-- `docs/PERFORMANCE.md` — reader performance budgets/metrics and verification;
-  check before touching reader rendering.
-- `docs/RESOURCE_LIMITS.md` — parser resource quotas (issue #83), the
-  `ResourceLimits` table every EPUB/PDF parse path enforces.
-- `docs/TESTING.md` — test layers, agent rules, and E2E infrastructure.
-- `docs/COVERAGE.md` — per-category coverage floors and exclusions.
-- `docs/RELEASE.md` — packaging and cutting releases.
-- `docs/SUPPLY_CHAIN.md` — dependency audits, SBOM, build-script.
-- `docs/ABOUT.md` — basic information regarding what this project is.
-
-Remember to update and evolve information within `./docs` when something important changes.
+Only for library, API, or dependency questions, not routine repo work: Context7
+for current library docs, GitHits for dependency internals, Firecrawl
+(`firecrawl-search`) for the public web. Cross-check when more than one applies.
+Full policy: `docs/RESEARCH.md`.
