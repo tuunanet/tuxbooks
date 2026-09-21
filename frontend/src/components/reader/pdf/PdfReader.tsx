@@ -39,6 +39,7 @@ import {
   type PdfAnchorInfo,
 } from "./hooks/usePdfScrollTracking";
 import { usePdfViewport, type PdfViewport } from "./hooks/usePdfViewport";
+import { usePdfZoomTelemetry } from "./hooks/usePdfZoomTelemetry";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
@@ -914,6 +915,10 @@ export function PdfReader({
   } | null>(null);
   const committedScaleRef = useRef(scale);
   const zoomEpochRef = useRef(zoomEpoch);
+  // Opt-in zoom telemetry: which action last changed the zoom, and the wheel
+  // cursor it anchored to (read by usePdfZoomTelemetry).
+  const zoomTriggerRef = useRef("");
+  const zoomPointerRef = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     committedScaleRef.current = scale;
   });
@@ -972,6 +977,8 @@ export function PdfReader({
         applied: false,
       };
     }
+    zoomTriggerRef.current = "wheel";
+    zoomPointerRef.current = { x: gesture.clientX, y: gesture.clientY };
     applyZoom({ mode: "custom", level: gesture.scale });
   }, [applyZoom, clearWheelSettle, scrollContainerRef]);
 
@@ -1098,6 +1105,21 @@ export function PdfReader({
     [interactive, presentationMode, pdfViewport, documentSlots, documentWidth],
   );
 
+  // Opt-in zoom telemetry (localStorage flag or VITE_PDF_ZOOM_LOG=1); a no-op
+  // otherwise. Records the view centre and canvas state per zoom and scroll.
+  usePdfZoomTelemetry({
+    scrollContainerRef,
+    documentRef,
+    scale,
+    zoomMode: zoom.mode,
+    zoomLevel: zoom.level,
+    currentPage,
+    viewport: pdfViewport,
+    anchorInfoRef,
+    triggerRef: zoomTriggerRef,
+    pointerRef: zoomPointerRef,
+  });
+
   // Scroll-driven position reporting: the anchor rule decides the page, the
   // position is written back to ReaderProvider so the shell (footer, keyboard
   // stepping, pages drawer) stays consistent with what the user sees.
@@ -1220,12 +1242,16 @@ export function PdfReader({
     (steps: 1 | -1) => {
       const base = wheelGestureRef.current?.scale ?? scale;
       cancelWheelGesture();
+      zoomTriggerRef.current = "keyboard-step";
+      zoomPointerRef.current = null;
       applyZoom({ mode: "custom", level: stepZoomLevel(base, steps) });
     },
     [applyZoom, cancelWheelGesture, scale],
   );
   const resetZoom = useCallback(() => {
     cancelWheelGesture();
+    zoomTriggerRef.current = "reset";
+    zoomPointerRef.current = null;
     applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL });
   }, [applyZoom, cancelWheelGesture]);
   // Typed/preset zoom: clamp onto the supported range and skip a no-op apply
@@ -1235,6 +1261,8 @@ export function PdfReader({
       const level = clampZoom(next);
       cancelWheelGesture();
       if (zoom.mode === "custom" && Math.abs(zoom.level - level) < 1e-9) return;
+      zoomTriggerRef.current = "typed";
+      zoomPointerRef.current = null;
       applyZoom({ mode: "custom", level });
     },
     [applyZoom, cancelWheelGesture, zoom.mode, zoom.level],
@@ -1243,6 +1271,8 @@ export function PdfReader({
     (mode: FitZoomMode) => {
       if (zoom.mode === mode) return;
       cancelWheelGesture();
+      zoomTriggerRef.current = "fit";
+      zoomPointerRef.current = null;
       applyZoom({ mode, level: zoom.level });
     },
     [applyZoom, cancelWheelGesture, zoom.mode, zoom.level],
