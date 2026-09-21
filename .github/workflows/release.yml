@@ -148,25 +148,16 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.14 fixes PDF opening and the zoom problems found while
-          using the new engine.
+          TuxBooks 0.0.15 aligns PDF zoom with GNOME Papers.
 
-          What changed since 0.0.13:
+          What changed since 0.0.14:
 
-          - PDFs open again. A worker sender check rejected every open in the
-            packaged app, so the reader hung on "Loading".
-          - Zoom holds its place. A zoom commits in one step now, so the view
-            no longer jumps after the wheel preview, and the point under the
-            pointer no longer drifts north-west on zoom in and south-east on
-            zoom out.
-          - A single page stays put. Zooming a one-page document keeps the
-            middle of its top border fixed instead of sliding the page.
-          - Deep zoom no longer kills the renderer. PDFium can allocate
-            gigabytes for a page-sized shading at high zoom; the render now
-            caps its device scale, and a bitmap can no longer exceed the 2 GB
-            WASM heap (docs/adr/0004-pdf-region-render-budget.md).
-          - Opt-in zoom telemetry (tuxbooksPdfZoomLog) for diagnosing
-            view-centre problems.
+          - Ctrl+wheel and trackpad pinch follow the cursor, on each axis that
+            can scroll. A page that fits the window stays put, and it starts
+            following the cursor the moment it overflows.
+          - Keyboard and toolbar zoom hold the viewport center, as Papers does.
+          - Typed zoom, Ctrl+0 and fit changes keep your relative position.
+          - A first zoom after opening no longer loses a restored page.
 
           Install on Ubuntu/Debian:
 
