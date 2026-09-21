@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
-import { offsetForPage, pageAtOffset, type LayoutSlot } from "../pdfLayout";
+import { anchorAtOffset, type LayoutSlot } from "../pdfLayout";
 
 /**
  * Where the reading anchor sits in the viewport: 25% of the viewport height
@@ -23,10 +23,27 @@ export function setScrollLeft(container: HTMLElement, value: number): void {
   container.scrollLeft = value;
 }
 
-/** Where the reading anchor currently is: page plus fraction within it. */
+/** Where the anchor currently is: page plus fraction within it. */
 export interface PdfAnchorInfo {
   page: number;
   fraction: number;
+}
+
+/**
+ * The document anchor (page + in-page fraction) at `viewportOffset` pixels
+ * below the viewport top, given the current scroll offset and where the
+ * document element starts in content coordinates. The reading anchor passes
+ * `clientHeight * READING_ANCHOR_RATIO`; a pointer zoom passes the cursor's
+ * viewport offset and later scrolls so the returned anchor lands back under
+ * the pointer (Papers' `zoom_center`).
+ */
+export function anchorAtViewportOffset(
+  viewportOffset: number,
+  scrollOffset: number,
+  documentOffset: number,
+  slots: LayoutSlot[],
+): PdfAnchorInfo | null {
+  return anchorAtOffset(scrollOffset + viewportOffset - documentOffset, slots);
 }
 
 interface PdfScrollTrackingOptions {
@@ -85,20 +102,15 @@ export function usePdfScrollTracking({
         documentEl.getBoundingClientRect().top -
         container.getBoundingClientRect().top +
         container.scrollTop;
-      const anchor =
-        container.scrollTop + container.clientHeight * READING_ANCHOR_RATIO - documentTop;
-      const page = pageAtOffset(anchor, slotsRef.current);
-      if (page === null) return;
-      if (anchorInfoRef) {
-        const slotTop = offsetForPage(page, slotsRef.current);
-        const slot = slotsRef.current.find((candidate) => candidate.pageNumber === page);
-        const fraction =
-          slot && slotTop !== null && slot.height > 0
-            ? Math.max(0, Math.min(1, (anchor - slotTop) / slot.height))
-            : 0;
-        anchorInfoRef.current = { page, fraction };
-      }
-      onPageChangeRef.current(page);
+      const info = anchorAtViewportOffset(
+        container.clientHeight * READING_ANCHOR_RATIO,
+        container.scrollTop,
+        documentTop,
+        slotsRef.current,
+      );
+      if (info === null) return;
+      if (anchorInfoRef) anchorInfoRef.current = info;
+      onPageChangeRef.current(info.page);
     };
 
     const requestSample = () => {

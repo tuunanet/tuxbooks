@@ -80,6 +80,12 @@ new_value = CLAMP(upper * factor - zoom_center, 0, upper - page_size)
 (`pps_view_update_adjustment_value`, `pps-view.c:564`, with the replacement at
 `:597` to `:598` and `:614` to `:615`.)
 
+`pdfLayout.centerValue` is the port of that transform, and
+`viewportPointToDocumentPoint` maps a viewport position back to a page point so
+the oracle's `center_anchor` can be compared directly. The adjustment is
+`value + zoom_center` over the old `upper`, reapplied to the new `MAX(viewport,
+content)` and clamped, exactly as the C does.
+
 TuxBooks currently re-anchors by the reading anchor's in-page fraction on a
 scale change (`docs/PDF.md`). The port replaces that for pointer zooms with the
 focal-anchor transform above. Keyboard and toolbar zooms keep the reading anchor,
@@ -92,6 +98,11 @@ Papers picks between two policies:
 - `SCROLL_TO_KEEP_POSITION` preserves the relative scroll fraction and is set
   during a normal re-layout (`pps-view.c:3487`);
 - `SCROLL_TO_CENTER` holds the focal anchor and is set by an explicit zoom.
+
+`pdfLayout.keepPositionValue` is the `SCROLL_TO_KEEP_POSITION` branch and
+`pdfLayout.centerValue` the `SCROLL_TO_CENTER` branch; `adjustmentValueForPolicy`
+selects between them. Both read the paper's `upper = MAX(viewport, content)`
+(`adjustmentUpper`).
 
 Two helpers, `keep_scroll_of_current_page` and `needs_scrolling_to_current_page`,
 stop the view from fighting a user during kinetic scroll

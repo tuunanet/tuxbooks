@@ -421,6 +421,138 @@ export function compensateOffset(
   return offset + (updatedSlot.top - previousSlot.top);
 }
 
+/**
+ * One axis of Papers' scroll state — the `GtkAdjustment` triple
+ * `pps_view_update_adjustment_value` reads (`pps-view.c:564`): `value` is the
+ * scroll offset, `upper` the padded content size, and `pageSize` the viewport
+ * extent. `upper` is always at least `pageSize` (see {@link adjustmentUpper}).
+ */
+export interface ScrollAdjustment {
+  value: number;
+  upper: number;
+  pageSize: number;
+}
+
+/**
+ * Which scroll rule a layout change uses (Papers' `pending_scroll`):
+ * `keep-position` preserves the relative offset through an ordinary
+ * re-layout, `center` holds the point under the pointer through an explicit
+ * zoom.
+ */
+export type ScrollPolicy = "keep-position" | "center";
+
+/**
+ * Papers' adjustment upper bound (`pps_view_update_adjustment_value:603`):
+ * the padded content size, never smaller than the viewport, so a page that
+ * fits the viewport still reports a full-viewport range.
+ */
+export function adjustmentUpper(viewportExtent: number, contentExtent: number): number {
+  return Math.max(viewportExtent, contentExtent);
+}
+
+/** Clamp a scroll offset into `[0, upper - pageSize]`, Papers' `CLAMP`. */
+function clampScrollValue(value: number, upper: number, pageSize: number): number {
+  const max = Math.max(0, upper - pageSize);
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(max, value));
+}
+
+/**
+ * Scroll offset after a re-layout (`SCROLL_TO_KEEP_POSITION`,
+ * `pps_view_update_adjustment_value:595` and `:609`): the old fraction
+ * `value / upper` is reapplied to the new content size, then clamped. Used
+ * when the layout changes for a reason other than an explicit zoom, so the
+ * reader keeps its relative place in the document.
+ */
+export function keepPositionValue(
+  adjustment: ScrollAdjustment,
+  newUpper: number,
+  newPageSize: number,
+): number {
+  const factor = adjustment.upper !== 0 ? adjustment.value / adjustment.upper : 0;
+  return clampScrollValue(newUpper * factor, newUpper, newPageSize);
+}
+
+/**
+ * Scroll offset after an explicit zoom (`SCROLL_TO_CENTER`,
+ * `pps_view_update_adjustment_value:598` and `:615`): the document point
+ * `value + zoomCenter` keeps the same fraction of the content, so the point
+ * under the pointer stays put. A negative `zoomCenter` means the viewport
+ * centre, Papers' `page_size * 0.5` fallback.
+ */
+export function centerValue(
+  adjustment: ScrollAdjustment,
+  newUpper: number,
+  newPageSize: number,
+  zoomCenter = -1,
+): number {
+  const center = zoomCenter >= 0 ? zoomCenter : adjustment.pageSize * 0.5;
+  const factor = adjustment.upper !== 0 ? (adjustment.value + center) / adjustment.upper : 0;
+  return clampScrollValue(newUpper * factor - center, newUpper, newPageSize);
+}
+
+/**
+ * Apply the pending scroll policy for one axis (Papers'
+ * `pps_view_update_adjustment_value` switch). `zoomCenter` is the pointer
+ * position inside the viewport in CSS pixels; the `center` policy ignores it
+ * when it is negative and falls back to the viewport centre.
+ */
+export function adjustmentValueForPolicy(
+  policy: ScrollPolicy,
+  adjustment: ScrollAdjustment,
+  newUpper: number,
+  newPageSize: number,
+  zoomCenter = -1,
+): number {
+  return policy === "center"
+    ? centerValue(adjustment, newUpper, newPageSize, zoomCenter)
+    : keepPositionValue(adjustment, newUpper, newPageSize);
+}
+
+/**
+ * Page-local point, in page units at scale 1, at a viewport position for one
+ * axis (Papers' `pps_view_get_point_on_page` / `transform_page_point_to_view_point`
+ * pair): the content pixel `scrollValue + viewportPosition` less the leading
+ * Papers margin, divided by the scale. Callers pass `spacing` and the axis'
+ * scale so the result lines up with `center_anchor` in the oracle.
+ */
+export function viewportPointToDocumentPoint(
+  scrollValue: number,
+  viewportPosition: number,
+  spacing: number,
+  scale: number,
+): number {
+  if (scale <= 0) return 0;
+  return (scrollValue + viewportPosition - spacing) / scale;
+}
+
+/** A document anchor: a page number plus the fraction down that page. */
+export interface DocumentAnchor {
+  page: number;
+  fraction: number;
+}
+
+/**
+ * The page plus in-page fraction at a document content offset. An offset
+ * inside the gap below a page belongs to that page (see {@link pageAtOffset}).
+ * Returns null for an empty document.
+ */
+export function anchorAtOffset(offset: number, slots: LayoutSlot[]): DocumentAnchor | null {
+  const page = pageAtOffset(offset, slots);
+  if (page === null) return null;
+  const slot = slots.find((candidate) => candidate.pageNumber === page);
+  if (!slot || slot.height <= 0) return { page, fraction: 0 };
+  const fraction = Math.max(0, Math.min(1, (offset - slot.top) / slot.height));
+  return { page, fraction };
+}
+
+/** Document content offset of an anchor's point, or null outside the slots. */
+export function offsetForAnchor(anchor: DocumentAnchor, slots: LayoutSlot[]): number | null {
+  const slot = slots.find((candidate) => candidate.pageNumber === anchor.page);
+  if (!slot) return null;
+  return slot.top + anchor.fraction * slot.height;
+}
+
 /** A rectangle in one coordinate space: document scroll coords or page-local CSS px. */
 export interface Rect {
   top: number;
