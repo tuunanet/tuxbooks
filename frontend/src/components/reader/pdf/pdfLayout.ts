@@ -528,60 +528,6 @@ export function adjustmentValueForPolicy(
 }
 
 /**
- * Scroll offsets that hold a single page's top-center at its screen position
- * through a scale change.
- *
- * A one-page document behaves differently from a scrolling stream: the page is
- * centered horizontally and top-aligned, and the reader's rule is that the
- * midpoint of its top border stays put. The page center's screen x is
- * `pageLeft - scrollLeft + pageWidth / 2` and the top's screen y is
- * `documentTop - scrollTop + pageTop`; both are preserved. The page is centered
- * in the content area with auto margins (`documentLeft` below), so the x term
- * is `max(0, (viewportWidth - pageWidth) / 2)` rather than a DOM read, which
- * keeps the same result whether the caller has the old or the new layout.
- *
- * Clamped to the real scroll range, so a negative document-local offset (the
- * padding above the document at the very top) is not rounded up the way
- * {@link centerValue}'s `[0, upper - pageSize]` clamp would.
- */
-export function singlePageTopCenterScroll(args: {
-  oldScrollLeft: number;
-  oldScrollTop: number;
-  oldDocumentWidth: number;
-  documentWidth: number;
-  oldPageTop: number;
-  pageTop: number;
-  documentTop: number;
-  /** Content-area left in scroll content (the pages' horizontal padding). */
-  contentLeft: number;
-  /** Content-area width: the base the auto margins center the page against. */
-  contentWidth: number;
-  /** Scroll-container client width, for the scroll-range clamp. */
-  viewportWidth: number;
-  viewportHeight: number;
-  scrollWidth: number;
-  scrollHeight: number;
-}): { scrollLeft: number; scrollTop: number } {
-  const clamp = (value: number, max: number): number =>
-    Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : 0;
-  const documentLeft = (width: number): number =>
-    args.contentLeft + Math.max(0, (args.contentWidth - width) / 2);
-  const anchorScreenX =
-    documentLeft(args.oldDocumentWidth) - args.oldScrollLeft + args.oldDocumentWidth / 2;
-  const anchorScreenY = args.documentTop - args.oldScrollTop + args.oldPageTop;
-  return {
-    scrollLeft: clamp(
-      documentLeft(args.documentWidth) + args.documentWidth / 2 - anchorScreenX,
-      Math.max(0, args.scrollWidth - args.viewportWidth),
-    ),
-    scrollTop: clamp(
-      args.documentTop + args.pageTop - anchorScreenY,
-      Math.max(0, args.scrollHeight - args.viewportHeight),
-    ),
-  };
-}
-
-/**
  * Page-local point, in page units at scale 1, at a viewport position for one
  * axis (Papers' `pps_view_get_point_on_page` / `transform_page_point_to_view_point`
  * pair): the content pixel `scrollValue + viewportPosition` less the leading

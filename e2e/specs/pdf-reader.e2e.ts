@@ -112,6 +112,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
     await canvas.waitFor({ state: "attached", timeout: 30000 });
+    // The width attribute is 0 until the first raster lands. Wait for that or
+    // the no-re-render assertion below reads a stale zero as the baseline.
+    await waitForRendered(page, 1);
     const input = page.getByTestId("pdf-zoom-input");
     const widthBefore = Number(await canvas.getAttribute("width"));
     const percentBefore = await input.inputValue();

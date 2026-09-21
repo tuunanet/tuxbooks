@@ -32,7 +32,6 @@ import { usePdfGeometry } from "./hooks/usePdfGeometry";
 import { usePdfScale } from "./hooks/usePdfScale";
 import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
-  READING_ANCHOR_RATIO,
   setScrollLeft,
   setScrollTop,
   usePdfScrollTracking,
@@ -55,6 +54,7 @@ import {
 } from "./pdfRenderPolicy";
 import {
   adjustmentValueForPolicy,
+  centerValue,
   clampZoom,
   DEFAULT_ZOOM_LEVEL,
   MAX_ZOOM,
@@ -64,7 +64,7 @@ import {
   documentMaxPageSize,
   keepPositionValue,
   layoutSlots,
-  singlePageTopCenterScroll,
+  PAGE_GAP_PX,
   stepZoomLevel,
   visiblePageRegion,
   wheelZoomScale,
@@ -135,8 +135,8 @@ interface WheelPreview {
  * Everything the gesture needs to commit, kept beside the rendered preview:
  * the last cursor position (viewport coordinates) and where the document
  * element sat in scroll content when the gesture began. Layout and scroll
- * are frozen for the whole gesture — every Ctrl+wheel event is prevented —
- * so the captured geometry stays valid until settle.
+ * stay put for the whole gesture, because every Ctrl+wheel event is
+ * prevented, so the captured geometry stays valid until settle.
  */
 interface WheelGesture extends WheelPreview {
   epoch: number;
@@ -144,9 +144,9 @@ interface WheelGesture extends WheelPreview {
   clientY: number;
   docLeft: number;
   docTop: number;
-  /** Committed document width and page top, for the one-page anchor. */
+  /** Committed content size, to tell a scrollable axis from a fitting one. */
   docWidth: number;
-  pageTop: number;
+  docHeight: number;
 }
 
 /**
@@ -873,27 +873,15 @@ export function PdfReader({
   // too. The pages that held pixels before the zoom move to `stalePages`
   // instead of vanishing: PdfPageCanvas keeps painting their previous bitmap
   // under a transform until the new-scale raster swaps in (scale-and-swap).
-  // The scroll position when a zoom is requested, before React re-lays out at
-  // the new scale. The browser clamps scroll offsets as soon as the content
-  // resizes, so a callback that runs after the commit must not read the live
-  // scroll to learn where the view was.
-  const preZoomScrollRef = useRef({ left: 0, top: 0 });
   const applyZoom = useCallback(
     (next: ZoomState) => {
-      const scrollContainer = scrollContainerRef?.current ?? null;
-      if (scrollContainer) {
-        preZoomScrollRef.current = {
-          left: scrollContainer.scrollLeft,
-          top: scrollContainer.scrollTop,
-        };
-      }
       setZoom(next);
       setStalePages((current) => new Set([...current, ...renderedPagesRef.current]));
       setRenderedPages(new Set());
       setFailedPages(new Set());
       bitmapCache.clear();
     },
-    [bitmapCache, scrollContainerRef],
+    [bitmapCache],
   );
 
   // § Ctrl+wheel gesture (smooth zoom): wheel events only move a transient
@@ -926,13 +914,6 @@ export function PdfReader({
     viewportHeight: number;
     centerX: number;
     centerY: number;
-    // A one-page document anchors on the page top-center instead of the
-    // cursor; these carry the pre-commit geometry that rule needs.
-    singlePage: boolean;
-    oldScrollLeft: number;
-    oldScrollTop: number;
-    oldDocumentWidth: number;
-    oldPageTop: number;
     applied: boolean;
   } | null>(null);
   const committedScaleRef = useRef(scale);
@@ -996,11 +977,6 @@ export function PdfReader({
         viewportHeight,
         centerX: gesture.clientX - containerRect.left,
         centerY: gesture.clientY - containerRect.top,
-        singlePage: oldSlots.length === 1,
-        oldScrollLeft: container.scrollLeft,
-        oldScrollTop: container.scrollTop,
-        oldDocumentWidth: oldDocWidth,
-        oldPageTop: oldSlots[0]?.top ?? 0,
         applied: false,
       };
     }
@@ -1023,76 +999,58 @@ export function PdfReader({
         activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
         return;
       }
-      const documentTop =
-        documentEl.getBoundingClientRect().top -
-        container.getBoundingClientRect().top +
-        container.scrollTop;
+      const containerRect = container.getBoundingClientRect();
+      const documentRect = documentEl.getBoundingClientRect();
+      const scrollTop = container.scrollTop;
+      const scrollLeft = container.scrollLeft;
+      const documentTop = documentRect.top - containerRect.top + scrollTop;
+      const documentLeft = documentRect.left - containerRect.left + scrollLeft;
       // The content scales with the zoom, so the pre-change extent is exact
       // from the ratio even when previousSlots has not caught up (a fresh
-      // measurement can leave it empty at mount).
+      // measurement can leave it empty at mount). A zero upper would collapse
+      // the kept offset to the top and lose a restored page.
       const ratio = oldScale > 0 && scale > 0 ? oldScale / scale : 1;
-      // A one-page document keeps its top-center where it is on screen through
-      // any zoom. A multi-page stream keeps the reading spot instead.
-      if (slots.length === 1) {
-        const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
-        const area = contentAreaElementRef.current;
-        const areaRect = area?.getBoundingClientRect();
-        const contentLeft = areaRect
-          ? areaRect.left - container.getBoundingClientRect().left + container.scrollLeft
-          : 0;
-        const contentWidth = area?.clientWidth || container.clientWidth;
-        const target = singlePageTopCenterScroll({
-          oldScrollLeft: preZoomScrollRef.current.left,
-          oldScrollTop: preZoomScrollRef.current.top,
-          oldDocumentWidth: documentWidth * ratio,
-          documentWidth,
-          oldPageTop: 0,
-          pageTop: slots[0]?.top ?? 0,
-          documentTop,
-          contentLeft,
-          contentWidth,
-          viewportWidth: container.clientWidth,
-          viewportHeight: container.clientHeight,
-          scrollWidth: container.scrollWidth,
-          scrollHeight: container.scrollHeight,
-        });
-        setScrollLeft(container, target.scrollLeft);
-        setScrollTop(container, target.scrollTop);
-        rootRef.current?.setAttribute("data-pdf-scroll-policy", "center");
-        return;
-      }
-      const info = anchorInfoRef.current;
-      if (!info) {
-        // No page anchor yet (scroll tracking has not sampled): fall back to
-        // Papers' SCROLL_TO_KEEP_POSITION, the old document-local offset
-        // reapplied to the new content by its relative position. On the first
-        // zoom of a fresh open `previousSlots` is still empty (the ref is only
-        // updated here), so derive the old extent from the scale ratio: a zero
-        // upper would collapse the kept offset to the top, losing the restored
-        // page.
-        const viewportHeight = container.clientHeight;
-        const previousContentHeight =
-          previousSlots.length > 0 ? documentHeight(previousSlots) : documentHeight(slots) * ratio;
-        const adjustment: ScrollAdjustment = {
-          value: container.scrollTop - documentTop,
-          upper: previousContentHeight,
-          pageSize: viewportHeight,
-        };
-        setScrollTop(
-          container,
-          documentTop + keepPositionValue(adjustment, documentHeight(slots), viewportHeight),
-        );
-        rootRef.current?.setAttribute("data-pdf-scroll-policy", "keep-position");
-        return;
-      }
-      const slot = slots.find((candidate) => candidate.pageNumber === info.page) ?? slots[0];
-      if (!slot) return;
-      const targetAnchor = slot.top + info.fraction * slot.height;
-      setScrollTop(
-        container,
-        targetAnchor + documentTop - container.clientHeight * READING_ANCHOR_RATIO,
+      const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
+      const contentHeight = documentHeight(slots);
+      const previousContentWidth =
+        previousSlots.length > 0
+          ? previousSlots.reduce((max, slot) => Math.max(max, slot.width), 0)
+          : documentWidth * ratio;
+      // Page gaps do not scale, so derive the old height from the scaled page
+      // area plus the fixed gaps rather than scaling the whole content.
+      const totalGap = PAGE_GAP_PX * Math.max(0, slots.length - 1);
+      const previousContentHeight =
+        previousSlots.length > 0
+          ? documentHeight(previousSlots)
+          : (contentHeight - totalGap) * ratio + totalGap;
+      const viewportWidth = container.clientWidth;
+      const viewportHeight = container.clientHeight;
+      const adjustmentX: ScrollAdjustment = {
+        value: scrollLeft - documentLeft,
+        upper: previousContentWidth,
+        pageSize: viewportWidth,
+      };
+      const adjustmentY: ScrollAdjustment = {
+        value: scrollTop - documentTop,
+        upper: previousContentHeight,
+        pageSize: viewportHeight,
+      };
+      // Aligned with Papers' per-input rules (docs/PDF-VIEW.md): a keyboard
+      // step or a toolbar button holds the viewport center, while a typed
+      // value, Ctrl+0 and a fit change keep the relative scroll fraction.
+      const centerViewport = zoomTriggerRef.current === "keyboard-step";
+      const newValueX = centerViewport
+        ? centerValue(adjustmentX, documentWidth, viewportWidth, viewportWidth / 2)
+        : keepPositionValue(adjustmentX, documentWidth, viewportWidth);
+      const newValueY = centerViewport
+        ? centerValue(adjustmentY, contentHeight, viewportHeight, viewportHeight / 2)
+        : keepPositionValue(adjustmentY, contentHeight, viewportHeight);
+      setScrollLeft(container, documentLeft + newValueX);
+      setScrollTop(container, documentTop + newValueY);
+      rootRef.current?.setAttribute(
+        "data-pdf-scroll-policy",
+        centerViewport ? "center" : "keep-position",
       );
-      rootRef.current?.setAttribute("data-pdf-scroll-policy", "keep-position");
     },
     [scrollContainerRef, slots, scale],
   );
@@ -1408,27 +1366,29 @@ export function PdfReader({
           docLeft: docRect.left - containerRect.left + container.scrollLeft,
           docTop: docRect.top - containerRect.top + container.scrollTop,
           docWidth: committedSlots.reduce((max, slot) => Math.max(max, slot.width), 0),
-          pageTop: committedSlots[0]?.top ?? 0,
+          docHeight: documentHeight(committedSlots),
         };
       }
 
-      // The origin follows the cursor, except on a one-page document where the
-      // zoom is anchored on the midpoint of the page's top border so the page
-      // grows from its top-center (transform-origin on the document).
-      const containerRect = container.getBoundingClientRect();
-      const singlePage = slotsRef.current.length === 1;
-      const originX = singlePage
-        ? gesture.docWidth / 2
-        : event.clientX - containerRect.left + container.scrollLeft - gesture.docLeft;
-      const originY = singlePage
-        ? gesture.pageTop
-        : event.clientY - containerRect.top + container.scrollTop - gesture.docTop;
       const scale = wheelZoomScale(
         gesture.scale,
         event.deltaY,
         event.deltaMode,
         container.clientHeight || 1,
       );
+      // The preview scales about the cursor on an axis only while that axis can
+      // scroll at the target scale. An axis whose content fits the viewport has
+      // no scroll range, so the page stays put and the preview scales about the
+      // page center across and the page top down, which is where the committed
+      // fixup leaves it. The committed scale is the reference, because
+      // gesture.scale tracks the running preview.
+      const containerRect = container.getBoundingClientRect();
+      const ratio = committedScaleRef.current > 0 ? scale / committedScaleRef.current : 1;
+      const cursorX = event.clientX - containerRect.left + container.scrollLeft - gesture.docLeft;
+      const cursorY = event.clientY - containerRect.top + container.scrollTop - gesture.docTop;
+      const originX =
+        gesture.docWidth * ratio > container.clientWidth ? cursorX : gesture.docWidth / 2;
+      const originY = gesture.docHeight * ratio > container.clientHeight ? cursorY : 0;
       gesture = {
         ...gesture,
         scale,
@@ -1455,13 +1415,11 @@ export function PdfReader({
 
   // Wheel-gesture commit fixup: runs right after React re-lays out at the
   // committed scale (before the browser paints), scrolling so the document
-  // point that sat under the cursor still sits there. The policy is Papers'
-  // SCROLL_TO_CENTER (`pdfLayout.centerValue`): the document-local offset
-  // under the cursor keeps the same fraction of the new `MAX(viewport,
-  // content)`, which holds the cursor point through the scale change. This
-  // replaces the previous DOM-ratio fixup, so the reader and the geometry
-  // oracle share one implementation. The document element is read at its new,
-  // untransformed layout here.
+  // point that sat under the cursor still sits there on each axis that can
+  // scroll. The policy is Papers' SCROLL_TO_CENTER (`pdfLayout.centerValue`),
+  // with our raw content extent as the upper. An axis whose content fits the
+  // viewport has no scroll range, so its clamp leaves the page where it is.
+  // The document element is read at its new, untransformed layout here.
   useLayoutEffect(() => {
     const fixup = wheelScrollFixupRef.current;
     const container = scrollContainerRef?.current ?? null;
@@ -1477,33 +1435,6 @@ export function PdfReader({
     const docLeft = documentRect.left - containerRect.left + container.scrollLeft;
     const docTop = documentRect.top - containerRect.top + container.scrollTop;
     const newDocWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
-    if (fixup.singlePage) {
-      // A one-page document holds its top-center, not the cursor point.
-      const area = contentAreaElementRef.current;
-      const areaRect = area?.getBoundingClientRect();
-      const contentLeft = areaRect ? areaRect.left - containerRect.left + container.scrollLeft : 0;
-      const contentWidth = area?.clientWidth || container.clientWidth;
-      const target = singlePageTopCenterScroll({
-        oldScrollLeft: fixup.oldScrollLeft,
-        oldScrollTop: fixup.oldScrollTop,
-        oldDocumentWidth: fixup.oldDocumentWidth,
-        documentWidth: newDocWidth,
-        oldPageTop: fixup.oldPageTop,
-        pageTop: slots[0]?.top ?? 0,
-        documentTop: docTop,
-        contentLeft,
-        contentWidth,
-        viewportWidth: container.clientWidth,
-        viewportHeight: container.clientHeight,
-        scrollWidth: container.scrollWidth,
-        scrollHeight: container.scrollHeight,
-      });
-      setScrollLeft(container, target.scrollLeft);
-      setScrollTop(container, target.scrollTop);
-      rootRef.current?.setAttribute("data-pdf-scroll-policy", "center");
-      wheelScrollFixupRef.current = { ...fixup, applied: true };
-      return;
-    }
     const newValueY = adjustmentValueForPolicy(
       "center",
       { value: fixup.oldValueY, upper: fixup.oldUpperY, pageSize: fixup.viewportHeight },

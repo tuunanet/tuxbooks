@@ -97,13 +97,31 @@ deliberate divergence: the padded form is what makes a zoom in from fit drift
 north-west and the matching zoom out drift south-east (ADR 0004 records the
 render-budget work that shares this code path).
 
-For a pointer zoom the pointer is the anchor. Keyboard, toolbar and typed zooms
-have no pointer, so a multi-page stream keeps the reading anchor's in-page
-fraction (`docs/PDF.md`). A one-page document does something different again:
-`pdfLayout.singlePageTopCenterScroll` holds the midpoint of the page's top
-border where it is on screen, with the page centered horizontally, so a
-single-page plot grows from its top-center instead of sliding under the zoom.
-The rule covers every zoom path for a single page, wheel included.
+The anchor is per axis, and an axis anchors only while it can scroll. Papers
+updates the horizontal and vertical adjustments separately, so when the content
+fills the viewport on an axis the `upper` collapses to `page_size`, the scroll
+range becomes `[0, 0]`, and the axis cannot move. A cursor zoom therefore
+follows the pointer on a scrollable axis and leaves the page still on a fitting
+one. That is what reads as a pin while the whole page fits, and it releases the
+moment the page overflows. Both scroll rules clamp the same way, so a fitting
+axis falls out of the one formula rather than a special case.
+
+The anchor per input mirrors Papers:
+
+- Ctrl+wheel and trackpad pinch use the pointer as captured by
+  `scroll_to_zoom_cb` (`pps-view.c:3546`). The raw pointer position is used,
+  whether it is over a page or over the margin.
+- Keyboard step and the toolbar plus or minus leave `zoom_center` at the `-1`
+  sentinel, which `pps_view_update_adjustment_value` turns into
+  `page_size * 0.5`, the viewport center (`:589` to `:590`). `PdfReader` picks
+  this out with the `keyboard-step` zoom trigger.
+- Typed zoom, Ctrl+0 and fit changes keep the relative scroll fraction
+  (`SCROLL_TO_KEEP_POSITION`). Papers' `doc.zoom` bypasses `pps_view_zoom`
+  entirely (`shell/src/document_view/actions.rs`), so its pending scroll never
+  becomes `SCROLL_TO_CENTER`.
+
+The reading anchor stays the reader's position tracker for progress and page
+changes, but zoom no longer uses it.
 
 ## Scroll-preservation policy
 
