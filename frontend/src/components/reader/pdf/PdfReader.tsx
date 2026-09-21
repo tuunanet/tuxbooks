@@ -1027,14 +1027,14 @@ export function PdfReader({
         documentEl.getBoundingClientRect().top -
         container.getBoundingClientRect().top +
         container.scrollTop;
+      // The content scales with the zoom, so the pre-change extent is exact
+      // from the ratio even when previousSlots has not caught up (a fresh
+      // measurement can leave it empty at mount).
+      const ratio = oldScale > 0 && scale > 0 ? oldScale / scale : 1;
       // A one-page document keeps its top-center where it is on screen through
       // any zoom. A multi-page stream keeps the reading spot instead.
       if (slots.length === 1) {
         const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
-        // The page width scales with the zoom, so the pre-change width is exact
-        // from the ratio even when previousSlots has not caught up (a fresh
-        // measurement can leave it empty at mount).
-        const ratio = oldScale > 0 ? oldScale / scale : 1;
         const area = contentAreaElementRef.current;
         const areaRect = area?.getBoundingClientRect();
         const contentLeft = areaRect
@@ -1065,11 +1065,17 @@ export function PdfReader({
       if (!info) {
         // No page anchor yet (scroll tracking has not sampled): fall back to
         // Papers' SCROLL_TO_KEEP_POSITION, the old document-local offset
-        // reapplied to the new content by its relative position.
+        // reapplied to the new content by its relative position. On the first
+        // zoom of a fresh open `previousSlots` is still empty (the ref is only
+        // updated here), so derive the old extent from the scale ratio: a zero
+        // upper would collapse the kept offset to the top, losing the restored
+        // page.
         const viewportHeight = container.clientHeight;
+        const previousContentHeight =
+          previousSlots.length > 0 ? documentHeight(previousSlots) : documentHeight(slots) * ratio;
         const adjustment: ScrollAdjustment = {
           value: container.scrollTop - documentTop,
-          upper: documentHeight(previousSlots),
+          upper: previousContentHeight,
           pageSize: viewportHeight,
         };
         setScrollTop(
