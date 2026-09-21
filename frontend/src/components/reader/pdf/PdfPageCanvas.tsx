@@ -6,7 +6,11 @@ import {
   type SmartPalette,
 } from "@/lib/pdf/pdfEngine";
 import type { Rect } from "./pdfLayout";
-import { effectiveRenderRatio, needsRegionRender, regionRenderRatio } from "./pdfRenderPolicy";
+import {
+  effectiveRenderRatio,
+  needsRegionRender,
+  regionRenderRatioForPage,
+} from "./pdfRenderPolicy";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 
 interface PdfPageCanvasProps {
@@ -296,7 +300,14 @@ export function PdfPageCanvas({
     }
 
     const ratio = regionMode
-      ? regionRenderRatio(regionWidth, regionHeight, dpr)
+      ? regionRenderRatioForPage(
+          width / scale,
+          height / scale,
+          regionWidth,
+          regionHeight,
+          scale,
+          dpr,
+        )
       : effectiveRenderRatio(width / scale, height / scale, scale, dpr);
 
     // Fast path: a bitmap rendered at this scale, ratio, region, and variant
