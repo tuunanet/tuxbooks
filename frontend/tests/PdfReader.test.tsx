@@ -840,12 +840,13 @@ describe("PdfReader virtualization", () => {
 
     await renderLoadedReader();
     // Emulate the 4K reference conditions (docs/PERFORMANCE.md): a ~3816px
-    // content area fits the letter page at ~6.2×, so each slot's capped
-    // buffer is ~75 MB and only ~3 fit the 256 MB live-canvas budget.
+    // content area reserves the 24px Papers margin and fits the letter page
+    // at ~6.2×, so each slot's capped buffer is ~75 MB and only ~3 fit the
+    // 256 MB live-canvas budget.
     const area = screen.getByTestId("pdf-content-area");
     Object.defineProperty(area, "clientWidth", { value: 3816, configurable: true });
     window.dispatchEvent(new Event("resize"));
-    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "3816"));
+    await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "3792"));
 
     for (let page = 2; page <= 8; page++) {
       fireVisible(slot(page) as Element, true);
@@ -1106,9 +1107,10 @@ describe("PdfReader fit width and zoom anchoring", () => {
 
     await renderLoadedReader();
 
-    // A 1224px-wide content area fits the 612pt reference page at 2×.
+    // A 1248px-wide content area reserves the Papers margin (2 * 12px) on
+    // each side, so the 612pt reference page fits at 2×.
     const area = screen.getByTestId("pdf-content-area");
-    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
     await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "1224"));
@@ -1116,6 +1118,35 @@ describe("PdfReader fit width and zoom anchoring", () => {
     // The zoom indicator shows the effective page zoom (scale × 100), not a
     // multiplier: the fit-width scale here is 2× the page's point size.
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200");
+  });
+
+  it("fits against the document's largest page, not page 1", async () => {
+    const doc = makeFakePdfDocument(3, (pageNumber) =>
+      pageNumber === 2 ? { width: 1224, height: 612 } : { width: 612, height: 792 },
+    );
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    // Page 1 alone is the reference until the widest page is measured, so the
+    // fit lands at (1248 - 24) / 612 = 2×.
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
+
+    // Measuring the 1224pt-wide page raises the fit reference
+    // (pps_document_get_max_page_size) to its width. The scale drops to
+    // (1248 - 24) / 1224 = 1, so page 1 renders at its native width instead
+    // of being blown up.
+    firePreload(slot(2) as Element, true);
+    await waitFor(() => expect(slot(1)).toHaveStyle({ width: "612px" }));
+    expect(slot(2)).toHaveStyle({ width: "1224px" });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
   });
 
   it("recomputes the fit scale when the window resizes", async () => {
@@ -1128,11 +1159,11 @@ describe("PdfReader fit width and zoom anchoring", () => {
 
     await renderLoadedReader();
     const area = screen.getByTestId("pdf-content-area");
-    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "1224"));
 
-    Object.defineProperty(area, "clientWidth", { value: 918, configurable: true });
+    Object.defineProperty(area, "clientWidth", { value: 942, configurable: true });
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "918"));
   });
@@ -1900,9 +1931,10 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const container = document.createElement("div");
     const { doc } = await renderZoomableReader(container);
 
-    // 1224px content area fits the 612pt reference page at 2× (200%).
+    // 1248px content area reserves the 24px Papers margin, fitting the 612pt
+    // reference page at 2× (200%).
     const area = screen.getByTestId("pdf-content-area");
-    Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
+    Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
 
@@ -2040,7 +2072,7 @@ describe("PdfReader zoom modes (issue #65)", () => {
 });
 
 describe("PdfReader presentation mode (issue #65)", () => {
-  /** Container whose viewport fits the letter page exactly at scale 1. */
+  /** Container one letter page high; the fit-page scale reserves the margin. */
   function stubViewportContainer(): HTMLElement {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientHeight", { value: 792, configurable: true });
@@ -2085,8 +2117,9 @@ describe("PdfReader presentation mode (issue #65)", () => {
 
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-presentation", "true");
     // The single-page surface mounts just the current slot, so no neighbour
-    // can show through the scroll container.
-    expect(slot(1)).toHaveStyle({ height: "792px" });
+    // can show through the scroll container. The 792px viewport reserves the
+    // 24px Papers margin, so the letter page fits at 0.9697× (height 768).
+    expect(slot(1)).toHaveStyle({ height: "768px" });
     expect(slot(2)).toBeNull();
     expect(slot(3)).toBeNull();
   });
@@ -2104,10 +2137,11 @@ describe("PdfReader presentation mode (issue #65)", () => {
 
     // Measure page 2 (landscape) as the visible observer would.
     fireVisible(slot(2) as Element, true);
-    // The 1224pt-wide page is width-bound: the contain scale is 1, so it is
-    // exactly as wide as the area and never clips (a height-only fit would
-    // have made it 1584px wide).
-    await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1224px", height: "612px" }));
+    // The 1224pt-wide page is width-bound: the contain scale is
+    // (1224 - 24) / 1224, so it fills the area minus the Papers margin
+    // (1200x600) and never clips (a height-only fit would have made it
+    // 1584px wide).
+    await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1200px", height: "600px" }));
   });
 
   it("keeps the current page on enter and restores the zoom state on exit", async () => {
@@ -2128,11 +2162,11 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
     expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
     // Page is preserved. Page 2 is still the page-1 estimate in jsdom, so
-    // the contain scale is 1× and the slot keeps the letter geometry.
+    // the contained height is the 792px page less the Papers margin (768px).
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
-    expect(slot(2)).toHaveStyle({ height: "792px" });
+    expect(slot(2)).toHaveStyle({ height: "768px" });
 
     view.rerenderBook({ presentationMode: false });
     expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull();

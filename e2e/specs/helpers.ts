@@ -213,13 +213,18 @@ export async function scrollToSlot(page: Page, pageNumber: number): Promise<void
 }
 
 /**
- * Fit-width factor: the reader fits the 612pt reference page into the
- * content area, so rendered geometry scales by clientWidth/612.
+ * Fit-width factor: the reader fits the document's widest page (Papers'
+ * `pps_document_get_max_page_size`) into the content area minus the Papers
+ * margin (2 * 12px), so rendered geometry scales by
+ * (clientWidth - 24) / referencePageWidth. The default reference is the 612pt
+ * letter page the minimal and large fixtures use; a mixed-size fixture passes
+ * its widest page width.
  */
-export async function fitFactor(page: Page): Promise<number> {
-  return page.evaluate(
-    () => (document.querySelector("[data-testid=pdf-content-area]")?.clientWidth ?? 0) / 612,
-  );
+export async function fitFactor(page: Page, referencePageWidth = 612): Promise<number> {
+  return page.evaluate((reference) => {
+    const width = document.querySelector("[data-testid=pdf-content-area]")?.clientWidth ?? 0;
+    return (width - 24) / reference;
+  }, referencePageWidth);
 }
 
 /**
