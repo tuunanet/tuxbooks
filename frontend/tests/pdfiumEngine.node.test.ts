@@ -8,6 +8,7 @@ import { normalizePdfOutline } from "@/lib/pdf/pdfOutline";
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";
 import { assemblePageText, findPageMatches } from "@/lib/pdf/pdfSearch";
 import { PdfiumEngine, type PageClip } from "@/lib/pdf/pdfiumCore";
+import { colorSchemeFromPalette, hexToRgb01, type Rgb } from "@/lib/pdf/smartColors";
 
 /**
  * Real PDFium-WASM integration (tuxbooks-koe.5, .7, .8). Loading the browser
@@ -31,6 +32,9 @@ const fixturePath = fileURLToPath(
 const outlineFixturePath = fileURLToPath(
   new URL("../../tests/fixtures/books/large.pdf", import.meta.url),
 );
+const smartFixturePath = fileURLToPath(
+  new URL("../../tests/fixtures/books/smart.pdf", import.meta.url),
+);
 
 /** Exact-length ArrayBuffer copy (Buffer views share a pooled backing store). */
 function toArrayBuffer(view: Uint8Array): ArrayBuffer {
@@ -44,6 +48,31 @@ function countNonWhite(rgba: Uint8ClampedArray<ArrayBuffer>): number {
   }
   return count;
 }
+
+/** Byte offset of one pixel in a packed RGBA buffer. */
+function pixelOffset(width: number, x: number, y: number): number {
+  return (y * width + x) * 4;
+}
+
+/** Rec. 709 luminance of one RGBA pixel, 0–255. */
+function pixelLuminance(rgba: Uint8ClampedArray, offset: number): number {
+  return 0.2126 * rgba[offset]! + 0.7152 * rgba[offset + 1]! + 0.0722 * rgba[offset + 2]!;
+}
+
+/** Channel spread (max − min) of one RGBA pixel, 0–255. */
+function pixelChroma(rgba: Uint8ClampedArray, offset: number): number {
+  return (
+    Math.max(rgba[offset]!, rgba[offset + 1]!, rgba[offset + 2]!) -
+    Math.min(rgba[offset]!, rgba[offset + 1]!, rgba[offset + 2]!)
+  );
+}
+
+/** The reader's dark preset, as `theme.ts` derives it for the engine seam. */
+const DARK_PALETTE = {
+  background: hexToRgb01("#101013") as Rgb,
+  text: hexToRgb01("#e4e4e7") as Rgb,
+};
+const DARK_SCHEME = colorSchemeFromPalette(DARK_PALETTE);
 
 /** Copies a sub-rectangle out of a packed RGBA buffer. */
 function cropRgba(
@@ -150,6 +179,93 @@ describe("PdfiumEngine (WASM)", () => {
     // not defaulted to the page origin.
     const blank = engine.renderRgba(0, width, height, [72, 520, 378, 40]);
     expect(countNonWhite(blank)).toBe(0);
+  });
+
+  test("renders the dark colour scheme with a dark page and light text", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(smartFixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    const width = 612;
+    const height = 792;
+    const dark = engine.renderRgba(0, width, height, undefined, DARK_SCHEME);
+
+    // The unpainted page background takes the scheme's path fill, not white.
+    const corner = pixelOffset(width, 5, 5);
+    expect(dark[corner]).toBe(0x10);
+    expect(dark[corner + 1]).toBe(0x10);
+    expect(dark[corner + 2]).toBe(0x13);
+
+    // The title band (x 72..470 at device y 80..135) carries light text on
+    // the dark page; text is sparse, so most of the band stays background.
+    let light = 0;
+    for (let y = 80; y < 135; y += 1) {
+      for (let x = 72; x < 470; x += 1) {
+        if (pixelLuminance(dark, pixelOffset(width, x, y)) > 160) light += 1;
+      }
+    }
+    expect(light).toBeGreaterThan(50);
+    expect(light).toBeLessThan(55 * (470 - 72) * 0.5);
+
+    // A blank band below the text is the dark page, never white.
+    const blank = cropRgba(dark, width, 40, 500, 100, 100);
+    let blankLuminance = 0;
+    for (let i = 0; i < blank.length; i += 4) blankLuminance += pixelLuminance(blank, i);
+    expect(blankLuminance / (blank.length / 4)).toBeLessThan(40);
+  });
+
+  test("keeps a coloured image's pixels under the dark scheme", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(smartFixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    const width = 612;
+    const height = 792;
+    const plain = engine.renderRgba(1, width, height);
+    const dark = engine.renderRgba(1, width, height, undefined, DARK_SCHEME);
+
+    // The gradient photo spans device x 56..556, y 62..712. The colour
+    // scheme recolors path and text categories only, so image pixels are
+    // byte-for-byte the plain raster's.
+    for (const [x, y] of [
+      [300, 300],
+      [200, 200],
+      [400, 500],
+    ] as const) {
+      const offset = pixelOffset(width, x, y);
+      expect(pixelChroma(dark, offset)).toBeGreaterThan(24);
+      for (let channel = 0; channel < 3; channel += 1) {
+        expect(Math.abs(dark[offset + channel]! - plain[offset + channel]!)).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
+  test("renders a clipped region with the colour scheme aligned to the page", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(smartFixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    // The region uses the progressive colour-scheme path (no matrix variant
+    // exists), so it must land on the same pixels as the whole-page crop.
+    const clip: PageClip = [72, 80, 470, 80];
+    const width = 470;
+    const height = 80;
+    const whole = engine.renderRgba(0, 612, 792, undefined, DARK_SCHEME);
+    const region = engine.renderRgba(0, width, height, clip, DARK_SCHEME);
+    const expected = cropRgba(whole, 612, 72, 80, width, height);
+    let mismatches = 0;
+    for (let i = 0; i < region.length; i += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        if (Math.abs(region[i + channel]! - expected[i + channel]!) > 8) {
+          mismatches += 1;
+          break;
+        }
+      }
+    }
+    expect(mismatches / (width * height)).toBeLessThan(0.02);
   });
 
   test("keeps a deep-zoom region inside the pixel budget", async () => {

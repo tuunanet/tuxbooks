@@ -16,6 +16,12 @@ interface RenderRequest {
   width: number;
   height: number;
   clip?: number[];
+  colorScheme?: {
+    pathFill: number;
+    pathStroke: number;
+    textFill: number;
+    textStroke: number;
+  };
 }
 
 const workers: FakeWorker[] = [];
@@ -142,6 +148,38 @@ describe("PDFium adapter", () => {
     expect(workers[0]!.renders).toEqual([
       { page: 1, width: 60, height: 80, clip: [20, 40, 60, 80] },
     ]);
+    await pdf.destroy();
+  });
+
+  test("maps the dark palette to the colour scheme on the render request", async () => {
+    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
+    const pdf = await openPdfDocumentFromBook(1, "pdf");
+    const page = await pdf.getPage(1);
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 300;
+
+    // The seam passes the reader's `SmartPalette`; the adapter converts it to
+    // PDFium's category colour scheme before it crosses to the worker, so the
+    // worker payload carries plain 32-bit colours (tuxbooks-koe.9).
+    await page.render({
+      canvas,
+      viewport: { width: 100, height: 150 },
+      transform: [2, 0, 0, 2, 0, 0],
+      smartColors: { background: [0x10 / 255, 0x10 / 255, 0x13 / 255], text: [1, 1, 1] },
+    }).promise;
+    expect(workers[0]!.renders[0]?.colorScheme).toEqual({
+      pathFill: 0xff101013,
+      pathStroke: 0xffffffff,
+      textFill: 0xffffffff,
+      textStroke: 0xff101013,
+    });
+
+    // Without a palette (default, paper via CSS tint, filter modes) the
+    // request carries no colour scheme.
+    await page.render({ canvas, viewport: { width: 100, height: 150 } }).promise;
+    expect(workers[0]!.renders[1]?.colorScheme).toBeUndefined();
+
     await pdf.destroy();
   });
 
