@@ -1,4 +1,5 @@
 import { init, type WrappedPdfiumModule } from "@embedpdf/pdfium";
+import type { EngineTextLine } from "./pdfEngineTypes";
 import type { PdfRangeSource } from "./pdfRangeSource";
 
 /**
@@ -34,6 +35,22 @@ export interface PdfSize {
 
 /** Viewport region in page units: `[left, top, width, height]`. */
 export type PageClip = [number, number, number, number];
+
+/** Accumulator for one text line while its characters are walked. */
+interface LineBuilder {
+  text: string;
+  /** Left edge, page units. */
+  x: number;
+  /** Right edge, page units. */
+  right: number;
+  /** Top edge (PDF space, y up), page units. */
+  top: number;
+  /** Bottom edge (PDF space, y up), page units. */
+  bottom: number;
+  /** Baseline (PDF space, y up), page units. */
+  baseline: number;
+  size: number;
+}
 
 export class PdfiumEngine {
   private doc: number | null = null;
@@ -119,6 +136,99 @@ export class PdfiumEngine {
       return { width: values[0]!, height: values[1]! };
     } finally {
       this.rt.wasmExports.free(out);
+    }
+  }
+
+  /**
+   * Structured-text lines of one page (0-based index), in page units, for the
+   * text layer and selection. PDFium exposes per-character boxes rather than
+   * lines, so characters are walked in order and grouped by baseline; the
+   * loose character box (the font's line box, not just the glyph ink) gives
+   * the vertical extents the text-layer renderer expects.
+   *
+   * Coordinates are returned with a top-left origin, y down, so
+   * `renderPdfTextLayer` positions spans unchanged; PDF space is y up, so the
+   * vertical values are flipped through the page height. Pages with no text
+   * yield an empty list, never an error. Page rotation is not applied.
+   */
+  textLines(index: number): EngineTextLine[] {
+    const size = this.pageSize(index);
+    if (!size) return [];
+    const page = this.mod.FPDF_LoadPage(this.requireDoc(), index);
+    if (!page) return [];
+    const textPage = this.mod.FPDFText_LoadPage(page);
+    if (!textPage) {
+      this.mod.FPDF_ClosePage(page);
+      return [];
+    }
+    const box = this.rt.wasmExports.malloc(16);
+    const origin = this.rt.wasmExports.malloc(16);
+    try {
+      const count = this.mod.FPDFText_CountChars(textPage);
+      if (count <= 0) return [];
+      const lines: LineBuilder[] = [];
+      for (let i = 0; i < count; i += 1) {
+        const unicode = this.mod.FPDFText_GetUnicode(textPage, i);
+        // Control characters (the generated CR/LF between lines) carry no
+        // geometry; the baseline grouping already separates the lines.
+        if (unicode < 0x20) continue;
+        if (!this.mod.FPDFText_GetLooseCharBox(textPage, i, box)) continue;
+        this.mod.FPDFText_GetCharOrigin(textPage, i, origin, origin + 8);
+        // FS_RECTF is [left, top, right, bottom] in PDF space (y up).
+        const rect = new Float32Array(this.rt.HEAPU8.buffer, box, 4);
+        const left = rect[0]!;
+        const top = rect[1]!;
+        const right = rect[2]!;
+        const bottom = rect[3]!;
+        if (!(right > left) || !(top > bottom)) continue;
+        const baseline = new Float64Array(this.rt.HEAPU8.buffer, origin, 2)[1]!;
+        const fontSize = this.mod.FPDFText_GetFontSize(textPage, i) || top - bottom;
+        let line = lines[lines.length - 1];
+        const limit = line ? Math.max(line.size, fontSize) * 0.4 : 0;
+        if (!line || Math.abs(baseline - line.baseline) > Math.max(2, limit)) {
+          line = {
+            text: "",
+            x: left,
+            right,
+            top,
+            bottom,
+            baseline,
+            size: fontSize,
+          };
+          lines.push(line);
+        } else {
+          // A wide horizontal gap is word spacing that the content stream did
+          // not encode as a space character.
+          if (
+            unicode !== 0x20 &&
+            !line.text.endsWith(" ") &&
+            left - line.right > Math.max(1, line.size * 0.2)
+          ) {
+            line.text += " ";
+          }
+          line.x = Math.min(line.x, left);
+          line.right = Math.max(line.right, right);
+          line.top = Math.max(line.top, top);
+          line.bottom = Math.min(line.bottom, bottom);
+          line.size = Math.max(line.size, fontSize);
+        }
+        line.text += String.fromCodePoint(unicode);
+      }
+      return lines
+        .map((line) => ({
+          text: line.text.replace(/\s+/g, " ").trim(),
+          x: line.x,
+          y: size.height - line.top,
+          w: line.right - line.x,
+          h: line.top - line.bottom,
+          size: line.size,
+        }))
+        .filter((line) => line.text.length > 0 && line.w > 0 && line.h > 0);
+    } finally {
+      this.rt.wasmExports.free(box);
+      this.rt.wasmExports.free(origin);
+      this.mod.FPDFText_ClosePage(textPage);
+      this.mod.FPDF_ClosePage(page);
     }
   }
 
