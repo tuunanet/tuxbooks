@@ -28,24 +28,14 @@ async function restrictedImports(filePath: string, source: string) {
 
 const VIOLATIONS = [
   {
-    label: "a reader component importing the mupdf package",
-    filePath: "src/components/reader/pdf/ImportBoundaryFixture.ts",
-    source: 'import { Document } from "mupdf";\nexport const value = Document;',
-  },
-  {
     label: "a reader component importing the PDFium package",
     filePath: "src/components/reader/pdf/ImportBoundaryFixture.tsx",
     source: 'import { init } from "@embedpdf/pdfium";\nexport const value = init;',
   },
   {
-    label: "the seam importing the MuPDF worker module",
+    label: "the seam importing the PDFium worker module",
     filePath: "src/lib/pdf/pdfEngine.ts",
-    source: 'import url from "./mupdfWorker?worker&url";\nexport default url;',
-  },
-  {
-    label: "the seam importing the MuPDF WASM URL",
-    filePath: "src/lib/pdf/pdfEngine.ts",
-    source: 'import url from "virtual:mupdf-wasm-url";\nexport default url;',
+    source: 'import url from "./pdfiumWorker?worker&url";\nexport default url;',
   },
   {
     label: "the seam importing the PDFium WASM URL",
@@ -55,17 +45,6 @@ const VIOLATIONS = [
 ];
 
 const ADAPTERS = [
-  {
-    label: "the MuPDF asset adapter importing its worker and WASM URL",
-    filePath: "src/lib/pdf/mupdfEngine.ts",
-    source:
-      'import url from "./mupdfWorker?worker&url";\nimport wasm from "virtual:mupdf-wasm-url";\nexport const value = [url, wasm];',
-  },
-  {
-    label: "the MuPDF worker importing the mupdf package",
-    filePath: "src/lib/pdf/mupdfWorker.ts",
-    source: 'import type { Document } from "mupdf";\nexport type D = Document;',
-  },
   {
     label: "the PDFium core importing the PDFium package",
     filePath: "src/lib/pdf/pdfiumCore.ts",

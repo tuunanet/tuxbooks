@@ -3,7 +3,7 @@
 tuxbooks is a local-first desktop ebook library manager. There is no backend
 server, no cloud sync, and no network dependency: Chromium (via Electron) is
 the sole desktop web runtime; a native Rust service owns the database and
-the filesystem; Readium and MuPDF.js render books.
+the filesystem; Readium and PDFium render books.
 
 **Migration state:** the Electron migration is complete; this doc
 describes the current contract.
@@ -196,11 +196,11 @@ resources load through `tuxbooks://`. See [EPUB.md](EPUB.md).
 ## PDF layer
 
 Import-time metadata stays in Rust (`pdf/` via `lopdf`; page-1 cover
-rasterization via `pdfium-render` — retained unless MuPDF in the renderer
-provably replaces it, see [PDF.md](PDF.md)), under the shared resource
-limits ([RESOURCE_LIMITS.md](RESOURCE_LIMITS.md)). Reader rendering belongs to
-**MuPDF.js/WASM** in the renderer behind `lib/pdf/pdfEngine.ts` (the only
-MuPDF import site); `components/reader/pdf/` owns layout, virtualization,
+rasterization via `pdfium-render` — retained, see [PDF.md](PDF.md)), under
+the shared resource limits ([RESOURCE_LIMITS.md](RESOURCE_LIMITS.md)). Reader
+rendering belongs to **PDFium-WASM** in the renderer behind the
+`lib/pdf/pdfEngine.ts` seam (`pdfiumCore.ts` is the only PDFium import site);
+`components/reader/pdf/` owns layout, virtualization,
 the render queue, and persistence. Byte access flows through
 `tuxbooks://`. See [PDF.md](PDF.md).
 
@@ -274,7 +274,7 @@ frontend/src/
                           localStorage store shared by Settings and the reader)
     lib/fixtures.ts       realistic sample books for tests/previews
     lib/epub/readiumEngine.ts  the only Readium import site (EPUB seam)
-    lib/pdf/pdfEngine.ts  the only MuPDF.js import site (PDF seam)
+    lib/pdf/pdfEngine.ts  the PDF engine seam (PDFium adapter behind it)
     hooks/                useLibrary, useAnnotations, useBookMetadata,
                           useBookFileProperties, useBookActions,
                           useCollectionActions
@@ -294,7 +294,7 @@ frontend/src/
                           registers its `ReaderAdapter` (`readerModel.ts`)
                           for jumps, search, and highlight creation. EPUB
                           reader (Readium) and pdf/ continuous PDF reader
-                          (MuPDF; layout math, virtualization, render queue,
+                          (PDFium; layout math, virtualization, render queue,
                           thumbnails, outline) implement the same seam.
                           ReaderNavigation holds the Search, Bookmarks, and
                           Highlights tabs.
@@ -307,7 +307,7 @@ UI primitives come from shadcn/ui (`pnpm dlx shadcn add ...`; icons from
 `lucide-react`) — do not hand-roll equivalents. The `@/` alias maps to
 `frontend/src/`. Business logic lives in Rust; readers own rendering;
 React components render state and call the typed wrappers in
-`lib/bridge.ts`; no component touches raw IPC, Readium, or MuPDF objects.
+`lib/bridge.ts`; no component touches raw IPC, Readium, or PDFium objects.
 `LibraryDataProvider` owns the fetched library data (shared by the library
 view, global search, and import flows); `ImportProvider` streams
 `import-progress` events and listens to `library-changed` so watcher

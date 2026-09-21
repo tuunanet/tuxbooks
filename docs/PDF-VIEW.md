@@ -188,8 +188,8 @@ Papers'. The comparison matters only for the oracle fixtures.
 
 ## Open items for the Phase 0 spike
 
-- Whether `FPDF_RenderPageBitmapWithMatrix` covers region rendering as cleanly as
-  MuPDF's clip.
+- Whether `FPDF_RenderPageBitmapWithMatrix` covers region rendering faithfully
+  at every scale.
 - The comparison tolerance for the oracle.
 - Whether scale-and-swap can key off the existing bitmap cache variant field or
   needs a new one. Resolved: it keys off a per-canvas last-presented bitmap, so

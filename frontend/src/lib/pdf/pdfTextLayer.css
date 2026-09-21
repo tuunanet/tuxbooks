@@ -2,8 +2,8 @@
  * Styles for the PDF text layer built by the engine seam
  * (`renderPdfTextLayer` in lib/pdf/pdfEngine.ts): transparent spans
  * positioned in page-unit space over the page canvas, giving real text
- * selection without any visuals of their own. Pin to the bundled MuPDF.js
- * version when the layer structure changes (docs/PDF.md).
+ * selection without any visuals of their own. The geometry is pinned by the
+ * PDFium text-line extractor (docs/PDF.md).
  */
 
 .textLayer {

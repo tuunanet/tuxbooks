@@ -99,7 +99,7 @@ const DEFAULT_ZOOM_STATE: ZoomState = { mode: "fit-width", level: DEFAULT_ZOOM_L
 const MAX_ACTIVE_CANVASES = 8;
 
 /**
- * Upper bound on page renders started but not yet completed. MuPDF
+ * Upper bound on page renders started but not yet completed. PDFium
  * rasterizes synchronously inside the document's worker, so renders
  * serialize there; two requests in flight keep the queue fed — page N+1 is
  * queued while page N rasterizes — instead of waiting for a fully drained
@@ -495,7 +495,7 @@ export function PdfReader({
   // indirection keeps the effect on the document alone, and the cancelled
   // flag stops a superseded load from reporting. Outline work is explicitly
   // below first paint (§ first-page priority): the request is sent only
-  // after the first page has rendered, so it can never occupy the MuPDF
+  // after the first page has rendered, so it can never occupy the PDFium
   // worker ahead of page 1. The ref guard keeps the one-shot behavior while
   // `hasFirstPaint` gates the effect.
   const onOutlineLoadRef = useRef(onOutlineLoad);
@@ -687,7 +687,7 @@ export function PdfReader({
   );
 
   // Rendering policy, modeled on the classic viewer render queues,
-  // adjusted for what the MuPDF worker actually parallelizes — see
+  // adjusted for what the PDFium worker actually parallelizes — see
   // MAX_CONCURRENT_RENDERS below:
   //
   //   1. up to MAX_CONCURRENT_RENDERS renders run at a time (started in

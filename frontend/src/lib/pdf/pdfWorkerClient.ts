@@ -53,9 +53,7 @@ export class WorkerClient {
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private failureListeners = new Set<() => void>();
-  private idleResolvers = new Set<() => void>();
   private failed = false;
-  private terminated = false;
   private stallTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiag = "";
 
@@ -75,7 +73,6 @@ export class WorkerClient {
       this.pending.delete(data.id);
       if (data.ok) pending.resolve(data.result);
       else pending.reject(new Error(data.error ?? `${this.engineLabel} worker failure`));
-      this.notifyIdle();
     };
     this.worker.onerror = (event) => {
       // A dead worker is a diagnostic failure, not cancellation: every
@@ -85,7 +82,6 @@ export class WorkerClient {
       this.pending.clear();
       this.stopStallWatch();
       this.failed = true;
-      this.notifyIdle();
       const failure = new Error(event.message || `${this.engineLabel} worker failed to load`);
       console.error(
         `[pdf-engine] worker gone: ${failure.message}` +
@@ -136,22 +132,6 @@ export class WorkerClient {
       clearInterval(this.stallTimer);
       this.stallTimer = null;
     }
-  }
-
-  /**
-   * Resolves once no request is in flight. A recycling document lets the old
-   * worker finish its queued renders before terminating it, so the swap is
-   * invisible to callers; a terminated worker resolves immediately.
-   */
-  whenIdle(): Promise<void> {
-    if (this.terminated || this.pending.size === 0) return Promise.resolve();
-    return new Promise((resolve) => this.idleResolvers.add(resolve));
-  }
-
-  private notifyIdle(): void {
-    if (this.pending.size > 0) return;
-    for (const resolve of this.idleResolvers) resolve();
-    this.idleResolvers.clear();
   }
 
   /** Registers a one-shot worker-death listener; returns the unsubscribe fn. */
@@ -212,16 +192,13 @@ export class WorkerClient {
         if (pending) {
           this.pending.delete(id);
           pending.reject(new PdfRenderCancelledError());
-          this.notifyIdle();
         }
       },
     };
   }
 
   terminate(): void {
-    this.terminated = true;
     this.stopStallWatch();
     this.worker.terminate();
-    this.notifyIdle();
   }
 }

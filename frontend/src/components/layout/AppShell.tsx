@@ -26,8 +26,8 @@ function GlobalSearchShortcut() {
 }
 
 /**
- * MuPDF engine prewarm (§ warm engine): once the shell has rendered and the
- * main thread goes idle, load the MuPDF module into a spare worker so the
+ * PDF engine prewarm (§ warm engine): once the shell has rendered and the
+ * main thread goes idle, load the PDFium module into a spare worker so the
  * first PDF open skips worker startup + WASM fetch/compile. Never opens a
  * document or rasterizes; a failed prewarm only means the next open pays
  * the cold start. Deliberately NOT cancelled on unmount — the reader view

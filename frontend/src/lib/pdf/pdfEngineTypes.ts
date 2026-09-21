@@ -2,9 +2,9 @@ import type { RawPdfOutline } from "./pdfOutline";
 import type { SmartPalette } from "./smartColors";
 
 /**
- * The engine seam's types (ADR 0002). Both the MuPDF and PDFium adapters
- * implement `PdfDocument`/`PdfPage`; components depend on these and the
- * dispatchers in `pdfEngine.ts`, never on an engine package.
+ * The engine seam's types (ADR 0002). The PDFium adapter implements
+ * `PdfDocument`/`PdfPage`; components depend on these and the re-exports in
+ * `pdfEngine.ts`, never on an engine package.
  */
 
 /** One structured-text line in page units (points); `y` is the baseline. */
@@ -45,11 +45,11 @@ export interface PdfPage {
    * size times the transform ratio. Returns a cancellable promise; a
    * cancelled render rejects with PdfRenderCancelledError and never paints.
    *
-   * `smartColors` turns on Smart Dark object-aware recoloring in the worker
-   * (issue #67): text/vector/image-mask colors are remapped onto the dark
-   * palette while ordinary images pass through. Undefined renders the page
-   * as-is (Original, and every filter/tint-based theme — those are applied
-   * as CSS over the surface, never at raster time).
+   * `smartColors` turns on the dark colour scheme in the worker (ADR 0002):
+   * PDFium recolors path and text categories onto the dark palette while
+   * images keep their pixels. Undefined renders the page as-is (Original,
+   * and every filter/tint-based theme — those are applied as CSS over the
+   * surface, never at raster time).
    */
   render(options: {
     canvas: HTMLCanvasElement;

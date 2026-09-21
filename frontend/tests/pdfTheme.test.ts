@@ -15,9 +15,9 @@ describe("PDF theme treatments", () => {
     expect(pdfThemeTreatment("light")).toEqual({});
   });
 
-  it("maps the dark theme to Smart Dark worker-side recoloring (issue #67)", () => {
+  it("maps the dark theme to the worker colour scheme (ADR 0002)", () => {
     // Dark is no longer a CSS invert filter: pages rasterize with the
-    // object-aware recoloring palette shared with the EPUB dark preset.
+    // category-level recoloring palette shared with the EPUB dark preset.
     const treatment = pdfThemeTreatment("dark");
     expect(treatment.filter).toBeUndefined();
     expect(treatment.tint).toBeUndefined();

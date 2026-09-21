@@ -4,8 +4,8 @@
  * document; the main-thread adapter terminates it on close, freeing the
  * whole WASM heap.
  *
- * Protocol matches the MuPDF worker (`{ id, method, params }` in,
- * `{ id, ok, result | error }` out) so the shared `WorkerClient` drives both.
+ * Protocol is `{ id, method, params }` in and `{ id, ok, result | error }`
+ * out, driven by the shared `WorkerClient`.
  * `open` accepts either transferred bytes or a `bookUrl`
  * (`tuxbooks://book/<id>`), which opens through `FPDF_LoadCustomDocument`
  * with an `FPDF_FILEACCESS` range callback, so a document opens (and page 1

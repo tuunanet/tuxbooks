@@ -13,19 +13,15 @@ import tseslint from "typescript-eslint";
  */
 const ENGINE_IMPORT_PATTERNS = [
   {
-    group: ["mupdf", "mupdf/*"],
-    message: "Import the PDF engine only through the pdfEngine seam.",
-  },
-  {
     group: ["@embedpdf/pdfium", "@embedpdf/pdfium/*"],
     message: "Import the PDF engine only through the pdfEngine seam.",
   },
   {
-    group: ["virtual:mupdf-wasm-url", "virtual:pdfium-wasm-url"],
+    group: ["virtual:pdfium-wasm-url"],
     message: "Engine WASM URLs are resolved inside the engine adapter.",
   },
   {
-    group: ["*mupdfWorker*", "*pdfiumWorker*"],
+    group: ["*pdfiumWorker*"],
     message: "Engine workers are started inside the engine adapter.",
   },
 ];
@@ -63,8 +59,6 @@ export default tseslint.config(
     // above. The workers are included so the engine-side modules can reach
     // their engine; the main-thread adapters own the worker URL and WASM URL.
     files: [
-      "src/lib/pdf/mupdfEngine.ts",
-      "src/lib/pdf/mupdfWorker.ts",
       "src/lib/pdf/pdfiumCore.ts",
       "src/lib/pdf/pdfiumEngine.ts",
       "src/lib/pdf/pdfiumWorker.ts",

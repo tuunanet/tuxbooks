@@ -11,14 +11,13 @@
  *   white × tint = the tint (exactly the theme's own paper color, shared
  *   with the EPUB palette), black stays black, and other colors pick up
  *   the warm cast like real paper under light.
- * - `smart` — object-aware recoloring inside the MuPDF worker *before*
- *   rasterization (issue #67): text, vector fills, strokes, and image-mask
- *   paints are remapped from the document's own palette onto the dark
- *   palette, while ordinary raster images pass through unchanged so
- *   photographs, covers, and screenshots keep their colors (mupdf's
- *   callback Device API makes the distinction possible; a CSS filter only
- *   sees finished pixels). The Dark theme is Smart Dark — the normal
- *   dark-mode behavior; see lib/pdf/smartColors.ts for the mapping.
+ * - `smart` — category-level recoloring inside the PDFium worker *before*
+ *   rasterization (ADR 0002): path fills and strokes and text fills and
+ *   strokes are remapped from the document's palette onto the dark one
+ *   through `FPDF_COLORSCHEME`, while images keep their pixels so
+ *   photographs, covers, and screenshots stay recognizable (a CSS filter
+ *   only sees finished pixels). The Dark theme uses this color scheme — the
+ *   normal dark-mode behavior; see lib/pdf/smartColors.ts for the mapping.
  *
  * Blue and Mint have no faithful treatment (they rely on text/background
  * recoloring), so they are not offered for PDFs and map to no-ops.
@@ -30,7 +29,7 @@ import { hexToRgb01, type SmartPalette } from "./smartColors";
 export interface PdfThemeTreatment {
   filter?: string;
   tint?: string;
-  /** Worker-side object-aware recoloring palette (Smart Dark). */
+  /** Worker-side dark colour-scheme palette (PDFium categories). */
   smart?: SmartPalette;
   /**
    * CSS background for the page slots while their raster is pending
@@ -46,7 +45,7 @@ export interface PdfThemeTreatment {
 }
 
 /**
- * Smart Dark's palette is the reader's own dark preset (issue #67): the
+ * The dark colour scheme's palette is the reader's own dark preset: the
  * shell chrome and the recolored pages share one background/text pair, so
  * the document surface and the reader around it never disagree.
  */
@@ -86,8 +85,9 @@ export const PDF_THEME_CHOICES = [
 /**
  * The appearance menu's PDF theme choices (issue #67), in presentation
  * order. The dark preset reads "Smart dark" because its behavior differs
- * from the EPUB preset of the same name — object-aware recoloring in the
- * worker instead of a CSS filter — while remaining the same stored theme;
+ * from the EPUB preset of the same name — category colour-scheme recoloring
+ * in the worker instead of a CSS filter — while remaining the same stored
+ * theme;
  * Invert is the explicit negative kept for users who want it.
  */
 export const PDF_THEME_MENU_OPTIONS: { value: ReaderTheme; label: string }[] = [

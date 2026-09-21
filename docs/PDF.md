@@ -57,10 +57,10 @@ PDF date strings (`D:YYYYMMDD…`) are rendered as `YYYY-MM-DD HH:mm`.
 |            | when the PDFium library is unavailable — placeholder art then)     |
 
 Cover rasterization stays in Rust (PDFium). Decision recorded at migration
-phase 4: MuPDF in the renderer does not replace it — renderer MuPDF
-rasterizes whole documents for the reading surface, while import-time
-covers need a per-file, no-UI rasterization in the sidecar; keeping PDFium
-avoids loading every full document during a scan for identical quality.
+phase 4: the renderer engine does not replace it — the renderer rasterizes
+whole documents for the reading surface, while import-time covers need a
+per-file, no-UI rasterization in the sidecar; keeping native PDFium avoids
+loading every full document during a scan for identical quality.
 
 ## Metadata writing (embed)
 
@@ -84,38 +84,40 @@ Per-file failures never abort an import run: the importer collects them in
 
 ## Rendering
 
-Rendering is the renderer's job: **MuPDF.js/WASM** (`mupdf` npm package)
-rasterizes pages, with all engine objects and rasterization in a dedicated
-module worker (`lib/pdf/mupdfWorker.ts`) — MuPDF renders synchronously, so
-the worker keeps it off the UI thread. One worker instance serves one
-document; closing the document terminates the worker and frees the whole
-WASM heap. The WASM bundle is emitted by a small Vite plugin
-(`virtual:mupdf-wasm-url` in `vite.config.ts`) because the emscripten
-glue's own chunk-relative resolution never finds the asset in a bundled
-build; the main thread resolves the URL and passes it into the open
-request, where the worker pins it as `Module.locateFile` before the
-dynamic engine import. `frontend/src/lib/pdf/pdfEngine.ts` is the only
-module that touches MuPDF. Byte access flows through the `tuxbooks://`
-custom protocol (range requests supported) — paths never cross the
-boundary.
+Rendering is the renderer's job: **PDFium compiled to WebAssembly**
+(`@embedpdf/pdfium`) rasterizes pages, with all engine objects and
+rasterization in a dedicated module worker (`lib/pdf/pdfiumWorker.ts`) —
+PDFium's C API is synchronous, so the worker keeps it off the UI thread.
+One worker instance serves one document; closing the document terminates
+the worker and frees the whole WASM heap. The engine lives behind a
+three-layer seam: `frontend/src/lib/pdf/pdfEngine.ts` is the public seam
+the reader imports, `pdfiumEngine.ts` is the main-thread adapter, and
+`pdfiumCore.ts` is the only module that imports the engine package, so a
+reader component can never depend on engine internals. The WASM bundle is
+emitted by a small Vite plugin (`virtual:pdfium-wasm-url` in
+`vite.config.ts`) because the engine glue's own chunk-relative resolution
+never finds the asset in a bundled build; the main thread resolves the URL
+and passes it into the open request. Byte access flows through the
+`tuxbooks://` custom protocol (range requests supported) — paths never
+cross the boundary.
 
 ### Opening (range-backed, never whole-file)
 
-Documents open through the engine's **random-access stream**
-(`openPdfDocumentFromBook`): the worker wraps `tuxbooks://book/<id>` in a
-`mupdf.Stream` handle whose reads are synchronous XHR **HTTP Range
-requests** (legal only inside a worker) against the Electron protocol
-handler, which seeks/reads through the Rust sidecar. MuPDF therefore pulls
-only the ranges it needs — the xref trail first, page 1 content next — and
-the first readable page no longer waits for the whole file to cross the
-bridge. A 1 MiB read-ahead chunk cache (bounded, LRU) keeps MuPDF's
-scattered object reads from becoming one request per object. The in-memory
-`openPdfDocument(bytes)` path remains for tests and byte sources that are
-already fully resident.
+Documents open through **`FPDF_LoadCustomDocument` with
+`FPDF_FILEACCESS`** (`openPdfDocumentFromBook`): the worker wraps
+`tuxbooks://book/<id>` in a `PdfRangeSource` whose `m_GetBlock` reads are
+synchronous XHR **HTTP Range requests** (legal only inside a worker) against
+the Electron protocol handler, which seeks/reads through the Rust sidecar.
+PDFium therefore pulls only the ranges it needs — the xref trail first, page
+1 content next — and the first readable page no longer waits for the whole
+file to cross the bridge. A 1 MiB read-ahead chunk cache (bounded, LRU)
+keeps PDFium's scattered object reads from becoming one request per object.
+The in-memory `openPdfDocument(bytes)` path remains for tests and byte
+sources that are already fully resident.
 
 ### Engine prewarm
 
-`prewarmPdfEngine()` loads the MuPDF module into a spare worker (no
+`prewarmPdfEngine()` loads the PDFium module into a spare worker (no
 document, no rasterization) once the app shell has rendered and the main
 thread is idle (`AppShell`'s `PdfEnginePrewarm`); the first open adopts
 that warm worker instead of paying worker startup + WASM fetch/compile on
@@ -169,7 +171,7 @@ environment, and a failed prewarm only means the next open starts cold.
   attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
   and diagnostics. Above the whole-page budget, a canvas rasterizes only the
   page's visible region at device resolution (`usePdfViewport` +
-  `visiblePageRegion`, the `mupdfWorker` clip) and positions itself in the
+  `visiblePageRegion`, the `pdfiumWorker` clip) and positions itself in the
   slot, so text stays sharp and no page-sized buffer is allocated; the
   canvas carries `data-pdf-render-region` (`full` or the region rect).
 - `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`;
@@ -322,7 +324,7 @@ E2E asserts state values and attribute shape only; timing thresholds are
 manual-bench material (`just bench-reader`, docs/PERFORMANCE.md), never
 headless CI assertions. Outline work is explicitly ordered below first
 paint: the outline request is sent only after the first page has rendered,
-so it can never occupy the MuPDF worker ahead of page 1.
+so it can never occupy the PDFium worker ahead of page 1.
 
 ### Thumbnails sidebar (`PdfSidebar`)
 
@@ -343,8 +345,10 @@ cell re-enters the window — no per-cell retry buttons.
 ### Outline
 
 The document outline comes from the engine seam (`getPdfOutline`) — the
-MuPDF document is already parsed in the renderer, so the outline shares the
-engine with rendering instead of growing a second parser in Rust. Every
+PDFium document is already parsed in the renderer, so the outline shares the
+engine with rendering instead of growing a second parser in Rust. The worker
+walks PDFium's bookmarks (`FPDFBookmark_*`, `FPDFDest_GetDestPageIndex`) and
+the pure normalizer maps destinations to pages. Every
 destination resolves to the same 1-based page locator the reader persists;
 PdfReader reports the normalized tree upward and ReaderNavigation's Outline
 tab renders it with depth indentation. Outline navigation reuses
@@ -379,9 +383,9 @@ placement.
 
 Search reuses the engine that already renders the document instead of
 growing a second extraction architecture: the seam pulls a page's text
-content through MuPDF and assembles it with the pure helpers in
-`lib/pdf/pdfSearch.ts` (item and line boundaries become single spaces, so
-queries match across them like they read on the page).
+content through PDFium's text-page APIs and assembles it with the pure
+helpers in `lib/pdf/pdfSearch.ts` (item and line boundaries become single
+spaces, so queries match across them like they read on the page).
 
 `components/reader/pdf/hooks/usePdfSearch.ts` walks pages sequentially
 (worker-serialized), matches case-insensitively, streams one group per page
@@ -401,9 +405,9 @@ thumbnails, outline, and restore.
 Rendered pages mount a text layer (`PdfPageTextLayer`, through the seam)
 over the canvas: transparent, selectable text spans — the interaction
 affordance for highlights, no visuals of its own. The seam builds the spans
-from MuPDF structured-text lines; its stylesheet (`lib/pdf/pdfTextLayer.css`)
-is coupled to that geometry and is reviewed when MuPDF changes. Text layers
-exist only on the bounded render set, like canvases.
+from PDFium's structured-text lines (`FPDFText_*` character boxes grouped by
+baseline); its stylesheet (`lib/pdf/pdfTextLayer.css`) is coupled to that
+geometry. Text layers exist only on the bounded render set, like canvases.
 
 Text selections are captured on `pointerup` (deferred one tick): the
 anchor node resolves the page through the slot's `data-pdf-slot`, the
@@ -437,58 +441,32 @@ the scroll tracker — a coarse page-local position, per the data model.
 
 ### Worker
 
-The MuPDF worker is bundled and configured once in the engine. A
+The PDFium worker is bundled and configured once in the engine. A
 main-thread fallback is the classic cause of seconds-long variable renders
 — the reader exposes `data-pdf-worker-src` and the seeded E2E verifies the
 asset is fetchable. One worker serves one document, so render, text
 extraction, outline, and thumbnail requests serialize inside it; the
 open-path ordering (page 1 first, then adjacent pages, then outline and
 thumbnails) is enforced on the main thread — see "Open-timeline
-telemetry" above.
+telemetry" above. A worker that dies unexpectedly rejects its pending
+requests and fires a one-shot listener; the document owner re-opens once
+from the range-backed source and a second death surfaces as a real error.
+There is no worker recycling: PDFium has no JS-device state to corrupt.
 
 ### Diagnostics
 
 The worker posts an out-of-band breadcrumb for every request it starts,
 finishes, or fails (`{ kind: "pdf-worker-diag", … }`, no request id) that
-carries the method, page, elapsed time, and the current MuPDF WASM heap
+carries the method, page, elapsed time, and the current WASM linear-memory
 size; the engine logs the stream at debug level and keeps the last line.
 A worker request in flight past `WORKER_STALL_WARN_MS` (10 s) is reported
 by a main-thread watchdog while it is still running, so a blocked worker
-(Smart Dark OOM, a synchronous range read) leaves a trace instead of
+(a synchronous range read, a large raster) leaves a trace instead of
 looking like a frozen UI. The main process mirrors the renderer console
 and replays its tail on `render-process-gone` (`electron/main/index.ts`),
-because a renderer crash takes the whole console with it. The heap line is
-the leak signal: it must stay flat across repeated renders of one
-document.
-
-Releasing the device objects stops the heap leak, but the engine's JS
-callback Device can still corrupt MuPDF's internal state after enough Smart
-Dark renders: on shading-heavy pages a re-render starts throwing
-`Unexpected mesh type` and then `exception stack overflow` while the heap
-stays flat. So a range-backed document bounds its worker lifetime: after
-`SMART_RENDER_RECYCLE_LIMIT` (180) Smart Dark renders it opens a replacement
-worker on the same source before swapping, routes new work to it, and lets
-the old worker drain its in-flight requests before terminating it
-(`MuPdfDocument.recycleWorker`). The swap is invisible to the reader — the
-document handle, page sizes, text cache, and bitmap cache all survive — and
-in-memory opens (no retained bytes to reopen) never recycle. Non-smart
-renders do not count toward the budget because they never use the device.
-Two signals escape a worker ahead of the budget: a render that bypassed the
-display list (`recovered`), and a Smart Dark render that throws
-(`Unexpected mesh type` is that corruption surfacing). The failure escape
-fires once per worker and re-arms after any successful render; a page that
-fails again before any success is content the device cannot render, so it
-shows its retry state rather than swapping the worker on every zoom commit.
-
-#### What the worker budget does not fix
-
-The corruption itself is in mupdf.js shading handling under a JS device, not
-something the reader can prevent, so the engine contains it by trading
-workers rather than stopping it. The `Unexpected mesh type` throw is
-state-dependent and did not reproduce in the e2e harness, so the escape
-contract is pinned at the unit seam while the e2e guards the real-book crash
-class. A follow-up worth considering: render shading-heavy pages through the
-plain path instead of the recolor device, which is the actual poison vector.
+because a renderer crash takes the whole console with it. The memory line
+is a diagnostic; PDFium's C API takes no native object into a JS callback,
+so there is no per-operation leak to watch for and no worker recycling.
 
 ### Appearance and color modes (issue #67)
 
@@ -501,30 +479,21 @@ theme, which for PDFs is really a set of **color modes**
 - **Default / Light** — pages render as-is.
 - **Paper** — multiply-tints the white pages to the theme's own paper color
   (a CSS filter cannot darken white).
-- **Dark = Smart Dark** — object-aware recoloring _inside the MuPDF worker,
-  before rasterization_: the page runs through a callback `Device`
-  (`makeSmartRecolorDevice` in `mupdfWorker.ts`) that forwards every drawing
-  operation to a `DrawDevice` while remapping fill/stroke/text/image-mask
-  paint colors onto the dark palette (`lib/pdf/smartColors.ts`). Black maps
-  to the light text color, white to the dark background, grays ramp by
-  luminance; chromatic colors keep their hue with a compressed lightness so
-  links and accent fills stay recognizable. Ordinary `fillImage` operations
-  pass through unchanged — photographs, covers, and screenshots are never
-  turned into negatives. Pages without an explicit background fill are
-  pre-filled with the dark background (PDFs do not paint their own page
-  background; viewers supply the white). Image-mask paints follow the
-  text rules (masks are stencil shapes, not photos).
-
-  The callback device is the one place the reader touches the engine's JS
-  device binding, and that binding keeps a native reference per argument it
-  passes (path, colorspace, text, stroke, image) expecting JavaScript GC to
-  drop it. In a worker the GC never keeps up, so the Smart Dark path must
-  release each argument right after forwarding it and destroy the device,
-  its `DrawDevice`, and the background path per render
-  (`releaseDeviceArgs`); `Shade` is the exception (a borrowed pointer) and
-  must not be dropped. Without this the WASM heap grows on every render
-  until the renderer dies (see "Diagnostics" for the heap breadcrumb that
-  catches it).
+- **Dark = Smart dark** — category-level recoloring _inside the PDFium
+  worker, before rasterization_ (ADR 0002): the seam's palette maps onto
+  PDFium's `FPDF_COLORSCHEME` (`colorSchemeFromPalette` in
+  `lib/pdf/smartColors.ts`), which remaps path fills and strokes and text
+  fills and strokes onto the dark palette. Path fills take the page
+  background, text takes the light text colour, and the cross terms (path
+  stroke, text stroke) are the opposite endpoint so converted fills stay
+  visible against their fill; `FPDF_CONVERT_FILL_TO_STROKE` strokes fills so
+  adjacent fills do not merge into the background. Pages without an explicit
+  background fill are pre-filled with the scheme's path fill (PDFs do not
+  paint their own page background; viewers supply the white). Images are not
+  a colour-scheme category, so photographs, covers, and screenshots keep
+  their pixels. A coloured vector fill loses its hue (all path fills share
+  one colour), the accepted degradation from the retired object-level
+  recoloring.
 
 - **Invert** — the explicit full-page negative (`invert(1)
 hue-rotate(180deg)`, the recipe Foliate popularized), kept from the old
@@ -540,35 +509,13 @@ PDF never reaches EPUB engines or shell chrome as an unknown name.
 
 #### Scanned and rasterized pages
 
-A page that _is_ one large image cannot be recolored object-by-object, and
-leaving it bright would break dark reading. When a raster image covers
-most of the page (≥ 60% coverage), the worker samples its decoded pixels
-and classifies it (`classifyRasterImage`): paper-backed, achromatic
-rasters (scans, rasterized text pages) are transformed with the same
-palette mapping as vector content; anything with meaningful chromatic
-content keeps its colors. The chromatic-fraction signal exists because
-the mean saturation cannot tell covers from scans: on a white-dominant
-page (the AI Engineering cover measures 69% near-white, mean spread
-0.027, 2.7% clearly chromatic pixels) the background dilutes the mean
-into indistinguishability, while the chromatic accents (logo, colored
-artwork) always mark designed artwork. Classification decisions are
-cached per document/page/image-ordinal, and the transformed image in a
-small LRU, so re-renders never re-pay the analysis. The original image's
-decoded pixmap is only ever read — the transform runs on a private
-DeviceRGB copy (`convertToColorSpace`), since the decode result is owned
-by MuPDF's per-image cache.
-
-The LRU owns its entries and destroys them on eviction and on clear
-(`TransformedImageCache`, unit-tested without WASM): each entry holds a
-page-scale pixmap, and the worker's GC is too lazy to release one, so an
-LRU that only forgets the key leaks multi-megabyte images into the WASM
-heap per eviction. Scans past the 4M-pixel cap are not cached and are
-destroyed right after the fill operation that consumes them. The retained
-colorspace wrappers read during classification and conversion are released
-the same way.
+A page that is one large image has no path or text categories to recolor,
+so Smart dark leaves it as-is. Scanned-image classification, which would
+detect a paper-backed scan and remap its pixels, is out of scope for the
+first version of the colour scheme.
 
 Color mode is part of the render and cache identity: the worker render
-request carries the palette only in Smart Dark, and the per-document
+request carries the colour scheme only in Smart dark, and the per-document
 bitmap cache (`pdfBitmapCache`) keys entries by `{page, scale, ratio,
 variant}` where `variant` is `"original" | "smart"` — a mode switch
 re-renders instead of serving the other mode's pixels. The shell chrome

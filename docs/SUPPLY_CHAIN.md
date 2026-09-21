@@ -38,7 +38,7 @@ Locked versions of the high-risk set at the time of the last review
 | Dependency         | Locked        | Latest stable | Status                                                        |
 | ------------------ | ------------- | ------------- | ------------------------------------------------------------- |
 | electron           | 44.2.0        | 44.4.1        | Latest major, in-support line; patch delta rides Dependabot   |
-| mupdf              | 1.28.1        | 1.28.1        | Current                                                       |
+| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                 |
 | @readium/navigator | 2.8.2         | 2.10.1        | No advisories; minors tracked via Dependabot                  |
 | @readium/shared    | 2.4.0         | 2.5.1         | No advisories; minors tracked via Dependabot                  |
 | @readium/css       | 2.0.5         | 2.0.5         | Current                                                       |

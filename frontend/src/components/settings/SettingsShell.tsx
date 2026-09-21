@@ -62,7 +62,7 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
     {
       label: "Rendering",
       value: "Continuous, on demand",
-      hint: "Pages rasterize as you scroll with MuPDF; covers are extracted at import by the sidecar.",
+      hint: "Pages rasterize as you scroll with PDFium; covers are extracted at import by the sidecar.",
     },
     {
       label: "Outlines and thumbnails",

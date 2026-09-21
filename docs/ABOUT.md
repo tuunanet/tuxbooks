@@ -9,7 +9,7 @@ layer; Chromium (via Electron) is the sole desktop web runtime.**
 - Electron `main`/`preload` are plumbing only; the renderer never sees Node.js.
   The Rust sidecar (`sidecar/`) owns DB, filesystem, scanner, and metadata.
 - Reader engines behind single-module seams: only
-  `frontend/src/lib/epub/readiumEngine.ts` imports Readium, only
-  `frontend/src/lib/pdf/pdfEngine.ts` imports MuPDF; components use the
-  format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
+  `frontend/src/lib/epub/readiumEngine.ts` imports Readium, and only the PDF
+  engine adapters under `frontend/src/lib/pdf/` import PDFium; components use
+  the format-agnostic `Reader` abstraction (`docs/EPUB.md` / `docs/PDF.md`).
 - Do not silently change these architectural conventions.

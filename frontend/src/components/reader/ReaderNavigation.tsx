@@ -83,7 +83,7 @@ function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null
 /**
  * Reading navigation drawer: EPUB contents from the Readium engine (real
  * labels, real destinations); PDF pages, thumbnails, and outline from the
- * loaded MuPDF document; persistent bookmarks, highlights, and notes from
+ * loaded PDFium document; persistent bookmarks, highlights, and notes from
  * the backend annotations; in-book search streamed from the open book's
  * reader.
  */

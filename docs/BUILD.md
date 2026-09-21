@@ -127,10 +127,10 @@ When nothing binds, imports continue without PDF covers and the cover
 tests skip. Bump `PDFIUM_BUILD` in the script when upgrading
 pdfium-render.
 
-Decision (migration phase 4): MuPDF.js in the renderer does **not**
-replace this pipeline — renderer MuPDF rasterizes whole documents for the
-reader, while import-time covers need a per-file, no-UI rasterization in
-the sidecar; PDFium stays the import-time cover engine (docs/PDF.md).
+Decision (migration phase 4): the renderer engine does **not** replace this
+pipeline — the renderer rasterizes whole documents for the reader, while
+import-time covers need a per-file, no-UI rasterization in the sidecar;
+native PDFium stays the import-time cover engine (docs/PDF.md).
 
 ## Debug-build performance
 
