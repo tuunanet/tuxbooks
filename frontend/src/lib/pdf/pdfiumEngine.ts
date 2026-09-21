@@ -12,10 +12,11 @@ import type { BookFormat } from "@/types/domain";
  * reader component touches an engine.
  *
  * Open, page sizes, whole-page raster, range-backed open (`tuxbooks-koe.5`),
- * and viewport-clipped region render at device resolution (`tuxbooks-koe.6`).
- * Text (`tuxbooks-koe.7`), outline and search (`tuxbooks-koe.8`), and the
- * dark colour scheme (`tuxbooks-koe.9`) stay reserved and fail soft (empty
- * text, no outline, plain raster) so the reader still opens and renders.
+ * viewport-clipped region render at device resolution (`tuxbooks-koe.6`), and
+ * structured-text lines for the text layer and selection (`tuxbooks-koe.7`).
+ * Outline and search (`tuxbooks-koe.8`) and the dark colour scheme
+ * (`tuxbooks-koe.9`) stay reserved and fail soft (no outline, plain raster) so
+ * the reader still opens and renders.
  */
 
 /** Configured worker URL; diagnostics for the E2E worker-load assertion. */
@@ -41,6 +42,7 @@ class PdfiumDocument implements PdfDocument {
   readonly numPages: number;
   private readonly client: WorkerClient;
   private readonly pageSizes = new Map<number, { width: number; height: number }>();
+  private readonly textLines = new Map<number, Promise<EngineTextLine[]>>();
   private destroyed = false;
 
   constructor(client: WorkerClient, numPages: number) {
@@ -127,10 +129,22 @@ class PdfiumDocument implements PdfDocument {
     return null;
   }
 
-  /** Reserved for tuxbooks-koe.7; empty lines yield no text layer. */
-  async getTextLines(): Promise<EngineTextLine[]> {
+  /**
+   * Structured-text lines for the page, in page units. Cached per page for the
+   * document's lifetime (the text layer and in-book search both read it); a
+   * failed extraction is dropped so a retry is not poisoned.
+   */
+  getTextLines(pageNumber: number): Promise<EngineTextLine[]> {
     this.assertAlive();
-    return [];
+    let lines = this.textLines.get(pageNumber);
+    if (!lines) {
+      lines = this.client
+        .request("text", { page: pageNumber })
+        .then((raw) => (raw as { lines: EngineTextLine[] }).lines);
+      this.textLines.set(pageNumber, lines);
+      lines.catch(() => this.textLines.delete(pageNumber));
+    }
+    return lines;
   }
 
   onWorkerFailed(callback: () => void): () => void {
@@ -141,6 +155,7 @@ class PdfiumDocument implements PdfDocument {
     if (this.destroyed) return;
     this.destroyed = true;
     this.pageSizes.clear();
+    this.textLines.clear();
     this.client.terminate();
   }
 }

@@ -16,6 +16,7 @@
  */
 
 import type { WorkerDiag } from "./pdfWorkerClient";
+import type { EngineTextLine } from "./pdfEngineTypes";
 import { PdfRangeSource } from "./pdfRangeSource";
 import { PdfiumEngine, type PageClip } from "./pdfiumCore";
 
@@ -33,6 +34,7 @@ type WorkerRequest =
       };
     }
   | { id: number; method: "pageSize"; params: { page: number } }
+  | { id: number; method: "text"; params: { page: number } }
   | {
       id: number;
       method: "render";
@@ -95,6 +97,11 @@ const methods = {
     const size = engine.pageSize(page - 1);
     if (!size) throw new Error(`page ${page} has no size`);
     return size;
+  },
+
+  text({ page }: { page: number }): { lines: EngineTextLine[] } {
+    if (!engine) throw new Error("no document open");
+    return { lines: engine.textLines(page - 1) };
   },
 
   async render({
