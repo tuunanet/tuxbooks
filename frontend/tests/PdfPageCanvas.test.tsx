@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/pdf/pdfEngine", () => ({
   isRenderingCancelled: vi.fn(() => false),
@@ -73,5 +73,85 @@ describe("PdfPageCanvas color-mode reset (issue #67 follow-up)", () => {
       />,
     );
     expect(fakeCtx.clearRect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PdfPageCanvas scale-and-swap", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      fakeCtx as unknown as CanvasRenderingContext2D,
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Render one page to a level of completion the caller controls. */
+  function renderPage(doc: ReturnType<typeof makeFakePdfDocument>) {
+    return render(
+      <PdfPageCanvas document={doc as never} pageNumber={1} width={100} height={129} scale={1} />,
+    );
+  }
+
+  it("keeps the previous bitmap scaled through a scale change, then swaps in the new one", async () => {
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = renderPage(doc);
+    const canvas = screen.getByTestId("pdf-canvas");
+
+    // Complete the first render at scale 1.
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+    expect(canvas.style.transform).toBe("");
+
+    // Scale change while the new render is held: the previous bitmap is
+    // immediately drawn under a transform sized to the new box. The visible
+    // surface is never blank (a drawable bitmap is present throughout).
+    view.rerender(
+      <PdfPageCanvas document={doc as never} pageNumber={1} width={200} height={258} scale={2} />,
+    );
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    expect(canvas.style.transform).toBe("scale(2, 2)");
+    expect(fakeCtx.drawImage).toHaveBeenCalledTimes(1); // still the first buffer
+
+    // The new-scale raster resolves; the atomic blit replaces the scaled
+    // bitmap and clears the transform.
+    await waitFor(() => expect(doc.renderOptions.length).toBe(2));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+    expect(canvas.style.transform).toBe("");
+    expect(fakeCtx.drawImage).toHaveBeenCalledTimes(2);
+    expect(canvas.getAttribute("width")).toBe(String(Math.floor(612 * 2)));
+  });
+
+  it("keeps a display-only canvas scaled without starting a new raster", async () => {
+    const doc = makeFakePdfDocument(1);
+    const view = renderPage(doc);
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+    const requestsAfterFirst = doc.getPage.mock.calls.length;
+
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={200}
+        height={258}
+        scale={2}
+        renderEnabled={false}
+      />,
+    );
+
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    expect(canvas.style.transform).toBe("scale(2, 2)");
+    // Wait out the render-settle window: a display-only canvas must not ask
+    // the engine for a page it is not budgeted to rasterize.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(doc.getPage.mock.calls.length).toBe(requestsAfterFirst);
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
   });
 });

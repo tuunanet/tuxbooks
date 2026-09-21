@@ -55,10 +55,35 @@ interface PdfPageCanvasProps {
    * stores its offscreen buffer so a future re-entry can do the same.
    */
   bitmapCache?: PdfBitmapCache | null;
+  /**
+   * Whether this canvas may start a new raster. False keeps a canvas that
+   * already holds pixels mounted for display only: its previous bitmap is
+   * shown scaled to the current geometry while other pages rasterize, and it
+   * renders once the reader admits it back into the render budget. The
+   * reader uses this for the pages that fall outside `MAX_CONCURRENT_RENDERS`
+   * during a zoom commit, so scale-and-swap never queues a page-sized raster
+   * for every previously rendered page at once.
+   */
+  renderEnabled?: boolean;
   /** Test hook; distinct per surface (main pages vs. thumbnails). */
   testId?: string;
   onPageRendered?: (pageNumber: number) => void;
   onPageError?: (pageNumber: number, error: unknown) => void;
+}
+
+/**
+ * The geometry the last-presented bitmap was rendered at. Scale-and-swap
+ * reuses the canvas's own pixels: while the new-scale raster is in flight
+ * (or while the canvas is display-only), the previous bitmap is drawn scaled
+ * from this box to the current one, so the page never goes blank through a
+ * zoom.
+ */
+interface PresentedGeometry {
+  readonly scale: number;
+  readonly regionKey: string;
+  readonly cssWidth: number;
+  readonly cssHeight: number;
+  readonly mode: "full" | "region";
 }
 
 /** One-shot copy of a finished buffer onto the visible canvas. */
@@ -83,7 +108,31 @@ function blit(
   if (top !== undefined) canvas.style.top = `${top}px`;
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
+  // A fresh blit lands at its natural size: clear any scale-and-swap
+  // transform left by the previous bitmap so it cannot compound.
+  canvas.style.transform = "";
+  canvas.style.transformOrigin = "";
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
+}
+
+/**
+ * Scale-and-swap: present a bitmap rendered at an earlier scale under a CSS
+ * transform sized to the current box. The canvas keeps its previous layout
+ * box (the last blit's CSS size) and the transform stretches it to `width` ×
+ * `height`, so the old pixels fill the new page rect while the sharp raster
+ * runs. Drawing under a transform is exactly Papers' "existing texture drawn
+ * scaled into the new rect" (`pps-view-page.c` snapshot).
+ */
+function presentScaled(
+  canvas: HTMLCanvasElement,
+  previous: PresentedGeometry,
+  width: number,
+  height: number,
+): void {
+  const scaleX = previous.cssWidth > 0 ? width / previous.cssWidth : 1;
+  const scaleY = previous.cssHeight > 0 ? height / previous.cssHeight : 1;
+  canvas.style.transformOrigin = "top left";
+  canvas.style.transform = `scale(${scaleX}, ${scaleY})`;
 }
 
 /** Internal control-flow marker: the instance was superseded mid-render. */
@@ -146,12 +195,16 @@ export function PdfPageCanvas({
   smartColors,
   renderVariant = "original",
   bitmapCache = null,
+  renderEnabled = true,
   testId = "pdf-canvas",
   onPageRendered,
   onPageError,
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<PdfRenderTask | null>(null);
+  // The last bitmap presented (blitted or shown scaled). Scale-and-swap
+  // reads it to keep the old pixels on screen through a scale change.
+  const lastPresentedRef = useRef<PresentedGeometry | null>(null);
   // PERF-2 signal (docs/PERFORMANCE.md): durations (ms) of the last renders
   // published as a deterministic `data-pdf-render-ms` attribute — a
   // diagnostic only, never asserted by timing in CI.
@@ -217,6 +270,10 @@ export function PdfPageCanvas({
     if (previousVariantRef.current !== renderVariant) {
       previousVariantRef.current = renderVariant;
       canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      // Wrong-mode pixels must not be scaled either: drop the swap source.
+      lastPresentedRef.current = null;
+      canvas.style.transform = "";
+      canvas.style.transformOrigin = "";
     }
 
     const ratio = regionMode
@@ -231,8 +288,41 @@ export function PdfPageCanvas({
       const startedAt = performance.now();
       canvas.setAttribute("data-pdf-render-quality", "final");
       blit(canvas, cached.buffer, cssWidth, cssHeight, blitLeft, blitTop);
+      lastPresentedRef.current = {
+        scale,
+        regionKey,
+        cssWidth,
+        cssHeight,
+        mode: regionMode ? "region" : "full",
+      };
       publishRenderMs(canvas, performance.now() - startedAt);
       renderedRef.current?.(pageNumber);
+      return;
+    }
+
+    // Scale-and-swap: a canvas that survives a scale change already holds the
+    // previous-scale pixels. Present them under a transform sized to the new
+    // box immediately, so the visible surface never blanks while the sharp
+    // raster runs. Only whole-page rasters are swapped this way; a region
+    // canvas is already viewport-sized and keeps its pixels in place.
+    const previous = lastPresentedRef.current;
+    const swapped =
+      previous !== null &&
+      previous.mode === "full" &&
+      !regionMode &&
+      (previous.scale !== scale ||
+        previous.regionKey !== regionKey ||
+        previous.cssWidth !== cssWidth ||
+        previous.cssHeight !== cssHeight);
+    if (swapped && previous) {
+      presentScaled(canvas, previous, cssWidth, cssHeight);
+      canvas.setAttribute("data-pdf-render-quality", "scaled");
+    }
+
+    // Display-only stale canvas: keep painting the scaled previous bitmap and
+    // let the reader promote this page back into the render budget. Without a
+    // previous bitmap there is nothing to show, so stay blank as before.
+    if (!renderEnabled) {
       return;
     }
 
@@ -301,6 +391,13 @@ export function PdfPageCanvas({
       const firstBuffer = await renderInto(previewRatio);
       canvas.setAttribute("data-pdf-render-quality", needsRefinement ? "preview" : "final");
       blit(canvas, firstBuffer, cssWidth, cssHeight, blitLeft, blitTop);
+      lastPresentedRef.current = {
+        scale,
+        regionKey,
+        cssWidth,
+        cssHeight,
+        mode: regionMode ? "region" : "full",
+      };
       renderedRef.current?.(pageNumber);
 
       if (!needsRefinement) {
@@ -338,6 +435,13 @@ export function PdfPageCanvas({
         buffer: refinedBuffer,
       });
       blit(canvas, refinedBuffer, cssWidth, cssHeight, blitLeft, blitTop);
+      lastPresentedRef.current = {
+        scale,
+        regionKey,
+        cssWidth,
+        cssHeight,
+        mode: regionMode ? "region" : "full",
+      };
     })().catch((err: unknown) => {
       if (cancelled || isRenderingCancelled(err) || err instanceof CancelledRender) return;
       errorRef.current?.(pageNumber, err);
@@ -357,6 +461,7 @@ export function PdfPageCanvas({
     smartColors,
     renderVariant,
     bitmapCache,
+    renderEnabled,
     regionMode,
     regionLeft,
     regionTop,

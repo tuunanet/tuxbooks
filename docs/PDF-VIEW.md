@@ -150,6 +150,17 @@ TuxBooks invalidates canvases and the scale-keyed bitmap cache on a scale change
 policy: keep painting the previous bitmap under a transform until the new-scale
 render commits, then swap. This is the one net-new mechanism in the port.
 
+Scale-and-swap lives in `PdfPageCanvas`, not in the bitmap cache. The canvas
+keeps the last bitmap it presented and, when the scale changes, draws it under
+a CSS transform sized to the new page box; the freshly rasterized buffer
+replaces it in one atomic blit. The cache stays exact-scale keyed, so it never
+serves a stale-scale bitmap. `PdfReader` supplies the second half: a zoom moves
+the pages that held pixels into a display-only set, keeps their canvases
+mounted, and admits at most `MAX_CONCURRENT_RENDERS` pages to the fresh raster,
+so no page-sized render is queued for every previously rendered page at once.
+A page outside that budget keeps its scaled bitmap until the render budget
+reaches it.
+
 ## Rendering and caching, as background
 
 Papers renders a page to a `cairo_image_surface_create` at `scale * device_scale`
@@ -174,4 +185,5 @@ Papers'. The comparison matters only for the oracle fixtures.
   MuPDF's clip.
 - The comparison tolerance for the oracle.
 - Whether scale-and-swap can key off the existing bitmap cache variant field or
-  needs a new one.
+  needs a new one. Resolved: it keys off a per-canvas last-presented bitmap, so
+  the scale-exact bitmap cache is untouched and no new cache field is needed.

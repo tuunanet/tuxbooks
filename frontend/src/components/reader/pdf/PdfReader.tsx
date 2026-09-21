@@ -53,17 +53,22 @@ import {
   renderBufferBytes,
 } from "./pdfRenderPolicy";
 import {
+  adjustmentUpper,
+  adjustmentValueForPolicy,
   clampZoom,
   DEFAULT_ZOOM_LEVEL,
   MAX_ZOOM,
   MIN_ZOOM,
   displayedSizes,
+  documentHeight,
+  keepPositionValue,
   layoutSlots,
   stepZoomLevel,
   visiblePageRegion,
   wheelZoomScale,
   type FitZoomMode,
   type Rect,
+  type ScrollAdjustment,
   type ZoomMode,
 } from "./pdfLayout";
 import { pageToPosition, positionToPage } from "./pdfPages";
@@ -379,6 +384,16 @@ export function PdfReader({
   const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
   const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(() => new Set());
+  // Pages holding a previous-scale bitmap kept on screen through a zoom
+  // commit. Scale-and-swap (PdfPageCanvas) paints them transformed while the
+  // pages admitted to the render budget rasterize; a completed render clears
+  // its page from this set. Reset with the document, the color variant, and
+  // a presentation flip, never on an ordinary zoom.
+  const [stalePages, setStalePages] = useState<ReadonlySet<number>>(() => new Set());
+  const renderedPagesRef = useRef(renderedPages);
+  useEffect(() => {
+    renderedPagesRef.current = renderedPages;
+  });
 
   const effectivePageCount = pageCount > 0 ? pageCount : PDF_PLACEHOLDER_PAGE_COUNT;
   const currentPage = positionToPage(position, effectivePageCount);
@@ -651,6 +666,12 @@ export function PdfReader({
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),
     [sizes, scale],
   );
+  // Latest layout for the imperative wheel-commit scroll math, which runs in
+  // a layout effect and must not re-create the wheel listener every zoom.
+  const slotsRef = useRef(slots);
+  useEffect(() => {
+    slotsRef.current = slots;
+  });
 
   // Presentation mode is a single-page surface: only the current page's slot
   // is laid out, so no neighbour can peek in from the scroll container. The
@@ -704,14 +725,14 @@ export function PdfReader({
 
   // The render set, derived purely from the priority order and the
   // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
-  // pages of `renderOrder` own canvases (bounded concurrency in flight —
-  // they stay mounted until rendered, failed, or priority-demoted out of
-  // the set, which cancels them), and completed canvases stay mounted while
-  // their page remains in-window. A zoom clears `renderedPages`, so
-  // in-place re-renders keep their canvas: the page is simply pending again
-  // at priority rank 0. No mounted-set tracking is needed — the first-K
-  // selection is idempotent across commits.
-  const canvasPages = useMemo(() => {
+  // pages of `renderOrder` own the render budget (bounded concurrency in
+  // flight), and completed canvases stay mounted while their page remains
+  // in-window. A zoom does not unmount the pages that held pixels: they are
+  // kept as display-only scale-and-swap (stalePages) until either the render
+  // budget admits them or they leave the window, so the visible surface is
+  // never blank through the commit. `renderPermittedPages` is exactly the
+  // budget, and PdfPageCanvas refuses to raster outside it.
+  const { canvasPages, renderPermittedPages } = useMemo(() => {
     const window = new Set(renderOrder);
     const rendering: number[] = [];
     for (const page of renderOrder) {
@@ -719,8 +740,12 @@ export function PdfReader({
       if (renderedPages.has(page) || failedPages.has(page)) continue;
       rendering.push(page);
     }
-    return [...[...renderedPages].filter((page) => window.has(page)), ...rendering];
-  }, [renderOrder, renderedPages, failedPages]);
+    const mounted = new Set<number>();
+    for (const page of renderedPages) if (window.has(page)) mounted.add(page);
+    for (const page of stalePages) if (window.has(page)) mounted.add(page);
+    for (const page of rendering) mounted.add(page);
+    return { canvasPages: [...mounted], renderPermittedPages: new Set(rendering) };
+  }, [renderOrder, renderedPages, failedPages, stalePages]);
 
   // Per-document bitmap cache: eviction stashes finished buffers and window
   // re-entry blits them, so scrolling back across a heavy page never
@@ -748,6 +773,7 @@ export function PdfReader({
     setBookkeepingDocument(pdfDocument);
     setRenderedPages(new Set());
     setFailedPages(new Set());
+    setStalePages(new Set());
   }
 
   // Color-mode invalidation (issue #67): a theme switch between modes with
@@ -764,6 +790,7 @@ export function PdfReader({
     setVariantState({ variant: renderVariant, document: pdfDocument });
     setRenderedPages(new Set());
     setFailedPages(new Set());
+    setStalePages(new Set());
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
@@ -801,15 +828,19 @@ export function PdfReader({
   const scrollReportedPageRef = useRef<number | null>(null);
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
+  const previousSlotsRef = useRef(slots);
   const mountedRef = useRef(false);
 
   // A zoom or fit-mode change invalidates rendered canvases; the new scale
   // re-renders the visible pages while evicted slots simply resize their
   // reservations. Cached bitmaps are keyed by scale, so they are dropped
-  // too.
+  // too. The pages that held pixels before the zoom move to `stalePages`
+  // instead of vanishing: PdfPageCanvas keeps painting their previous bitmap
+  // under a transform until the new-scale raster swaps in (scale-and-swap).
   const applyZoom = useCallback(
     (next: ZoomState) => {
       setZoom(next);
+      setStalePages((current) => new Set([...current, ...renderedPagesRef.current]));
       setRenderedPages(new Set());
       setFailedPages(new Set());
       bitmapCache.clear();
@@ -833,13 +864,20 @@ export function PdfReader({
   // Set at commit, applied by the layout effect below once React has
   // re-laid out at the new scale (the scroll math needs the new geometry),
   // then consumed by the re-anchor effect so the commit's own scale change
-  // skips the reading-spot re-anchor — the cursor point supersedes it.
+  // skips the reading-spot re-anchor — the cursor point supersedes it. The
+  // offsets are document-local (scroll minus the document element's position
+  // in scroll content) and the policy is Papers' SCROLL_TO_CENTER: the
+  // pointer holds the same document fraction across the scale change.
   const wheelScrollFixupRef = useRef<{
-    originX: number;
-    originY: number;
-    ratio: number;
-    clientX: number;
-    clientY: number;
+    targetScale: number;
+    oldValueX: number;
+    oldValueY: number;
+    oldUpperX: number;
+    oldUpperY: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    centerX: number;
+    centerY: number;
     applied: boolean;
   } | null>(null);
   const committedScaleRef = useRef(scale);
@@ -878,36 +916,81 @@ export function PdfReader({
     if (gesture.epoch !== zoomEpochRef.current) return;
     const committed = committedScaleRef.current;
     if (gesture.scale === committed) return;
-    wheelScrollFixupRef.current = {
-      originX: gesture.originX,
-      originY: gesture.originY,
-      ratio: gesture.scale / committed,
-      clientX: gesture.clientX,
-      clientY: gesture.clientY,
-      applied: false,
-    };
+    const container = scrollContainerRef?.current ?? null;
+    // No scroll container (standalone render): there is no scroll position to
+    // hold, so commit the scale without a focal-anchor fixup.
+    if (container) {
+      const containerRect = container.getBoundingClientRect();
+      const oldSlots = slotsRef.current;
+      const oldDocWidth = oldSlots.reduce((max, slot) => Math.max(max, slot.width), 0);
+      const viewportWidth = container.clientWidth;
+      const viewportHeight = container.clientHeight;
+      // Capture the old adjustment in document-local coordinates; the layout
+      // effect re-derives the new upper once React has laid out the new scale.
+      wheelScrollFixupRef.current = {
+        targetScale: gesture.scale,
+        oldValueX: container.scrollLeft - gesture.docLeft,
+        oldValueY: container.scrollTop - gesture.docTop,
+        oldUpperX: adjustmentUpper(viewportWidth, oldDocWidth),
+        oldUpperY: adjustmentUpper(viewportHeight, documentHeight(oldSlots)),
+        viewportWidth,
+        viewportHeight,
+        centerX: gesture.clientX - containerRect.left,
+        centerY: gesture.clientY - containerRect.top,
+        applied: false,
+      };
+    }
     applyZoom({ mode: "custom", level: gesture.scale });
-  }, [applyZoom, clearWheelSettle]);
+  }, [applyZoom, clearWheelSettle, scrollContainerRef]);
 
   const reanchorByFraction = useCallback(() => {
+    // The layout in effect before this scale change; it is the "old" content
+    // for the keep-position fallback below. Updated here (not in the effect
+    // that calls this) so the effect never depends on `slots` and so a
+    // measurement-only slots change never re-anchors the viewport.
+    const previousSlots = previousSlotsRef.current;
+    previousSlotsRef.current = slots;
     const container = scrollContainerRef?.current ?? null;
     const documentEl = documentRef.current;
-    const info = anchorInfoRef.current;
-    if (!container || !documentEl || !info || slots.length === 0) {
+    if (!container || !documentEl || slots.length === 0) {
       activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
+      return;
+    }
+    const documentTop =
+      documentEl.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop;
+    const info = anchorInfoRef.current;
+    if (!info) {
+      // No page anchor yet (scroll tracking has not sampled): fall back to
+      // Papers' SCROLL_TO_KEEP_POSITION, the old document-local offset
+      // reapplied to the new content by its relative position.
+      const viewportHeight = container.clientHeight;
+      const adjustment: ScrollAdjustment = {
+        value: container.scrollTop - documentTop,
+        upper: adjustmentUpper(viewportHeight, documentHeight(previousSlots)),
+        pageSize: viewportHeight,
+      };
+      setScrollTop(
+        container,
+        documentTop +
+          keepPositionValue(
+            adjustment,
+            adjustmentUpper(viewportHeight, documentHeight(slots)),
+            viewportHeight,
+          ),
+      );
+      rootRef.current?.setAttribute("data-pdf-scroll-policy", "keep-position");
       return;
     }
     const slot = slots.find((candidate) => candidate.pageNumber === info.page) ?? slots[0];
     if (!slot) return;
     const targetAnchor = slot.top + info.fraction * slot.height;
-    const documentTop =
-      documentEl.getBoundingClientRect().top -
-      container.getBoundingClientRect().top +
-      container.scrollTop;
     setScrollTop(
       container,
       targetAnchor + documentTop - container.clientHeight * READING_ANCHOR_RATIO,
     );
+    rootRef.current?.setAttribute("data-pdf-scroll-policy", "keep-position");
   }, [scrollContainerRef, slots]);
 
   // Keep the latest re-anchoring logic reachable from the effect below
@@ -1029,6 +1112,12 @@ export function PdfReader({
   }, []);
 
   const handlePageRendered = useCallback((pageNumber: number) => {
+    setStalePages((current) => {
+      if (!current.has(pageNumber)) return current;
+      const next = new Set(current);
+      next.delete(pageNumber);
+      return next;
+    });
     setRenderedPages((current) => {
       if (current.has(pageNumber)) return current;
       const next = new Set(current);
@@ -1249,31 +1338,45 @@ export function PdfReader({
 
   // Wheel-gesture commit fixup: runs right after React re-lays out at the
   // committed scale (before the browser paints), scrolling so the document
-  // point that sat under the cursor still sits there. The document element
-  // is read at its new, untransformed layout here; when the document is
-  // narrower than the viewport the centering margins absorb the horizontal
-  // shift instead (scroll is pinned) — the same partial anchor browsers
-  // show for non-scrollable pages.
+  // point that sat under the cursor still sits there. The policy is Papers'
+  // SCROLL_TO_CENTER (`pdfLayout.centerValue`): the document-local offset
+  // under the cursor keeps the same fraction of the new `MAX(viewport,
+  // content)`, which holds the cursor point through the scale change. This
+  // replaces the previous DOM-ratio fixup, so the reader and the geometry
+  // oracle share one implementation. The document element is read at its new,
+  // untransformed layout here.
   useLayoutEffect(() => {
     const fixup = wheelScrollFixupRef.current;
     const container = scrollContainerRef?.current ?? null;
     const documentEl = documentRef.current;
-    // One application: the anchor effect consumes the fixup at the render
-    // where the layout scale actually lands (usePdfScale derives the scale
-    // an effect-tick after the zoom state, so that is NOT this render).
+    // One application: the fixup is consumed only at the render where the
+    // layout scale actually lands (usePdfScale derives the scale an
+    // effect-tick after the zoom state). Applying before then would read the
+    // old content extents and compute a no-op.
     if (!fixup || fixup.applied || !container || !documentEl) return;
+    if (scale !== fixup.targetScale) return;
     const containerRect = container.getBoundingClientRect();
     const documentRect = documentEl.getBoundingClientRect();
     const docLeft = documentRect.left - containerRect.left + container.scrollLeft;
     const docTop = documentRect.top - containerRect.top + container.scrollTop;
-    setScrollTop(
-      container,
-      docTop + fixup.originY * fixup.ratio - (fixup.clientY - containerRect.top),
+    const newDocWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
+    const newValueY = adjustmentValueForPolicy(
+      "center",
+      { value: fixup.oldValueY, upper: fixup.oldUpperY, pageSize: fixup.viewportHeight },
+      adjustmentUpper(fixup.viewportHeight, documentHeight(slots)),
+      fixup.viewportHeight,
+      fixup.centerY,
     );
-    setScrollLeft(
-      container,
-      docLeft + fixup.originX * fixup.ratio - (fixup.clientX - containerRect.left),
+    const newValueX = adjustmentValueForPolicy(
+      "center",
+      { value: fixup.oldValueX, upper: fixup.oldUpperX, pageSize: fixup.viewportWidth },
+      adjustmentUpper(fixup.viewportWidth, newDocWidth),
+      fixup.viewportWidth,
+      fixup.centerX,
     );
+    setScrollTop(container, docTop + newValueY);
+    setScrollLeft(container, docLeft + newValueX);
+    rootRef.current?.setAttribute("data-pdf-scroll-policy", "center");
     wheelScrollFixupRef.current = { ...fixup, applied: true };
   });
 
@@ -1303,6 +1406,7 @@ export function PdfReader({
     );
     setRenderedPages(new Set());
     setFailedPages(new Set());
+    setStalePages(new Set());
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
@@ -1408,6 +1512,7 @@ export function PdfReader({
         document={pdfDocument}
         slots={documentSlots}
         renderPages={canvasPages}
+        renderPermittedPages={renderPermittedPages}
         anchorPage={currentPage}
         scale={scale}
         previewTransform={
@@ -1423,7 +1528,7 @@ export function PdfReader({
         renderedPages={renderedPages}
         failedPages={failedPages}
         bitmapCache={bitmapCache}
-        previewAnchorRender={renderedPages.size === 0}
+        previewAnchorRender={renderedPages.size === 0 && stalePages.size === 0}
         onPageRendered={handlePageRenderedTelemetried}
         onPageError={handlePageError}
         registerSlot={registerSlot}
