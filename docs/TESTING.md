@@ -9,6 +9,25 @@ Four layers, all runnable locally via `just`:
 | Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC bridge                                    |
 | E2E (Playwright)  | `just test-e2e`      | real Electron binary, real window, real SQLite                            |
 
+## What CI runs
+
+CI is `ci.yml`. It always runs, so its `CI gate` job is always reported and is
+the single required check for `main` in branch protection.
+
+A first job, `Detect changes`, classifies the diff. When every changed file is
+non-code (markdown anywhere, `docs/`, `site/`, `.beads/`, `.agents/`,
+`.opencode/`, `.codex/`, `graft/`, `oracle/`, `vendor/`, or `.gitignore`), it
+sets `code=false` and the heavy jobs (`Frontend`, `Coverage`, `Rust`,
+`Release build`) skip. `CI gate` treats a skipped job as a pass, so a docs or
+site change merges on the cheap jobs alone, in about fifteen seconds. A
+workflow-level `paths-ignore` cannot express this: skipping the workflow leaves
+the required check pending and blocks the merge.
+
+`codeql.yml` is advisory and keeps `paths-ignore` over the same non-code set.
+`audit.yml` runs only when dependency manifests change, plus its weekly sweep.
+The `Release` workflow runs `just test` and `just test-e2e` on every `v*` tag
+regardless of paths.
+
 ## Timeouts and termination
 
 Every test invocation is guaranteed to terminate; a wedged run is killed,
