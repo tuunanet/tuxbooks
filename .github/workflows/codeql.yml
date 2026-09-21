@@ -19,8 +19,10 @@ name: CodeQL
 # CodeQL's actions queries added template-injection checks over three small
 # hand-reviewed files at ~45s per run.
 #
-# `paths-ignore` mirrors ci.yml so docs-only/site-only changes skip this
-# workflow entirely (default setup ignored it).
+# `paths-ignore` covers the same non-code paths ci.yml skips as jobs: markdown,
+# the site, the bd tracker export, agent skills and config, the graft graph,
+# the oracle, and the reference submodule. This workflow is advisory, so it can
+# skip wholesale; the required "CI gate" lives in ci.yml and always runs.
 on:
   push:
     branches: [main]
@@ -28,11 +30,25 @@ on:
       - "**.md"
       - "site/**"
       - ".gitignore"
+      - ".beads/**"
+      - ".agents/**"
+      - ".opencode/**"
+      - ".codex/**"
+      - "graft/**"
+      - "oracle/**"
+      - "vendor/**"
   pull_request:
     paths-ignore:
       - "**.md"
       - "site/**"
       - ".gitignore"
+      - ".beads/**"
+      - ".agents/**"
+      - ".opencode/**"
+      - ".codex/**"
+      - "graft/**"
+      - "oracle/**"
+      - "vendor/**"
   schedule:
     # Weekly deep scan (rust included) on Monday morning UTC.
     - cron: "17 4 * * 1"
