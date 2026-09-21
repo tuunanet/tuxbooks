@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { PDF_ENGINE_STORAGE_KEY } from "@/lib/pdf/pdfEngineFlag";
+import { findPageMatches } from "@/lib/pdf/pdfSearch";
 
 /**
- * The PDFium main-thread adapter (tuxbooks-koe.5, .7) against a fake worker:
- * the seam shape (open → page sizes → whole-page render → text lines), the
- * transform ratio, the reserved capabilities, and the flag dispatch between
- * engines. The real WASM load is covered by pdfiumEngine.node.test.ts and the
- * engine's E2E smoke; this pins the main-thread contract cheaply.
+ * The PDFium main-thread adapter (tuxbooks-koe.5, .7, .8) against a fake
+ * worker: the seam shape (open → page sizes → whole-page render → text lines →
+ * outline), the transform ratio, outline/search routing, and the flag dispatch
+ * between engines. The real WASM load is covered by pdfiumEngine.node.test.ts
+ * and the engine's E2E smoke; this pins the main-thread contract cheaply.
  */
 
 interface RenderRequest {
@@ -25,6 +26,7 @@ class FakeWorker {
   posted: number[] = [];
   renders: RenderRequest[] = [];
   texts: { page: number }[] = [];
+  outlineCalls = 0;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: ((event: { message: string }) => void) | null = null;
 
@@ -51,6 +53,25 @@ class FakeWorker {
         const lines =
           page === 3 ? [] : [{ text: `line ${page}`, x: 10, y: 20, w: 100, h: 30, size: 24 }];
         this.respond({ id, ok: true, result: { lines } });
+      } else if (method === "outline") {
+        this.outlineCalls += 1;
+        // The raw seam shape: 0-based pages, an external link without a page.
+        this.respond({
+          id,
+          ok: true,
+          result: {
+            items: [
+              {
+                title: "Part One",
+                page: 0,
+                items: [
+                  { title: "Chapter 1", page: 2, items: [] },
+                  { title: "Website", page: null, items: [] },
+                ],
+              },
+            ],
+          },
+        });
       } else this.respond({ id, ok: true, result: {} });
     });
   }
@@ -66,7 +87,8 @@ class FakeWorker {
 
 vi.stubGlobal("Worker", FakeWorker);
 
-const { openPdfDocumentFromBook, renderPdfTextLayer } = await import("@/lib/pdf/pdfEngine");
+const { openPdfDocumentFromBook, getPdfOutline, getPdfPageText, renderPdfTextLayer } =
+  await import("@/lib/pdf/pdfEngine");
 
 afterEach(() => {
   workers.length = 0;
@@ -123,11 +145,31 @@ describe("PDFium adapter", () => {
     await pdf.destroy();
   });
 
-  test("reserves the outline, so the reader opens without it", async () => {
+  test("routes outline and search through the worker and shapes the results", async () => {
     window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
-    await expect(pdf.getOutline()).resolves.toBeNull();
+    // Outline: the worker walks PDFium's bookmarks and returns the raw tree;
+    // the seam normalizes it to the reader's 1-based page locators.
+    await expect(getPdfOutline(pdf)).resolves.toEqual([
+      {
+        title: "Part One",
+        page: 1,
+        items: [
+          { title: "Chapter 1", page: 3, items: [] },
+          { title: "Website", page: null, items: [] },
+        ],
+      },
+    ]);
+    expect(workers[0]!.outlineCalls).toBe(1);
+
+    // Search: page text comes from the same structured text lines the text
+    // layer uses, assembled and matched case-insensitively by the pure helpers.
+    const pageText = await getPdfPageText(pdf, 2);
+    expect(pageText).toBe("line 2");
+    expect(findPageMatches(pageText, "LINE")).toEqual([{ pre: "", match: "line", post: " 2" }]);
+    expect(workers[0]!.texts).toEqual([{ page: 2 }]);
+
     await pdf.destroy();
   });
 

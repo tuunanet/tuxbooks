@@ -2,6 +2,7 @@ import workerUrl from "./pdfiumWorker?worker&url";
 import wasmUrlRaw from "virtual:pdfium-wasm-url";
 import type { PageClip } from "./pdfiumCore";
 import type { EngineTextLine, PdfDocument, PdfPage, PdfRenderTask } from "./pdfEngineTypes";
+import type { RawPdfOutline } from "./pdfOutline";
 import { WorkerClient } from "./pdfWorkerClient";
 import type { BookFormat } from "@/types/domain";
 
@@ -12,11 +13,11 @@ import type { BookFormat } from "@/types/domain";
  * reader component touches an engine.
  *
  * Open, page sizes, whole-page raster, range-backed open (`tuxbooks-koe.5`),
- * viewport-clipped region render at device resolution (`tuxbooks-koe.6`), and
- * structured-text lines for the text layer and selection (`tuxbooks-koe.7`).
- * Outline and search (`tuxbooks-koe.8`) and the dark colour scheme
- * (`tuxbooks-koe.9`) stay reserved and fail soft (no outline, plain raster) so
- * the reader still opens and renders.
+ * viewport-clipped region render at device resolution (`tuxbooks-koe.6`),
+ * structured-text lines for the text layer, selection, and in-book search
+ * (`tuxbooks-koe.7`), and the document outline (`tuxbooks-koe.8`). The dark
+ * colour scheme (`tuxbooks-koe.9`) stays reserved and fails soft (plain
+ * raster) so the reader still opens and renders.
  */
 
 /** Configured worker URL; diagnostics for the E2E worker-load assertion. */
@@ -123,10 +124,17 @@ class PdfiumDocument implements PdfDocument {
     return { promise, cancel: handle.cancel };
   }
 
-  /** Reserved for tuxbooks-koe.8; the reader tolerates a missing outline. */
-  async getOutline(): Promise<null> {
+  /**
+   * The document outline as the seam's raw tree (0-based pages, external links
+   * without a page); the worker walks PDFium's bookmarks. The reader tolerates
+   * null: documents without an outline simply show none.
+   */
+  async getOutline(): Promise<RawPdfOutline[] | null> {
     this.assertAlive();
-    return null;
+    const { items } = (await this.client.request("outline", undefined)) as {
+      items: RawPdfOutline[] | null;
+    };
+    return items;
   }
 
   /**
