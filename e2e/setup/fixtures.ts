@@ -132,3 +132,13 @@ export const benchBookTitles = {
   pdf: "Geometrie und Topologie (PDF)",
   epub: "Page Blanche (EPUB)",
 } as const;
+
+/**
+ * Books the seeded phase copies into the scratch library: the five committed
+ * fixtures (`seededBookTitles`) plus the optional GeoTopo crash-regression
+ * book, seeded when the free corpus has been fetched (`just fetch-ebooks`,
+ * environment.ts). Count-based library specs must derive their expectation
+ * from here, or fetching the corpus breaks them by one book.
+ */
+export const seededLibraryBookCount =
+  Object.keys(seededBookTitles).length + (fs.existsSync(benchPdfFixture) ? 1 : 0);

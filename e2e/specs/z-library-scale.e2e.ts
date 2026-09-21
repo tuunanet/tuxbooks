@@ -23,11 +23,10 @@ import { readdirSync } from "node:fs";
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { SCALE_CORPUS_SIZE, scaleCorpusDir } from "../setup/environment.js";
+import { seededLibraryBookCount } from "../setup/fixtures.js";
 
 /** Grid window cap: PERF-15's budget, asserted live at scale. */
 const WINDOW_CAP = 120;
-/** Books pre-seeded into the scratch library by global setup. */
-const SEEDED_BOOKS = 5;
 
 function corpusReady(): boolean {
   try {
@@ -76,7 +75,7 @@ test.describe("library scale (issue #61)", () => {
     // header (LibraryHeader shows visible.length, fed by the event
     // stream — no refetch involved).
     await expect(page.getByTestId("library-stats")).toHaveText(
-      `${SEEDED_BOOKS + SCALE_CORPUS_SIZE} books`,
+      `${seededLibraryBookCount + SCALE_CORPUS_SIZE} books`,
       { timeout: 30000 },
     );
 
