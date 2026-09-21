@@ -2033,23 +2033,37 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
     expect(canvasPages()).toEqual(["1", "2", "3"]);
 
-    // A zoom keeps every previously rendered canvas mounted. The pages inside
-    // the render budget rasterize while the page outside it keeps its
-    // previous bitmap scaled, so no canvas is ever blank through the commit.
+    // A zoom keeps every previously rendered canvas mounted. Each presents
+    // its previous bitmap scaled to the new page box while the new-scale
+    // raster is held, so the commit never shows a blank frame. Asserting the
+    // "scaled" quality (not final) is what proves the old bitmap is on
+    // screen: the held render cannot have replaced it yet.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await waitFor(() => {
-      const canvases = screen.getAllByTestId("pdf-canvas");
-      expect(canvases).toHaveLength(3);
-      for (const canvas of canvases) {
-        expect(["scaled", "preview", "final"]).toContain(
-          canvas.getAttribute("data-pdf-render-quality"),
-        );
+      expect(canvasPages()).toEqual(["1", "2", "3"]);
+      for (const canvas of screen.getAllByTestId("pdf-canvas")) {
+        expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
       }
     });
-    const page3 = screen
-      .getAllByTestId("pdf-canvas")
-      .find((canvas) => canvas.getAttribute("data-pdf-page") === "3");
-    await waitFor(() => expect(page3).toHaveAttribute("data-pdf-render-quality", "scaled"));
+
+    const canvasFor = (page: string) =>
+      screen
+        .getAllByTestId("pdf-canvas")
+        .find((canvas) => canvas.getAttribute("data-pdf-page") === page);
+    const page1 = canvasFor("1");
+    const page2 = canvasFor("2");
+    const page3 = canvasFor("3");
+
+    // Only the pages inside the render budget get a new raster. Completing
+    // them swaps the scaled bitmap for the sharp final one, atomically; the
+    // page outside the budget keeps its scaled bitmap and starts no render.
+    doc.releaseRender(1);
+    doc.releaseRender(2);
+    await waitFor(() => {
+      expect(page1).toHaveAttribute("data-pdf-render-quality", "final");
+      expect(page2).toHaveAttribute("data-pdf-render-quality", "final");
+    });
+    expect(page3).toHaveAttribute("data-pdf-render-quality", "scaled");
   });
 
   it("unmounts mid-gesture through the commit path without errors", async () => {

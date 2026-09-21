@@ -38,6 +38,11 @@ export function makeFakePdfDocument(
   const failOnce = new Set(options.failOnceFor ?? []);
   const attempts = new Map<number, number>();
   const releaseFns = new Map<number, () => void>();
+  // A release can arrive before its held render registers: the canvas mounts
+  // and reports its lifecycle a beat before the async effect reaches
+  // page.render. Remember it so the render resolves the moment it starts
+  // instead of racing the caller and hanging under slow instrumentation.
+  const pendingRelease = new Set<number>();
   const cancelledPages: number[] = [];
   const workerFailureListeners: Array<() => void> = [];
   const doc: FakePdfDocument = {
@@ -45,7 +50,16 @@ export function makeFakePdfDocument(
     getPage: vi.fn(),
     scales,
     renderOptions,
-    releaseRender: (pageNumber) => releaseFns.get(pageNumber)?.(),
+    releaseRender: (pageNumber) => {
+      const release = releaseFns.get(pageNumber);
+      if (release) {
+        releaseFns.delete(pageNumber);
+        release();
+        return;
+      }
+      // No held render registered yet: queue the release for the next one.
+      pendingRelease.add(pageNumber);
+    },
     cancelledPages,
     failWorker: () => {
       for (const listener of workerFailureListeners.splice(0)) listener();
@@ -77,6 +91,12 @@ export function makeFakePdfDocument(
             };
           }
           if (held.has(number)) {
+            if (pendingRelease.delete(number)) {
+              return {
+                promise: Promise.resolve(),
+                cancel: vi.fn(() => cancelledPages.push(number)),
+              };
+            }
             return {
               promise: new Promise<void>((resolve) => releaseFns.set(number, resolve)),
               cancel: vi.fn(() => cancelledPages.push(number)),
