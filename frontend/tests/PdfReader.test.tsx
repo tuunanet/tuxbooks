@@ -623,7 +623,7 @@ describe("PdfReader outline and thumbnails", () => {
     renderPdfReader({ onOutlineLoad });
     await screen.findByTestId("pdf-loading");
 
-    // § first-page priority: outline work must not occupy the MuPDF worker
+    // § first-page priority: outline work must not occupy the PDFium worker
     // before page 1 has rendered.
     expect(getPdfOutline).not.toHaveBeenCalled();
 

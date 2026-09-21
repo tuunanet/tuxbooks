@@ -20,7 +20,7 @@ export type AppUiCspVariant = "production" | "development";
 const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
   production: [
     "default-src 'none'",
-    // 'wasm-unsafe-eval' is required by the MuPDF WASM (instantiated inside
+    // 'wasm-unsafe-eval' is required by the PDFium WASM (instantiated inside
     // the PDF worker, which inherits this policy); no inline or eval script
     // execution is allowed. blob: is the reader toolkit's own injected
     // section scripts (marked data-readium, inside the sandboxed frames);

@@ -124,9 +124,9 @@ describe("PdfiumEngine (WASM)", () => {
     const lines = engine.textLines(0);
     expect(lines.map((line) => line.text)).toEqual(["Tuxbooks PDF Fixture", "Page 1 of 3"]);
 
-    // Page units, top-left origin (y down). The reference line is
-    // x=72,y=229,w=397,h=54,size=40 from MuPDF's structured text; PDFium's
-    // loose character boxes land within a few points and keep font size.
+    // Page units, top-left origin (y down). PDFium's loose character boxes
+    // are the font's line box, so the extents land a few points from the
+    // glyph ink while keeping the font size.
     const [title, body] = lines;
     expect(title!.x).toBeCloseTo(72, 0);
     expect(title!.y).toBeCloseTo(234.2, 0);

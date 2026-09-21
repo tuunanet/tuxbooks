@@ -65,15 +65,15 @@ The stored reader setting that decides how PDF pages are painted: default,
 paper, dark, or invert.
 _Avoid_: theme, dark mode
 
-**Smart Dark**:
-Object-level recoloring of PDF page content, applied before rasterization, which
-remaps each drawing operation's paint colours while leaving photographs alone. A
-MuPDF capability retired with that engine.
+**Smart dark**:
+The PDF reader's dark color mode, labeled "Smart dark" in the appearance menu. It
+rasterizes each page through PDFium's category colour scheme, so path and text
+colours are remapped while photographs keep their pixels.
 _Avoid_: dark mode
 
 **Color scheme**:
-Category-level recoloring of PDF page content: path fill and stroke, text fill
-and stroke. The coarse successor to Smart Dark.
+PDFium's category-level recoloring: path fill and stroke, text fill and stroke.
+The mechanism behind the Smart dark mode, coarser than object-level recoloring.
 
 ## Verification
 

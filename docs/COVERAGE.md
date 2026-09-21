@@ -69,7 +69,7 @@ adjustments and a fresh baseline column here, in one change.
 | `sidecar/src/error.rs`                                      | thiserror-derived Display/From code.                                                                                             |
 | `sidecar/src/main.rs`, `frontend/src/main.tsx`              | Entry points.                                                                                                                    |
 | `electron/main/`, `electron/preload/`                       | Process plumbing — exercised on every E2E run; no business logic by contract (docs/ARCHITECTURE.md).                             |
-| `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around Readium/MuPDF; real behavior covered by the E2E reader suites, unit tests mock the seam.     |
+| `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around Readium/PDFium; real behavior covered by the E2E reader suites, unit tests mock the seam.    |
 | `frontend/src/components/ui/`                               | shadcn/ui primitives — vendored scaffolding, not app logic.                                                                      |
 | `frontend/src/lib/fixtures.ts`                              | Sample data for tests/previews.                                                                                                  |
 | `frontend/src/types/`                                       | Pure type declarations, no runtime code.                                                                                         |

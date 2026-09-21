@@ -51,19 +51,18 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   (`lib/epub/readiumEngine.ts`, `lib/pdf/pdfEngine.ts`) —
   [ARCHITECTURE.md](ARCHITECTURE.md).
 - Only the PDF engine adapters under `frontend/src/lib/pdf/` import an
-  engine package (`mupdf`, `@embedpdf/pdfium`), its worker module, or its
-  WASM URL (`virtual:mupdf-wasm-url`, `virtual:pdfium-wasm-url`). Reader
-  components depend on the seam's re-exported types and helpers, never on
-  an engine directly. ESLint `no-restricted-imports` enforces this (ADR 0002,
-  `tuxbooks-koe.10`); add a new engine package to the rule when the engine
-  changes.
+  engine package (`@embedpdf/pdfium`), its worker module, or its WASM URL
+  (`virtual:pdfium-wasm-url`). Reader components depend on the seam's
+  re-exported types and helpers, never on an engine directly. ESLint
+  `no-restricted-imports` enforces this (ADR 0002, `tuxbooks-koe.10`); add a
+  new engine package to the rule when the engine changes.
 
 ## Dependencies
 
 - No new dependency (Rust crate or npm package) without a clear, stated
   reason.
 - Reader engines are deliberate choices: Readium TS Toolkit (EPUB) and
-  MuPDF.js (PDF). Do not add competing engines or renderers alongside
+  PDFium-WASM (PDF). Do not add competing engines or renderers alongside
   them.
 - UI primitives come from shadcn/ui (`pnpm dlx shadcn add <component>`;
   config in `frontend/components.json`); icons from `lucide-react` — do

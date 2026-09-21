@@ -25,7 +25,7 @@ interface PdfDocumentSnapshot extends PdfDocumentState {
 
 /**
  * Opens a book's PDF through the engine's range-backed stream
- * (`openPdfDocumentFromBook`): the worker pulls only the byte ranges MuPDF
+ * (`openPdfDocumentFromBook`): the worker pulls only the byte ranges PDFium
  * needs, so the document opens without the whole file crossing the bridge.
  * The hook owns the document lifetime: switching books or unmounting
  * destroys the document, and a load that finishes after its effect was

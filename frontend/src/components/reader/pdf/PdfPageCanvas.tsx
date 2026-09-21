@@ -147,7 +147,7 @@ const RENDER_MS_SAMPLE_COUNT = 5;
 
 /**
  * Quiet period a superseding change waits out before it starts a raster.
- * MuPDF rasterizes synchronously inside its worker and cancellation is only
+ * PDFium rasterizes synchronously inside its worker and cancellation is only
  * checked between requests, so a heavy render cannot be interrupted mid-way:
  * starting one per intermediate zoom step or scroll-driven region move
  * queues multi-second rasters and reads as a freeze. Only the first render of

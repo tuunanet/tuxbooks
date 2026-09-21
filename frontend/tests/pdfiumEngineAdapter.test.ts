@@ -1,14 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { PDF_ENGINE_STORAGE_KEY } from "@/lib/pdf/pdfEngineFlag";
 import { findPageMatches } from "@/lib/pdf/pdfSearch";
 
 /**
  * The PDFium main-thread adapter (tuxbooks-koe.5, .7, .8) against a fake
  * worker: the seam shape (open → page sizes → whole-page render → text lines →
- * outline), the transform ratio, outline/search routing, and the flag dispatch
- * between engines. The real WASM load is covered by pdfiumEngine.node.test.ts
- * and the engine's E2E smoke; this pins the main-thread contract cheaply.
+ * outline), the transform ratio, and outline/search routing. The real WASM
+ * load is covered by pdfiumEngine.node.test.ts and the engine's E2E smoke;
+ * this pins the main-thread contract cheaply.
  */
 
 interface RenderRequest {
@@ -103,7 +102,6 @@ afterEach(() => {
 
 describe("PDFium adapter", () => {
   test("opens range-backed, reports page sizes, and rasters with the transform ratio", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     expect(workers).toHaveLength(1);
@@ -128,7 +126,6 @@ describe("PDFium adapter", () => {
   });
 
   test("renders a clipped region in page units at the transform ratio", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
     const page = await pdf.getPage(1);
     const canvas = document.createElement("canvas");
@@ -152,7 +149,6 @@ describe("PDFium adapter", () => {
   });
 
   test("maps the dark palette to the colour scheme on the render request", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
     const page = await pdf.getPage(1);
     const canvas = document.createElement("canvas");
@@ -184,7 +180,6 @@ describe("PDFium adapter", () => {
   });
 
   test("routes outline and search through the worker and shapes the results", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     // Outline: the worker walks PDFium's bookmarks and returns the raw tree;
@@ -212,7 +207,6 @@ describe("PDFium adapter", () => {
   });
 
   test("requests text from the worker, caches it, and shapes the lines", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     await expect(pdf.getTextLines(2)).resolves.toEqual([
@@ -241,7 +235,6 @@ describe("PDFium adapter", () => {
   });
 
   test("a page with no usable text degrades to no text layer without error", async () => {
-    window.localStorage.setItem(PDF_ENGINE_STORAGE_KEY, "pdfium");
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     await expect(pdf.getTextLines(3)).resolves.toEqual([]);
@@ -249,13 +242,6 @@ describe("PDFium adapter", () => {
     await renderPdfTextLayer(pdf, 3, container, 1);
     expect(container.childElementCount).toBe(0);
 
-    await pdf.destroy();
-  });
-
-  test("flag off keeps the MuPDF engine selected", async () => {
-    const pdf = await openPdfDocumentFromBook(1, "pdf");
-    expect(workers).toHaveLength(1);
-    expect(workers[0]!.url).toContain("mupdfWorker");
     await pdf.destroy();
   });
 });

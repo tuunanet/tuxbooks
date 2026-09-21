@@ -12,7 +12,7 @@ import { FPDF_CONVERT_FILL_TO_STROKE, type FpdfColorScheme } from "./smartColors
  *
  * PDFium's public API is synchronous C functions that take no native object
  * into a JS callback, so the whole engine runs on the calling thread (the
- * worker) and the MuPDF guardrail class cannot exist here.
+ * worker) and the engine-guardrail failure class cannot exist here.
  */
 
 /** Subset of the wrapped Emscripten runtime this adapter uses. */

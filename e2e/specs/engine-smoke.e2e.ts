@@ -18,7 +18,7 @@ import {
  *
  * The chains are asserted through the format-agnostic reader seam (stable
  * DOM attributes, docs/EPUB.md + docs/PDF.md), so they keep proving the same
- * initialization contract when the engines are swapped (Readium, MuPDF.js).
+ * initialization contract when the engines are swapped (Readium, PDFium).
  */
 
 test.describe("tuxbooks engine smoke (EPUB)", () => {

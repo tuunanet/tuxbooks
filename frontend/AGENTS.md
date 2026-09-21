@@ -2,7 +2,7 @@
 
 React + TypeScript renderer, bundled by Vite. `src/components` (UI),
 `src/state` (app/store), `src/hooks`, `src/lib/epub` (Readium) and `src/lib/pdf`
-(MuPDF.js). Tests live in `tests/` (vitest + Testing Library); `tests/security/`
+(PDFium). Tests live in `tests/` (vitest + Testing Library); `tests/security/`
 covers the content-fence policy, `tests/mocks/` holds shared fixtures.
 
 Narrow commands:

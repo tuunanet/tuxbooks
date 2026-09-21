@@ -5,7 +5,7 @@
  * worker) against the `tuxbooks://book/<id>` protocol handler, which seeks
  * through the Rust sidecar. A bounded read-ahead chunk cache turns PDFium's
  * scattered object reads into a handful of range requests instead of one per
- * object (the same pattern the MuPDF stream uses, docs/PDF.md).
+ * object (docs/PDF.md).
  *
  * The source never reads the whole file unless the file is smaller than one
  * chunk, or the protocol handler ignores the `Range` header.

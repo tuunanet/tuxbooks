@@ -19,7 +19,7 @@ export interface PdfOutlineItem {
   items: PdfOutlineItem[];
 }
 
-/** Raw engine outline entry (0-based page, as MuPDF resolves destinations). */
+/** Raw engine outline entry (0-based page, as PDFium resolves destinations). */
 export interface RawPdfOutline {
   title?: string;
   /** 0-based page number, or null/undefined when the entry has no page. */

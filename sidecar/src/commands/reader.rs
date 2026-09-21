@@ -4,7 +4,7 @@ use crate::error::AppError;
 use crate::AppState;
 
 /// Raw bytes of a stored book's source file, consumed by the frontend reader
-/// engines (MuPDF.js for PDF, Readium for EPUB) via the `tuxbooks://`
+/// engines (PDFium-WASM for PDF, Readium for EPUB) via the `tuxbooks://`
 /// protocol. An optional byte range backs HTTP-style Range requests so large
 /// documents are read incrementally; with no range the whole file is served.
 /// The response carries base64 data plus the file's total size and the

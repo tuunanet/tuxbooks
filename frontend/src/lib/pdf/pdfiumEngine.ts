@@ -28,9 +28,9 @@ export function pdfiumWorkerSrc(): string {
 }
 
 /**
- * Absolute URL of the PDFium WASM bundle. Like MuPDF's, the worker cannot
- * resolve the bundler-relative asset itself, so the main thread resolves the
- * emitted URL against the document location and passes it into the request.
+ * Absolute URL of the PDFium WASM bundle. The worker cannot resolve the
+ * bundler-relative asset itself, so the main thread resolves the emitted URL
+ * against the document location and passes it into the request.
  */
 function resolvePdfiumWasmUrl(): string {
   return new URL(wasmUrlRaw, globalThis.location?.href ?? import.meta.url).href;
@@ -92,7 +92,7 @@ class PdfiumDocument implements PdfDocument {
     if (options.region) {
       // Region mode: the caller's canvas is region-sized. The viewport is the
       // full page's CSS size, so CSS pixels convert to page units through the
-      // page-units-per-CSS ratio, exactly as the MuPDF adapter does.
+      // page-units-per-CSS ratio.
       width = Math.max(1, Math.round(options.region.width * ratio));
       height = Math.max(1, Math.round(options.region.height * ratio));
       const pageUnitsPerCss =
@@ -109,7 +109,7 @@ class PdfiumDocument implements PdfDocument {
     }
     // The seam hands the dark palette across; PDFium's category colour
     // scheme is derived here so the worker payload carries plain 32-bit
-    // colours (and MuPDF's object-recolor palette stays untouched).
+    // colours.
     const colorScheme = options.smartColors
       ? colorSchemeFromPalette(options.smartColors)
       : undefined;
@@ -177,7 +177,7 @@ class PdfiumDocument implements PdfDocument {
   }
 }
 
-/** Prewarmed PDFium worker (mirrors the MuPDF prewarm contract). */
+/** Prewarmed PDFium worker: one idle worker holds the loaded WASM module. */
 let prewarmedClient: WorkerClient | null = null;
 let prewarmPromise: Promise<void> | null = null;
 

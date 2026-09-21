@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizePdfOutline, type RawPdfOutline } from "@/lib/pdf/pdfOutline";
 
-/** Builds a raw MuPDF outline entry (0-based pages). */
+/** Builds a raw PDFium outline entry (0-based pages). */
 function raw(
   title: string,
   page: number | null | undefined,

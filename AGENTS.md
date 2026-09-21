@@ -1,7 +1,7 @@
 # AGENTS.md
 
 TuxBooks is a local-first ebook library and reader: an Electron + React +
-TypeScript frontend, a Rust sidecar, and Readium/MuPDF.js reader layers. Work
+TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers. Work
 happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
 never build on `main`. Remove the worktree after the PR merges.
 
