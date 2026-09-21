@@ -4,9 +4,11 @@ TuxBooks shipped its first public release (0.0.1) in September 2026 and is in ac
 
 The focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## Now: 0.0.13
+## Now: 0.0.14
 
 Release 0.0.13 rebuilt the PDF reader. It runs on PDFium compiled to WebAssembly instead of MuPDF.js, so the app no longer ships an AGPL-only dependency, and its zoom and scrolling follow GNOME Papers: wheel and pinch zoom hold the point under the pointer, page sizes round to whole pixels, deep zoom renders only the visible region, and the previous render stays on screen while the sharp one loads.
+
+Release 0.0.14 follows with the fixes that surfaced in use: PDFs open again, a zoom holds its place instead of jumping or drifting, a single page keeps its top edge fixed while zooming, and deep zoom can no longer exhaust the PDFium heap (see `docs/adr/0004-pdf-region-render-budget.md`).
 
 With the engine swap done, work continues in four areas.
 
