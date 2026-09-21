@@ -40,8 +40,9 @@ plus a quarter of the viewport height.
 _Avoid_: scroll anchor
 
 **Focal anchor**:
-The document point under the pointer during a zoom, which the reader holds fixed
-while the scale changes.
+The document point under the pointer that a wheel or pinch zoom holds fixed. It
+is held only on an axis that can scroll; an axis whose content fits the viewport
+has no scroll range, so the page stays where the layout puts it.
 _Avoid_: zoom center
 
 **Keep-position**:
@@ -50,7 +51,8 @@ re-layout, as opposed to centering.
 _Avoid_: preserve scroll
 
 **Center on zoom**:
-The scroll policy that holds the focal anchor fixed through an explicit zoom.
+The scroll policy that holds a point fixed through an explicit zoom: the focal
+anchor for a pointer zoom, the viewport center for a keyboard or toolbar step.
 
 **Scale-and-swap**:
 Holding a page's previous bitmap on screen, scaled to the new page box, while

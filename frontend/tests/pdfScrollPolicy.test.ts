@@ -10,7 +10,6 @@ import {
   layoutSlots,
   offsetForAnchor,
   PAGE_GAP_PX,
-  singlePageTopCenterScroll,
   viewportPointToDocumentPoint,
   type LayoutSlot,
   type ScrollAdjustment,
@@ -128,46 +127,6 @@ describe("adjustmentValueForPolicy", () => {
       75.459787557,
       8,
     );
-  });
-});
-
-describe("singlePageTopCenterScroll", () => {
-  const base = {
-    oldScrollLeft: 0,
-    oldScrollTop: 0,
-    oldDocumentWidth: 600,
-    documentWidth: 900,
-    oldPageTop: 0,
-    pageTop: 0,
-    documentTop: 16,
-    contentLeft: 0,
-    contentWidth: 1000,
-    viewportWidth: 1000,
-    viewportHeight: 800,
-    scrollWidth: 900,
-    scrollHeight: 2000,
-  };
-
-  it("keeps the page top pinned while the page stays narrower than the viewport", () => {
-    expect(singlePageTopCenterScroll(base)).toEqual({ scrollLeft: 0, scrollTop: 0 });
-  });
-
-  it("holds the page center's screen position when it grows past the viewport", () => {
-    const target = singlePageTopCenterScroll({
-      ...base,
-      oldDocumentWidth: 1200,
-      documentWidth: 2400,
-      oldScrollLeft: 100,
-      scrollWidth: 2400,
-    });
-    // Old center screen = 0 - 100 + 600 = 500; new = 1200 - scrollLeft = 500.
-    expect(target.scrollLeft).toBe(700);
-    expect(target.scrollTop).toBe(0);
-  });
-
-  it("does not move a scrolled page top", () => {
-    const target = singlePageTopCenterScroll({ ...base, oldScrollTop: 300, scrollHeight: 3000 });
-    expect(target.scrollTop).toBe(300);
   });
 });
 

@@ -40,6 +40,7 @@ import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
+import { displayedSizes, documentHeight, layoutSlots } from "@/components/reader/pdf/pdfLayout";
 const openDocumentMock = vi.mocked(openPdfDocumentFromBook);
 const closeDocumentMock = vi.mocked(closePdfDocument);
 
@@ -1160,7 +1161,7 @@ describe("PdfReader fit width and zoom anchoring", () => {
     await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "918"));
   });
 
-  it("preserves the reading spot within the page across zoom changes", async () => {
+  it("holds the viewport center across toolbar zoom changes", async () => {
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
@@ -1171,22 +1172,35 @@ describe("PdfReader fit width and zoom anchoring", () => {
     const view = renderPdfReader({ scrollContainerRef: { current: container } });
     await screen.findByTestId("pdf-canvas");
     stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    const slotsAt = (scale: number) =>
+      layoutSlots(
+        displayedSizes(
+          Array.from({ length: 3 }, (_, index) => ({
+            pageNumber: index + 1,
+            width: 612,
+            height: 792,
+          })),
+          scale,
+        ),
+      );
 
-    // Anchor sits 35% into page 2 (anchor = 900 + 180 = 1080; page 2 spans
-    // 800..1592 → fraction 280/792).
     scrollTo(container, 900);
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
 
-    // Zoom to 150%: on Okular's preset ladder that is two steps
-    // (100 → 125 → 150). Page 2 moves to top 1196 (scaled height 1188 + the
-    // unscaled 8px gap); the anchor must land at 1196 + 0.3535…*1188 = 1616
-    // → scrollTop = 1616 - 180 = 1436. The in-page fraction is preserved
-    // exactly.
+    // Papers' toolbar and keyboard zoom uses the -1 sentinel, the viewport
+    // center: the document point at `scrollTop + viewport/2` keeps its
+    // fraction of the content through the scale change. Two steps on the
+    // preset ladder go 100 -> 125 -> 150.
+    const viewport = container.clientHeight;
+    const centerDoc = 900 + viewport / 2;
+    const expected =
+      (centerDoc / documentHeight(slotsAt(1))) * documentHeight(slotsAt(1.5)) - viewport / 2;
+
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    await waitFor(() => expect(container.scrollTop).toBe(1436));
+    await waitFor(() => expect(container.scrollTop).toBeCloseTo(expected, 3));
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
     view.unmount();
   });
@@ -1990,7 +2004,7 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
   });
 
-  it("pins the page top through a zoom on a one-page document", async () => {
+  it("holds the viewport center on a keyboard zoom", async () => {
     const doc = makeFakePdfDocument(1, () => ({ width: 612, height: 2000 }));
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({ get_reading_progress: null, save_reading_progress: null });
@@ -2006,10 +2020,36 @@ describe("PdfReader zoom modes (issue #65)", () => {
     fireEvent.keyDown(window, { key: "+" });
     await settle();
 
-    // The reading-spot rule would move this (it puts the anchor at 25% of the
-    // viewport); the one-page rule holds the page top.
-    expect(container.scrollTop).toBeCloseTo(500, 5);
+    // Papers' -1 sentinel: the keyboard step holds the viewport center. Scale
+    // 1 -> 1.25, content 2000 -> 2500, so (500 + 400) / 2000 = (new + 400) / 2500.
+    expect(container.scrollTop).toBeCloseTo(725, 4);
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
+  });
+
+  it("keeps the relative position on a typed zoom", async () => {
+    const doc = makeFakePdfDocument(1, () => ({ width: 612, height: 2000 }));
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({ get_reading_progress: null, save_reading_progress: null });
+    const container = document.createElement("div");
+    renderPdfReader({ scrollContainerRef: { current: container } });
+    await screen.findByTestId("pdf-canvas");
+    stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    Object.defineProperty(container, "clientHeight", { value: 800, configurable: true });
+    Object.defineProperty(container, "scrollHeight", { value: 6000, configurable: true });
+    Object.defineProperty(container, "scrollWidth", { value: 1000, configurable: true });
+    scrollTo(container, 500);
+
+    const input = screen.getByTestId("pdf-zoom-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "200{Enter}");
+    await settle();
+
+    // Papers' KEEP_POSITION: 500 / 2000 = 0.25, new content 4000 -> 1000.
+    expect(container.scrollTop).toBeCloseTo(1000, 4);
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute(
+      "data-pdf-scroll-policy",
+      "keep-position",
+    );
   });
 
   it("keeps every rendered canvas drawable through a zoom commit (scale-and-swap)", async () => {
