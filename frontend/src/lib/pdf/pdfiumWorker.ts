@@ -20,6 +20,7 @@ import type { EngineTextLine } from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import { PdfRangeSource } from "./pdfRangeSource";
 import { PdfiumEngine, type PageClip } from "./pdfiumCore";
+import { isTrustedWorkerOrigin } from "./pdfWorkerOrigin";
 import type { FpdfColorScheme } from "./smartColors";
 
 type WorkerRequest =
@@ -146,7 +147,7 @@ const methods = {
 // from anywhere else is rejected rather than trusted.
 const SENDER_ORIGIN = self.location.origin;
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  if (event.origin !== SENDER_ORIGIN) return;
+  if (!isTrustedWorkerOrigin(event.origin, SENDER_ORIGIN)) return;
   const request = event.data;
   const respond = (response: WorkerResponse, transfer: Transferable[] = []): void => {
     (self as unknown as Worker).postMessage(response, transfer);
