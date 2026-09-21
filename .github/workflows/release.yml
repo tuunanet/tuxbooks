@@ -145,13 +145,29 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_file="$(mktemp)"
-          # The "New since" line is specific to 0.0.12; revisit it when the
-          # next release is cut.
+          # Release notes are curated per release; rewrite them when the next
+          # version is cut.
           cat > "$notes_file" <<EOF
-          Development snapshot — TuxBooks is pre-1.0 and in active development.
+          TuxBooks 0.0.13 rebuilds the PDF reader on a new engine and brings
+          its zoom and scrolling in line with GNOME Papers.
 
-          Fixed since 0.0.11: the PDF reader no longer crashes the renderer
-          when zooming over shading-heavy pages in Smart Dark.
+          What changed since 0.0.12:
+
+          - New PDF engine. The reader runs on PDFium compiled to WebAssembly
+            instead of MuPDF.js. The AGPL-only dependency is gone, so every
+            shipped component is GPL-compatible.
+          - Better zoom. Wheel and pinch zoom keep the point under the pointer
+            fixed, page sizes round to whole pixels so edges stay crisp, and
+            the previous render stays on screen while the sharp one loads, so
+            zooming does not flash blank.
+          - Sharper deep zoom. Pages rasterize only the visible region at
+            device resolution, which also reduces memory use.
+          - The reading features carry over to the new engine: text selection
+            and highlights, in-book search, the outline, and dark mode.
+          - Dark mode is a category color scheme: text and vector art follow
+            the theme and photographs keep their colors. It is coarser than
+            the old object-level recolor, and full-page scans stay light; use
+            Invert or High-contrast for those.
 
           Install on Ubuntu/Debian:
 
@@ -171,7 +187,6 @@ jobs:
           EOF
           gh release create "$GITHUB_REF_NAME" \
             --title "TuxBooks $GITHUB_REF_NAME" \
-            --prerelease \
             --notes-file "$notes_file" \
             "dist-packages/tuxbooks_${version}_amd64.deb" \
             "dist-packages/tuxbooks-${version}.AppImage" \

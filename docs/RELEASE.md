@@ -21,9 +21,10 @@ are unchanged from the earlier releases.
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
 document worker (`resources/sidecar/tuxbooks-worker`) plus PDFium resource.
-`scripts/check-deb.sh` gates the worker's presence. Releases are marked
-pre-release until 1.0, and the site links to the releases list (not
-`/releases/latest`, which ignores pre-releases).
+`scripts/check-deb.sh` gates the worker's presence. Releases are published as
+normal releases, not pre-release, and the site links to the latest release at
+`/releases/latest`. The version stays below 1.0 while the app is in active
+development; that is a version number, not a release flag.
 
 ### Desktop identity (branding vs technical identifiers)
 
@@ -97,7 +98,7 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
    - **publish** — refuses to run unless the tag exactly matches the
      version in the packaging manifest, builds deb + AppImage, generates
      the SBOM (`just sbom`), writes `SHA256SUMS.txt` over the installers
-     and the SBOM, and publishes a pre-release with install instructions.
+     and the SBOM, and publishes the release with install instructions.
 
 Before tagging, run `just audit`: release builds must be free of
 untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
