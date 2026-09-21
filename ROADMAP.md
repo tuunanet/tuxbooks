@@ -2,22 +2,24 @@
 
 TuxBooks shipped its first public release (0.0.1) in September 2026 and is in active pre-1.0 development.
 
-The current focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
+The focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## 🚧 Before 0.0.2 — Stabilize & Polish
+## Now: 0.0.13
 
-The immediate goal is to squash remaining bugs and finish the smaller pieces needed for a solid next release.
+Release 0.0.13 rebuilt the PDF reader. It runs on PDFium compiled to WebAssembly instead of MuPDF.js, so the app no longer ships an AGPL-only dependency, and its zoom and scrolling follow GNOME Papers: wheel and pinch zoom hold the point under the pointer, page sizes round to whole pixels, deep zoom renders only the visible region, and the previous render stays on screen while the sharp one loads.
+
+With the engine swap done, work continues in four areas.
 
 ### Core reliability
 
 - Fix remaining library, import, synchronization, and persistence bugs
 - Fix reader lifecycle and edge-case crashes
-- Improve PDF and EPUB loading and reading stability
-- Ensure reading progress and navigation remain reliable across restarts
+- Apply page rotation to PDF text selection, highlights, and outline navigation
+- Keep reading progress and navigation reliable across restarts
 
 ### Reader polish
 
-- Improve PDF/EPUB reading performance and responsiveness
+- Bring the PDF render p95 back within budget at high device pixel ratio
 - Fix remaining navigation, search, annotation, and rendering edge cases
 - Polish reader controls and interaction details
 
@@ -29,11 +31,11 @@ The immediate goal is to squash remaining bugs and finish the smaller pieces nee
 
 ### Release readiness
 
-- Complete the remaining pre-release testing
+- Keep the release pipeline green and the packaging gate passing
 - Verify packaging and installation on supported Linux environments
-- Publish the next release
+- Cut the next release when the work above settles
 
-## 🌱 After 0.0.2
+## Later
 
 Once the core experience is solid, development can move toward larger features and quality-of-life improvements.
 
