@@ -17,6 +17,13 @@ interface PdfDocumentViewProps {
    * geometry-only slot.
    */
   renderPages: number[];
+  /**
+   * Subset of `renderPages` allowed to start a new raster right now. Any
+   * other mounted page is display-only scale-and-swap: it keeps showing its
+   * previous bitmap scaled while the pages in this set rasterize. Defaults
+   * to every mounted page (steady state, no zoom transition).
+   */
+  renderPermittedPages?: ReadonlySet<number>;
   /** The page the reading position names; its slot is the scroll target. */
   anchorPage: number;
   /** Render scale for the canvases. */
@@ -92,6 +99,7 @@ export function PdfDocumentView({
   document,
   slots,
   renderPages,
+  renderPermittedPages,
   anchorPage,
   scale,
   previewTransform,
@@ -221,6 +229,11 @@ export function PdfDocumentView({
                     smartColors={smartColors}
                     renderVariant={renderVariant}
                     bitmapCache={bitmapCache}
+                    renderEnabled={
+                      renderedPages.has(slot.pageNumber) ||
+                      renderPermittedPages === undefined ||
+                      renderPermittedPages.has(slot.pageNumber)
+                    }
                     onPageRendered={onPageRendered}
                     onPageError={onPageError}
                   />

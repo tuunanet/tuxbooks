@@ -52,6 +52,12 @@ _Avoid_: preserve scroll
 **Center on zoom**:
 The scroll policy that holds the focal anchor fixed through an explicit zoom.
 
+**Scale-and-swap**:
+Holding a page's previous bitmap on screen, scaled to the new page box, while
+its new-scale raster runs, then replacing it in one atomic blit. The visible
+surface never blanks through a zoom commit.
+_Avoid_: placeholder, stale raster
+
 ## PDF colour
 
 **Color mode**:

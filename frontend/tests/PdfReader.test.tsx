@@ -40,6 +40,13 @@ import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
+import {
+  adjustmentUpper,
+  adjustmentValueForPolicy,
+  displayedSizes,
+  documentHeight,
+  layoutSlots,
+} from "@/components/reader/pdf/pdfLayout";
 
 const openDocumentMock = vi.mocked(openPdfDocumentFromBook);
 const closeDocumentMock = vi.mocked(closePdfDocument);
@@ -1928,22 +1935,89 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
   });
 
-  it("keeps the point under the cursor fixed when the wheel gesture commits", async () => {
+  it("holds the focal anchor through the wheel commit via the center policy", async () => {
     const container = document.createElement("div");
     await renderZoomableReader(container);
     stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    // A viewport narrower than the page, so the horizontal axis actually
+    // scrolls and the policy has something to preserve.
+    Object.defineProperty(container, "clientWidth", { value: 400, configurable: true });
     scrollTo(container, 1000);
 
-    // Cursor 200px into the stubbed viewport while scrolled to 1000: the
-    // document point under the cursor sits at content y 1200 and x 200.
-    // The commit must land those at ×1.2 back under the cursor — absolute
-    // scrollTop 1200·1.2 − 200 = 1240 (the stubbed document starts at
-    // content 0), scrollLeft 200·1.2 − 200 = 40.
+    // Cursor 200px into the viewport while scrolled to 1000: the commit uses
+    // the merged Papers geometry (pdfLayout.centerValue), not the reader's
+    // old DOM-ratio fixup, and records the policy it applied.
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 200 });
     await settle();
 
-    expect(container.scrollTop).toBe(1240);
-    expect(container.scrollLeft).toBe(40);
+    const pageSize = { width: 612, height: 792 };
+    const slotsAt = (scale: number) =>
+      layoutSlots(
+        displayedSizes(
+          Array.from({ length: 3 }, (_, index) => ({ pageNumber: index + 1, ...pageSize })),
+          scale,
+        ),
+      );
+    const expectedY = adjustmentValueForPolicy(
+      "center",
+      { value: 1000, upper: adjustmentUpper(720, documentHeight(slotsAt(1))), pageSize: 720 },
+      adjustmentUpper(720, documentHeight(slotsAt(1.2))),
+      720,
+      200,
+    );
+    const expectedX = adjustmentValueForPolicy(
+      "center",
+      { value: 0, upper: adjustmentUpper(400, 612), pageSize: 400 },
+      adjustmentUpper(400, 734),
+      400,
+      200,
+    );
+    expect(container.scrollTop).toBeCloseTo(expectedY, 6);
+    expect(container.scrollLeft).toBeCloseTo(expectedX, 6);
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
+  });
+
+  it("keeps every rendered canvas drawable through a zoom commit (scale-and-swap)", async () => {
+    const doc = makeFakePdfDocument(3, undefined, { holdRenderFor: [1, 2, 3] });
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    const container = document.createElement("div");
+    renderPdfReader({ scrollContainerRef: { current: container } });
+    await screen.findByTestId("pdf-canvas");
+
+    // Bring all three pages into the window and complete their first paints.
+    doc.releaseRender(1);
+    await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
+    fireVisible(slot(2) as Element, true);
+    await waitFor(() => expect(canvasPages()).toContain("2"));
+    doc.releaseRender(2);
+    await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
+    fireVisible(slot(3) as Element, true);
+    await waitFor(() => expect(canvasPages()).toContain("3"));
+    doc.releaseRender(3);
+    await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
+    expect(canvasPages()).toEqual(["1", "2", "3"]);
+
+    // A zoom keeps every previously rendered canvas mounted. The pages inside
+    // the render budget rasterize while the page outside it keeps its
+    // previous bitmap scaled, so no canvas is ever blank through the commit.
+    await userEvent.click(screen.getByTestId("pdf-zoom-in"));
+    await waitFor(() => {
+      const canvases = screen.getAllByTestId("pdf-canvas");
+      expect(canvases).toHaveLength(3);
+      for (const canvas of canvases) {
+        expect(["scaled", "preview", "final"]).toContain(
+          canvas.getAttribute("data-pdf-render-quality"),
+        );
+      }
+    });
+    const page3 = screen
+      .getAllByTestId("pdf-canvas")
+      .find((canvas) => canvas.getAttribute("data-pdf-page") === "3");
+    await waitFor(() => expect(page3).toHaveAttribute("data-pdf-render-quality", "scaled"));
   });
 
   it("unmounts mid-gesture through the commit path without errors", async () => {
