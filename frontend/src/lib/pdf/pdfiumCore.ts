@@ -5,6 +5,27 @@ import type { PdfRangeSource } from "./pdfRangeSource";
 import { FPDF_CONVERT_FILL_TO_STROKE, type FpdfColorScheme } from "./smartColors";
 
 /**
+ * Hard ceiling on one PDFium bitmap, in pixels (2²⁵). The WASM heap is capped
+ * at 2 GB and a single RGBA bitmap is 4 bytes/pixel, so anything past this
+ * cannot be allocated: `FPDFBitmap_Create` would ask the runtime to grow past
+ * its limit and the renderer dies. The reader's ratio policies already target
+ * this budget; this is the engine's last line of defence for any caller that
+ * slips through (a whole-page viewport at deep zoom is tens of megapixels).
+ */
+export const MAX_RENDER_BITMAP_PIXELS = 2 ** 25;
+
+/** Shrink a bitmap to {@link MAX_RENDER_BITMAP_PIXELS}, preserving aspect. */
+export function clampBitmapSize(width: number, height: number): { width: number; height: number } {
+  const pixels = width * height;
+  if (!(pixels > MAX_RENDER_BITMAP_PIXELS)) return { width, height };
+  const factor = Math.sqrt(MAX_RENDER_BITMAP_PIXELS / pixels);
+  return {
+    width: Math.max(1, Math.floor(width * factor)),
+    height: Math.max(1, Math.floor(height * factor)),
+  };
+}
+
+/**
  * PDFium-WASM operations (ADR 0002), independent of the worker transport so
  * the same code backs the worker and the Node integration test. This is the
  * only runtime module that imports the `@embedpdf/pdfium` package; the
@@ -330,6 +351,9 @@ export class PdfiumEngine {
     const doc = this.requireDoc();
     const page = this.mod.FPDF_LoadPage(doc, index);
     if (!page) throw new Error(`PDFium: FPDF_LoadPage(${index}) failed`);
+    // Never hand PDFium a bitmap its 2 GB heap cannot hold; a caller that
+    // missed the ratio caps gets a CSS-upscaled result instead of a crash.
+    ({ width, height } = clampBitmapSize(width, height));
     const bitmap = this.mod.FPDFBitmap_Create(width, height, 1);
     if (!bitmap) {
       this.mod.FPDF_ClosePage(page);
