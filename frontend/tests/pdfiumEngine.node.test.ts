@@ -4,19 +4,22 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { MAX_RENDER_PIXELS_HARD, regionRenderRatio } from "@/components/reader/pdf/pdfRenderPolicy";
+import { normalizePdfOutline } from "@/lib/pdf/pdfOutline";
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";
+import { assemblePageText, findPageMatches } from "@/lib/pdf/pdfSearch";
 import { PdfiumEngine, type PageClip } from "@/lib/pdf/pdfiumCore";
 
 /**
- * Real PDFium-WASM integration (tuxbooks-koe.5). Loading the browser build
- * under vitest's jsdom is impractical (the Emscripten glue wants a Worker or
- * Node fs), so this test runs in the Node environment against the package's
- * Node build and drives the same `PdfiumEngine` the worker uses: open from
- * bytes and range-backed, page count, page sizes, and whole-page raster.
+ * Real PDFium-WASM integration (tuxbooks-koe.5, .7, .8). Loading the browser
+ * build under vitest's jsdom is impractical (the Emscripten glue wants a
+ * Worker or Node fs), so this test runs in the Node environment against the
+ * package's Node build and drives the same `PdfiumEngine` the worker uses:
+ * open from bytes and range-backed, page count, page sizes, whole-page raster,
+ * text lines, outline, and search.
  *
- * The fixture is the committed 3-page, 612×792 `minimal.pdf`. The worker
- * transport and the reader path are covered by the jsdom adapter test and the
- * engine E2E smoke.
+ * The fixtures are the committed `minimal.pdf` (3 pages, no outline) and
+ * `large.pdf` (100 pages, a nested outline). The worker transport and the
+ * reader path are covered by the jsdom adapter test and the engine E2E smoke.
  */
 
 const wasmPath = fileURLToPath(
@@ -24,6 +27,9 @@ const wasmPath = fileURLToPath(
 );
 const fixturePath = fileURLToPath(
   new URL("../../tests/fixtures/books/minimal.pdf", import.meta.url),
+);
+const outlineFixturePath = fileURLToPath(
+  new URL("../../tests/fixtures/books/large.pdf", import.meta.url),
 );
 
 /** Exact-length ArrayBuffer copy (Buffer views share a pooled backing store). */
@@ -195,5 +201,78 @@ describe("PdfiumEngine (WASM)", () => {
       expect(call.start).toBeGreaterThanOrEqual(0);
       expect(call.end).toBeLessThan(file.length);
     }
+  });
+
+  test("walks PDFium bookmarks into the raw outline shape, 0-based", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(outlineFixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    // large.pdf carries a nested outline: five parts on pages 1/21/41/61/81,
+    // each with two sections offset by ten pages (see make-fixture.py).
+    const raw = engine.outline();
+    expect(raw).toHaveLength(5);
+    expect(raw![0]).toEqual({
+      title: "Part One",
+      page: 0,
+      items: [
+        { title: "Section One-A", page: 0, items: [] },
+        { title: "Section One-B", page: 10, items: [] },
+      ],
+    });
+    expect(raw![4]).toEqual({
+      title: "Part Five",
+      page: 80,
+      items: [
+        { title: "Section Five-A", page: 80, items: [] },
+        { title: "Section Five-B", page: 90, items: [] },
+      ],
+    });
+
+    // The pure normalizer still turns those 0-based destinations into the
+    // reader's 1-based page locators, unchanged by the engine swap.
+    const normalized = normalizePdfOutline(raw);
+    expect(normalized[0]?.page).toBe(1);
+    expect(normalized[0]?.items[1]).toEqual({
+      title: "Section One-B",
+      page: 11,
+      items: [],
+    });
+    expect(normalized[4]?.items[1]?.page).toBe(91);
+  });
+
+  test("reports no outline for a document without one", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(fixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    expect(engine.outline()).toBeNull();
+  });
+
+  test("searches the assembled PDFium text case-insensitively and across lines", async () => {
+    const wasm = readFileSync(wasmPath);
+    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
+    const file = readFileSync(fixturePath);
+    engine.openBytes(toArrayBuffer(file));
+
+    // Search reuses the text layer's lines; the seam assembles them the same
+    // way as getPdfPageText (line boundaries become single spaces).
+    const pageText = assemblePageText(
+      engine.textLines(0).map((line) => ({ str: line.text, hasEOL: true })),
+    );
+    expect(pageText).toBe("Tuxbooks PDF Fixture Page 1 of 3");
+
+    // Case-insensitive, one occurrence per page.
+    const caseInsensitive = findPageMatches(pageText, "pdf");
+    expect(caseInsensitive).toHaveLength(1);
+    expect(caseInsensitive[0]?.match).toBe("PDF");
+
+    // A query that crosses the line break between the title and the marker
+    // still matches, because the lines are joined like they read.
+    const acrossLines = findPageMatches(pageText, "fixture page");
+    expect(acrossLines).toHaveLength(1);
+    expect(acrossLines[0]?.match).toBe("Fixture Page");
   });
 });

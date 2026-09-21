@@ -1,5 +1,6 @@
 import { init, type WrappedPdfiumModule } from "@embedpdf/pdfium";
 import type { EngineTextLine } from "./pdfEngineTypes";
+import type { RawPdfOutline } from "./pdfOutline";
 import type { PdfRangeSource } from "./pdfRangeSource";
 
 /**
@@ -19,6 +20,7 @@ interface PdfiumRuntime {
   wasmExports: { malloc(size: number): number; free(pointer: number): void };
   addFunction(fn: (...args: number[]) => number, signature: string): number;
   removeFunction(pointer: number): void;
+  UTF16ToString(pointer: number): string;
 }
 
 export interface PdfiumLoadOptions {
@@ -230,6 +232,66 @@ export class PdfiumEngine {
       this.mod.FPDFText_ClosePage(textPage);
       this.mod.FPDF_ClosePage(page);
     }
+  }
+
+  /**
+   * The document outline (table of contents) as the seam's raw tree, with
+   * internal destinations resolved to 0-based page indices and external links
+   * carrying no page. PDFium exposes the tree through `FPDFBookmark_*` and the
+   * destination page through `FPDFBookmark_GetDest` +
+   * `FPDFDest_GetDestPageIndex`; books without an outline return null, never an
+   * error. The 1-based conversion stays in `pdfOutline.ts`.
+   */
+  outline(): RawPdfOutline[] | null {
+    const doc = this.requireDoc();
+    const first = this.mod.FPDFBookmark_GetFirstChild(doc, 0);
+    if (!first) return null;
+    return this.walkBookmarks(doc, first);
+  }
+
+  private walkBookmarks(doc: number, first: number): RawPdfOutline[] {
+    const items: RawPdfOutline[] = [];
+    let node = first;
+    while (node) {
+      const child = this.mod.FPDFBookmark_GetFirstChild(doc, node);
+      items.push({
+        title: this.bookmarkTitle(node),
+        page: this.bookmarkPage(doc, node),
+        items: child ? this.walkBookmarks(doc, child) : [],
+      });
+      node = this.mod.FPDFBookmark_GetNextSibling(doc, node);
+    }
+    return items;
+  }
+
+  /** Bookmark title as UTF-16 text, or "" when the title is missing. */
+  private bookmarkTitle(node: number): string {
+    const needed = this.mod.FPDFBookmark_GetTitle(node, 0, 0);
+    if (needed <= 0) return "";
+    const buffer = this.rt.wasmExports.malloc(needed);
+    if (!buffer) return "";
+    try {
+      if (this.mod.FPDFBookmark_GetTitle(node, buffer, needed) <= 0) return "";
+      return this.rt.UTF16ToString(buffer);
+    } finally {
+      this.rt.wasmExports.free(buffer);
+    }
+  }
+
+  /**
+   * Destination page of one bookmark, 0-based, or null for an external link or
+   * an unresolvable destination. A bookmark may carry its destination directly
+   * or through an action (`/GoTo`); both are tried.
+   */
+  private bookmarkPage(doc: number, node: number): number | null {
+    let dest = this.mod.FPDFBookmark_GetDest(doc, node);
+    if (!dest) {
+      const action = this.mod.FPDFBookmark_GetAction(node);
+      if (action) dest = this.mod.FPDFAction_GetDest(doc, action);
+    }
+    if (!dest) return null;
+    const index = this.mod.FPDFDest_GetDestPageIndex(doc, dest);
+    return index >= 0 ? index : null;
   }
 
   /**

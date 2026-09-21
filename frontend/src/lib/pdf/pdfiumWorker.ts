@@ -17,6 +17,7 @@
 
 import type { WorkerDiag } from "./pdfWorkerClient";
 import type { EngineTextLine } from "./pdfEngineTypes";
+import type { RawPdfOutline } from "./pdfOutline";
 import { PdfRangeSource } from "./pdfRangeSource";
 import { PdfiumEngine, type PageClip } from "./pdfiumCore";
 
@@ -35,6 +36,7 @@ type WorkerRequest =
     }
   | { id: number; method: "pageSize"; params: { page: number } }
   | { id: number; method: "text"; params: { page: number } }
+  | { id: number; method: "outline"; params?: undefined }
   | {
       id: number;
       method: "render";
@@ -102,6 +104,11 @@ const methods = {
   text({ page }: { page: number }): { lines: EngineTextLine[] } {
     if (!engine) throw new Error("no document open");
     return { lines: engine.textLines(page - 1) };
+  },
+
+  outline(): { items: RawPdfOutline[] | null } {
+    if (!engine) throw new Error("no document open");
+    return { items: engine.outline() };
   },
 
   async render({
