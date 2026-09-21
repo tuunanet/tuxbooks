@@ -148,26 +148,25 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.13 rebuilds the PDF reader on a new engine and brings
-          its zoom and scrolling in line with GNOME Papers.
+          TuxBooks 0.0.14 fixes PDF opening and the zoom problems found while
+          using the new engine.
 
-          What changed since 0.0.12:
+          What changed since 0.0.13:
 
-          - New PDF engine. The reader runs on PDFium compiled to WebAssembly
-            instead of MuPDF.js. The AGPL-only dependency is gone, so every
-            shipped component is GPL-compatible.
-          - Better zoom. Wheel and pinch zoom keep the point under the pointer
-            fixed, page sizes round to whole pixels so edges stay crisp, and
-            the previous render stays on screen while the sharp one loads, so
-            zooming does not flash blank.
-          - Sharper deep zoom. Pages rasterize only the visible region at
-            device resolution, which also reduces memory use.
-          - The reading features carry over to the new engine: text selection
-            and highlights, in-book search, the outline, and dark mode.
-          - Dark mode is a category color scheme: text and vector art follow
-            the theme and photographs keep their colors. It is coarser than
-            the old object-level recolor, and full-page scans stay light; use
-            Invert or High-contrast for those.
+          - PDFs open again. A worker sender check rejected every open in the
+            packaged app, so the reader hung on "Loading".
+          - Zoom holds its place. A zoom commits in one step now, so the view
+            no longer jumps after the wheel preview, and the point under the
+            pointer no longer drifts north-west on zoom in and south-east on
+            zoom out.
+          - A single page stays put. Zooming a one-page document keeps the
+            middle of its top border fixed instead of sliding the page.
+          - Deep zoom no longer kills the renderer. PDFium can allocate
+            gigabytes for a page-sized shading at high zoom; the render now
+            caps its device scale, and a bitmap can no longer exceed the 2 GB
+            WASM heap (docs/adr/0004-pdf-region-render-budget.md).
+          - Opt-in zoom telemetry (tuxbooksPdfZoomLog) for diagnosing
+            view-centre problems.
 
           Install on Ubuntu/Debian:
 
