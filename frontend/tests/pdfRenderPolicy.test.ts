@@ -9,6 +9,7 @@ import {
   effectiveRenderRatio,
   needsRegionRender,
   regionRenderRatio,
+  regionRenderRatioForPage,
   renderBufferBytes,
 } from "@/components/reader/pdf/pdfRenderPolicy";
 
@@ -195,5 +196,37 @@ describe("regionRenderRatio", () => {
   it("falls back to 1 for unmeasurable inputs", () => {
     expect(regionRenderRatio(0, 700, 2)).toBe(1);
     expect(regionRenderRatio(1000, 700, 0)).toBe(1);
+  });
+});
+
+describe("regionRenderRatioForPage", () => {
+  const plot = { width: 279.5, height: 248.5 } as const;
+  const region = { width: 2536, height: 2236 } as const;
+
+  it("caps the device scale so a page-sized shading stays inside the budget", () => {
+    // PDFium allocates a page-sized shading buffer at the render's device
+    // scale, not the clip's. At scale 21.5 the uncapped region ratio (2) puts
+    // the device scale at 43, which high-waters the WASM heap by hundreds of
+    // MB per render until it cannot grow. The cap holds it under 22.
+    for (const scale of [11, 21.5, 43, 100]) {
+      const ratio = regionRenderRatioForPage(
+        plot.width,
+        plot.height,
+        region.width,
+        region.height,
+        scale,
+        2,
+      );
+      const deviceScale = scale * ratio;
+      const pageDevicePixels = plot.width * deviceScale * (plot.height * deviceScale);
+      expect(pageDevicePixels, `scale ${scale}`).toBeLessThanOrEqual(MAX_RENDER_PIXELS_HARD * 1.02);
+      expect(deviceScale, `scale ${scale}`).toBeLessThanOrEqual(22);
+    }
+  });
+
+  it("keeps the plain region ratio while the page fits the budget", () => {
+    expect(
+      regionRenderRatioForPage(plot.width, plot.height, region.width, region.height, 1, 2),
+    ).toBe(2);
   });
 });

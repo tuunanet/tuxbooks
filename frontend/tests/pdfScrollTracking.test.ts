@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { anchorAtViewportOffset } from "@/components/reader/pdf/hooks/usePdfScrollTracking";
 import {
-  adjustmentUpper,
   centerValue,
   displayedSizes,
   documentHeight,
@@ -43,16 +42,16 @@ describe("pointer-anchored zoom across a scale change", () => {
     const before = anchorAtViewportOffset(pointerOffset, scroll, 0, beforeSlots);
     expect(before).not.toBeNull();
 
-    // Papers' center policy: the point at `scroll + pointerOffset` keeps the
-    // same fraction of the content.
+    // The center policy: the point at `scroll + pointerOffset` keeps the same
+    // fraction of the content (upper is the raw content extent).
     const oldAdjustment = {
       value: scroll,
-      upper: adjustmentUpper(viewport, documentHeight(beforeSlots)),
+      upper: documentHeight(beforeSlots),
       pageSize: viewport,
     };
     const nextScroll = centerValue(
       oldAdjustment,
-      adjustmentUpper(viewport, documentHeight(afterSlots)),
+      documentHeight(afterSlots),
       viewport,
       pointerOffset,
     );
@@ -75,10 +74,10 @@ describe("pointer-anchored zoom across a scale change", () => {
     const keptScroll = keepPositionValue(
       {
         value: 100,
-        upper: adjustmentUpper(viewport, documentHeight(beforeSlots)),
+        upper: documentHeight(beforeSlots),
         pageSize: viewport,
       },
-      adjustmentUpper(viewport, documentHeight(afterSlots)),
+      documentHeight(afterSlots),
       viewport,
     );
     const kept = anchorAtViewportOffset(pointerOffset, keptScroll, 0, afterSlots);

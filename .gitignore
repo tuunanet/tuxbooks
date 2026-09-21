@@ -68,6 +68,10 @@ electron/dist/
 # Local debugging fixture (issue #67 follow-up) — temporary copy, never commit.
 tests/fixtures/ai-engineering.pdf
 
+# PDF zoom telemetry capture (opt-in diagnostic, pdfZoomTelemetry.ts). Never
+# commit: it is a user's session trace, not a fixture.
+tuxbooks-pdf-zoom-log.json
+
 # Git worktrees (superpowers workflow)
 .worktrees/
 

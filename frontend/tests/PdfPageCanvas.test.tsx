@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 
@@ -124,6 +125,165 @@ describe("PdfPageCanvas scale-and-swap", () => {
     expect(canvas.style.transform).toBe("");
     expect(fakeCtx.drawImage).toHaveBeenCalledTimes(2);
     expect(canvas.getAttribute("width")).toBe(String(Math.floor(612 * 2)));
+  });
+
+  it("presents the scaled bitmap in the layout phase, before the resized wrapper can paint uncovered", async () => {
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const observed: string[] = [];
+
+    // A parent layout effect runs after a child's layout effects but before
+    // the browser paints, so the canvas state read here is what the first
+    // paintable frame contains. The scaled bitmap must already cover the
+    // wrapper React just resized; as a passive effect it did not, and the
+    // frame in between flashed the page placeholder (the zoom white flash).
+    function Harness({ scale }: { scale: number }) {
+      const mounted = useRef(false);
+      useLayoutEffect(() => {
+        if (!mounted.current) return;
+        observed.push(
+          document.querySelector<HTMLCanvasElement>('[data-testid="pdf-canvas"]')?.style
+            .transform ?? "missing",
+        );
+      });
+      useEffect(() => {
+        mounted.current = true;
+      });
+      return (
+        <PdfPageCanvas
+          document={doc as never}
+          pageNumber={1}
+          width={100 * scale}
+          height={129 * scale}
+          scale={scale}
+        />
+      );
+    }
+
+    const view = render(<Harness scale={1} />);
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-quality", "final"),
+    );
+
+    observed.length = 0;
+    view.rerender(<Harness scale={2} />);
+
+    expect(observed.at(-1)).toBe("scale(2, 2)");
+  });
+
+  it("scales the previous full-page bitmap over the page box when zoom crosses into region mode", async () => {
+    // The renderer reads devicePixelRatio once per render; force a HiDPI
+    // display so the whole-page ratio caps below it and region mode engages.
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = renderPage(doc);
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    // A zoom deep enough that the whole-page buffer would drop below device
+    // resolution, with a viewport region supplied: region mode engages and the
+    // old full-page pixels must cover the *page* box, not the region rect (the
+    // wrapper is now scrolled far from the page origin).
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={3000}
+        height={3000}
+        scale={30}
+        region={{ left: 100, top: 200, width: 2000, height: 2000 }}
+      />,
+    );
+
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    expect(canvas.style.left).toBe("0px");
+    expect(canvas.style.top).toBe("0px");
+    expect(canvas.style.transform).toBe(`scale(30, ${3000 / 129})`);
+  });
+
+  it("remaps a region bitmap to the new scale so a zoom keeps the focal area covered", async () => {
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = render(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={3000}
+        height={3000}
+        scale={30}
+        region={{ left: 500, top: 600, width: 2000, height: 2000 }}
+      />,
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    // Half the scale: the crop sits at half the page-local CSS position and
+    // covers half the box, so the visible page content stays put while the
+    // new region raster runs.
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={3000}
+        height={3000}
+        scale={15}
+        region={{ left: 250, top: 300, width: 2000, height: 2000 }}
+      />,
+    );
+
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    expect(canvas.style.left).toBe("250px");
+    expect(canvas.style.top).toBe("300px");
+    expect(canvas.style.transform).toBe("scale(0.5, 0.5)");
+  });
+
+  it("clears the region placement when a full-page render lands", async () => {
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = render(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={6000}
+        height={6000}
+        scale={30}
+        region={{ left: 40, top: 60, width: 120, height: 120 }}
+      />,
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    // Zoom out below the region threshold: the remap places the old crop
+    // imperatively (position/left/top), and the full-page render must clear
+    // that placement. Without it the page draws offset and only a fragment is
+    // visible, which is the reported blank page after a keyboard zoom-out.
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={2000}
+        height={2000}
+        scale={10}
+      />,
+    );
+    expect(canvas.style.position).toBe("absolute");
+    expect(Number.parseFloat(canvas.style.left)).toBeCloseTo(40 / 3, 3);
+
+    await waitFor(() => expect(doc.renderOptions.length).toBe(2));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    expect(canvas.style.position).toBe("");
+    expect(canvas.style.left).toBe("");
+    expect(canvas.style.top).toBe("");
+    expect(canvas.style.transform).toBe("");
   });
 
   it("keeps a display-only canvas scaled without starting a new raster", async () => {

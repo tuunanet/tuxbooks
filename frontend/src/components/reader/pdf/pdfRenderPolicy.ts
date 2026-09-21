@@ -121,6 +121,32 @@ export function regionRenderRatio(
   return Math.max(0.01, Math.min(dpr, hard, dimensionRatio));
 }
 
+/**
+ * Region ratio additionally capped by the whole-page budget.
+ *
+ * PDFium allocates internal buffers for page-sized objects (a shading's
+ * pattern bitmap, for one) at the render's *device scale*, not the clip's.
+ * A large clip at a moderate device scale therefore asks the WASM heap for
+ * hundreds of megabytes even though the region buffer is small, and because
+ * the emscripten heap never shrinks, the high-water accumulates until the
+ * 2 GB ceiling is hit and every later render fails ("Cannot enlarge memory").
+ * Capping the region's ratio by the whole-page ratio holds the page's device
+ * scale inside the 2^25-pixel budget, which bounds that internal allocation.
+ */
+export function regionRenderRatioForPage(
+  pageUnitWidth: number,
+  pageUnitHeight: number,
+  regionWidth: number,
+  regionHeight: number,
+  scale: number,
+  dpr: number,
+): number {
+  return Math.min(
+    regionRenderRatio(regionWidth, regionHeight, dpr),
+    effectiveRenderRatio(pageUnitWidth, pageUnitHeight, scale, dpr),
+  );
+}
+
 /** RGBA bytes a render buffer occupies at the given CSS size and ratio. */
 export function renderBufferBytes(width: number, height: number, ratio: number): number {
   return width * height * ratio * ratio * 4;

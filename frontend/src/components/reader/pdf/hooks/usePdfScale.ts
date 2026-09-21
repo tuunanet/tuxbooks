@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { computePdfScale, PAPERS_VIEW_SPACING, type PdfScaleRequest } from "../pdfLayout";
 
 /**
@@ -22,12 +22,23 @@ export function usePdfScale(
   contentAreaRef: (element: HTMLDivElement | null) => void;
 } {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
+  const [areaWidth, setAreaWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
-  const [scale, setScale] = useState(1);
 
   const contentAreaRef = useCallback((element: HTMLDivElement | null) => {
     setArea(element);
+    setAreaWidth(element?.clientWidth ?? 0);
   }, []);
+
+  // Derived during render, never stored and updated in an effect: a zoom
+  // request must yield its new scale in the same commit. A scale that lands
+  // one commit late paints the old layout for a frame after the wheel
+  // preview transform is dropped, which reads as a jump on every ctrl+wheel
+  // commit.
+  const scale = useMemo(() => {
+    if (!area) return 1;
+    return computePdfScale(request, areaWidth, viewportHeight, PAPERS_VIEW_SPACING);
+  }, [area, areaWidth, viewportHeight, request]);
 
   useEffect(() => {
     const container = scrollContainerRef?.current ?? null;
@@ -46,9 +57,7 @@ export function usePdfScale(
   useEffect(() => {
     if (!area) return;
 
-    const update = () => {
-      setScale(computePdfScale(request, area.clientWidth, viewportHeight, PAPERS_VIEW_SPACING));
-    };
+    const update = () => setAreaWidth(area.clientWidth);
     update();
 
     const observer = new ResizeObserver(update);
@@ -58,9 +67,7 @@ export function usePdfScale(
       observer.disconnect();
       window.removeEventListener("resize", update);
     };
-    // The request object is rebuilt per render by the caller; only its
-    // fields drive the scale, so they are the real dependencies.
-  }, [area, viewportHeight, request]);
+  }, [area]);
 
   return { scale, contentAreaRef };
 }
