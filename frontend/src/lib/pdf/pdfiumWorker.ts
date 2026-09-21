@@ -20,6 +20,7 @@ import type { EngineTextLine } from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import { PdfRangeSource } from "./pdfRangeSource";
 import { PdfiumEngine, type PageClip } from "./pdfiumCore";
+import type { FpdfColorScheme } from "./smartColors";
 
 type WorkerRequest =
   | { id: number; method: "prewarm"; params: { wasmUrl: string } }
@@ -40,7 +41,13 @@ type WorkerRequest =
   | {
       id: number;
       method: "render";
-      params: { page: number; width: number; height: number; clip?: PageClip };
+      params: {
+        page: number;
+        width: number;
+        height: number;
+        clip?: PageClip;
+        colorScheme?: FpdfColorScheme;
+      };
     };
 
 interface WorkerResponse {
@@ -116,14 +123,16 @@ const methods = {
     width,
     height,
     clip,
+    colorScheme,
   }: {
     page: number;
     width: number;
     height: number;
     clip?: PageClip;
+    colorScheme?: FpdfColorScheme;
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!engine) throw new Error("no document open");
-    const rgba = engine.renderRgba(page - 1, width, height, clip);
+    const rgba = engine.renderRgba(page - 1, width, height, clip, colorScheme);
     const imageData = new ImageData(rgba, width, height);
     const bitmap = await createImageBitmap(imageData);
     return { width, height, bitmap };

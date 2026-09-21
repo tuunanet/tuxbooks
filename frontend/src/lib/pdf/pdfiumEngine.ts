@@ -4,6 +4,7 @@ import type { PageClip } from "./pdfiumCore";
 import type { EngineTextLine, PdfDocument, PdfPage, PdfRenderTask } from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import { WorkerClient } from "./pdfWorkerClient";
+import { colorSchemeFromPalette, type SmartPalette } from "./smartColors";
 import type { BookFormat } from "@/types/domain";
 
 /**
@@ -15,9 +16,10 @@ import type { BookFormat } from "@/types/domain";
  * Open, page sizes, whole-page raster, range-backed open (`tuxbooks-koe.5`),
  * viewport-clipped region render at device resolution (`tuxbooks-koe.6`),
  * structured-text lines for the text layer, selection, and in-book search
- * (`tuxbooks-koe.7`), and the document outline (`tuxbooks-koe.8`). The dark
- * colour scheme (`tuxbooks-koe.9`) stays reserved and fails soft (plain
- * raster) so the reader still opens and renders.
+ * (`tuxbooks-koe.7`), the document outline (`tuxbooks-koe.8`), and the dark
+ * colour scheme (`tuxbooks-koe.9`). The seam's `smartColors` palette is mapped
+ * onto PDFium's `FPDF_COLORSCHEME` (`colorSchemeFromPalette`), which recolors
+ * path and text categories while leaving images intact.
  */
 
 /** Configured worker URL; diagnostics for the E2E worker-load assertion. */
@@ -78,7 +80,7 @@ class PdfiumDocument implements PdfDocument {
       canvas: HTMLCanvasElement;
       viewport: { width: number; height: number };
       transform?: number[];
-      smartColors?: unknown;
+      smartColors?: SmartPalette;
       region?: { x: number; y: number; width: number; height: number };
     },
   ): PdfRenderTask {
@@ -105,11 +107,18 @@ class PdfiumDocument implements PdfDocument {
       width = Math.max(1, Math.floor(options.viewport.width * ratio));
       height = Math.max(1, Math.floor(options.viewport.height * ratio));
     }
+    // The seam hands the dark palette across; PDFium's category colour
+    // scheme is derived here so the worker payload carries plain 32-bit
+    // colours (and MuPDF's object-recolor palette stays untouched).
+    const colorScheme = options.smartColors
+      ? colorSchemeFromPalette(options.smartColors)
+      : undefined;
     const handle = this.client.requestCancellable("render", {
       page: pageNumber,
       width,
       height,
       clip,
+      colorScheme,
     });
     const promise = handle.result.then((raw) => {
       const { bitmap } = raw as { bitmap: ImageBitmap };

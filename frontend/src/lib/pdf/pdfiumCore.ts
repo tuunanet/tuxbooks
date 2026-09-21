@@ -2,6 +2,7 @@ import { init, type WrappedPdfiumModule } from "@embedpdf/pdfium";
 import type { EngineTextLine } from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import type { PdfRangeSource } from "./pdfRangeSource";
+import { FPDF_CONVERT_FILL_TO_STROKE, type FpdfColorScheme } from "./smartColors";
 
 /**
  * PDFium-WASM operations (ADR 0002), independent of the worker transport so
@@ -37,6 +38,16 @@ export interface PdfSize {
 
 /** Viewport region in page units: `[left, top, width, height]`. */
 export type PageClip = [number, number, number, number];
+
+/** Progressive-render status, from `fpdf_progressive.h`. */
+const FPDF_RENDER_TOBECONTINUED = 1;
+const FPDF_RENDER_FAILED = 3;
+
+/** `IFSDK_PAUSE` size on wasm32: version int, callback pointer, user pointer. */
+const PAUSE_STRUCT_BYTES = 12;
+
+/** `FPDF_COLORSCHEME`: four 32-bit colours. */
+const COLOR_SCHEME_BYTES = 16;
 
 /** Accumulator for one text line while its characters are walked. */
 interface LineBuilder {
@@ -302,12 +313,19 @@ export class PdfiumEngine {
    * With `clip` (region in page units), only that region rasterizes, scaled
    * so the region fills the region-sized `width × height` bitmap. Deep zoom
    * then pays for a viewport buffer instead of a page-sized one.
+   *
+   * `colorScheme` switches the dark path on (ADR 0002): the bitmap is
+   * pre-filled with the scheme's path fill (the page background, which PDFs
+   * do not paint themselves) and the page renders through PDFium's
+   * progressive colour-scheme entry point. Images are not a colour-scheme
+   * category, so photographs and scans keep their pixels.
    */
   renderRgba(
     index: number,
     width: number,
     height: number,
     clip?: PageClip,
+    colorScheme?: FpdfColorScheme,
   ): Uint8ClampedArray<ArrayBuffer> {
     const doc = this.requireDoc();
     const page = this.mod.FPDF_LoadPage(doc, index);
@@ -318,14 +336,105 @@ export class PdfiumEngine {
       throw new Error(`PDFium: FPDFBitmap_Create(${width}×${height}) failed`);
     }
     try {
-      // PDFs paint no page background; viewers supply white.
-      this.mod.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xffffffff);
-      if (clip) this.renderPageRegion(bitmap, page, clip, width, height);
-      else this.mod.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
+      // PDFs paint no page background; viewers supply white — or the dark
+      // page colour the scheme's path fill carries.
+      const background = colorScheme ? colorScheme.pathFill : 0xffffffff;
+      this.mod.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, background);
+      if (colorScheme) {
+        this.renderColorScheme(bitmap, page, index, clip, width, height, colorScheme);
+      } else if (clip) {
+        this.renderPageRegion(bitmap, page, clip, width, height);
+      } else {
+        this.mod.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
+      }
       return this.copyBgraToRgba(bitmap, width, height);
     } finally {
       this.mod.FPDFBitmap_Destroy(bitmap);
       this.mod.FPDF_ClosePage(page);
+    }
+  }
+
+  /**
+   * The colour-scheme path: the only PDFium entry point that takes an
+   * `FPDF_COLORSCHEME` is the progressive
+   * `FPDF_RenderPageBitmapWithColorScheme_Start`, which requires a valid
+   * `IFSDK_PAUSE` (a null pause returns `FPDF_RENDER_FAILED`). Whole pages
+   * render at 0,0; a clipped region renders through the same start/size box
+   * as a full page, offset so the clip lands at the bitmap origin, with the
+   * bitmap bounds doing the cropping (the API has no matrix variant).
+   */
+  private renderColorScheme(
+    bitmap: number,
+    page: number,
+    index: number,
+    clip: PageClip | undefined,
+    width: number,
+    height: number,
+    colorScheme: FpdfColorScheme,
+  ): void {
+    let startX = 0;
+    let startY = 0;
+    let sizeX = width;
+    let sizeY = height;
+    if (clip) {
+      const [left, top, clipWidth, clipHeight] = clip;
+      if (!(clipWidth > 0) || !(clipHeight > 0)) {
+        throw new Error(
+          `PDFium: colour-scheme region needs a positive size, got ${clipWidth}×${clipHeight}`,
+        );
+      }
+      const size = this.pageSize(index);
+      if (!size) throw new Error(`PDFium: page ${index} has no size`);
+      const scaleX = width / clipWidth;
+      const scaleY = height / clipHeight;
+      sizeX = Math.max(1, Math.round(size.width * scaleX));
+      sizeY = Math.max(1, Math.round(size.height * scaleY));
+      startX = -Math.round(left * scaleX);
+      startY = -Math.round(top * scaleY);
+    }
+    const scheme = this.rt.wasmExports.malloc(COLOR_SCHEME_BYTES);
+    const pause = this.rt.wasmExports.malloc(PAUSE_STRUCT_BYTES);
+    if (!scheme || !pause) {
+      if (scheme) this.rt.wasmExports.free(scheme);
+      if (pause) this.rt.wasmExports.free(pause);
+      throw new Error("PDFium: out of memory for the colour-scheme render");
+    }
+    let needPause: number | null = null;
+    try {
+      const view = new DataView(this.rt.HEAPU8.buffer);
+      view.setUint32(scheme + 0, colorScheme.pathFill, true);
+      view.setUint32(scheme + 4, colorScheme.pathStroke, true);
+      view.setUint32(scheme + 8, colorScheme.textFill, true);
+      view.setUint32(scheme + 12, colorScheme.textStroke, true);
+      needPause = this.rt.addFunction(() => 0, "ii");
+      view.setInt32(pause + 0, 1, true);
+      view.setUint32(pause + 4, needPause, true);
+      view.setUint32(pause + 8, 0, true);
+      let status = this.mod.FPDF_RenderPageBitmapWithColorScheme_Start(
+        bitmap,
+        page,
+        startX,
+        startY,
+        sizeX,
+        sizeY,
+        0,
+        FPDF_CONVERT_FILL_TO_STROKE,
+        scheme,
+        pause,
+      );
+      while (status === FPDF_RENDER_TOBECONTINUED) {
+        status = this.mod.FPDF_RenderPage_Continue(page, pause);
+      }
+      if (status === FPDF_RENDER_FAILED) {
+        throw new Error("PDFium: colour-scheme render failed");
+      }
+    } finally {
+      // The render context lives on the page; clear it whether the render
+      // completed or failed so the next render starts clean.
+      this.mod.FPDF_RenderPage_Close(page);
+      if (needPause !== null) this.rt.removeFunction(needPause);
+      this.rt.wasmExports.free(scheme);
+      this.rt.wasmExports.free(pause);
     }
   }
 
