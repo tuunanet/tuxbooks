@@ -576,34 +576,21 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 30000,
     });
 
-    // Geometry corrects lazily as pages approach the viewport, so walk the
-    // document and wait for each slot to take its real displayed height
-    // (100% zoom = fit width; dpr = 1 under Xvfb; heights scale from the
-    // fixture MediaBoxes by the fit factor).
-    const fit = await fitFactor(page);
-    const expectedHeights = [792, 612, 1008, 500, 842, 504].map((height) =>
-      Math.floor(height * fit),
-    );
-    for (const [index, height] of expectedHeights.entries()) {
-      const pageNumber = index + 1;
+    // Geometry corrects lazily as pages approach the viewport, and the fit
+    // reference is the document's widest page (792pt here), not page 1's
+    // 612pt. Walk the whole document once so every page is measured and the
+    // fit scale settles on its final reference before the heights below are
+    // read. (100% zoom = fit width; dpr = 1 under Xvfb.)
+    const rawHeights = [792, 612, 1008, 500, 842, 504];
+    for (let pageNumber = 1; pageNumber <= rawHeights.length; pageNumber++) {
       await scrollToSlot(page, pageNumber);
-      await expect
-        .poll(
-          async () =>
-            Math.abs(
-              (await page.evaluate(
-                (target) =>
-                  document.querySelector<HTMLElement>(`[data-pdf-slot="${target}"]`)
-                    ?.offsetHeight ?? 0,
-                pageNumber,
-              )) - height,
-            ),
-          { timeout: 30000 },
-        )
-        .toBeLessThanOrEqual(1);
+      await waitForRendered(page, pageNumber);
     }
 
-    // From the top, the document now shows real mixed geometry and stacks
+    const fit = await fitFactor(page, 792);
+    const expectedHeights = rawHeights.map((height) => Math.floor(height * fit));
+
+    // From the top, the document shows real mixed geometry and stacks
     // strictly: each top equals the previous bottom plus the 8px page gap —
     // no overlap, no collapse (±1px for offsetHeight rounding).
     await scrollToSlot(page, 1);

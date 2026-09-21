@@ -54,6 +54,13 @@ dual-page variants (`:6783` onward), called from `pps_view_size_allocate`
 `pdfLayout.computePdfScale`; the port aligns the arithmetic, including the
 rounding below, and keeps the existing mode names.
 
+The target extent reserves `priv->spacing` on each side, so at the oracle's
+1024×768 viewport with `spacing = 12` the fit width is `(1024 - 2*12) /
+doc_width`. `PdfReader` sets the fit reference to the document's largest page
+(`pps_document_get_max_page_size`), not page 1, so a mixed-size document fits
+its widest and tallest page; `usePdfScale` passes the Papers spacing to
+`computePdfScale`.
+
 ## Integer page sizing
 
 A scaled page is rounded to whole pixels: `(int)(points * scale + 0.5)` in

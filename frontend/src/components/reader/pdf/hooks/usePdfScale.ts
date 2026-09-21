@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
-import { computePdfScale, type PdfScaleRequest } from "../pdfLayout";
+import { computePdfScale, PAPERS_VIEW_SPACING, type PdfScaleRequest } from "../pdfLayout";
 
 /**
  * Layout scale for the continuous reader, derived from the zoom state
@@ -47,7 +47,7 @@ export function usePdfScale(
     if (!area) return;
 
     const update = () => {
-      setScale(computePdfScale(request, area.clientWidth, viewportHeight));
+      setScale(computePdfScale(request, area.clientWidth, viewportHeight, PAPERS_VIEW_SPACING));
     };
     update();
 

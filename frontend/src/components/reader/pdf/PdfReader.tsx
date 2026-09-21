@@ -61,6 +61,7 @@ import {
   MIN_ZOOM,
   displayedSizes,
   documentHeight,
+  documentMaxPageSize,
   keepPositionValue,
   layoutSlots,
   stepZoomLevel,
@@ -402,9 +403,12 @@ export function PdfReader({
   // Layout scale from the zoom state (§ issue #65): fit modes recompute
   // from the measured content area and viewport; presentation mode fits the
   // whole page being read inside the area (both axes) so mixed-size
-  // documents rescale per page and any page shape stays fully visible. The
-  // request object is memoized — it is the scale hook's effect dependency.
-  const referencePage = sizes?.[0] ?? null;
+  // documents rescale per page and any page shape stays fully visible.
+  // Document-wide fit uses the largest page, not page 1, matching Papers'
+  // pps_document_get_max_page_size, so a mixed document's widest or tallest
+  // page sets the scale. The request object is memoized — it is the scale
+  // hook's effect dependency.
+  const referencePage = useMemo(() => (sizes ? documentMaxPageSize(sizes) : null), [sizes]);
   const presentationPage = presentationMode && sizes ? (sizes[currentPage - 1] ?? null) : null;
   const scaleRequest = useMemo(
     () => ({

@@ -26,12 +26,25 @@ export type FitZoomMode = "fit-width" | "fit-page" | "fit-auto";
  */
 export type ZoomMode = FitZoomMode | "custom";
 
+/**
+ * Papers' viewport margin `priv->spacing` (`pps_view_init`,
+ * `libview/pps-view.c`), in CSS pixels. Every fit scale reserves
+ * `2 * PAPERS_VIEW_SPACING` across the target axis, so the oracle at a
+ * 1024px-wide viewport reports 12px margins and a 1000px target. The reader
+ * passes this to {@link computePdfScale}.
+ */
+export const PAPERS_VIEW_SPACING = 12;
+
 /** Request for {@link computePdfScale}: the zoom state plus page references. */
 export interface PdfScaleRequest {
   mode: ZoomMode;
   /** Custom-mode ladder level; ignored by the fit modes. */
   level: number;
-  /** Document-wide reference page (page 1); null before geometry is known. */
+  /**
+   * Document-wide fit reference, the box Papers' fit formulas measure
+   * against: {@link documentMaxPageSize}, not page 1, so a mixed-size
+   * document fits its widest and tallest page. Null before geometry is known.
+   */
   reference: Pick<PageSize, "width" | "height"> | null;
   /**
    * The current page's own size while presentation mode is active: the page
@@ -45,11 +58,13 @@ export interface PdfScaleRequest {
  * The layout scale for one render pass (pure — unit-tested without a
  * browser). Presentation mode fits the whole current page inside the
  * measured area (both axes, page-keyed) so any page shape stays fully
- * visible; every other mode is document-wide (page-1 reference) so ordinary
- * navigation never rescales the layout mid-document. `spacing` is the Papers
- * margin reserved on each side of the target (`2 * spacing`); callers pass
- * the oracle's `spacing` when calibrating against it. Unmeasurable inputs
- * fall back to 1 so callers never render at a zero scale.
+ * visible; every other mode is document-wide (the {@link
+ * documentMaxPageSize} reference) so ordinary navigation never rescales the
+ * layout mid-document. `spacing` is the Papers margin reserved on each side
+ * of the target (`2 * spacing`); the reader passes
+ * {@link PAPERS_VIEW_SPACING} so a document fits inside the same inset
+ * Papers uses. Unmeasurable inputs fall back to 1 so callers never render at
+ * a zero scale.
  */
 export function computePdfScale(
   request: PdfScaleRequest,
