@@ -103,12 +103,20 @@ function blit(
   // same geometry — draw straight into the existing store instead.
   if (canvas.width !== buffer.width) canvas.width = buffer.width;
   if (canvas.height !== buffer.height) canvas.height = buffer.height;
-  // Region mode: the offset moves together with the pixels, inside the same
-  // atomic paint. React must not own left/top — it re-applies them on every
-  // scroll-driven re-render, which would parade the stale bitmap around the
-  // page (a ~10% jump) until the new raster lands.
-  if (left !== undefined) canvas.style.left = `${left}px`;
-  if (top !== undefined) canvas.style.top = `${top}px`;
+  // A region blit is placed at its page-local offset; a full-page blit is in
+  // flow at the page origin. Both are set here, not left to React: the
+  // scale-and-swap remap writes `position/left/top` imperatively, and React
+  // never removes styles it does not own, so a full-page blit must clear them
+  // or the page lands at a stale offset (only a fragment visible).
+  if (left !== undefined && top !== undefined) {
+    canvas.style.position = "absolute";
+    canvas.style.left = `${left}px`;
+    canvas.style.top = `${top}px`;
+  } else {
+    canvas.style.position = "";
+    canvas.style.left = "";
+    canvas.style.top = "";
+  }
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   // A fresh blit lands at its natural size: clear any scale-and-swap
@@ -342,8 +350,15 @@ export function PdfPageCanvas({
           if (regionMode) {
             // The page origin, not the region origin: the transform stretches
             // the full-page bitmap across the whole page.
+            canvas.style.position = "absolute";
             canvas.style.left = "0px";
             canvas.style.top = "0px";
+          } else {
+            // In flow at the page origin; clear any region placement so a
+            // full-page bitmap is not drawn at a stale offset.
+            canvas.style.position = "";
+            canvas.style.left = "";
+            canvas.style.top = "";
           }
           presentScaled(canvas, previous, swapWidth, swapHeight);
           canvas.setAttribute("data-pdf-render-quality", "scaled");

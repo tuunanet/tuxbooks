@@ -242,6 +242,50 @@ describe("PdfPageCanvas scale-and-swap", () => {
     expect(canvas.style.transform).toBe("scale(0.5, 0.5)");
   });
 
+  it("clears the region placement when a full-page render lands", async () => {
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = render(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={6000}
+        height={6000}
+        scale={30}
+        region={{ left: 40, top: 60, width: 120, height: 120 }}
+      />,
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    // Zoom out below the region threshold: the remap places the old crop
+    // imperatively (position/left/top), and the full-page render must clear
+    // that placement. Without it the page draws offset and only a fragment is
+    // visible, which is the reported blank page after a keyboard zoom-out.
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={2000}
+        height={2000}
+        scale={10}
+      />,
+    );
+    expect(canvas.style.position).toBe("absolute");
+    expect(Number.parseFloat(canvas.style.left)).toBeCloseTo(40 / 3, 3);
+
+    await waitFor(() => expect(doc.renderOptions.length).toBe(2));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    expect(canvas.style.position).toBe("");
+    expect(canvas.style.left).toBe("");
+    expect(canvas.style.top).toBe("");
+    expect(canvas.style.transform).toBe("");
+  });
+
   it("keeps a display-only canvas scaled without starting a new raster", async () => {
     const doc = makeFakePdfDocument(1);
     const view = renderPage(doc);
