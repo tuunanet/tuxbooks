@@ -1990,6 +1990,28 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
   });
 
+  it("pins the page top through a zoom on a one-page document", async () => {
+    const doc = makeFakePdfDocument(1, () => ({ width: 612, height: 2000 }));
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({ get_reading_progress: null, save_reading_progress: null });
+    const container = document.createElement("div");
+    renderPdfReader({ scrollContainerRef: { current: container } });
+    await screen.findByTestId("pdf-canvas");
+    stubScrollGeometry(container, screen.getByTestId("pdf-document"));
+    Object.defineProperty(container, "clientHeight", { value: 800, configurable: true });
+    Object.defineProperty(container, "scrollHeight", { value: 5000, configurable: true });
+    Object.defineProperty(container, "scrollWidth", { value: 1000, configurable: true });
+    scrollTo(container, 500);
+
+    fireEvent.keyDown(window, { key: "+" });
+    await settle();
+
+    // The reading-spot rule would move this (it puts the anchor at 25% of the
+    // viewport); the one-page rule holds the page top.
+    expect(container.scrollTop).toBeCloseTo(500, 5);
+    expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
+  });
+
   it("keeps every rendered canvas drawable through a zoom commit (scale-and-swap)", async () => {
     const doc = makeFakePdfDocument(3, undefined, { holdRenderFor: [1, 2, 3] });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);

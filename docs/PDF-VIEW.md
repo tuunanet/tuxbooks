@@ -89,14 +89,21 @@ new_value = CLAMP(upper * factor - zoom_center, 0, upper - page_size)
 
 `pdfLayout.centerValue` is the port of that transform, and
 `viewportPointToDocumentPoint` maps a viewport position back to a page point so
-the oracle's `center_anchor` can be compared directly. The adjustment is
-`value + zoom_center` over the old `upper`, reapplied to the new `MAX(viewport,
-content)` and clamped, exactly as the C does.
+the oracle's `center_anchor` can be compared directly. Papers feeds the
+viewport-padded `upper = MAX(viewport, content)`; TuxBooks uses the raw content
+extent instead, so the fraction stays proportional to the page when the content
+crosses the viewport extent and the held point does not drift. That is a
+deliberate divergence: the padded form is what makes a zoom in from fit drift
+north-west and the matching zoom out drift south-east (ADR 0004 records the
+render-budget work that shares this code path).
 
-TuxBooks currently re-anchors by the reading anchor's in-page fraction on a
-scale change (`docs/PDF.md`). The port replaces that for pointer zooms with the
-focal-anchor transform above. Keyboard and toolbar zooms keep the reading anchor,
-because there is no pointer to anchor to.
+For a pointer zoom the pointer is the anchor. Keyboard, toolbar and typed zooms
+have no pointer, so a multi-page stream keeps the reading anchor's in-page
+fraction (`docs/PDF.md`). A one-page document does something different again:
+`pdfLayout.singlePageTopCenterScroll` holds the midpoint of the page's top
+border where it is on screen, with the page centered horizontally, so a
+single-page plot grows from its top-center instead of sliding under the zoom.
+The rule covers every zoom path for a single page, wheel included.
 
 ## Scroll-preservation policy
 
@@ -108,8 +115,8 @@ Papers picks between two policies:
 
 `pdfLayout.keepPositionValue` is the `SCROLL_TO_KEEP_POSITION` branch and
 `pdfLayout.centerValue` the `SCROLL_TO_CENTER` branch; `adjustmentValueForPolicy`
-selects between them. Both read the paper's `upper = MAX(viewport, content)`
-(`adjustmentUpper`).
+selects between them. Both take the raw content extent as `upper` and clamp to
+`[0, content - viewport]`.
 
 Two helpers, `keep_scroll_of_current_page` and `needs_scrolling_to_current_page`,
 stop the view from fighting a user during kinetic scroll
