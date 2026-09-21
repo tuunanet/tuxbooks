@@ -74,7 +74,10 @@ test.describe("PDF Smart dark zoom churn", () => {
       await input.fill("10000");
       await input.press("Enter");
       await expect(input).toHaveValue("10000");
-      await waitForRendered(page, anchor, 60_000);
+      // A typed zoom keeps the relative scroll fraction (Papers), so the shown
+      // page can shift by one at deep zoom. Wait on whatever page the reader
+      // now shows.
+      await waitForRendered(page, await shownPage(page), 60_000);
 
       // Ten 1-notch bursts at commit cadence (~260ms apart): every burst
       // settles into a commit whose re-render must coalesce rather than
