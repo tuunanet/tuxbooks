@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   isRenderingCancelled,
   type PdfDocument,
@@ -252,7 +252,12 @@ export function PdfPageCanvas({
     errorRef.current = onPageError;
   });
 
-  useEffect(() => {
+  // Layout phase, not passive: the wrapper's box is mutated in the same
+  // commit that resizes the canvas, so the previous bitmap must be presented
+  // (and a cached bitmap blitted) before the browser paints. As a passive
+  // effect this ran after the first paint, flashing the uncovered wrapper
+  // (the page placeholder) for one frame on every zoom commit.
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -303,19 +308,32 @@ export function PdfPageCanvas({
     // Scale-and-swap: a canvas that survives a scale change already holds the
     // previous-scale pixels. Present them under a transform sized to the new
     // box immediately, so the visible surface never blanks while the sharp
-    // raster runs. Only whole-page rasters are swapped this way; a region
-    // canvas is already viewport-sized and keeps its pixels in place.
+    // raster runs. A full-page bitmap is presented over the *whole page box*
+    // even when the new mode is region — a region canvas is viewport-sized, so
+    // scaling the old page into the region rect would squash the whole page
+    // into it. Keeping the page box means the scroll shows the right content
+    // (blurry) until the region raster lands, instead of the old bitmap
+    // parked at the page origin while the reader sits scrolled far away. Only
+    // whole-page rasters swap; a region canvas already holds viewport-sized
+    // pixels in place.
     const previous = lastPresentedRef.current;
+    const swapWidth = previous?.mode === "full" ? width : cssWidth;
+    const swapHeight = previous?.mode === "full" ? height : cssHeight;
     const swapped =
       previous !== null &&
       previous.mode === "full" &&
-      !regionMode &&
       (previous.scale !== scale ||
         previous.regionKey !== regionKey ||
-        previous.cssWidth !== cssWidth ||
-        previous.cssHeight !== cssHeight);
+        previous.cssWidth !== swapWidth ||
+        previous.cssHeight !== swapHeight);
     if (swapped && previous) {
-      presentScaled(canvas, previous, cssWidth, cssHeight);
+      if (regionMode) {
+        // The page origin, not the region origin: the transform stretches the
+        // full-page bitmap across the whole page.
+        canvas.style.left = "0px";
+        canvas.style.top = "0px";
+      }
+      presentScaled(canvas, previous, swapWidth, swapHeight);
       canvas.setAttribute("data-pdf-render-quality", "scaled");
     }
 

@@ -1354,9 +1354,9 @@ export function PdfReader({
     const container = scrollContainerRef?.current ?? null;
     const documentEl = documentRef.current;
     // One application: the fixup is consumed only at the render where the
-    // layout scale actually lands (usePdfScale derives the scale an
-    // effect-tick after the zoom state). Applying before then would read the
-    // old content extents and compute a no-op.
+    // layout scale lands, which usePdfScale now derives in the same commit as
+    // the zoom state. Applying before then would read the old content extents
+    // and compute a no-op.
     if (!fixup || fixup.applied || !container || !documentEl) return;
     if (scale !== fixup.targetScale) return;
     const containerRect = container.getBoundingClientRect();
