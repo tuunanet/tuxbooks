@@ -204,6 +204,44 @@ describe("PdfPageCanvas scale-and-swap", () => {
     expect(canvas.style.transform).toBe(`scale(30, ${3000 / 129})`);
   });
 
+  it("remaps a region bitmap to the new scale so a zoom keeps the focal area covered", async () => {
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const view = render(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={3000}
+        height={3000}
+        scale={30}
+        region={{ left: 500, top: 600, width: 2000, height: 2000 }}
+      />,
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(doc.renderOptions.length).toBe(1));
+    doc.releaseRender(1);
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+
+    // Half the scale: the crop sits at half the page-local CSS position and
+    // covers half the box, so the visible page content stays put while the
+    // new region raster runs.
+    view.rerender(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={3000}
+        height={3000}
+        scale={15}
+        region={{ left: 250, top: 300, width: 2000, height: 2000 }}
+      />,
+    );
+
+    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    expect(canvas.style.left).toBe("250px");
+    expect(canvas.style.top).toBe("300px");
+    expect(canvas.style.transform).toBe("scale(0.5, 0.5)");
+  });
+
   it("keeps a display-only canvas scaled without starting a new raster", async () => {
     const doc = makeFakePdfDocument(1);
     const view = renderPage(doc);

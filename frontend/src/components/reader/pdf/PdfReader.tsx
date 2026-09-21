@@ -38,7 +38,7 @@ import {
   usePdfScrollTracking,
   type PdfAnchorInfo,
 } from "./hooks/usePdfScrollTracking";
-import { usePdfViewport } from "./hooks/usePdfViewport";
+import { usePdfViewport, type PdfViewport } from "./hooks/usePdfViewport";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
@@ -68,6 +68,7 @@ import {
   visiblePageRegion,
   wheelZoomScale,
   type FitZoomMode,
+  type LayoutSlot,
   type Rect,
   type ScrollAdjustment,
   type ZoomMode,
@@ -146,21 +147,48 @@ interface WheelGesture extends WheelPreview {
 
 /**
  * Region rasterization (high zoom): rasterize a margin beyond the visible
- * area so a short scroll does not immediately force a new raster, and snap
- * region edges to a grid so sub-step scrolling reuses the same region key.
- * Both in page-local CSS pixels, which are 1:1 with screen pixels.
- */
-/**
- * Region rasterization (high zoom): rasterize a margin beyond the visible
  * area so scrolling does not immediately run past the painted region, and
  * snap region edges to a grid so sub-step scrolling reuses the same region
- * key. Both in page-local CSS pixels, which are 1:1 with screen pixels. The
- * margin is cheap: a clipped render's cost is dominated by interpreting the
- * page's content (identical for any region of that page), not by the region's
- * area, so a wide margin buys coverage without adding raster time.
+ * key. Both in page-local CSS pixels, which are 1:1 with screen pixels.
+ *
+ * A region raster is expensive on a vector-heavy page (hundreds of
+ * milliseconds to seconds at device resolution), so a zoom must keep the
+ * previous bitmap on screen through the change; see the scale-and-swap remap
+ * in `PdfPageCanvas`.
  */
 const REGION_OVERSCAN_PX = 768;
 const REGION_STEP_PX = 256;
+
+/** Per-page visible regions for the current viewport, with an overscan margin. */
+function visiblePageRegions(
+  viewport: PdfViewport,
+  slots: LayoutSlot[],
+  documentWidth: number,
+  overscanPx: number,
+): Map<number, Rect> {
+  const frame: Rect = {
+    top: viewport.scrollTop,
+    left: viewport.scrollLeft,
+    width: viewport.width,
+    height: viewport.height,
+  };
+  const regions = new Map<number, Rect>();
+  for (const slot of slots) {
+    const region = visiblePageRegion(
+      {
+        top: viewport.documentTop + slot.top,
+        left: viewport.documentLeft + (documentWidth - slot.width) / 2,
+        width: slot.width,
+        height: slot.height,
+      },
+      frame,
+      overscanPx,
+      REGION_STEP_PX,
+    );
+    if (region) regions.set(slot.pageNumber, region);
+  }
+  return regions;
+}
 
 /**
  * A settled selection's outcome (issue: the pointerup handler defers by a
@@ -1062,33 +1090,13 @@ export function PdfReader({
     () => documentSlots.reduce((max, slot) => Math.max(max, slot.width), 0),
     [documentSlots],
   );
-  const pageRegions = useMemo(() => {
-    if (!interactive || presentationMode || pdfViewport.width <= 0 || documentSlots.length === 0) {
-      return undefined;
-    }
-    const viewport: Rect = {
-      top: pdfViewport.scrollTop,
-      left: pdfViewport.scrollLeft,
-      width: pdfViewport.width,
-      height: pdfViewport.height,
-    };
-    const regions = new Map<number, Rect>();
-    for (const slot of documentSlots) {
-      const region = visiblePageRegion(
-        {
-          top: pdfViewport.documentTop + slot.top,
-          left: pdfViewport.documentLeft + (documentWidth - slot.width) / 2,
-          width: slot.width,
-          height: slot.height,
-        },
-        viewport,
-        REGION_OVERSCAN_PX,
-        REGION_STEP_PX,
-      );
-      if (region) regions.set(slot.pageNumber, region);
-    }
-    return regions;
-  }, [interactive, presentationMode, pdfViewport, documentSlots, documentWidth]);
+  const pageRegions = useMemo(
+    () =>
+      interactive && !presentationMode && pdfViewport.width > 0 && documentSlots.length > 0
+        ? visiblePageRegions(pdfViewport, documentSlots, documentWidth, REGION_OVERSCAN_PX)
+        : undefined,
+    [interactive, presentationMode, pdfViewport, documentSlots, documentWidth],
+  );
 
   // Scroll-driven position reporting: the anchor rule decides the page, the
   // position is written back to ReaderProvider so the shell (footer, keyboard
