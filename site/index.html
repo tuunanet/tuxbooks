@@ -47,7 +47,7 @@
             height="140"
           />
           <p class="badge">
-            <span class="badge-dot" aria-hidden="true"></span> v0.0.12 &middot; in active
+            <span class="badge-dot" aria-hidden="true"></span> v0.0.13 &middot; in active
             development
           </p>
           <h1>Your books. Your shelf.<br />Your machine.</h1>
@@ -57,7 +57,7 @@
             stopped reading, and keeps everything on your machine.
           </p>
           <p class="hero-cta">
-            <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks/releases"
+            <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks/releases/latest"
               >Download for Linux</a
             >
             <a class="btn" href="https://github.com/tuunanet/tuxbooks#getting-started"
@@ -116,7 +116,32 @@
                 </svg>
               </div>
               <h3>Readers for EPUB and PDF</h3>
-              <p>Choose your font, text size, and line spacing, and read in light or dark.</p>
+              <p>
+                Choose your font, text size, and line spacing for EPUB, and read PDFs with crisp
+                zoom, fast scrolling, and a dark mode that keeps photographs in color.
+              </p>
+            </article>
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="M21 21l-4.35-4.35" />
+                  <path d="M11 8v6M8 11h6" />
+                </svg>
+              </div>
+              <h3>PDF reading, rebuilt</h3>
+              <p>
+                The PDF engine is new. Wheel and pinch zoom keep the point under your cursor in
+                place, deep zoom stays sharp, and the page stays visible while the next render
+                loads.
+              </p>
             </article>
             <article class="card">
               <div class="card-icon" aria-hidden="true">
@@ -240,14 +265,15 @@
           <h2>Roadmap</h2>
           <p class="section-lede">
             TuxBooks shipped its first public release (0.0.1) in September 2026 and is in active
-            pre-1.0 development. The app already works day to day &mdash; the focus now is not on
-            adding lots of new features, but on making the existing experience reliable, polished,
-            and pleasant to use. The full roadmap lives in
+            pre-1.0 development. Release 0.0.13 rebuilds the PDF reader on PDFium and brings its
+            zoom and scrolling in line with GNOME Papers. The focus now is not on adding lots of new
+            features, but on making the existing experience reliable, polished, and pleasant to use.
+            The full roadmap lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
             <li class="mile milestone--now">
-              <span class="mile-status">Now &middot; Before 0.0.2</span>
+              <span class="mile-status">Now &middot; 0.0.13</span>
               <h3>Stabilize &amp; polish</h3>
               <p>
                 Squash the remaining bugs and finish the smaller pieces needed for a solid next
@@ -285,7 +311,7 @@
               </ul>
             </li>
             <li class="mile milestone--next">
-              <span class="mile-status">Later &middot; After 0.0.2</span>
+              <span class="mile-status">Later</span>
               <h3>What may come next</h3>
               <p>
                 Once the core experience is solid, development can move toward larger features and
