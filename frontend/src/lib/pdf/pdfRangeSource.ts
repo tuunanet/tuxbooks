@@ -44,16 +44,36 @@ function xhrRangeFetcher(url: string, range: string): RangeResponse {
   };
 }
 
+/**
+ * The only URL shape this source may read. The URL arrives over
+ * `postMessage`, and the synchronous range callback then requests it, so the
+ * host and path are rebuilt from the validated parts below rather than
+ * trusted as a string (CWE-918: never take a request host from untrusted
+ * input).
+ */
+const BOOK_URL = /^tuxbooks:\/\/book\/(\d+)\?format=(pdf|epub)$/;
+
+function canonicalBookUrl(url: string): string {
+  const match = BOOK_URL.exec(url);
+  if (!match) throw new Error(`refusing to read from ${url}: not a book URL`);
+  const id = Number(match[1]);
+  const format = match[2] === "epub" ? "epub" : "pdf";
+  return `tuxbooks://book/${id}?format=${format}`;
+}
+
 export class PdfRangeSource {
   private size: number | null = null;
   private readonly chunks = new Map<number, ArrayBuffer>();
+  private readonly url: string;
 
   constructor(
-    private readonly url: string,
+    url: string,
     private readonly fetchRange: RangeFetcher = xhrRangeFetcher,
     private readonly chunkBytes = RANGE_CHUNK_BYTES,
     private readonly maxChunks = RANGE_MAX_CACHED_CHUNKS,
-  ) {}
+  ) {
+    this.url = canonicalBookUrl(url);
+  }
 
   /**
    * Total file size from a one-byte range's `content-range` header, without

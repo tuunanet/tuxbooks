@@ -139,10 +139,14 @@ const methods = {
   },
 };
 
-// Dedicated workers only receive messages from the creating document, and the
-// method dispatch below validates the request; a literal origin check is
-// impossible under the app's opaque `tuxbooks://` origin.
+// Dedicated workers only receive messages from the document that created
+// them, and the dispatch below validates the method and id, but verify the
+// sender's origin anyway. The bundle is served from a real origin
+// (`app://bundle` in production, the Vite origin in development), so a message
+// from anywhere else is rejected rather than trusted.
+const SENDER_ORIGIN = self.location.origin;
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+  if (event.origin !== SENDER_ORIGIN) return;
   const request = event.data;
   const respond = (response: WorkerResponse, transfer: Transferable[] = []): void => {
     (self as unknown as Worker).postMessage(response, transfer);

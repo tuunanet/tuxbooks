@@ -108,4 +108,16 @@ describe("PdfRangeSource", () => {
     expect(source.read(memory, 0, 5, 9)).toBe(5);
     expect([...memory]).toEqual([9, 10, 11, 12, 13]);
   });
+
+  test("refuses a URL that is not the app's book protocol", () => {
+    // The URL arrives over postMessage; the source must not turn arbitrary
+    // input into a request (js/client-side-request-forgery).
+    const fetcher: RangeFetcher = () => ({ status: 206, body: new ArrayBuffer(0), headers: {} });
+    expect(() => new PdfRangeSource("https://evil.example/steal.pdf", fetcher)).toThrow(
+      /not a book URL/,
+    );
+    expect(() => new PdfRangeSource("tuxbooks://book/../../etc/passwd", fetcher)).toThrow(
+      /not a book URL/,
+    );
+  });
 });

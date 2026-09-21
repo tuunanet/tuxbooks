@@ -467,6 +467,8 @@ export function PdfPageCanvas({
     regionTop,
     regionWidth,
     regionHeight,
+    blitLeft,
+    blitTop,
     regionKey,
     cssWidth,
     cssHeight,
