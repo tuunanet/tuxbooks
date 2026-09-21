@@ -1,5 +1,4 @@
-import workerUrl from "./mupdfWorker?worker&url";
-import wasmUrlRaw from "virtual:mupdf-wasm-url";
+import { mupdfWorkerSrc, resolveMuPdfWasmUrl } from "./mupdfEngine";
 import { normalizePdfOutline, type PdfOutlineItem, type RawPdfOutline } from "./pdfOutline";
 import { assemblePageText, type PdfTextItem } from "./pdfSearch";
 import { selectPdfEngine } from "./pdfEngineFlag";
@@ -62,18 +61,7 @@ interface WorkerOpenRequest {
  * worker-load assertion.
  */
 export function pdfWorkerSrc(): string {
-  return selectPdfEngine() === "pdfium" ? pdfiumWorkerSrc() : workerUrl;
-}
-
-/**
- * Absolute URL of the MuPDF WASM bundle, resolved once at first open. The
- * worker cannot resolve the asset itself: bundler-relative URLs inside a
- * worker chunk never point at the emitted file, so the main thread resolves
- * the emitted URL against the document location and passes it into the open
- * request.
- */
-function resolveWasmUrl(): string {
-  return new URL(wasmUrlRaw, globalThis.location?.href ?? import.meta.url).href;
+  return selectPdfEngine() === "pdfium" ? pdfiumWorkerSrc() : mupdfWorkerSrc();
 }
 
 class MuPdfDocument implements PdfDocument {
@@ -270,7 +258,7 @@ class MuPdfDocument implements PdfDocument {
       this.recycling = false;
       return;
     }
-    const replacement = new WorkerClient(workerUrl, "MuPDF");
+    const replacement = new WorkerClient(mupdfWorkerSrc(), "MuPDF");
     try {
       await replacement.request("open", reopen);
       if (this.destroyed) {
@@ -367,10 +355,10 @@ export function prewarmMuPdfEngine(): Promise<void> {
     // Non-worker hosts (unit tests, exotic embeddings): nothing to warm.
     return Promise.resolve();
   }
-  const client = new WorkerClient(workerUrl, "MuPDF");
+  const client = new WorkerClient(mupdfWorkerSrc(), "MuPDF");
   prewarmedClient = client;
   prewarmPromise = client
-    .request("prewarm", { wasmUrl: resolveWasmUrl() })
+    .request("prewarm", { wasmUrl: resolveMuPdfWasmUrl() })
     .then(() => undefined)
     .catch((error: unknown) => {
       // Discard only if still the current spare; an adopted worker is owned
@@ -413,12 +401,12 @@ function takePrewarmedClient(): WorkerClient | null {
  * the array afterwards.
  */
 export async function openMuPdfDocument(data: Uint8Array): Promise<PdfDocument> {
-  const client = takePrewarmedClient() ?? new WorkerClient(workerUrl, "MuPDF");
+  const client = takePrewarmedClient() ?? new WorkerClient(mupdfWorkerSrc(), "MuPDF");
   try {
     const { pageCount } = (await client.request(
       "open",
       {
-        wasmUrl: resolveWasmUrl(),
+        wasmUrl: resolveMuPdfWasmUrl(),
         data: data.buffer,
         offset: data.byteOffset,
         length: data.byteLength,
@@ -443,9 +431,9 @@ export async function openMuPdfDocumentFromBook(
   bookId: number,
   format: BookFormat,
 ): Promise<PdfDocument> {
-  const client = takePrewarmedClient() ?? new WorkerClient(workerUrl, "MuPDF");
+  const client = takePrewarmedClient() ?? new WorkerClient(mupdfWorkerSrc(), "MuPDF");
   const reopen: WorkerOpenRequest = {
-    wasmUrl: resolveWasmUrl(),
+    wasmUrl: resolveMuPdfWasmUrl(),
     bookUrl: `tuxbooks://book/${bookId}?format=${format}`,
   };
   try {
