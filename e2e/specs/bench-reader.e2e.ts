@@ -721,13 +721,24 @@ test.describe("reader performance benchmark", () => {
       (report.environment.window.height ?? 800) / 2,
     );
     for (let i = 0; i < 3; i++) {
-      const before = await page.evaluate(() => {
-        const canvas = document.querySelector<HTMLCanvasElement>("[data-testid=pdf-canvas]");
+      // The anchor is the page being read, not the first canvas in DOM order:
+      // the render window keeps a neighbour's preview canvas mounted first, so
+      // the first canvas is often not the anchor and never re-rasterizes.
+      // The settle signal is a new `data-pdf-render-ms` sample on the anchor
+      // canvas, not a backing-store width change: above the whole-page budget
+      // the canvas is a viewport-clipped region whose pixel width is fixed at
+      // the display size, so it never changes with zoom.
+      const anchorPage = Number(
+        (await textOf(page, "pdf-page-indicator")).match(/Page (\d+)/)?.[1],
+      );
+      const before = await page.evaluate((target) => {
+        const slot = document.querySelector(`[data-pdf-slot="${target}"]`);
+        const canvas = slot?.querySelector<HTMLCanvasElement>("[data-testid=pdf-canvas]");
         return {
-          width: canvas?.getAttribute("width") ?? "",
-          slot: canvas?.closest("[data-pdf-slot]")?.getAttribute("data-pdf-slot") ?? "1",
+          renderMs: canvas?.getAttribute("data-pdf-render-ms") ?? "",
+          slot: String(target),
         };
-      });
+      }, anchorPage);
       const start = Date.now();
       await page.keyboard.down("Control");
       for (let tick = 0; tick < 3; tick++) await page.mouse.wheel(0, -120);
@@ -736,19 +747,23 @@ test.describe("reader performance benchmark", () => {
         .poll(async () => {
           const state = await page.evaluate((target) => {
             const slot = document.querySelector(`[data-pdf-slot="${target}"]`);
-            const canvas = slot?.querySelector("canvas");
+            const canvas = slot?.querySelector<HTMLCanvasElement>("[data-testid=pdf-canvas]");
             return {
               rendered: slot?.getAttribute("data-render-state"),
-              width: canvas?.getAttribute("width") ?? "",
+              renderMs: canvas?.getAttribute("data-pdf-render-ms") ?? "",
             };
           }, before.slot);
-          return state.rendered === "rendered" && state.width !== before.width;
+          return state.rendered === "rendered" && state.renderMs !== before.renderMs;
         })
         .toBe(true);
       report.pdf.wheelSettleMs.push(Date.now() - start);
     }
-    // Leave the big-jump walk at a comparable zoom to previous runs.
+    // Leave the big-jump walk at a comparable zoom to previous runs. The
+    // reset re-anchors the document asynchronously; let it settle before the
+    // jump samples, or the pending re-anchor clobbers the first jump back to
+    // the top (observed: the scroll lands, then the re-anchor resets it).
     await page.keyboard.press("Control+0");
+    await page.waitForTimeout(800);
 
     // Large-document navigation: long scroll jumps across a third of the
     // document — the virtualization + eviction path under displacement.

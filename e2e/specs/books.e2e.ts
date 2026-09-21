@@ -1,5 +1,6 @@
 import { expect, test } from "../fixtures/electron-app.js";
 
+import { seededLibraryBookCount } from "../setup/fixtures.js";
 import {
   firstPdfCanvas,
   openBookDetail,
@@ -11,8 +12,9 @@ import {
 
 test.describe("tuxbooks library navigation", () => {
   // Test B — the library shows the seeded fixtures with the sidebar up.
-  // The seed carries four books: the original EPUB/PDF pair plus the large
-  // (100-page) and mixed-size PDF fixtures used by the reader suites.
+  // The seed carries the five committed fixtures (EPUB + PDF pair, large,
+  // mixed-size, smart-colors) plus the optional GeoTopo crash-regression
+  // book when the free corpus has been fetched (seededLibraryBookCount).
   test("shows All Books with the seeded fixture books", async ({ page }) => {
     await waitForLibraryView(page);
 
@@ -20,7 +22,7 @@ test.describe("tuxbooks library navigation", () => {
     await expect(page.getByRole("button", { name: "All Books" })).toBeVisible();
 
     const cards = await page.getByTestId("book-card").all();
-    expect(cards.length).toBe(5);
+    expect(cards.length).toBe(seededLibraryBookCount);
 
     const allText = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]"))
@@ -33,7 +35,7 @@ test.describe("tuxbooks library navigation", () => {
     expect(allText).toContain("Odd Sizes");
     expect(allText).toContain("Smart Colors");
 
-    expect(await textOf(page, "library-stats")).toContain("5 books");
+    expect(await textOf(page, "library-stats")).toContain(`${seededLibraryBookCount} books`);
   });
 
   // Test C — detail view with title and format for the EPUB fixture.
