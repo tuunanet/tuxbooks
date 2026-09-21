@@ -131,7 +131,18 @@ code {
   text-decoration: none;
 }
 .nav-links a.btn {
-  color: var(--accent-ink);
+  /* GitHub's Invertocat may only appear in white, black, grey, or green, and it
+     needs high contrast, so the GitHub button stays white on the dark surface
+     instead of using the accent colour. */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+
+.btn-icon {
+  display: block;
+  flex: none;
 }
 
 /* Buttons */
@@ -594,6 +605,11 @@ figcaption {
 }
 .footer-links {
   gap: 20px;
+}
+.footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Small screens */
