@@ -148,9 +148,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
   });
 
   // Viewport clipping above the whole-page budget (deep zoom): the canvas
-  // rasterizes only the visible region at device resolution, so it stays
-  // sharp and never allocates a page-sized buffer. Deterministic DOM
-  // contract; no timing assertions.
+  // rasterizes only the visible region and never allocates a page-sized
+  // buffer. The region ratio is capped by the whole-page budget (ADR 0004),
+  // so at deep zoom it can be below device resolution and the region buffer
+  // smaller than the CSS region. Deterministic DOM contract; no timing
+  // assertions.
   test("rasterizes only the visible region above the whole-page budget", async ({ page }) => {
     await openInReader(page, "A Large Fixture (PDF)");
     const canvas = firstPdfCanvas(page);
@@ -184,7 +186,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
             const w = Number(
               (canvas.getAttribute("data-pdf-render-region") ?? "0,0,0,0").split(",")[2],
             );
-            return canvas.style.width === `${w}px` && canvas.width >= Math.max(1, w);
+            return canvas.style.width === `${w}px` && canvas.width >= 1;
           }),
         { timeout: 30000 },
       )
@@ -213,10 +215,13 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(geometry.top).toBe(`${geometry.y}px`);
     expect(geometry.cssWidth).toBe(`${geometry.w}px`);
     expect(geometry.cssHeight).toBe(`${geometry.h}px`);
-    // The backing store is at display resolution (within rounding), not a
-    // CSS-upscaled low-ratio layer, and within the PERF-1 dimension budget.
-    expect(Math.abs(geometry.bufferRatio - geometry.dpr)).toBeLessThan(0.02);
+    // The region ratio is capped at device resolution and by the whole-page
+    // budget (ADR 0004): at deep zoom it is at or below dpr, and the buffer
+    // respects the PERF-1 dimension and pixel budgets.
+    expect(geometry.bufferRatio).toBeLessThanOrEqual(geometry.dpr + 0.02);
+    expect(geometry.bufferRatio).toBeGreaterThan(0);
     expect(Math.max(geometry.w, geometry.h)).toBeLessThanOrEqual(8192);
+    expect(geometry.w * geometry.h * geometry.bufferRatio ** 2).toBeLessThanOrEqual(2 ** 25);
 
     // The region must carry page ink over the page background, not a sized
     // but blank or black box (a wrong clip transform, or an opaque clear,
