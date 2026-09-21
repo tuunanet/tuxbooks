@@ -3,18 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
-    # Nothing in CI consumes these: markdown (README, docs/, AGENTS.md,
-    # LICENSE.md), the static site (published by publish-site.yml), and
-    # ignore-file churn. Skips fire when EVERY changed file matches.
-    paths-ignore:
-      - "**.md"
-      - "site/**"
-      - ".gitignore"
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - "site/**"
-      - ".gitignore"
+
+# This workflow always runs so its "CI gate" job is always reported and can be
+# the single required branch-protection check. A workflow-level `paths-ignore`
+# cannot do that: skipping the workflow leaves a required check pending forever
+# and blocks the merge. Instead the `changes` job classifies the diff and the
+# heavy jobs skip when every changed file is non-code: markdown (README, docs/,
+# AGENTS.md, CONTEXT.md, ROADMAP.md, LICENSE.md), the static site (published by
+# publish-site.yml), the bd tracker export, agent skills and config, the graft
+# graph, the oracle, the reference submodule, and the ignore file. The gate
+# treats a skipped job as a pass.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +30,44 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Classify the diff
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base...HEAD")"
+          printf 'Changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" \
+            | grep -vE '\.md$|^\.gitignore$' \
+            | grep -vE '^(docs/|site/|\.beads/|\.agents/|\.opencode/|\.codex/|graft/|oracle/|vendor/)' \
+            | grep -q .; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   workflows:
     name: Workflows (actionlint)
     runs-on: ubuntu-24.04
@@ -50,7 +87,8 @@ jobs:
     name: Frontend (lint, typecheck, test)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       contents: read
     steps:
@@ -83,7 +121,8 @@ jobs:
     name: Coverage (frontend gate + badge)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       # Publish coverage-badge.json to the badges branch — used by the main
       # push step only (PR runs stop before publish).
@@ -132,7 +171,8 @@ jobs:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       contents: read
     steps:
@@ -171,8 +211,8 @@ jobs:
     name: Release build (Electron shell + sidecar)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    needs: [frontend, rust]
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request')
+    needs: [changes, frontend, rust]
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       contents: read
     steps:
@@ -209,3 +249,35 @@ jobs:
         run: |
           just package deb
           just check-deb
+
+  # The single required branch-protection check. It runs on every PR and main
+  # push (`if: always()`), and it fails if any job above failed or was
+  # cancelled. A skipped job (non-code change, or the merge-commit push) is a
+  # pass, which is what lets lightweight changes merge without the heavy jobs.
+  gate:
+    name: CI gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [changes, workflows, frontend, coverage, rust, build]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Require every job to pass or be skipped
+        run: |
+          fail=0
+          for entry in \
+            "changes:${{ needs.changes.result }}" \
+            "workflows:${{ needs.workflows.result }}" \
+            "frontend:${{ needs.frontend.result }}" \
+            "coverage:${{ needs.coverage.result }}" \
+            "rust:${{ needs.rust.result }}" \
+            "build:${{ needs.build.result }}"; do
+            name="${entry%%:*}"; result="${entry##*:}"
+            echo "$name: $result"
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::$name did not pass ($result)"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
