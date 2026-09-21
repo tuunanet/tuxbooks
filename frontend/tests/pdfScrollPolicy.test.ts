@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  adjustmentUpper,
   adjustmentValueForPolicy,
   anchorAtOffset,
   centerValue,
@@ -75,14 +74,6 @@ function slotsAt(doc: OracleDocument, scale: number): LayoutSlot[] {
     PAGE_GAP_PX,
   );
 }
-
-describe("adjustmentUpper", () => {
-  it("is the padded content size, never below the viewport (Papers MAX)", () => {
-    expect(adjustmentUpper(768, 1318)).toBe(1318);
-    expect(adjustmentUpper(1024, 600)).toBe(1024);
-    expect(adjustmentUpper(768, 768)).toBe(768);
-  });
-});
 
 describe("keepPositionValue", () => {
   it("preserves the old relative offset on the new content", () => {

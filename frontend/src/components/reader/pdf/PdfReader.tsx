@@ -54,7 +54,6 @@ import {
   renderBufferBytes,
 } from "./pdfRenderPolicy";
 import {
-  adjustmentUpper,
   adjustmentValueForPolicy,
   clampZoom,
   DEFAULT_ZOOM_LEVEL,
@@ -968,8 +967,8 @@ export function PdfReader({
         targetScale: gesture.scale,
         oldValueX: container.scrollLeft - gesture.docLeft,
         oldValueY: container.scrollTop - gesture.docTop,
-        oldUpperX: adjustmentUpper(viewportWidth, oldDocWidth),
-        oldUpperY: adjustmentUpper(viewportHeight, documentHeight(oldSlots)),
+        oldUpperX: oldDocWidth,
+        oldUpperY: documentHeight(oldSlots),
         viewportWidth,
         viewportHeight,
         centerX: gesture.clientX - containerRect.left,
@@ -1007,17 +1006,12 @@ export function PdfReader({
       const viewportHeight = container.clientHeight;
       const adjustment: ScrollAdjustment = {
         value: container.scrollTop - documentTop,
-        upper: adjustmentUpper(viewportHeight, documentHeight(previousSlots)),
+        upper: documentHeight(previousSlots),
         pageSize: viewportHeight,
       };
       setScrollTop(
         container,
-        documentTop +
-          keepPositionValue(
-            adjustment,
-            adjustmentUpper(viewportHeight, documentHeight(slots)),
-            viewportHeight,
-          ),
+        documentTop + keepPositionValue(adjustment, documentHeight(slots), viewportHeight),
       );
       rootRef.current?.setAttribute("data-pdf-scroll-policy", "keep-position");
       return;
@@ -1405,14 +1399,14 @@ export function PdfReader({
     const newValueY = adjustmentValueForPolicy(
       "center",
       { value: fixup.oldValueY, upper: fixup.oldUpperY, pageSize: fixup.viewportHeight },
-      adjustmentUpper(fixup.viewportHeight, documentHeight(slots)),
+      documentHeight(slots),
       fixup.viewportHeight,
       fixup.centerY,
     );
     const newValueX = adjustmentValueForPolicy(
       "center",
       { value: fixup.oldValueX, upper: fixup.oldUpperX, pageSize: fixup.viewportWidth },
-      adjustmentUpper(fixup.viewportWidth, newDocWidth),
+      newDocWidth,
       fixup.viewportWidth,
       fixup.centerX,
     );

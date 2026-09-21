@@ -40,14 +40,6 @@ import { scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { fireIntersection, intersectionObservers } from "./mocks/intersectionObserver";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
-import {
-  adjustmentUpper,
-  adjustmentValueForPolicy,
-  displayedSizes,
-  documentHeight,
-  layoutSlots,
-} from "@/components/reader/pdf/pdfLayout";
-
 const openDocumentMock = vi.mocked(openPdfDocumentFromBook);
 const closeDocumentMock = vi.mocked(closePdfDocument);
 
@@ -1967,45 +1959,34 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
   });
 
-  it("holds the focal anchor through the wheel commit via the center policy", async () => {
+  it("keeps the point under the cursor through a wheel zoom that crosses the viewport extent", async () => {
     const container = document.createElement("div");
     await renderZoomableReader(container);
     stubScrollGeometry(container, screen.getByTestId("pdf-document"));
-    // A viewport narrower than the page, so the horizontal axis actually
-    // scrolls and the policy has something to preserve.
-    Object.defineProperty(container, "clientWidth", { value: 400, configurable: true });
-    scrollTo(container, 1000);
+    // Wider than the page at 100%: the content extent starts below the
+    // viewport on X and rises past it across the zoom. The old
+    // MAX(viewport, content) denominator changed meaning there, so the cursor
+    // point drifted (north-west on zoom in, south-east on zoom out).
+    Object.defineProperty(container, "clientWidth", { value: 800, configurable: true });
+    Object.defineProperty(container, "clientHeight", { value: 800, configurable: true });
+    scrollTo(container, 0);
 
-    // Cursor 200px into the viewport while scrolled to 1000: the commit uses
-    // the merged Papers geometry (pdfLayout.centerValue), not the reader's
-    // old DOM-ratio fixup, and records the policy it applied.
-    fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 200 });
+    const cursorX = 200;
+    const cursorY = 200;
+    // The capped step (-300) takes the page from narrower than the viewport to
+    // wider, so the vertical axis becomes scrollable during the zoom.
+    fireEvent.wheel(container, { deltaY: -300, ctrlKey: true, clientX: cursorX, clientY: cursorY });
     await settle();
 
-    const pageSize = { width: 612, height: 792 };
-    const slotsAt = (scale: number) =>
-      layoutSlots(
-        displayedSizes(
-          Array.from({ length: 3 }, (_, index) => ({ pageNumber: index + 1, ...pageSize })),
-          scale,
-        ),
-      );
-    const expectedY = adjustmentValueForPolicy(
-      "center",
-      { value: 1000, upper: adjustmentUpper(720, documentHeight(slotsAt(1))), pageSize: 720 },
-      adjustmentUpper(720, documentHeight(slotsAt(1.2))),
-      720,
-      200,
-    );
-    const expectedX = adjustmentValueForPolicy(
-      "center",
-      { value: 0, upper: adjustmentUpper(400, 612), pageSize: 400 },
-      adjustmentUpper(400, 734),
-      400,
-      200,
-    );
-    expect(container.scrollTop).toBeCloseTo(expectedY, 6);
-    expect(container.scrollLeft).toBeCloseTo(expectedX, 6);
+    const newScale = Number((screen.getByTestId("pdf-zoom-input") as HTMLInputElement).value) / 100;
+    expect(newScale).toBeGreaterThan(1.7);
+    // The page point under the cursor, in page units, is unchanged on both
+    // axes. Nothing here mirrors the implementation formula: this is the
+    // property the reader must hold.
+    // Within a CSS pixel: the slot heights and the reported zoom are rounded,
+    // so the held point lands on the nearest pixel, not exactly.
+    expect(Math.abs((container.scrollLeft + cursorX) / newScale - cursorX)).toBeLessThan(1);
+    expect(Math.abs((container.scrollTop + cursorY) / newScale - cursorY)).toBeLessThan(1);
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
   });
 

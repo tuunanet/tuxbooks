@@ -437,10 +437,10 @@ export function compensateOffset(
 }
 
 /**
- * One axis of Papers' scroll state — the `GtkAdjustment` triple
- * `pps_view_update_adjustment_value` reads (`pps-view.c:564`): `value` is the
- * scroll offset, `upper` the padded content size, and `pageSize` the viewport
- * extent. `upper` is always at least `pageSize` (see {@link adjustmentUpper}).
+ * One axis of the scroll state: `value` is the scroll offset, `upper` the
+ * content extent, and `pageSize` the viewport extent. `upper` is the raw
+ * content size, which may be smaller than `pageSize` when the page fits;
+ * both scroll rules clamp against `max(0, upper - pageSize)`.
  */
 export interface ScrollAdjustment {
   value: number;
@@ -456,15 +456,6 @@ export interface ScrollAdjustment {
  */
 export type ScrollPolicy = "keep-position" | "center";
 
-/**
- * Papers' adjustment upper bound (`pps_view_update_adjustment_value:603`):
- * the padded content size, never smaller than the viewport, so a page that
- * fits the viewport still reports a full-viewport range.
- */
-export function adjustmentUpper(viewportExtent: number, contentExtent: number): number {
-  return Math.max(viewportExtent, contentExtent);
-}
-
 /** Clamp a scroll offset into `[0, upper - pageSize]`, Papers' `CLAMP`. */
 function clampScrollValue(value: number, upper: number, pageSize: number): number {
   const max = Math.max(0, upper - pageSize);
@@ -478,6 +469,11 @@ function clampScrollValue(value: number, upper: number, pageSize: number): numbe
  * `value / upper` is reapplied to the new content size, then clamped. Used
  * when the layout changes for a reason other than an explicit zoom, so the
  * reader keeps its relative place in the document.
+ *
+ * `upper` is the raw content extent on both sides, never padded to the
+ * viewport: the fraction is then proportional to the page, so the held point
+ * is exact even when the content crosses the viewport extent (the padded
+ * form changes the denominator's meaning mid-zoom and drifts the view).
  */
 export function keepPositionValue(
   adjustment: ScrollAdjustment,
@@ -494,6 +490,13 @@ export function keepPositionValue(
  * `value + zoomCenter` keeps the same fraction of the content, so the point
  * under the pointer stays put. A negative `zoomCenter` means the viewport
  * centre, Papers' `page_size * 0.5` fallback.
+ *
+ * `upper` and `newUpper` are the raw content extents, not padded to the
+ * viewport: the fraction then tracks the page, so the cursor point is exact
+ * when the content crosses the viewport extent. Papers pads the GTK
+ * adjustment, which makes the denominator's meaning change mid-zoom; passing
+ * the content extent is the correction (the clamp still allows the fit case,
+ * where `upper < pageSize` and the range collapses to zero).
  */
 export function centerValue(
   adjustment: ScrollAdjustment,
