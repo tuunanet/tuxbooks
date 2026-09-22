@@ -85,4 +85,69 @@ describe("PdfPageField", () => {
 
     expect(input).toHaveValue("3");
   });
+
+  it("ignores the wheel while the field is not focused", () => {
+    const { onSetPage, input } = renderField();
+
+    fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(onSetPage).not.toHaveBeenCalled();
+  });
+
+  it("steps one page on a full wheel tick while focused", () => {
+    const { onSetPage, input } = renderField();
+    act(() => {
+      input.focus();
+    });
+
+    fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(onSetPage).toHaveBeenCalledTimes(1);
+    expect(onSetPage).toHaveBeenCalledWith(2);
+  });
+
+  it("steps once when a burst of micro ticks crosses the threshold", () => {
+    const { onSetPage, input } = renderField();
+    act(() => {
+      input.focus();
+    });
+
+    for (let tick = 0; tick < 5; tick += 1) {
+      fireEvent.wheel(input, { deltaY: 5 });
+    }
+
+    expect(onSetPage).toHaveBeenCalledTimes(1);
+    expect(onSetPage).toHaveBeenCalledWith(2);
+  });
+
+  it("clears the accumulator across an idle gap so micro ticks do not sum", () => {
+    vi.useFakeTimers();
+    try {
+      const { onSetPage, input } = renderField();
+      act(() => {
+        input.focus();
+      });
+
+      fireEvent.wheel(input, { deltaY: 5 });
+      vi.advanceTimersByTime(500);
+      fireEvent.wheel(input, { deltaY: 5 });
+
+      expect(onSetPage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("steps with the Up and Down arrows while focused", () => {
+    const { onSetPage, input } = renderField({ pageNumber: 2 });
+    act(() => {
+      input.focus();
+    });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+
+    expect(onSetPage).toHaveBeenNthCalledWith(1, 3);
+    expect(onSetPage).toHaveBeenNthCalledWith(2, 1);
+  });
 });
