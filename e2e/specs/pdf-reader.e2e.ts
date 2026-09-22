@@ -77,6 +77,12 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("jumps to a typed page in the reader toolbar", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    // Progress persists across tests, so start from a known page and prove the
+    // jump moves off it.
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
 
     const input = page.getByTestId("pdf-page-input");
     await input.fill("2");
@@ -95,6 +101,10 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("clamps an out-of-range typed page to the last page", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
 
     const input = page.getByTestId("pdf-page-input");
     await input.fill("99");
@@ -226,6 +236,10 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("jumps to a typed page in the presentation bar", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
 
     await page.keyboard.press("Control+l");
     const bar = page.getByTestId("pdf-presentation-bar");
@@ -238,6 +252,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect(bar.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
       timeout: 10000,
     });
+    await expect.poll(() => canvasIsNonBlank(page, 3), { timeout: 10000 }).toBe(true);
 
     await page.getByTestId("pdf-pres-exit").click();
     await returnToLibrary(page);
@@ -250,6 +265,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("pre-renders the next page before a presentation step", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
