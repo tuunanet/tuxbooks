@@ -1601,6 +1601,8 @@ export function PdfReader({
       canZoomOut={displayScale > MIN_ZOOM + 1e-9}
       onPrev={() => goToPage(currentPage - 1)}
       onNext={() => goToPage(currentPage + 1)}
+      onSetPage={goToPage}
+      pageEntryDisabled={!layoutReady}
       onZoomIn={() => zoomByStepsRef.current(1)}
       onZoomOut={() => zoomByStepsRef.current(-1)}
       onSelectFit={setZoomMode}
