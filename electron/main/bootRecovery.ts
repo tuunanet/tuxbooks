@@ -25,7 +25,7 @@ export interface StartupFsSurface {
 /** The native dialog surface the recovery uses; injected from main. */
 export interface StartupDialogSurface {
   showMessageBox(options: {
-    type: "error";
+    type: "error" | "warning";
     title: string;
     message: string;
     detail: string;
@@ -128,4 +128,99 @@ export async function reportStartupFailure(
     // stderr can be closed under a GUI launch; the dialog still runs.
   }
   await showStartupErrorDialog(deps, failure);
+}
+
+/**
+ * Startup database quarantine (data-management spec): where a broken
+ * database was found and where the sidecar moved it. Reported before the
+ * window opens so the user knows the old file was kept.
+ */
+export interface QuarantineReport {
+  from: string;
+  to: string;
+}
+
+/** The read-only sidecar call the recovery report needs; injected from main. */
+export interface StartupSidecarSurface {
+  call(method: string): Promise<unknown>;
+}
+
+export interface StartupQuarantineDeps extends Pick<
+  StartupRecoveryDeps,
+  "dialog" | "shell" | "paths"
+> {
+  sidecar: StartupSidecarSurface;
+  stderr: (message: string) => void;
+}
+
+/**
+ * Read the sidecar's startup-recovery report. Null, missing, or malformed
+ * values read as no quarantine: only a non-empty from/to pair counts, so a
+ * healthy database can never produce a dialog.
+ */
+export function parseQuarantineReport(value: unknown): QuarantineReport | null {
+  if (value === null || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.from !== "string" || record.from.length === 0) return null;
+  if (typeof record.to !== "string" || record.to.length === 0) return null;
+  return { from: record.from, to: record.to };
+}
+
+/**
+ * Tell the user the previous database was found broken and moved aside,
+ * naming where it went. Never throws.
+ */
+export async function showQuarantineDialog(
+  deps: Pick<StartupRecoveryDeps, "dialog" | "shell" | "paths">,
+  report: QuarantineReport,
+): Promise<void> {
+  try {
+    const { response } = await deps.dialog.showMessageBox({
+      type: "warning",
+      title: "TuxBooks repaired its database",
+      message: "TuxBooks found a damaged database and started a new one.",
+      detail:
+        `The damaged file was kept here:\n${report.to}\n\n` +
+        "TuxBooks moved it and its WAL and shared-memory files aside; nothing was deleted.",
+      buttons: ["Open data folder"],
+    });
+    if (response === 0) {
+      await deps.shell.openPath(deps.paths.dataDir);
+    }
+  } catch {
+    // A dialog that cannot open must not block startup.
+  }
+}
+
+/**
+ * Query the sidecar for a startup quarantine and surface it. Returns the
+ * report when one happened, or null when the database was healthy or the
+ * query failed. Never throws: a missing report must not block the window.
+ */
+export async function surfaceStartupQuarantine(
+  deps: StartupQuarantineDeps,
+): Promise<QuarantineReport | null> {
+  let result: unknown;
+  try {
+    result = await deps.sidecar.call("get_startup_recovery");
+  } catch (error) {
+    safeStderr(
+      deps,
+      `[recovery] could not read the startup recovery report: ${describeStartupFailure(error)}`,
+    );
+    return null;
+  }
+  const report = parseQuarantineReport(result);
+  if (!report) return null;
+  safeStderr(deps, `[recovery] quarantined a broken database: ${report.from} -> ${report.to}`);
+  await showQuarantineDialog(deps, report);
+  return report;
+}
+
+function safeStderr(deps: Pick<StartupQuarantineDeps, "stderr">, message: string): void {
+  try {
+    deps.stderr(message);
+  } catch {
+    // stderr can be closed under a GUI launch; startup continues.
+  }
 }

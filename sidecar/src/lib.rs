@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 
-use crate::db::connection::init_pool;
+use crate::db::connection::init_pool_recovering;
+use crate::domain::StartupRecovery;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
 use crate::services::library_watcher::LibraryWatcher;
@@ -27,6 +28,9 @@ pub struct AppState {
     pub db: SqlitePool,
     pub db_path: PathBuf,
     pub watcher: Arc<LibraryWatcher>,
+    /// Set once at startup when a broken database was quarantined; read by
+    /// `get_startup_recovery` so main can name the file in the dialog.
+    pub startup_recovery: Option<StartupRecovery>,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -166,7 +170,7 @@ fn app_data_dir() -> PathBuf {
 /// JSON-RPC server forwards it to the Electron main process.
 pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error> {
     let db_path = resolve_db_path();
-    let pool = init_pool(&db_path)
+    let (pool, startup_recovery) = init_pool_recovering(&db_path)
         .await
         .map_err(|e| anyhow::anyhow!("failed to initialize database at {db_path:?}: {e}"))?;
 
@@ -270,6 +274,7 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         db: pool,
         db_path,
         watcher: Arc::new(watcher),
+        startup_recovery,
     })
 }
 

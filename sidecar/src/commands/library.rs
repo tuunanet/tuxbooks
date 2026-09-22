@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::domain::StorageStats;
+use crate::domain::{StartupRecovery, StorageStats};
 use crate::error::AppError;
 use crate::repository::library_locations;
 use crate::repository::storage;
@@ -221,4 +221,11 @@ pub async fn reconnect_book(
 /// book bytes, and the catalog row counts.
 pub async fn get_storage_stats(state: &AppState) -> Result<StorageStats, AppError> {
     storage::storage_stats(&state.db).await
+}
+
+/// Where a broken database was moved at startup, or `null` when the database
+/// was healthy. Read-only: the sidecar records the quarantine once during
+/// `init_state`, so this cannot trigger another.
+pub async fn get_startup_recovery(state: &AppState) -> Result<Option<StartupRecovery>, AppError> {
+    Ok(state.startup_recovery.clone())
 }
