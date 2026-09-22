@@ -74,7 +74,7 @@ mkdir -p "$CARGO_HOME_HOST"
 image_build=( "$ENGINE" build )
 if [ "${TUXBOOKS_SIDECAR_CACHE:-}" = "gha" ]; then
   if [ "$ENGINE" = "docker" ] && "$ENGINE" buildx version >/dev/null 2>&1; then
-    image_build=( "$ENGINE" buildx build --cache-from type=gha --cache-to type=gha,mode=max --load )
+    image_build=( "$ENGINE" buildx build --cache-from type=gha --cache-to "type=gha,mode=max" --load )
   else
     echo "build-sidecar-release: TUXBOOKS_SIDECAR_CACHE=gha needs docker buildx; building without cache" >&2
   fi
