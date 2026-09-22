@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use sqlx::SqlitePool;
 
 use crate::domain::{CatalogCounts, LibraryLocationStat, StorageStats};
@@ -8,34 +10,40 @@ use crate::error::AppError;
 /// and the catalog row counts. Locations keep registration order.
 ///
 /// A book belongs to the most specific (longest matching) location whose
-/// path prefixes it: the path equals the location or starts with the location
-/// plus a separator. The `NOT EXISTS` guard stops a book under nested
-/// locations from counting toward both.
+/// path prefixes it, where a path matches when it equals the location or
+/// starts with the location plus a separator. The matching runs in Rust over
+/// the book's ancestors, one lookup per path segment, so the cost does not
+/// grow with the number of watched locations. A single correlated SQL join
+/// was linear in locations times books and took seconds at a thousand
+/// locations (see tests/storage_bench.rs).
 pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> {
-    let locations = sqlx::query_as::<_, LibraryLocationStat>(
-        r#"
-        SELECT l.id AS id, l.path, l.added_at,
-               COUNT(b.id) AS book_count,
-               COALESCE(SUM(b.file_size), 0) AS total_bytes
-        FROM library_locations l
-        LEFT JOIN books b
-          ON (b.path = l.path OR substr(b.path, 1, length(l.path) + 1) = l.path || '/')
-         AND NOT EXISTS (
-               SELECT 1 FROM library_locations more
-               WHERE length(more.path) > length(l.path)
-                 AND (b.path = more.path
-                      OR substr(b.path, 1, length(more.path) + 1) = more.path || '/')
-             )
-        GROUP BY l.id
-        ORDER BY l.id
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
+    let locations: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT id, path, added_at FROM library_locations ORDER BY id")
+            .fetch_all(pool)
+            .await?;
 
-    let book_total_bytes: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(file_size), 0) FROM books")
-        .fetch_one(pool)
-        .await?;
+    // Watched path to its row index; the borrow ends before `locations` moves.
+    let (counts, bytes, book_total_bytes) = {
+        let mut location_index: HashMap<&str, usize> = HashMap::with_capacity(locations.len());
+        for (index, (_, path, _)) in locations.iter().enumerate() {
+            location_index.insert(path.as_str(), index);
+        }
+
+        let mut counts = vec![0_i64; locations.len()];
+        let mut bytes = vec![0_i64; locations.len()];
+        let mut total_bytes = 0_i64;
+        let books: Vec<(String, i64)> = sqlx::query_as("SELECT path, file_size FROM books")
+            .fetch_all(pool)
+            .await?;
+        for (path, file_size) in &books {
+            total_bytes += file_size;
+            if let Some(index) = owning_location(path, &location_index) {
+                counts[index] += 1;
+                bytes[index] += file_size;
+            }
+        }
+        (counts, bytes, total_bytes)
+    };
 
     let catalog = sqlx::query_as::<_, CatalogCounts>(
         r#"
@@ -50,11 +58,40 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
     .fetch_one(pool)
     .await?;
 
+    let locations = locations
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, path, added_at))| LibraryLocationStat {
+            id,
+            path,
+            added_at,
+            book_count: counts[index],
+            total_bytes: bytes[index],
+        })
+        .collect();
+
     Ok(StorageStats {
         locations,
         book_total_bytes,
         catalog,
     })
+}
+
+/// The watched location that owns `book_path`: the deepest watched directory
+/// that is the path itself or one of its ancestors. A sibling directory with
+/// a shared string prefix does not match, since the split is always on a path
+/// separator.
+fn owning_location(book_path: &str, locations: &HashMap<&str, usize>) -> Option<usize> {
+    let mut candidate = book_path;
+    loop {
+        if let Some(&index) = locations.get(candidate) {
+            return Some(index);
+        }
+        match candidate.rsplit_once('/') {
+            Some((parent, _)) if !parent.is_empty() => candidate = parent,
+            _ => return None,
+        }
+    }
 }
 
 #[cfg(test)]
