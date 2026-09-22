@@ -165,21 +165,23 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.17 polishes the PDF reader and makes presentation flips instant.
+          TuxBooks 0.0.18 adds a Data settings tab and makes a failed start recoverable.
 
-          What changed since 0.0.15:
+          What changed since 0.0.17:
 
-          - Presentation mode pre-renders the next and previous pages, so a
-            page step blits instead of rasterizing behind a blank page for up
-            to a second.
-          - The reader title is centered on the header, so the zoom controls no
-            longer pull it off center.
-          - The presentation controls fade out and return on pointer hover or
-            keyboard focus.
-          - The page raster matches the CSS box exactly, which removes the
-            faint resampled edge lines at deep zoom.
-          - Deep zoom no longer fails to render a page whose bitmap rounds just
-            past the engine's pixel cap.
+          - A Data tab in Settings shows where TuxBooks keeps its own data, the
+            size of each piece, and the folders it watches, with open-folder
+            and copy-path actions.
+          - Clear cache removes only the data the app rebuilds by itself
+            (browser caches and the GPU fallback marker). The catalog, the
+            cover cache, your settings, and your books stay.
+          - A failed start now writes a log, shows a dialog with the log path,
+            and prints the same message to the terminal, instead of quitting
+            silently.
+          - A database that cannot open is quarantined under a timestamped
+            name and the app starts with a fresh one. Nothing is deleted.
+          - \`--reset-data\` clears app data and never book files, and
+            \`--dry-run\` prints the paths and sizes without changing anything.
 
           Install on Ubuntu/Debian:
 

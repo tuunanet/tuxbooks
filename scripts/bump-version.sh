@@ -43,14 +43,15 @@ fi
 # version swapped, so lines keep their structure:
 #   package.json / frontend/package.json — "version": "X.Y.Z" (first match)
 #   sidecar/Cargo.toml — the [package] version (first `version = ` line)
-#   site/index.html — the homepage badge's headline version
+#   site/index.html — the homepage badge's version token (the badge text may
+#     wrap across lines, so match only the `vX.Y.Z &middot;` token)
 # sidecar/Cargo.lock is handled separately below (the tuxbooks package's own
 # entry is located by its preceding `name = "tuxbooks"` line).
 OLD_LINE=(
   "package.json|\"version\": \"$CURRENT\""
   "frontend/package.json|\"version\": \"$CURRENT\""
   "sidecar/Cargo.toml|^version = \"$CURRENT\""
-  "site/index.html|v$CURRENT &middot; in active development"
+  "site/index.html|v$CURRENT &middot;"
 )
 
 # Rewrite Cargo.lock first into a temp file: the script must not leave a
