@@ -229,8 +229,8 @@ function PdfZoomControl({
 }
 
 /**
- * PDF document controls: page navigation (`‹ Page 1 of 991 ›`), the Okular
- * style zoom combo (`−`, an editable percent input with a presets dropdown
+ * PDF document controls: page navigation (`‹ [1] of 991 ›`, an editable page
+ * field), the Okular style zoom combo (`−`, an editable percent input with a presets dropdown
  * including fit modes, `+`), and the presentation-mode toggle — one compact
  * group docked into the shell's reader header via a portal (issue #68), so no
  * dedicated control row takes vertical space from the pages. The dropdown's

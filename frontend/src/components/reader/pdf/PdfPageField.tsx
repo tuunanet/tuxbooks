@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parsePageNumber } from "./pdfPages";
 
 interface PdfPageFieldProps {
@@ -27,10 +27,19 @@ export function PdfPageField({
 }: PdfPageFieldProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const skipCommitRef = useRef(false);
+  const editedRef = useRef(false);
   const display = draft ?? String(pageNumber);
   const digitCount = Math.max(1, String(pageCount).length);
 
+  // A page change from outside the field (scroll, navigation, restore) while
+  // the user has not typed must not leave a stale draft behind: drop it so
+  // the field tracks the live page and a later blur cannot jump back.
+  useEffect(() => {
+    if (!editedRef.current) setDraft(null);
+  }, [pageNumber]);
+
   const commit = () => {
+    editedRef.current = false;
     if (skipCommitRef.current) {
       skipCommitRef.current = false;
       setDraft(null);
@@ -54,18 +63,27 @@ export function PdfPageField({
         value={display}
         style={{ width: `calc(${digitCount}ch + 1rem)` }}
         onFocus={(event) => {
+          editedRef.current = false;
           setDraft(String(pageNumber));
           event.currentTarget.select();
         }}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          editedRef.current = true;
+          setDraft(event.target.value);
+        }}
         onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             commit();
+            // The blur below fires onBlur, whose commit closure still holds
+            // the pre-commit draft; skip that second commit so Enter commits
+            // exactly once.
+            skipCommitRef.current = true;
             event.currentTarget.blur();
           } else if (event.key === "Escape") {
             event.preventDefault();
+            editedRef.current = false;
             skipCommitRef.current = true;
             setDraft(null);
             event.currentTarget.blur();
