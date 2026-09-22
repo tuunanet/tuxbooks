@@ -39,3 +39,14 @@ pub struct StorageStats {
     pub book_total_bytes: i64,
     pub catalog: CatalogCounts,
 }
+
+/// Where a broken database was found and where it was moved, set once at
+/// startup when the service quarantined it. Returned by the
+/// `get_startup_recovery` IPC command so main can name the file in the
+/// recovery dialog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupRecovery {
+    pub from: String,
+    pub to: String,
+}

@@ -220,6 +220,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "ping",
   "get_library_stats",
   "get_storage_stats",
+  "get_startup_recovery",
   "list_books",
   "search_books",
   "remove_book",

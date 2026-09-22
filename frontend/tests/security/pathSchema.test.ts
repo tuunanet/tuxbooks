@@ -293,6 +293,7 @@ describe("boundary configuration tables (T-5)", () => {
       "get_book_resource",
       "get_epub_session",
       "embed_book_metadata",
+      "get_startup_recovery",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }

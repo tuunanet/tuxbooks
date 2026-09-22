@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  parseQuarantineReport,
   reportStartupFailure,
   RESET_DATA_COMMAND,
   STARTUP_ERROR_LOG,
   startupErrorLogPath,
+  surfaceStartupQuarantine,
   type StartupDialogSurface,
+  type StartupQuarantineDeps,
   type StartupRecoveryDeps,
 } from "../../electron/main/bootRecovery";
 
@@ -147,5 +150,97 @@ describe("startup failure recovery", () => {
 
     expect(log.mock.calls[0]![1]).toContain("database is locked");
     expect(stderr.mock.calls[0]![0]).toContain("database is locked");
+  });
+});
+
+function quarantineHarness(reported: unknown): {
+  deps: StartupQuarantineDeps;
+  showMessageBox: ReturnType<typeof vi.fn>;
+  openPath: ReturnType<typeof vi.fn>;
+  stderr: ReturnType<typeof vi.fn>;
+  call: ReturnType<typeof vi.fn>;
+} {
+  const showMessageBox = vi.fn(async () => ({ response: 0 }));
+  const openPath = vi.fn(async () => "");
+  const stderr = vi.fn();
+  const call = vi.fn(async () => reported);
+  const deps: StartupQuarantineDeps = {
+    sidecar: { call },
+    dialog: { showMessageBox },
+    shell: { openPath },
+    stderr,
+    paths: PATHS,
+  };
+  return { deps, showMessageBox, openPath, stderr, call };
+}
+
+describe("startup database quarantine", () => {
+  it("accepts only a non-empty from/to pair", () => {
+    const report = { from: "/d/tuxbooks.db", to: "/d/tuxbooks.db.corrupt-1" };
+    expect(parseQuarantineReport(report)).toEqual(report);
+    expect(parseQuarantineReport(null)).toBeNull();
+    expect(parseQuarantineReport({ from: "", to: "/d/x" })).toBeNull();
+    expect(parseQuarantineReport({ from: "/d/x" })).toBeNull();
+    expect(parseQuarantineReport({ from: 1, to: "/d/x" })).toBeNull();
+    expect(parseQuarantineReport("nope")).toBeNull();
+  });
+
+  it("names where the broken file went and returns the report", async () => {
+    const moved = "/app/data/tuxbooks.db.corrupt-20260922T080000.000Z";
+    const { deps, showMessageBox, openPath, stderr, call } = quarantineHarness({
+      from: "/app/data/tuxbooks.db",
+      to: moved,
+    });
+
+    const report = await surfaceStartupQuarantine(deps);
+
+    expect(call).toHaveBeenCalledWith("get_startup_recovery");
+    expect(report).toEqual({ from: "/app/data/tuxbooks.db", to: moved });
+    expect(showMessageBox).toHaveBeenCalledOnce();
+    const options = showMessageBox.mock.calls[0]![0] as DialogOptions;
+    expect(options.type).toBe("warning");
+    expect(options.detail).toContain(moved);
+    expect(options.buttons).toEqual(["Open data folder"]);
+    expect(openPath).toHaveBeenCalledWith(PATHS.dataDir);
+    expect(stderr.mock.calls[0]![0]).toContain("quarantined");
+  });
+
+  it("stays silent for a healthy database", async () => {
+    const { deps, showMessageBox, stderr } = quarantineHarness(null);
+
+    await expect(surfaceStartupQuarantine(deps)).resolves.toBeNull();
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when the sidecar call fails", async () => {
+    const call = vi.fn(async () => {
+      throw new Error("sidecar not running");
+    });
+    const showMessageBox = vi.fn(async () => ({ response: 0 }));
+    const stderr = vi.fn();
+    const deps: StartupQuarantineDeps = {
+      sidecar: { call },
+      dialog: { showMessageBox },
+      shell: { openPath: vi.fn() },
+      stderr,
+      paths: PATHS,
+    };
+
+    await expect(surfaceStartupQuarantine(deps)).resolves.toBeNull();
+
+    expect(showMessageBox).not.toHaveBeenCalled();
+    expect(stderr.mock.calls[0]![0]).toContain("sidecar not running");
+  });
+
+  it("still reports the quarantine when the dialog fails", async () => {
+    const report = { from: "/a/tuxbooks.db", to: "/a/tuxbooks.db.corrupt-1" };
+    const { deps } = quarantineHarness(report);
+    deps.dialog.showMessageBox = vi.fn(async () => {
+      throw new Error("no display");
+    });
+
+    await expect(surfaceStartupQuarantine(deps)).resolves.toEqual(report);
   });
 });

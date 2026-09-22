@@ -15,7 +15,7 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
-import { reportStartupFailure } from "./bootRecovery";
+import { reportStartupFailure, surfaceStartupQuarantine } from "./bootRecovery";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -491,9 +491,18 @@ app.whenReady().then(() => {
   debugLog("app starting sidecar");
   sidecar
     .start()
-    .then(() => {
+    .then(async () => {
       bootElapsed("sidecar healthy");
       debugLog("sidecar healthy; creating window");
+      // A database the sidecar quarantined at startup is surfaced before the
+      // window opens, naming where the broken file was kept.
+      await surfaceStartupQuarantine({
+        sidecar,
+        dialog,
+        shell,
+        stderr: (message) => console.error(message),
+        paths: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+      });
       createWindow(forward);
     })
     .catch((error) => {
