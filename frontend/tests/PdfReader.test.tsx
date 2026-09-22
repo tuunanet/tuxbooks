@@ -2478,6 +2478,63 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(onExitPresentation).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the editable page field holding the current page", async () => {
+    await renderPresentingReader();
+
+    const input = screen.getByTestId("pdf-page-input");
+    expect(input).toHaveValue("1");
+    expect(input).toBeEnabled();
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("jumps to a typed page on Enter", async () => {
+    await renderPresentingReader();
+    const input = screen.getByTestId("pdf-page-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "3{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+    expect(input).toHaveValue("3");
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3");
+  });
+
+  it("discards the typed page on Escape", async () => {
+    await renderPresentingReader();
+    const input = screen.getByTestId("pdf-page-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "3{Escape}");
+
+    expect(input).toHaveValue("1");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("clamps an out-of-range typed page to the last page", async () => {
+    await renderPresentingReader();
+    const input = screen.getByTestId("pdf-page-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "99{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+    expect(input).toHaveValue("3");
+  });
+
+  it("still steps pages with prev and next around the field", async () => {
+    await renderPresentingReader();
+    const input = screen.getByTestId("pdf-page-input");
+
+    await userEvent.click(screen.getByTestId("pdf-pres-next"));
+    await waitFor(() => expect(input).toHaveValue("2"));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+
+    await userEvent.click(screen.getByTestId("pdf-pres-prev"));
+    await waitFor(() => expect(input).toHaveValue("1"));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
   it("pre-renders the next page so a step blits instead of re-rastering", async () => {
     const doc = makeFakePdfDocument(3, (pageNumber) =>
       pageNumber === 2 ? { width: 1224, height: 612 } : { width: 612, height: 792 },

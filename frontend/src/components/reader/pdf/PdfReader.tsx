@@ -1586,7 +1586,7 @@ export function PdfReader({
   // header host when one is provided, inline above the document otherwise
   // (standalone renders). In presentation mode the header chrome is hidden
   // by the shell; the document instead carries the minimal floating bar
-  // (prev/next, the page indicator, exit) so the workflow stays
+  // (prev/next, an editable page field, exit) so the workflow stays
   // pointer-accessible without leaving the mode (§ issue #65).
   // The toolbar reports the effective scale live: during a wheel gesture
   // that is the previewed zoom, before any canvas has re-rendered.
@@ -1634,6 +1634,8 @@ export function PdfReader({
           pageCount={effectivePageCount}
           onPrev={() => goToPage(currentPage - 1)}
           onNext={() => goToPage(currentPage + 1)}
+          onSetPage={goToPage}
+          pageEntryDisabled={!layoutReady}
           onExit={onExitPresentation}
         />
       ) : (
