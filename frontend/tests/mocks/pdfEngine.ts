@@ -12,6 +12,8 @@ export interface FakePdfDocument {
   scales: number[];
   /** The options object of every page.render call, in call order. */
   renderOptions: Array<{ smartColors?: unknown } & Record<string, unknown>>;
+  /** The page number of every page.render call, in call order. */
+  renderPages: number[];
   /** Resolves a render held open via `holdRenderFor`. */
   releaseRender: (pageNumber: number) => void;
   /** Page numbers whose held render task was cancelled. */
@@ -34,6 +36,7 @@ export function makeFakePdfDocument(
 ): FakePdfDocument {
   const scales: number[] = [];
   const renderOptions: Array<{ smartColors?: unknown } & Record<string, unknown>> = [];
+  const renderPages: number[] = [];
   const held = new Set(options.holdRenderFor ?? []);
   const failOnce = new Set(options.failOnceFor ?? []);
   const attempts = new Map<number, number>();
@@ -50,6 +53,7 @@ export function makeFakePdfDocument(
     getPage: vi.fn(),
     scales,
     renderOptions,
+    renderPages,
     releaseRender: (pageNumber) => {
       const release = releaseFns.get(pageNumber);
       if (release) {
@@ -83,6 +87,7 @@ export function makeFakePdfDocument(
         }),
         render: vi.fn((renderCall: { smartColors?: unknown } & Record<string, unknown>) => {
           renderOptions.push(renderCall);
+          renderPages.push(number);
           attempts.set(number, (attempts.get(number) ?? 0) + 1);
           if (failOnce.has(number) && (attempts.get(number) ?? 0) === 1) {
             return {

@@ -8,6 +8,7 @@ import {
   capByBytes,
   effectiveRenderRatio,
   needsRegionRender,
+  presentationPagePlan,
   regionRenderRatio,
   regionRenderRatioForPage,
   renderBufferBytes,
@@ -166,6 +167,36 @@ describe("render window byte budget (PERF-4)", () => {
     const sizes = [10, 20, 30, 40, 50];
     const kept = capByBytes(sizes, (bytes) => bytes, 60);
     expect(kept).toEqual([10, 20, 30]);
+  });
+});
+
+describe("presentationPagePlan", () => {
+  it("reproduces the layout's rounded slot and the canvas's ratio", () => {
+    // A letter page fit to the 792px presentation viewport (the Papers margin
+    // leaves 768px): scale 768/792 rounds the page to 593x768.
+    const scale = 768 / 792;
+    const plan = presentationPagePlan(LETTER, scale, 1);
+    expect(plan).toEqual({ width: 593, height: 768, ratio: 1 });
+    // The ratio is exactly what a mounted canvas would derive from that slot.
+    expect(plan.ratio).toBe(
+      effectiveRenderRatio(plan.width / scale, plan.height / scale, scale, 1),
+    );
+  });
+
+  it("tracks devicePixelRatio without changing the slot geometry", () => {
+    const scale = 768 / 792;
+    expect(presentationPagePlan(LETTER, scale, 2).ratio).toBe(2);
+    expect(presentationPagePlan(LETTER, scale, 2).width).toBe(593);
+  });
+
+  it("fits a landscape page to the area width", () => {
+    const landscape = { width: 1224, height: 612 } as const;
+    const scale = (1224 - 24) / 1224;
+    expect(presentationPagePlan(landscape, scale, 1)).toEqual({
+      width: 1200,
+      height: 600,
+      ratio: 1,
+    });
   });
 });
 

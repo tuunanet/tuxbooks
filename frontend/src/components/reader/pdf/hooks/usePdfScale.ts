@@ -20,6 +20,10 @@ export function usePdfScale(
 ): {
   scale: number;
   contentAreaRef: (element: HTMLDivElement | null) => void;
+  /** Measured content-area width, the fit formulas' horizontal input. */
+  areaWidth: number;
+  /** Measured scroll-viewport height, the fit formulas' vertical input. */
+  viewportHeight: number;
 } {
   const [area, setArea] = useState<HTMLDivElement | null>(null);
   const [areaWidth, setAreaWidth] = useState(0);
@@ -69,5 +73,5 @@ export function usePdfScale(
     };
   }, [area]);
 
-  return { scale, contentAreaRef };
+  return { scale, contentAreaRef, areaWidth, viewportHeight };
 }

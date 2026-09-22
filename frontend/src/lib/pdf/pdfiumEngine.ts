@@ -85,16 +85,18 @@ class PdfiumDocument implements PdfDocument {
     },
   ): PdfRenderTask {
     this.assertAlive();
-    const ratio = options.transform ? (options.transform[0] ?? 1) : 1;
-    let width: number;
-    let height: number;
+    // Render exactly the pixels the caller sized the destination canvas to.
+    // PdfPageCanvas sizes it to the CSS box times the device ratio, so this
+    // keeps the buffer 1:1 with the box. Deriving the size from the unrounded
+    // page-size*scale here can land a pixel short, and the browser then
+    // resamples the whole canvas to fit, ghosting its edges.
+    const width = Math.max(1, options.canvas.width);
+    const height = Math.max(1, options.canvas.height);
     let clip: PageClip | undefined;
     if (options.region) {
-      // Region mode: the caller's canvas is region-sized. The viewport is the
-      // full page's CSS size, so CSS pixels convert to page units through the
-      // page-units-per-CSS ratio.
-      width = Math.max(1, Math.round(options.region.width * ratio));
-      height = Math.max(1, Math.round(options.region.height * ratio));
+      // Region mode: the caller's canvas is region-sized, and the viewport is
+      // the full page's CSS size, so CSS pixels convert to page units through
+      // the page-units-per-CSS ratio.
       const pageUnitsPerCss =
         size.width > 0 && options.viewport.width > 0 ? size.width / options.viewport.width : 1;
       clip = [
@@ -103,9 +105,6 @@ class PdfiumDocument implements PdfDocument {
         options.region.width * pageUnitsPerCss,
         options.region.height * pageUnitsPerCss,
       ];
-    } else {
-      width = Math.max(1, Math.floor(options.viewport.width * ratio));
-      height = Math.max(1, Math.floor(options.viewport.height * ratio));
     }
     // The seam hands the dark palette across; PDFium's category colour
     // scheme is derived here so the worker payload carries plain 32-bit

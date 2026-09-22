@@ -150,6 +150,68 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  test("centers the PDF title and hides the presentation bar until hover", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+
+    // The title is centered on the header itself, not on the space between the
+    // unequal left and right groups (the PDF zoom controls widen the left).
+    const centers = await page.evaluate(() => {
+      const title = document.querySelector<HTMLElement>("[data-testid=reader-title]")!;
+      const header = document.querySelector<HTMLElement>("header")!;
+      const t = title.getBoundingClientRect();
+      const h = header.getBoundingClientRect();
+      return { title: t.left + t.width / 2, header: h.left + h.width / 2 };
+    });
+    expect(Math.abs(centers.title - centers.header)).toBeLessThanOrEqual(2);
+
+    // Presentation mode: the bar is transparent until the pointer is over it.
+    await page.keyboard.press("Control+l");
+    const bar = page.getByTestId("pdf-presentation-bar");
+    await expect(bar).toBeVisible({ timeout: 10000 });
+    expect(Number(await bar.evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.1);
+    await bar.hover();
+    await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+
+    // Leave presentation mode for the next spec; the app is shared.
+    await page.getByTestId("pdf-pres-exit").click();
+    await returnToLibrary(page);
+  });
+
+  // Presentation steppers pre-render the neighbour (Papers' next/prev job
+  // model), so a step blits instead of rastering fresh behind a blank page.
+  // Deterministic signal: the cache holds the neighbour while the current page
+  // is still on screen.
+  test("pre-renders the next page before a presentation step", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+
+    await page.keyboard.press("Control+l");
+    await expect(page.getByTestId("pdf-presentation-bar")).toBeVisible({ timeout: 10000 });
+
+    // Page 1 is on screen and page 2 has already been rasterized offscreen:
+    // the reader reports the preload before anything is stepped to.
+    await expect
+      .poll(
+        () => page.getByTestId("pdf-reader").getAttribute("data-pdf-preload-count").then(Number),
+        { timeout: 30000 },
+      )
+      .toBeGreaterThanOrEqual(1);
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3");
+
+    await page.getByTestId("pdf-pres-next").click();
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+      timeout: 10000,
+    });
+    await expect.poll(() => canvasIsNonBlank(page, 2), { timeout: 10000 }).toBe(true);
+
+    await page.getByTestId("pdf-pres-exit").click();
+    await returnToLibrary(page);
+  });
+
   // Viewport clipping above the whole-page budget (deep zoom): the canvas
   // rasterizes only the visible region and never allocates a page-sized
   // buffer. The region ratio is capped by the whole-page budget (ADR 0004),

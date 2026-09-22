@@ -127,6 +127,28 @@ describe("PdfPageCanvas scale-and-swap", () => {
     expect(canvas.getAttribute("width")).toBe(String(Math.floor(612 * 2)));
   });
 
+  it("sizes the buffer to the rounded CSS box times the ratio, not the raw viewport", async () => {
+    // A real plot page at 426.5%: the raw page-size*scale is 1191.8675 by
+    // 1059.8525, so flooring it times the 2x ratio lands at 2383x2119, one
+    // pixel short of the 2384x2120 CSS box. The browser then resamples the
+    // whole canvas to fit, ghosting its edges.
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, () => ({ width: 279.5, height: 248.5 }));
+    render(
+      <PdfPageCanvas
+        document={doc as never}
+        pageNumber={1}
+        width={1192}
+        height={1060}
+        scale={4.265}
+      />,
+    );
+    const canvas = screen.getByTestId("pdf-canvas");
+    await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
+    expect(canvas.getAttribute("width")).toBe("2384");
+    expect(canvas.getAttribute("height")).toBe("2120");
+  });
+
   it("presents the scaled bitmap in the layout phase, before the resized wrapper can paint uncovered", async () => {
     const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
     const observed: string[] = [];

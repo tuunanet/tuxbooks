@@ -440,7 +440,7 @@ export function ReaderShell() {
           screen, navigation stays on the keyboard and the reader's floating
           bar. */}
       {!presentation && (
-        <header className="flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
+        <header className="relative flex shrink-0 items-center gap-1 border-b border-[var(--reader-chrome-border,var(--border))] px-2 py-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -464,11 +464,18 @@ export function ReaderShell() {
             />
           )}
 
-          <div className="min-w-0 flex-1 px-2 text-center">
-            <p data-testid="reader-title" className="truncate text-sm font-medium">
-              {book.title}
-            </p>
-          </div>
+          {/* Spacer: keeps the trailing controls at the right edge. The title
+              is centered on the header itself, not on the space between the
+              unequal left and right groups, since the PDF zoom controls make
+              the left group much wider. */}
+          <div className="min-w-0 flex-1" />
+
+          <p
+            data-testid="reader-title"
+            className="pointer-events-none absolute top-1/2 left-1/2 max-w-[45%] -translate-x-1/2 -translate-y-1/2 truncate text-center text-sm font-medium"
+          >
+            {book.title}
+          </p>
 
           <Tooltip>
             <TooltipTrigger asChild>

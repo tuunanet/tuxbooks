@@ -18,6 +18,13 @@ export interface PdfGeometry {
    * skipped; corrections land after the requested pages have been measured.
    */
   measurePages: (pageNumbers: number[]) => void;
+  /**
+   * True once real dimensions have replaced a page's initial estimate. The
+   * presentation preload gates on this so it never rasterizes a neighbour at
+   * the wrong (estimated) scale: the measurement lands a render later, and
+   * the resulting `sizes` change re-runs the gate.
+   */
+  isMeasured: (pageNumber: number) => boolean;
 }
 
 /**
@@ -85,5 +92,10 @@ export function usePdfGeometry(document: PdfDocument | null, pageCount: number):
     [document, pageCount],
   );
 
-  return { sizes: state.document === document ? state.sizes : null, measurePages };
+  const isMeasured = useCallback(
+    (pageNumber: number) => measuredPagesRef.current.has(pageNumber),
+    [],
+  );
+
+  return { sizes: state.document === document ? state.sizes : null, measurePages, isMeasured };
 }

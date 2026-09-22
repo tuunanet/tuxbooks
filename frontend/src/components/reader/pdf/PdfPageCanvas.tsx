@@ -402,13 +402,15 @@ export function PdfPageCanvas({
       if (cancelled) throw new CancelledRender();
       const viewport = page.getViewport({ scale });
 
-      // Whole-page mode keeps the engine viewport dimensions for the buffer
-      // (the historical behavior); a region sizes to the region.
-      const bufferWidth = area ? area.width : viewport.width;
-      const bufferHeight = area ? area.height : viewport.height;
+      // The buffer is the CSS box times the ratio, rounded. The CSS box is the
+      // rounded viewport (the slot size), so round it before scaling: flooring
+      // the raw page-size*scale can leave the buffer a pixel short of the box,
+      // and the browser then resamples the whole canvas, ghosting its edges.
+      const bufferWidth = area ? area.width : Math.round(viewport.width);
+      const bufferHeight = area ? area.height : Math.round(viewport.height);
       const buffer = canvas.ownerDocument.createElement("canvas");
-      buffer.width = Math.floor(bufferWidth * targetRatio);
-      buffer.height = Math.floor(bufferHeight * targetRatio);
+      buffer.width = Math.max(1, Math.round(bufferWidth * targetRatio));
+      buffer.height = Math.max(1, Math.round(bufferHeight * targetRatio));
       const bufferContext = buffer.getContext("2d");
       if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
