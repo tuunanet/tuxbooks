@@ -71,6 +71,42 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // The toolbar's editable page field: type a page and press Enter to jump.
+  // The accessible readout is the hidden live region, so the assertion is the
+  // exact indicator text, plus the destination page rasterizing.
+  test("jumps to a typed page in the reader toolbar", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+
+    const input = page.getByTestId("pdf-page-input");
+    await input.fill("2");
+    await input.press("Enter");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+      timeout: 30000,
+    });
+    await waitForRendered(page, 2);
+    expect(await canvasIsNonBlank(page, 2)).toBe(true);
+
+    await returnToLibrary(page);
+  });
+
+  // An out-of-range typed page clamps onto the document's range instead of
+  // leaving the field or the indicator off-document.
+  test("clamps an out-of-range typed page to the last page", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+
+    const input = page.getByTestId("pdf-page-input");
+    await input.fill("99");
+    await input.press("Enter");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 30000,
+    });
+    await expect(input).toHaveValue("3");
+
+    await returnToLibrary(page);
+  });
+
   // Okular-style zoom control: an editable percentage plus a presets
   // dropdown (fit modes and percentages) replace the fixed ladder.
   test("zooms to a typed percentage and a dropdown preset", async ({ page }) => {
@@ -174,6 +210,28 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 
     // Leave presentation mode for the next spec; the app is shared.
+    await page.getByTestId("pdf-pres-exit").click();
+    await returnToLibrary(page);
+  });
+
+  // The presentation bar carries the same editable page field as the toolbar:
+  // a typed jump works with the normal reader chrome hidden.
+  test("jumps to a typed page in the presentation bar", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+
+    await page.keyboard.press("Control+l");
+    const bar = page.getByTestId("pdf-presentation-bar");
+    await expect(bar).toBeVisible({ timeout: 10000 });
+    await bar.hover();
+
+    const input = bar.getByTestId("pdf-page-input");
+    await input.fill("3");
+    await input.press("Enter");
+    await expect(bar.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 10000,
+    });
+
     await page.getByTestId("pdf-pres-exit").click();
     await returnToLibrary(page);
   });
