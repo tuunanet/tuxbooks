@@ -15,6 +15,14 @@ const KIND_LABEL: Record<StorageEntryKind, string> = {
   books: "Books",
 };
 
+const CATALOG_ROWS = [
+  ["books", "Books"],
+  ["authors", "Authors"],
+  ["collections", "Collections"],
+  ["annotations", "Annotations"],
+  ["readingProgress", "Reading progress"],
+] as const;
+
 function formatMb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -122,6 +130,53 @@ export function DataSettings() {
           </ul>
         </div>
       ))}
+
+      <div data-testid="storage-book-locations" className="rounded-lg border p-4">
+        <p className="text-sm font-medium">Book folders</p>
+        {report.bookLocations.length === 0 ? (
+          <p
+            data-testid="storage-book-locations-empty"
+            className="mt-1 text-xs text-muted-foreground"
+          >
+            No folders have been added yet. Import a folder to build your library.
+          </p>
+        ) : (
+          <ul className="mt-4 divide-y">
+            {report.bookLocations.map((location) => (
+              <li key={location.path} className="flex items-center justify-between gap-4 py-2">
+                <code
+                  title={location.path}
+                  className="min-w-0 truncate text-xs text-muted-foreground"
+                >
+                  {location.path}
+                </code>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
+                  {formatMb(location.totalBytes)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div data-testid="storage-catalog" className="rounded-lg border p-4">
+        <p className="text-sm font-medium">Catalog</p>
+        <ul className="mt-4 divide-y">
+          {CATALOG_ROWS.map(([key, label]) => (
+            <li
+              key={key}
+              data-testid={`storage-catalog-${key}`}
+              className="flex items-center justify-between gap-4 py-2"
+            >
+              <span className="text-sm">{label}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {report.catalog[key]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <p data-testid="storage-reassurance" className="text-xs text-muted-foreground">
         Your books are read in place and never copied into the app.

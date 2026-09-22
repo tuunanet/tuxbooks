@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type {
-  LibraryLocationStat,
+  LibraryStorageStats,
   StorageEntry,
   StorageReport,
   StorageRoot,
@@ -13,9 +13,11 @@ import { GPU_FALLBACK_MARKER } from "./gpuFallback";
  * Sizes the app-owned storage roots (data-management spec): the data root
  * (catalog database with its WAL and shared-memory sidecars, cover cache, GPU
  * fallback marker) and the Electron config root (browser caches plus
- * settings). Pure node:fs/path so it unit-tests against a temp directory
- * without Electron. Main resolves the two paths; this module never guesses
- * one.
+ * settings). The watched book locations and catalog counts come from the
+ * sidecar (`get_storage_stats`); main folds them into the same report. Pure
+ * node:fs/path for the sizing so it unit-tests against a temp directory
+ * without Electron; main resolves the two paths and this module never
+ * guesses one.
  */
 
 /** Cap on files and directories one sizing walk may visit. */
@@ -107,8 +109,8 @@ function browserCacheBytes(configDir: string): number {
   );
 }
 
-/** Build the storage report from the two resolved roots. */
-export function buildStorageReport(dirs: StorageDirs): StorageReport {
+/** Build the storage report from the two resolved roots and the sidecar stats. */
+export function buildStorageReport(dirs: StorageDirs, library: LibraryStorageStats): StorageReport {
   const dataRootBytes = directoryBytes(dirs.dataDir);
   const configRootBytes = directoryBytes(dirs.configDir);
   const cacheDirsBytes = browserCacheBytes(dirs.configDir);
@@ -171,16 +173,14 @@ export function buildStorageReport(dirs: StorageDirs): StorageReport {
     },
   ];
 
-  // Book locations and catalog counts arrive in later tickets; leave them
-  // empty here rather than guessing at the sidecar's answer.
-  const bookLocations: LibraryLocationStat[] = [];
-
+  // Book locations and catalog counts come from the sidecar aggregate; the
+  // report mirrors them without recomputing.
   return {
     roots,
     appDataBytes: dataRootBytes + configRootBytes,
     cacheBytes: cacheDirsBytes + gpuMarkerBytes,
-    bookLocations,
-    bookTotalBytes: 0,
-    catalog: { books: 0, authors: 0, collections: 0, annotations: 0, readingProgress: 0 },
+    bookLocations: library.locations,
+    bookTotalBytes: library.bookTotalBytes,
+    catalog: library.catalog,
   };
 }

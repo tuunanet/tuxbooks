@@ -32,6 +32,25 @@ export interface LibraryLocationStat {
   totalBytes: number;
 }
 
+export interface CatalogCounts {
+  books: number;
+  authors: number;
+  collections: number;
+  annotations: number;
+  readingProgress: number;
+}
+
+/**
+ * The sidecar's storage aggregate (`get_storage_stats`): book stats per
+ * watched location, the library's total book bytes, and the catalog counts.
+ * Main folds it into the report; the renderer only ever reads the report.
+ */
+export interface LibraryStorageStats {
+  locations: LibraryLocationStat[];
+  bookTotalBytes: number;
+  catalog: CatalogCounts;
+}
+
 export interface StorageReport {
   roots: StorageRoot[];
   /** Total bytes across every app-owned root (data root plus config root). */
@@ -40,11 +59,5 @@ export interface StorageReport {
   cacheBytes: number;
   bookLocations: LibraryLocationStat[];
   bookTotalBytes: number;
-  catalog: {
-    books: number;
-    authors: number;
-    collections: number;
-    annotations: number;
-    readingProgress: number;
-  };
+  catalog: CatalogCounts;
 }

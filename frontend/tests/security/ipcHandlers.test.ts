@@ -10,6 +10,14 @@ const HOSTILE = "app://evil/index.html";
 
 const STORAGE_DIRS = { dataDir: "/app/data", configDir: "/app/config" };
 
+const LIBRARY_STATS = {
+  locations: [
+    { path: "/books", addedAt: "2026-01-01T00:00:00.000Z", bookCount: 2, totalBytes: 3_000_000 },
+  ],
+  bookTotalBytes: 3_000_000,
+  catalog: { books: 2, authors: 1, collections: 0, annotations: 0, readingProgress: 0 },
+};
+
 const ALL_CHANNELS = [
   IPC_CHANNELS.invoke,
   IPC_CHANNELS.dialog,
@@ -41,9 +49,11 @@ function harness(): {
 } {
   const handlers = new Map<string, IpcHandler>();
   const sidecar = {
-    call: vi.fn(async (method: string) =>
-      method === "list_books" ? [{ id: 3, path: "/library/3.epub" }] : {},
-    ),
+    call: vi.fn(async (method: string) => {
+      if (method === "list_books") return [{ id: 3, path: "/library/3.epub" }];
+      if (method === "get_storage_stats") return LIBRARY_STATS;
+      return {};
+    }),
   };
   const dialog = {
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ["/picked/one.epub"] })),
@@ -100,7 +110,7 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
 
 describe("storage report channel (data-management spec)", () => {
   it("returns the report shape to the application page", async () => {
-    const { handlers } = harness();
+    const { handlers, sidecar } = harness();
     const handler = handlers.get(IPC_CHANNELS.storageReport);
     const report = (await handler!(senderEvent(ALLOWED) as never)) as StorageReport;
     expect(report.roots.map((root) => root.id)).toEqual(["app-data", "app-config"]);
@@ -110,15 +120,10 @@ describe("storage report channel (data-management spec)", () => {
       expect(typeof root.sizeBytes).toBe("number");
       expect(Array.isArray(root.entries)).toBe(true);
     }
-    expect(report.bookLocations).toEqual([]);
-    expect(report.bookTotalBytes).toBe(0);
-    expect(report.catalog).toEqual({
-      books: 0,
-      authors: 0,
-      collections: 0,
-      annotations: 0,
-      readingProgress: 0,
-    });
+    expect(sidecar.call).toHaveBeenCalledWith("get_storage_stats");
+    expect(report.bookLocations).toEqual(LIBRARY_STATS.locations);
+    expect(report.bookTotalBytes).toBe(LIBRARY_STATS.bookTotalBytes);
+    expect(report.catalog).toEqual(LIBRARY_STATS.catalog);
   });
 
   it("opens a root by id and rejects a renderer-supplied path", async () => {

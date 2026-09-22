@@ -7,6 +7,7 @@ import {
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import { Sidecar, SidecarError } from "./sidecar";
 import { buildStorageReport, type StorageDirs } from "./storageSizing";
+import type { LibraryStorageStats } from "../shared/storageReport";
 
 /**
  * The renderer-facing ipcMain handlers (docs/ARCHITECTURE.md, issue #84):
@@ -145,7 +146,10 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.storageReport, async (event) => {
     requireAppSender(event);
-    return buildStorageReport(storageDirs);
+    // The watched locations and catalog counts come from the sidecar; main
+    // sizes its own data roots and folds both into one report.
+    const library = (await sidecar.call("get_storage_stats")) as LibraryStorageStats;
+    return buildStorageReport(storageDirs, library);
   });
 
   register(IPC_CHANNELS.openDataFolder, async (event, rootId: unknown) => {

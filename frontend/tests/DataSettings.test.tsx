@@ -53,9 +53,16 @@ const REPORT: StorageReport = {
   ],
   appDataBytes: 6 * 1024 * 1024,
   cacheBytes: 3 * 1024 * 1024,
-  bookLocations: [],
-  bookTotalBytes: 0,
-  catalog: { books: 0, authors: 0, collections: 0, annotations: 0, readingProgress: 0 },
+  bookLocations: [
+    {
+      path: "/home/u/Books",
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bookCount: 12,
+      totalBytes: 24 * 1024 * 1024,
+    },
+  ],
+  bookTotalBytes: 24 * 1024 * 1024,
+  catalog: { books: 12, authors: 8, collections: 3, annotations: 5, readingProgress: 7 },
 };
 
 describe("DataSettings", () => {
@@ -82,6 +89,32 @@ describe("DataSettings", () => {
     expect(dataRoot).toHaveTextContent("5.0 MB");
     expect(screen.getByTestId("storage-reassurance")).toHaveTextContent(
       "read in place and never copied",
+    );
+  });
+
+  it("lists watched locations and catalog counts", async () => {
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    const locations = screen.getByTestId("storage-book-locations");
+    expect(locations).toHaveTextContent("/home/u/Books");
+    expect(locations).toHaveTextContent("12 books");
+    expect(locations).toHaveTextContent("24.0 MB");
+
+    const catalog = screen.getByTestId("storage-catalog");
+    expect(within(catalog).getByTestId("storage-catalog-books")).toHaveTextContent("12");
+    expect(within(catalog).getByTestId("storage-catalog-authors")).toHaveTextContent("8");
+    expect(within(catalog).getByTestId("storage-catalog-collections")).toHaveTextContent("3");
+    expect(within(catalog).getByTestId("storage-catalog-annotations")).toHaveTextContent("5");
+    expect(within(catalog).getByTestId("storage-catalog-readingProgress")).toHaveTextContent("7");
+  });
+
+  it("shows an empty state when no folders are watched", async () => {
+    storageReportMock.mockResolvedValue({ ...REPORT, bookLocations: [], bookTotalBytes: 0 });
+    render(<DataSettings />);
+
+    expect(await screen.findByTestId("storage-book-locations-empty")).toHaveTextContent(
+      "No folders have been added yet",
     );
   });
 
