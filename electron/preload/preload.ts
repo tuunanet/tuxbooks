@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-import { IPC_CHANNELS, isValidBookFormat, isValidBookId } from "../shared/pathSchema";
+import {
+  IPC_CHANNELS,
+  isStorageRootId,
+  isValidBookFormat,
+  isValidBookId,
+} from "../shared/pathSchema";
 
 /**
  * The preload bridge (docs/ARCHITECTURE.md): the renderer's entire view of
@@ -57,6 +62,19 @@ const api = {
       return Promise.reject(new TypeError(`invalid book id: ${String(bookId)}`));
     }
     return ipcRenderer.invoke(IPC_CHANNELS.reveal, bookId);
+  },
+
+  /** App-owned storage report (data root, config root, sizes). */
+  storageReport(): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.storageReport);
+  },
+
+  /** Open one app-owned storage root in the system file manager, by stable id. */
+  openDataFolder(rootId: string): Promise<void> {
+    if (!isStorageRootId(rootId)) {
+      return Promise.reject(new TypeError(`invalid data folder id: ${String(rootId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.openDataFolder, rootId);
   },
 
   /**

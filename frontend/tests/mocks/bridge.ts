@@ -1,5 +1,7 @@
 import { vi, type Mock } from "vitest";
 
+import type { StorageReport, StorageRootId } from "@/lib/bridge";
+
 /**
  * Fake of the `window.tuxbooks` preload bridge (electron/preload). App code
  * reaches the outside world only through `@/lib/bridge`, which reads this
@@ -20,6 +22,22 @@ export const pickBookFileMock: Mock<() => Promise<string | null>> = vi.fn(async 
 export const pickBookFilesMock: Mock<() => Promise<string[]>> = vi.fn(async () => []);
 export const pickCoverImageMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const revealBookMock: Mock<(bookId: number) => Promise<void>> = vi.fn(async () => {});
+
+export const EMPTY_STORAGE_REPORT: StorageReport = {
+  roots: [],
+  appDataBytes: 0,
+  cacheBytes: 0,
+  bookLocations: [],
+  bookTotalBytes: 0,
+  catalog: { books: 0, authors: 0, collections: 0, annotations: 0, readingProgress: 0 },
+};
+
+export const storageReportMock: Mock<() => Promise<StorageReport>> = vi.fn(
+  async () => EMPTY_STORAGE_REPORT,
+);
+export const openDataFolderMock: Mock<(rootId: StorageRootId) => Promise<void>> = vi.fn(
+  async () => {},
+);
 export const fetchBookBytesMock: Mock<(bookId: number, format: string) => Promise<ArrayBuffer>> =
   vi.fn(async () => new ArrayBuffer(16));
 export const pathForFileMock: Mock<(file: File) => string> = vi.fn(
@@ -48,6 +66,8 @@ export function installTuxbooksMock(): void {
     pickBookFiles: () => pickBookFilesMock(),
     pickCoverImage: () => pickCoverImageMock(),
     revealBook: (bookId: number) => revealBookMock(bookId),
+    storageReport: () => storageReportMock(),
+    openDataFolder: (rootId: StorageRootId) => openDataFolderMock(rootId),
     fetchBookBytes: (bookId: number, format: string) => fetchBookBytesMock(bookId, format),
     pathForFile: (file: File) => pathForFileMock(file),
   };

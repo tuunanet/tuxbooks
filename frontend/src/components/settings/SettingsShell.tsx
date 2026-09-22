@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
+import { DataSettings } from "@/components/settings/DataSettings";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { epubForegroundFitsTheme, epubSurfaceTheme } from "@/lib/epub/appearance";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
-type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "advanced";
+type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "advanced" | "data";
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
@@ -25,6 +26,7 @@ const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "pdf", label: "PDF" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
   { id: "advanced", label: "Advanced" },
+  { id: "data", label: "Data" },
 ];
 
 interface SettingsRow {
@@ -90,6 +92,7 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
       hint: "Kept in sync automatically when books are imported or updated.",
     },
   ],
+  data: [],
 };
 
 const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
@@ -265,8 +268,8 @@ function SettingsNavigation({
 /**
  * Settings screen. General holds the app theme plus library information;
  * Reading and PDF hold real, persisted default appearance controls (saved on
- * device and applied whenever a book opens); the remaining sections describe
- * shortcuts and local storage.
+ * device and applied whenever a book opens); Data shows the app-owned storage
+ * roots; the remaining sections describe shortcuts and local storage.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -280,6 +283,8 @@ export function SettingsShell() {
         </h2>
         {active === "reading" || active === "pdf" ? (
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
+        ) : active === "data" ? (
+          <DataSettings />
         ) : (
           <dl data-testid="settings-rows" className="mt-6 divide-y">
             {active === "general" && <AppThemeRow />}

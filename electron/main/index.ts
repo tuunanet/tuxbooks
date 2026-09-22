@@ -406,6 +406,9 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
       issued: new IssuedPaths(),
       dialog,
       shell,
+      // The data root reuses main's resolver; the config root is read at
+      // runtime because the packaged directory name is uncertain.
+      storageDirs: { dataDir: appDataDir(), configDir: app.getPath("userData") },
       debugIpc: process.env.TUXBOOKS_DEBUG_IPC === "1",
       debugLog,
     },

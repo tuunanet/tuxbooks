@@ -12,6 +12,7 @@ import {
   coverMime,
   decodeUriComponentSafe,
   isAllowedSenderUrl,
+  isStorageRootId,
   isValidBookId,
   isValidBookFormat,
   isValidLibraryPath,
@@ -245,6 +246,29 @@ describe("isValidBookFormat (T-2: query schema)", () => {
   });
 });
 
+describe("isStorageRootId (storage rows are named by stable id, never a path)", () => {
+  it("accepts only the two app-owned root ids", () => {
+    expect(isStorageRootId("app-data")).toBe(true);
+    expect(isStorageRootId("app-config")).toBe(true);
+  });
+
+  it("rejects every path, unknown id, and non-string", () => {
+    for (const bad of [
+      "/home/user/.local/share/com.tuxbooks.app",
+      "app-data/../etc",
+      "app",
+      "",
+      "storage",
+      null,
+      undefined,
+      1,
+      {},
+    ]) {
+      expect(isStorageRootId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(false);
+    }
+  });
+});
+
 describe("payload bound constants (T-6)", () => {
   it("stays positive and above the largest legitimate payloads", () => {
     // A 32-bit signed shift (2 << 30) overflows to a negative cap, which
@@ -276,11 +300,13 @@ describe("boundary configuration tables (T-5)", () => {
     expect(SIDECAR_METHODS.has("__proto__")).toBe(false);
   });
 
-  it("enumerates exactly the four IPC channels", () => {
+  it("enumerates exactly the renderer-facing IPC channels", () => {
     expect(IPC_CHANNELS).toEqual({
       invoke: "tuxbooks:invoke",
       dialog: "tuxbooks:dialog",
       reveal: "tuxbooks:reveal",
+      storageReport: "tuxbooks:storage-report",
+      openDataFolder: "tuxbooks:open-data-folder",
       event: "tuxbooks:event",
     });
   });

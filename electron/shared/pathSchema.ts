@@ -251,11 +251,21 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "delete_annotation",
 ]);
 
+/** Stable ids for the two app-owned storage roots. */
+export type StorageRootId = "app-data" | "app-config";
+
+/** Type guard for renderer-supplied storage root ids. */
+export function isStorageRootId(value: unknown): value is StorageRootId {
+  return value === "app-data" || value === "app-config";
+}
+
 /** The only ipcMain channels the preload may touch. */
 export const IPC_CHANNELS = {
   invoke: "tuxbooks:invoke",
   dialog: "tuxbooks:dialog",
   reveal: "tuxbooks:reveal",
+  storageReport: "tuxbooks:storage-report",
+  openDataFolder: "tuxbooks:open-data-folder",
   event: "tuxbooks:event",
 } as const;
 
