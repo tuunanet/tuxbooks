@@ -172,6 +172,10 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(Number(await bar.evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.1);
     await bar.hover();
     await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+
+    // Leave presentation mode for the next spec; the app is shared.
+    await page.getByTestId("pdf-pres-exit").click();
+    await returnToLibrary(page);
   });
 
   // Viewport clipping above the whole-page budget (deep zoom): the canvas
