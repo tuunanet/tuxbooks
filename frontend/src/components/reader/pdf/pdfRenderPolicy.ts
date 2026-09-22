@@ -18,6 +18,7 @@
  * keep a mounted canvas are bounded by bytes as well as count, using the
  * same capped ratio for the per-page estimate.
  */
+import { scaledPixels } from "./pdfLayout";
 
 /**
  * Preferred pixel budget for one page's backing store (16.7 MP). The ratio
@@ -83,6 +84,32 @@ export function effectiveRenderRatio(
   const candidate = Math.min(dpr, areaSoft, dimensionRatio);
   const floor = Math.min(1, areaHard, dimensionRatio);
   return Math.min(dpr, Math.max(candidate, floor));
+}
+
+/**
+ * The slot geometry and effective ratio one presentation page renders at.
+ *
+ * Presentation mode fits the page being read (both axes), so every page has
+ * its own fit scale. The displayed slot is rounded exactly as the layout
+ * rounds it (`scaledPixels`), and the ratio is the same derivation a mounted
+ * canvas makes from that geometry. Computing both here lets the presentation
+ * preload rasterize a neighbour under exactly the cache key the canvas will
+ * look up on arrival, so a step is a blit instead of a fresh raster.
+ */
+export function presentationPagePlan(
+  size: { width: number; height: number },
+  scale: number,
+  dpr: number,
+): { width: number; height: number; ratio: number } {
+  const width = scaledPixels(size.width, scale);
+  const height = scaledPixels(size.height, scale);
+  const ratio = effectiveRenderRatio(
+    scale > 0 ? width / scale : width,
+    scale > 0 ? height / scale : height,
+    scale,
+    dpr,
+  );
+  return { width, height, ratio };
 }
 
 /**

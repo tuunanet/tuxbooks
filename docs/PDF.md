@@ -245,6 +245,15 @@ distraction-free one-page view:
   back onto the previous page) without touching zoom controls. The floating
   `PdfPresentationBar` mirrors prev/next/indicator and adds the exit
   control.
+- The next and previous pages pre-render into the shared bitmap cache ahead
+  of a flip. Only the current page is laid out, so the virtualization
+  observers never see a neighbour and the render budget never admits one;
+  without the preload every step rasterized from scratch behind a blank
+  placeholder. Each neighbour rasterizes offscreen at its own page fit scale,
+  one at a time, forward page first, once the current page is on screen (its
+  size is measured first so the cache key matches on arrival). A flip then
+  blits the retained bitmap instead of paying the raster, the same
+  next/prev job model Papers uses (`pps-view-presentation.c`).
 
 Shift participates in shortcut combos (`shift+space` vs `space`), so
 selection-extension keys and Shift+Space never alias the unmodified

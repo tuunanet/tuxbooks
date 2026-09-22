@@ -2249,4 +2249,36 @@ describe("PdfReader presentation mode (issue #65)", () => {
     await userEvent.click(screen.getByTestId("pdf-pres-exit"));
     expect(onExitPresentation).toHaveBeenCalledTimes(1);
   });
+
+  it("pre-renders the next page so a step blits instead of re-rastering", async () => {
+    const doc = makeFakePdfDocument(3, (pageNumber) =>
+      pageNumber === 2 ? { width: 1224, height: 612 } : { width: 612, height: 792 },
+    );
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({ get_reading_progress: null, save_reading_progress: null });
+    const container = stubViewportContainer();
+    renderPdfReader({
+      scrollContainerRef: { current: container },
+      presentationMode: true,
+      book: pdfBook,
+    });
+    await screen.findByTestId("pdf-canvas");
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: PRESENT_AREA_WIDTH, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+
+    // Page 1 is on screen and page 2 is already rasterized offscreen (once),
+    // so the shared cache holds the neighbour before any navigation.
+    await waitFor(() => expect(doc.renderPages.filter((page) => page === 2)).toHaveLength(1));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+
+    // Stepping forward consumes that bitmap: page 2 is never rastered a second
+    // time, so the step cannot flash a blank placeholder while it renders.
+    await userEvent.click(screen.getByTestId("pdf-pres-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    await screen.findByTestId("pdf-canvas");
+    expect(doc.renderPages.filter((page) => page === 2)).toHaveLength(1);
+  });
 });

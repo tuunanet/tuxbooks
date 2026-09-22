@@ -29,6 +29,10 @@ import { useReaderProgress } from "../useReaderProgress";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
+import {
+  usePdfPresentationPreload,
+  type PdfPreloadRequest,
+} from "./hooks/usePdfPresentationPreload";
 import { usePdfScale } from "./hooks/usePdfScale";
 import { usePdfSearch } from "./hooks/usePdfSearch";
 import {
@@ -399,7 +403,7 @@ export function PdfReader({
     openMs,
     openStartedAt,
   } = usePdfDocument(book.id, onDocumentLoad);
-  const { sizes, measurePages } = usePdfGeometry(pdfDocument, pageCount);
+  const { sizes, measurePages, isMeasured } = usePdfGeometry(pdfDocument, pageCount);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
 
   // Theme treatment (issue #67): the dark preset is Smart Dark — pages
@@ -417,6 +421,11 @@ export function PdfReader({
   const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
   const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(() => new Set());
+  // Presentation preloads that landed in the bitmap cache. Diagnostics only:
+  // the count re-renders the reader so `data-pdf-bitmap-cache` (and the
+  // preload attribute) reflect the off-viewport rasters, which otherwise
+  // mutate the cache without a state change.
+  const [preloadCount, setPreloadCount] = useState(0);
   // Pages holding a previous-scale bitmap kept on screen through a zoom
   // commit. Scale-and-swap (PdfPageCanvas) paints them transformed while the
   // pages admitted to the render budget rasterize; a completed render clears
@@ -431,6 +440,7 @@ export function PdfReader({
   const effectivePageCount = pageCount > 0 ? pageCount : PDF_PLACEHOLDER_PAGE_COUNT;
   const currentPage = positionToPage(position, effectivePageCount);
   const layoutReady = status === "ready" && sizes !== null;
+  const dpr = window.devicePixelRatio || 1;
 
   // Layout scale from the zoom state (§ issue #65): fit modes recompute
   // from the measured content area and viewport; presentation mode fits the
@@ -451,9 +461,19 @@ export function PdfReader({
     }),
     [zoom.mode, zoom.level, referencePage, presentationPage],
   );
-  const { scale, contentAreaRef: registerContentArea } = usePdfScale(
-    scaleRequest,
-    scrollContainerRef,
+  const {
+    scale,
+    contentAreaRef: registerContentArea,
+    areaWidth,
+    viewportHeight,
+  } = usePdfScale(scaleRequest, scrollContainerRef);
+
+  // Presentation preload request: the zoom state a neighbour's own fit scale
+  // is derived from. Memoized without the per-page override — the preload
+  // fills in each neighbour's page size itself.
+  const preloadRequest = useMemo<PdfPreloadRequest>(
+    () => ({ mode: zoom.mode, level: zoom.level, reference: referencePage }),
+    [zoom.mode, zoom.level, referencePage],
   );
 
   // PERF-11 diagnostics (docs/PERFORMANCE.md): the reader publishes one
@@ -749,7 +769,6 @@ export function PdfReader({
     // effective ratio² × 4, Phase 1's policy) before the count fallback.
     // The anchor survives any budget (capByBytes keeps the first page).
     const slotsByPage = new Map(documentSlots.map((slot) => [slot.pageNumber, slot]));
-    const dpr = window.devicePixelRatio || 1;
     const bufferBytes = (page: number): number => {
       const slot = slotsByPage.get(page);
       if (!slot) return 0;
@@ -757,7 +776,7 @@ export function PdfReader({
       return renderBufferBytes(slot.width, slot.height, ratio);
     };
     return capByBytes(active, bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(0, MAX_ACTIVE_CANVASES);
-  }, [currentPage, visiblePages, preloadPages, documentSlots, scale]);
+  }, [currentPage, visiblePages, preloadPages, documentSlots, scale, dpr]);
 
   // The render set, derived purely from the priority order and the
   // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
@@ -836,6 +855,41 @@ export function PdfReader({
     if (!layoutReady || (visiblePages.size === 0 && preloadPages.size === 0)) return;
     measurePages([...visiblePages, ...preloadPages]);
   }, [layoutReady, measurePages, visiblePages, preloadPages]);
+
+  // Presentation neighbours are measured even though only the current page is
+  // laid out: the preload needs each neighbour's real size to compute its own
+  // fit scale, and a key computed from a stale estimate would miss on arrival.
+  useEffect(() => {
+    if (!presentationMode || !layoutReady) return;
+    const neighbours = [currentPage - 1, currentPage + 1].filter(
+      (page) => page >= 1 && page <= effectivePageCount,
+    );
+    if (neighbours.length > 0) measurePages(neighbours);
+  }, [presentationMode, layoutReady, currentPage, effectivePageCount, measurePages]);
+
+  // Ready the next and previous pages for presentation steppers (§ issue #65):
+  // only the current page is in the render window, so without this every step
+  // rasterizes from scratch behind a blank placeholder.
+  const handlePreloaded = useCallback(() => {
+    setPreloadCount((count) => count + 1);
+  }, []);
+  usePdfPresentationPreload({
+    document: pdfDocument,
+    sizes,
+    currentPage,
+    pageCount: effectivePageCount,
+    enabled: presentationMode,
+    request: preloadRequest,
+    currentPageReady: renderedPages.has(currentPage),
+    isMeasured,
+    areaWidth,
+    viewportHeight,
+    bitmapCache,
+    smartColors: treatment.smart,
+    renderVariant,
+    dpr,
+    onPreloaded: handlePreloaded,
+  });
 
   // Re-anchor after layout-scale changes (zoom, fit recalculation,
   // window resize, presentation rescale): the anchor's page + in-page
@@ -1564,6 +1618,7 @@ export function PdfReader({
       data-pdf-presentation={presentationMode}
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
+      data-pdf-preload-count={preloadCount}
       {...openTelemetry}
       className={
         presentationMode
