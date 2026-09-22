@@ -88,9 +88,9 @@ describe("PdfSidebar virtualization", () => {
     // Page 1 completed before the window moved, so it is evicted: completed
     // canvases stay mounted only while their page stays in the window.
     await waitFor(() => expect(thumbnailPages()).toEqual(["5", "6", "7", "8"]));
-    // Low-resolution: the thumbnail renders at cell width / page width scale;
-    // the backing store floors the fractional 612·(112/612) viewport.
-    expect(screen.getAllByTestId("pdf-thumbnail")[0]).toHaveAttribute("width", "111");
+    // The thumbnail renders at cell width / page width scale, and the backing
+    // store matches the cell width exactly, so the browser never resamples it.
+    expect(screen.getAllByTestId("pdf-thumbnail")[0]).toHaveAttribute("width", "112");
   });
 
   it("caps mounted thumbnails at the render budget", async () => {
