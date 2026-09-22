@@ -1,18 +1,23 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PdfPageField } from "./PdfPageField";
 
 interface PdfPresentationBarProps {
   pageNumber: number;
   pageCount: number;
   onPrev: () => void;
   onNext: () => void;
+  /** Jumps to a typed page via the reader's `goToPage` path. */
+  onSetPage: (page: number) => void;
+  /** Disables the page field until the reader layout is ready. */
+  pageEntryDisabled?: boolean;
   onExit?: () => void;
 }
 
 /**
  * Presentation-mode controls (issue #65): a small floating bar at the
- * bottom edge of the document — prev/next, the page indicator, exit — so
- * the fullscreen reading workflow stays pointer-accessible while the
+ * bottom edge of the document with prev/next, an editable page field, and
+ * exit, so the fullscreen reading workflow stays pointer-accessible while the
  * normal reader chrome (header, footer, sidebar) is hidden. The page fills
  * the viewport height, so keyboard navigation (Space/PageDown/arrows) is
  * the primary path; the bar is only the fallback.
@@ -26,6 +31,8 @@ export function PdfPresentationBar({
   pageCount,
   onPrev,
   onNext,
+  onSetPage,
+  pageEntryDisabled = false,
   onExit,
 }: PdfPresentationBarProps) {
   return (
@@ -44,13 +51,15 @@ export function PdfPresentationBar({
         >
           <span aria-hidden="true">‹</span>
         </Button>
-        <span
-          data-testid="pdf-page-indicator"
-          aria-live="polite"
-          className="whitespace-nowrap px-2 text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
-        >
+        <span data-testid="pdf-page-indicator" aria-live="polite" className="sr-only">
           Page {pageNumber} of {pageCount}
         </span>
+        <PdfPageField
+          pageNumber={pageNumber}
+          pageCount={pageCount}
+          disabled={pageEntryDisabled}
+          onSetPage={onSetPage}
+        />
         <Button
           variant="ghost"
           size="icon-sm"
