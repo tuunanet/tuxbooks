@@ -7,6 +7,7 @@ import {
   isValidBookId,
   isValidLibraryLocationId,
 } from "../shared/pathSchema";
+import type { StorageReport } from "../shared/storageReport";
 
 /**
  * The preload bridge (docs/ARCHITECTURE.md): the renderer's entire view of
@@ -66,8 +67,8 @@ const api = {
   },
 
   /** App-owned storage report (data root, config root, sizes). */
-  storageReport(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.storageReport);
+  storageReport(): Promise<StorageReport> {
+    return ipcRenderer.invoke(IPC_CHANNELS.storageReport) as Promise<StorageReport>;
   },
 
   /** Open one app-owned storage root in the system file manager, by stable id. */

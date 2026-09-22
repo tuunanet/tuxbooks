@@ -86,20 +86,25 @@ export function writeStartupErrorLog(
   }
 }
 
+interface RecoveryDialog {
+  type: "error" | "warning";
+  title: string;
+  message: string;
+  detail: string;
+}
+
 /**
- * Show the native error dialog with the plain failure sentence and the log
- * path, and open the data root when its one button is chosen. Never throws.
+ * Show one recovery dialog with the single "Open data folder" button, opening
+ * the data root when it is chosen. Never throws: a dialog that cannot open
+ * must not crash the recovery path.
  */
-export async function showStartupErrorDialog(
+async function showRecoveryDialog(
   deps: Pick<StartupRecoveryDeps, "dialog" | "shell" | "paths">,
-  failure: unknown,
+  options: RecoveryDialog,
 ): Promise<void> {
   try {
     const { response } = await deps.dialog.showMessageBox({
-      type: "error",
-      title: "TuxBooks could not start",
-      message: `TuxBooks could not start. ${describeStartupFailure(failure)}.`,
-      detail: `A startup error log was written to:\n${startupErrorLogPath(deps.paths.dataDir)}`,
+      ...options,
       buttons: ["Open data folder"],
     });
     if (response === 0) {
@@ -108,6 +113,22 @@ export async function showStartupErrorDialog(
   } catch {
     // A dialog that cannot open must not crash the recovery path.
   }
+}
+
+/**
+ * Show the native error dialog with the plain failure sentence and the log
+ * path, and open the data root when its one button is chosen. Never throws.
+ */
+export async function showStartupErrorDialog(
+  deps: Pick<StartupRecoveryDeps, "dialog" | "shell" | "paths">,
+  failure: unknown,
+): Promise<void> {
+  await showRecoveryDialog(deps, {
+    type: "error",
+    title: "TuxBooks could not start",
+    message: `TuxBooks could not start. ${describeStartupFailure(failure)}.`,
+    detail: `A startup error log was written to:\n${startupErrorLogPath(deps.paths.dataDir)}`,
+  });
 }
 
 /**
@@ -122,11 +143,7 @@ export async function reportStartupFailure(
 ): Promise<void> {
   const message = startupFailureMessage(failure, deps.paths);
   writeStartupErrorLog(deps.fs, deps.paths, message, now);
-  try {
-    deps.stderr(message);
-  } catch {
-    // stderr can be closed under a GUI launch; the dialog still runs.
-  }
+  safeStderr(deps, message);
   await showStartupErrorDialog(deps, failure);
 }
 
@@ -174,22 +191,14 @@ export async function showQuarantineDialog(
   deps: Pick<StartupRecoveryDeps, "dialog" | "shell" | "paths">,
   report: QuarantineReport,
 ): Promise<void> {
-  try {
-    const { response } = await deps.dialog.showMessageBox({
-      type: "warning",
-      title: "TuxBooks repaired its database",
-      message: "TuxBooks found a damaged database and started a new one.",
-      detail:
-        `The damaged file was kept here:\n${report.to}\n\n` +
-        "TuxBooks moved it and its WAL and shared-memory files aside; nothing was deleted.",
-      buttons: ["Open data folder"],
-    });
-    if (response === 0) {
-      await deps.shell.openPath(deps.paths.dataDir);
-    }
-  } catch {
-    // A dialog that cannot open must not block startup.
-  }
+  await showRecoveryDialog(deps, {
+    type: "warning",
+    title: "TuxBooks repaired its database",
+    message: "TuxBooks found a damaged database and started a new one.",
+    detail:
+      `The damaged file was kept here:\n${report.to}\n\n` +
+      "TuxBooks moved it and its WAL and shared-memory files aside; nothing was deleted.",
+  });
 }
 
 /**

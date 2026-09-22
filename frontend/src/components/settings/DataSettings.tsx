@@ -111,10 +111,12 @@ export function DataSettings() {
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
       <div className="rounded-lg border p-4">
         <p data-testid="storage-total" className="text-sm font-medium">
-          Total app footprint: {formatMb(report.appDataBytes)}
+          TuxBooks app data: {formatMb(report.appDataBytes)} · Your book files:{" "}
+          {formatMb(report.bookTotalBytes)}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Some browser cache rebuilds while the app runs, so the numbers can change between visits.
+          Book files are counted where they live, not as app data. Some browser cache rebuilds while
+          the app runs, so the app data size can change between visits.
         </p>
       </div>
 
@@ -158,6 +160,11 @@ export function DataSettings() {
               </li>
             ))}
           </ul>
+          {root.id === "app-config" && (
+            <p data-testid="storage-settings-hint" className="mt-3 text-xs text-muted-foreground">
+              Includes your theme and reader settings. A full app data wipe would clear them.
+            </p>
+          )}
         </div>
       ))}
 

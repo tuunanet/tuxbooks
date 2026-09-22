@@ -96,6 +96,10 @@ describe("DataSettings", () => {
     expect(dataRoot).toHaveTextContent("Only copy");
     expect(dataRoot).toHaveTextContent("5.0 MB");
     expect(screen.getByTestId("storage-root-app-config")).toHaveTextContent("Derived");
+    expect(screen.getByTestId("storage-total")).toHaveTextContent("24.0 MB");
+    expect(screen.getByTestId("storage-settings-hint")).toHaveTextContent(
+      "theme and reader settings",
+    );
     expect(screen.getByTestId("storage-reassurance")).toHaveTextContent(
       "read in place and never copied",
     );

@@ -75,7 +75,7 @@ if (recoveryRequested) handleRecoveryFlags(startupFlags);
 function handleRecoveryFlags(flags: StartupFlags): void {
   const deps: ResetDataDeps = {
     fs,
-    dirs: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+    dirs: appStorageDirs(),
     stdout: (message) => console.log(message),
     stderr: (message) => console.error(message),
   };
@@ -156,6 +156,15 @@ function appDataDir(): string {
 
 function coversDir(): string {
   return path.join(appDataDir(), "covers");
+}
+
+/**
+ * The two app-owned storage roots, resolved once per call: the data root from
+ * main's resolver, the config root from Electron at runtime (the packaged
+ * directory name is uncertain, so it is never hardcoded).
+ */
+function appStorageDirs(): { dataDir: string; configDir: string } {
+  return { dataDir: appDataDir(), configDir: app.getPath("userData") };
 }
 
 /**
@@ -447,9 +456,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
       issued: new IssuedPaths(),
       dialog,
       shell,
-      // The data root reuses main's resolver; the config root is read at
-      // runtime because the packaged directory name is uncertain.
-      storageDirs: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+      storageDirs: appStorageDirs(),
       debugIpc: process.env.TUXBOOKS_DEBUG_IPC === "1",
       debugLog,
     },
@@ -542,7 +549,7 @@ app.whenReady().then(() => {
         dialog,
         shell,
         stderr: (message) => console.error(message),
-        paths: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+        paths: appStorageDirs(),
       });
       createWindow(forward);
     })
@@ -557,13 +564,10 @@ app.whenReady().then(() => {
           dialog,
           shell,
           stderr: (message) => console.error(message),
-          paths: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+          paths: appStorageDirs(),
         },
         error,
-      ).then(
-        () => app.quit(),
-        () => app.quit(),
-      );
+      ).finally(() => app.quit());
     });
 
   app.on("before-quit", () => sidecar.stop());

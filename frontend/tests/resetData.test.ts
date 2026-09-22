@@ -129,6 +129,10 @@ describe("--dry-run", () => {
 describe("--reset-data", () => {
   const WHEN = new Date("2026-09-22T08:00:00.000Z");
 
+  it("formats the quarantine stamp as the sidecar does", () => {
+    expect(quarantineStamp(WHEN)).toBe("20260922T080000.000Z");
+  });
+
   it("quarantines the database, clears app data, and leaves book files untouched", async () => {
     const database = path.join(dataDir, CATALOG_DB_FILENAME);
     write(database, 1000);
@@ -142,6 +146,7 @@ describe("--reset-data", () => {
     write(path.join(configDir, "Local Storage", "state"), 9);
     const outsideBook = path.join(outsideDir, "outside.epub");
     write(outsideBook, 700);
+    const beforeOutside = snapshot(outsideDir);
     const quarantinedPath = `${database}.corrupt-${quarantineStamp(WHEN)}`;
     const { deps, out } = harness({ now: () => WHEN });
 
@@ -163,6 +168,8 @@ describe("--reset-data", () => {
 
     expect(fs.readFileSync(path.join(dataDir, "book.epub")).length).toBe(500);
     expect(fs.readFileSync(outsideBook).length).toBe(700);
+    // A watched-location-style directory outside the two roots is untouched.
+    expect(snapshot(outsideDir)).toEqual(beforeOutside);
 
     const text = out.join("\n");
     expect(text).toContain(dataDir);

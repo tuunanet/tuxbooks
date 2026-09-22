@@ -119,7 +119,10 @@ Publication-derived and user-stored strings (metadata fields, annotation
 text/notes/locators, search hits, collection names, reader profile data) are
 rendered only through React text nodes and escaped attributes; the renderer
 has no `dangerouslySetInnerHTML`, no dynamic `href`, and no
-`document.title`/clipboard/notifications fed from data. The single URL-carrying
+`document.title`/clipboard/notifications fed from publication-derived or
+user-stored strings. The Data tab copies app-owned filesystem paths (the data
+root and the watched-location paths) to the clipboard; those carry no
+publication data. The single URL-carrying
 sink is the stored cover path, which `lib/bridge.ts coverFileUrl` reduces to a
 percent-encoded file name under the fixed `tuxbooks://cover/` scheme. Reader
 profile values from localStorage are snapped back onto the supported scales on

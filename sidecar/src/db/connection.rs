@@ -117,6 +117,13 @@ fn quarantine_files(db_path: &Path) -> Result<StartupRecovery, AppError> {
     })
 }
 
+/// The quarantine timestamp format: human-readable UTC. Matches the reset
+/// path's `quarantineStamp` in electron/main/resetData.ts; the two pinned
+/// tests ("...matches the reset path format") keep the pair in step.
+fn quarantine_stamp(now: chrono::DateTime<chrono::Utc>) -> String {
+    now.format("%Y%m%dT%H%M%S%.3fZ").to_string()
+}
+
 /// Pick a free `<db filename>.corrupt-<timestamp>` name in the database's
 /// directory. The timestamp is human-readable UTC; when that name already
 /// exists (two recoveries in the same millisecond, or a Windows rename whose
@@ -127,7 +134,7 @@ fn quarantine_target(db_path: &Path) -> PathBuf {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "tuxbooks.db".to_string());
-    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
+    let stamp = quarantine_stamp(chrono::Utc::now());
     for attempt in 0..1_000u32 {
         let candidate = if attempt == 0 {
             parent.join(format!("{file_name}.corrupt-{stamp}"))
@@ -196,6 +203,14 @@ mod tests {
         ] {
             assert!(names.contains(&expected.to_string()), "missing {expected}");
         }
+    }
+
+    #[test]
+    fn quarantine_stamp_matches_the_reset_path_format() {
+        let when = chrono::DateTime::parse_from_rfc3339("2026-09-22T08:00:00.000Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(quarantine_stamp(when), "20260922T080000.000Z");
     }
 
     #[test]
