@@ -148,6 +148,13 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
     await canvas.waitFor({ state: "attached", timeout: 30000 });
+    // Reading progress persists across tests in a seeded run, so reopening the
+    // fixture can restore to a page other than 1. Force the top before the
+    // geometry assertions below so they run against page 1 regardless.
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
     // The width attribute is 0 until the first raster lands. Wait for that or
     // the no-re-render assertion below reads a stale zero as the baseline.
     await waitForRendered(page, 1);
