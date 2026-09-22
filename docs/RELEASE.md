@@ -92,9 +92,10 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
 3. Tag it: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. Never move or
    reuse a tag — a bad build is fixed in the next version.
 4. The release workflow then runs two jobs:
-   - **verify** — Rust + frontend unit/integration tests and the headless
-     real-binary E2E suites (`just test`, `just test-e2e`), so a tag never
-     publishes what has not been proven;
+   - **verify** — the headless real-binary E2E suites (`just test-e2e`), the
+     part a commit's CI run does not cover; its unit and integration suites
+     were already green there, so a tag never publishes what has not been
+     proven;
    - **publish** — refuses to run unless the tag exactly matches the
      version in the packaging manifest, builds deb + AppImage, generates
      the SBOM (`just sbom`), writes `SHA256SUMS.txt` over the installers

@@ -66,7 +66,21 @@ retry() {
 CARGO_HOME_HOST="${CARGO_HOME:-$HOME/.cargo}"
 mkdir -p "$CARGO_HOME_HOST"
 
-retry 3 5 "$ENGINE" build -f "$DOCKERFILE" -t "$IMAGE" "$ROOT/scripts"
+# Optional BuildKit layer cache. CI sets TUXBOOKS_SIDECAR_CACHE=gha after
+# `docker/setup-buildx-action`; buildx then stores and restores the pinned
+# image's layers in the GitHub Actions cache, so the apt and dependency layers
+# are reused across runs. Local builds leave it unset and use the plain
+# builder.
+image_build=( "$ENGINE" build )
+if [ "${TUXBOOKS_SIDECAR_CACHE:-}" = "gha" ]; then
+  if [ "$ENGINE" = "docker" ] && "$ENGINE" buildx version >/dev/null 2>&1; then
+    image_build=( "$ENGINE" buildx build --cache-from type=gha --cache-to type=gha,mode=max --load )
+  else
+    echo "build-sidecar-release: TUXBOOKS_SIDECAR_CACHE=gha needs docker buildx; building without cache" >&2
+  fi
+fi
+
+retry 3 5 "${image_build[@]}" -f "$DOCKERFILE" -t "$IMAGE" "$ROOT/scripts"
 
 # --user keeps every file cargo writes in the bind-mounted workspace and
 # CARGO_HOME owned by the invoking user, so no root-owned target/ afterward.

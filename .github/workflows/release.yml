@@ -51,16 +51,15 @@ jobs:
         with:
           workspaces: sidecar
 
-      # Same gates CI's check jobs run before a build: unit/integration
-      # tests (Rust + frontend) and the real-binary headless E2E suites. A
-      # tag never publishes what main has not proven.
-      - name: Unit and integration tests
+      # CI already ran the unit/integration suites (Rust and frontend) on the
+      # commit this tag points at, and a tag is cut on a CI-gated commit on
+      # main. This job adds the part CI never runs: the real-binary headless
+      # E2E suites, so a tag never publishes what has not been proven.
+      - name: E2E (headless)
         run: |
           pnpm install --frozen-lockfile
-          just test
-
-      - name: E2E (headless)
-        run: just test-e2e
+          bash scripts/fetch-pdfium.sh
+          just test-e2e
 
       - name: Upload E2E failure artifacts
         if: failure()
@@ -95,6 +94,22 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
+      # Cache the Electron and electron-builder downloads (the packaging step
+      # otherwise re-fetches them every release) and give the pinned-glibc
+      # sidecar container a BuildKit layer cache in the Actions cache.
+      - name: Electron cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Set up Buildx (sidecar container cache)
+        uses: docker/setup-buildx-action@v3
+
       - name: Verify the tag matches the bundled version
         run: |
           declared="$(jq -r .version package.json)"
@@ -119,6 +134,8 @@ jobs:
       # the PDFium library into resources/sidecar (electron-builder.yml);
       # the packaging gate re-verifies the payload before anything publishes.
       - name: Build Debian and AppImage bundles
+        env:
+          TUXBOOKS_SIDECAR_CACHE: gha
         run: |
           pnpm install --frozen-lockfile
           # Quoted: `package` takes one TARGETS argument; unquoted, just
