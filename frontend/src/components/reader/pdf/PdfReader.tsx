@@ -78,7 +78,7 @@ import {
   type ScrollAdjustment,
   type ZoomMode,
 } from "./pdfLayout";
-import { pageToPosition, positionToPage } from "./pdfPages";
+import { clampPage, pageToPosition, positionToPage } from "./pdfPages";
 import type { ReaderSearchGroup } from "../searchModel";
 import type { Annotation, AnnotationInput, AnnotationRect } from "@/types/domain";
 import type { Book } from "@/types/domain";
@@ -1304,7 +1304,7 @@ export function PdfReader({
   }, []);
 
   const goToPage = (page: number) => {
-    const clamped = Math.max(1, Math.min(effectivePageCount, page));
+    const clamped = clampPage(page, effectivePageCount);
     setPosition(pageToPosition(clamped, effectivePageCount));
   };
   // Keep the adapter's jump on the latest page count and position mapping.
@@ -1601,6 +1601,8 @@ export function PdfReader({
       canZoomOut={displayScale > MIN_ZOOM + 1e-9}
       onPrev={() => goToPage(currentPage - 1)}
       onNext={() => goToPage(currentPage + 1)}
+      onSetPage={goToPage}
+      pageEntryDisabled={!layoutReady}
       onZoomIn={() => zoomByStepsRef.current(1)}
       onZoomOut={() => zoomByStepsRef.current(-1)}
       onSelectFit={setZoomMode}

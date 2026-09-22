@@ -10,6 +10,7 @@ import {
   type FitZoomMode,
   type ZoomMode,
 } from "./pdfLayout";
+import { PdfPageField } from "./PdfPageField";
 
 interface PdfToolbarProps {
   pageNumber: number;
@@ -22,6 +23,10 @@ interface PdfToolbarProps {
   canZoomOut: boolean;
   onPrev: () => void;
   onNext: () => void;
+  /** Jumps to a typed page via the reader's `goToPage` path. */
+  onSetPage: (page: number) => void;
+  /** Disables the page field until the reader layout is ready. */
+  pageEntryDisabled?: boolean;
   onZoomIn: () => void;
   onZoomOut: () => void;
   /** Switches to a dynamic fit mode from the zoom dropdown. */
@@ -224,8 +229,8 @@ function PdfZoomControl({
 }
 
 /**
- * PDF document controls: page navigation (`‹ Page 1 of 991 ›`), the Okular
- * style zoom combo (`−`, an editable percent input with a presets dropdown
+ * PDF document controls: page navigation (`‹ [1] of 991 ›`, an editable page
+ * field), the Okular style zoom combo (`−`, an editable percent input with a presets dropdown
  * including fit modes, `+`), and the presentation-mode toggle — one compact
  * group docked into the shell's reader header via a portal (issue #68), so no
  * dedicated control row takes vertical space from the pages. The dropdown's
@@ -242,6 +247,8 @@ export function PdfToolbar({
   canZoomOut,
   onPrev,
   onNext,
+  onSetPage,
+  pageEntryDisabled = false,
   onZoomIn,
   onZoomOut,
   onSelectFit,
@@ -267,13 +274,15 @@ export function PdfToolbar({
       >
         <span aria-hidden="true">‹</span>
       </Button>
-      <span
-        data-testid="pdf-page-indicator"
-        aria-live="polite"
-        className="whitespace-nowrap px-2 text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
-      >
+      <span data-testid="pdf-page-indicator" aria-live="polite" className="sr-only">
         Page {pageNumber} of {pageCount}
       </span>
+      <PdfPageField
+        pageNumber={pageNumber}
+        pageCount={pageCount}
+        disabled={pageEntryDisabled}
+        onSetPage={onSetPage}
+      />
       <Button
         variant="ghost"
         size="icon-sm"

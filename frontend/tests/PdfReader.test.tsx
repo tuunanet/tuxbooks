@@ -21,6 +21,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 });
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
+import { PdfToolbar } from "@/components/reader/pdf/PdfToolbar";
 import type { ReaderSelection } from "@/components/reader/annotationModel";
 import type { ReaderAdapter } from "@/components/reader/readerModel";
 import {
@@ -1322,6 +1323,143 @@ describe("PdfReader navigation", () => {
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
     );
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+  });
+});
+
+describe("PdfReader page field", () => {
+  async function renderThreePageReader() {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+    await renderLoadedReader();
+  }
+
+  it("selects the whole value on focus and tracks live navigation", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input") as HTMLInputElement;
+    expect(input).toHaveValue("1");
+    expect(input).toHaveAttribute("inputmode", "numeric");
+    expect(input).toHaveAttribute("autocomplete", "off");
+
+    act(() => {
+      input.focus();
+    });
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(1);
+
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() => expect(input).toHaveValue("2"));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+  });
+
+  it("jumps to a typed page on Enter and scrolls it to the top", async () => {
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      await renderThreePageReader();
+      scrollIntoViewSpy.mockClear();
+
+      const input = screen.getByTestId("pdf-page-input");
+      await userEvent.clear(input);
+      await userEvent.type(input, "3{Enter}");
+
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
+      );
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3");
+      expect(input).toHaveValue("3");
+      expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(3));
+      expect(scrollIntoViewSpy.mock.calls[0]?.[0]).toEqual({
+        block: "start",
+        inline: "nearest",
+      });
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  it("commits a changed value on blur", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "2");
+    await userEvent.tab();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
+    );
+    expect(input).toHaveValue("2");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
+  });
+
+  it("discards the edit on Escape without jumping", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input");
+    await userEvent.clear(input);
+    await userEvent.type(input, "3{Escape}");
+
+    expect(input).toHaveValue("1");
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
+  });
+
+  it("silently keeps the current page for empty or non-numeric input", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "{Enter}");
+    expect(input).toHaveValue("1");
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "abc{Enter}");
+    expect(input).toHaveValue("1");
+  });
+
+  it("clamps typed values onto the document's page range", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "99{Enter}");
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
+    );
+    expect(input).toHaveValue("3");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "0{Enter}");
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1"),
+    );
+    expect(input).toHaveValue("1");
+  });
+
+  it("disables the field until the reader layout is ready", () => {
+    const props = {
+      pageNumber: 1,
+      pageCount: 3,
+      zoomMode: "custom" as const,
+      zoomScale: 1,
+      canZoomIn: true,
+      canZoomOut: true,
+      onPrev: () => {},
+      onNext: () => {},
+      onZoomIn: () => {},
+      onZoomOut: () => {},
+      onSelectFit: () => {},
+      onSetZoom: () => {},
+      onSetPage: () => {},
+    };
+    const view = render(<PdfToolbar {...props} pageEntryDisabled />);
+    expect(screen.getByTestId("pdf-page-input")).toBeDisabled();
+    view.rerender(<PdfToolbar {...props} />);
+    expect(screen.getByTestId("pdf-page-input")).toBeEnabled();
   });
 });
 
