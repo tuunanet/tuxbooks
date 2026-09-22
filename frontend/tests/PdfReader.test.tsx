@@ -1461,6 +1461,96 @@ describe("PdfReader page field", () => {
     view.rerender(<PdfToolbar {...props} />);
     expect(screen.getByTestId("pdf-page-input")).toBeEnabled();
   });
+
+  async function focusPageInput() {
+    const input = screen.getByTestId("pdf-page-input") as HTMLInputElement;
+    act(() => {
+      input.focus();
+    });
+    return input;
+  }
+
+  it("steps forward and back with the arrow keys while focused", async () => {
+    await renderThreePageReader();
+    const input = await focusPageInput();
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
+    );
+    expect(input).toHaveValue("2");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1"),
+    );
+    expect(input).toHaveValue("1");
+  });
+
+  it("steps one page per wheel tick in either direction while focused", async () => {
+    await renderThreePageReader();
+    const input = await focusPageInput();
+
+    fireEvent.wheel(input, { deltaY: 100 });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
+    );
+
+    fireEvent.wheel(input, { deltaY: -100 });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1"),
+    );
+  });
+
+  it("ignores wheel ticks over the unfocused field", async () => {
+    await renderThreePageReader();
+    const input = screen.getByTestId("pdf-page-input");
+
+    fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+    expect(input).toHaveValue("1");
+  });
+
+  it("ignores modified wheel ticks that belong to zoom", async () => {
+    await renderThreePageReader();
+    const input = await focusPageInput();
+
+    fireEvent.wheel(input, { deltaY: 100, ctrlKey: true });
+    fireEvent.wheel(input, { deltaY: 100, metaKey: true });
+    fireEvent.wheel(input, { deltaY: 100, altKey: true });
+
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+    expect(input).toHaveValue("1");
+  });
+
+  it("ignores a micro wheel tick below the step threshold", async () => {
+    await renderThreePageReader();
+    const input = await focusPageInput();
+
+    fireEvent.wheel(input, { deltaY: 5 });
+
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+    expect(input).toHaveValue("1");
+  });
+
+  it("stops stepping at the page bounds", async () => {
+    await renderThreePageReader();
+    const input = await focusPageInput();
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
+    );
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3");
+    expect(input).toHaveValue("3");
+  });
 });
 
 describe("PdfReader controls docking", () => {
