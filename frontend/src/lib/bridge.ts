@@ -56,6 +56,7 @@ export interface TuxbooksApi {
   revealBook(bookId: number): Promise<void>;
   storageReport(): Promise<StorageReport>;
   openDataFolder(rootId: StorageRootId): Promise<void>;
+  clearCache(): Promise<number>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
 }
@@ -319,6 +320,14 @@ export function getStorageReport(): Promise<StorageReport> {
 /** Open one app-owned storage root in the system file manager (by root id). */
 export function openDataFolder(rootId: StorageRootId): Promise<void> {
   return tuxbooks().openDataFolder(rootId);
+}
+
+/**
+ * Clear the caches the app rebuilds by itself (browser caches and the GPU
+ * fallback marker); resolves the bytes freed.
+ */
+export function clearCache(): Promise<number> {
+  return tuxbooks().clearCache();
 }
 
 /** Absolute filesystem path of a dropped File (sandboxed preload helper). */

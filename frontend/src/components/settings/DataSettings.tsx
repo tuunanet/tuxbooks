@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  clearCache,
   getStorageReport,
   openDataFolder,
   type StorageEntryKind,
@@ -35,6 +44,9 @@ function formatMb(bytes: number): string {
 export function DataSettings() {
   const [report, setReport] = useState<StorageReport | null>(null);
   const [failed, setFailed] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [freed, setFreed] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -49,6 +61,20 @@ export function DataSettings() {
     return () => {
       active = false;
     };
+  }, []);
+
+  const confirmClear = useCallback(async () => {
+    setClearing(true);
+    try {
+      const bytes = await clearCache();
+      setFreed(bytes);
+      setConfirmOpen(false);
+      setReport(await getStorageReport());
+    } catch {
+      setConfirmOpen(false);
+    } finally {
+      setClearing(false);
+    }
   }, []);
 
   const open = useCallback((rootId: StorageRootId) => {
@@ -131,6 +157,37 @@ export function DataSettings() {
         </div>
       ))}
 
+      <div data-testid="storage-clear-cache" className="rounded-lg border p-4">
+        <p className="text-sm font-medium">Clear cache</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Frees the browser caches and the GPU fallback marker, the data TuxBooks rebuilds by
+          itself. Your catalog, cover cache, settings, and books stay.
+        </p>
+        <Button
+          data-testid="clear-cache-button"
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          disabled={report.cacheBytes === 0}
+          onClick={() => {
+            setFreed(null);
+            setConfirmOpen(true);
+          }}
+        >
+          Clear cache ({formatMb(report.cacheBytes)})
+        </Button>
+        {freed !== null && (
+          <p
+            data-testid="storage-clear-result"
+            role="status"
+            className="mt-2 text-xs text-muted-foreground"
+          >
+            Freed {formatMb(freed)}. Some browser cache is rewritten while the app runs, so freed
+            space can read larger after a restart.
+          </p>
+        )}
+      </div>
+
       <div data-testid="storage-book-locations" className="rounded-lg border p-4">
         <p className="text-sm font-medium">Book folders</p>
         {report.bookLocations.length === 0 ? (
@@ -181,6 +238,40 @@ export function DataSettings() {
       <p data-testid="storage-reassurance" className="text-xs text-muted-foreground">
         Your books are read in place and never copied into the app.
       </p>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent data-testid="clear-cache-dialog" className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Clear cache?</DialogTitle>
+            <DialogDescription>
+              Removes the browser caches and the GPU fallback marker. Keeps your catalog, cover
+              cache, settings, and books. Some browser cache is rewritten while the app runs, so
+              freed space can read larger after a restart.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="clear-cache-cancel"
+              onClick={() => setConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="clear-cache-confirm"
+              disabled={clearing}
+              onClick={() => void confirmClear()}
+            >
+              Yes, clear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

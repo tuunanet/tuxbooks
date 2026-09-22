@@ -307,6 +307,7 @@ describe("boundary configuration tables (T-5)", () => {
       reveal: "tuxbooks:reveal",
       storageReport: "tuxbooks:storage-report",
       openDataFolder: "tuxbooks:open-data-folder",
+      clearCache: "tuxbooks:clear-cache",
       event: "tuxbooks:event",
     });
   });

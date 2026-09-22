@@ -1,14 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { GPU_FALLBACK_MARKER } from "../../../electron/main/gpuFallback";
 import { registerIpcHandlers, type IpcHandler } from "../../../electron/main/ipcHandlers";
 import { IssuedPaths } from "../../../electron/main/ipcPolicy";
+import type { StorageDirs } from "../../../electron/main/storageSizing";
 import { IPC_CHANNELS } from "../../../electron/shared/pathSchema";
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
 const ALLOWED = "app://bundle/index.html";
 const HOSTILE = "app://evil/index.html";
 
-const STORAGE_DIRS = { dataDir: "/app/data", configDir: "/app/config" };
+const STORAGE_DIRS: StorageDirs = {
+  dataDir: path.join(os.tmpdir(), `ipc-handlers-missing-data-${process.pid}`),
+  configDir: path.join(os.tmpdir(), `ipc-handlers-missing-config-${process.pid}`),
+};
 
 const LIBRARY_STATS = {
   locations: [
@@ -24,6 +33,7 @@ const ALL_CHANNELS = [
   IPC_CHANNELS.reveal,
   IPC_CHANNELS.storageReport,
   IPC_CHANNELS.openDataFolder,
+  IPC_CHANNELS.clearCache,
 ];
 
 function senderEvent(url: string): { senderFrame: { url: string } } {
@@ -35,10 +45,11 @@ function argsFor(channel: string): unknown[] {
   if (channel === IPC_CHANNELS.dialog) return ["directory"];
   if (channel === IPC_CHANNELS.storageReport) return [];
   if (channel === IPC_CHANNELS.openDataFolder) return ["app-data"];
+  if (channel === IPC_CHANNELS.clearCache) return [];
   return [3];
 }
 
-function harness(): {
+function harness(storageDirs: StorageDirs = STORAGE_DIRS): {
   handlers: Map<string, IpcHandler>;
   sidecar: { call: ReturnType<typeof vi.fn> };
   dialog: { showOpenDialog: ReturnType<typeof vi.fn> };
@@ -64,7 +75,7 @@ function harness(): {
     issued: new IssuedPaths(),
     dialog,
     shell,
-    storageDirs: STORAGE_DIRS,
+    storageDirs,
     debugIpc: false,
   });
   return { handlers, sidecar, dialog, shell };
@@ -142,5 +153,97 @@ describe("storage report channel (data-management spec)", () => {
       /data folder id/,
     );
     expect(shell.openPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("cache clear channel (data-management spec)", () => {
+  let dataDir: string;
+  let configDir: string;
+
+  function write(filePath: string, bytes: number): void {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, Buffer.alloc(bytes, 1));
+  }
+
+  async function clear(dirs: StorageDirs): Promise<number> {
+    const { handlers } = harness(dirs);
+    const handler = handlers.get(IPC_CHANNELS.clearCache);
+    expect(handler).toBeDefined();
+    return (await handler!(senderEvent(ALLOWED) as never)) as number;
+  }
+
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "clear-data-"));
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), "clear-config-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  it("removes only the browser caches and GPU marker and frees their bytes", async () => {
+    write(path.join(configDir, "Cache", "a"), 400);
+    write(path.join(configDir, "GPUCache", "b"), 100);
+    write(path.join(configDir, "Preferences"), 7);
+    write(path.join(configDir, "Local Storage", "state"), 8);
+    write(path.join(dataDir, "tuxbooks.db"), 1000);
+    write(path.join(dataDir, "tuxbooks.db-wal"), 40);
+    write(path.join(dataDir, "covers", "cover.png"), 300);
+    write(path.join(dataDir, GPU_FALLBACK_MARKER), 5);
+    write(path.join(dataDir, "book.epub"), 500);
+
+    const freed = await clear({ dataDir, configDir });
+
+    expect(freed).toBe(505);
+    expect(fs.existsSync(path.join(configDir, "Cache"))).toBe(false);
+    expect(fs.existsSync(path.join(configDir, "GPUCache"))).toBe(false);
+    expect(fs.existsSync(path.join(dataDir, GPU_FALLBACK_MARKER))).toBe(false);
+
+    expect(fs.existsSync(path.join(configDir, "Preferences"))).toBe(true);
+    expect(fs.existsSync(path.join(configDir, "Local Storage", "state"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "tuxbooks.db"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "tuxbooks.db-wal"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "covers", "cover.png"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir, "book.epub"))).toBe(true);
+  });
+
+  it("refuses a cache target that is a symlink out of the root", async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "clear-outside-"));
+    write(path.join(outside, "secret"), 9999);
+    try {
+      fs.symlinkSync(outside, path.join(configDir, "Cache"), "dir");
+    } catch {
+      fs.rmSync(outside, { recursive: true, force: true });
+      return;
+    }
+    try {
+      const freed = await clear({ dataDir, configDir });
+      expect(freed).toBe(0);
+      expect(fs.existsSync(path.join(outside, "secret"))).toBe(true);
+      expect(fs.existsSync(path.join(configDir, "Cache"))).toBe(true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does not follow a symlink planted inside a cache directory", async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "clear-outside-"));
+    write(path.join(outside, "secret"), 9999);
+    write(path.join(configDir, "Cache", "real"), 100);
+    try {
+      fs.symlinkSync(path.join(outside, "secret"), path.join(configDir, "Cache", "link"));
+    } catch {
+      fs.rmSync(outside, { recursive: true, force: true });
+      return;
+    }
+    try {
+      const freed = await clear({ dataDir, configDir });
+      expect(freed).toBe(100);
+      expect(fs.existsSync(path.join(configDir, "Cache"))).toBe(false);
+      expect(fs.existsSync(path.join(outside, "secret"))).toBe(true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

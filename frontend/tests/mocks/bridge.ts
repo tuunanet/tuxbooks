@@ -38,6 +38,7 @@ export const storageReportMock: Mock<() => Promise<StorageReport>> = vi.fn(
 export const openDataFolderMock: Mock<(rootId: StorageRootId) => Promise<void>> = vi.fn(
   async () => {},
 );
+export const clearCacheMock: Mock<() => Promise<number>> = vi.fn(async () => 0);
 export const fetchBookBytesMock: Mock<(bookId: number, format: string) => Promise<ArrayBuffer>> =
   vi.fn(async () => new ArrayBuffer(16));
 export const pathForFileMock: Mock<(file: File) => string> = vi.fn(
@@ -68,6 +69,7 @@ export function installTuxbooksMock(): void {
     revealBook: (bookId: number) => revealBookMock(bookId),
     storageReport: () => storageReportMock(),
     openDataFolder: (rootId: StorageRootId) => openDataFolderMock(rootId),
+    clearCache: () => clearCacheMock(),
     fetchBookBytes: (bookId: number, format: string) => fetchBookBytesMock(bookId, format),
     pathForFile: (file: File) => pathForFileMock(file),
   };
