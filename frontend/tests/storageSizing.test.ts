@@ -1,0 +1,133 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { GPU_FALLBACK_MARKER } from "../../electron/main/gpuFallback";
+import { buildStorageReport, directoryBytes } from "../../electron/main/storageSizing";
+import type { StorageReport, StorageRoot } from "../../electron/shared/storageReport";
+
+/**
+ * Main-process sizing tests (data-management spec): the bounded walk and the
+ * report it feeds. Real temp directories, external behavior only: what the
+ * report contains, never how the walk is written.
+ */
+
+let dataDir: string;
+let configDir: string;
+
+beforeEach(() => {
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "storage-data-"));
+  configDir = fs.mkdtempSync(path.join(os.tmpdir(), "storage-config-"));
+});
+
+afterEach(() => {
+  fs.rmSync(dataDir, { recursive: true, force: true });
+  fs.rmSync(configDir, { recursive: true, force: true });
+});
+
+function write(filePath: string, bytes: number): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, Buffer.alloc(bytes, 1));
+}
+
+function rootById(report: StorageReport, id: "app-data" | "app-config"): StorageRoot {
+  const root = report.roots.find((candidate) => candidate.id === id);
+  if (!root) throw new Error(`missing root ${id}`);
+  return root;
+}
+
+describe("directoryBytes", () => {
+  it("sums files recursively", () => {
+    write(path.join(dataDir, "a.bin"), 100);
+    write(path.join(dataDir, "nested", "b.bin"), 200);
+    expect(directoryBytes(dataDir)).toBe(300);
+  });
+
+  it("does not follow symlinks", () => {
+    write(path.join(dataDir, "real.bin"), 100);
+    const outside = path.join(os.tmpdir(), `storage-outside-${process.pid}-${Date.now()}`);
+    write(outside, 5000);
+    try {
+      fs.symlinkSync(outside, path.join(dataDir, "link.bin"));
+    } catch {
+      fs.rmSync(outside, { force: true });
+      return;
+    }
+    try {
+      expect(directoryBytes(dataDir)).toBe(100);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+
+  it("reads a missing directory as zero without throwing", () => {
+    expect(directoryBytes(path.join(dataDir, "nope"))).toBe(0);
+  });
+});
+
+describe("buildStorageReport", () => {
+  it("sizes the data root entries", () => {
+    write(path.join(dataDir, "tuxbooks.db"), 1000);
+    write(path.join(dataDir, "tuxbooks.db-wal"), 40);
+    write(path.join(dataDir, "tuxbooks.db-shm"), 10);
+    write(path.join(dataDir, "covers", "a.png"), 300);
+    write(path.join(dataDir, "covers", "b.png"), 200);
+    write(path.join(dataDir, GPU_FALLBACK_MARKER), 5);
+
+    const report = buildStorageReport({ dataDir, configDir });
+    const dataRoot = rootById(report, "app-data");
+    expect(dataRoot.id).toBe("app-data");
+    expect(dataRoot.sizeBytes).toBe(directoryBytes(dataDir));
+    expect(dataRoot.entries.find((entry) => entry.id === "catalog")).toMatchObject({
+      sizeBytes: 1050,
+      kind: "only-copy",
+    });
+    expect(dataRoot.entries.find((entry) => entry.id === "covers")).toMatchObject({
+      sizeBytes: 500,
+      kind: "derived",
+    });
+    expect(dataRoot.entries.find((entry) => entry.id === "gpu-fallback")).toMatchObject({
+      sizeBytes: 5,
+      kind: "derived",
+    });
+  });
+
+  it("sizes the config root caches and settings and the cache total", () => {
+    write(path.join(configDir, "Cache", "x"), 400);
+    write(path.join(configDir, "GPUCache", "y"), 100);
+    write(path.join(configDir, "Preferences"), 7);
+    write(path.join(dataDir, GPU_FALLBACK_MARKER), 5);
+
+    const report = buildStorageReport({ dataDir, configDir });
+    const configRoot = rootById(report, "app-config");
+    expect(configRoot.id).toBe("app-config");
+    expect(configRoot.sizeBytes).toBe(directoryBytes(configDir));
+    expect(configRoot.entries.find((entry) => entry.id === "browser-caches")).toMatchObject({
+      sizeBytes: 500,
+      kind: "derived",
+    });
+    expect(configRoot.entries.find((entry) => entry.id === "settings")).toMatchObject({
+      sizeBytes: directoryBytes(configDir) - 500,
+      kind: "settings",
+    });
+    expect(report.cacheBytes).toBe(505);
+    expect(report.appDataBytes).toBe(
+      report.roots.reduce((total, root) => total + root.sizeBytes, 0),
+    );
+  });
+
+  it("leaves book locations and catalog counts for a later ticket", () => {
+    const report = buildStorageReport({ dataDir, configDir });
+    expect(report.bookLocations).toEqual([]);
+    expect(report.bookTotalBytes).toBe(0);
+    expect(report.catalog).toEqual({
+      books: 0,
+      authors: 0,
+      collections: 0,
+      annotations: 0,
+      readingProgress: 0,
+    });
+  });
+});

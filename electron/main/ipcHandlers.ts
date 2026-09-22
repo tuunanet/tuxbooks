@@ -1,6 +1,12 @@
-import { IPC_CHANNELS, isAllowedSenderUrl, isValidBookId } from "../shared/pathSchema";
+import {
+  IPC_CHANNELS,
+  isAllowedSenderUrl,
+  isStorageRootId,
+  isValidBookId,
+} from "../shared/pathSchema";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import { Sidecar, SidecarError } from "./sidecar";
+import { buildStorageReport, type StorageDirs } from "./storageSizing";
 
 /**
  * The renderer-facing ipcMain handlers (docs/ARCHITECTURE.md, issue #84):
@@ -23,6 +29,7 @@ export interface NativeDialogSurface {
 /** The native shell surface the handlers use; injected from the main process. */
 export interface NativeShellSurface {
   showItemInFolder(fullPath: string): void;
+  openPath(fullPath: string): Promise<string>;
 }
 
 /** Minimal sender view of the Electron IPC event. */
@@ -37,6 +44,7 @@ export interface IpcHandlerDeps {
   issued: IssuedPaths;
   dialog: NativeDialogSurface;
   shell: NativeShellSurface;
+  storageDirs: StorageDirs;
   debugIpc: boolean;
   debugLog?: (line: string) => void;
 }
@@ -49,12 +57,12 @@ function requireAppSender(event: SenderEvent): void {
   }
 }
 
-/** Register the invoke, dialog, and reveal handlers on `register`. */
+/** Register the invoke, dialog, reveal, and storage handlers on `register`. */
 export function registerIpcHandlers(
   register: (channel: string, handler: IpcHandler) => void,
   deps: IpcHandlerDeps,
 ): void {
-  const { sidecar, issued, dialog, shell, debugIpc, debugLog } = deps;
+  const { sidecar, issued, dialog, shell, storageDirs, debugIpc, debugLog } = deps;
 
   register(IPC_CHANNELS.invoke, async (event, method: unknown, params: unknown) => {
     requireAppSender(event);
@@ -133,5 +141,21 @@ export function registerIpcHandlers(
       throw new SidecarError(`no book ${bookId}`);
     }
     shell.showItemInFolder(book.path);
+  });
+
+  register(IPC_CHANNELS.storageReport, async (event) => {
+    requireAppSender(event);
+    return buildStorageReport(storageDirs);
+  });
+
+  register(IPC_CHANNELS.openDataFolder, async (event, rootId: unknown) => {
+    requireAppSender(event);
+    // The renderer names a stable root id; main resolves the real path and
+    // never accepts one from the renderer (data-management spec).
+    if (!isStorageRootId(rootId)) {
+      throw new SidecarError("open requires a known data folder id");
+    }
+    const target = rootId === "app-data" ? storageDirs.dataDir : storageDirs.configDir;
+    await shell.openPath(target);
   });
 }
