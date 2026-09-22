@@ -14,7 +14,7 @@ use crate::error::AppError;
 pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> {
     let locations = sqlx::query_as::<_, LibraryLocationStat>(
         r#"
-        SELECT l.path, l.added_at,
+        SELECT l.id AS id, l.path, l.added_at,
                COUNT(b.id) AS book_count,
                COALESCE(SUM(b.file_size), 0) AS total_bytes
         FROM library_locations l

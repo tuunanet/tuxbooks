@@ -12,6 +12,7 @@ import {
   clearCache,
   getStorageReport,
   openDataFolder,
+  openLibraryLocation,
   type StorageEntryKind,
   type StorageReport,
   type StorageRootId,
@@ -21,7 +22,6 @@ const KIND_LABEL: Record<StorageEntryKind, string> = {
   derived: "Derived",
   "only-copy": "Only copy",
   settings: "Settings",
-  books: "Books",
 };
 
 const CATALOG_ROWS = [
@@ -79,6 +79,10 @@ export function DataSettings() {
 
   const open = useCallback((rootId: StorageRootId) => {
     void openDataFolder(rootId).catch(() => {});
+  }, []);
+
+  const openLocation = useCallback((locationId: number) => {
+    void openLibraryLocation(locationId).catch(() => {});
   }, []);
 
   const copyPath = useCallback((pathValue: string) => {
@@ -200,17 +204,31 @@ export function DataSettings() {
         ) : (
           <ul className="mt-4 divide-y">
             {report.bookLocations.map((location) => (
-              <li key={location.path} className="flex items-center justify-between gap-4 py-2">
-                <code
-                  title={location.path}
-                  className="min-w-0 truncate text-xs text-muted-foreground"
-                >
-                  {location.path}
-                </code>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                  {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
-                  {formatMb(location.totalBytes)}
-                </span>
+              <li
+                key={location.id}
+                data-testid={`storage-location-${location.id}`}
+                className="flex items-center justify-between gap-4 py-2"
+              >
+                <div className="min-w-0">
+                  <code
+                    title={location.path}
+                    className="block truncate text-xs text-muted-foreground"
+                  >
+                    {location.path}
+                  </code>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
+                    {formatMb(location.totalBytes)}
+                  </span>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openLocation(location.id)}>
+                    Open folder
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => copyPath(location.path)}>
+                    Copy path
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
@@ -261,7 +279,6 @@ export function DataSettings() {
             </Button>
             <Button
               type="button"
-              variant="destructive"
               size="sm"
               data-testid="clear-cache-confirm"
               disabled={clearing}

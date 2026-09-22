@@ -21,7 +21,13 @@ const STORAGE_DIRS: StorageDirs = {
 
 const LIBRARY_STATS = {
   locations: [
-    { path: "/books", addedAt: "2026-01-01T00:00:00.000Z", bookCount: 2, totalBytes: 3_000_000 },
+    {
+      id: 1,
+      path: "/books",
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bookCount: 2,
+      totalBytes: 3_000_000,
+    },
   ],
   bookTotalBytes: 3_000_000,
   catalog: { books: 2, authors: 1, collections: 0, annotations: 0, readingProgress: 0 },
@@ -33,6 +39,7 @@ const ALL_CHANNELS = [
   IPC_CHANNELS.reveal,
   IPC_CHANNELS.storageReport,
   IPC_CHANNELS.openDataFolder,
+  IPC_CHANNELS.openLibraryLocation,
   IPC_CHANNELS.clearCache,
 ];
 
@@ -45,6 +52,7 @@ function argsFor(channel: string): unknown[] {
   if (channel === IPC_CHANNELS.dialog) return ["directory"];
   if (channel === IPC_CHANNELS.storageReport) return [];
   if (channel === IPC_CHANNELS.openDataFolder) return ["app-data"];
+  if (channel === IPC_CHANNELS.openLibraryLocation) return [1];
   if (channel === IPC_CHANNELS.clearCache) return [];
   return [3];
 }
@@ -116,6 +124,9 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
     if (channel === IPC_CHANNELS.openDataFolder) {
       expect(shell.openPath).toHaveBeenCalledWith(STORAGE_DIRS.dataDir);
     }
+    if (channel === IPC_CHANNELS.openLibraryLocation) {
+      expect(shell.openPath).toHaveBeenCalledWith("/books");
+    }
   });
 });
 
@@ -151,6 +162,27 @@ describe("storage report channel (data-management spec)", () => {
     );
     await expect(handler!(senderEvent(ALLOWED) as never, "app-data/../app-config")).rejects.toThrow(
       /data folder id/,
+    );
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("open library location channel (data-management spec)", () => {
+  it("resolves a watched location by id and rejects a renderer-supplied path", async () => {
+    const { handlers, shell } = harness();
+    const handler = handlers.get(IPC_CHANNELS.openLibraryLocation);
+    expect(handler).toBeDefined();
+
+    await handler!(senderEvent(ALLOWED) as never, 1);
+    expect(shell.openPath).toHaveBeenCalledWith("/books");
+
+    shell.openPath.mockClear();
+    await expect(handler!(senderEvent(ALLOWED) as never, "/books")).rejects.toThrow(
+      /library location id/,
+    );
+    await expect(handler!(senderEvent(ALLOWED) as never, 0)).rejects.toThrow(/library location id/);
+    await expect(handler!(senderEvent(ALLOWED) as never, 99)).rejects.toThrow(
+      /no library location 99/,
     );
     expect(shell.openPath).not.toHaveBeenCalled();
   });

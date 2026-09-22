@@ -12,6 +12,7 @@ pub struct LibraryStats {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryLocationStat {
+    pub id: i64,
     pub path: String,
     pub added_at: String,
     pub book_count: i64,

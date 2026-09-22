@@ -261,6 +261,11 @@ export function isStorageRootId(value: unknown): value is StorageRootId {
   return value === "app-data" || value === "app-config";
 }
 
+/** Type guard for renderer-supplied watched-location ids (preload arguments). */
+export function isValidLibraryLocationId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /** The only ipcMain channels the preload may touch. */
 export const IPC_CHANNELS = {
   invoke: "tuxbooks:invoke",
@@ -268,6 +273,7 @@ export const IPC_CHANNELS = {
   reveal: "tuxbooks:reveal",
   storageReport: "tuxbooks:storage-report",
   openDataFolder: "tuxbooks:open-data-folder",
+  openLibraryLocation: "tuxbooks:open-library-location",
   clearCache: "tuxbooks:clear-cache",
   event: "tuxbooks:event",
 } as const;

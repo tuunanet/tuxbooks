@@ -5,6 +5,7 @@ import {
   isStorageRootId,
   isValidBookFormat,
   isValidBookId,
+  isValidLibraryLocationId,
 } from "../shared/pathSchema";
 
 /**
@@ -75,6 +76,14 @@ const api = {
       return Promise.reject(new TypeError(`invalid data folder id: ${String(rootId)}`));
     }
     return ipcRenderer.invoke(IPC_CHANNELS.openDataFolder, rootId);
+  },
+
+  /** Open one watched library location in the system file manager, by id. */
+  openLibraryLocation(locationId: number): Promise<void> {
+    if (!isValidLibraryLocationId(locationId)) {
+      return Promise.reject(new TypeError(`invalid library location id: ${String(locationId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.openLibraryLocation, locationId);
   },
 
   /** Remove the regenerable browser caches and GPU marker; resolves bytes freed. */

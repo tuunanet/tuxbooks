@@ -15,6 +15,7 @@ import {
   isStorageRootId,
   isValidBookId,
   isValidBookFormat,
+  isValidLibraryLocationId,
   isValidLibraryPath,
   memberMime,
   parseBookId,
@@ -269,6 +270,31 @@ describe("isStorageRootId (storage rows are named by stable id, never a path)", 
   });
 });
 
+describe("isValidLibraryLocationId (watched rows are named by id, never a path)", () => {
+  it("accepts positive safe integers", () => {
+    expect(isValidLibraryLocationId(1)).toBe(true);
+    expect(isValidLibraryLocationId(42)).toBe(true);
+  });
+
+  it("rejects paths, zero, negatives, non-integers, and non-numbers", () => {
+    for (const bad of [
+      "/home/user/Books",
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      "1",
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isValidLibraryLocationId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(
+        false,
+      );
+    }
+  });
+});
+
 describe("payload bound constants (T-6)", () => {
   it("stays positive and above the largest legitimate payloads", () => {
     // A 32-bit signed shift (2 << 30) overflows to a negative cap, which
@@ -308,6 +334,7 @@ describe("boundary configuration tables (T-5)", () => {
       reveal: "tuxbooks:reveal",
       storageReport: "tuxbooks:storage-report",
       openDataFolder: "tuxbooks:open-data-folder",
+      openLibraryLocation: "tuxbooks:open-library-location",
       clearCache: "tuxbooks:clear-cache",
       event: "tuxbooks:event",
     });

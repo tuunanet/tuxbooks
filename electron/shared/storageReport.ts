@@ -3,11 +3,10 @@ import type { StorageRootId } from "./pathSchema";
 /**
  * The storage read model (data-management spec): what TuxBooks keeps on disk
  * and how large each item is. Main resolves paths by stable id and builds
- * this report; the renderer only displays it and names rows by id. Later
- * tickets fill the book locations and catalog counts.
+ * this report; the renderer only displays it and names rows by id.
  */
 
-export type StorageEntryKind = "derived" | "only-copy" | "settings" | "books";
+export type StorageEntryKind = "derived" | "only-copy" | "settings";
 
 export interface StorageEntry {
   id: string;
@@ -26,6 +25,8 @@ export interface StorageRoot {
 }
 
 export interface LibraryLocationStat {
+  /** The `library_locations.id`; the renderer opens a location by this id. */
+  id: number;
   path: string;
   addedAt: string;
   bookCount: number;

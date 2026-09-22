@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { RESET_DATA_COMMAND } from "./bootRecovery";
 import { clearAppCache } from "./clearCache";
+import { isContained } from "./pathContainment";
 import {
   BROWSER_CACHE_DIRS,
   buildStorageReport,
@@ -19,8 +20,8 @@ import type { LibraryStorageStats, StorageReport } from "../shared/storageReport
  * database is quarantined by default, never deleted, so the catalog (the only
  * copy) and the watched locations it carries survive. The fs surface, the
  * resolved roots, and the writers are injected, so the policy unit-tests
- * without Electron. Containment mirrors `clearAppCache`: a lexical check
- * against the root, then a realpath check, and symlinks are never followed.
+ * without Electron. Each removal goes through the shared `isContained` rule,
+ * so a symlink can never point a deletion outside the app-owned roots.
  */
 
 export interface StartupFlags {
@@ -68,20 +69,6 @@ export function parseStartupFlags(argv: readonly string[]): StartupFlags {
     dryRun: argv.includes("--dry-run"),
     resetData: argv.includes("--reset-data"),
   };
-}
-
-/** Whether `target` resolves inside `root` once symlinks are resolved. */
-function isContained(fs: ResetFsSurface, root: string, target: string): boolean {
-  const resolvedRoot = path.resolve(root);
-  const resolvedTarget = path.resolve(target);
-  if (!resolvedTarget.startsWith(resolvedRoot + path.sep)) return false;
-  try {
-    const realRoot = fs.realpathSync(resolvedRoot);
-    const realTarget = fs.realpathSync(resolvedTarget);
-    return realTarget.startsWith(realRoot + path.sep);
-  } catch {
-    return false;
-  }
 }
 
 /** The sidecar's quarantine stamp; matches its `%Y%m%dT%H%M%S%.3fZ` format. */

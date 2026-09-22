@@ -96,7 +96,7 @@ describe("buildStorageReport", () => {
     });
     expect(dataRoot.entries.find((entry) => entry.id === "covers")).toMatchObject({
       sizeBytes: 500,
-      kind: "derived",
+      kind: "only-copy",
     });
     expect(dataRoot.entries.find((entry) => entry.id === "gpu-fallback")).toMatchObject({
       sizeBytes: 5,
@@ -131,7 +131,13 @@ describe("buildStorageReport", () => {
   it("folds the sidecar's locations, bytes, and catalog counts into the report", () => {
     const library: LibraryStorageStats = {
       locations: [
-        { path: "/books", addedAt: "2026-01-01T00:00:00.000Z", bookCount: 3, totalBytes: 9 },
+        {
+          id: 1,
+          path: "/books",
+          addedAt: "2026-01-01T00:00:00.000Z",
+          bookCount: 3,
+          totalBytes: 9,
+        },
       ],
       bookTotalBytes: 9,
       catalog: { books: 3, authors: 2, collections: 1, annotations: 4, readingProgress: 2 },

@@ -129,7 +129,9 @@ export function buildStorageReport(dirs: StorageDirs, library: LibraryStorageSta
       label: "Cover cache",
       path: path.join(dirs.dataDir, COVERS_DIRNAME),
       sizeBytes: directoryBytes(path.join(dirs.dataDir, COVERS_DIRNAME)),
-      kind: "derived",
+      // Extracted at import and not re-derived on demand, so unlike the
+      // browser caches it is not safe to clear. Only-copy is the honest label.
+      kind: "only-copy",
     },
     {
       id: "gpu-fallback",

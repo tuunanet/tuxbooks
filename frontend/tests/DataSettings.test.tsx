@@ -6,7 +6,12 @@ import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import type { StorageReport } from "@/lib/bridge";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
-import { clearCacheMock, openDataFolderMock, storageReportMock } from "./mocks/bridge";
+import {
+  clearCacheMock,
+  openDataFolderMock,
+  openLibraryLocationMock,
+  storageReportMock,
+} from "./mocks/bridge";
 
 const DATA_PATH = "/home/u/.local/share/com.tuxbooks.app";
 const CONFIG_PATH = "/home/u/.config/TuxBooks";
@@ -31,7 +36,7 @@ const REPORT: StorageReport = {
           label: "Cover cache",
           path: `${DATA_PATH}/covers`,
           sizeBytes: 2 * 1024 * 1024,
-          kind: "derived",
+          kind: "only-copy",
         },
       ],
     },
@@ -55,6 +60,7 @@ const REPORT: StorageReport = {
   cacheBytes: 3 * 1024 * 1024,
   bookLocations: [
     {
+      id: 1,
       path: "/home/u/Books",
       addedAt: "2026-01-01T00:00:00.000Z",
       bookCount: 12,
@@ -70,6 +76,7 @@ describe("DataSettings", () => {
     storageReportMock.mockReset();
     storageReportMock.mockResolvedValue(REPORT);
     openDataFolderMock.mockReset();
+    openLibraryLocationMock.mockReset();
     clearCacheMock.mockReset();
     clearCacheMock.mockResolvedValue(0);
   });
@@ -87,8 +94,8 @@ describe("DataSettings", () => {
 
     const dataRoot = screen.getByTestId("storage-root-app-data");
     expect(dataRoot).toHaveTextContent("Only copy");
-    expect(dataRoot).toHaveTextContent("Derived");
     expect(dataRoot).toHaveTextContent("5.0 MB");
+    expect(screen.getByTestId("storage-root-app-config")).toHaveTextContent("Derived");
     expect(screen.getByTestId("storage-reassurance")).toHaveTextContent(
       "read in place and never copied",
     );
@@ -131,6 +138,19 @@ describe("DataSettings", () => {
 
     await user.click(within(dataRoot).getByRole("button", { name: "Copy path" }));
     await expect(navigator.clipboard.readText()).resolves.toBe(DATA_PATH);
+  });
+
+  it("opens a watched location by id and copies its path", async () => {
+    const user = userEvent.setup();
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    const location = screen.getByTestId("storage-location-1");
+    await user.click(within(location).getByRole("button", { name: "Open folder" }));
+    expect(openLibraryLocationMock).toHaveBeenCalledWith(1);
+
+    await user.click(within(location).getByRole("button", { name: "Copy path" }));
+    await expect(navigator.clipboard.readText()).resolves.toBe("/home/u/Books");
   });
 
   it("shows the cache total on the clear button and confirms what goes and stays", async () => {

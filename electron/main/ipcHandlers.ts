@@ -3,6 +3,7 @@ import {
   isAllowedSenderUrl,
   isStorageRootId,
   isValidBookId,
+  isValidLibraryLocationId,
 } from "../shared/pathSchema";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import { Sidecar, SidecarError } from "./sidecar";
@@ -162,6 +163,21 @@ export function registerIpcHandlers(
     }
     const target = rootId === "app-data" ? storageDirs.dataDir : storageDirs.configDir;
     await shell.openPath(target);
+  });
+
+  register(IPC_CHANNELS.openLibraryLocation, async (event, locationId: unknown) => {
+    requireAppSender(event);
+    // The renderer names a watched location by id; main resolves the real
+    // path from the catalog and never accepts one from the renderer.
+    if (!isValidLibraryLocationId(locationId)) {
+      throw new SidecarError("open requires a known library location id");
+    }
+    const library = (await sidecar.call("get_storage_stats")) as LibraryStorageStats;
+    const location = library.locations.find((candidate) => candidate.id === locationId);
+    if (!location) {
+      throw new SidecarError(`no library location ${locationId}`);
+    }
+    await shell.openPath(location.path);
   });
 
   register(IPC_CHANNELS.clearCache, async (event) => {
