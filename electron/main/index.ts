@@ -15,7 +15,18 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
-import { reportStartupFailure, surfaceStartupQuarantine } from "./bootRecovery";
+import {
+  describeStartupFailure,
+  reportStartupFailure,
+  surfaceStartupQuarantine,
+} from "./bootRecovery";
+import {
+  parseStartupFlags,
+  runDryRun,
+  runResetData,
+  type ResetDataDeps,
+  type StartupFlags,
+} from "./resetData";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -53,8 +64,37 @@ bootElapsed("electron process");
 
 // CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
 
+// Command-line recovery runs before app ready and before the single-instance
+// lock (data-management spec): `--reset-data` and `--dry-run` must work even
+// when a second instance or a broken start would otherwise block startup.
+const startupFlags = parseStartupFlags(process.argv);
+const recoveryRequested = startupFlags.dryRun || startupFlags.resetData;
+if (recoveryRequested) handleRecoveryFlags(startupFlags);
+
+/** Run the requested recovery flag, then exit; the app is never started. */
+function handleRecoveryFlags(flags: StartupFlags): void {
+  const deps: ResetDataDeps = {
+    fs,
+    dirs: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+    stdout: (message) => console.log(message),
+    stderr: (message) => console.error(message),
+  };
+  if (flags.dryRun) {
+    runDryRun(deps);
+    app.exit(0);
+    return;
+  }
+  void runResetData(deps).then(
+    () => app.exit(0),
+    (error: unknown) => {
+      deps.stderr(`TuxBooks could not reset app data: ${describeStartupFailure(error)}`);
+      app.exit(1);
+    },
+  );
+}
+
 // One library database owner: a second app instance quits immediately.
-if (!app.requestSingleInstanceLock()) {
+if (!recoveryRequested && !app.requestSingleInstanceLock()) {
   app.quit();
 }
 
@@ -417,6 +457,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 }
 
 app.whenReady().then(() => {
+  if (recoveryRequested) return;
   bootElapsed("app ready");
   // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
   // per-run file, so E2E diagnosis works from CI artifacts alone. The file
