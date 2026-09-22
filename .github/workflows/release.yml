@@ -148,16 +148,19 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.15 aligns PDF zoom with GNOME Papers.
+          TuxBooks 0.0.16 polishes the PDF reader and makes presentation flips instant.
 
-          What changed since 0.0.14:
+          What changed since 0.0.15:
 
-          - Ctrl+wheel and trackpad pinch follow the cursor, on each axis that
-            can scroll. A page that fits the window stays put, and it starts
-            following the cursor the moment it overflows.
-          - Keyboard and toolbar zoom hold the viewport center, as Papers does.
-          - Typed zoom, Ctrl+0 and fit changes keep your relative position.
-          - A first zoom after opening no longer loses a restored page.
+          - Presentation mode pre-renders the next and previous pages, so a
+            page step blits instead of rasterizing behind a blank page for up
+            to a second.
+          - The reader title is centered on the header, so the zoom controls no
+            longer pull it off center.
+          - The presentation controls fade out and return on pointer hover or
+            keyboard focus.
+          - The page raster matches the CSS box exactly, which removes the
+            faint resampled edge lines at deep zoom.
 
           Install on Ubuntu/Debian:
 
