@@ -2,8 +2,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
+use crate::domain::StorageStats;
 use crate::error::AppError;
 use crate::repository::library_locations;
+use crate::repository::storage;
 use crate::rpc::EventEmitter;
 use crate::services::book_importer::{import_directory, import_file, ImportReport};
 use crate::services::library_reconciler::{reconnect_book as reconnect, LibraryChange};
@@ -212,4 +214,11 @@ pub async fn reconnect_book(
         },
     );
     Ok(book)
+}
+
+/// Aggregate stats for the Data tab (data-management spec): each watched
+/// location with its book count and total book bytes, the library's total
+/// book bytes, and the catalog row counts.
+pub async fn get_storage_stats(state: &AppState) -> Result<StorageStats, AppError> {
+    storage::storage_stats(&state.db).await
 }

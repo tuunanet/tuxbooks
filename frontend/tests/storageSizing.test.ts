@@ -6,13 +6,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { GPU_FALLBACK_MARKER } from "../../electron/main/gpuFallback";
 import { buildStorageReport, directoryBytes } from "../../electron/main/storageSizing";
-import type { StorageReport, StorageRoot } from "../../electron/shared/storageReport";
+import type {
+  LibraryStorageStats,
+  StorageReport,
+  StorageRoot,
+} from "../../electron/shared/storageReport";
 
 /**
  * Main-process sizing tests (data-management spec): the bounded walk and the
  * report it feeds. Real temp directories, external behavior only: what the
  * report contains, never how the walk is written.
  */
+
+const NO_LIBRARY: LibraryStorageStats = {
+  locations: [],
+  bookTotalBytes: 0,
+  catalog: { books: 0, authors: 0, collections: 0, annotations: 0, readingProgress: 0 },
+};
 
 let dataDir: string;
 let configDir: string;
@@ -76,7 +86,7 @@ describe("buildStorageReport", () => {
     write(path.join(dataDir, "covers", "b.png"), 200);
     write(path.join(dataDir, GPU_FALLBACK_MARKER), 5);
 
-    const report = buildStorageReport({ dataDir, configDir });
+    const report = buildStorageReport({ dataDir, configDir }, NO_LIBRARY);
     const dataRoot = rootById(report, "app-data");
     expect(dataRoot.id).toBe("app-data");
     expect(dataRoot.sizeBytes).toBe(directoryBytes(dataDir));
@@ -100,7 +110,7 @@ describe("buildStorageReport", () => {
     write(path.join(configDir, "Preferences"), 7);
     write(path.join(dataDir, GPU_FALLBACK_MARKER), 5);
 
-    const report = buildStorageReport({ dataDir, configDir });
+    const report = buildStorageReport({ dataDir, configDir }, NO_LIBRARY);
     const configRoot = rootById(report, "app-config");
     expect(configRoot.id).toBe("app-config");
     expect(configRoot.sizeBytes).toBe(directoryBytes(configDir));
@@ -118,16 +128,18 @@ describe("buildStorageReport", () => {
     );
   });
 
-  it("leaves book locations and catalog counts for a later ticket", () => {
-    const report = buildStorageReport({ dataDir, configDir });
-    expect(report.bookLocations).toEqual([]);
-    expect(report.bookTotalBytes).toBe(0);
-    expect(report.catalog).toEqual({
-      books: 0,
-      authors: 0,
-      collections: 0,
-      annotations: 0,
-      readingProgress: 0,
-    });
+  it("folds the sidecar's locations, bytes, and catalog counts into the report", () => {
+    const library: LibraryStorageStats = {
+      locations: [
+        { path: "/books", addedAt: "2026-01-01T00:00:00.000Z", bookCount: 3, totalBytes: 9 },
+      ],
+      bookTotalBytes: 9,
+      catalog: { books: 3, authors: 2, collections: 1, annotations: 4, readingProgress: 2 },
+    };
+
+    const report = buildStorageReport({ dataDir, configDir }, library);
+    expect(report.bookLocations).toEqual(library.locations);
+    expect(report.bookTotalBytes).toBe(9);
+    expect(report.catalog).toEqual(library.catalog);
   });
 });

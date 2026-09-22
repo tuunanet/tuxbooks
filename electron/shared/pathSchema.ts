@@ -219,6 +219,7 @@ export function coverMime(name: string): string {
 export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "ping",
   "get_library_stats",
+  "get_storage_stats",
   "list_books",
   "search_books",
   "remove_book",
