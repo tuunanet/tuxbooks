@@ -157,6 +157,28 @@ describe("DataSettings", () => {
     await expect(navigator.clipboard.readText()).resolves.toBe("/home/u/Books");
   });
 
+  it("keeps a long folder list scrollable and shows the count", async () => {
+    const many = Array.from({ length: 250 }, (_, index) => ({
+      id: index + 1,
+      path: `/home/u/Books/${index}`,
+      addedAt: "2026-01-01T00:00:00.000Z",
+      bookCount: 1,
+      totalBytes: 1024,
+    }));
+    storageReportMock.mockResolvedValue({
+      ...REPORT,
+      bookLocations: many,
+      bookTotalBytes: 250 * 1024,
+    });
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    expect(screen.getByTestId("storage-book-locations")).toHaveTextContent("Book folders (250)");
+    const list = screen.getByTestId("storage-book-location-list");
+    expect(list).toHaveClass("overflow-y-auto");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(250);
+  });
+
   it("shows the cache total on the clear button and confirms what goes and stays", async () => {
     const user = userEvent.setup();
     render(<DataSettings />);

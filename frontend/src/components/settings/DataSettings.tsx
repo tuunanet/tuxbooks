@@ -200,7 +200,10 @@ export function DataSettings() {
       </div>
 
       <div data-testid="storage-book-locations" className="rounded-lg border p-4">
-        <p className="text-sm font-medium">Book folders</p>
+        <p className="text-sm font-medium">
+          Book folders
+          {report.bookLocations.length > 0 ? ` (${report.bookLocations.length})` : ""}
+        </p>
         {report.bookLocations.length === 0 ? (
           <p
             data-testid="storage-book-locations-empty"
@@ -209,7 +212,12 @@ export function DataSettings() {
             No folders have been added yet. Import a folder to build your library.
           </p>
         ) : (
-          <ul className="mt-4 divide-y">
+          // A long list scrolls inside the card so the controls below it (clear
+          // cache, catalog) stay reachable rather than being pushed off-screen.
+          <ul
+            data-testid="storage-book-location-list"
+            className="mt-4 max-h-72 divide-y overflow-y-auto"
+          >
             {report.bookLocations.map((location) => (
               <li
                 key={location.id}
