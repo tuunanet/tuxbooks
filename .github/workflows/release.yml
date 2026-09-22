@@ -148,7 +148,7 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.16 polishes the PDF reader and makes presentation flips instant.
+          TuxBooks 0.0.17 polishes the PDF reader and makes presentation flips instant.
 
           What changed since 0.0.15:
 
@@ -161,6 +161,8 @@ jobs:
             keyboard focus.
           - The page raster matches the CSS box exactly, which removes the
             faint resampled edge lines at deep zoom.
+          - Deep zoom no longer fails to render a page whose bitmap rounds just
+            past the engine's pixel cap.
 
           Install on Ubuntu/Debian:
 
