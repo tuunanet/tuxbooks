@@ -6,7 +6,7 @@ import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import type { StorageReport } from "@/lib/bridge";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
-import { openDataFolderMock, storageReportMock } from "./mocks/bridge";
+import { clearCacheMock, openDataFolderMock, storageReportMock } from "./mocks/bridge";
 
 const DATA_PATH = "/home/u/.local/share/com.tuxbooks.app";
 const CONFIG_PATH = "/home/u/.config/TuxBooks";
@@ -70,6 +70,8 @@ describe("DataSettings", () => {
     storageReportMock.mockReset();
     storageReportMock.mockResolvedValue(REPORT);
     openDataFolderMock.mockReset();
+    clearCacheMock.mockReset();
+    clearCacheMock.mockResolvedValue(0);
   });
 
   it("shows the total footprint, both roots, and the reassurance", async () => {
@@ -129,6 +131,68 @@ describe("DataSettings", () => {
 
     await user.click(within(dataRoot).getByRole("button", { name: "Copy path" }));
     await expect(navigator.clipboard.readText()).resolves.toBe(DATA_PATH);
+  });
+
+  it("shows the cache total on the clear button and confirms what goes and stays", async () => {
+    const user = userEvent.setup();
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    const button = screen.getByTestId("clear-cache-button");
+    expect(button).toHaveTextContent("3.0 MB");
+
+    await user.click(button);
+    const dialog = await screen.findByTestId("clear-cache-dialog");
+    expect(dialog).toHaveTextContent("browser caches");
+    expect(dialog).toHaveTextContent("GPU fallback marker");
+    expect(dialog).toHaveTextContent("catalog");
+    expect(dialog).toHaveTextContent("cover cache");
+    expect(dialog).toHaveTextContent("settings");
+    expect(clearCacheMock).not.toHaveBeenCalled();
+  });
+
+  it("cancel closes the confirmation without clearing", async () => {
+    const user = userEvent.setup();
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("clear-cache-button"));
+    const dialog = await screen.findByTestId("clear-cache-dialog");
+    await user.click(within(dialog).getByTestId("clear-cache-cancel"));
+
+    expect(clearCacheMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("clear-cache-dialog")).not.toBeInTheDocument();
+  });
+
+  it("clears after confirmation, shows the freed amount, and refreshes the sizes", async () => {
+    const user = userEvent.setup();
+    const after: StorageReport = { ...REPORT, cacheBytes: 0, appDataBytes: 3 * 1024 * 1024 };
+    storageReportMock.mockResolvedValueOnce(REPORT);
+    storageReportMock.mockResolvedValueOnce(after);
+    clearCacheMock.mockResolvedValue(3 * 1024 * 1024);
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("clear-cache-button"));
+    const dialog = await screen.findByTestId("clear-cache-dialog");
+    await user.click(within(dialog).getByTestId("clear-cache-confirm"));
+
+    expect(clearCacheMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId("storage-clear-result")).toHaveTextContent("Freed 3.0 MB");
+    expect(storageReportMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByTestId("storage-total")).toHaveTextContent("3.0 MB");
+    expect(screen.getByTestId("clear-cache-button")).toHaveTextContent("0.0 MB");
+  });
+
+  it("shows the cover cache but never offers to clear it", async () => {
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    const dataRoot = screen.getByTestId("storage-root-app-data");
+    const covers = within(dataRoot).getByText("Cover cache").closest("li");
+    expect(covers).not.toBeNull();
+    expect(within(covers as HTMLElement).queryByRole("button")).toBeNull();
+    expect(screen.getAllByTestId("clear-cache-button")).toHaveLength(1);
   });
 
   it("is reachable from the Settings navigation", async () => {

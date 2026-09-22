@@ -267,6 +267,7 @@ export const IPC_CHANNELS = {
   reveal: "tuxbooks:reveal",
   storageReport: "tuxbooks:storage-report",
   openDataFolder: "tuxbooks:open-data-folder",
+  clearCache: "tuxbooks:clear-cache",
   event: "tuxbooks:event",
 } as const;
 

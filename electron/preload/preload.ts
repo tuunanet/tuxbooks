@@ -77,6 +77,11 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.openDataFolder, rootId);
   },
 
+  /** Remove the regenerable browser caches and GPU marker; resolves bytes freed. */
+  clearCache(): Promise<number> {
+    return ipcRenderer.invoke(IPC_CHANNELS.clearCache) as Promise<number>;
+  },
+
   /**
    * Raw bytes of a stored book's source file, fetched over the scoped
    * `tuxbooks://` protocol (range-capable, never base64 through IPC).

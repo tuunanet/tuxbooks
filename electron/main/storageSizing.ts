@@ -30,7 +30,7 @@ export const COVERS_DIRNAME = "covers";
  * Chromium cache directories kept under the Electron config root. Sizing is
  * best effort: a directory the running app does not have contributes zero.
  */
-const BROWSER_CACHE_DIRS = [
+export const BROWSER_CACHE_DIRS = [
   "Cache",
   "Code Cache",
   "GPUCache",

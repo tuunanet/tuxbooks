@@ -6,6 +6,7 @@ import {
 } from "../shared/pathSchema";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import { Sidecar, SidecarError } from "./sidecar";
+import { clearAppCache } from "./clearCache";
 import { buildStorageReport, type StorageDirs } from "./storageSizing";
 import type { LibraryStorageStats } from "../shared/storageReport";
 
@@ -161,5 +162,12 @@ export function registerIpcHandlers(
     }
     const target = rootId === "app-data" ? storageDirs.dataDir : storageDirs.configDir;
     await shell.openPath(target);
+  });
+
+  register(IPC_CHANNELS.clearCache, async (event) => {
+    requireAppSender(event);
+    // Only the regenerable browser caches and the GPU marker are removed;
+    // containment is enforced in the module against the two resolved roots.
+    return clearAppCache(storageDirs);
   });
 }
