@@ -19,7 +19,7 @@ import type { WorkerDiag } from "./pdfWorkerClient";
 import type { EngineTextLine } from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import { PdfRangeSource } from "./pdfRangeSource";
-import { PdfiumEngine, type PageClip } from "./pdfiumCore";
+import { PdfiumEngine, clampBitmapSize, type PageClip } from "./pdfiumCore";
 import { isTrustedWorkerOrigin } from "./pdfWorkerOrigin";
 import type { FpdfColorScheme } from "./smartColors";
 
@@ -133,10 +133,15 @@ const methods = {
     colorScheme?: FpdfColorScheme;
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!engine) throw new Error("no document open");
-    const rgba = engine.renderRgba(page - 1, width, height, clip, colorScheme);
-    const imageData = new ImageData(rgba, width, height);
+    // The engine caps oversized bitmaps to the WASM heap budget. Clamp here
+    // first so the ImageData is built at the size the engine actually renders;
+    // constructing it at the requested size throws when the cap bites (a
+    // whole-page request rounding just past 2**25 at deep zoom).
+    const capped = clampBitmapSize(width, height);
+    const rgba = engine.renderRgba(page - 1, capped.width, capped.height, clip, colorScheme);
+    const imageData = new ImageData(rgba, capped.width, capped.height);
     const bitmap = await createImageBitmap(imageData);
-    return { width, height, bitmap };
+    return { width: capped.width, height: capped.height, bitmap };
   },
 };
 

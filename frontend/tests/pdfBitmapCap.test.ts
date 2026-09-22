@@ -26,6 +26,18 @@ describe("clampBitmapSize", () => {
     expect(width * height).toBeLessThanOrEqual(MAX_RENDER_BITMAP_PIXELS);
     expect(width / height).toBeCloseTo(27950 / 24850, 2);
   });
+
+  it("caps a request a hair over the budget (the deep-zoom whole-page case)", () => {
+    // A whole-page buffer can round just past 2**25 at deep zoom; the worker
+    // must build its ImageData at the capped size or the length check throws.
+    const width = 5092;
+    const height = 6590;
+    expect(width * height).toBeGreaterThan(MAX_RENDER_BITMAP_PIXELS);
+    const capped = clampBitmapSize(width, height);
+    expect(capped.width * capped.height).toBeLessThanOrEqual(MAX_RENDER_BITMAP_PIXELS);
+    expect(capped.width).toBeLessThan(width);
+    expect(capped.height).toBeLessThan(height);
+  });
 });
 
 describe("PdfiumEngine bitmap cap", () => {
