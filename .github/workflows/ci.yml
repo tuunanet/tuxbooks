@@ -39,6 +39,7 @@ jobs:
       contents: read
     outputs:
       code: ${{ steps.classify.outputs.code }}
+      packaging: ${{ steps.classify.outputs.packaging }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,6 +56,7 @@ jobs:
           fi
           if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "packaging=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed="$(git diff --name-only "$base...HEAD")"
@@ -66,6 +68,20 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "packaging=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Packaging-relevant paths: anything that lands in, or configures,
+          # the deb payload the packaging gate inspects (Electron shell,
+          # sidecar, builder config). A frontend-only change cannot alter what
+          # check-deb.sh verifies, so the build job then skips the deb build
+          # and compiles the sidecar on the host instead of in the pinned
+          # container.
+          if printf '%s\n' "$changed" \
+            | grep -qE '^(electron/|sidecar/|build/|scripts/(check-deb\.sh|build-sidecar-release\.sh|sidecar-build\.Dockerfile|build-electron\.mjs|fetch-pdfium\.sh)|electron-builder\.yml|package\.json|pnpm-lock\.yaml|justfile|\.github/workflows/release\.yml)'; then
+            echo "packaging=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "packaging=false" >> "$GITHUB_OUTPUT"
           fi
 
   workflows:
@@ -84,7 +100,7 @@ jobs:
           .build/bin/actionlint
 
   frontend:
-    name: Frontend (lint, typecheck, test)
+    name: Frontend (lint, typecheck)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [changes]
@@ -114,8 +130,10 @@ jobs:
       - name: TypeScript
         run: pnpm typecheck
 
-      - name: Vitest
-        run: pnpm --filter frontend test:ci
+  # The coverage job owns the frontend test run: it executes the full vitest
+  # suite with coverage and fails on any test failure or floor breach
+  # (docs/COVERAGE.md). The lint/typecheck job above no longer re-runs the
+  # same suite.
 
   coverage:
     name: Coverage (frontend gate + badge)
@@ -211,7 +229,10 @@ jobs:
     name: Release build (Electron shell + sidecar)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    needs: [changes, frontend, rust]
+    # Only the diff classifier gates this job. It runs in parallel with the
+    # lint/test jobs against the same commit instead of waiting behind them,
+    # so the multi-minute build is no longer serialized after the tests.
+    needs: [changes]
     if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       contents: read
@@ -235,17 +256,43 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
+      # electron-builder re-downloads Electron and its helper tooling on every
+      # run. Cache the downloads; the key follows the lockfile and builder
+      # config that pin the versions.
+      - name: Electron cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      # The pinned-glibc container sidecar exists so the packaging gate can
+      # check the ABI floor on the deb. A change that cannot reach the deb
+      # payload compiles the sidecar on the host instead: same compile,
+      # seconds instead of minutes.
+      - name: Set up Buildx (sidecar container cache)
+        if: needs.changes.outputs.packaging == 'true'
+        uses: docker/setup-buildx-action@v3
+
       - name: Build (renderer + Electron bundles + release sidecar)
+        env:
+          TUXBOOKS_SIDECAR_CACHE: ${{ needs.changes.outputs.packaging == 'true' && 'gha' || '' }}
+          TUXBOOKS_SIDECAR_HOST_BUILD: ${{ needs.changes.outputs.packaging == 'true' && '0' || '1' }}
         run: |
           pnpm install --frozen-lockfile
           just build
 
       # Packaging gate (docs/RELEASE.md): a packaging regression fails the
-      # build like any other test. CI verifies the deb target — self-contained,
-      # no rpmbuild needed (only the rpm target wants it, see justfile
-      # `package`); the rpm and AppImage are wired into the release
-      # workflow's full `just package` run.
+      # build like any other test. CI verifies the deb target, self-contained,
+      # with no rpmbuild needed (only the rpm target wants it, see justfile
+      # `package`); the rpm and AppImage are wired into the release workflow's
+      # full `just package` run. Skipped when the change cannot reach the deb
+      # payload.
       - name: Package deb + packaging gate
+        if: needs.changes.outputs.packaging == 'true'
         run: |
           just package deb
           just check-deb
