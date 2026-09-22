@@ -71,6 +71,52 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // The toolbar's editable page field: type a page and press Enter to jump.
+  // The accessible readout is the hidden live region, so the assertion is the
+  // exact indicator text, plus the destination page rasterizing.
+  test("jumps to a typed page in the reader toolbar", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    // Progress persists across tests, so start from a known page and prove the
+    // jump moves off it.
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+
+    const input = page.getByTestId("pdf-page-input");
+    await input.fill("2");
+    await input.press("Enter");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+      timeout: 30000,
+    });
+    await waitForRendered(page, 2);
+    expect(await canvasIsNonBlank(page, 2)).toBe(true);
+
+    await returnToLibrary(page);
+  });
+
+  // An out-of-range typed page clamps onto the document's range instead of
+  // leaving the field or the indicator off-document.
+  test("clamps an out-of-range typed page to the last page", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+
+    const input = page.getByTestId("pdf-page-input");
+    await input.fill("99");
+    await input.press("Enter");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 30000,
+    });
+    await expect(input).toHaveValue("3");
+
+    await returnToLibrary(page);
+  });
+
   // Okular-style zoom control: an editable percentage plus a presets
   // dropdown (fit modes and percentages) replace the fixed ladder.
   test("zooms to a typed percentage and a dropdown preset", async ({ page }) => {
@@ -112,6 +158,13 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
     await canvas.waitFor({ state: "attached", timeout: 30000 });
+    // Reading progress persists across tests in a seeded run, so reopening the
+    // fixture can restore to a page other than 1. Force the top before the
+    // geometry assertions below so they run against page 1 regardless.
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
     // The width attribute is 0 until the first raster lands. Wait for that or
     // the no-re-render assertion below reads a stale zero as the baseline.
     await waitForRendered(page, 1);
@@ -178,6 +231,33 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // The presentation bar carries the same editable page field as the toolbar:
+  // a typed jump works with the normal reader chrome hidden.
+  test("jumps to a typed page in the presentation bar", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+
+    await page.keyboard.press("Control+l");
+    const bar = page.getByTestId("pdf-presentation-bar");
+    await expect(bar).toBeVisible({ timeout: 10000 });
+    await bar.hover();
+
+    const input = bar.getByTestId("pdf-page-input");
+    await input.fill("3");
+    await input.press("Enter");
+    await expect(bar.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 10000,
+    });
+    await expect.poll(() => canvasIsNonBlank(page, 3), { timeout: 10000 }).toBe(true);
+
+    await page.getByTestId("pdf-pres-exit").click();
+    await returnToLibrary(page);
+  });
+
   // Presentation steppers pre-render the neighbour (Papers' next/prev job
   // model), so a step blits instead of rastering fresh behind a blank page.
   // Deterministic signal: the cache holds the neighbour while the current page
@@ -185,6 +265,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("pre-renders the next page before a presentation step", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
