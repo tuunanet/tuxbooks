@@ -15,6 +15,7 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
+import { reportStartupFailure } from "./bootRecovery";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -496,8 +497,23 @@ app.whenReady().then(() => {
       createWindow(forward);
     })
     .catch((error) => {
-      console.error("[sidecar] startup failed:", error);
-      app.quit();
+      // A silent quit leaves a desktop user with no window and no message:
+      // leave a timestamped log in the data root, print the resolved paths
+      // and the reset command to stderr, and show the error dialog before
+      // quitting. Recovery never throws, so the quit always runs.
+      void reportStartupFailure(
+        {
+          fs,
+          dialog,
+          shell,
+          stderr: (message) => console.error(message),
+          paths: { dataDir: appDataDir(), configDir: app.getPath("userData") },
+        },
+        error,
+      ).then(
+        () => app.quit(),
+        () => app.quit(),
+      );
     });
 
   app.on("before-quit", () => sidecar.stop());
