@@ -219,6 +219,8 @@ export function coverMime(name: string): string {
 export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "ping",
   "get_library_stats",
+  "get_storage_stats",
+  "get_startup_recovery",
   "list_books",
   "search_books",
   "remove_book",
@@ -251,11 +253,28 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "delete_annotation",
 ]);
 
+/** Stable ids for the two app-owned storage roots. */
+export type StorageRootId = "app-data" | "app-config";
+
+/** Type guard for renderer-supplied storage root ids. */
+export function isStorageRootId(value: unknown): value is StorageRootId {
+  return value === "app-data" || value === "app-config";
+}
+
+/** Type guard for renderer-supplied watched-location ids (preload arguments). */
+export function isValidLibraryLocationId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /** The only ipcMain channels the preload may touch. */
 export const IPC_CHANNELS = {
   invoke: "tuxbooks:invoke",
   dialog: "tuxbooks:dialog",
   reveal: "tuxbooks:reveal",
+  storageReport: "tuxbooks:storage-report",
+  openDataFolder: "tuxbooks:open-data-folder",
+  openLibraryLocation: "tuxbooks:open-library-location",
+  clearCache: "tuxbooks:clear-cache",
   event: "tuxbooks:event",
 } as const;
 

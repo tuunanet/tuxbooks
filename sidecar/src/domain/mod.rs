@@ -10,7 +10,9 @@ pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect
 pub use book::{Book, BookFormat, NewBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
 pub use file::{FileProperties, FileProperty};
-pub use library::LibraryStats;
+pub use library::{
+    CatalogCounts, LibraryLocationStat, LibraryStats, StartupRecovery, StorageStats,
+};
 pub use metadata::{
     BookMetadata, MetadataFieldSource, MetadataFieldSources, MetadataFields, MetadataOverridden,
 };

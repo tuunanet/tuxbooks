@@ -212,6 +212,8 @@ async fn dispatch(
     match method {
         "ping" => Ok(json!("pong")),
         "get_library_stats" => Ok(call!(commands::books::get_library_stats(state))),
+        "get_storage_stats" => Ok(call!(commands::library::get_storage_stats(state))),
+        "get_startup_recovery" => Ok(call!(commands::library::get_startup_recovery(state))),
         "list_books" => Ok(call!(commands::books::list_books(state))),
         "search_books" => {
             let p: QueryArgs = parse_params(params)?;
@@ -576,6 +578,7 @@ mod tests {
             db: pool,
             db_path: dir.join("t.db"),
             watcher: Arc::new(watcher),
+            startup_recovery: None,
         })
     }
 
@@ -792,6 +795,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, json!("pong"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_storage_stats_reports_the_wire_shape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"], json!([]));
+        assert_eq!(result["bookTotalBytes"], json!(0));
+        assert_eq!(
+            result["catalog"],
+            json!({
+                "books": 0,
+                "authors": 0,
+                "collections": 0,
+                "annotations": 0,
+                "readingProgress": 0,
+            })
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_startup_recovery_is_null_for_a_healthy_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let result = dispatch(&state, &test_events(), "get_startup_recovery", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result, json!(null));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_startup_recovery_reports_the_quarantine_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let mut recovered = (*state).clone();
+        recovered.startup_recovery = Some(crate::domain::StartupRecovery {
+            from: "/data/tuxbooks.db".into(),
+            to: "/data/tuxbooks.db.corrupt-20260922T080000.000Z".into(),
+        });
+        let recovered = Arc::new(recovered);
+
+        let result = dispatch(
+            &recovered,
+            &test_events(),
+            "get_startup_recovery",
+            json!({}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["from"], json!("/data/tuxbooks.db"));
+        assert_eq!(
+            result["to"],
+            json!("/data/tuxbooks.db.corrupt-20260922T080000.000Z")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

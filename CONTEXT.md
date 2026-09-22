@@ -77,6 +77,20 @@ _Avoid_: dark mode
 PDFium's category-level recoloring: path fill and stroke, text fill and stroke.
 The mechanism behind the Smart dark mode, coarser than object-level recoloring.
 
+## Data and storage
+
+**App data**:
+Everything TuxBooks stores to run: the catalog database, the cover cache, the
+GPU fallback marker, and the browser caches and settings in the Electron config
+directory. It never includes the user's book files.
+_Avoid_: the library (that term means the catalog index)
+
+**Cache**:
+The subset of app data the app regenerates by itself: the Chromium browser caches
+and the GPU fallback marker. The catalog, the cover cache, and the settings sit
+outside it.
+_Avoid_: app data, temporary files
+
 ## Verification
 
 **Fidelity oracle**:

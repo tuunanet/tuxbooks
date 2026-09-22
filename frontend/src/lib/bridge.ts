@@ -22,6 +22,8 @@ import type {
   ReadingProgressRecord,
   SearchHit,
 } from "@/types/domain";
+import type { StorageRootId } from "../../../electron/shared/pathSchema";
+import type { StorageReport } from "../../../electron/shared/storageReport";
 
 export type {
   Book,
@@ -34,6 +36,14 @@ export type {
   LibraryStats,
   MetadataFields,
 } from "@/types/domain";
+export type { StorageRootId } from "../../../electron/shared/pathSchema";
+export type {
+  LibraryLocationStat,
+  StorageEntry,
+  StorageEntryKind,
+  StorageReport,
+  StorageRoot,
+} from "../../../electron/shared/storageReport";
 
 /** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */
 export interface TuxbooksApi {
@@ -44,6 +54,10 @@ export interface TuxbooksApi {
   pickBookFiles(): Promise<string[]>;
   pickCoverImage(): Promise<string | null>;
   revealBook(bookId: number): Promise<void>;
+  storageReport(): Promise<StorageReport>;
+  openDataFolder(rootId: StorageRootId): Promise<void>;
+  openLibraryLocation(locationId: number): Promise<void>;
+  clearCache(): Promise<number>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
 }
@@ -297,6 +311,29 @@ export function pickBookFiles(): Promise<string[]> {
 /** Reveal a stored book's file in the system file manager (by book id). */
 export function revealBook(bookId: number): Promise<void> {
   return tuxbooks().revealBook(bookId);
+}
+
+/** App-owned storage report: the data and config roots with their sizes. */
+export function getStorageReport(): Promise<StorageReport> {
+  return tuxbooks().storageReport();
+}
+
+/** Open one app-owned storage root in the system file manager (by root id). */
+export function openDataFolder(rootId: StorageRootId): Promise<void> {
+  return tuxbooks().openDataFolder(rootId);
+}
+
+/** Open one watched library location in the system file manager (by id). */
+export function openLibraryLocation(locationId: number): Promise<void> {
+  return tuxbooks().openLibraryLocation(locationId);
+}
+
+/**
+ * Clear the caches the app rebuilds by itself (browser caches and the GPU
+ * fallback marker); resolves the bytes freed.
+ */
+export function clearCache(): Promise<number> {
+  return tuxbooks().clearCache();
 }
 
 /** Absolute filesystem path of a dropped File (sandboxed preload helper). */

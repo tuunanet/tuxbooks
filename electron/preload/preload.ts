@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-import { IPC_CHANNELS, isValidBookFormat, isValidBookId } from "../shared/pathSchema";
+import {
+  IPC_CHANNELS,
+  isStorageRootId,
+  isValidBookFormat,
+  isValidBookId,
+  isValidLibraryLocationId,
+} from "../shared/pathSchema";
+import type { StorageReport } from "../shared/storageReport";
 
 /**
  * The preload bridge (docs/ARCHITECTURE.md): the renderer's entire view of
@@ -57,6 +64,32 @@ const api = {
       return Promise.reject(new TypeError(`invalid book id: ${String(bookId)}`));
     }
     return ipcRenderer.invoke(IPC_CHANNELS.reveal, bookId);
+  },
+
+  /** App-owned storage report (data root, config root, sizes). */
+  storageReport(): Promise<StorageReport> {
+    return ipcRenderer.invoke(IPC_CHANNELS.storageReport) as Promise<StorageReport>;
+  },
+
+  /** Open one app-owned storage root in the system file manager, by stable id. */
+  openDataFolder(rootId: string): Promise<void> {
+    if (!isStorageRootId(rootId)) {
+      return Promise.reject(new TypeError(`invalid data folder id: ${String(rootId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.openDataFolder, rootId);
+  },
+
+  /** Open one watched library location in the system file manager, by id. */
+  openLibraryLocation(locationId: number): Promise<void> {
+    if (!isValidLibraryLocationId(locationId)) {
+      return Promise.reject(new TypeError(`invalid library location id: ${String(locationId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.openLibraryLocation, locationId);
+  },
+
+  /** Remove the regenerable browser caches and GPU marker; resolves bytes freed. */
+  clearCache(): Promise<number> {
+    return ipcRenderer.invoke(IPC_CHANNELS.clearCache) as Promise<number>;
   },
 
   /**

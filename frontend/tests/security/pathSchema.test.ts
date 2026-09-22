@@ -12,8 +12,10 @@ import {
   coverMime,
   decodeUriComponentSafe,
   isAllowedSenderUrl,
+  isStorageRootId,
   isValidBookId,
   isValidBookFormat,
+  isValidLibraryLocationId,
   isValidLibraryPath,
   memberMime,
   parseBookId,
@@ -245,6 +247,54 @@ describe("isValidBookFormat (T-2: query schema)", () => {
   });
 });
 
+describe("isStorageRootId (storage rows are named by stable id, never a path)", () => {
+  it("accepts only the two app-owned root ids", () => {
+    expect(isStorageRootId("app-data")).toBe(true);
+    expect(isStorageRootId("app-config")).toBe(true);
+  });
+
+  it("rejects every path, unknown id, and non-string", () => {
+    for (const bad of [
+      "/home/user/.local/share/com.tuxbooks.app",
+      "app-data/../etc",
+      "app",
+      "",
+      "storage",
+      null,
+      undefined,
+      1,
+      {},
+    ]) {
+      expect(isStorageRootId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(false);
+    }
+  });
+});
+
+describe("isValidLibraryLocationId (watched rows are named by id, never a path)", () => {
+  it("accepts positive safe integers", () => {
+    expect(isValidLibraryLocationId(1)).toBe(true);
+    expect(isValidLibraryLocationId(42)).toBe(true);
+  });
+
+  it("rejects paths, zero, negatives, non-integers, and non-numbers", () => {
+    for (const bad of [
+      "/home/user/Books",
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      "1",
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isValidLibraryLocationId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(
+        false,
+      );
+    }
+  });
+});
+
 describe("payload bound constants (T-6)", () => {
   it("stays positive and above the largest legitimate payloads", () => {
     // A 32-bit signed shift (2 << 30) overflows to a negative cap, which
@@ -269,6 +319,7 @@ describe("boundary configuration tables (T-5)", () => {
       "get_book_resource",
       "get_epub_session",
       "embed_book_metadata",
+      "get_startup_recovery",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }
@@ -276,11 +327,15 @@ describe("boundary configuration tables (T-5)", () => {
     expect(SIDECAR_METHODS.has("__proto__")).toBe(false);
   });
 
-  it("enumerates exactly the four IPC channels", () => {
+  it("enumerates exactly the renderer-facing IPC channels", () => {
     expect(IPC_CHANNELS).toEqual({
       invoke: "tuxbooks:invoke",
       dialog: "tuxbooks:dialog",
       reveal: "tuxbooks:reveal",
+      storageReport: "tuxbooks:storage-report",
+      openDataFolder: "tuxbooks:open-data-folder",
+      openLibraryLocation: "tuxbooks:open-library-location",
+      clearCache: "tuxbooks:clear-cache",
       event: "tuxbooks:event",
     });
   });

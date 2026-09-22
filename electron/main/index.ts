@@ -15,6 +15,18 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
+import {
+  describeStartupFailure,
+  reportStartupFailure,
+  surfaceStartupQuarantine,
+} from "./bootRecovery";
+import {
+  parseStartupFlags,
+  runDryRun,
+  runResetData,
+  type ResetDataDeps,
+  type StartupFlags,
+} from "./resetData";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -52,8 +64,37 @@ bootElapsed("electron process");
 
 // CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
 
+// Command-line recovery runs before app ready and before the single-instance
+// lock (data-management spec): `--reset-data` and `--dry-run` must work even
+// when a second instance or a broken start would otherwise block startup.
+const startupFlags = parseStartupFlags(process.argv);
+const recoveryRequested = startupFlags.dryRun || startupFlags.resetData;
+if (recoveryRequested) handleRecoveryFlags(startupFlags);
+
+/** Run the requested recovery flag, then exit; the app is never started. */
+function handleRecoveryFlags(flags: StartupFlags): void {
+  const deps: ResetDataDeps = {
+    fs,
+    dirs: appStorageDirs(),
+    stdout: (message) => console.log(message),
+    stderr: (message) => console.error(message),
+  };
+  if (flags.dryRun) {
+    runDryRun(deps);
+    app.exit(0);
+    return;
+  }
+  void runResetData(deps).then(
+    () => app.exit(0),
+    (error: unknown) => {
+      deps.stderr(`TuxBooks could not reset app data: ${describeStartupFailure(error)}`);
+      app.exit(1);
+    },
+  );
+}
+
 // One library database owner: a second app instance quits immediately.
-if (!app.requestSingleInstanceLock()) {
+if (!recoveryRequested && !app.requestSingleInstanceLock()) {
   app.quit();
 }
 
@@ -115,6 +156,15 @@ function appDataDir(): string {
 
 function coversDir(): string {
   return path.join(appDataDir(), "covers");
+}
+
+/**
+ * The two app-owned storage roots, resolved once per call: the data root from
+ * main's resolver, the config root from Electron at runtime (the packaged
+ * directory name is uncertain, so it is never hardcoded).
+ */
+function appStorageDirs(): { dataDir: string; configDir: string } {
+  return { dataDir: appDataDir(), configDir: app.getPath("userData") };
 }
 
 /**
@@ -406,6 +456,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
       issued: new IssuedPaths(),
       dialog,
       shell,
+      storageDirs: appStorageDirs(),
       debugIpc: process.env.TUXBOOKS_DEBUG_IPC === "1",
       debugLog,
     },
@@ -413,6 +464,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 }
 
 app.whenReady().then(() => {
+  if (recoveryRequested) return;
   bootElapsed("app ready");
   // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
   // per-run file, so E2E diagnosis works from CI artifacts alone. The file
@@ -487,14 +539,35 @@ app.whenReady().then(() => {
   debugLog("app starting sidecar");
   sidecar
     .start()
-    .then(() => {
+    .then(async () => {
       bootElapsed("sidecar healthy");
       debugLog("sidecar healthy; creating window");
+      // A database the sidecar quarantined at startup is surfaced before the
+      // window opens, naming where the broken file was kept.
+      await surfaceStartupQuarantine({
+        sidecar,
+        dialog,
+        shell,
+        stderr: (message) => console.error(message),
+        paths: appStorageDirs(),
+      });
       createWindow(forward);
     })
     .catch((error) => {
-      console.error("[sidecar] startup failed:", error);
-      app.quit();
+      // A silent quit leaves a desktop user with no window and no message:
+      // leave a timestamped log in the data root, print the resolved paths
+      // and the reset command to stderr, and show the error dialog before
+      // quitting. Recovery never throws, so the quit always runs.
+      void reportStartupFailure(
+        {
+          fs,
+          dialog,
+          shell,
+          stderr: (message) => console.error(message),
+          paths: appStorageDirs(),
+        },
+        error,
+      ).finally(() => app.quit());
     });
 
   app.on("before-quit", () => sidecar.stop());
