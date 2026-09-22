@@ -151,7 +151,7 @@ export function buildStorageReport(dirs: StorageDirs, library: LibraryStorageSta
     },
     {
       id: "settings",
-      label: "Settings",
+      label: "Settings and other app files",
       path: dirs.configDir,
       sizeBytes: Math.max(0, configRootBytes - cacheDirsBytes),
       kind: "settings",

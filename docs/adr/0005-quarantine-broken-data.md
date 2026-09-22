@@ -24,6 +24,10 @@ and book files are the user's own library.
    quarantined copy went.
 2. Every reset path leaves book files and watched locations untouched. Reset
    clears app data only.
+3. The cover cache is app data. The cache-clear action leaves it alone, because
+   nothing re-extracts a missing cover while its book remains. A full reset may
+   remove it: it quarantines the catalog first, so the covers are unreferenced,
+   and the startup sweep deletes unreferenced covers on the next launch anyway.
 
 ## Considered options
 
