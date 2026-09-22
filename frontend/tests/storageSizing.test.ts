@@ -57,18 +57,19 @@ describe("directoryBytes", () => {
 
   it("does not follow symlinks", () => {
     write(path.join(dataDir, "real.bin"), 100);
-    const outside = path.join(os.tmpdir(), `storage-outside-${process.pid}-${Date.now()}`);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "storage-outside-"));
+    const outside = path.join(outsideDir, "outside.bin");
     write(outside, 5000);
     try {
       fs.symlinkSync(outside, path.join(dataDir, "link.bin"));
     } catch {
-      fs.rmSync(outside, { force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
       return;
     }
     try {
       expect(directoryBytes(dataDir)).toBe(100);
     } finally {
-      fs.rmSync(outside, { force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 
