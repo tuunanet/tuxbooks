@@ -91,6 +91,17 @@ and the GPU fallback marker. The catalog, the cover cache, and the settings sit
 outside it.
 _Avoid_: app data, temporary files
 
+**Watched folder**:
+A directory the user added for TuxBooks to watch. TuxBooks imports the books
+inside it and keeps them in sync as files change.
+_Avoid_: library location, book folder
+
+**Loose book**:
+A book whose path sits outside every watched folder, usually added by a
+single-file import. TuxBooks shows it in the library and never watches its
+folder.
+_Avoid_: unwatched book
+
 ## Verification
 
 **Fidelity oracle**:

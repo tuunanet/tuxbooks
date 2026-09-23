@@ -36,6 +36,8 @@ export interface Book {
   progressPercent: number | null;
   /** When the reading position was last saved. */
   progressUpdatedAt: string | null;
+  /** True when the path sits outside every watched folder (single-file import). */
+  loose: boolean;
 }
 
 /** A user-defined collection with its member book ids (mirrors `domain::CollectionSummary`). */

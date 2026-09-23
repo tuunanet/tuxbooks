@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::domain::{CatalogCounts, LibraryLocationStat, StorageStats};
 use crate::error::AppError;
+use crate::repository::library_locations::owning_location;
 
 /// The Data tab's storage read model: one row per watched library location
 /// with its book count and total file bytes, the library's total book bytes,
@@ -75,23 +76,6 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
         book_total_bytes,
         catalog,
     })
-}
-
-/// The watched location that owns `book_path`: the deepest watched directory
-/// that is the path itself or one of its ancestors. A sibling directory with
-/// a shared string prefix does not match, since the split is always on a path
-/// separator.
-fn owning_location(book_path: &str, locations: &HashMap<&str, usize>) -> Option<usize> {
-    let mut candidate = book_path;
-    loop {
-        if let Some(&index) = locations.get(candidate) {
-            return Some(index);
-        }
-        match candidate.rsplit_once('/') {
-            Some((parent, _)) if !parent.is_empty() => candidate = parent,
-            _ => return None,
-        }
-    }
 }
 
 #[cfg(test)]

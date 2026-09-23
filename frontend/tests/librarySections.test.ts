@@ -31,6 +31,7 @@ const neverOpened = () =>
 describe("sectionTitle", () => {
   it("names smart sections, collections, and settings", () => {
     expect(sectionTitle({ kind: "smart", id: "recently-added" })).toBe("Recently Added");
+    expect(sectionTitle({ kind: "smart", id: "outside-watched" })).toBe("Outside Watched Folders");
     expect(sectionTitle({ kind: "collection", id: 4 })).toBe("Collection");
     expect(sectionTitle({ kind: "settings" })).toBe("Settings");
   });
@@ -51,6 +52,16 @@ describe("filterBooksBySection", () => {
     expect(filterBooksBySection(books, { kind: "smart", id: "pdfs" }).map((b) => b.id)).toEqual([
       2,
     ]);
+  });
+
+  it("keeps only loose books in Outside Watched Folders", () => {
+    const mixed = [
+      epub(),
+      makeBook({ id: 30, title: "Dropped In", loose: true }),
+      makeBook({ id: 31, title: "Also Dropped In", loose: true }),
+    ];
+    const result = filterBooksBySection(mixed, { kind: "smart", id: "outside-watched" });
+    expect(result.map((b) => b.id)).toEqual([30, 31]);
   });
 
   it("sorts Recently Added newest first", () => {

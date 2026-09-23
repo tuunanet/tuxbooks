@@ -90,6 +90,28 @@ export function LibraryView({ section }: LibraryViewProps) {
   const [sort, setSort] = useState<BookSortId>("recently-added");
   const query = app.libraryQuery;
 
+  // The loose-books view exists only while a loose book does. Losing the last
+  // one drops the user back to All Books instead of an empty section.
+  const effectiveSection = useMemo<LibrarySection>(() => {
+    const outsideWatched = section.kind === "smart" && section.id === "outside-watched";
+    const anyLoose = books.some((book) => book.loose);
+    return outsideWatched && !loading && !anyLoose ? { kind: "smart", id: "all-books" } : section;
+  }, [section, books, loading]);
+
+  // Correct the stored section too, so the sidebar does not keep a stale
+  // selection for a view that no longer exists.
+  useEffect(() => {
+    if (
+      section.kind === "smart" &&
+      section.id === "outside-watched" &&
+      !loading &&
+      !error &&
+      !books.some((book) => book.loose)
+    ) {
+      dispatch({ type: "select-section", section: { kind: "smart", id: "all-books" } });
+    }
+  }, [section, loading, error, books, dispatch]);
+
   const selectBook = useCallback(
     (bookId: number | null) => dispatch({ type: "select-book", bookId }),
     [dispatch],
@@ -121,15 +143,15 @@ export function LibraryView({ section }: LibraryViewProps) {
 
   const visible = useMemo(() => {
     let scoped =
-      section.kind === "collection"
+      effectiveSection.kind === "collection"
         ? filterBooksByCollection(
             books,
-            collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
+            collections.find((collection) => collection.id === effectiveSection.id)?.bookIds ?? [],
           )
-        : filterBooksBySection(books, section);
+        : filterBooksBySection(books, effectiveSection);
     scoped = sortBooks(scoped, sort);
     return filterBooksByQuery(scoped, query);
-  }, [books, collections, section, sort, query]);
+  }, [books, collections, effectiveSection, sort, query]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -300,7 +322,7 @@ export function LibraryView({ section }: LibraryViewProps) {
   // (callback refs get null) before layout cleanups run, which silently
   // dropped every save; `scrollElRef` is never nulled and the onScroll
   // write keeps the map current regardless of teardown order.
-  const sectionKey = `${section.kind}:${"id" in section ? section.id : ""}`;
+  const sectionKey = `${effectiveSection.kind}:${"id" in effectiveSection ? effectiveSection.id : ""}`;
   const scrollElRef = useRef<HTMLDivElement | null>(null);
   const sectionKeyRef = useRef(sectionKey);
   sectionKeyRef.current = sectionKey;
@@ -341,7 +363,11 @@ export function LibraryView({ section }: LibraryViewProps) {
     );
   }
 
-  if (books.length === 0 && section.kind === "smart" && section.id === "all-books") {
+  if (
+    books.length === 0 &&
+    effectiveSection.kind === "smart" &&
+    effectiveSection.id === "all-books"
+  ) {
     return <EmptyLibraryState />;
   }
 
@@ -427,9 +453,10 @@ export function LibraryView({ section }: LibraryViewProps) {
     <section data-testid="library-view" className="flex h-full min-h-0 flex-col">
       <LibraryHeader
         title={
-          section.kind === "collection"
-            ? (collections.find((collection) => collection.id === section.id)?.name ?? "Collection")
-            : sectionTitle(section)
+          effectiveSection.kind === "collection"
+            ? (collections.find((collection) => collection.id === effectiveSection.id)?.name ??
+              "Collection")
+            : sectionTitle(effectiveSection)
         }
         count={visible.length}
         query={query}
@@ -442,7 +469,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       {visible.length === 0 ? (
         query.trim() !== "" ? (
           <NoSearchResultsState query={query} onClearSearch={() => setQuery("")} />
-        ) : section.kind === "collection" ? (
+        ) : effectiveSection.kind === "collection" ? (
           <EmptyCollectionState />
         ) : (
           <p data-testid="empty-section" className="text-sm text-muted-foreground">
