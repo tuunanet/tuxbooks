@@ -1,9 +1,43 @@
 # AGENTS.md
 
 TuxBooks is a local-first ebook library and reader: an Electron + React +
-TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers. Work
-happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`. Remove the worktree after the PR merges.
+TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
+
+## Preparing for a task
+
+Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
+never build on `main`. When creating a new worktree, make sure related uncommitted
+changes are switched from `main` to the worktree, especially files in `.beads`.
+
+## Completing a task
+
+1. Keep changes limited to the assigned task.
+2. Run the full gate once: `just check` (run `just format` first if needed).
+3. Assemble the evidence captured along the way into before/after pairs.
+4. Commit with a clear message (conventional commits), rebase onto the latest
+   `origin/main`, and rerun the gate.
+5. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
+   `--force-with-lease`). Open the PR with what changed, how it was tested
+   (every claim backed by evidence), before/after proof, and any risks or
+   follow-up work. Run the title and body through `unslop` before posting.
+6. Remove the worktree after the PR merges.
+
+## Multi-agent rules
+
+- Never commit directly to `main`.
+- One worktree and one branch per task and per agent — never reuse or modify
+  another agent's worktree, branch, or uncommitted work.
+- **Scope check** before starting: skim open PRs' changed files
+  (`gh pr list`, `gh pr diff <n> --name-only`) and look for uncommitted work
+  in shared checkouts. On overlap, stop and ask for direction.
+- Never force-push to `main` — and never plain `--force` anywhere; only
+  `--force-with-lease`, only on your own task branch.
+- Resolve lockfile conflicts by regenerating, never by hand-merging.
+- Worktrees don't isolate shared resources: confirm a dev-server port
+  answers _your_ process before trusting it, and don't run schema
+  experiments against a shared database.
+- If a conflict can't be resolved confidently, stop and report instead of
+  guessing.
 
 ## Route the task, then work
 
@@ -88,18 +122,6 @@ code comments, and the closing reply. It strips AI tells (em dashes, filler,
 hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
 plain ones and passive voice for active. Apply it to text you wrote or changed,
 not to prose you did not touch.
-
-## Completing a task
-
-1. Keep changes limited to the assigned task.
-2. Run the full gate once: `just check` (run `just format` first if needed).
-3. Assemble the evidence captured along the way into before/after pairs.
-4. Commit with a clear message (conventional commits), rebase onto the latest
-   `origin/main`, and rerun the gate.
-5. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
-   `--force-with-lease`). Open the PR with what changed, how it was tested
-   (every claim backed by evidence), before/after proof, and any risks or
-   follow-up work. Run the title and body through `unslop` before posting.
 
 ## Agent skills
 
