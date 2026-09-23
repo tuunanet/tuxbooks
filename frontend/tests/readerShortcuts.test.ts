@@ -37,6 +37,8 @@ describe("READER_SHORTCUTS", () => {
   });
 
   it("lists the reader bindings shared by both formats", () => {
+    expect(shortcut("reader.next").label).toBe("Next page or section");
+    expect(shortcut("reader.previous").label).toBe("Previous page or section");
     expect(shortcut("reader.next").combos).toEqual(["arrowright", "space", "pagedown"]);
     expect(shortcut("reader.previous").combos).toEqual(["arrowleft", "pageup"]);
     expect(shortcut("reader.first-last").combos).toEqual(["home", "end"]);
@@ -46,15 +48,16 @@ describe("READER_SHORTCUTS", () => {
     expect(shortcut("reader.leave-presentation").combos).toEqual(["escape"]);
   });
 
-  it("lists the new panel entries with their combos and pdf scope", () => {
+  it("scopes each panel entry to the formats where it works", () => {
+    expect(shortcut("pdf.thumbnails").group).toBe("pdf");
+    expect(shortcut("pdf.thumbnails").combos).toEqual([READER_PANEL_SHORTCUTS.thumbnails]);
     for (const [id, combo] of [
-      ["pdf.thumbnails", READER_PANEL_SHORTCUTS.thumbnails],
-      ["pdf.appearance", READER_PANEL_SHORTCUTS.appearance],
-      ["pdf.contents", READER_PANEL_SHORTCUTS.contents],
-      ["pdf.bookmarks", READER_PANEL_SHORTCUTS.bookmarks],
-      ["pdf.highlights", READER_PANEL_SHORTCUTS.highlights],
+      ["reader.appearance", READER_PANEL_SHORTCUTS.appearance],
+      ["reader.contents", READER_PANEL_SHORTCUTS.contents],
+      ["reader.bookmarks", READER_PANEL_SHORTCUTS.bookmarks],
+      ["reader.highlights", READER_PANEL_SHORTCUTS.highlights],
     ] as const) {
-      expect(shortcut(id).group).toBe("pdf");
+      expect(shortcut(id).group).toBe("reader");
       expect(shortcut(id).combos).toEqual([combo]);
     }
     expect(READER_PANEL_SHORTCUTS).toEqual({
@@ -64,6 +67,24 @@ describe("READER_SHORTCUTS", () => {
       bookmarks: "mod+shift+b",
       highlights: "mod+shift+h",
     });
+  });
+
+  it("keeps only the PDF-only bindings in the pdf group", () => {
+    const pdfIds = READER_SHORTCUTS.filter((entry) => entry.group === "pdf").map(
+      (entry) => entry.id,
+    );
+    expect(new Set(pdfIds)).toEqual(
+      new Set([
+        "pdf.thumbnails",
+        "pdf.zoom-in",
+        "pdf.zoom-out",
+        "pdf.zoom-reset",
+        "pdf.fit-page",
+        "pdf.fit-width",
+        "pdf.fit-auto",
+        "pdf.reverse-flip",
+      ]),
+    );
   });
 
   it("lists the remaining PDF bindings", () => {

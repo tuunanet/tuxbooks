@@ -13,6 +13,12 @@ import {
   writeReaderSettings,
   type StoredReaderSettings,
 } from "@/lib/readerSettings";
+import {
+  formatShortcutDisplay,
+  isMacPlatform,
+  READER_SHORTCUTS,
+  type ShortcutGroup,
+} from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
@@ -72,14 +78,7 @@ const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
       hint: "The navigation drawer shows the PDF outline and a virtualized thumbnail grid.",
     },
   ],
-  shortcuts: [
-    { label: "Global search", value: "Ctrl/Cmd + K" },
-    { label: "Open selected book", value: "Enter" },
-    { label: "Close overlay", value: "Esc" },
-    { label: "Reader: next / previous page", value: "→ / ← / Space" },
-    { label: "Reader: start / end", value: "Home / End" },
-    { label: "Reader: bookmark", value: "Ctrl/Cmd + B" },
-  ],
+  shortcuts: [],
   advanced: [
     {
       label: "Storage",
@@ -197,6 +196,65 @@ function InfoRow({ row }: { row: SettingsRow }) {
   );
 }
 
+const SHORTCUT_GROUP_ORDER: ShortcutGroup[] = ["global", "library", "reader", "pdf"];
+
+const SHORTCUT_GROUP_LABELS: Record<ShortcutGroup, string> = {
+  global: "Global",
+  library: "Library",
+  reader: "Reader",
+  pdf: "PDF reader",
+};
+
+const ARROW_GLYPHS: Record<string, string> = {
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+};
+
+function formatComboDisplay(combo: string, mac: boolean): string {
+  return formatShortcutDisplay(combo, mac).replace(
+    /Arrow(Up|Down|Left|Right)/g,
+    (token) => ARROW_GLYPHS[token] ?? token,
+  );
+}
+
+/** The complete keyboard reference, grouped by where each key works. */
+function ShortcutReference() {
+  const mac = isMacPlatform();
+
+  return (
+    <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
+      {SHORTCUT_GROUP_ORDER.map((group) => (
+        <section key={group}>
+          <h3 className="text-sm font-medium">{SHORTCUT_GROUP_LABELS[group]}</h3>
+          <dl className="mt-2 divide-y">
+            {READER_SHORTCUTS.filter((shortcut) => shortcut.group === group).map((shortcut) => (
+              <div key={shortcut.id} className="grid grid-cols-[10rem_1fr] gap-4 py-2.5">
+                <dt className="text-sm text-muted-foreground">{shortcut.label}</dt>
+                <dd className="flex flex-wrap items-center gap-1 text-sm">
+                  {shortcut.combos.map((combo, index) => (
+                    <span key={`${shortcut.id}-${combo}`} className="flex items-center gap-1">
+                      {index > 0 && (
+                        <span aria-hidden="true" className="text-xs text-muted-foreground">
+                          /
+                        </span>
+                      )}
+                      <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1.5 font-mono text-[0.7rem] text-muted-foreground">
+                        {formatComboDisplay(combo, mac)}
+                      </kbd>
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The first persisted control in Settings: stored in localStorage via
  * ThemeStateProvider and applied app-wide; the reader surface keeps its own
@@ -285,6 +343,8 @@ export function SettingsShell() {
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
         ) : active === "data" ? (
           <DataSettings />
+        ) : active === "shortcuts" ? (
+          <ShortcutReference />
         ) : (
           <dl data-testid="settings-rows" className="mt-6 divide-y">
             {active === "general" && <AppThemeRow />}
