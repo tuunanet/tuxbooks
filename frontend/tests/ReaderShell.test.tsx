@@ -725,6 +725,159 @@ describe("Reader EPUB presentation mode (issue #64)", () => {
   });
 });
 
+describe("Reader panel shortcuts", () => {
+  it("toggles the page-thumbnails sidebar with Ctrl+Shift+T in the PDF reader", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.queryByTestId("pdf-sidebar")).toBeNull();
+
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("pdf-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("reader-sidebar-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByTestId("pdf-sidebar")).toBeNull());
+  });
+
+  it("leaves the thumbnails shortcut inert in the EPUB reader", async () => {
+    renderReader("epub");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true, shiftKey: true });
+    expect(screen.queryByTestId("reader-sidebar-toggle")).toBeNull();
+    expect(screen.queryByTestId("pdf-sidebar")).toBeNull();
+  });
+
+  it("toggles the appearance popover with Ctrl+Shift+A and closes it again", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.queryByTestId("appearance-content")).toBeNull();
+
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("appearance-content")).toBeInTheDocument();
+    // Focus must not move into the panel.
+    expect(screen.getByTestId("appearance-content")).not.toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByTestId("appearance-content")).toBeNull());
+  });
+
+  it("closes the appearance popover on Escape", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+    await screen.findByTestId("appearance-content");
+
+    // Escape is a Radix dismiss: the real keydown bubbles from the focused
+    // node through document to window, so drive it with user-event.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("appearance-content")).toBeNull());
+  });
+
+  it("opens the contents drawer on its default tab with Ctrl+Shift+C and closes on repeat", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.queryByTestId("reader-nav")).toBeNull();
+
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-tab-pages")).toHaveAttribute("data-state", "active");
+    // The shortcut must not pull focus off the reading surface.
+    expect(screen.getByTestId("reader-nav")).not.toContainElement(
+      document.activeElement as HTMLElement,
+    );
+
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
+  });
+
+  it("opens the EPUB contents drawer on the Contents tab", async () => {
+    renderReader("epub");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-tab-contents")).toHaveAttribute("data-state", "active");
+  });
+
+  it("opens the Bookmarks and Highlights tabs with Ctrl+Shift+B and Ctrl+Shift+H", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-tab-bookmarks")).toHaveAttribute("data-state", "active");
+
+    // Close, then open straight onto Highlights.
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
+
+    fireEvent.keyDown(window, { key: "h", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-tab-highlights")).toHaveAttribute("data-state", "active");
+  });
+
+  it("closes an open drawer from any drawer shortcut without switching tabs", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true, shiftKey: true });
+    await screen.findByTestId("reader-nav");
+    expect(screen.getByTestId("nav-tab-bookmarks")).toHaveAttribute("data-state", "active");
+
+    // A different drawer key closes the open drawer instead of switching tabs.
+    fireEvent.keyDown(window, { key: "h", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
+  });
+
+  it("keeps arrows and space turning pages after a shortcut opens a panel", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
+    await screen.findByTestId("appearance-content");
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+  });
+
+  it("labels the panel buttons with their keys and aria-keyshortcuts", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const thumbnails = screen.getByTestId("reader-sidebar-toggle");
+    const appearance = screen.getByTestId("appearance-trigger");
+    const contents = screen.getByTestId("reader-nav-trigger");
+
+    expect(thumbnails).toHaveAccessibleName("Toggle page thumbnails");
+    expect(thumbnails).toHaveAttribute("aria-keyshortcuts", "Control+Shift+T");
+    expect(appearance).toHaveAttribute("aria-keyshortcuts", "Control+Shift+A");
+    expect(contents).toHaveAttribute("aria-keyshortcuts", "Control+Shift+C");
+
+    // The tooltips carry the same Ctrl wording as the other chrome controls.
+    for (const [testId, label] of [
+      ["reader-sidebar-toggle", "Page thumbnails (Ctrl+Shift+T)"],
+      ["appearance-trigger", "Appearance (Ctrl+Shift+A)"],
+      ["reader-nav-trigger", "Contents (Ctrl+Shift+C)"],
+    ] as const) {
+      const trigger = screen.getByTestId(testId);
+      fireEvent.focus(trigger);
+      await screen.findByRole("tooltip", { name: label });
+    }
+  });
+});
+
 describe("ReaderAppearance", () => {
   it("changes the reader theme, layout, and font family", async () => {
     renderReader();

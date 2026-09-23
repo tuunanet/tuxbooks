@@ -36,6 +36,7 @@ import {
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
 import { PDF_THEME_MENU_OPTIONS } from "@/lib/pdf/theme";
+import { formatShortcutAria, READER_PANEL_SHORTCUTS } from "@/lib/readerShortcuts";
 import { cn } from "@/lib/utils";
 import { ForegroundPicker } from "./ForegroundPicker";
 import {
@@ -501,12 +502,25 @@ export function ReaderAppearanceControls({
   );
 }
 
-/** Reader toolbar control: the appearance popover wrapping the shared controls. */
-export function ReaderAppearance({ format }: { format?: string }) {
+/**
+ * Reader toolbar control: the appearance popover wrapping the shared
+ * controls. The reader shell may drive it from a shortcut by passing `open`
+ * and `onOpenChange`; without them it stays uncontrolled, so Settings and
+ * other callers keep working untouched.
+ */
+export function ReaderAppearance({
+  format,
+  open,
+  onOpenChange,
+}: {
+  format?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const { preferences, setPreferences } = useReader();
   const isPdf = format === "pdf";
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -515,12 +529,13 @@ export function ReaderAppearance({ format }: { format?: string }) {
               size="icon-sm"
               data-testid="appearance-trigger"
               aria-label="Reading appearance"
+              aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.appearance)}
             >
               <Type />
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent>Appearance (Aa)</TooltipContent>
+        <TooltipContent>Appearance (Ctrl+Shift+A)</TooltipContent>
       </Tooltip>
       <PopoverContent
         data-testid="appearance-content"
