@@ -10,6 +10,8 @@ import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import {
   clearCacheMock,
+  copyDataPathMock,
+  copyLibraryLocationPathMock,
   mockInvoke,
   openDataFolderMock,
   openLibraryLocationMock,
@@ -80,6 +82,10 @@ describe("DataSettings", () => {
     storageReportMock.mockResolvedValue(REPORT);
     openDataFolderMock.mockReset();
     openLibraryLocationMock.mockReset();
+    copyDataPathMock.mockReset();
+    copyDataPathMock.mockResolvedValue(undefined);
+    copyLibraryLocationPathMock.mockReset();
+    copyLibraryLocationPathMock.mockResolvedValue(undefined);
     clearCacheMock.mockReset();
     clearCacheMock.mockResolvedValue(0);
   });
@@ -134,7 +140,7 @@ describe("DataSettings", () => {
     );
   });
 
-  it("opens a root by id and copies its path", async () => {
+  it("opens a root by id and copies its path through the bridge", async () => {
     const user = userEvent.setup();
     render(<DataSettings />);
     await screen.findByTestId("storage-total");
@@ -143,11 +149,13 @@ describe("DataSettings", () => {
     await user.click(within(dataRoot).getByRole("button", { name: "Open folder" }));
     expect(openDataFolderMock).toHaveBeenCalledWith("app-data");
 
-    await user.click(within(dataRoot).getByRole("button", { name: "Copy path" }));
-    await expect(navigator.clipboard.readText()).resolves.toBe(DATA_PATH);
+    const copy = within(dataRoot).getByTestId("copy-root-app-data");
+    await user.click(copy);
+    expect(copyDataPathMock).toHaveBeenCalledWith("app-data");
+    expect(copy).toHaveTextContent("Copied");
   });
 
-  it("opens a watched location by id and copies its path", async () => {
+  it("copies a watched location by id through the bridge", async () => {
     const user = userEvent.setup();
     render(<DataSettings />);
     await screen.findByTestId("storage-total");
@@ -156,8 +164,21 @@ describe("DataSettings", () => {
     await user.click(within(location).getByRole("button", { name: "Open folder" }));
     expect(openLibraryLocationMock).toHaveBeenCalledWith(1);
 
-    await user.click(within(location).getByRole("button", { name: "Copy path" }));
-    await expect(navigator.clipboard.readText()).resolves.toBe("/home/u/Books");
+    const copy = within(location).getByTestId("copy-location-1");
+    await user.click(copy);
+    expect(copyLibraryLocationPathMock).toHaveBeenCalledWith(1);
+    expect(copy).toHaveTextContent("Copied");
+  });
+
+  it("shows an error state when a path copy rejects", async () => {
+    const user = userEvent.setup();
+    copyDataPathMock.mockRejectedValue(new Error("denied"));
+    render(<DataSettings />);
+    await screen.findByTestId("storage-total");
+
+    const copy = screen.getByTestId("copy-root-app-data");
+    await user.click(copy);
+    expect(await screen.findByText("Copy failed")).toBeInTheDocument();
   });
 
   it("keeps a long folder list scrollable and shows the count", async () => {

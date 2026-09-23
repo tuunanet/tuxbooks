@@ -67,6 +67,8 @@ describe("preload surface audit (T-5)", () => {
       "storageReport",
       "openDataFolder",
       "openLibraryLocation",
+      "copyDataPath",
+      "copyLibraryLocationPath",
       "clearCache",
       "fetchBookBytes",
       "pathForFile",

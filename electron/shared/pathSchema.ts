@@ -274,6 +274,8 @@ export const IPC_CHANNELS = {
   storageReport: "tuxbooks:storage-report",
   openDataFolder: "tuxbooks:open-data-folder",
   openLibraryLocation: "tuxbooks:open-library-location",
+  copyDataPath: "tuxbooks:copy-data-path",
+  copyLibraryLocationPath: "tuxbooks:copy-library-location-path",
   clearCache: "tuxbooks:clear-cache",
   event: "tuxbooks:event",
 } as const;

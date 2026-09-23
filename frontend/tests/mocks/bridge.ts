@@ -41,6 +41,12 @@ export const openDataFolderMock: Mock<(rootId: StorageRootId) => Promise<void>> 
 export const openLibraryLocationMock: Mock<(locationId: number) => Promise<void>> = vi.fn(
   async () => {},
 );
+export const copyDataPathMock: Mock<(rootId: StorageRootId) => Promise<void>> = vi.fn(
+  async () => {},
+);
+export const copyLibraryLocationPathMock: Mock<(locationId: number) => Promise<void>> = vi.fn(
+  async () => {},
+);
 export const clearCacheMock: Mock<() => Promise<number>> = vi.fn(async () => 0);
 export const fetchBookBytesMock: Mock<(bookId: number, format: string) => Promise<ArrayBuffer>> =
   vi.fn(async () => new ArrayBuffer(16));
@@ -73,6 +79,8 @@ export function installTuxbooksMock(): void {
     storageReport: () => storageReportMock(),
     openDataFolder: (rootId: StorageRootId) => openDataFolderMock(rootId),
     openLibraryLocation: (locationId: number) => openLibraryLocationMock(locationId),
+    copyDataPath: (rootId: StorageRootId) => copyDataPathMock(rootId),
+    copyLibraryLocationPath: (locationId: number) => copyLibraryLocationPathMock(locationId),
     clearCache: () => clearCacheMock(),
     fetchBookBytes: (bookId: number, format: string) => fetchBookBytesMock(bookId, format),
     pathForFile: (file: File) => pathForFileMock(file),

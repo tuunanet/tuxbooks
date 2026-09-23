@@ -8,6 +8,7 @@ import {
   dialog,
   session,
   shell,
+  clipboard,
 } from "electron";
 import fs from "node:fs";
 import os from "node:os";
@@ -456,6 +457,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
       issued: new IssuedPaths(),
       dialog,
       shell,
+      clipboard,
       storageDirs: appStorageDirs(),
       debugIpc: process.env.TUXBOOKS_DEBUG_IPC === "1",
       debugLog,
