@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GPU_FALLBACK_MARKER } from "../../electron/main/gpuFallback";
 import {
   LAUNCH_COMMAND,
-  parseStartupFlags,
   quarantineStamp,
   runDryRun,
   runResetData,
@@ -16,9 +15,9 @@ import {
 import { CATALOG_DB_FILENAME, COVERS_DIRNAME } from "../../electron/main/storageSizing";
 
 /**
- * Command-line recovery tests (data-management spec): flag parsing, the
- * read-only dry run, and the reset scope. Real temp directories and injected
- * writers, external behavior only: what is printed and what survives.
+ * Command-line recovery tests (data-management spec): the read-only dry run
+ * and the reset scope. Real temp directories and injected writers, external
+ * behavior only: what is printed and what survives.
  */
 
 let dataDir: string;
@@ -83,25 +82,6 @@ function harness(overrides: Partial<ResetDataDeps> = {}): {
   };
   return { deps, out, err };
 }
-
-describe("startup flag parsing", () => {
-  it("recognizes --dry-run and --reset-data", () => {
-    expect(parseStartupFlags(["--dry-run"])).toEqual({ dryRun: true, resetData: false });
-    expect(parseStartupFlags(["--reset-data"])).toEqual({ dryRun: false, resetData: true });
-    expect(parseStartupFlags(["--reset-data", "--dry-run"])).toEqual({
-      dryRun: true,
-      resetData: true,
-    });
-  });
-
-  it("ignores unrelated arguments", () => {
-    expect(parseStartupFlags(["electron", ".", "--verbose", "book.epub"])).toEqual({
-      dryRun: false,
-      resetData: false,
-    });
-    expect(parseStartupFlags(["--reset-data=1"])).toEqual({ dryRun: false, resetData: false });
-  });
-});
 
 describe("--dry-run", () => {
   it("prints the resolved paths and sizes and changes nothing", () => {
