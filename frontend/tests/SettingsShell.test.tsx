@@ -8,12 +8,14 @@ import { THEME_STORAGE_KEY } from "@/lib/theme";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
-import { mockInvoke } from "./mocks/bridge";
+import { mockInvoke, pickBookFilesMock, pickDirectoryMock, invokeMock } from "./mocks/bridge";
 
 function renderSettings() {
   mockInvoke({
     get_library_stats: { bookCount: 0, collectionCount: 0 },
     list_books: [],
+    list_collections: [],
+    import_paths: { imported: 0, updated: 0, skipped: 0, failed: [] },
   });
   return render(
     <ThemeStateProvider>
@@ -53,18 +55,24 @@ describe("SettingsShell", () => {
     renderSettings();
 
     expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
-    for (const label of ["General", "Reading", "PDF", "Keyboard Shortcuts", "Advanced"]) {
+    for (const label of ["General", "Reading", "PDF", "Keyboard Shortcuts", "Data"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
 
-  it("starts on General with the app theme and library information", async () => {
+  it("starts on General with the app theme and library import actions", async () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Library folder");
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Managed from the sidebar");
+    expect(screen.getByRole("radiogroup", { name: "App theme" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add library folder…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import books…" })).toBeInTheDocument();
+
+    const rows = screen.getByTestId("settings-rows");
+    expect(rows).not.toHaveTextContent("Library folder");
+    expect(rows).not.toHaveTextContent("Header → Import");
+    expect(rows).not.toHaveTextContent("Managed from the sidebar");
   });
 
   it("switches sections from the navigation", async () => {
@@ -73,12 +81,16 @@ describe("SettingsShell", () => {
     await screen.findByTestId("settings-view");
     await userEvent.click(screen.getByRole("button", { name: "PDF" }));
     expect(screen.getByRole("heading", { name: "PDF" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Default PDF appearance");
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Continuous, on demand");
+    const pdfRows = screen.getByTestId("settings-rows");
+    expect(pdfRows).toHaveTextContent("Default PDF appearance");
+    expect(pdfRows).not.toHaveTextContent("Rendering");
+    expect(pdfRows).not.toHaveTextContent("Outlines and thumbnails");
 
     await userEvent.click(screen.getByRole("button", { name: "Reading" }));
     expect(screen.getByRole("heading", { name: "Reading" })).toBeInTheDocument();
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Default reading appearance");
+    const readingRows = screen.getByTestId("settings-rows");
+    expect(readingRows).toHaveTextContent("Default reading appearance");
+    expect(readingRows).not.toHaveTextContent("How defaults are saved");
   });
 
   it("lists the full shortcut reference grouped by scope", async () => {
@@ -133,13 +145,28 @@ describe("SettingsShell", () => {
     expect(rows).not.toHaveTextContent("Ctrl+K");
   });
 
-  it("marks every section as informational rather than persisting", async () => {
+  it("imports the picked folder from General", async () => {
+    pickDirectoryMock.mockResolvedValue("/picked/library");
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("Local only");
-    expect(screen.getByTestId("settings-rows")).toHaveTextContent("SQLite FTS5");
+    await userEvent.click(screen.getByRole("button", { name: "Add library folder…" }));
+
+    expect(pickDirectoryMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/picked/library"] });
+  });
+
+  it("imports picked files from General", async () => {
+    pickBookFilesMock.mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "Import books…" }));
+
+    expect(pickBookFilesMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("import_paths", {
+      paths: ["/a/one.epub", "/b/two.pdf"],
+    });
   });
 
   it("applies and persists the app theme from the General section", async () => {

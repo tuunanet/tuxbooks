@@ -4,6 +4,7 @@ import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
 import { DataSettings } from "@/components/settings/DataSettings";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { pickBookFiles, pickDirectory } from "@/lib/bridge";
 import { epubForegroundFitsTheme, epubSurfaceTheme } from "@/lib/epub/appearance";
 import {
   clearReaderSettings,
@@ -21,78 +22,19 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { useImport } from "@/state/importState";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
-type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "advanced" | "data";
+type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "data";
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
   { id: "reading", label: "Reading" },
   { id: "pdf", label: "PDF" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
-  { id: "advanced", label: "Advanced" },
   { id: "data", label: "Data" },
 ];
-
-interface SettingsRow {
-  label: string;
-  value: string;
-  hint?: string;
-}
-
-const SECTION_ROWS: Record<SettingsSectionId, SettingsRow[]> = {
-  general: [
-    {
-      label: "Library folder",
-      value: "Chosen per import",
-      hint: "Books are scanned from the folder you pick; the database and covers live in the app data directory.",
-    },
-    {
-      label: "Importing",
-      value: "Header → Import",
-      hint: "Use the Import menu, or drag a folder or files onto the window.",
-    },
-    {
-      label: "Collections",
-      value: "Managed from the sidebar",
-      hint: "Create collections there and add books from any context menu; a book can belong to many.",
-    },
-  ],
-  reading: [
-    {
-      label: "How defaults are saved",
-      value: "On this device",
-      hint: "Reader appearance is kept locally; it applies to every EPUB you open and can still be adjusted per session in the toolbar.",
-    },
-  ],
-  pdf: [
-    {
-      label: "Rendering",
-      value: "Continuous, on demand",
-      hint: "Pages rasterize as you scroll with PDFium; covers are extracted at import by the sidecar.",
-    },
-    {
-      label: "Outlines and thumbnails",
-      value: "Built in",
-      hint: "The navigation drawer shows the PDF outline and a virtualized thumbnail grid.",
-    },
-  ],
-  shortcuts: [],
-  advanced: [
-    {
-      label: "Storage",
-      value: "Local only",
-      hint: "The library database and extracted covers live in the OS app-data directory. Nothing leaves your machine.",
-    },
-    {
-      label: "Full-text search",
-      value: "SQLite FTS5",
-      hint: "Kept in sync automatically when books are imported or updated.",
-    },
-  ],
-  data: [],
-};
 
 const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
   { value: "system", label: "System" },
@@ -148,7 +90,6 @@ function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
   const { resolvedTheme } = useThemeState();
   const { stored, setPreferences, reset } = useStoredReaderSettings(resolvedTheme);
   const preferences = effectiveReaderPreferences(stored, resolvedTheme);
-  const section: SettingsSectionId = format === "pdf" ? "pdf" : "reading";
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
@@ -175,23 +116,6 @@ function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
           format={format}
         />
       </div>
-      <dl className="divide-y">
-        {SECTION_ROWS[section].map((row) => (
-          <InfoRow key={row.label} row={row} />
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-function InfoRow({ row }: { row: SettingsRow }) {
-  return (
-    <div className="grid grid-cols-[10rem_1fr] gap-4 py-3">
-      <dt className="text-sm text-muted-foreground">{row.label}</dt>
-      <dd className="min-w-0">
-        <p className="text-sm">{row.value}</p>
-        {row.hint && <p className="mt-1 text-xs text-muted-foreground">{row.hint}</p>}
-      </dd>
     </div>
   );
 }
@@ -289,6 +213,48 @@ function AppThemeRow() {
   );
 }
 
+/**
+ * General holds the app theme and the library import actions. Folders become
+ * watched locations; picked files import in place — both go through the shared
+ * import flow the header menu uses.
+ */
+function GeneralSection() {
+  const { importPaths } = useImport();
+
+  const importFolder = async () => {
+    const dir = await pickDirectory();
+    if (dir) await importPaths([dir]);
+  };
+
+  const importFiles = async () => {
+    const files = await pickBookFiles();
+    if (files.length > 0) await importPaths(files);
+  };
+
+  return (
+    <dl data-testid="settings-rows" className="mt-6 divide-y">
+      <AppThemeRow />
+      <div className="grid grid-cols-[10rem_1fr] gap-4 py-3">
+        <dt className="text-sm text-muted-foreground">Library</dt>
+        <dd className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => void importFolder()}>
+              Add library folder…
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void importFiles()}>
+              Import books…
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Folders you add become watched library locations. You can also drag files onto the
+            window to import them.
+          </p>
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
 function SettingsNavigation({
   active,
   onSectionChange,
@@ -324,10 +290,10 @@ function SettingsNavigation({
 }
 
 /**
- * Settings screen. General holds the app theme plus library information;
- * Reading and PDF hold real, persisted default appearance controls (saved on
- * device and applied whenever a book opens); Data shows the app-owned storage
- * roots; the remaining sections describe shortcuts and local storage.
+ * Settings screen. General holds the app theme plus the library import
+ * actions; Reading and PDF hold real, persisted default appearance controls
+ * (saved on device and applied whenever a book opens); Data shows the
+ * app-owned storage roots; Keyboard Shortcuts describes the bindings.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -339,19 +305,14 @@ export function SettingsShell() {
         <h2 className="text-2xl font-semibold">
           {SECTIONS.find((section) => section.id === active)?.label}
         </h2>
-        {active === "reading" || active === "pdf" ? (
+        {active === "general" ? (
+          <GeneralSection />
+        ) : active === "reading" || active === "pdf" ? (
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
         ) : active === "data" ? (
           <DataSettings />
-        ) : active === "shortcuts" ? (
-          <ShortcutReference />
         ) : (
-          <dl data-testid="settings-rows" className="mt-6 divide-y">
-            {active === "general" && <AppThemeRow />}
-            {SECTION_ROWS[active].map((row) => (
-              <InfoRow key={row.label} row={row} />
-            ))}
-          </dl>
+          <ShortcutReference />
         )}
       </div>
     </section>

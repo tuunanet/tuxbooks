@@ -5,9 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import type { StorageReport } from "@/lib/bridge";
+import { ImportProvider } from "@/state/ImportProvider";
+import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import {
   clearCacheMock,
+  mockInvoke,
   openDataFolderMock,
   openLibraryLocationMock,
   storageReportMock,
@@ -243,9 +246,18 @@ describe("DataSettings", () => {
 
   it("is reachable from the Settings navigation", async () => {
     const user = userEvent.setup();
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 0 },
+      list_books: [],
+      list_collections: [],
+    });
     render(
       <ThemeStateProvider>
-        <SettingsShell />
+        <LibraryDataProvider>
+          <ImportProvider>
+            <SettingsShell />
+          </ImportProvider>
+        </LibraryDataProvider>
       </ThemeStateProvider>,
     );
 
