@@ -12,7 +12,7 @@ export type FixtureBook = Book;
  * File-snapshot fields (available/fileSize/fileMtime) get representative
  * defaults below so each fixture reads like a healthy import.
  */
-const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime">[] = [
+const rawFixtureBooks: Omit<FixtureBook, "available" | "fileSize" | "fileMtime" | "loose">[] = [
   {
     id: 1,
     path: "/library/the-quiet-meridian.epub",
@@ -204,4 +204,5 @@ export const fixtureBooks: FixtureBook[] = rawFixtureBooks.map((book, index) => 
   available: true,
   fileSize: 900_000 + index * 137_000,
   fileMtime: 1_760_000_000 + index * 86400,
+  loose: false,
 }));

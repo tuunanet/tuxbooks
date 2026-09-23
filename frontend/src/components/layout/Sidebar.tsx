@@ -22,6 +22,15 @@ const LIBRARY_ITEMS: { id: SmartSectionId; label: string }[] = [
   { id: "finished", label: "Finished" },
 ];
 
+/**
+ * The loose-books item shows only while the library has at least one book
+ * outside every watched folder; an import can bring the first one.
+ */
+const OUTSIDE_WATCHED_ITEM: { id: SmartSectionId; label: string } = {
+  id: "outside-watched",
+  label: "Outside Watched Folders",
+};
+
 function GroupLabel({ children }: { children: string }) {
   return (
     <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -66,8 +75,11 @@ function ItemButton({ active, onClick, children, disabled, title, trailing }: It
 
 export function Sidebar({ active, onSectionChange }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { collections } = useLibrary();
+  const { collections, books } = useLibrary();
   const { create, remove } = useCollectionActions();
+
+  const looseCount = books.filter((book) => book.loose).length;
+  const libraryItems = looseCount > 0 ? [...LIBRARY_ITEMS, OUTSIDE_WATCHED_ITEM] : LIBRARY_ITEMS;
 
   return (
     <aside
@@ -91,7 +103,7 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
         <div>
           <GroupLabel>Library</GroupLabel>
           <div className="flex flex-col gap-0.5">
-            {LIBRARY_ITEMS.map((item) => {
+            {libraryItems.map((item) => {
               const section: LibrarySection = { kind: "smart", id: item.id };
               return (
                 <ItemButton

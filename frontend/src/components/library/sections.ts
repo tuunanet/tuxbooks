@@ -9,6 +9,7 @@ export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
   "recently-read": "Recently Read",
   "in-progress": "In Progress",
   finished: "Finished",
+  "outside-watched": "Outside Watched Folders",
 };
 
 export function sectionTitle(section: LibrarySection): string {
@@ -50,6 +51,9 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
         .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
+    case "outside-watched":
+      // Books whose path no watched folder owns (single-file imports).
+      return books.filter((book) => book.loose);
   }
 }
 

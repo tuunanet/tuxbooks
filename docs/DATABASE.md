@@ -52,7 +52,8 @@ real modifications from duplicate events without re-parsing documents.
 `scan_library` (or the test seeding); only these are watched and
 reconciled. Books outside watched locations are never touched by
 reconciliation — a fresh database that predates milestone 3 stays
-unwatched until the next folder import.
+unwatched until the next folder import. The library derives a book's
+`loose` flag from this table: true when no location owns its path.
 
 ### collections
 

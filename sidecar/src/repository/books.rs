@@ -4,6 +4,7 @@ use crate::domain::Book;
 use crate::domain::NewBook;
 use crate::domain::SearchHit;
 use crate::error::AppError;
+use crate::repository::library_locations::{list_locations, location_index, owning_location};
 
 /// Effective book columns for SELECT queries. The bibliographic fields are
 /// the effective (override-over-source) values; `series_name` resolves the
@@ -112,11 +113,18 @@ pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
 }
 
 pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
-    let books = sqlx::query_as::<_, Book>(&format!(
+    let mut books = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY b.title COLLATE NOCASE, b.id"
     ))
     .fetch_all(pool)
     .await?;
+    // Membership in a watched location decides `loose`; the same ancestry
+    // walk backs the Data tab's per-location counts.
+    let location_paths = list_locations(pool).await?;
+    let location_index = location_index(&location_paths);
+    for book in &mut books {
+        book.loose = owning_location(&book.path, &location_index).is_none();
+    }
     Ok(books)
 }
 
@@ -491,6 +499,38 @@ mod tests {
             .map(|b| b.title)
             .collect();
         assert_eq!(titles, vec!["Alpha", "beta", "Charlie"]);
+    }
+
+    #[tokio::test]
+    async fn list_books_marks_only_books_outside_watched_locations_as_loose() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        crate::repository::library_locations::add_location(&pool, "/lib")
+            .await
+            .unwrap();
+        upsert_book(&pool, &sample("/lib/inside.epub", "Inside"))
+            .await
+            .unwrap();
+        // A sibling prefix and a single-file import both stay outside.
+        upsert_book(&pool, &sample("/libx/sibling.epub", "Sibling"))
+            .await
+            .unwrap();
+        upsert_book(&pool, &sample("/loose.epub", "Loose"))
+            .await
+            .unwrap();
+
+        let books = list_books(&pool).await.unwrap();
+        let loose: Vec<(&str, bool)> = books
+            .iter()
+            .map(|book| (book.title.as_str(), book.loose))
+            .collect();
+        assert_eq!(
+            loose,
+            vec![("Inside", false), ("Loose", true), ("Sibling", true)]
+        );
     }
 
     #[tokio::test]

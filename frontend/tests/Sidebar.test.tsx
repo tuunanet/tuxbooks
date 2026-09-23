@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { initialAppState, type LibrarySection } from "@/state/appState";
+import { makeBook } from "./factories";
 import { mockInvoke } from "./mocks/bridge";
 
 function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
@@ -42,6 +43,30 @@ describe("Sidebar", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    // No loose book is loaded, so the loose-books view stays hidden.
+    expect(
+      screen.queryByRole("button", { name: "Outside Watched Folders" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the loose-books item only when a loose book is loaded", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
+      list_collections: [],
+    });
+    const onSectionChange = vi.fn();
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    const item = await screen.findByRole("button", { name: "Outside Watched Folders" });
+    await userEvent.click(item);
+    expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "outside-watched" });
   });
 
   it("marks the active section and updates on click", async () => {

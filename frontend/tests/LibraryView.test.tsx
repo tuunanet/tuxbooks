@@ -322,3 +322,34 @@ describe("LibraryView empty states", () => {
     expect(await screen.findByTestId("empty-collection")).toBeInTheDocument();
   });
 });
+
+describe("LibraryView outside watched folders", () => {
+  it("shows only loose books in the loose-books section", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [
+        makeBook({ id: 1, title: "Inside", loose: false }),
+        makeBook({ id: 2, title: "Dropped In", loose: true }),
+      ],
+    });
+
+    renderLibrary({ kind: "smart", id: "outside-watched" });
+
+    const cards = await screen.findAllByTestId("book-card");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveTextContent("Dropped In");
+    expect(screen.getByRole("heading", { name: "Outside Watched Folders" })).toBeInTheDocument();
+  });
+
+  it("falls back to All Books when no loose book remains", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Inside", loose: false })],
+    });
+
+    renderLibrary({ kind: "smart", id: "outside-watched" });
+
+    expect(await screen.findByRole("heading", { name: "All Books" })).toBeInTheDocument();
+    expect(screen.getByTestId("book-card")).toHaveTextContent("Inside");
+  });
+});
