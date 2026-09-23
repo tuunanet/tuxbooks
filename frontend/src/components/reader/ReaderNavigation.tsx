@@ -150,6 +150,11 @@ export function ReaderNavigation({
         data-testid="reader-nav"
         side="left"
         className="flex w-80 flex-col gap-0 p-0"
+        // Focus must stay on the reading surface when the drawer opens (from
+        // the toolbar or a shortcut), so arrows and space keep turning pages
+        // instead of being captured by the drawer's tabs. The modal focus
+        // trap still reaches the tray on the next Tab.
+        onOpenAutoFocus={(event) => event.preventDefault()}
         // Portaled outside the reader root: redefine the app tokens in the
         // sheet's scope so it follows the reader theme instead of the global
         // light/dark mode (same treatment as the appearance popover).

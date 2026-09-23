@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
+import { formatShortcutAria, READER_PANEL_SHORTCUTS } from "@/lib/readerShortcuts";
 import { markBookOpened } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAnnotations } from "@/hooks/useAnnotations";
@@ -93,6 +94,11 @@ export function ReaderShell() {
     tab: "contents",
   });
   const openNav = (tab: ReaderNavTab) => setNav({ open: true, tab });
+  // Drawer shortcut behavior: any drawer key closes the drawer whatever tab
+  // is showing and never switches tabs while it is open; otherwise it opens
+  // straight onto the requested tab.
+  const toggleNav = (tab: ReaderNavTab) =>
+    setNav((prev) => (prev.open ? { ...prev, open: false } : { open: true, tab }));
   // Real PDF page count, reported by PdfReader once the document loads.
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   // Real EPUB table of contents, reported by EpubReader once the engine
@@ -129,6 +135,9 @@ export function ReaderShell() {
   // PdfReader fills the host through a portal (it owns the document handle).
   const [pdfSidebarOpen, setPdfSidebarOpen] = useState(false);
   const [pdfSidebarHost, setPdfSidebarHost] = useState<HTMLElement | null>(null);
+  // Appearance popover visibility: the shell owns the state so Ctrl+Shift+A
+  // can toggle the otherwise-uncontrolled ReaderAppearance popover.
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   // PDF page/zoom controls dock into this header slot through the same
   // portal pattern: the reader keeps owning the zoom and position state,
   // the shell only provides the layout host (issue #68 — one compact
@@ -228,6 +237,18 @@ export function ReaderShell() {
   });
   useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
   useShortcut("mod+f", () => openNav("search"));
+
+  // Panel shortcuts: thumbnails is a PDF affordance (the same `isEpub ? null`
+  // gate as the page-turn combos), while the appearance popover and the
+  // navigation drawer exist in both formats. The drawer keys toggle — a
+  // second press closes the drawer instead of switching its tab.
+  useShortcut(isEpub ? null : READER_PANEL_SHORTCUTS.thumbnails, () =>
+    setPdfSidebarOpen((open) => !open),
+  );
+  useShortcut(READER_PANEL_SHORTCUTS.appearance, () => setAppearanceOpen((open) => !open));
+  useShortcut(READER_PANEL_SHORTCUTS.contents, () => toggleNav(isEpub ? "contents" : "pages"));
+  useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => toggleNav("bookmarks"));
+  useShortcut(READER_PANEL_SHORTCUTS.highlights, () => toggleNav("highlights"));
 
   // Presentation mode (issues #65 PDF / #64 EPUB): Ctrl+L toggles, Esc
   // exits, and a native fullscreen exit (Esc while really fullscreen) ends
@@ -500,17 +521,22 @@ export function ReaderShell() {
                   size="icon-sm"
                   data-testid="reader-sidebar-toggle"
                   aria-label="Toggle page thumbnails"
+                  aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.thumbnails)}
                   aria-pressed={pdfSidebarOpen}
                   onClick={() => setPdfSidebarOpen((open) => !open)}
                 >
                   <PanelLeft />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Page thumbnails</TooltipContent>
+              <TooltipContent>Page thumbnails (Ctrl+Shift+T)</TooltipContent>
             </Tooltip>
           )}
 
-          <ReaderAppearance format={book?.format} />
+          <ReaderAppearance
+            format={book?.format}
+            open={appearanceOpen}
+            onOpenChange={setAppearanceOpen}
+          />
 
           {isEpub && (
             <Tooltip>
@@ -538,12 +564,13 @@ export function ReaderShell() {
                 size="icon-sm"
                 data-testid="reader-nav-trigger"
                 aria-label="Contents and bookmarks"
+                aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
                 onClick={() => openNav(isEpub ? "contents" : "pages")}
               >
                 <TableOfContents />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Contents</TooltipContent>
+            <TooltipContent>Contents (Ctrl+Shift+C)</TooltipContent>
           </Tooltip>
 
           <Tooltip>
