@@ -259,6 +259,44 @@ Shift participates in shortcut combos (`shift+space` vs `space`), so
 selection-extension keys and Shift+Space never alias the unmodified
 navigation combos.
 
+### Keyboard shortcuts
+
+The reader shares one shortcut registry (`lib/shortcuts`) and one label
+source (`lib/readerShortcuts`), where `mod` is Ctrl on Linux/Windows and Cmd
+on macOS, written `Ctrl/Cmd` below. The unmodified keys drive the reading
+surface. The panel keys are owned by the shell (`ReaderShell`) and toggle
+their panel; a drawer key pressed while the drawer is open closes it instead
+of switching tabs.
+
+Shared by PDF and EPUB:
+
+| Action                   | Keys                         |
+| ------------------------ | ---------------------------- |
+| Next page or section     | `Right`, `Space`, `PageDown` |
+| Previous page or section | `Left`, `PageUp`             |
+| First or last page       | `Home`, `End`                |
+| Search in book           | `Ctrl/Cmd+F`                 |
+| Bookmark page            | `Ctrl/Cmd+B`                 |
+| Presentation mode        | `Ctrl/Cmd+L`                 |
+| Leave presentation       | `Esc`                        |
+| Appearance               | `Ctrl/Cmd+Shift+A`           |
+| Contents drawer          | `Ctrl/Cmd+Shift+C`           |
+| Bookmarks tab            | `Ctrl/Cmd+Shift+B`           |
+| Highlights tab           | `Ctrl/Cmd+Shift+H`           |
+
+PDF only:
+
+| Action                            | Keys                                     |
+| --------------------------------- | ---------------------------------------- |
+| Page thumbnails sidebar           | `Ctrl/Cmd+Shift+T`                       |
+| Zoom in / out                     | `Ctrl/Cmd+Plus`, `Ctrl/Cmd+Minus`        |
+| Reset zoom to 100%                | `Ctrl/Cmd+0`                             |
+| Fit page / width / auto           | `Ctrl/Cmd+1`, `Ctrl/Cmd+2`, `Ctrl/Cmd+3` |
+| Reverse page flip in presentation | `Shift+Space`                            |
+
+The toolbar's editable page field also steps through the document while it
+has focus: `Up`/`Down` move one page.
+
 ### Virtualization and rendering policy
 
 Never render a large PDF into the DOM at once; keep rasterization off the

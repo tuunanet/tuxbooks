@@ -225,6 +225,30 @@ Readium locators, validated against the actual EPUB:
   collapse and Chromium logs "ResizeObserver loop completed with undelivered
   notifications" on every frame of the transition.
 
+### Keyboard shortcuts
+
+The reader shares the shortcut registry and label source with the PDF reader,
+where `mod` is Ctrl on Linux/Windows and Cmd on macOS, written `Ctrl/Cmd`
+below. Navigation is owned by the EPUB engine while a book is open (see
+"Shell integration invariants" above), so these keys turn engine pages
+regardless of the shell's own registrations.
+
+- Next page or section: `Right`, `Space`, `PageDown`.
+- Previous page or section: `Left`, `PageUp`.
+- First or last: `Home`, `End`.
+- Search in book: `Ctrl/Cmd+F`.
+- Bookmark page: `Ctrl/Cmd+B`.
+- Presentation mode: `Ctrl/Cmd+L`, leave with `Esc`.
+- Appearance: `Ctrl/Cmd+Shift+A`.
+- Contents drawer: `Ctrl/Cmd+Shift+C`.
+- Bookmarks tab: `Ctrl/Cmd+Shift+B`.
+- Highlights tab: `Ctrl/Cmd+Shift+H`.
+
+These are PDF-only and do not apply to EPUB: page thumbnails
+(`Ctrl/Cmd+Shift+T`), the zoom and fit keys (`Ctrl/Cmd+Plus`,
+`Ctrl/Cmd+Minus`, `Ctrl/Cmd+0`, `Ctrl/Cmd+1`, `Ctrl/Cmd+2`, `Ctrl/Cmd+3`),
+and reverse page flip in presentation (`Shift+Space`).
+
 ### In-book search
 
 Search runs through the seam over the publication, streaming per-section
