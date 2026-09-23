@@ -96,12 +96,15 @@ pub async fn find_id_by_path(pool: &SqlitePool, path: &str) -> Result<Option<i64
 }
 
 pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Book>, AppError> {
-    let book = sqlx::query_as::<_, Book>(&format!(
+    let mut book = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.path = ?1"
     ))
     .bind(path)
     .fetch_optional(pool)
     .await?;
+    if let Some(book) = book.as_mut() {
+        populate_loose(pool, std::slice::from_mut(book)).await?;
+    }
     Ok(book)
 }
 
@@ -112,19 +115,29 @@ pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
     Ok(count)
 }
 
+/// Set `loose` on each book from the watched-location membership walk. Every
+/// read that returns a `Book` calls this, so no payload (a list, a single
+/// book, or a live change event) can carry the default instead of the real
+/// value. `loose` is derived, not a column.
+async fn populate_loose(pool: &SqlitePool, books: &mut [Book]) -> Result<(), AppError> {
+    if books.is_empty() {
+        return Ok(());
+    }
+    let location_paths = list_locations(pool).await?;
+    let location_index = location_index(&location_paths);
+    for book in books {
+        book.loose = owning_location(&book.path, &location_index).is_none();
+    }
+    Ok(())
+}
+
 pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     let mut books = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY b.title COLLATE NOCASE, b.id"
     ))
     .fetch_all(pool)
     .await?;
-    // Membership in a watched location decides `loose`; the same ancestry
-    // walk backs the Data tab's per-location counts.
-    let location_paths = list_locations(pool).await?;
-    let location_index = location_index(&location_paths);
-    for book in &mut books {
-        book.loose = owning_location(&book.path, &location_index).is_none();
-    }
+    populate_loose(pool, &mut books).await?;
     Ok(books)
 }
 
@@ -138,11 +151,14 @@ pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError
 }
 
 pub async fn get_book(pool: &SqlitePool, id: i64) -> Result<Option<Book>, AppError> {
-    let book =
+    let mut book =
         sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.id = ?1"))
             .bind(id)
             .fetch_optional(pool)
             .await?;
+    if let Some(book) = book.as_mut() {
+        populate_loose(pool, std::slice::from_mut(book)).await?;
+    }
     Ok(book)
 }
 
@@ -288,13 +304,14 @@ pub async fn set_availability_prefix(
     for book in &mut affected {
         book.available = available;
     }
+    populate_loose(pool, &mut affected).await?;
     Ok(affected)
 }
 
 /// All books whose path is `prefix` itself or lies under `prefix/`, used by
 /// startup reconciliation to diff one watched location against the database.
 pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec<Book>, AppError> {
-    let books = sqlx::query_as::<_, Book>(&format!(
+    let mut books = sqlx::query_as::<_, Book>(&format!(
         r#"
         SELECT {BOOK_COLUMNS}{BOOK_FROM}
         WHERE b.path = ?1 OR substr(b.path, 1, length(?1) + 1) = ?1 || '/'
@@ -304,6 +321,7 @@ pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec
     .bind(prefix)
     .fetch_all(pool)
     .await?;
+    populate_loose(pool, &mut books).await?;
     Ok(books)
 }
 
@@ -314,12 +332,13 @@ pub async fn find_books_with_size(
     pool: &SqlitePool,
     file_size: i64,
 ) -> Result<Vec<Book>, AppError> {
-    let books = sqlx::query_as::<_, Book>(&format!(
+    let mut books = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.file_size = ?1"
     ))
     .bind(file_size)
     .fetch_all(pool)
     .await?;
+    populate_loose(pool, &mut books).await?;
     Ok(books)
 }
 
@@ -530,6 +549,38 @@ mod tests {
         assert_eq!(
             loose,
             vec![("Inside", false), ("Loose", true), ("Sibling", true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn single_book_reads_compute_loose_from_watched_locations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        crate::repository::library_locations::add_location(&pool, "/lib")
+            .await
+            .unwrap();
+        let (inside_id, _) = upsert_book(&pool, &sample("/lib/inside.epub", "Inside"))
+            .await
+            .unwrap();
+        let (loose_id, _) = upsert_book(&pool, &sample("/loose.epub", "Loose"))
+            .await
+            .unwrap();
+
+        // `get_book` backs the library-changed and import-progress payloads,
+        // and `get_book_by_path` backs the watcher's rename payloads. Both
+        // must carry the computed `loose`, or a live event clobbers a correct
+        // value and the loose-books view vanishes.
+        assert!(!get_book(&pool, inside_id).await.unwrap().unwrap().loose);
+        assert!(get_book(&pool, loose_id).await.unwrap().unwrap().loose);
+        assert!(
+            get_book_by_path(&pool, "/loose.epub")
+                .await
+                .unwrap()
+                .unwrap()
+                .loose
         );
     }
 
