@@ -1,13 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import type { StorageReport } from "@/lib/bridge";
+import type { Book } from "@/types/domain";
+import type { LibrarySection } from "@/state/appState";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
+import { makeBook } from "./factories";
 import {
   clearCacheMock,
   copyDataPathMock,
@@ -76,6 +79,28 @@ const REPORT: StorageReport = {
   catalog: { books: 12, authors: 8, collections: 3, annotations: 5, readingProgress: 7 },
 };
 
+/**
+ * DataSettings now reads the shared library data for the loose-book count, so
+ * every render needs the provider (and its three fetches) plus the section
+ * callback the shell supplies.
+ */
+function renderDataSettings({
+  books = [],
+  onSelectSection = vi.fn(),
+}: { books?: Book[]; onSelectSection?: (section: LibrarySection) => void } = {}) {
+  mockInvoke({
+    get_library_stats: { bookCount: books.length, collectionCount: 0 },
+    list_books: books,
+    list_collections: [],
+  });
+  render(
+    <LibraryDataProvider>
+      <DataSettings onSelectSection={onSelectSection} />
+    </LibraryDataProvider>,
+  );
+  return { onSelectSection };
+}
+
 describe("DataSettings", () => {
   beforeEach(() => {
     storageReportMock.mockReset();
@@ -91,7 +116,7 @@ describe("DataSettings", () => {
   });
 
   it("shows the total footprint, both roots, and the reassurance", async () => {
-    render(<DataSettings />);
+    renderDataSettings();
 
     expect(await screen.findByTestId("storage-total")).toHaveTextContent("6.0 MB");
     expect(screen.getByTestId("storage-root-app-data")).toHaveTextContent("App data");
@@ -115,10 +140,12 @@ describe("DataSettings", () => {
   });
 
   it("lists watched locations and catalog counts", async () => {
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const locations = screen.getByTestId("storage-book-locations");
+    expect(locations).toHaveTextContent("Watched folders");
+    expect(locations).not.toHaveTextContent("Book folders");
     expect(locations).toHaveTextContent("/home/u/Books");
     expect(locations).toHaveTextContent("12 books");
     expect(locations).toHaveTextContent("24.0 MB");
@@ -129,11 +156,35 @@ describe("DataSettings", () => {
     expect(within(catalog).getByTestId("storage-catalog-collections")).toHaveTextContent("3");
     expect(within(catalog).getByTestId("storage-catalog-annotations")).toHaveTextContent("5");
     expect(within(catalog).getByTestId("storage-catalog-readingProgress")).toHaveTextContent("7");
+
+    const loose = within(catalog).getByTestId("storage-catalog-outside-watched");
+    expect(loose).toHaveTextContent("Outside watched folders");
+    expect(loose).toHaveTextContent("0");
+    expect(within(loose).getByRole("button", { name: "Show books" })).toBeDisabled();
+  });
+
+  it("counts books outside watched folders and routes to the view", async () => {
+    const user = userEvent.setup();
+    const { onSelectSection } = renderDataSettings({
+      books: [
+        makeBook({ id: 1, loose: true }),
+        makeBook({ id: 2, loose: true }),
+        makeBook({ id: 3, loose: false }),
+      ],
+    });
+    await screen.findByTestId("storage-total");
+
+    const row = screen.getByTestId("storage-catalog-outside-watched");
+    expect(row).toHaveTextContent("Outside watched folders");
+    expect(row).toHaveTextContent("2");
+
+    await user.click(within(row).getByRole("button", { name: "Show books" }));
+    expect(onSelectSection).toHaveBeenCalledWith({ kind: "smart", id: "outside-watched" });
   });
 
   it("shows an empty state when no folders are watched", async () => {
     storageReportMock.mockResolvedValue({ ...REPORT, bookLocations: [], bookTotalBytes: 0 });
-    render(<DataSettings />);
+    renderDataSettings();
 
     expect(await screen.findByTestId("storage-book-locations-empty")).toHaveTextContent(
       "No folders have been added yet",
@@ -142,7 +193,7 @@ describe("DataSettings", () => {
 
   it("opens a root by id and copies its path through the bridge", async () => {
     const user = userEvent.setup();
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const dataRoot = screen.getByTestId("storage-root-app-data");
@@ -157,7 +208,7 @@ describe("DataSettings", () => {
 
   it("copies a watched location by id through the bridge", async () => {
     const user = userEvent.setup();
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const location = screen.getByTestId("storage-location-1");
@@ -173,7 +224,7 @@ describe("DataSettings", () => {
   it("shows an error state when a path copy rejects", async () => {
     const user = userEvent.setup();
     copyDataPathMock.mockRejectedValue(new Error("denied"));
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const copy = screen.getByTestId("copy-root-app-data");
@@ -194,10 +245,10 @@ describe("DataSettings", () => {
       bookLocations: many,
       bookTotalBytes: 250 * 1024,
     });
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
-    expect(screen.getByTestId("storage-book-locations")).toHaveTextContent("Book folders (250)");
+    expect(screen.getByTestId("storage-book-locations")).toHaveTextContent("Watched folders (250)");
     const list = screen.getByTestId("storage-book-location-list");
     expect(list).toHaveClass("overflow-y-auto");
     expect(within(list).getAllByRole("listitem")).toHaveLength(250);
@@ -205,7 +256,7 @@ describe("DataSettings", () => {
 
   it("shows the cache total on the clear button and confirms what goes and stays", async () => {
     const user = userEvent.setup();
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const button = screen.getByTestId("clear-cache-button");
@@ -223,7 +274,7 @@ describe("DataSettings", () => {
 
   it("cancel closes the confirmation without clearing", async () => {
     const user = userEvent.setup();
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     await user.click(screen.getByTestId("clear-cache-button"));
@@ -240,7 +291,7 @@ describe("DataSettings", () => {
     storageReportMock.mockResolvedValueOnce(REPORT);
     storageReportMock.mockResolvedValueOnce(after);
     clearCacheMock.mockResolvedValue(3 * 1024 * 1024);
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     await user.click(screen.getByTestId("clear-cache-button"));
@@ -255,7 +306,7 @@ describe("DataSettings", () => {
   });
 
   it("shows the cover cache but never offers to clear it", async () => {
-    render(<DataSettings />);
+    renderDataSettings();
     await screen.findByTestId("storage-total");
 
     const dataRoot = screen.getByTestId("storage-root-app-data");
@@ -276,7 +327,7 @@ describe("DataSettings", () => {
       <ThemeStateProvider>
         <LibraryDataProvider>
           <ImportProvider>
-            <SettingsShell />
+            <SettingsShell onSelectSection={vi.fn()} />
           </ImportProvider>
         </LibraryDataProvider>
       </ThemeStateProvider>,

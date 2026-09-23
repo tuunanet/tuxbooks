@@ -73,6 +73,9 @@ describe("SettingsShell", () => {
     expect(rows).not.toHaveTextContent("Library folder");
     expect(rows).not.toHaveTextContent("Header → Import");
     expect(rows).not.toHaveTextContent("Managed from the sidebar");
+    expect(rows).toHaveTextContent("Single files import in place and are not watched");
+    expect(rows).toHaveTextContent("Folders you add become watched folders");
+    expect(rows).not.toHaveTextContent("watched library locations");
   });
 
   it("switches sections from the navigation", async () => {

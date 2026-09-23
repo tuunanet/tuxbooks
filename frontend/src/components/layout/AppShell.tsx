@@ -90,7 +90,9 @@ function Shell() {
         {app.view === "detail" ? (
           <BookDetail />
         ) : app.section.kind === "settings" ? (
-          <SettingsShell />
+          <SettingsShell
+            onSelectSection={(section) => dispatch({ type: "select-section", section })}
+          />
         ) : (
           /* Smart and collection sections share the library view; collection
              filtering happens inside (milestone 10). */

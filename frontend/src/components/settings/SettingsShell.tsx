@@ -22,6 +22,7 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import type { LibrarySection } from "@/state/appState";
 import { useImport } from "@/state/importState";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
@@ -246,8 +247,8 @@ function GeneralSection() {
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Folders you add become watched library locations. You can also drag files onto the
-            window to import them.
+            Single files import in place and are not watched. Folders you add become watched
+            folders. You can also drag files onto the window to import them.
           </p>
         </dd>
       </div>
@@ -289,13 +290,17 @@ function SettingsNavigation({
   );
 }
 
+export interface SettingsShellProps {
+  onSelectSection: (section: LibrarySection) => void;
+}
+
 /**
  * Settings screen. General holds the app theme plus the library import
  * actions; Reading and PDF hold real, persisted default appearance controls
  * (saved on device and applied whenever a book opens); Data shows the
  * app-owned storage roots; Keyboard Shortcuts describes the bindings.
  */
-export function SettingsShell() {
+export function SettingsShell({ onSelectSection }: SettingsShellProps) {
   const [active, setActive] = useState<SettingsSectionId>("general");
 
   return (
@@ -310,7 +315,7 @@ export function SettingsShell() {
         ) : active === "reading" || active === "pdf" ? (
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
         ) : active === "data" ? (
-          <DataSettings />
+          <DataSettings onSelectSection={onSelectSection} />
         ) : (
           <ShortcutReference />
         )}
