@@ -40,6 +40,8 @@ const ALL_CHANNELS = [
   IPC_CHANNELS.storageReport,
   IPC_CHANNELS.openDataFolder,
   IPC_CHANNELS.openLibraryLocation,
+  IPC_CHANNELS.copyDataPath,
+  IPC_CHANNELS.copyLibraryLocationPath,
   IPC_CHANNELS.clearCache,
 ];
 
@@ -53,6 +55,8 @@ function argsFor(channel: string): unknown[] {
   if (channel === IPC_CHANNELS.storageReport) return [];
   if (channel === IPC_CHANNELS.openDataFolder) return ["app-data"];
   if (channel === IPC_CHANNELS.openLibraryLocation) return [1];
+  if (channel === IPC_CHANNELS.copyDataPath) return ["app-data"];
+  if (channel === IPC_CHANNELS.copyLibraryLocationPath) return [1];
   if (channel === IPC_CHANNELS.clearCache) return [];
   return [3];
 }
@@ -65,6 +69,7 @@ function harness(storageDirs: StorageDirs = STORAGE_DIRS): {
     showItemInFolder: ReturnType<typeof vi.fn>;
     openPath: ReturnType<typeof vi.fn>;
   };
+  clipboard: { writeText: ReturnType<typeof vi.fn> };
 } {
   const handlers = new Map<string, IpcHandler>();
   const sidecar = {
@@ -78,22 +83,24 @@ function harness(storageDirs: StorageDirs = STORAGE_DIRS): {
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ["/picked/one.epub"] })),
   };
   const shell = { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") };
+  const clipboard = { writeText: vi.fn() };
   registerIpcHandlers((channel, handler) => handlers.set(channel, handler), {
     sidecar,
     issued: new IssuedPaths(),
     dialog,
     shell,
+    clipboard,
     storageDirs,
     debugIpc: false,
   });
-  return { handlers, sidecar, dialog, shell };
+  return { handlers, sidecar, dialog, shell, clipboard };
 }
 
 describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", () => {
   it.each(ALL_CHANNELS)(
     "%s rejects a disallowed sender before touching anything native",
     async (channel) => {
-      const { handlers, sidecar, dialog, shell } = harness();
+      const { handlers, sidecar, dialog, shell, clipboard } = harness();
       const handler = handlers.get(channel);
       expect(handler).toBeDefined();
       await expect(handler!(senderEvent(HOSTILE) as never, ...argsFor(channel))).rejects.toThrow(
@@ -103,11 +110,12 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
       expect(dialog.showOpenDialog).not.toHaveBeenCalled();
       expect(shell.showItemInFolder).not.toHaveBeenCalled();
       expect(shell.openPath).not.toHaveBeenCalled();
+      expect(clipboard.writeText).not.toHaveBeenCalled();
     },
   );
 
   it.each(ALL_CHANNELS)("%s admits the application page", async (channel) => {
-    const { handlers, sidecar, dialog, shell } = harness();
+    const { handlers, sidecar, dialog, shell, clipboard } = harness();
     const handler = handlers.get(channel);
     expect(handler).toBeDefined();
     await handler!(senderEvent(ALLOWED) as never, ...argsFor(channel));
@@ -126,6 +134,12 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
     }
     if (channel === IPC_CHANNELS.openLibraryLocation) {
       expect(shell.openPath).toHaveBeenCalledWith("/books");
+    }
+    if (channel === IPC_CHANNELS.copyDataPath) {
+      expect(clipboard.writeText).toHaveBeenCalledWith(STORAGE_DIRS.dataDir);
+    }
+    if (channel === IPC_CHANNELS.copyLibraryLocationPath) {
+      expect(clipboard.writeText).toHaveBeenCalledWith("/books");
     }
   });
 });
@@ -185,6 +199,47 @@ describe("open library location channel (data-management spec)", () => {
       /no library location 99/,
     );
     expect(shell.openPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("copy data path channel (data-management spec)", () => {
+  it("copies a root by id and rejects a renderer-supplied path", async () => {
+    const { handlers, clipboard } = harness();
+    const handler = handlers.get(IPC_CHANNELS.copyDataPath);
+    expect(handler).toBeDefined();
+
+    await handler!(senderEvent(ALLOWED) as never, "app-config");
+    expect(clipboard.writeText).toHaveBeenCalledWith(STORAGE_DIRS.configDir);
+
+    clipboard.writeText.mockClear();
+    await expect(handler!(senderEvent(ALLOWED) as never, "/etc/passwd")).rejects.toThrow(
+      /data folder id/,
+    );
+    await expect(handler!(senderEvent(ALLOWED) as never, "app-data/../app-config")).rejects.toThrow(
+      /data folder id/,
+    );
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("copy library location path channel (data-management spec)", () => {
+  it("copies a watched location by id and rejects a renderer-supplied path", async () => {
+    const { handlers, clipboard } = harness();
+    const handler = handlers.get(IPC_CHANNELS.copyLibraryLocationPath);
+    expect(handler).toBeDefined();
+
+    await handler!(senderEvent(ALLOWED) as never, 1);
+    expect(clipboard.writeText).toHaveBeenCalledWith("/books");
+
+    clipboard.writeText.mockClear();
+    await expect(handler!(senderEvent(ALLOWED) as never, "/books")).rejects.toThrow(
+      /library location id/,
+    );
+    await expect(handler!(senderEvent(ALLOWED) as never, 0)).rejects.toThrow(/library location id/);
+    await expect(handler!(senderEvent(ALLOWED) as never, 99)).rejects.toThrow(
+      /no library location 99/,
+    );
+    expect(clipboard.writeText).not.toHaveBeenCalled();
   });
 });
 

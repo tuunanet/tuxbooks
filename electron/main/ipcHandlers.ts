@@ -35,6 +35,11 @@ export interface NativeShellSurface {
   openPath(fullPath: string): Promise<string>;
 }
 
+/** The native clipboard surface the handlers use; injected from the main process. */
+export interface NativeClipboardSurface {
+  writeText(text: string): void;
+}
+
 /** Minimal sender view of the Electron IPC event. */
 export interface SenderEvent {
   readonly senderFrame?: { readonly url: string } | null;
@@ -47,6 +52,7 @@ export interface IpcHandlerDeps {
   issued: IssuedPaths;
   dialog: NativeDialogSurface;
   shell: NativeShellSurface;
+  clipboard: NativeClipboardSurface;
   storageDirs: StorageDirs;
   debugIpc: boolean;
   debugLog?: (line: string) => void;
@@ -65,7 +71,7 @@ export function registerIpcHandlers(
   register: (channel: string, handler: IpcHandler) => void,
   deps: IpcHandlerDeps,
 ): void {
-  const { sidecar, issued, dialog, shell, storageDirs, debugIpc, debugLog } = deps;
+  const { sidecar, issued, dialog, shell, clipboard, storageDirs, debugIpc, debugLog } = deps;
 
   register(IPC_CHANNELS.invoke, async (event, method: unknown, params: unknown) => {
     requireAppSender(event);
@@ -185,5 +191,33 @@ export function registerIpcHandlers(
     // Only the regenerable browser caches and the GPU marker are removed;
     // containment is enforced in the module against the two resolved roots.
     return clearAppCache(storageDirs);
+  });
+
+  register(IPC_CHANNELS.copyDataPath, async (event, rootId: unknown) => {
+    requireAppSender(event);
+    // The renderer names a stable root id; main resolves the real path and
+    // writes it with the native clipboard, never accepting a path from the
+    // renderer (data-management spec). Same resolution as openDataFolder.
+    if (!isStorageRootId(rootId)) {
+      throw new SidecarError("copy requires a known data folder id");
+    }
+    const target = rootId === "app-data" ? storageDirs.dataDir : storageDirs.configDir;
+    clipboard.writeText(target);
+  });
+
+  register(IPC_CHANNELS.copyLibraryLocationPath, async (event, locationId: unknown) => {
+    requireAppSender(event);
+    // The renderer names a watched location by id; main resolves the real
+    // path from the catalog and writes it with the native clipboard. Same
+    // resolution as openLibraryLocation.
+    if (!isValidLibraryLocationId(locationId)) {
+      throw new SidecarError("copy requires a known library location id");
+    }
+    const library = (await sidecar.call("get_storage_stats")) as LibraryStorageStats;
+    const location = library.locations.find((candidate) => candidate.id === locationId);
+    if (!location) {
+      throw new SidecarError(`no library location ${locationId}`);
+    }
+    clipboard.writeText(location.path);
   });
 }

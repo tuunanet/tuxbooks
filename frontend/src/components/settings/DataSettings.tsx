@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import {
   clearCache,
+  copyDataPath,
+  copyLibraryLocationPath,
   getStorageReport,
   openDataFolder,
   openLibraryLocation,
@@ -23,6 +25,11 @@ const KIND_LABEL: Record<StorageEntryKind, string> = {
   "only-copy": "Only copy",
   settings: "Settings",
 };
+
+/** How long a successful copy keeps its "Copied" label before reverting. */
+const COPY_FEEDBACK_MS = 1500;
+
+type CopyFeedback = "copied" | "error";
 
 const CATALOG_ROWS = [
   ["books", "Books"],
@@ -47,6 +54,16 @@ export function DataSettings() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [freed, setFreed] = useState<number | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const copyTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(
+    () => () => {
+      for (const timer of copyTimers.current.values()) clearTimeout(timer);
+      copyTimers.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -85,11 +102,53 @@ export function DataSettings() {
     void openLibraryLocation(locationId).catch(() => {});
   }, []);
 
-  const copyPath = useCallback((pathValue: string) => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard) return;
-    void clipboard.writeText(pathValue).catch(() => {});
+  const flashCopied = useCallback((key: string) => {
+    setCopyFeedback((current) => ({ ...current, [key]: "copied" }));
+    const existing = copyTimers.current.get(key);
+    if (existing) clearTimeout(existing);
+    copyTimers.current.set(
+      key,
+      setTimeout(() => {
+        copyTimers.current.delete(key);
+        setCopyFeedback((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      }, COPY_FEEDBACK_MS),
+    );
   }, []);
+
+  const copyRootPath = useCallback(
+    (rootId: StorageRootId) => {
+      const key = `root:${rootId}`;
+      // Main resolves the path from the id and writes the clipboard; the
+      // renderer never names a filesystem path (data-management spec).
+      void copyDataPath(rootId).then(
+        () => flashCopied(key),
+        () => setCopyFeedback((current) => ({ ...current, [key]: "error" })),
+      );
+    },
+    [flashCopied],
+  );
+
+  const copyLocationPath = useCallback(
+    (locationId: number) => {
+      const key = `location:${locationId}`;
+      void copyLibraryLocationPath(locationId).then(
+        () => flashCopied(key),
+        () => setCopyFeedback((current) => ({ ...current, [key]: "error" })),
+      );
+    },
+    [flashCopied],
+  );
+
+  const copyLabel = (key: string): string => {
+    const feedback = copyFeedback[key];
+    if (feedback === "copied") return "Copied";
+    if (feedback === "error") return "Copy failed";
+    return "Copy path";
+  };
 
   if (failed) {
     return (
@@ -142,8 +201,13 @@ export function DataSettings() {
               <Button variant="outline" size="sm" onClick={() => open(root.id)}>
                 Open folder
               </Button>
-              <Button variant="outline" size="sm" onClick={() => copyPath(root.path)}>
-                Copy path
+              <Button
+                data-testid={`copy-root-${root.id}`}
+                variant="outline"
+                size="sm"
+                onClick={() => copyRootPath(root.id)}
+              >
+                {copyLabel(`root:${root.id}`)}
               </Button>
             </div>
           </div>
@@ -240,8 +304,13 @@ export function DataSettings() {
                   <Button variant="outline" size="sm" onClick={() => openLocation(location.id)}>
                     Open folder
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => copyPath(location.path)}>
-                    Copy path
+                  <Button
+                    data-testid={`copy-location-${location.id}`}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyLocationPath(location.id)}
+                  >
+                    {copyLabel(`location:${location.id}`)}
                   </Button>
                 </div>
               </li>

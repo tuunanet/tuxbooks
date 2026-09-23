@@ -57,6 +57,8 @@ export interface TuxbooksApi {
   storageReport(): Promise<StorageReport>;
   openDataFolder(rootId: StorageRootId): Promise<void>;
   openLibraryLocation(locationId: number): Promise<void>;
+  copyDataPath(rootId: StorageRootId): Promise<void>;
+  copyLibraryLocationPath(locationId: number): Promise<void>;
   clearCache(): Promise<number>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
@@ -326,6 +328,16 @@ export function openDataFolder(rootId: StorageRootId): Promise<void> {
 /** Open one watched library location in the system file manager (by id). */
 export function openLibraryLocation(locationId: number): Promise<void> {
   return tuxbooks().openLibraryLocation(locationId);
+}
+
+/** Copy one app-owned storage root's path to the native clipboard (by root id). */
+export function copyDataPath(rootId: StorageRootId): Promise<void> {
+  return tuxbooks().copyDataPath(rootId);
+}
+
+/** Copy one watched library location's path to the native clipboard (by id). */
+export function copyLibraryLocationPath(locationId: number): Promise<void> {
+  return tuxbooks().copyLibraryLocationPath(locationId);
 }
 
 /**

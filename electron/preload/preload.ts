@@ -87,6 +87,22 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.openLibraryLocation, locationId);
   },
 
+  /** Copy one app-owned storage root's path to the clipboard, by stable id. */
+  copyDataPath(rootId: string): Promise<void> {
+    if (!isStorageRootId(rootId)) {
+      return Promise.reject(new TypeError(`invalid data folder id: ${String(rootId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.copyDataPath, rootId);
+  },
+
+  /** Copy one watched library location's path to the clipboard, by id. */
+  copyLibraryLocationPath(locationId: number): Promise<void> {
+    if (!isValidLibraryLocationId(locationId)) {
+      return Promise.reject(new TypeError(`invalid library location id: ${String(locationId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.copyLibraryLocationPath, locationId);
+  },
+
   /** Remove the regenerable browser caches and GPU marker; resolves bytes freed. */
   clearCache(): Promise<number> {
     return ipcRenderer.invoke(IPC_CHANNELS.clearCache) as Promise<number>;

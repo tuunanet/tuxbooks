@@ -4,7 +4,8 @@
  * Run modes map to projects, one Electron invocation per phase, exactly
  * like the previous harness:
  *
- *   empty   — library.e2e.ts (app shell, sidebar, empty state, settings)
+ *   empty   — library.e2e.ts + settings-data.e2e.ts (app shell, sidebar,
+ *             empty state, settings)
  *   seeded  — all application suites against the seeded scratch library
  *   shell   — desktop-shell.e2e.ts: native window lifecycle + branding
  *             (own phase: the relaunch scenario closes and relaunches the
@@ -31,6 +32,7 @@ const ci = Boolean(process.env.CI);
 /** Project spec filters: which spec files each phase runs. */
 const SEEDED_EXCLUDE = [
   "library.e2e.ts",
+  "settings-data.e2e.ts",
   "desktop-shell.e2e.ts",
   "gpu-fallback.e2e.ts",
   "epub-content-security.e2e.ts",
@@ -81,7 +83,7 @@ export default defineConfig({
   reporter: [["list"], ["json", { outputFile: path.join(artifactsDir, "playwright-report.json") }]],
 
   projects: [
-    { name: "empty", ...project(["library.e2e.ts"]) },
+    { name: "empty", ...project(["library.e2e.ts", "settings-data.e2e.ts"]) },
     { name: "shell", ...project(["desktop-shell.e2e.ts"]) },
     { name: "gpu", ...project(["gpu-fallback.e2e.ts"]) },
     { name: "security", ...project(["epub-content-security.e2e.ts", "app-hardening.e2e.ts"]) },
