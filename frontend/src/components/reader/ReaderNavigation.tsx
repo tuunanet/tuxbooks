@@ -7,6 +7,12 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  formatShortcutAria,
+  formatShortcutDisplay,
+  READER_PANEL_SHORTCUTS,
+} from "@/lib/readerShortcuts";
 import { epubSurfaceTheme, readerPopoverVariables, type ReaderTheme } from "@/lib/epub/appearance";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
@@ -49,6 +55,87 @@ interface ReaderNavigationProps {
   onTabChange: (tab: ReaderNavTab) => void;
   /** Active reader theme; the portaled sheet re-themes its app tokens to it. */
   theme: ReaderTheme;
+}
+
+/** Trigger metadata for one drawer tab: label, testid, and hint copy. */
+interface ReaderNavTabHint {
+  label: string;
+  testId: string;
+  /** One-line description; the shortcut renders after it when the tab has one. */
+  description: string;
+  /** Engine combo; shown in the hint and exposed through `aria-keyshortcuts`. */
+  combo?: string;
+}
+
+/**
+ * Hint copy keyed by tab value so the triggers stay in one place. Pages and
+ * Contents share the contents combo: the header's Contents button opens the
+ * drawer onto Pages for a PDF and Contents for an EPUB.
+ */
+const NAV_TAB_HINTS: Record<ReaderNavTab, ReaderNavTabHint> = {
+  contents: {
+    label: "Contents",
+    testId: "nav-tab-contents",
+    description: "The book's chapters, in order.",
+    combo: READER_PANEL_SHORTCUTS.contents,
+  },
+  pages: {
+    label: "Pages",
+    testId: "nav-tab-pages",
+    description: "Thumbnails of every page, click one to jump there.",
+    combo: READER_PANEL_SHORTCUTS.contents,
+  },
+  outline: {
+    label: "Outline",
+    testId: "nav-tab-outline",
+    description: "The document's own headings, in order.",
+  },
+  bookmarks: {
+    label: "Bookmarks",
+    testId: "nav-tab-bookmarks",
+    description: "Pages you saved, so you can return to them.",
+    combo: READER_PANEL_SHORTCUTS.bookmarks,
+  },
+  highlights: {
+    label: "Highlights",
+    testId: "nav-tab-highlights",
+    description: "Text you highlighted, with any notes you added.",
+    combo: READER_PANEL_SHORTCUTS.highlights,
+  },
+  search: {
+    label: "Search",
+    testId: "nav-tab-search",
+    description: "Find text in this book.",
+    combo: "mod+f",
+  },
+};
+
+/** A drawer tab trigger with its hover/focus hint and `aria-keyshortcuts`. */
+function navTabTrigger(value: ReaderNavTab, selected: boolean) {
+  const { label, testId, description, combo } = NAV_TAB_HINTS[value];
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        asChild
+        // Radix's tooltip trigger stamps its own `data-state` (open/closed)
+        // onto the child; without this it would overwrite the tab's
+        // active/inactive state that drives its styling.
+        data-state={selected ? "active" : "inactive"}
+      >
+        <TabsTrigger
+          data-testid={testId}
+          value={value}
+          aria-keyshortcuts={combo ? formatShortcutAria(combo) : undefined}
+        >
+          {label}
+        </TabsTrigger>
+      </TooltipTrigger>
+      <TooltipContent>
+        {description}
+        {combo ? ` (${formatShortcutDisplay(combo, false)})` : ""}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 /** Flattens a TOC tree into rows with their nesting depth. */
@@ -171,30 +258,12 @@ export function ReaderNavigation({
           className="flex min-h-0 flex-1 flex-col gap-0"
         >
           <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2">
-            {isEpub && (
-              <TabsTrigger data-testid="nav-tab-contents" value="contents">
-                Contents
-              </TabsTrigger>
-            )}
-            {!isEpub && (
-              <>
-                <TabsTrigger data-testid="nav-tab-pages" value="pages">
-                  Pages
-                </TabsTrigger>
-                <TabsTrigger data-testid="nav-tab-outline" value="outline">
-                  Outline
-                </TabsTrigger>
-              </>
-            )}
-            <TabsTrigger data-testid="nav-tab-bookmarks" value="bookmarks">
-              Bookmarks
-            </TabsTrigger>
-            <TabsTrigger data-testid="nav-tab-highlights" value="highlights">
-              Highlights
-            </TabsTrigger>
-            <TabsTrigger data-testid="nav-tab-search" value="search">
-              Search
-            </TabsTrigger>
+            {isEpub && navTabTrigger("contents", tab === "contents")}
+            {!isEpub && navTabTrigger("pages", tab === "pages")}
+            {!isEpub && navTabTrigger("outline", tab === "outline")}
+            {navTabTrigger("bookmarks", tab === "bookmarks")}
+            {navTabTrigger("highlights", tab === "highlights")}
+            {navTabTrigger("search", tab === "search")}
           </TabsList>
 
           {isEpub && (

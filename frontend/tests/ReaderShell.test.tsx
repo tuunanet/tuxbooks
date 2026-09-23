@@ -25,6 +25,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 
 import { AppShell } from "@/components/layout/AppShell";
 import { ReaderNavigation } from "@/components/reader/ReaderNavigation";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
@@ -395,6 +396,54 @@ describe("ReaderNavigation", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
   });
 
+  it("hints every EPUB tab with its shortcut and exposes aria-keyshortcuts", async () => {
+    renderReader();
+
+    await openNavigation();
+    await screen.findByTestId("nav-tab-contents");
+
+    const hints = [
+      ["nav-tab-contents", "Control+Shift+C", "The book's chapters, in order. (Ctrl+Shift+C)"],
+      [
+        "nav-tab-bookmarks",
+        "Control+Shift+B",
+        "Pages you saved, so you can return to them. (Ctrl+Shift+B)",
+      ],
+      [
+        "nav-tab-highlights",
+        "Control+Shift+H",
+        "Text you highlighted, with any notes you added. (Ctrl+Shift+H)",
+      ],
+      ["nav-tab-search", "Control+F", "Find text in this book. (Ctrl+F)"],
+    ] as const;
+
+    for (const [testId, keyshortcuts, tooltip] of hints) {
+      const trigger = screen.getByTestId(testId);
+      expect(trigger).toHaveAttribute("aria-keyshortcuts", keyshortcuts);
+      fireEvent.focus(trigger);
+      await screen.findByRole("tooltip", { name: tooltip });
+    }
+  });
+
+  it("hints the PDF Pages tab with a key and the Outline tab without one", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    await openNavigation();
+
+    const pages = await screen.findByTestId("nav-tab-pages");
+    expect(pages).toHaveAttribute("aria-keyshortcuts", "Control+Shift+C");
+    fireEvent.focus(pages);
+    await screen.findByRole("tooltip", {
+      name: "Thumbnails of every page, click one to jump there. (Ctrl+Shift+C)",
+    });
+
+    const outline = screen.getByTestId("nav-tab-outline");
+    expect(outline).not.toHaveAttribute("aria-keyshortcuts");
+    fireEvent.focus(outline);
+    await screen.findByRole("tooltip", { name: "The document's own headings, in order." });
+  });
+
   it("shows a loading state while the EPUB document is still opening", async () => {
     const { ReadiumEpubHandle } = await import("@/lib/epub/readiumEngine");
     vi.mocked(ReadiumEpubHandle.open).mockReturnValueOnce(new Promise(() => {}) as never);
@@ -555,25 +604,29 @@ describe("ReaderNavigation", () => {
 
   it("themes the portaled drawer with the active reader theme", async () => {
     render(
-      <ReaderNavigation
-        open
-        onOpenChange={() => {}}
-        book={makeBook()}
-        pageCount={0}
-        onJump={() => {}}
-        epubToc={null}
-        pdfOutline={null}
-        annotations={[]}
-        onAnnotationJump={() => {}}
-        onDeleteAnnotation={() => {}}
-        onUpdateAnnotation={() => {}}
-        search={null}
-        onSearch={() => {}}
-        onSearchPick={() => {}}
-        tab="contents"
-        onTabChange={() => {}}
-        theme="dark"
-      />,
+      // The standalone drawer needs the tooltip context AppShell normally
+      // provides; its tab triggers carry hover/focus hints.
+      <TooltipProvider>
+        <ReaderNavigation
+          open
+          onOpenChange={() => {}}
+          book={makeBook()}
+          pageCount={0}
+          onJump={() => {}}
+          epubToc={null}
+          pdfOutline={null}
+          annotations={[]}
+          onAnnotationJump={() => {}}
+          onDeleteAnnotation={() => {}}
+          onUpdateAnnotation={() => {}}
+          search={null}
+          onSearch={() => {}}
+          onSearchPick={() => {}}
+          tab="contents"
+          onTabChange={() => {}}
+          theme="dark"
+        />
+      </TooltipProvider>,
     );
 
     // The drawer is portaled outside the reader root, so the reader theme's
