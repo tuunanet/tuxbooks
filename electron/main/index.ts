@@ -18,7 +18,7 @@ import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
 import { reportStartupFailure, surfaceStartupQuarantine } from "./bootRecovery";
 import { runCli } from "./cli";
-import { runDryRun, runResetData } from "./resetData";
+import { runDryRun, runResetData, type ResetDataDeps } from "./resetData";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -53,6 +53,14 @@ const bootElapsed = (label: string): void => {
 const stdout = (message: string): void => console.log(message);
 const stderr = (message: string): void => console.error(message);
 
+/** Built per call so a plain GUI launch never resolves storage dirs. */
+const resetDeps = (): ResetDataDeps => ({
+  fs,
+  dirs: appStorageDirs(),
+  stdout,
+  stderr,
+});
+
 // Explicit CLI commands (--help, --version, --dry-run, --reset-data) run
 // before any startup log line, before app ready, and before the
 // single-instance lock: help and version own stdout, recovery
@@ -64,8 +72,8 @@ const cliHandled = runCli(process.argv, {
   stderr,
   exit: (code) => app.exit(code),
   version: app.getVersion(),
-  runDryRun: () => runDryRun({ fs, dirs: appStorageDirs(), stdout, stderr }),
-  runResetData: () => runResetData({ fs, dirs: appStorageDirs(), stdout, stderr }),
+  runDryRun: () => runDryRun(resetDeps()),
+  runResetData: () => runResetData(resetDeps()),
 });
 
 // Anchor segment: bundle evaluation itself (module graph + protocol setup).

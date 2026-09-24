@@ -65,6 +65,24 @@ const PASSTHROUGH_OPTIONS = new Set([
   "--disable-gpu",
 ]);
 
+/** What one token contributes; null means ignore it (positional or pass-through). */
+type TokenEvent = "help" | "version" | "dry-run" | "reset-data" | { error: string };
+
+function classify(token: string): TokenEvent | null {
+  if (token === "-h" || token === "--help") return "help";
+  if (token === "-v" || token === "--version") return "version";
+  if (token === "--dry-run") return "dry-run";
+  if (token === "--reset-data") return "reset-data";
+  if (!token.startsWith("-") || token === "-") return null;
+  const separator = token.indexOf("=");
+  const name = separator === -1 ? token : token.slice(0, separator);
+  if (PASSTHROUGH_OPTIONS.has(name)) return null;
+  if (separator !== -1 && BOOLEAN_OPTIONS.has(name)) {
+    return { error: `option '${name}' does not take a value` };
+  }
+  return { error: `unknown option '${name}'` };
+}
+
 /** Recognize the command; every scan runs, precedence breaks all ties. */
 export function parseCli(argv: readonly string[]): CliCommand {
   let help = false;
@@ -75,31 +93,16 @@ export function parseCli(argv: readonly string[]): CliCommand {
 
   for (const token of argv) {
     if (token === "--") break;
-    if (token === "-h" || token === "--help") {
-      help = true;
+    const event = classify(token);
+    if (event === null) continue;
+    if (typeof event !== "string") {
+      error ??= event.error;
       continue;
     }
-    if (token === "-v" || token === "--version") {
-      version = true;
-      continue;
-    }
-    if (token === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
-    if (token === "--reset-data") {
-      resetData = true;
-      continue;
-    }
-    if (!token.startsWith("-") || token === "-") continue;
-    const separator = token.indexOf("=");
-    const name = separator === -1 ? token : token.slice(0, separator);
-    if (PASSTHROUGH_OPTIONS.has(name)) continue;
-    if (separator !== -1 && BOOLEAN_OPTIONS.has(name)) {
-      error ??= `option '${name}' does not take a value`;
-      continue;
-    }
-    error ??= `unknown option '${name}'`;
+    if (event === "help") help = true;
+    else if (event === "version") version = true;
+    else if (event === "dry-run") dryRun = true;
+    else resetData = true;
   }
 
   if (help) return { kind: "help" };

@@ -105,6 +105,10 @@ describe("parseCli", () => {
     expect(parseCli(["electron", "/path/main.cjs", "book.epub"])).toEqual({ kind: "gui" });
   });
 
+  it("treats a lone dash as a positional, not an option", () => {
+    expect(parseCli(["tuxbooks", "-"])).toEqual({ kind: "gui" });
+  });
+
   it("stops option parsing at the end-of-options marker", () => {
     expect(parseCli(["tuxbooks", "--", "--help"])).toEqual({ kind: "gui" });
     expect(parseCli(["tuxbooks", "--", "--bogus"])).toEqual({ kind: "gui" });
