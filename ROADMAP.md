@@ -4,7 +4,7 @@ TuxBooks shipped its first public release (0.0.1) in September 2026 and is in ac
 
 The focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## Now: 0.0.18
+## Now: 0.0.19
 
 Release 0.0.13 rebuilt the PDF reader. It runs on PDFium compiled to WebAssembly instead of MuPDF.js, so the app no longer ships an AGPL-only dependency, and its zoom and scrolling follow GNOME Papers: wheel and pinch zoom hold the point under the pointer, page sizes round to whole pixels, deep zoom renders only the visible region, and the previous render stays on screen while the sharp one loads.
 
@@ -15,6 +15,8 @@ Release 0.0.15 aligns zoom anchoring with GNOME Papers: wheel and pinch follow t
 Release 0.0.17 polishes the PDF reader: presentation mode pre-renders the next and previous pages so a flip blits instead of rasterizing behind a blank page, the reader title centers on the header, the presentation controls fade out until hovered or focused, and the page buffer matches the CSS box so deep zoom no longer resamples the whole canvas. It also caps a render bitmap before the worker builds its image, fixing a deep-zoom render failure. (0.0.16 was tagged but not published; 0.0.17 carries its changes.)
 
 Release 0.0.18 adds a Data tab in Settings. It shows where TuxBooks keeps its own data, how large each piece is, and the folders it watches, and it clears only the caches the app rebuilds on its own; the catalog, the cover cache, your settings, and your books stay. A failed start is no longer silent: the app writes a startup log, shows a dialog, and prints the resolved paths and a recovery command, and a database that cannot open is quarantined under a timestamped name and replaced with a fresh one instead of being deleted. `--reset-data` and `--dry-run` cover recovery from a terminal, and neither ever touches book files.
+
+Release 0.0.19 makes the reader usable without a mouse and names the books the app is not reconciling. The PDF page number is an editable field in the toolbar and the presentation bar: type a page to jump, step with the wheel or arrow keys while it is focused. Shortcuts open the thumbnails sidebar, the appearance panel, and the contents drawer (including its Bookmarks and Highlights tabs), Settings lists every shortcut from one source, and the docs match. Books outside every watched folder get their own Outside Watched Folders view; the Data tab counts them and jumps there, and Copy path works again. The CLI gains `--help` and `--version` and rejects unknown flags.
 
 With the engine swap done, work continues in four areas.
 

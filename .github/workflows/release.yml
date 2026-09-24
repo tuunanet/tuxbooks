@@ -165,23 +165,21 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.18 adds a Data settings tab and makes a failed start recoverable.
+          TuxBooks 0.0.19 makes the reader keyboard-friendly and surfaces books outside your watched folders.
 
-          What changed since 0.0.17:
+          What changed since 0.0.18:
 
-          - A Data tab in Settings shows where TuxBooks keeps its own data, the
-            size of each piece, and the folders it watches, with open-folder
-            and copy-path actions.
-          - Clear cache removes only the data the app rebuilds by itself
-            (browser caches and the GPU fallback marker). The catalog, the
-            cover cache, your settings, and your books stay.
-          - A failed start now writes a log, shows a dialog with the log path,
-            and prints the same message to the terminal, instead of quitting
-            silently.
-          - A database that cannot open is quarantined under a timestamped
-            name and the app starts with a fresh one. Nothing is deleted.
-          - \`--reset-data\` clears app data and never book files, and
-            \`--dry-run\` prints the paths and sizes without changing anything.
+          - The PDF page number is an editable field in the toolbar and the
+            presentation bar: type a page and press Enter to jump, step pages
+            with the wheel or arrow keys while the field is focused.
+          - Shortcuts open the reader panels (thumbnails, appearance, contents
+            drawer, bookmarks, highlights), and Settings lists every shortcut
+            from one source of truth.
+          - Books outside every watched folder appear under Outside Watched
+            Folders. The Data tab counts them and can jump there. Copy path in
+            Settings works again.
+          - The CLI accepts \`--help\` and \`--version\` and rejects unknown
+            flags.
 
           Install on Ubuntu/Debian:
 
