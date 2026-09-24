@@ -26,8 +26,8 @@ progress, and provides EPUB and PDF reading experiences.
 ## Install
 
 Prebuilt packages (deb, AppImage) are on the
-[releases page](https://github.com/tuunanet/tuxbooks/releases) — TuxBooks is
-pre-1.0, so releases are marked pre-release:
+[releases page](https://github.com/tuunanet/tuxbooks/releases). TuxBooks is
+pre-1.0 and still under active development:
 
 ```sh
 # Ubuntu/Debian
