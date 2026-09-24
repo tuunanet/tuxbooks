@@ -24,11 +24,6 @@ import type { LibraryStorageStats, StorageReport } from "../shared/storageReport
  * so a symlink can never point a deletion outside the app-owned roots.
  */
 
-export interface StartupFlags {
-  dryRun: boolean;
-  resetData: boolean;
-}
-
 /** The copy-paste command shown after a reset, to start the app again. */
 export const LAUNCH_COMMAND = "tuxbooks";
 
@@ -62,14 +57,6 @@ const EMPTY_LIBRARY: LibraryStorageStats = {
   bookTotalBytes: 0,
   catalog: { books: 0, authors: 0, collections: 0, annotations: 0, readingProgress: 0 },
 };
-
-/** Recognize the recovery flags; every unrelated argument is ignored. */
-export function parseStartupFlags(argv: readonly string[]): StartupFlags {
-  return {
-    dryRun: argv.includes("--dry-run"),
-    resetData: argv.includes("--reset-data"),
-  };
-}
 
 /** The sidecar's quarantine stamp; matches its `%Y%m%dT%H%M%S%.3fZ` format. */
 export function quarantineStamp(now: Date): string {

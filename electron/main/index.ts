@@ -16,18 +16,9 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
-import {
-  describeStartupFailure,
-  reportStartupFailure,
-  surfaceStartupQuarantine,
-} from "./bootRecovery";
-import {
-  parseStartupFlags,
-  runDryRun,
-  runResetData,
-  type ResetDataDeps,
-  type StartupFlags,
-} from "./resetData";
+import { reportStartupFailure, surfaceStartupQuarantine } from "./bootRecovery";
+import { runCli } from "./cli";
+import { runDryRun, runResetData, type ResetDataDeps } from "./resetData";
 import { handleProtocolRequest } from "./protocolHandler";
 import { makeProtocolSources } from "./protocolSources";
 import { IssuedPaths } from "./ipcPolicy";
@@ -57,45 +48,43 @@ const BOOT_START = performance.now();
 const bootElapsed = (label: string): void => {
   console.log(`[startup] ${label} +${Math.round(performance.now() - BOOT_START)}ms`);
 };
+// CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
+
+const stdout = (message: string): void => console.log(message);
+const stderr = (message: string): void => console.error(message);
+
+/** Built per call so a plain GUI launch never resolves storage dirs. */
+const resetDeps = (): ResetDataDeps => ({
+  fs,
+  dirs: appStorageDirs(),
+  stdout,
+  stderr,
+});
+
+// Explicit CLI commands (--help, --version, --dry-run, --reset-data) run
+// before any startup log line, before app ready, and before the
+// single-instance lock: help and version own stdout, recovery
+// (data-management spec) must work when a second instance or a broken
+// start would otherwise block it, and a usage error exits 2 without
+// starting the GUI. False means carry on and start the graphical app.
+const cliHandled = runCli(process.argv, {
+  stdout,
+  stderr,
+  exit: (code) => app.exit(code),
+  version: app.getVersion(),
+  runDryRun: () => runDryRun(resetDeps()),
+  runResetData: () => runResetData(resetDeps()),
+});
+
 // Anchor segment: bundle evaluation itself (module graph + protocol setup).
 // The gap between this and "app ready" is Chromium's platform init (GPU,
 // compositor, fontconfig, high-DPI) on the developer machine (PERF-11:
-// measure, never work around unmeasured).
-bootElapsed("electron process");
-
-// CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
-
-// Command-line recovery runs before app ready and before the single-instance
-// lock (data-management spec): `--reset-data` and `--dry-run` must work even
-// when a second instance or a broken start would otherwise block startup.
-const startupFlags = parseStartupFlags(process.argv);
-const recoveryRequested = startupFlags.dryRun || startupFlags.resetData;
-if (recoveryRequested) handleRecoveryFlags(startupFlags);
-
-/** Run the requested recovery flag, then exit; the app is never started. */
-function handleRecoveryFlags(flags: StartupFlags): void {
-  const deps: ResetDataDeps = {
-    fs,
-    dirs: appStorageDirs(),
-    stdout: (message) => console.log(message),
-    stderr: (message) => console.error(message),
-  };
-  if (flags.dryRun) {
-    runDryRun(deps);
-    app.exit(0);
-    return;
-  }
-  void runResetData(deps).then(
-    () => app.exit(0),
-    (error: unknown) => {
-      deps.stderr(`TuxBooks could not reset app data: ${describeStartupFailure(error)}`);
-      app.exit(1);
-    },
-  );
-}
+// measure, never work around unmeasured). CLI launches own their stdout,
+// so the anchor only prints for a GUI launch.
+if (!cliHandled) bootElapsed("electron process");
 
 // One library database owner: a second app instance quits immediately.
-if (!recoveryRequested && !app.requestSingleInstanceLock()) {
+if (!cliHandled && !app.requestSingleInstanceLock()) {
   app.quit();
 }
 
@@ -466,7 +455,7 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 }
 
 app.whenReady().then(() => {
-  if (recoveryRequested) return;
+  if (cliHandled) return;
   bootElapsed("app ready");
   // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
   // per-run file, so E2E diagnosis works from CI artifacts alone. The file
