@@ -24,7 +24,7 @@ export interface CliDeps {
   runResetData: () => Promise<unknown>;
 }
 
-export type CliCommand =
+type CliCommand =
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "usage-error"; message: string }
@@ -36,7 +36,7 @@ export type CliCommand =
  * Exact `--help` text; the fixed program name is never derived from
  * argv[0], so the output is identical for packaged, dev, and e2e launches.
  */
-export const HELP_TEXT = `Usage: tuxbooks [options]
+const HELP_TEXT = `Usage: tuxbooks [options]
 
 TuxBooks: a local-first ebook library and reader.
 
@@ -84,7 +84,7 @@ function classify(token: string): TokenEvent | null {
 }
 
 /** Recognize the command; every scan runs, precedence breaks all ties. */
-export function parseCli(argv: readonly string[]): CliCommand {
+function parseCli(argv: readonly string[]): CliCommand {
   let help = false;
   let version = false;
   let dryRun = false;

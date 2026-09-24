@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { HELP_TEXT, parseCli, runCli, type CliDeps } from "../../electron/main/cli";
+import { runCli, type CliDeps } from "../../electron/main/cli";
 
 /**
  * Command-line tests (standard CLI practice): fixed order-independent
  * precedence, strict unknown-flag errors, the launcher pass-through list,
  * exact help/version/error text, and exit codes. External behavior only:
  * what is printed, what is called, and which exit code is requested.
+ * parseCli stays module-private, so recognition cases observe runCli's
+ * outputs instead of importing the parser.
  */
 
 function harness(overrides: Partial<CliDeps> = {}): {
@@ -41,79 +43,150 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe("parseCli", () => {
+const USAGE_HINT_LINE = "Run 'tuxbooks --help' for usage.";
+
+describe("command recognition", () => {
   it("recognizes the help and version flags in both spellings", () => {
-    expect(parseCli(["tuxbooks", "-h"])).toEqual({ kind: "help" });
-    expect(parseCli(["tuxbooks", "--help"])).toEqual({ kind: "help" });
-    expect(parseCli(["tuxbooks", "-v"])).toEqual({ kind: "version" });
-    expect(parseCli(["tuxbooks", "--version"])).toEqual({ kind: "version" });
+    for (const flag of ["-h", "--help"]) {
+      const { deps, out, err, exits } = harness();
+      expect(runCli(["tuxbooks", flag], deps)).toBe(true);
+      expect(out.join("\n")).toContain("Usage: tuxbooks [options]");
+      expect(err).toEqual([]);
+      expect(exits).toEqual([0]);
+    }
+    for (const flag of ["-v", "--version"]) {
+      const { deps, out, err, exits } = harness();
+      expect(runCli(["tuxbooks", flag], deps)).toBe(true);
+      expect(out).toEqual(["tuxbooks 1.2.3"]);
+      expect(err).toEqual([]);
+      expect(exits).toEqual([0]);
+    }
   });
 
   it("lets help win over version, usage errors, and actions in any order", () => {
-    expect(parseCli(["tuxbooks", "--version", "--help"])).toEqual({ kind: "help" });
-    expect(parseCli(["tuxbooks", "--bogus", "--help"])).toEqual({ kind: "help" });
-    expect(parseCli(["tuxbooks", "--help", "--reset-data"])).toEqual({ kind: "help" });
-    expect(parseCli(["tuxbooks", "--dry-run", "-h"])).toEqual({ kind: "help" });
+    const cases = [
+      ["tuxbooks", "--version", "--help"],
+      ["tuxbooks", "--bogus", "--help"],
+      ["tuxbooks", "--help", "--reset-data"],
+      ["tuxbooks", "--dry-run", "-h"],
+      ["electron", ".", "--bogus", "-h"],
+    ];
+    for (const argv of cases) {
+      const { deps, out, err, exits, calls } = harness();
+      expect(runCli(argv, deps)).toBe(true);
+      expect(out.join("\n")).toContain("Usage: tuxbooks [options]");
+      expect(err).toEqual([]);
+      expect(exits).toEqual([0]);
+      expect(calls).toEqual({ dryRun: 0, resetData: 0 });
+    }
   });
 
   it("lets version win over usage errors and actions", () => {
-    expect(parseCli(["tuxbooks", "--bogus", "-v"])).toEqual({ kind: "version" });
-    expect(parseCli(["tuxbooks", "--dry-run", "--version"])).toEqual({ kind: "version" });
+    const cases = [
+      ["tuxbooks", "--bogus", "-v"],
+      ["tuxbooks", "--dry-run", "--version"],
+    ];
+    for (const argv of cases) {
+      const { deps, out, err, exits, calls } = harness();
+      expect(runCli(argv, deps)).toBe(true);
+      expect(out).toEqual(["tuxbooks 1.2.3"]);
+      expect(err).toEqual([]);
+      expect(exits).toEqual([0]);
+      expect(calls).toEqual({ dryRun: 0, resetData: 0 });
+    }
   });
 
   it("rejects unknown options, clustered short flags, and option values", () => {
-    expect(parseCli(["tuxbooks", "--bogus"])).toEqual({
-      kind: "usage-error",
-      message: "unknown option '--bogus'",
-    });
-    expect(parseCli(["tuxbooks", "-hv"])).toEqual({
-      kind: "usage-error",
-      message: "unknown option '-hv'",
-    });
-    expect(parseCli(["tuxbooks", "--reset-data=1"])).toEqual({
-      kind: "usage-error",
-      message: "option '--reset-data' does not take a value",
-    });
-    expect(parseCli(["tuxbooks", "--help=1"])).toEqual({
-      kind: "usage-error",
-      message: "option '--help' does not take a value",
-    });
+    const cases: [string[], string][] = [
+      [["tuxbooks", "--bogus"], "unknown option '--bogus'"],
+      [["tuxbooks", "-hv"], "unknown option '-hv'"],
+      [["tuxbooks", "--reset-data=1"], "option '--reset-data' does not take a value"],
+      [["tuxbooks", "--help=1"], "option '--help' does not take a value"],
+    ];
+    for (const [argv, reason] of cases) {
+      const { deps, out, err, exits, calls } = harness();
+      expect(runCli(argv, deps)).toBe(true);
+      expect(out).toEqual([]);
+      expect(err).toEqual([`tuxbooks: ${reason}`, USAGE_HINT_LINE]);
+      expect(exits).toEqual([2]);
+      expect(calls).toEqual({ dryRun: 0, resetData: 0 });
+    }
   });
 
   it("reports the first usage error when several options are bad", () => {
-    expect(parseCli(["tuxbooks", "--bogus", "--worse"])).toEqual({
-      kind: "usage-error",
-      message: "unknown option '--bogus'",
-    });
-    expect(parseCli(["tuxbooks", "--dry-run", "--bogus"])).toEqual({
-      kind: "usage-error",
-      message: "unknown option '--bogus'",
-    });
+    const multi = harness();
+    expect(runCli(["tuxbooks", "--bogus", "--worse"], multi.deps)).toBe(true);
+    expect(multi.err).toEqual(["tuxbooks: unknown option '--bogus'", USAGE_HINT_LINE]);
+    expect(multi.exits).toEqual([2]);
+
+    const withAction = harness();
+    expect(runCli(["tuxbooks", "--dry-run", "--bogus"], withAction.deps)).toBe(true);
+    expect(withAction.err).toEqual(["tuxbooks: unknown option '--bogus'", USAGE_HINT_LINE]);
+    expect(withAction.calls).toEqual({ dryRun: 0, resetData: 0 });
+    expect(withAction.exits).toEqual([2]);
   });
 
   it("runs the non-destructive dry run when both action flags are given", () => {
-    expect(parseCli(["tuxbooks", "--dry-run", "--reset-data"])).toEqual({ kind: "dry-run" });
-    expect(parseCli(["tuxbooks", "--reset-data", "--dry-run"])).toEqual({ kind: "dry-run" });
-    expect(parseCli(["tuxbooks", "--reset-data"])).toEqual({ kind: "reset-data" });
-    expect(parseCli(["tuxbooks", "--dry-run"])).toEqual({ kind: "dry-run" });
+    const cases = [
+      ["tuxbooks", "--dry-run", "--reset-data"],
+      ["tuxbooks", "--reset-data", "--dry-run"],
+    ];
+    for (const argv of cases) {
+      const { deps, out, err, exits, calls } = harness();
+      expect(runCli(argv, deps)).toBe(true);
+      expect(calls).toEqual({ dryRun: 1, resetData: 0 });
+      expect(out).toEqual([]);
+      expect(err).toEqual([]);
+      expect(exits).toEqual([0]);
+    }
   });
 
   it("starts the GUI when only positionals are given", () => {
-    expect(parseCli(["tuxbooks"])).toEqual({ kind: "gui" });
-    expect(parseCli(["electron", "."])).toEqual({ kind: "gui" });
-    expect(parseCli(["tuxbooks", "book.epub"])).toEqual({ kind: "gui" });
-    expect(parseCli(["electron", "/path/main.cjs", "book.epub"])).toEqual({ kind: "gui" });
+    const cases = [
+      ["tuxbooks"],
+      ["electron", "."],
+      ["tuxbooks", "book.epub"],
+      ["electron", "/path/main.cjs", "book.epub"],
+    ];
+    for (const argv of cases) {
+      const { deps, out, err, exits, calls } = harness();
+      expect(runCli(argv, deps)).toBe(false);
+      expect(out).toEqual([]);
+      expect(err).toEqual([]);
+      expect(exits).toEqual([]);
+      expect(calls).toEqual({ dryRun: 0, resetData: 0 });
+    }
   });
 
   it("treats a lone dash as a positional, not an option", () => {
-    expect(parseCli(["tuxbooks", "-"])).toEqual({ kind: "gui" });
+    const { deps, out, err, exits, calls } = harness();
+    expect(runCli(["tuxbooks", "-"], deps)).toBe(false);
+    expect(out).toEqual([]);
+    expect(err).toEqual([]);
+    expect(exits).toEqual([]);
+    expect(calls).toEqual({ dryRun: 0, resetData: 0 });
   });
 
   it("stops option parsing at the end-of-options marker", () => {
-    expect(parseCli(["tuxbooks", "--", "--help"])).toEqual({ kind: "gui" });
-    expect(parseCli(["tuxbooks", "--", "--bogus"])).toEqual({ kind: "gui" });
-    expect(parseCli(["tuxbooks", "--dry-run", "--", "--reset-data"])).toEqual({ kind: "dry-run" });
-    expect(parseCli(["tuxbooks", "--help", "--"])).toEqual({ kind: "help" });
+    const guiHelp = harness();
+    expect(runCli(["tuxbooks", "--", "--help"], guiHelp.deps)).toBe(false);
+    expect(guiHelp.out).toEqual([]);
+    expect(guiHelp.exits).toEqual([]);
+
+    const guiError = harness();
+    expect(runCli(["tuxbooks", "--", "--bogus"], guiError.deps)).toBe(false);
+    expect(guiError.err).toEqual([]);
+    expect(guiError.exits).toEqual([]);
+
+    const action = harness();
+    expect(runCli(["tuxbooks", "--dry-run", "--", "--reset-data"], action.deps)).toBe(true);
+    expect(action.calls).toEqual({ dryRun: 1, resetData: 0 });
+    expect(action.exits).toEqual([0]);
+
+    const help = harness();
+    expect(runCli(["tuxbooks", "--help", "--"], help.deps)).toBe(true);
+    expect(help.out.join("\n")).toContain("Usage: tuxbooks [options]");
+    expect(help.exits).toEqual([0]);
   });
 
   it("passes launcher Chromium switches through without treating them as unknown", () => {
@@ -125,13 +198,20 @@ describe("parseCli", () => {
       "--use-fake-device-for-media-stream",
       "--disable-gpu",
     ];
-    expect(parseCli(launcherArgs)).toEqual({ kind: "gui" });
-    expect(parseCli([...launcherArgs, "--dry-run"])).toEqual({ kind: "dry-run" });
+    const gui = harness();
+    expect(runCli(launcherArgs, gui.deps)).toBe(false);
+    expect(gui.exits).toEqual([]);
+
+    const dry = harness();
+    expect(runCli([...launcherArgs, "--dry-run"], dry.deps)).toBe(true);
+    expect(dry.calls).toEqual({ dryRun: 1, resetData: 0 });
+    expect(dry.exits).toEqual([0]);
+
     // Near-miss typos in the pass-through list stay strict.
-    expect(parseCli(["tuxbooks", "--no-sandbos"])).toEqual({
-      kind: "usage-error",
-      message: "unknown option '--no-sandbos'",
-    });
+    const typo = harness();
+    expect(runCli(["tuxbooks", "--no-sandbos"], typo.deps)).toBe(true);
+    expect(typo.err).toEqual(["tuxbooks: unknown option '--no-sandbos'", USAGE_HINT_LINE]);
+    expect(typo.exits).toEqual([2]);
   });
 });
 
@@ -155,14 +235,6 @@ Options:
     expect(calls).toEqual({ dryRun: 0, resetData: 0 });
   });
 
-  it("prints help for -h next to an unknown option without erroring", () => {
-    const { deps, out, err, exits } = harness();
-    expect(runCli(["electron", ".", "--bogus", "-h"], deps)).toBe(true);
-    expect(out).toEqual([HELP_TEXT]);
-    expect(err).toEqual([]);
-    expect(exits).toEqual([0]);
-  });
-
   it("prints the version with the injected version string and exits 0", () => {
     const { deps, out, err, exits } = harness();
     expect(runCli(["tuxbooks", "--version"], deps)).toBe(true);
@@ -175,7 +247,7 @@ Options:
     const { deps, out, err, exits, calls } = harness();
     expect(runCli(["tuxbooks", "--bogus"], deps)).toBe(true);
     expect(out).toEqual([]);
-    expect(err).toEqual(["tuxbooks: unknown option '--bogus'", "Run 'tuxbooks --help' for usage."]);
+    expect(err).toEqual(["tuxbooks: unknown option '--bogus'", USAGE_HINT_LINE]);
     expect(exits).toEqual([2]);
     expect(calls).toEqual({ dryRun: 0, resetData: 0 });
   });
@@ -184,10 +256,7 @@ Options:
     const { deps, out, err, exits, calls } = harness();
     expect(runCli(["tuxbooks", "--reset-data=1"], deps)).toBe(true);
     expect(out).toEqual([]);
-    expect(err).toEqual([
-      "tuxbooks: option '--reset-data' does not take a value",
-      "Run 'tuxbooks --help' for usage.",
-    ]);
+    expect(err).toEqual(["tuxbooks: option '--reset-data' does not take a value", USAGE_HINT_LINE]);
     expect(exits).toEqual([2]);
     expect(calls).toEqual({ dryRun: 0, resetData: 0 });
   });
