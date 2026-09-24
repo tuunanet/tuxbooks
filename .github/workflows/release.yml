@@ -98,7 +98,7 @@ jobs:
       # otherwise re-fetches them every release) and give the pinned-glibc
       # sidecar container a BuildKit layer cache in the Actions cache.
       - name: Electron cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/electron
