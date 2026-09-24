@@ -6,6 +6,14 @@ import path from "node:path";
 
 import { appUiCsp } from "../electron/shared/appCsp";
 
+// App version for the About tab; bump-version.sh keeps package.json in sync
+// with the Electron/sidecar versions, so one read covers all builds.
+const appVersion = (
+  JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
+
 /**
  * Emits the PDFium WASM bundle as a build asset and serves it in dev,
  * exposing its URL through a virtual module. The package does not export the
@@ -41,6 +49,9 @@ const pdfiumWasmUrl: Plugin = {
 export default defineConfig({
   plugins: [react(), tailwindcss(), pdfiumWasmUrl],
   clearScreen: false,
+  define: {
+    __TUXBOOKS_VERSION__: JSON.stringify(appVersion),
+  },
   // Electron loads the built renderer over file:// — absolute asset URLs
   // would resolve to the filesystem root, so assets must stay relative.
   base: "./",
