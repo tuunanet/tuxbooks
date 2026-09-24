@@ -55,9 +55,20 @@ describe("SettingsShell", () => {
     renderSettings();
 
     expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
-    for (const label of ["General", "Reading", "PDF", "Keyboard Shortcuts", "Data"]) {
+    for (const label of ["General", "Reading", "PDF", "Keyboard Shortcuts", "Data", "About"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("lists About last in the section navigation", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+    expect(labels).toEqual(["General", "Reading", "PDF", "Keyboard Shortcuts", "Data", "About"]);
   });
 
   it("starts on General with the app theme and library import actions", async () => {
