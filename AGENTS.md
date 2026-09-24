@@ -6,8 +6,7 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`. When creating a new worktree, make sure related uncommitted
-changes are switched from `main` to the worktree, especially files in `.beads`.
+never build on `main`.
 
 ## Completing a task
 
@@ -20,7 +19,11 @@ changes are switched from `main` to the worktree, especially files in `.beads`.
    `--force-with-lease`). Open the PR with what changed, how it was tested
    (every claim backed by evidence), before/after proof, and any risks or
    follow-up work. Run the title and body through `unslop` before posting.
-6. Remove the worktree after the PR merges.
+6. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
+   them out of the task PR. After that PR merges, open a
+   `chore(bd): sync the tracker export` PR for the export files. Full rules
+   live in `docs/agents/issue-tracker.md`.
+7. Remove the worktree after the PR merges.
 
 ## Multi-agent rules
 
