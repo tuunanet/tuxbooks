@@ -53,13 +53,18 @@ export function BookListItem({
           tabIndex={tabIndex}
           onClick={(event) => {
             event.currentTarget.focus();
-            onSelect?.(book.id);
+            onSelect?.(book.id, event);
           }}
           onDoubleClick={() => onOpen?.(book.id)}
-          onContextMenu={() => onSelect?.(book.id)}
+          onContextMenu={(event) => onSelect?.(book.id, event)}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-            selected ? "bg-accent" : "hover:bg-accent/40",
+            // Selected rows get the blue token and nothing else; hover
+            // paints the accent on unselected rows only, so the two
+            // never read the same.
+            selected
+              ? "bg-library-selection/20 ring-2 ring-library-selection"
+              : "hover:bg-accent/40",
           )}
         >
           <BookCover

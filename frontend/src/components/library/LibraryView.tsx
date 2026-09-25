@@ -7,6 +7,7 @@ import {
   useState,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { BookCard } from "@/components/books/BookCard";
@@ -22,6 +23,7 @@ import { EmptyCollectionState } from "./EmptyCollectionState";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { LibraryHeader } from "./LibraryHeader";
 import { NoSearchResultsState } from "./NoSearchResultsState";
+import { SelectionBar } from "./SelectionBar";
 import {
   filterBooksByCollection,
   filterBooksByQuery,
@@ -112,10 +114,6 @@ export function LibraryView({ section }: LibraryViewProps) {
     }
   }, [section, loading, error, books, dispatch]);
 
-  const selectBook = useCallback(
-    (bookId: number | null) => dispatch({ type: "select-book", bookId }),
-    [dispatch],
-  );
   const openDetail = useCallback(
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),
     [dispatch],
@@ -152,6 +150,52 @@ export function LibraryView({ section }: LibraryViewProps) {
     scoped = sortBooks(scoped, sort);
     return filterBooksByQuery(scoped, query);
   }, [books, collections, effectiveSection, sort, query]);
+
+  // The rendered selection, and the on-screen order Shift-click ranges are
+  // measured over. Selected ids outlive the filter, so a book a search
+  // hides stays selected and is counted by the selection bar.
+  const selectedIds = useMemo(() => app.selectedBookIds ?? [], [app.selectedBookIds]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const visibleIds = useMemo(() => visible.map((book) => book.id), [visible]);
+
+  const clearSelection = useCallback(
+    () => dispatch({ type: "clear-library-selection" }),
+    [dispatch],
+  );
+
+  // The card hands over the event, so this is the one place that reads the
+  // modifier keys and tells a right click from a plain one.
+  const selectBook = useCallback(
+    (bookId: number, event: ReactMouseEvent<HTMLElement>) => {
+      if (event.type === "contextmenu") {
+        // Right click opens the menu for the selection as it stands; only
+        // an unselected book takes the selection over.
+        if (!selectedSet.has(bookId)) dispatch({ type: "library-select", bookId });
+        return;
+      }
+      if (event.shiftKey) {
+        dispatch({ type: "library-range-select", bookId, visibleIds });
+      } else if (event.ctrlKey || event.metaKey) {
+        dispatch({ type: "library-toggle-select", bookId });
+      } else {
+        dispatch({ type: "library-select", bookId });
+      }
+    },
+    [dispatch, selectedSet, visibleIds],
+  );
+
+  // A click or right click on empty space (grid gaps, the scroll area
+  // itself) starts over. The missing-file action buttons sit outside the
+  // card but still belong to it, so they keep the selection.
+  const clearOnBackground = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-book-card]") || target.closest("button")) return;
+      clearSelection();
+    },
+    [clearSelection],
+  );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -375,7 +419,7 @@ export function LibraryView({ section }: LibraryViewProps) {
     const itemProps = {
       book,
       collections,
-      selected: book.id === app.selectedBookId,
+      selected: selectedSet.has(book.id),
       tabIndex: index === focusedIndex ? 0 : -1,
       onSelect: selectBook,
       onOpen: openDetail,
@@ -466,6 +510,7 @@ export function LibraryView({ section }: LibraryViewProps) {
         view={view}
         onViewChange={setView}
       />
+      <SelectionBar count={selectedIds.length} onClear={clearSelection} />
       {visible.length === 0 ? (
         query.trim() !== "" ? (
           <NoSearchResultsState query={query} onClearSearch={() => setQuery("")} />
@@ -482,6 +527,8 @@ export function LibraryView({ section }: LibraryViewProps) {
           data-testid={isGrid ? "book-grid" : "book-list"}
           onKeyDown={handleContainerKeyDown}
           onFocusCapture={handleFocusCapture}
+          onClick={clearOnBackground}
+          onContextMenu={clearOnBackground}
           onScroll={() => {
             const el = scrollElRef.current;
             if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
