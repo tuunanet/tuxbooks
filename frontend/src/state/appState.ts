@@ -36,15 +36,14 @@ export interface AppState {
    * Books highlighted in the library grid and list. A plain click replaces
    * the set, Ctrl/Cmd+click toggles one book, Shift+click takes the range
    * from the anchor over the visible order. Ids survive search and sort, so
-   * a filtered-out book stays selected. Optional so partial test and
-   * preview states keep working; the provider defaults it to [].
+   * a filtered-out book stays selected.
    */
-  selectedBookIds?: number[];
+  selectedBookIds: number[];
   /**
    * The anchor for Shift-click ranges, always the last plain or Ctrl click.
    * Shift-click and right-click never move it.
    */
-  selectionAnchorId?: number | null;
+  selectionAnchorId: number | null;
   /**
    * Section shown inside the detail view (issue #58). Metadata is the
    * primary curation surface; Overview keeps the operational facts.
@@ -63,6 +62,8 @@ export interface AppState {
 export type AppAction =
   | { type: "select-section"; section: LibrarySection }
   | { type: "library-select"; bookId: number }
+  /** Right-click takeover: the selection becomes this book, the anchor stays. */
+  | { type: "library-context-select"; bookId: number }
   | { type: "library-toggle-select"; bookId: number }
   /** `visibleIds` is the on-screen order, after search and sort. */
   | { type: "library-range-select"; bookId: number; visibleIds: number[] }
@@ -99,8 +100,13 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       };
     case "library-select":
       return { ...state, selectedBookIds: [action.bookId], selectionAnchorId: action.bookId };
+    case "library-context-select":
+      // A right click takes the selection over but leaves the anchor alone,
+      // so the next Shift+click still measures from the last plain or Ctrl
+      // click.
+      return { ...state, selectedBookIds: [action.bookId] };
     case "library-toggle-select": {
-      const selected = state.selectedBookIds ?? [];
+      const selected = state.selectedBookIds;
       return {
         ...state,
         selectedBookIds: selected.includes(action.bookId)
@@ -110,7 +116,7 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       };
     }
     case "library-range-select": {
-      const anchorId = state.selectionAnchorId ?? null;
+      const anchorId = state.selectionAnchorId;
       const anchorIndex = anchorId === null ? -1 : action.visibleIds.indexOf(anchorId);
       const targetIndex = action.visibleIds.indexOf(action.bookId);
       // Without an anchor on screen (nothing clicked yet, or the filter hid
@@ -124,8 +130,7 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       return { ...state, selectedBookIds: action.visibleIds.slice(start, end + 1) };
     }
     case "clear-library-selection": {
-      const ids = state.selectedBookIds ?? [];
-      if (ids.length === 0 && (state.selectionAnchorId ?? null) === null) return state;
+      if (state.selectedBookIds.length === 0 && state.selectionAnchorId === null) return state;
       return { ...state, selectedBookIds: [], selectionAnchorId: null };
     }
     case "open-book-detail":

@@ -9,8 +9,8 @@ import {
 
 interface AppStateProviderProps {
   children: ReactNode;
-  /** Optional override for tests and previews; defaults to the real initial state. */
-  initialState?: AppState;
+  /** Partial override for tests and previews; missing fields fall back to the real initial state. */
+  initialState?: Partial<AppState>;
 }
 
 export function AppStateProvider({ children, initialState }: AppStateProviderProps) {

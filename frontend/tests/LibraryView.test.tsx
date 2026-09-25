@@ -165,6 +165,13 @@ describe("LibraryView selection and opening", () => {
 });
 
 describe("LibraryView multi-selection", () => {
+  /** Recently Added shows them as Alpha, Gamma, Beta: ids out of order. */
+  const outOfOrderBooks = () => [
+    makeBook({ id: 1, title: "Alpha", addedAt: "2026-03-01T00:00:00.000Z" }),
+    makeBook({ id: 2, title: "Beta", addedAt: "2026-01-01T00:00:00.000Z" }),
+    makeBook({ id: 3, title: "Gamma", addedAt: "2026-02-01T00:00:00.000Z" }),
+  ];
+
   it("marks the clicked card with the blue selection and shows no bar below two books", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
@@ -225,11 +232,7 @@ describe("LibraryView multi-selection", () => {
   it("takes the shift+click range over the visible order", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 3, collectionCount: 0 },
-      list_books: [
-        makeBook({ id: 1, title: "Alpha", addedAt: "2026-03-01T00:00:00.000Z" }),
-        makeBook({ id: 2, title: "Beta", addedAt: "2026-01-01T00:00:00.000Z" }),
-        makeBook({ id: 3, title: "Gamma", addedAt: "2026-02-01T00:00:00.000Z" }),
-      ],
+      list_books: outOfOrderBooks(),
     });
 
     renderLibrary();
@@ -280,6 +283,26 @@ describe("LibraryView multi-selection", () => {
     expect(cards.map((card) => card.getAttribute("aria-pressed"))).toEqual(["true", "true"]);
   });
 
+  it("clears a filtered-away selection from the empty state", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+    fireEvent.click(item(cards, 0));
+    fireEvent.click(item(cards, 1), { ctrlKey: true });
+
+    await userEvent.type(screen.getByTestId("library-search"), "nothing-matches");
+    expect(await screen.findByTestId("no-search-results")).toBeInTheDocument();
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("2 books selected");
+
+    fireEvent.click(screen.getByTestId("no-search-results"));
+
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+  });
+
   it("keeps the selection when the sort changes", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
@@ -327,6 +350,24 @@ describe("LibraryView multi-selection", () => {
     expect(cards.map((card) => card.getAttribute("aria-pressed"))).toEqual(["false", "false"]);
   });
 
+  it("keeps the selection when a modifier click lands on empty space", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+    });
+
+    renderLibrary();
+    const grid = await screen.findByTestId("book-grid");
+    const cards = await screen.findAllByTestId("book-card");
+    fireEvent.click(item(cards, 0));
+    fireEvent.click(item(cards, 1), { ctrlKey: true });
+
+    fireEvent.click(grid, { ctrlKey: true });
+    fireEvent.click(grid, { shiftKey: true });
+
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("2 books selected");
+  });
+
   it("right click takes over an unselected book and keeps a live selection", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
@@ -346,6 +387,35 @@ describe("LibraryView multi-selection", () => {
 
     expect(cards.map((card) => card.getAttribute("aria-pressed"))).toEqual(["true", "true"]);
     expect(screen.getByTestId("selection-count")).toHaveTextContent("2 books selected");
+  });
+
+  it("keeps the anchor on the last plain click when a right click takes over", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 3, collectionCount: 0 },
+      list_books: outOfOrderBooks(),
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+    // Visible order is Alpha, Gamma, Beta.
+    fireEvent.click(item(cards, 0));
+    fireEvent.contextMenu(item(cards, 2));
+
+    expect(cards.map((card) => card.getAttribute("aria-pressed"))).toEqual([
+      "false",
+      "false",
+      "true",
+    ]);
+
+    // The range still starts at the plain click, so it runs Alpha..Gamma
+    // and leaves the right-clicked Beta out.
+    fireEvent.click(item(cards, 1), { shiftKey: true });
+
+    expect(cards.map((card) => card.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "true",
+      "false",
+    ]);
   });
 
   it("clears the selection when the sidebar section changes", async () => {

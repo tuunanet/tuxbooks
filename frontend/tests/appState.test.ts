@@ -72,6 +72,8 @@ describe("appStateReducer", () => {
         view: "reader",
         section: { kind: "collection", id: 2 },
         selectedBookId: 9,
+        selectedBookIds: [9],
+        selectionAnchorId: 9,
         libraryQuery: "",
       },
       { type: "return-to-library" },
@@ -80,6 +82,8 @@ describe("appStateReducer", () => {
       view: "library",
       section: { kind: "collection", id: 2 },
       selectedBookId: 9,
+      selectedBookIds: [9],
+      selectionAnchorId: 9,
       libraryQuery: "",
     });
   });
@@ -103,6 +107,15 @@ describe("appStateReducer library selection", () => {
     const state = appStateReducer(withSelection([2, 5], 2), { type: "library-select", bookId: 7 });
     expect(state.selectedBookIds).toEqual([7]);
     expect(state.selectionAnchorId).toBe(7);
+  });
+
+  it("a right-click takeover replaces the selection but leaves the anchor", () => {
+    const state = appStateReducer(withSelection([2, 5], 2), {
+      type: "library-context-select",
+      bookId: 7,
+    });
+    expect(state.selectedBookIds).toEqual([7]);
+    expect(state.selectionAnchorId).toBe(2);
   });
 
   it("ctrl+click adds an unselected book and moves the anchor", () => {

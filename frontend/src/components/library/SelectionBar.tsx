@@ -16,6 +16,8 @@ export function SelectionBar({ count, onClear }: SelectionBarProps) {
   return (
     <div
       data-testid="selection-bar"
+      role="status"
+      aria-live="polite"
       className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-library-selection/40 bg-library-selection/10 px-3 py-1.5 text-sm"
     >
       <span data-testid="selection-count">{count} books selected</span>

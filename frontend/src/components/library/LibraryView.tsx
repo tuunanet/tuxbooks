@@ -154,7 +154,7 @@ export function LibraryView({ section }: LibraryViewProps) {
   // The rendered selection, and the on-screen order Shift-click ranges are
   // measured over. Selected ids outlive the filter, so a book a search
   // hides stays selected and is counted by the selection bar.
-  const selectedIds = useMemo(() => app.selectedBookIds ?? [], [app.selectedBookIds]);
+  const selectedIds = app.selectedBookIds;
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const visibleIds = useMemo(() => visible.map((book) => book.id), [visible]);
 
@@ -169,8 +169,9 @@ export function LibraryView({ section }: LibraryViewProps) {
     (bookId: number, event: ReactMouseEvent<HTMLElement>) => {
       if (event.type === "contextmenu") {
         // Right click opens the menu for the selection as it stands; only
-        // an unselected book takes the selection over.
-        if (!selectedSet.has(bookId)) dispatch({ type: "library-select", bookId });
+        // an unselected book takes the selection over, and the anchor stays
+        // where the last plain or Ctrl click left it.
+        if (!selectedSet.has(bookId)) dispatch({ type: "library-context-select", bookId });
         return;
       }
       if (event.shiftKey) {
@@ -184,14 +185,17 @@ export function LibraryView({ section }: LibraryViewProps) {
     [dispatch, selectedSet, visibleIds],
   );
 
-  // A click or right click on empty space (grid gaps, the scroll area
-  // itself) starts over. The missing-file action buttons sit outside the
-  // card but still belong to it, so they keep the selection.
+  // A plain click or a right click on empty space starts over, in the grid
+  // as in the empty states below it. Cards, controls, and the missing-file
+  // action buttons own their own clicks, and a modifier click on empty
+  // space belongs to no book.
   const clearOnBackground = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target.closest("[data-book-card]") || target.closest("button")) return;
+      if (target.closest("[data-book-card], button, input")) return;
+      const modified = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;
+      if (modified && event.type !== "contextmenu") return;
       clearSelection();
     },
     [clearSelection],
@@ -494,7 +498,12 @@ export function LibraryView({ section }: LibraryViewProps) {
   };
 
   return (
-    <section data-testid="library-view" className="flex h-full min-h-0 flex-col">
+    <section
+      data-testid="library-view"
+      className="flex h-full min-h-0 flex-col"
+      onClick={clearOnBackground}
+      onContextMenu={clearOnBackground}
+    >
       <LibraryHeader
         title={
           effectiveSection.kind === "collection"
@@ -527,8 +536,6 @@ export function LibraryView({ section }: LibraryViewProps) {
           data-testid={isGrid ? "book-grid" : "book-list"}
           onKeyDown={handleContainerKeyDown}
           onFocusCapture={handleFocusCapture}
-          onClick={clearOnBackground}
-          onContextMenu={clearOnBackground}
           onScroll={() => {
             const el = scrollElRef.current;
             if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);

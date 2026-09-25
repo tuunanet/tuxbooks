@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { Book, CollectionSummary } from "@/types/domain";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { bookSelectionClass } from "./selection";
 
 /**
  * Interaction surface shared by the grid card and the list row: click
@@ -91,12 +92,7 @@ export function BookCard({
           onContextMenu={(event) => onSelect?.(book.id, event)}
           className={cn(
             "group flex flex-col rounded-xl p-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-            // Selected cards get the blue token and nothing else; hover
-            // paints the accent on unselected cards only, so the two
-            // never read the same.
-            selected
-              ? "bg-library-selection/20 ring-2 ring-library-selection"
-              : "hover:bg-accent/40",
+            bookSelectionClass(selected),
           )}
         >
           <div className="relative">

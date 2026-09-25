@@ -6,6 +6,7 @@ import type { Book } from "@/types/domain";
 import type { InteractiveBookProps } from "./BookCard";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { bookSelectionClass } from "./selection";
 
 interface BookListItemProps extends InteractiveBookProps {
   book: Book;
@@ -59,12 +60,7 @@ export function BookListItem({
           onContextMenu={(event) => onSelect?.(book.id, event)}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-            // Selected rows get the blue token and nothing else; hover
-            // paints the accent on unselected rows only, so the two
-            // never read the same.
-            selected
-              ? "bg-library-selection/20 ring-2 ring-library-selection"
-              : "hover:bg-accent/40",
+            bookSelectionClass(selected),
           )}
         >
           <BookCover
