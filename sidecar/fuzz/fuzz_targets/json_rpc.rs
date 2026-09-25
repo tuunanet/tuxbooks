@@ -67,6 +67,7 @@ async fn build_state(root: &Path, library_dir: &Path) -> AppState {
         db: pool,
         db_path,
         watcher: Arc::new(watcher),
+        startup_recovery: None,
     };
     let book = NewBook {
         path: library_dir.join("seed.epub").to_string_lossy().into_owned(),
