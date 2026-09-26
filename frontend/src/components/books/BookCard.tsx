@@ -22,6 +22,8 @@ export interface InteractiveBookProps {
   selected?: boolean;
   collections: CollectionSummary[];
   tabIndex?: number;
+  /** Selection size behind the right-click menu; above one it goes bulk. */
+  selectionCount?: number;
   onSelect?: (bookId: number, event: ReactMouseEvent<HTMLElement>) => void;
   onOpen?: (bookId: number) => void;
   onRead?: (bookId: number) => void;
@@ -32,6 +34,7 @@ export interface InteractiveBookProps {
   onRemoveFromCollection?: (bookId: number, collectionId: number) => void;
   onMarkFinished?: (bookId: number) => void;
   onReveal?: (bookId: number) => void;
+  onBulkRemove?: () => void;
 }
 
 interface BookCardProps extends InteractiveBookProps {
@@ -48,6 +51,7 @@ export function BookCard({
   selected = false,
   collections,
   tabIndex = 0,
+  selectionCount = 1,
   onSelect,
   onOpen,
   onRead,
@@ -58,6 +62,7 @@ export function BookCard({
   onRemoveFromCollection,
   onMarkFinished,
   onReveal,
+  onBulkRemove,
 }: BookCardProps) {
   const percent = progressPercentOf(book);
   return (
@@ -65,6 +70,7 @@ export function BookCard({
       <BookContextMenu
         book={book}
         collections={collections}
+        selectionCount={selectionCount}
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
@@ -74,6 +80,7 @@ export function BookCard({
         onRemoveFromCollection={onRemoveFromCollection}
         onMarkFinished={onMarkFinished}
         onReveal={onReveal}
+        onBulkRemove={onBulkRemove}
       >
         <button
           type="button"

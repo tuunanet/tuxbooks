@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { LibraryView } from "@/components/library/LibraryView";
@@ -9,7 +9,7 @@ import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
-import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
+import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 
 function renderLibrary(section: LibrarySection = { kind: "smart", id: "all-books" }) {
   return render(
@@ -458,6 +458,230 @@ describe("LibraryView multi-selection", () => {
     expect(item(rows, 0)).toHaveAttribute("aria-pressed", "true");
     expect(item(rows, 0)).toHaveClass("bg-library-selection/20", "ring-library-selection");
     expect(item(rows, 1)).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("LibraryView bulk context menu", () => {
+  /** A book whose file is gone, so the single menu carries Locate File…. */
+  const lost = () => makeBook({ id: 3, title: "Lost", available: false });
+
+  it("keeps the full single-book menu at a selection of one", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), lost()],
+      list_collections: [],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+
+    // Click then right click on the same book: the selection stays at one.
+    fireEvent.click(item(cards, 1));
+    fireEvent.contextMenu(item(cards, 1));
+
+    await screen.findByRole("menuitem", { name: "Open" });
+    expect(screen.getByRole("menuitem", { name: "Mark as Finished" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Add to Collection" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove from Collection" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit Metadata" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Locate File…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove from Library" })).toBeInTheDocument();
+    // The missing file keeps its old disabled states on this menu too.
+    expect(screen.getByRole("menuitem", { name: "Continue Reading" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitem", { name: "Show in File Manager" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Remove 3 Books from Library" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers only the four bulk items at a selection of several", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 3, collectionCount: 0 },
+      list_books: [alpha(), beta(), lost()],
+      list_collections: [],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+
+    fireEvent.click(item(cards, 0));
+    fireEvent.click(item(cards, 1), { ctrlKey: true });
+    fireEvent.click(item(cards, 2), { ctrlKey: true });
+    fireEvent.contextMenu(item(cards, 2));
+
+    const menu = await screen.findByRole("menu");
+    const names = within(menu)
+      .getAllByRole("menuitem")
+      .map((node) => node.textContent);
+    expect(names).toHaveLength(4);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "Add to Collection",
+        "Remove from Collection",
+        "Mark as Finished",
+        "Remove 3 Books from Library",
+      ]),
+    );
+    expect(
+      within(menu).getByRole("menuitem", { name: "Remove 3 Books from Library" }),
+    ).toHaveAttribute("data-variant", "destructive");
+
+    // The follow-up tickets wire these; here they are inert placeholders.
+    for (const pending of ["Add to Collection", "Remove from Collection", "Mark as Finished"]) {
+      expect(within(menu).getByRole("menuitem", { name: pending })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    }
+
+    for (const hidden of [
+      "Open",
+      "Continue Reading",
+      "Edit Metadata",
+      "Locate File…",
+      "Show in File Manager",
+      "Remove from Library",
+    ]) {
+      expect(within(menu).queryByRole("menuitem", { name: hidden })).not.toBeInTheDocument();
+    }
+  });
+
+  it("asks once before a bulk remove, naming the count and the files on disk", async () => {
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+      list_collections: [],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+    fireEvent.click(item(cards, 0));
+    fireEvent.click(item(cards, 1), { ctrlKey: true });
+    fireEvent.contextMenu(item(cards, 1));
+
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove 2 Books from Library" }),
+    );
+
+    const dialogs = await screen.findAllByRole("dialog");
+    expect(dialogs).toHaveLength(1);
+    expect(item(dialogs, 0)).toHaveTextContent("Remove 2 books from the library?");
+    expect(item(dialogs, 0)).toHaveTextContent(/files on disk/i);
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("remove_book", expect.anything());
+    expect(screen.getByTestId("selection-count")).toHaveTextContent("2 books selected");
+  });
+
+  it("removes every selected book, refreshes once, clears the selection and reports on the bar", async () => {
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 3, collectionCount: 0 },
+      list_books: [
+        alpha(),
+        beta(),
+        makeBook({ id: 3, title: "Gamma", addedAt: "2026-03-01T00:00:00.000Z" }),
+      ],
+      list_collections: [],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+    fireEvent.click(item(cards, 0));
+    fireEvent.click(item(cards, 1), { ctrlKey: true });
+    fireEvent.click(item(cards, 2), { ctrlKey: true });
+    fireEvent.contextMenu(item(cards, 2));
+
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove 3 Books from Library" }),
+    );
+    await userEvent.click(await screen.findByTestId("bulk-remove-confirm"));
+
+    expect(invokeMock).toHaveBeenCalledWith("remove_book", { bookId: 1 });
+    expect(invokeMock).toHaveBeenCalledWith("remove_book", { bookId: 2 });
+    expect(invokeMock).toHaveBeenCalledWith("remove_book", { bookId: 3 });
+
+    // The mount fetch plus exactly one refresh after the loop.
+    expect(invokeMock.mock.calls.filter(([method]) => method === "list_books")).toHaveLength(2);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("selection-message")).toHaveTextContent(
+        "Removed 3 books from the library",
+      ),
+    );
+    expect(screen.queryByTestId("selection-count")).not.toBeInTheDocument();
+
+    const after = await screen.findAllByTestId("book-card");
+    expect(after.map((card) => card.getAttribute("aria-pressed"))).toEqual([
+      "false",
+      "false",
+      "false",
+    ]);
+  });
+
+  it("retires the result note on its own", async () => {
+    // The note expires on a timer; fake clocks drive that one assertion
+    // while every interaction stays synchronous (fireEvent, no waits).
+    vi.useFakeTimers();
+    try {
+      mockInvoke({
+        get_library_stats: { bookCount: 2, collectionCount: 0 },
+        list_books: [alpha(), beta()],
+        list_collections: [],
+      });
+
+      renderLibrary();
+      await act(async () => {});
+
+      const cards = screen.getAllByTestId("book-card");
+      fireEvent.click(item(cards, 0));
+      fireEvent.click(item(cards, 1), { ctrlKey: true });
+      fireEvent.contextMenu(item(cards, 1));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Remove 2 Books from Library" }));
+      fireEvent.click(screen.getByTestId("bulk-remove-confirm"));
+
+      // The per-book calls and the refresh resolve as microtasks.
+      await act(async () => {});
+      expect(screen.getByTestId("selection-message")).toHaveTextContent(
+        "Removed 2 books from the library",
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("removes a single book from the menu with no dialog", async () => {
+    invokeMock.mockClear();
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [alpha()],
+      list_collections: [],
+    });
+
+    renderLibrary();
+    const cards = await screen.findAllByTestId("book-card");
+    fireEvent.contextMenu(item(cards, 0));
+
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove from Library" }));
+
+    expect(invokeMock).toHaveBeenCalledWith("remove_book", { bookId: 1 });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("selection-bar")).not.toBeInTheDocument();
   });
 });
 

@@ -19,6 +19,7 @@ import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
+import { BulkRemoveDialog } from "./BulkRemoveDialog";
 import { EmptyCollectionState } from "./EmptyCollectionState";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { LibraryHeader } from "./LibraryHeader";
@@ -52,6 +53,8 @@ const GRID_TEXT_ESTIMATE_PX = 80;
 /** One BookListItem row plus its gap, before measurement corrects it. */
 const LIST_ROW_ESTIMATE_PX = 76;
 const OVERSCAN_ROWS = 2;
+/** How long the result note stays on the selection bar. */
+const BULK_MESSAGE_MS = 4000;
 
 /**
  * Scroll positions per section, surviving detail/reader round trips
@@ -90,6 +93,8 @@ export function LibraryView({ section }: LibraryViewProps) {
   // section-scoped app state so it resets when the sidebar section changes.
   const [view, setView] = useState<BookViewMode>("grid");
   const [sort, setSort] = useState<BookSortId>("recently-added");
+  const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const query = app.libraryQuery;
 
   // The loose-books view exists only while a loose book does. Losing the last
@@ -163,6 +168,23 @@ export function LibraryView({ section }: LibraryViewProps) {
     [dispatch],
   );
 
+  // The per-book call only drops the library entry, never the file on disk;
+  // one refresh at the end picks up every removal.
+  const confirmBulkRemove = useCallback(async () => {
+    const ids = selectedIds;
+    setBulkRemoveOpen(false);
+    for (const id of ids) await removeBookFromLibrary(id);
+    await refresh();
+    dispatch({ type: "clear-library-selection" });
+    setBulkMessage(`Removed ${ids.length} books from the library`);
+  }, [selectedIds, removeBookFromLibrary, refresh, dispatch]);
+
+  useEffect(() => {
+    if (bulkMessage === null) return;
+    const timer = window.setTimeout(() => setBulkMessage(null), BULK_MESSAGE_MS);
+    return () => window.clearTimeout(timer);
+  }, [bulkMessage]);
+
   // The card hands over the event, so this is the one place that reads the
   // modifier keys and tells a right click from a plain one.
   const selectBook = useCallback(
@@ -193,6 +215,10 @@ export function LibraryView({ section }: LibraryViewProps) {
     (event: ReactMouseEvent<HTMLElement>) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      // Menus and dialogs render into a portal outside this section's DOM
+      // even though React bubbles their events through it: a click there is
+      // never a click on empty space.
+      if (!event.currentTarget.contains(target)) return;
       if (target.closest("[data-book-card], button, input")) return;
       const modified = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;
       if (modified && event.type !== "contextmenu") return;
@@ -424,6 +450,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       book,
       collections,
       selected: selectedSet.has(book.id),
+      selectionCount: selectedIds.length,
       tabIndex: index === focusedIndex ? 0 : -1,
       onSelect: selectBook,
       onOpen: openDetail,
@@ -435,6 +462,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       onRemoveFromCollection: collectionActions.removeBook,
       onMarkFinished: markFinished,
       onReveal: handleReveal,
+      onBulkRemove: () => setBulkRemoveOpen(true),
     };
     const content = view === "grid" ? <BookCard {...itemProps} /> : <BookListItem {...itemProps} />;
     // `display: contents` keeps the wrapper invisible to the row grid/list
@@ -519,7 +547,13 @@ export function LibraryView({ section }: LibraryViewProps) {
         view={view}
         onViewChange={setView}
       />
-      <SelectionBar count={selectedIds.length} onClear={clearSelection} />
+      <SelectionBar count={selectedIds.length} message={bulkMessage} onClear={clearSelection} />
+      <BulkRemoveDialog
+        open={bulkRemoveOpen}
+        count={selectedIds.length}
+        onConfirm={() => void confirmBulkRemove()}
+        onCancel={() => setBulkRemoveOpen(false)}
+      />
       {visible.length === 0 ? (
         query.trim() !== "" ? (
           <NoSearchResultsState query={query} onClearSearch={() => setQuery("")} />
