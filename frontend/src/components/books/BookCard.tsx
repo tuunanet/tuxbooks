@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -5,20 +6,23 @@ import { cn } from "@/lib/utils";
 import type { Book, CollectionSummary } from "@/types/domain";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { bookSelectionClass } from "./selection";
 
 /**
- * Interaction surface shared by the grid card and the list row: single click
- * selects, double click opens the detail view, right click opens the action
- * menu. `tabIndex` is the roving-tabindex value handed out by the grid/list
- * container. `onLocate`/`onRemove` power the missing-file actions;
- * `onAddToCollection`/`onRemoveFromCollection`/`onMarkFinished`/`onReveal`
- * power the milestone-10 menu entries.
+ * Interaction surface shared by the grid card and the list row: click
+ * selects (Ctrl/Cmd+click toggles, Shift+click takes a range), double click
+ * opens the detail view, right click opens the action menu. `onSelect`
+ * receives the event so the view can read the modifier keys and tell a
+ * right click from a plain one. `tabIndex` is the roving-tabindex value
+ * handed out by the grid/list container. `onLocate`/`onRemove` power the
+ * missing-file actions; `onAddToCollection`/`onRemoveFromCollection`/
+ * `onMarkFinished`/`onReveal` power the milestone-10 menu entries.
  */
 export interface InteractiveBookProps {
   selected?: boolean;
   collections: CollectionSummary[];
   tabIndex?: number;
-  onSelect?: (bookId: number) => void;
+  onSelect?: (bookId: number, event: ReactMouseEvent<HTMLElement>) => void;
   onOpen?: (bookId: number) => void;
   onRead?: (bookId: number) => void;
   onLocate?: (bookId: number) => void;
@@ -82,13 +86,13 @@ export function BookCard({
           onClick={(event) => {
             // WebKit does not focus buttons on click; keep keyboard roving consistent.
             event.currentTarget.focus();
-            onSelect?.(book.id);
+            onSelect?.(book.id, event);
           }}
           onDoubleClick={() => onOpen?.(book.id)}
-          onContextMenu={() => onSelect?.(book.id)}
+          onContextMenu={(event) => onSelect?.(book.id, event)}
           className={cn(
             "group flex flex-col rounded-xl p-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-            selected ? "bg-accent/60 ring-2 ring-primary" : "hover:bg-accent/40",
+            bookSelectionClass(selected),
           )}
         >
           <div className="relative">

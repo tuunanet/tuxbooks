@@ -27,7 +27,23 @@ export type LibrarySection =
 export interface AppState {
   view: AppView;
   section: LibrarySection;
+  /**
+   * The book the detail and reader views show. Library multi-selection is
+   * `selectedBookIds`; this stays the single navigation target.
+   */
   selectedBookId: number | null;
+  /**
+   * Books highlighted in the library grid and list. A plain click replaces
+   * the set, Ctrl/Cmd+click toggles one book, Shift+click takes the range
+   * from the anchor over the visible order. Ids survive search and sort, so
+   * a filtered-out book stays selected.
+   */
+  selectedBookIds: number[];
+  /**
+   * The anchor for Shift-click ranges, always the last plain or Ctrl click.
+   * Shift-click and right-click never move it.
+   */
+  selectionAnchorId: number | null;
   /**
    * Section shown inside the detail view (issue #58). Metadata is the
    * primary curation surface; Overview keeps the operational facts.
@@ -45,7 +61,13 @@ export interface AppState {
 
 export type AppAction =
   | { type: "select-section"; section: LibrarySection }
-  | { type: "select-book"; bookId: number | null }
+  | { type: "library-select"; bookId: number }
+  /** Right-click takeover: the selection becomes this book, the anchor stays. */
+  | { type: "library-context-select"; bookId: number }
+  | { type: "library-toggle-select"; bookId: number }
+  /** `visibleIds` is the on-screen order, after search and sort. */
+  | { type: "library-range-select"; bookId: number; visibleIds: number[] }
+  | { type: "clear-library-selection" }
   | { type: "open-book-detail"; bookId: number; tab?: DetailTab }
   | { type: "open-reader"; bookId: number }
   | { type: "return-to-library" }
@@ -56,6 +78,8 @@ export const initialAppState: AppState = {
   view: "library",
   section: { kind: "smart", id: "all-books" },
   selectedBookId: null,
+  selectedBookIds: [],
+  selectionAnchorId: null,
   detailTab: "overview",
   libraryQuery: "",
 };
@@ -64,10 +88,51 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "select-section":
       // Choosing a sidebar section always returns to the library view and
-      // starts with an unfiltered list.
-      return { ...state, view: "library", section: action.section, libraryQuery: "" };
-    case "select-book":
-      return { ...state, selectedBookId: action.bookId };
+      // starts with an unfiltered list; a selection from the old slice
+      // would point at books the new one may not show.
+      return {
+        ...state,
+        view: "library",
+        section: action.section,
+        libraryQuery: "",
+        selectedBookIds: [],
+        selectionAnchorId: null,
+      };
+    case "library-select":
+      return { ...state, selectedBookIds: [action.bookId], selectionAnchorId: action.bookId };
+    case "library-context-select":
+      // A right click takes the selection over but leaves the anchor alone,
+      // so the next Shift+click still measures from the last plain or Ctrl
+      // click.
+      return { ...state, selectedBookIds: [action.bookId] };
+    case "library-toggle-select": {
+      const selected = state.selectedBookIds;
+      return {
+        ...state,
+        selectedBookIds: selected.includes(action.bookId)
+          ? selected.filter((id) => id !== action.bookId)
+          : [...selected, action.bookId],
+        selectionAnchorId: action.bookId,
+      };
+    }
+    case "library-range-select": {
+      const anchorId = state.selectionAnchorId;
+      const anchorIndex = anchorId === null ? -1 : action.visibleIds.indexOf(anchorId);
+      const targetIndex = action.visibleIds.indexOf(action.bookId);
+      // Without an anchor on screen (nothing clicked yet, or the filter hid
+      // it) there is no range to take, so fall back to the target alone and
+      // leave the anchor where the last plain or Ctrl click put it.
+      if (anchorIndex < 0 || targetIndex < 0) {
+        return { ...state, selectedBookIds: [action.bookId] };
+      }
+      const start = Math.min(anchorIndex, targetIndex);
+      const end = Math.max(anchorIndex, targetIndex);
+      return { ...state, selectedBookIds: action.visibleIds.slice(start, end + 1) };
+    }
+    case "clear-library-selection": {
+      if (state.selectedBookIds.length === 0 && state.selectionAnchorId === null) return state;
+      return { ...state, selectedBookIds: [], selectionAnchorId: null };
+    }
     case "open-book-detail":
       return {
         ...state,

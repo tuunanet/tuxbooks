@@ -6,6 +6,7 @@ import type { Book } from "@/types/domain";
 import type { InteractiveBookProps } from "./BookCard";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { bookSelectionClass } from "./selection";
 
 interface BookListItemProps extends InteractiveBookProps {
   book: Book;
@@ -53,13 +54,13 @@ export function BookListItem({
           tabIndex={tabIndex}
           onClick={(event) => {
             event.currentTarget.focus();
-            onSelect?.(book.id);
+            onSelect?.(book.id, event);
           }}
           onDoubleClick={() => onOpen?.(book.id)}
-          onContextMenu={() => onSelect?.(book.id)}
+          onContextMenu={(event) => onSelect?.(book.id, event)}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-            selected ? "bg-accent" : "hover:bg-accent/40",
+            bookSelectionClass(selected),
           )}
         >
           <BookCover

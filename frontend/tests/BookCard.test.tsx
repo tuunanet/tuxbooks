@@ -43,7 +43,7 @@ describe("BookCard", () => {
     );
 
     fireEvent.click(screen.getByTestId("book-card"));
-    expect(onSelect).toHaveBeenCalledWith(1);
+    expect(onSelect).toHaveBeenCalledWith(1, expect.anything());
     expect(screen.getByTestId("book-card")).toHaveAttribute("aria-pressed", "false");
 
     rerender(<BookCard book={makeBook()} collections={[]} selected />);
@@ -63,7 +63,7 @@ describe("BookCard", () => {
     render(<BookCard book={makeBook()} collections={[]} onSelect={onSelect} />);
 
     fireEvent.contextMenu(screen.getByTestId("book-card"));
-    expect(onSelect).toHaveBeenCalledWith(1);
+    expect(onSelect).toHaveBeenCalledWith(1, expect.anything());
   });
 
   it("opens the reader via Continue Reading in the context menu", async () => {
