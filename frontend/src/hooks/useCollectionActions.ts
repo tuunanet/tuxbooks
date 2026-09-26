@@ -72,5 +72,42 @@ export function useCollectionActions() {
     [refreshCollections],
   );
 
-  return { create, remove, addBook, removeBook };
+  // Bulk membership: one call per book, then a single shared refresh. A
+  // rejected call is logged and left behind so the rest of the batch still
+  // lands, and the count of what actually changed comes back for the note.
+  const addMany = useCallback(
+    async (bookIds: number[], collectionId: number): Promise<number> => {
+      let applied = 0;
+      for (const bookId of bookIds) {
+        try {
+          await addBookToCollection(bookId, collectionId);
+          applied += 1;
+        } catch (err) {
+          console.error("add to collection failed:", toMessage(err));
+        }
+      }
+      await refreshCollections();
+      return applied;
+    },
+    [refreshCollections],
+  );
+
+  const removeMany = useCallback(
+    async (bookIds: number[], collectionId: number): Promise<number> => {
+      let applied = 0;
+      for (const bookId of bookIds) {
+        try {
+          await removeBookFromCollection(bookId, collectionId);
+          applied += 1;
+        } catch (err) {
+          console.error("remove from collection failed:", toMessage(err));
+        }
+      }
+      await refreshCollections();
+      return applied;
+    },
+    [refreshCollections],
+  );
+
+  return { create, remove, addBook, removeBook, addMany, removeMany };
 }

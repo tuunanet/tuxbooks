@@ -49,5 +49,27 @@ export function useBookActions() {
     [refresh],
   );
 
-  return { locateBook, removeBookFromLibrary, markFinished };
+  /**
+   * Flags every given book as finished; one refresh for the whole batch.
+   * A rejected call is logged and left behind, and the count of what
+   * actually changed comes back for the note.
+   */
+  const markManyFinished = useCallback(
+    async (bookIds: number[]): Promise<number> => {
+      let applied = 0;
+      for (const bookId of bookIds) {
+        try {
+          await markBookFinished(bookId);
+          applied += 1;
+        } catch (err) {
+          console.error("mark finished failed:", toMessage(err));
+        }
+      }
+      await refresh();
+      return applied;
+    },
+    [refresh],
+  );
+
+  return { locateBook, removeBookFromLibrary, markFinished, markManyFinished };
 }

@@ -35,6 +35,13 @@ export interface InteractiveBookProps {
   onMarkFinished?: (bookId: number) => void;
   onReveal?: (bookId: number) => void;
   onBulkRemove?: () => void;
+  /** Ids in the current selection; the bulk collection submenus read it. */
+  selectedBookIds?: number[];
+  /** Bulk add: adds every selected book the collection is still missing. */
+  onBulkAddToCollection?: (collection: CollectionSummary) => void;
+  /** Bulk remove: drops the selected members only. */
+  onBulkRemoveFromCollection?: (collection: CollectionSummary) => void;
+  onBulkMarkFinished?: () => void;
 }
 
 interface BookCardProps extends InteractiveBookProps {
@@ -63,6 +70,10 @@ export function BookCard({
   onMarkFinished,
   onReveal,
   onBulkRemove,
+  selectedBookIds,
+  onBulkAddToCollection,
+  onBulkRemoveFromCollection,
+  onBulkMarkFinished,
 }: BookCardProps) {
   const percent = progressPercentOf(book);
   return (
@@ -81,6 +92,10 @@ export function BookCard({
         onMarkFinished={onMarkFinished}
         onReveal={onReveal}
         onBulkRemove={onBulkRemove}
+        selectedBookIds={selectedBookIds}
+        onBulkAddToCollection={onBulkAddToCollection}
+        onBulkRemoveFromCollection={onBulkRemoveFromCollection}
+        onBulkMarkFinished={onBulkMarkFinished}
       >
         <button
           type="button"

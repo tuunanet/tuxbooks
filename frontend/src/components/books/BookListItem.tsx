@@ -29,6 +29,10 @@ export function BookListItem({
   onMarkFinished,
   onReveal,
   onBulkRemove,
+  selectedBookIds,
+  onBulkAddToCollection,
+  onBulkRemoveFromCollection,
+  onBulkMarkFinished,
 }: BookListItemProps) {
   const percent = book.progressPercent;
   return (
@@ -47,6 +51,10 @@ export function BookListItem({
         onMarkFinished={onMarkFinished}
         onReveal={onReveal}
         onBulkRemove={onBulkRemove}
+        selectedBookIds={selectedBookIds}
+        onBulkAddToCollection={onBulkAddToCollection}
+        onBulkRemoveFromCollection={onBulkRemoveFromCollection}
+        onBulkMarkFinished={onBulkMarkFinished}
       >
         <button
           type="button"
