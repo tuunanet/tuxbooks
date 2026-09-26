@@ -17,6 +17,7 @@ export function BookListItem({
   selected = false,
   collections,
   tabIndex = 0,
+  selectionCount = 1,
   onSelect,
   onOpen,
   onRead,
@@ -27,6 +28,7 @@ export function BookListItem({
   onRemoveFromCollection,
   onMarkFinished,
   onReveal,
+  onBulkRemove,
 }: BookListItemProps) {
   const percent = book.progressPercent;
   return (
@@ -34,6 +36,7 @@ export function BookListItem({
       <BookContextMenu
         book={book}
         collections={collections}
+        selectionCount={selectionCount}
         onOpen={onOpen}
         onRead={onRead}
         onLocate={onLocate}
@@ -43,6 +46,7 @@ export function BookListItem({
         onRemoveFromCollection={onRemoveFromCollection}
         onMarkFinished={onMarkFinished}
         onReveal={onReveal}
+        onBulkRemove={onBulkRemove}
       >
         <button
           type="button"
