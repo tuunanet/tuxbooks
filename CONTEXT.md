@@ -96,6 +96,12 @@ A directory the user added for TuxBooks to watch. TuxBooks imports the books
 inside it and keeps them in sync as files change.
 _Avoid_: library location, book folder
 
+**Unwatch**:
+Removing a watched folder from the watch list. Its files stay on disk and its
+books stay in the catalog as loose books unless the user also asks to remove
+them.
+_Avoid_: remove folder, stop tracking
+
 **Loose book**:
 A book whose path sits outside every watched folder, usually added by a
 single-file import. TuxBooks shows it in the library and never watches its
