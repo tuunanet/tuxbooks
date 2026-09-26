@@ -34,7 +34,7 @@ import {
   type BookSortId,
   type BookViewMode,
 } from "./sections";
-import type { Book } from "@/types/domain";
+import type { Book, CollectionSummary } from "@/types/domain";
 
 interface LibraryViewProps {
   section: LibrarySection;
@@ -84,7 +84,7 @@ function LibrarySkeleton() {
 
 export function LibraryView({ section }: LibraryViewProps) {
   const { books, collections, loading, error, refresh } = useLibrary();
-  const { locateBook, removeBookFromLibrary, markFinished } = useBookActions();
+  const { locateBook, removeBookFromLibrary, markFinished, markManyFinished } = useBookActions();
   const collectionActions = useCollectionActions();
   const app = useAppState();
   const dispatch = useAppDispatch();
@@ -178,6 +178,44 @@ export function LibraryView({ section }: LibraryViewProps) {
     dispatch({ type: "clear-library-selection" });
     setBulkMessage(`Removed ${ids.length} books from the library`);
   }, [selectedIds, removeBookFromLibrary, refresh, dispatch]);
+
+  // Membership ops work on the selected ids only: the menu lists a collection
+  // only when the selection differs from it, so the batch is never empty and
+  // the note counts what the bridge calls changed. The selection is never
+  // cleared, so the next action chains off the same set.
+  const bulkAddToCollection = useCallback(
+    async (collection: CollectionSummary) => {
+      const ids = selectedIds.filter((id) => !collection.bookIds.includes(id));
+      const applied = await collectionActions.addMany(ids, collection.id);
+      setBulkMessage(`Added ${applied} to ${collection.name}`);
+    },
+    [selectedIds, collectionActions],
+  );
+
+  const bulkRemoveFromCollection = useCallback(
+    async (collection: CollectionSummary) => {
+      const ids = selectedIds.filter((id) => collection.bookIds.includes(id));
+      const applied = await collectionActions.removeMany(ids, collection.id);
+      setBulkMessage(`Removed ${applied} from ${collection.name}`);
+    },
+    [selectedIds, collectionActions],
+  );
+
+  // Unfinished selections only: already-finished books are skipped silently,
+  // and the selection survives so the next action can chain off it.
+  const bulkMarkFinished = useCallback(async () => {
+    const targets = selectedIds.filter((id) => {
+      const book = books.find((candidate) => candidate.id === id);
+      if (!book) return false;
+      return !(book.progressPercent !== null && book.progressPercent >= 100);
+    });
+    if (targets.length === 0) {
+      setBulkMessage("All selected books are already finished");
+      return;
+    }
+    const applied = await markManyFinished(targets);
+    setBulkMessage(`Marked ${applied} books as finished`);
+  }, [selectedIds, books, markManyFinished]);
 
   useEffect(() => {
     if (bulkMessage === null) return;
@@ -463,6 +501,10 @@ export function LibraryView({ section }: LibraryViewProps) {
       onMarkFinished: markFinished,
       onReveal: handleReveal,
       onBulkRemove: () => setBulkRemoveOpen(true),
+      selectedBookIds: selectedIds,
+      onBulkAddToCollection: bulkAddToCollection,
+      onBulkRemoveFromCollection: bulkRemoveFromCollection,
+      onBulkMarkFinished: bulkMarkFinished,
     };
     const content = view === "grid" ? <BookCard {...itemProps} /> : <BookListItem {...itemProps} />;
     // `display: contents` keeps the wrapper invisible to the row grid/list
