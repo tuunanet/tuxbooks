@@ -31,6 +31,8 @@ export interface LibraryLocationStat {
   addedAt: string;
   bookCount: number;
   totalBytes: number;
+  /** The sidecar checked the path on disk while serving the aggregate. */
+  missingFromDisk: boolean;
 }
 
 export interface CatalogCounts {

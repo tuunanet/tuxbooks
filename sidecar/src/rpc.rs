@@ -819,6 +819,31 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn get_storage_stats_serves_the_missing_from_disk_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let present = tmp.path().join("present");
+        std::fs::create_dir(&present).unwrap();
+        let gone = tmp.path().join("gone");
+        crate::repository::library_locations::add_location(&state.db, present.to_str().unwrap())
+            .await
+            .unwrap();
+        crate::repository::library_locations::add_location(&state.db, gone.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        let locations = result["locations"].as_array().expect("locations array");
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0]["path"], json!(present.to_str().unwrap()));
+        assert_eq!(locations[0]["missingFromDisk"], json!(false));
+        assert_eq!(locations[1]["path"], json!(gone.to_str().unwrap()));
+        assert_eq!(locations[1]["missingFromDisk"], json!(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn get_startup_recovery_is_null_for_a_healthy_database() {
         let tmp = tempfile::tempdir().unwrap();
         let state = test_state(tmp.path()).await;

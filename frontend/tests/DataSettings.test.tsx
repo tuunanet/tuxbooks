@@ -73,6 +73,7 @@ const REPORT: StorageReport = {
       addedAt: "2026-01-01T00:00:00.000Z",
       bookCount: 12,
       totalBytes: 24 * 1024 * 1024,
+      missingFromDisk: false,
     },
   ],
   bookTotalBytes: 24 * 1024 * 1024,
@@ -239,6 +240,7 @@ describe("DataSettings", () => {
       addedAt: "2026-01-01T00:00:00.000Z",
       bookCount: 1,
       totalBytes: 1024,
+      missingFromDisk: false,
     }));
     storageReportMock.mockResolvedValue({
       ...REPORT,

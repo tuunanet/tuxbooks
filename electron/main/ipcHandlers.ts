@@ -95,7 +95,7 @@ export function registerIpcHandlers(
     if (kind === "directory") {
       const result = await dialog.showOpenDialog({
         properties: ["openDirectory"],
-        title: "Choose a folder to import",
+        title: "Choose a folder to import. Folders stay in sync until you unwatch them in Settings",
       });
       const picked = result.filePaths[0];
       if (result.canceled || picked === undefined) return null;

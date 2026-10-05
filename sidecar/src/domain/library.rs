@@ -9,6 +9,8 @@ pub struct LibraryStats {
 }
 
 /// Book count and total file bytes under one watched library location.
+/// `missing_from_disk` is checked when the aggregate is served, so a watched
+/// folder that vanished keeps its row and stays cleanable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryLocationStat {
@@ -17,6 +19,7 @@ pub struct LibraryLocationStat {
     pub added_at: String,
     pub book_count: i64,
     pub total_bytes: i64,
+    pub missing_from_disk: bool,
 }
 
 /// Row counts for the catalog tables shown on the Data tab.
