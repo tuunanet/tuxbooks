@@ -21,6 +21,7 @@ import {
   type StorageReport,
   type StorageRootId,
 } from "@/lib/bridge";
+import { formatMb } from "@/lib/format";
 
 const KIND_LABEL: Record<StorageEntryKind, string> = {
   derived: "Derived",
@@ -40,10 +41,6 @@ const CATALOG_ROWS = [
   ["annotations", "Annotations"],
   ["readingProgress", "Reading progress"],
 ] as const;
-
-function formatMb(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /**
  * The Data tab is rendered inside Settings; the loose-books row routes to the

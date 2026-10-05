@@ -7,8 +7,9 @@ use crate::error::AppError;
 use crate::repository::library_locations::owning_location;
 
 /// The Data tab's storage read model: one row per watched library location
-/// with its book count and total file bytes, the library's total book bytes,
-/// and the catalog row counts. Locations keep registration order.
+/// with its book count and total file bytes, whether the path is still on
+/// disk, the library's total book bytes, and the catalog row counts.
+/// Locations keep registration order.
 ///
 /// A book belongs to the most specific (longest matching) location whose
 /// path prefixes it, where a path matches when it equals the location or
@@ -62,12 +63,21 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
     let locations = locations
         .into_iter()
         .enumerate()
-        .map(|(index, (id, path, added_at))| LibraryLocationStat {
-            id,
-            path,
-            added_at,
-            book_count: counts[index],
-            total_bytes: bytes[index],
+        .map(|(index, (id, path, added_at))| {
+            // Only a confirmed NotFound earns the label: a stat that fails
+            // for any other reason says nothing about presence.
+            let missing_from_disk = match std::fs::metadata(&path) {
+                Ok(_) => false,
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+            };
+            LibraryLocationStat {
+                id,
+                path,
+                added_at,
+                book_count: counts[index],
+                total_bytes: bytes[index],
+                missing_from_disk,
+            }
         })
         .collect();
 
@@ -192,6 +202,36 @@ mod tests {
         // the parent keeps its own book and must not double count.
         assert_eq!(seen, vec![("/lib", 1, 100), ("/lib/sub", 1, 200)]);
         assert_eq!(stats.book_total_bytes, 300);
+    }
+
+    #[tokio::test]
+    async fn flags_locations_that_are_gone_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool(tmp.path()).await;
+
+        let present = tmp.path().join("present");
+        std::fs::create_dir(&present).unwrap();
+        let gone = tmp.path().join("gone");
+        library_locations::add_location(&pool, present.to_str().unwrap())
+            .await
+            .unwrap();
+        library_locations::add_location(&pool, gone.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let stats = storage_stats(&pool).await.unwrap();
+        let flags: Vec<(&str, bool)> = stats
+            .locations
+            .iter()
+            .map(|location| (location.path.as_str(), location.missing_from_disk))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                (present.to_str().unwrap(), false),
+                (gone.to_str().unwrap(), true)
+            ]
+        );
     }
 
     #[tokio::test]

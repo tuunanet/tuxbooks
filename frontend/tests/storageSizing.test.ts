@@ -138,6 +138,7 @@ describe("buildStorageReport", () => {
           addedAt: "2026-01-01T00:00:00.000Z",
           bookCount: 3,
           totalBytes: 9,
+          missingFromDisk: false,
         },
       ],
       bookTotalBytes: 9,

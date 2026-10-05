@@ -27,6 +27,7 @@ const LIBRARY_STATS = {
       addedAt: "2026-01-01T00:00:00.000Z",
       bookCount: 2,
       totalBytes: 3_000_000,
+      missingFromDisk: false,
     },
   ],
   bookTotalBytes: 3_000_000,

@@ -3,6 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { AboutSection } from "@/components/settings/AboutSection";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
 import { DataSettings } from "@/components/settings/DataSettings";
+import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { pickBookFiles, pickDirectory } from "@/lib/bridge";
@@ -28,13 +29,14 @@ import { useImport } from "@/state/importState";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
-type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "data" | "about";
+type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "folders" | "data" | "about";
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
   { id: "reading", label: "Reading" },
   { id: "pdf", label: "PDF" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
+  { id: "folders", label: "Folders" },
   { id: "data", label: "Data" },
   { id: "about", label: "About" },
 ];
@@ -299,9 +301,10 @@ export interface SettingsShellProps {
 /**
  * Settings screen. General holds the app theme plus the library import
  * actions; Reading and PDF hold real, persisted default appearance controls
- * (saved on device and applied whenever a book opens); Data shows the
- * app-owned storage roots; Keyboard Shortcuts describes the bindings; About
- * shows the app version, creator credit, and contributor doc links.
+ * (saved on device and applied whenever a book opens); Folders lists the
+ * watched folders with their counts; Data shows the app-owned storage roots;
+ * Keyboard Shortcuts describes the bindings; About shows the app version,
+ * creator credit, and contributor doc links.
  */
 export function SettingsShell({ onSelectSection }: SettingsShellProps) {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -319,6 +322,8 @@ export function SettingsShell({ onSelectSection }: SettingsShellProps) {
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
         ) : active === "data" ? (
           <DataSettings onSelectSection={onSelectSection} />
+        ) : active === "folders" ? (
+          <FoldersSettings />
         ) : active === "about" ? (
           <AboutSection />
         ) : (

@@ -55,7 +55,15 @@ describe("SettingsShell", () => {
     renderSettings();
 
     expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
-    for (const label of ["General", "Reading", "PDF", "Keyboard Shortcuts", "Data", "About"]) {
+    for (const label of [
+      "General",
+      "Reading",
+      "PDF",
+      "Keyboard Shortcuts",
+      "Folders",
+      "Data",
+      "About",
+    ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
@@ -68,7 +76,15 @@ describe("SettingsShell", () => {
     const labels = within(nav)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(labels).toEqual(["General", "Reading", "PDF", "Keyboard Shortcuts", "Data", "About"]);
+    expect(labels).toEqual([
+      "General",
+      "Reading",
+      "PDF",
+      "Keyboard Shortcuts",
+      "Folders",
+      "Data",
+      "About",
+    ]);
   });
 
   it("starts on General with the app theme and library import actions", async () => {
@@ -105,6 +121,16 @@ describe("SettingsShell", () => {
     const readingRows = screen.getByTestId("settings-rows");
     expect(readingRows).toHaveTextContent("Default reading appearance");
     expect(readingRows).not.toHaveTextContent("How defaults are saved");
+  });
+
+  it("opens the Folders section from the navigation", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "Folders" }));
+    expect(screen.getByRole("heading", { name: "Folders" })).toBeInTheDocument();
+    expect(screen.getByTestId("folders-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("folders-add")).toBeInTheDocument();
   });
 
   it("lists the full shortcut reference grouped by scope", async () => {
