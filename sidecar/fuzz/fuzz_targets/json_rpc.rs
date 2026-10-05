@@ -112,7 +112,7 @@ fn gate_filesystem_paths(method: &str, request: &mut Value, library_dir: &Path) 
                 params["path"] = json!(library_dir.to_string_lossy());
             }
         }
-        "import_paths" => {
+        "import_paths" | "unwatch_locations" => {
             let all_strings = params
                 .get("paths")
                 .and_then(Value::as_array)

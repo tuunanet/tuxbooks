@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -34,12 +34,14 @@ const REPORT: StorageReport = {
   catalog: { books: 15, authors: 8, collections: 3, annotations: 5, readingProgress: 7 },
 };
 
-function renderFolders() {
+function renderFolders(extra: Record<string, unknown> = {}) {
   mockInvoke({
     get_library_stats: { bookCount: 15, collectionCount: 0 },
     list_books: [],
     list_collections: [],
     import_paths: { imported: 1, updated: 0, skipped: 0, failed: [] },
+    unwatch_locations: 1,
+    ...extra,
   });
   return render(
     <LibraryDataProvider>
@@ -135,5 +137,155 @@ describe("FoldersSettings", () => {
     await waitFor(() => expect(pickDirectoryMock).toHaveBeenCalledTimes(1));
     expect(invokeMock).not.toHaveBeenCalledWith("import_paths", expect.anything());
     expect(add).toBeEnabled();
+  });
+});
+
+/** A list of `count` watched folders, two books each, nothing missing. */
+function manyFolders(count: number): StorageReport {
+  const bookLocations = Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    path: `/books/shelf-${index + 1}`,
+    addedAt: "2026-01-01T00:00:00.000Z",
+    bookCount: 2,
+    totalBytes: 1024 * 1024,
+    missingFromDisk: false,
+  }));
+  return { ...REPORT, bookLocations };
+}
+
+describe("FoldersSettings unwatch", () => {
+  beforeEach(() => {
+    storageReportMock.mockReset();
+    storageReportMock.mockResolvedValue(REPORT);
+    pickDirectoryMock.mockReset();
+    pickDirectoryMock.mockResolvedValue(null);
+    invokeMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps Unwatch disabled until a folder is selected", async () => {
+    renderFolders();
+
+    const unwatch = await screen.findByTestId("folders-unwatch");
+    expect(unwatch).toBeDisabled();
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    expect(unwatch).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    expect(unwatch).toBeDisabled();
+  });
+
+  it("selects every row from the header and clears the choice with Cancel", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folders-select-all"));
+    expect(screen.getByTestId("folder-select-1")).toBeChecked();
+    expect(screen.getByTestId("folder-select-2")).toBeChecked();
+    expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
+
+    await userEvent.click(screen.getByTestId("folders-clear"));
+    expect(screen.getByTestId("folder-select-1")).not.toBeChecked();
+    expect(screen.getByTestId("folder-select-2")).not.toBeChecked();
+    expect(screen.getByTestId("folders-unwatch")).toBeDisabled();
+    expect(screen.queryByTestId("folders-clear")).toBeNull();
+  });
+
+  it("names the one folder and its book count in the dialog", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(dialog).toHaveTextContent("Unwatch /home/u/Books?");
+    expect(dialog).toHaveTextContent("12 books stay in your library as loose books");
+    expect(dialog).toHaveTextContent("Your files on disk stay untouched.");
+    expect(within(dialog).queryByTestId("unwatch-names")).toBeNull();
+  });
+
+  it("aggregates several folders and overflows the name list", async () => {
+    storageReportMock.mockResolvedValue(manyFolders(5));
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folders-select-all"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(dialog).toHaveTextContent("Unwatch 5 folders?");
+    expect(dialog).toHaveTextContent("10 books stay in your library as loose books");
+
+    const names = within(dialog).getByTestId("unwatch-names");
+    expect(within(names).getAllByRole("listitem")).toHaveLength(3);
+    expect(dialog).toHaveTextContent("+2 more");
+    expect(dialog).toHaveTextContent("Unwatch 5 Folders");
+  });
+
+  it("unwatches the selection and re-reads the folder list", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+    await screen.findByTestId("unwatch-dialog");
+
+    storageReportMock.mockResolvedValue({
+      ...REPORT,
+      bookLocations: REPORT.bookLocations.slice(1),
+    });
+    await userEvent.click(screen.getByTestId("unwatch-confirm"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/home/u/Books"],
+      }),
+    );
+    await waitFor(() => {
+      const rows = within(screen.getByTestId("folders-list")).getAllByRole("listitem");
+      expect(rows).toHaveLength(1);
+    });
+    expect(screen.queryByTestId("unwatch-dialog")).toBeNull();
+    expect(screen.getByTestId("folders-unwatch")).toBeDisabled();
+  });
+
+  it("closes the dialog without unwatching anything", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-2"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+    await screen.findByTestId("unwatch-dialog");
+
+    await userEvent.click(screen.getByTestId("unwatch-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("unwatch-dialog")).toBeNull());
+    expect(invokeMock).not.toHaveBeenCalledWith("unwatch_locations", expect.anything());
+    expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
+  });
+
+  it("keeps the dialog open when the sidecar refuses the unwatch", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderFolders({ unwatch_locations: new Error("database is locked") });
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+    const dialog = await screen.findByTestId("unwatch-dialog");
+
+    await userEvent.click(screen.getByTestId("unwatch-confirm"));
+    await waitFor(() => expect(logged).toHaveBeenCalled());
+    logged.mockRestore();
+
+    // Nothing happened, so nothing may look like it did: the folder is still
+    // selected, the choice is still on screen, and the list was not re-read.
+    expect(screen.getByTestId("unwatch-dialog")).toBe(dialog);
+    expect(screen.getByTestId("folder-select-1")).toBeChecked();
+    expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
+    expect(storageReportMock).toHaveBeenCalledTimes(1);
   });
 });

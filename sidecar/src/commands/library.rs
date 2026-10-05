@@ -1,14 +1,16 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use crate::commands::emit_changed_book;
 use crate::domain::{StartupRecovery, StorageStats};
 use crate::error::AppError;
+use crate::repository::books;
 use crate::repository::library_locations;
 use crate::repository::storage;
 use crate::rpc::EventEmitter;
 use crate::services::book_importer::{import_directory, import_file, ImportReport};
-use crate::services::library_reconciler::{reconnect_book as reconnect, LibraryChange};
+use crate::services::library_reconciler::reconnect_book as reconnect;
 use crate::{covers_dir, pdfium_library_dirs, AppState};
 
 /// Progress events are batched: the renderer coalesces its commits anyway,
@@ -185,6 +187,47 @@ pub async fn import_paths(
     Ok(report)
 }
 
+/// Unwatch one or more folders: the rows leave the watch list and the
+/// filesystem watcher stops observing those paths. Books stay in the catalog
+/// and files on disk are never touched — from here on they simply read back
+/// as loose books. Every book that falls out of the watch list is announced
+/// through the existing `library-changed` event, so the library view updates
+/// without a restart. Returns how many folders were actually listed.
+pub async fn unwatch_locations(
+    state: &AppState,
+    events: &EventEmitter,
+    paths: Vec<String>,
+) -> Result<usize, AppError> {
+    let mut roots = Vec::with_capacity(paths.len());
+    for raw in &paths {
+        let path = raw.trim();
+        if path.is_empty() {
+            return Err(AppError::InvalidInput("folder path is empty".into()));
+        }
+        roots.push(path.to_string());
+    }
+
+    let mut removed = 0usize;
+    for path in &roots {
+        // Stop the taps first: a row left behind is visible and retryable,
+        // a watch left behind would keep syncing a folder the user just left.
+        state.watcher.unwatch(Path::new(path));
+        if !library_locations::remove_location(&state.db, path).await? {
+            continue;
+        }
+        removed += 1;
+        // The row is gone, so `loose` is now computed without it. Only books
+        // that fell out of every watched folder read back loose, and only
+        // they earn a live event.
+        for book in books::list_books_in_prefix(&state.db, path).await? {
+            if book.loose {
+                emit_changed_book(events, book);
+            }
+        }
+    }
+    Ok(removed)
+}
+
 /// Reconnect an unavailable book to a new file chosen by the user. The book
 /// keeps its id — and therefore metadata, collections, and reading progress —
 /// while path and parsed metadata are refreshed from the located file.
@@ -207,12 +250,7 @@ pub async fn reconnect_book(
         &pdfium_dirs,
     )
     .await?;
-    events.emit(
-        "library-changed",
-        &LibraryChange::Changed {
-            book: Box::new(book.clone()),
-        },
-    );
+    emit_changed_book(events, book.clone());
     Ok(book)
 }
 

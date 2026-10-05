@@ -11,6 +11,18 @@ use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 use crate::AppState;
 
+/// Push one book already in hand as the `changed` event every view patches
+/// from. `emit_book_changed` is the same event for callers that hold only a
+/// row id.
+pub(crate) fn emit_changed_book(events: &EventEmitter, book: crate::domain::Book) {
+    events.emit(
+        "library-changed",
+        &LibraryChange::Changed {
+            book: Box::new(book),
+        },
+    );
+}
+
 /// A command mutated a book row (metadata, cover, reading progress), so the
 /// UI updates through the same `library-changed` channel the watcher and
 /// remove/reconnect already use: refetch the row and push it as a `changed`
@@ -21,12 +33,7 @@ pub(crate) async fn emit_book_changed(
     book_id: i64,
 ) -> Result<(), AppError> {
     if let Some(book) = crate::repository::books::get_book(&state.db, book_id).await? {
-        events.emit(
-            "library-changed",
-            &LibraryChange::Changed {
-                book: Box::new(book),
-            },
-        );
+        emit_changed_book(events, book);
     }
     Ok(())
 }

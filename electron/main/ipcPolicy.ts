@@ -153,7 +153,12 @@ function validateIssuedPaths(
 
 /** Per-method parameter shapes that do not carry issued paths. */
 function validateMethodShape(method: string, record: Record<string, unknown>): void {
-  if (method === "import_paths") {
+  // The two path-list methods are not issued-path methods: drag-and-drop
+  // never passes a dialog (`import_paths`), and `unwatch_locations` names
+  // rows the renderer read back from `get_storage_stats`. Neither can be
+  // gated on a dialog claim, so both are bound to the path schema and the
+  // count instead.
+  if (method === "import_paths" || method === "unwatch_locations") {
     const paths = record.paths;
     if (
       !Array.isArray(paths) ||

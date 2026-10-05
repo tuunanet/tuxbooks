@@ -6,7 +6,8 @@
 //! Design notes:
 //! - `watch()` registers roots synchronously on the notify watcher (thread
 //!   safe by contract), so a root is guaranteed observed once `watch()`
-//!   returns — no event races at startup.
+//!   returns — no event races at startup. `unwatch()` withdraws one again
+//!   and re-registers any nested root the recursive removal took down.
 //! - one *reconciler* thread drains events with a quiet-period debounce;
 //!   rename sources survive flush boundaries so `From`/`To` halves that
 //!   straddle windows still pair up.
@@ -15,6 +16,7 @@
 //! - this module must not import a UI runtime; UI notification happens through the
 //!   reconciler's change callback (wired to IPC in `lib.rs`).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -38,7 +40,16 @@ pub struct WatcherConfig {
 /// Handle to the running watcher. Dropping it stops event delivery and winds
 /// the reconciler thread down once its event channel disconnects.
 pub struct LibraryWatcher {
-    inner: Mutex<notify::RecommendedWatcher>,
+    inner: Mutex<WatcherHandle>,
+}
+
+/// The notify watcher plus the roots the app asked for. The root set is what
+/// lets a nested location survive its parent's [`LibraryWatcher::unwatch`]:
+/// notify drops every watch under a path, including one a subfolder
+/// registered for itself.
+struct WatcherHandle {
+    watcher: notify::RecommendedWatcher,
+    roots: HashSet<PathBuf>,
 }
 
 impl std::fmt::Debug for LibraryWatcher {
@@ -68,7 +79,10 @@ impl LibraryWatcher {
         })?;
 
         Ok(Self {
-            inner: Mutex::new(inner),
+            inner: Mutex::new(WatcherHandle {
+                watcher: inner,
+                roots: HashSet::new(),
+            }),
         })
     }
 
@@ -76,14 +90,39 @@ impl LibraryWatcher {
     /// registered — subsequent filesystem changes on `root` are observed.
     /// Safe to call repeatedly for the same root.
     pub fn watch(&self, root: &Path) {
-        if let Err(err) = self
-            .inner
-            .lock()
-            .expect("watcher mutex poisoned")
-            .watch(root, notify::RecursiveMode::Recursive)
-        {
-            eprintln!("watcher: cannot watch {}: {err}", root.display());
+        let mut handle = self.inner.lock().expect("watcher mutex poisoned");
+        handle.roots.insert(root.to_path_buf());
+        register(&mut handle.watcher, root);
+    }
+
+    /// Stop watching `root` recursively. A root that was never registered —
+    /// a folder already gone from disk when the app started — has nothing to
+    /// remove, so a missing watch is not an error. Roots the app registered
+    /// *inside* `root` are re-registered: notify's recursive unwatch takes
+    /// them down with the parent, but they are separate watched folders and
+    /// must keep syncing on their own.
+    pub fn unwatch(&self, root: &Path) {
+        let mut handle = self.inner.lock().expect("watcher mutex poisoned");
+        handle.roots.remove(root);
+        let nested: Vec<PathBuf> = handle
+            .roots
+            .iter()
+            .filter(|candidate| candidate.starts_with(root))
+            .cloned()
+            .collect();
+
+        if let Err(err) = handle.watcher.unwatch(root) {
+            eprintln!("watcher: cannot unwatch {}: {err}", root.display());
         }
+        for candidate in nested {
+            register(&mut handle.watcher, &candidate);
+        }
+    }
+}
+
+fn register(watcher: &mut notify::RecommendedWatcher, root: &Path) {
+    if let Err(err) = watcher.watch(root, notify::RecursiveMode::Recursive) {
+        eprintln!("watcher: cannot watch {}: {err}", root.display());
     }
 }
 

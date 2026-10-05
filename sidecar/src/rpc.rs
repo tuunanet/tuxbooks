@@ -237,6 +237,12 @@ async fn dispatch(
                 state, events, p.paths
             )))
         }
+        "unwatch_locations" => {
+            let p: PathsArgs = parse_params(params)?;
+            Ok(call!(commands::library::unwatch_locations(
+                state, events, p.paths
+            )))
+        }
         "reconnect_book" => {
             let p: ReconnectArgs = parse_params(params)?;
             Ok(call!(commands::library::reconnect_book(
