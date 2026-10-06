@@ -507,12 +507,12 @@ workspace: `sidecar/fuzz/corpus/<target>/` (runtime corpus) and
   gitignored fuzz target dir, seeded book row, real schema) and drives
   `handle_request_line`, the exact boundary code `handle_line` runs.
   Filesystem-path parameters (`scan_library`, `import_paths`,
-  `reconnect_book`, `set_book_cover`) are pinned into the scratch
-  directory before the request executes, and `create_collection` names
-  are pinned; without the pins, collections and annotations would grow
-  the scratch database without bound. Non-string shapes stay untouched,
-  so -32602 parameter decoding stays reachable. Every produced response
-  line is asserted to be valid JSON.
+  `unwatch_locations`, `reconnect_book`, `set_book_cover`) are pinned into
+  the scratch directory before the request executes, and
+  `create_collection` names are pinned; without the pins, collections and
+  annotations would grow the scratch database without bound. Non-string
+  shapes stay untouched, so -32602 parameter decoding stays reachable.
+  Every produced response line is asserted to be valid JSON.
 
 ### Crash triage
 

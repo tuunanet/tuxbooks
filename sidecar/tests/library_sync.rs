@@ -11,26 +11,35 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::{Book, ProgressUpdate};
 use tuxbooks_lib::repository::{books as book_repo, library_locations, reading_progress};
+use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{LibraryChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
+use tuxbooks_lib::AppState;
 
 const DEBOUNCE: Duration = Duration::from_millis(50);
 const WAIT: Duration = Duration::from_secs(15);
 
+/// Everything one test captured from the emitter: `(event name, payload)`.
+type FiredEvents = Vec<(&'static str, Value)>;
+
 struct TestEnv {
-    _tmp: TempDir,
+    tmp: TempDir,
+    db_path: PathBuf,
     library: PathBuf,
     pool: SqlitePool,
     reconciler: Arc<Reconciler>,
-    _watcher: LibraryWatcher,
+    watcher: Arc<LibraryWatcher>,
+    emitter: EventEmitter,
+    fired: Arc<Mutex<FiredEvents>>,
     changes: mpsc::Receiver<LibraryChange>,
 }
 
@@ -68,9 +77,10 @@ fn write_epub(path: &Path, title: &str) {
 
 async fn setup() -> TestEnv {
     let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("t.db");
     let library = tmp.path().join("library");
     std::fs::create_dir_all(&library).unwrap();
-    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let pool = init_pool(&db_path).await.unwrap();
 
     let (change_tx, change_rx) = mpsc::channel();
     let reconciler = Arc::new(Reconciler::new(
@@ -82,11 +92,13 @@ async fn setup() -> TestEnv {
             let _ = change_tx.send(change.clone());
         }),
     ));
-    let watcher = LibraryWatcher::start(WatcherConfig {
-        reconciler: reconciler.clone(),
-        debounce: DEBOUNCE,
-    })
-    .unwrap();
+    let watcher = Arc::new(
+        LibraryWatcher::start(WatcherConfig {
+            reconciler: reconciler.clone(),
+            debounce: DEBOUNCE,
+        })
+        .unwrap(),
+    );
     // Production registers every watched root in the database (scan_library
     // does it); the recovery sweep reconciles exactly those locations.
     library_locations::add_location(&pool, &library.to_string_lossy())
@@ -94,12 +106,23 @@ async fn setup() -> TestEnv {
         .unwrap();
     watcher.watch(&library);
 
+    // The emitter is the same handle request handlers use, so a test can
+    // assert what the client would receive live.
+    let fired: Arc<Mutex<FiredEvents>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&fired);
+    let emitter = EventEmitter::new(move |name, payload| {
+        sink.lock().unwrap().push((name, payload));
+    });
+
     TestEnv {
-        _tmp: tmp,
+        tmp,
+        db_path,
         library,
         pool,
         reconciler,
-        _watcher: watcher,
+        watcher,
+        emitter,
+        fired,
         changes: change_rx,
     }
 }
@@ -113,6 +136,64 @@ impl TestEnv {
         let path = self.path(name);
         write_epub(&path, title);
         path
+    }
+
+    /// The live service handle: the same `AppState` shape `init_state`
+    /// builds, pointed at this test's database and watcher.
+    fn state(&self) -> Arc<AppState> {
+        Arc::new(AppState {
+            db: self.pool.clone(),
+            db_path: self.db_path.clone(),
+            watcher: Arc::clone(&self.watcher),
+            startup_recovery: None,
+        })
+    }
+
+    /// Drive `unwatch_locations` through the real JSON-RPC boundary and
+    /// return its `result`. Panics on a JSON-RPC error so a failing call
+    /// never reads as "nothing was unwatched".
+    async fn unwatch(&self, paths: &[&str]) -> Value {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "unwatch_locations",
+            "params": { "paths": paths },
+        });
+        let state = self.state();
+        match handle_request_line(&state, &self.emitter, &request.to_string()).await {
+            RequestLineOutcome::Response(line) => {
+                let response: Value = serde_json::from_str(line.trim()).unwrap();
+                assert!(
+                    response.get("error").is_none(),
+                    "unwatch_locations failed: {response}"
+                );
+                response["result"].clone()
+            }
+            RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
+        }
+    }
+
+    /// Every book pushed through a live `library-changed` event, as the
+    /// wire payload the renderer would receive.
+    fn changed_books(&self) -> Vec<Value> {
+        self.fired
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, _)| *name == "library-changed")
+            .filter_map(
+                |(_, payload)| match payload.get("kind").and_then(Value::as_str) {
+                    Some("changed") => payload.get("book").cloned(),
+                    _ => None,
+                },
+            )
+            .collect()
+    }
+
+    /// A sibling directory outside `library`, used to keep a second watched
+    /// root next to the first.
+    fn sibling(&self, name: &str) -> PathBuf {
+        self.tmp.path().join(name)
     }
 
     /// Wait for the next change matching `predicate`.
@@ -543,4 +624,127 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
         .await
         .unwrap();
     assert_eq!(report.changes, 0);
+}
+
+/// Unwatch is the escape hatch from ADR 0007: the folder leaves the watch
+/// list, its books stay, and the client hears about it without a restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_folder_drops_the_row_and_keeps_the_books() {
+    let env = setup().await;
+    let kept = env.write_book("kept.epub", "Kept Book");
+    wait_for_titles(&env, ["Kept Book"]);
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+
+    // The watch list no longer carries the folder...
+    assert!(library_locations::list_locations(&env.pool)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // ...the file on disk is left exactly where it was...
+    assert!(kept.exists(), "unwatching must never touch files on disk");
+
+    // ...and the book survives, now reading back as a loose book.
+    let books = env.books().await;
+    assert_eq!(books.len(), 1, "unwatching must not drop catalog rows");
+    assert_eq!(books[0].title, "Kept Book");
+    assert!(
+        books[0].loose,
+        "a book outside the watch list reads back loose"
+    );
+
+    // The library hears about it live through the existing change event.
+    let changed = env.changed_books();
+    assert_eq!(changed.len(), 1, "one live event per book that went loose");
+    assert_eq!(changed[0]["title"], "Kept Book");
+    assert_eq!(changed[0]["loose"], true);
+}
+
+/// A disk change inside the unwatched folder must not reach the catalog,
+/// while a folder that is still watched keeps syncing — otherwise the
+/// negative half of the test would pass with a dead watcher.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_folder_stops_its_disk_changes_from_reaching_the_catalog() {
+    let env = setup().await;
+    let other = env.sibling("other");
+    std::fs::create_dir_all(&other).unwrap();
+    library_locations::add_location(&env.pool, &other.to_string_lossy())
+        .await
+        .unwrap();
+    env.watcher.watch(&other);
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+
+    write_epub(&env.path("ignored.epub"), "Ignored Book");
+    // Give a broken watcher time to deliver this before the live root speaks.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    write_epub(&other.join("live.epub"), "Live Book");
+    wait_for_titles(&env, ["Live Book"]);
+
+    assert_eq!(env.count().await, 1, "the unwatched folder must stay quiet");
+    assert!(
+        book_repo::get_book_by_path(&env.pool, &env.path("ignored.epub").to_string_lossy())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(env.path("ignored.epub").exists());
+}
+
+/// A subfolder listed as its own watched folder keeps syncing when its
+/// parent leaves the watch list: notify's recursive unwatch takes the
+/// child's watch down with it, so the survivor has to be registered again.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_parent_keeps_a_watched_subfolder_syncing() {
+    let env = setup().await;
+    let sub = env.library.join("shelf");
+    std::fs::create_dir_all(&sub).unwrap();
+    library_locations::add_location(&env.pool, &sub.to_string_lossy())
+        .await
+        .unwrap();
+    env.watcher.watch(&sub);
+
+    // Prove the subfolder syncs on its own first; this also drains the
+    // pending "directory appeared" event so nothing is left in flight when
+    // the parent goes away.
+    write_epub(&sub.join("before.epub"), "Before Unwatch");
+    wait_for_titles(&env, ["Before Unwatch"]);
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![sub.to_string_lossy().into_owned()],
+        "the subfolder stays a watched folder of its own"
+    );
+
+    // The subfolder still syncs...
+    write_epub(&sub.join("after.epub"), "After Unwatch");
+    wait_for_titles(&env, ["After Unwatch"]);
+
+    // ...and the parent's own directory does not.
+    write_epub(&env.path("root-book.epub"), "Root Book");
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert_eq!(env.count().await, 2, "only the still-watched root imported");
+    assert!(env.path("root-book.epub").exists());
+}
+
+/// A folder that vanished from disk has no watch left to remove, but its row
+/// must still be cleanable — dead entries are exactly what unwatch is for.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_folder_already_gone_from_disk_still_works() {
+    let env = setup().await;
+    let root = env.library.to_string_lossy().into_owned();
+
+    std::fs::remove_dir_all(&env.library).unwrap();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+    assert!(library_locations::list_locations(&env.pool)
+        .await
+        .unwrap()
+        .is_empty());
 }

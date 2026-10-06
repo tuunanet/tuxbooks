@@ -113,6 +113,15 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
 }
 
 /**
+ * Leave the watch list: the folders stop syncing and their rows go away.
+ * Books stay in the catalog and read back as loose books; files on disk are
+ * never touched. Returns how many folders were actually listed.
+ */
+export function unwatchLocations(paths: string[]): Promise<number> {
+  return invoke("unwatch_locations", { paths });
+}
+
+/**
  * Subscribe to import progress (the `import-progress` backend event). The
  * sidecar batches persisted books and emits them as arrays — the callback
  * receives each batch as it lands, so covers appear while a scan is still

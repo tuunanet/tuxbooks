@@ -41,6 +41,16 @@ pub async fn add_location(pool: &SqlitePool, path: &str) -> Result<bool, AppErro
     Ok(result.rows_affected() > 0)
 }
 
+/// Drop a watched filesystem root from the watch list. Returns true when a
+/// row went away; unwatching something that was never listed changes nothing.
+pub async fn remove_location(pool: &SqlitePool, path: &str) -> Result<bool, AppError> {
+    let result = sqlx::query("DELETE FROM library_locations WHERE path = ?1")
+        .bind(path)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// All watched filesystem roots in registration order.
 pub async fn list_locations(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
     let paths: Vec<String> = sqlx::query_scalar("SELECT path FROM library_locations ORDER BY id")
@@ -68,6 +78,25 @@ mod tests {
             list_locations(&pool).await.unwrap(),
             vec!["/books", "/more"]
         );
+    }
+
+    #[tokio::test]
+    async fn remove_location_drops_one_row_and_reports_whether_it_was_listed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        add_location(&pool, "/books").await.unwrap();
+        add_location(&pool, "/more").await.unwrap();
+
+        assert!(remove_location(&pool, "/books").await.unwrap());
+        assert_eq!(list_locations(&pool).await.unwrap(), vec!["/more"]);
+
+        // A second attempt and a path never listed both change nothing.
+        assert!(!remove_location(&pool, "/books").await.unwrap());
+        assert!(!remove_location(&pool, "/never-listed").await.unwrap());
+        assert_eq!(list_locations(&pool).await.unwrap(), vec!["/more"]);
     }
 
     #[test]
