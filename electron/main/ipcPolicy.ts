@@ -167,6 +167,14 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
     ) {
       throw policyError("invalid paths");
     }
+    if (method === "unwatch_locations") {
+      // The remove-from-library box is opt-in, so absent means keep; what is
+      // never allowed is a non-boolean reaching the sidecar.
+      const removeBooks = record.removeBooks;
+      if (removeBooks !== undefined && typeof removeBooks !== "boolean") {
+        throw policyError("invalid removeBooks");
+      }
+    }
     return;
   }
   if (method === "search_books" && typeof record.query !== "string") {

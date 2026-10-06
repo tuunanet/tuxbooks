@@ -1,5 +1,6 @@
 import { SMART_SECTION_TITLES } from "@/components/library/sections";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -21,21 +22,29 @@ interface UnwatchTarget {
 interface UnwatchFoldersDialogProps {
   open: boolean;
   folders: UnwatchTarget[];
+  removeBooks: boolean;
+  onRemoveBooksChange: (next: boolean) => void;
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
 }
 
 /**
- * The single confirmation in front of Unwatch. It names what is affected —
- * one folder by name, several as a count plus a list that overflows — says
- * how many books are involved, and repeats the local-first promise twice:
- * the books stay (as loose books), and the files on disk stay where they
- * are. Cancel (or Escape) closes it and does nothing else.
+ * The single confirmation in front of Unwatch. It names what is affected
+ * (one folder by name, several as a count plus a list that overflows), says
+ * how many books are involved, and promises the files on disk stay where
+ * they are. Keeping the books is the default and the copy says so; the
+ * remove-from-library box is opt-in and rewrites that one sentence when it
+ * is ticked, so the screen never promises books stay while the button is
+ * about to delete them. There is nothing to remove from a folder with no
+ * books, so the box is shown but disabled there. Cancel (or Escape) closes
+ * it and does nothing else.
  */
 export function UnwatchFoldersDialog({
   open,
   folders,
+  removeBooks,
+  onRemoveBooksChange,
   onConfirm,
   onCancel,
   busy = false,
@@ -48,12 +57,19 @@ export function UnwatchFoldersDialog({
   // The kept books land in the loose-books section, so the dialog names it
   // rather than restating it — a rename there must not strand this copy.
   const looseSection = SMART_SECTION_TITLES["outside-watched"];
-  const keep =
-    books === 0
-      ? `No books live in ${several ? "these folders" : "this folder"}.`
-      : books === 1
-        ? `1 book stays in your library as a loose book under “${looseSection}”.`
-        : `${books} books stay in your library as loose books under “${looseSection}”.`;
+  const scope = several ? "these folders" : "this folder";
+  const one = books === 1;
+  const noun = one ? "book" : "books";
+  let body: string;
+  if (books === 0) {
+    body = `No books live in ${scope}.`;
+  } else if (removeBooks) {
+    body = `The ${books} ${noun} in ${scope} ${one ? "is" : "are"} removed from your library.`;
+  } else if (one) {
+    body = `1 book stays in your library as a loose book under “${looseSection}”.`;
+  } else {
+    body = `${books} books stay in your library as loose books under “${looseSection}”.`;
+  }
 
   return (
     <Dialog
@@ -65,7 +81,7 @@ export function UnwatchFoldersDialog({
       <DialogContent data-testid="unwatch-dialog" className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{`${keep} Your files on disk stay untouched.`}</DialogDescription>
+          <DialogDescription>{`${body} Your files on disk stay untouched.`}</DialogDescription>
         </DialogHeader>
 
         {several && (
@@ -86,6 +102,20 @@ export function UnwatchFoldersDialog({
             {`+${folders.length - MAX_LISTED} more`}
           </p>
         )}
+
+        <label className="flex items-start gap-2">
+          <Checkbox
+            data-testid="unwatch-remove-books"
+            checked={removeBooks}
+            disabled={busy || books === 0}
+            onCheckedChange={(next) => onRemoveBooksChange(next === true)}
+          />
+          <span className="text-sm">
+            {one
+              ? "Also remove this book from the library"
+              : `Also remove these ${books} ${noun} from the library`}
+          </span>
+        </label>
 
         <DialogFooter>
           <Button
