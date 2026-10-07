@@ -151,6 +151,16 @@ struct PathsArgs {
     paths: Vec<String>,
 }
 
+/// `unwatch_locations` carries the dialog's remove-from-library box. The
+/// box is opt-in, so an absent flag must read the same as `false`.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnwatchArgs {
+    paths: Vec<String>,
+    #[serde(default)]
+    remove_books: bool,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NameArgs {
@@ -238,9 +248,12 @@ async fn dispatch(
             )))
         }
         "unwatch_locations" => {
-            let p: PathsArgs = parse_params(params)?;
+            let p: UnwatchArgs = parse_params(params)?;
             Ok(call!(commands::library::unwatch_locations(
-                state, events, p.paths
+                state,
+                events,
+                p.paths,
+                p.remove_books
             )))
         }
         "reconnect_book" => {

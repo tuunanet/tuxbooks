@@ -26,6 +26,7 @@ export function FoldersSettings() {
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [confirming, setConfirming] = useState(false);
+  const [removeBooks, setRemoveBooks] = useState(false);
   const [unwatching, setUnwatching] = useState(false);
 
   const load = useCallback(
@@ -85,7 +86,10 @@ export function FoldersSettings() {
     setUnwatching(true);
     let unwatched = false;
     try {
-      await unwatchLocations(chosen.map((location) => location.path));
+      await unwatchLocations(
+        chosen.map((location) => location.path),
+        removeBooks,
+      );
       unwatched = true;
     } catch (error) {
       console.error("unwatch_locations failed:", error);
@@ -98,7 +102,7 @@ export function FoldersSettings() {
     setSelected(new Set());
     setConfirming(false);
     await load();
-  }, [chosen, load]);
+  }, [chosen, removeBooks, load]);
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
@@ -125,7 +129,12 @@ export function FoldersSettings() {
               variant="destructive"
               size="sm"
               disabled={chosen.length === 0 || unwatching}
-              onClick={() => setConfirming(true)}
+              onClick={() => {
+                // The remove-from-library box is opt-in: every opening
+                // starts from it being off, whatever the last try did.
+                setRemoveBooks(false);
+                setConfirming(true);
+              }}
             >
               Unwatch
             </Button>
@@ -211,6 +220,8 @@ export function FoldersSettings() {
           path: location.path,
           bookCount: location.bookCount,
         }))}
+        removeBooks={removeBooks}
+        onRemoveBooksChange={setRemoveBooks}
         busy={unwatching}
         onConfirm={() => void confirmUnwatch()}
         onCancel={() => setConfirming(false)}

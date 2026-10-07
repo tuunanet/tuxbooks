@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use crate::commands::books::remove_book;
 use crate::commands::emit_changed_book;
 use crate::domain::{StartupRecovery, StorageStats};
 use crate::error::AppError;
@@ -188,15 +189,20 @@ pub async fn import_paths(
 }
 
 /// Unwatch one or more folders: the rows leave the watch list and the
-/// filesystem watcher stops observing those paths. Books stay in the catalog
-/// and files on disk are never touched — from here on they simply read back
-/// as loose books. Every book that falls out of the watch list is announced
-/// through the existing `library-changed` event, so the library view updates
-/// without a restart. Returns how many folders were actually listed.
+/// filesystem watcher stops observing those paths. Files on disk are never
+/// touched either way. With `remove_books` set, the books those folders own
+/// (the same set the dialog counted) also leave the catalog through
+/// `remove_book`, the delete cascade the library's own Remove uses, so
+/// progress, collections, and annotations go with the row. Otherwise the
+/// books stay and any that fell out of every watched folder read back as
+/// loose. Both paths announce the result through the existing
+/// `library-changed` event, so the library view updates without a restart.
+/// Returns how many folders were actually listed.
 pub async fn unwatch_locations(
     state: &AppState,
     events: &EventEmitter,
     paths: Vec<String>,
+    remove_books: bool,
 ) -> Result<usize, AppError> {
     let mut roots = Vec::with_capacity(paths.len());
     for raw in &paths {
@@ -205,6 +211,21 @@ pub async fn unwatch_locations(
             return Err(AppError::InvalidInput("folder path is empty".into()));
         }
         roots.push(path.to_string());
+    }
+
+    // Which books these folders own has to be settled before any row goes:
+    // the dialog counts each folder with `storage_stats`, and that count is
+    // the promise "these N books are removed". Ownership flips the moment a
+    // row is deleted, so the removal set is read while the rows still stand.
+    // The keep path needs no snapshot: it reads `loose` from what remains,
+    // because a book a surviving folder still owns did not change at all.
+    let mut doomed = Vec::new();
+    if remove_books {
+        for path in &roots {
+            for book in books::books_owned_by(&state.db, path).await? {
+                doomed.push(book.id);
+            }
+        }
     }
 
     let mut removed = 0usize;
@@ -216,6 +237,9 @@ pub async fn unwatch_locations(
             continue;
         }
         removed += 1;
+        if remove_books {
+            continue;
+        }
         // The row is gone, so `loose` is now computed without it. Only books
         // that fell out of every watched folder read back loose, and only
         // they earn a live event.
@@ -224,6 +248,12 @@ pub async fn unwatch_locations(
                 emit_changed_book(events, book);
             }
         }
+    }
+
+    // The same delete cascade the library's own Remove uses: progress,
+    // collections, and annotations go with the row. Files on disk do not.
+    for book_id in doomed {
+        remove_book(state, events, book_id).await?;
     }
     Ok(removed)
 }

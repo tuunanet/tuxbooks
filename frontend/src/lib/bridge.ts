@@ -113,12 +113,14 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
 }
 
 /**
- * Leave the watch list: the folders stop syncing and their rows go away.
- * Books stay in the catalog and read back as loose books; files on disk are
- * never touched. Returns how many folders were actually listed.
+ * Leave the watch list: the folders stop syncing and their rows go away,
+ * and files on disk are never touched either way. Books stay in the catalog
+ * and read back as loose books unless `removeBooks` is set, which drops the
+ * folders' books out of the catalog through the same delete cascade the
+ * library's own Remove uses. Returns how many folders were actually listed.
  */
-export function unwatchLocations(paths: string[]): Promise<number> {
-  return invoke("unwatch_locations", { paths });
+export function unwatchLocations(paths: string[], removeBooks: boolean): Promise<number> {
+  return invoke("unwatch_locations", { paths, removeBooks });
 }
 
 /**

@@ -325,6 +325,20 @@ pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec
     Ok(books)
 }
 
+/// All books this location owns, under the one membership rule the library
+/// uses. Books a deeper watched folder claims are left out, which is exactly
+/// what `storage_stats` counts under this location, so a caller that showed
+/// a book count and then acts on it acts on the same set.
+pub async fn books_owned_by(pool: &SqlitePool, location: &str) -> Result<Vec<Book>, AppError> {
+    let mut books = list_books_in_prefix(pool, location).await?;
+    let locations = list_locations(pool).await?;
+    let index = location_index(&locations);
+    books.retain(|book| {
+        owning_location(&book.path, &index).is_some_and(|owner| locations[owner] == location)
+    });
+    Ok(books)
+}
+
 /// All books with the given file size — move-recovery candidates for the
 /// watcher (a book whose file vanished plus a new file with the same name
 /// and size is almost certainly the same book that moved).

@@ -51,8 +51,9 @@ real modifications from duplicate events without re-parsing documents.
 `id`, `path` (UNIQUE), `added_at`. The filesystem roots registered by
 `scan_library` (or the test seeding); only these are watched and
 reconciled. Unwatching a folder deletes its row, which is what stops the
-sync: the books stay where they are and read back as loose from then on.
-Books outside watched locations are never touched by
+sync: the books stay where they are and read back as loose from then on,
+unless that unwatch also asks to remove them from the catalog. Books outside
+watched locations are never touched by
 reconciliation — a fresh database that predates milestone 3 stays
 unwatched until the next folder import. The library derives a book's
 `loose` flag from this table: true when no location owns its path.
