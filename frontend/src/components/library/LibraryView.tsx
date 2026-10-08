@@ -26,6 +26,7 @@ import { LibraryHeader } from "./LibraryHeader";
 import { NoSearchResultsState } from "./NoSearchResultsState";
 import { SelectionBar } from "./SelectionBar";
 import {
+  SMART_SECTION_SUBTITLES,
   filterBooksByCollection,
   filterBooksByQuery,
   filterBooksBySection,
@@ -582,6 +583,11 @@ export function LibraryView({ section }: LibraryViewProps) {
             : sectionTitle(effectiveSection)
         }
         count={visible.length}
+        subtitle={
+          effectiveSection.kind === "smart"
+            ? SMART_SECTION_SUBTITLES[effectiveSection.id]
+            : undefined
+        }
         query={query}
         onQueryChange={setQuery}
         sort={sort}

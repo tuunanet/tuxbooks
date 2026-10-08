@@ -31,7 +31,7 @@ const neverOpened = () =>
 describe("sectionTitle", () => {
   it("names smart sections, collections, and settings", () => {
     expect(sectionTitle({ kind: "smart", id: "recently-added" })).toBe("Recently Added");
-    expect(sectionTitle({ kind: "smart", id: "outside-watched" })).toBe("Outside Watched Folders");
+    expect(sectionTitle({ kind: "smart", id: "outside-watched" })).toBe("Loose Books");
     expect(sectionTitle({ kind: "collection", id: 4 })).toBe("Collection");
     expect(sectionTitle({ kind: "settings" })).toBe("Settings");
   });
@@ -54,7 +54,7 @@ describe("filterBooksBySection", () => {
     ]);
   });
 
-  it("keeps only loose books in Outside Watched Folders", () => {
+  it("keeps only loose books in Loose Books", () => {
     const mixed = [
       epub(),
       makeBook({ id: 30, title: "Dropped In", loose: true }),

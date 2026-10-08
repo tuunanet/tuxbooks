@@ -204,7 +204,7 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch /home/u/Books?");
-    expect(dialog).toHaveTextContent("12 books stay in your library as loose books");
+    expect(dialog).toHaveTextContent("12 books stay in your library under “Loose Books”");
     expect(dialog).toHaveTextContent("Your files on disk stay untouched.");
     expect(within(dialog).queryByTestId("unwatch-names")).toBeNull();
   });
@@ -219,7 +219,7 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch 5 folders?");
-    expect(dialog).toHaveTextContent("10 books stay in your library as loose books");
+    expect(dialog).toHaveTextContent("10 books stay in your library under “Loose Books”");
 
     const names = within(dialog).getByTestId("unwatch-names");
     expect(within(names).getAllByRole("listitem")).toHaveLength(3);
@@ -297,7 +297,7 @@ describe("FoldersSettings unwatch", () => {
     const box = within(dialog).getByTestId("unwatch-remove-books");
     expect(box).not.toBeChecked();
     // The default promise still stands until the box is ticked.
-    expect(dialog).toHaveTextContent("12 books stay in your library as loose books");
+    expect(dialog).toHaveTextContent("12 books stay in your library under “Loose Books”");
     expect(box).toHaveAccessibleName("Also remove these 12 books from the library");
   });
 

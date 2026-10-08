@@ -22,6 +22,8 @@ import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./section
 interface LibraryHeaderProps {
   title: string;
   count: number;
+  /** One line under the count that explains the section (loose books). */
+  subtitle?: string;
   query: string;
   onQueryChange: (query: string) => void;
   sort: BookSortId;
@@ -33,6 +35,7 @@ interface LibraryHeaderProps {
 export function LibraryHeader({
   title,
   count,
+  subtitle,
   query,
   onQueryChange,
   sort,
@@ -62,6 +65,14 @@ export function LibraryHeader({
         <p data-testid="library-stats" className="text-sm text-muted-foreground">
           {count} {count === 1 ? "book" : "books"}
         </p>
+        {subtitle && (
+          <p
+            data-testid="library-section-explainer"
+            className="mt-1 max-w-prose text-sm text-muted-foreground"
+          >
+            {subtitle}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

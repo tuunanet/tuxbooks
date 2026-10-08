@@ -347,7 +347,7 @@ export function DataSettings({ onSelectSection }: DataSettingsProps) {
             data-testid="storage-catalog-outside-watched"
             className="flex items-center justify-between gap-4 py-2"
           >
-            <span className="text-sm">Outside watched folders</span>
+            <span className="text-sm">Loose books</span>
             <span className="flex items-center gap-3">
               <span className="text-xs tabular-nums text-muted-foreground">{looseCount}</span>
               <Button
