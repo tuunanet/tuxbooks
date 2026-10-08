@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useLibraryData } from "@/hooks/useLibrary";
+import { EVENT_FLUSH_MS, useLibraryData } from "@/hooks/useLibrary";
 import { makeBook } from "./factories";
 import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
 
@@ -137,6 +137,37 @@ describe("useLibraryData library-changed synchronization", () => {
       expect(result.current.books[0]).toMatchObject({ id: 4, progressPercent: 37.5 }),
     );
     expect(result.current.books).toHaveLength(1);
+  });
+});
+
+describe("useLibraryData post-import refresh", () => {
+  it("a completing import refresh wins over events still in the flush window", async () => {
+    mockInvoke(emptyLibrary);
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // A watched-folder import streams every book while the location row is
+    // still absent, so the event payloads truthfully say loose at emit time.
+    // The first batch lands before the import completes.
+    act_emit(makeBook({ id: 1, title: "Early Book", loose: true }));
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    // The final batch is still inside the flush window when the completing
+    // refresh fetches the reconciled truth: the folder now owns both books.
+    act_emit(makeBook({ id: 2, title: "Late Book", loose: true }));
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [
+        makeBook({ id: 1, title: "Early Book", loose: false }),
+        makeBook({ id: 2, title: "Late Book", loose: false }),
+      ],
+    });
+    await act(() => result.current.refresh());
+    expect(result.current.books.every((book) => !book.loose)).toBe(true);
+
+    // The buffered batch must not overwrite the fetched rows afterwards.
+    await act(() => new Promise((resolve) => setTimeout(resolve, EVENT_FLUSH_MS + 50)));
+    expect(result.current.books.find((book) => book.id === 2)?.loose).toBe(false);
   });
 });
 
