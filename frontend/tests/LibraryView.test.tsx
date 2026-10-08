@@ -1229,7 +1229,32 @@ describe("LibraryView outside watched folders", () => {
     const cards = await screen.findAllByTestId("book-card");
     expect(cards).toHaveLength(1);
     expect(cards[0]).toHaveTextContent("Dropped In");
-    expect(screen.getByRole("heading", { name: "Outside Watched Folders" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Loose Books" })).toBeInTheDocument();
+  });
+
+  it("explains that loose books are not watched", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
+    });
+
+    renderLibrary({ kind: "smart", id: "outside-watched" });
+
+    expect(await screen.findByTestId("library-section-explainer")).toHaveTextContent(
+      "Files live outside your watched folders, so TuxBooks doesn't track changes to them. Import a book's folder to start watching it.",
+    );
+  });
+
+  it("does not explain watching on sections that are always managed", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Inside", loose: false })],
+    });
+
+    renderLibrary({ kind: "smart", id: "all-books" });
+
+    expect(await screen.findByTestId("library-stats")).toBeInTheDocument();
+    expect(screen.queryByTestId("library-section-explainer")).not.toBeInTheDocument();
   });
 
   it("falls back to All Books when no loose book remains", async () => {

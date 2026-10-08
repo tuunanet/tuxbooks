@@ -159,7 +159,7 @@ describe("DataSettings", () => {
     expect(within(catalog).getByTestId("storage-catalog-readingProgress")).toHaveTextContent("7");
 
     const loose = within(catalog).getByTestId("storage-catalog-outside-watched");
-    expect(loose).toHaveTextContent("Outside watched folders");
+    expect(loose).toHaveTextContent("Loose books");
     expect(loose).toHaveTextContent("0");
     expect(within(loose).getByRole("button", { name: "Show books" })).toBeDisabled();
   });
@@ -176,7 +176,7 @@ describe("DataSettings", () => {
     await screen.findByTestId("storage-total");
 
     const row = screen.getByTestId("storage-catalog-outside-watched");
-    expect(row).toHaveTextContent("Outside watched folders");
+    expect(row).toHaveTextContent("Loose books");
     expect(row).toHaveTextContent("2");
 
     await user.click(within(row).getByRole("button", { name: "Show books" }));

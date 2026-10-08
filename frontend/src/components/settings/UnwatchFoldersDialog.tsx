@@ -66,9 +66,9 @@ export function UnwatchFoldersDialog({
   } else if (removeBooks) {
     body = `The ${books} ${noun} in ${scope} ${one ? "is" : "are"} removed from your library.`;
   } else if (one) {
-    body = `1 book stays in your library as a loose book under “${looseSection}”.`;
+    body = `1 book stays in your library under “${looseSection}”.`;
   } else {
-    body = `${books} books stay in your library as loose books under “${looseSection}”.`;
+    body = `${books} books stay in your library under “${looseSection}”.`;
   }
 
   return (
