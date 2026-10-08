@@ -68,17 +68,30 @@ export function useLibraryData(): LibraryState {
   const pendingRef = useRef<PendingChange[]>([]);
   const flushTimerRef = useRef<number | null>(null);
 
-  const applyFetched = useCallback((next: Book[]) => {
-    booksRef.current = next;
-    indexRef.current = new Map(next.map((book, index) => [book.id, index]));
-    setBooks(next);
-  }, []);
-
-  const flushPending = useCallback(() => {
+  const cancelFlushTimer = useCallback(() => {
     if (flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
+  }, []);
+
+  const applyFetched = useCallback(
+    (next: Book[]) => {
+      // A wholesale fetch supersedes buffered events. Event payloads are built
+      // before the backend serves this snapshot (a watched-folder import
+      // streams books while the location row is still absent), so letting
+      // them flush afterwards would overwrite fresh rows with stale ones.
+      pendingRef.current = [];
+      cancelFlushTimer();
+      booksRef.current = next;
+      indexRef.current = new Map(next.map((book, index) => [book.id, index]));
+      setBooks(next);
+    },
+    [cancelFlushTimer],
+  );
+
+  const flushPending = useCallback(() => {
+    cancelFlushTimer();
     const pending = pendingRef.current;
     if (pending.length === 0) return;
     pendingRef.current = [];
@@ -134,7 +147,7 @@ export function useLibraryData(): LibraryState {
     booksRef.current = next;
     indexRef.current = new Map(next.map((book, index) => [book.id, index]));
     setBooks(next);
-  }, []);
+  }, [cancelFlushTimer]);
 
   const scheduleFlush = useCallback(() => {
     if (flushTimerRef.current !== null) return;
@@ -195,8 +208,8 @@ export function useLibraryData(): LibraryState {
   // the sidecar are also flattened here); buffered events land as one
   // commit per flush tick so books and covers appear while the scan is
   // still running. The final refresh after the import completes
-  // reconciles ordering and stats (the sidebar count lags a few seconds
-  // by design).
+  // reconciles ordering and stats, and supersedes anything still buffered
+  // (the sidebar count lags a few seconds by design).
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -216,12 +229,9 @@ export function useLibraryData(): LibraryState {
       disposed = true;
       unlisten?.();
       pendingRef.current = [];
-      if (flushTimerRef.current !== null) {
-        window.clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
+      cancelFlushTimer();
     };
-  }, [scheduleFlush]);
+  }, [scheduleFlush, cancelFlushTimer]);
 
   // Filesystem synchronization (milestone 3): the watcher pushes book
   // changes (new/updated/relinked/unavailable) and removals live, so the
