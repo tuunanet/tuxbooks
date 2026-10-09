@@ -104,31 +104,18 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
   });
 
   describe("unwatch_locations", () => {
-    it("accepts watch-list paths with the remove flag absent or boolean", () => {
+    it("accepts watch-list paths, with no keep/remove choice on the wire", () => {
       const paths = ["/home/u/Books"];
       expect(() => validateInvokeParams("unwatch_locations", { paths }, issued())).not.toThrow();
-      expect(() =>
-        validateInvokeParams("unwatch_locations", { paths, removeBooks: false }, issued()),
-      ).not.toThrow();
-      expect(() =>
-        validateInvokeParams("unwatch_locations", { paths, removeBooks: true }, issued()),
-      ).not.toThrow();
     });
 
-    it("rejects malformed paths and a non-boolean remove flag", () => {
+    it("rejects malformed paths", () => {
       expect(() => validateInvokeParams("unwatch_locations", { paths: "x" }, issued())).toThrow(
         /invalid paths/,
       );
       expect(() =>
         validateInvokeParams("unwatch_locations", { paths: ["../relative"] }, issued()),
       ).toThrow(/invalid paths/);
-      expect(() =>
-        validateInvokeParams(
-          "unwatch_locations",
-          { paths: ["/home/u/Books"], removeBooks: "yes" },
-          issued(),
-        ),
-      ).toThrow(/invalid removeBooks/);
     });
   });
 

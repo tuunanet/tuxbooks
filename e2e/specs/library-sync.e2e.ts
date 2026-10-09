@@ -10,13 +10,13 @@
  * native dialogs cannot be operated from the renderer automation surface —
  * reconnection is covered by frontend and Rust tests instead.
  */
-import { renameSync, copyFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { epubFixture, seededLibraryBookCount } from "../setup/fixtures.js";
-import { libraryDir } from "../setup/environment.js";
+import { libraryDir, scratchDir } from "../setup/environment.js";
 
 async function cardCount(page: Page): Promise<number> {
   return page.getByTestId("book-card").count();
@@ -91,6 +91,69 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount);
     expect(await missingOverlays(page)).toBe(0);
+  });
+
+  test("unwatching a folder empties the app of its books while files stay", async ({ page }) => {
+    // A shelf outside the seeded library, so the mirror round trip never
+    // disturbs the fixtures the other suites run against.
+    const shelf = path.join(scratchDir, "unwatch-shelf");
+    const shelfBook = path.join(shelf, "shelf-book.epub");
+    mkdirSync(shelf, { recursive: true });
+    copyFileSync(epubFixture, shelfBook);
+    const before = readFileSync(shelfBook);
+
+    // The native import dialog cannot be driven from the automation surface,
+    // so the shelf comes in through the same bridge command the UI's Import
+    // Folder flow issues (same rule as the scale spec).
+    const report = (await page.evaluate(
+      (dir) => window.tuxbooks!.invoke("import_paths", { paths: [dir] }),
+      shelf,
+    )) as { imported: number; failed: unknown[] };
+    expect(report).toMatchObject({ imported: 1, failed: [] });
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the imported shelf book never appeared in the library",
+      })
+      .toBe(seededLibraryBookCount + 1);
+
+    // Unwatch it the way a user does: Settings > Folders > select > Unwatch.
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByRole("button", { name: "Folders" }).click();
+    const list = page.getByTestId("folders-list");
+    const row = list.locator("li", { hasText: shelf });
+    await expect(row).toBeVisible();
+    await row.getByRole("checkbox", { name: `Select ${shelf}` }).click();
+    await page.getByTestId("folders-unwatch").click();
+
+    // Destructive-only: no keep/remove choice, the loss is spelled out, and
+    // the files-on-disk promise stands.
+    const dialog = page.getByTestId("unwatch-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("unwatch-remove-books")).toHaveCount(0);
+    await expect(dialog).toContainText(
+      "The 1 book in this folder is removed from your library, along with its reading progress and annotations.",
+    );
+    await expect(dialog).toContainText("Your files on disk stay untouched.");
+    await page.getByTestId("unwatch-confirm").click();
+
+    // The shelf leaves the watch list...
+    await expect(row).toHaveCount(0);
+
+    // ...its book leaves the library view...
+    await page.getByRole("button", { name: "All Books" }).click();
+    await expect(page.getByTestId("library-view")).toBeVisible();
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the unwatched folder's book never left the library",
+      })
+      .toBe(seededLibraryBookCount);
+
+    // ...and the file on disk is byte-for-byte what it was.
+    expect(readFileSync(shelfBook).equals(before)).toBe(true);
+    rmSync(shelf, { recursive: true, force: true });
   });
 
   test("leaves the seeded library intact for the other suites", async ({ page }) => {
