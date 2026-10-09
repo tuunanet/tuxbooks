@@ -26,7 +26,6 @@ import { LibraryHeader } from "./LibraryHeader";
 import { NoSearchResultsState } from "./NoSearchResultsState";
 import { SelectionBar } from "./SelectionBar";
 import {
-  SMART_SECTION_SUBTITLES,
   filterBooksByCollection,
   filterBooksByQuery,
   filterBooksBySection,
@@ -98,28 +97,6 @@ export function LibraryView({ section }: LibraryViewProps) {
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const query = app.libraryQuery;
 
-  // The loose-books view exists only while a loose book does. Losing the last
-  // one drops the user back to All Books instead of an empty section.
-  const effectiveSection = useMemo<LibrarySection>(() => {
-    const outsideWatched = section.kind === "smart" && section.id === "outside-watched";
-    const anyLoose = books.some((book) => book.loose);
-    return outsideWatched && !loading && !anyLoose ? { kind: "smart", id: "all-books" } : section;
-  }, [section, books, loading]);
-
-  // Correct the stored section too, so the sidebar does not keep a stale
-  // selection for a view that no longer exists.
-  useEffect(() => {
-    if (
-      section.kind === "smart" &&
-      section.id === "outside-watched" &&
-      !loading &&
-      !error &&
-      !books.some((book) => book.loose)
-    ) {
-      dispatch({ type: "select-section", section: { kind: "smart", id: "all-books" } });
-    }
-  }, [section, loading, error, books, dispatch]);
-
   const openDetail = useCallback(
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),
     [dispatch],
@@ -147,15 +124,15 @@ export function LibraryView({ section }: LibraryViewProps) {
 
   const visible = useMemo(() => {
     let scoped =
-      effectiveSection.kind === "collection"
+      section.kind === "collection"
         ? filterBooksByCollection(
             books,
-            collections.find((collection) => collection.id === effectiveSection.id)?.bookIds ?? [],
+            collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
           )
-        : filterBooksBySection(books, effectiveSection);
+        : filterBooksBySection(books, section);
     scoped = sortBooks(scoped, sort);
     return filterBooksByQuery(scoped, query);
-  }, [books, collections, effectiveSection, sort, query]);
+  }, [books, collections, section, sort, query]);
 
   // The rendered selection, and the on-screen order Shift-click ranges are
   // measured over. Selected ids outlive the filter, so a book a search
@@ -435,7 +412,7 @@ export function LibraryView({ section }: LibraryViewProps) {
   // (callback refs get null) before layout cleanups run, which silently
   // dropped every save; `scrollElRef` is never nulled and the onScroll
   // write keeps the map current regardless of teardown order.
-  const sectionKey = `${effectiveSection.kind}:${"id" in effectiveSection ? effectiveSection.id : ""}`;
+  const sectionKey = `${section.kind}:${"id" in section ? section.id : ""}`;
   const scrollElRef = useRef<HTMLDivElement | null>(null);
   const sectionKeyRef = useRef(sectionKey);
   sectionKeyRef.current = sectionKey;
@@ -476,11 +453,7 @@ export function LibraryView({ section }: LibraryViewProps) {
     );
   }
 
-  if (
-    books.length === 0 &&
-    effectiveSection.kind === "smart" &&
-    effectiveSection.id === "all-books"
-  ) {
+  if (books.length === 0 && section.kind === "smart" && section.id === "all-books") {
     return <EmptyLibraryState />;
   }
 
@@ -577,17 +550,11 @@ export function LibraryView({ section }: LibraryViewProps) {
     >
       <LibraryHeader
         title={
-          effectiveSection.kind === "collection"
-            ? (collections.find((collection) => collection.id === effectiveSection.id)?.name ??
-              "Collection")
-            : sectionTitle(effectiveSection)
+          section.kind === "collection"
+            ? (collections.find((collection) => collection.id === section.id)?.name ?? "Collection")
+            : sectionTitle(section)
         }
         count={visible.length}
-        subtitle={
-          effectiveSection.kind === "smart"
-            ? SMART_SECTION_SUBTITLES[effectiveSection.id]
-            : undefined
-        }
         query={query}
         onQueryChange={setQuery}
         sort={sort}
@@ -605,7 +572,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       {visible.length === 0 ? (
         query.trim() !== "" ? (
           <NoSearchResultsState query={query} onClearSearch={() => setQuery("")} />
-        ) : effectiveSection.kind === "collection" ? (
+        ) : section.kind === "collection" ? (
           <EmptyCollectionState />
         ) : (
           <p data-testid="empty-section" className="text-sm text-muted-foreground">

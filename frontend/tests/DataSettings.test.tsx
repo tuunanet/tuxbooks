@@ -1,16 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
 import type { StorageReport } from "@/lib/bridge";
-import type { Book } from "@/types/domain";
-import type { LibrarySection } from "@/state/appState";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
-import { makeBook } from "./factories";
 import {
   clearCacheMock,
   copyDataPathMock,
@@ -81,25 +78,11 @@ const REPORT: StorageReport = {
 };
 
 /**
- * DataSettings now reads the shared library data for the loose-book count, so
- * every render needs the provider (and its three fetches) plus the section
- * callback the shell supplies.
+ * The Data tab reads only the storage report, so it renders on its own with
+ * no library provider behind it.
  */
-function renderDataSettings({
-  books = [],
-  onSelectSection = vi.fn(),
-}: { books?: Book[]; onSelectSection?: (section: LibrarySection) => void } = {}) {
-  mockInvoke({
-    get_library_stats: { bookCount: books.length, collectionCount: 0 },
-    list_books: books,
-    list_collections: [],
-  });
-  render(
-    <LibraryDataProvider>
-      <DataSettings onSelectSection={onSelectSection} />
-    </LibraryDataProvider>,
-  );
-  return { onSelectSection };
+function renderDataSettings() {
+  render(<DataSettings />);
 }
 
 describe("DataSettings", () => {
@@ -158,29 +141,10 @@ describe("DataSettings", () => {
     expect(within(catalog).getByTestId("storage-catalog-annotations")).toHaveTextContent("5");
     expect(within(catalog).getByTestId("storage-catalog-readingProgress")).toHaveTextContent("7");
 
-    const loose = within(catalog).getByTestId("storage-catalog-outside-watched");
-    expect(loose).toHaveTextContent("Loose books");
-    expect(loose).toHaveTextContent("0");
-    expect(within(loose).getByRole("button", { name: "Show books" })).toBeDisabled();
-  });
-
-  it("counts books outside watched folders and routes to the view", async () => {
-    const user = userEvent.setup();
-    const { onSelectSection } = renderDataSettings({
-      books: [
-        makeBook({ id: 1, loose: true }),
-        makeBook({ id: 2, loose: true }),
-        makeBook({ id: 3, loose: false }),
-      ],
-    });
-    await screen.findByTestId("storage-total");
-
-    const row = screen.getByTestId("storage-catalog-outside-watched");
-    expect(row).toHaveTextContent("Loose books");
-    expect(row).toHaveTextContent("2");
-
-    await user.click(within(row).getByRole("button", { name: "Show books" }));
-    expect(onSelectSection).toHaveBeenCalledWith({ kind: "smart", id: "outside-watched" });
+    expect(
+      within(catalog).queryByTestId("storage-catalog-outside-watched"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show books" })).not.toBeInTheDocument();
   });
 
   it("shows an empty state when no folders are watched", async () => {
@@ -329,7 +293,7 @@ describe("DataSettings", () => {
       <ThemeStateProvider>
         <LibraryDataProvider>
           <ImportProvider>
-            <SettingsShell onSelectSection={vi.fn()} />
+            <SettingsShell />
           </ImportProvider>
         </LibraryDataProvider>
       </ThemeStateProvider>,

@@ -43,70 +43,28 @@ describe("Sidebar", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
-    // No loose book is loaded, so the loose-books view stays hidden.
     expect(screen.queryByRole("button", { name: "Loose Books" })).not.toBeInTheDocument();
   });
 
-  it("shows the loose-books item only when a loose book is loaded", async () => {
+  it("renders no loose entry even when the library has books", async () => {
     mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
-      list_collections: [],
-    });
-    const onSectionChange = vi.fn();
-    render(
-      <AppStateProvider>
-        <LibraryDataProvider>
-          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
-        </LibraryDataProvider>
-      </AppStateProvider>,
-    );
-
-    const item = await screen.findByRole("button", { name: "Loose Books" });
-    await userEvent.click(item);
-    expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "outside-watched" });
-  });
-
-  it("marks the loose-books item as not watched when it is not the active section", async () => {
-    mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [makeBook({ id: 1, title: "Alpha" }), makeBook({ id: 2, title: "Beta" })],
       list_collections: [],
     });
     render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={{ kind: "smart", id: "all-books" }} onSectionChange={vi.fn()} />
+          <Sidebar active={initialAppState.section} onSectionChange={vi.fn()} />
         </LibraryDataProvider>
       </AppStateProvider>,
     );
 
-    const item = await screen.findByRole("button", { name: "Loose Books" });
-    expect(item).toHaveAttribute(
-      "title",
-      "Not watched — these files sit outside your watched folders, so TuxBooks won't track changes to them.",
-    );
-    expect(item).toHaveClass("text-muted-foreground");
-    expect(item.querySelector("svg.lucide-eye-off")).not.toBeNull();
-  });
-
-  it("keeps the active loose-books item at full contrast", async () => {
-    mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
-      list_collections: [],
-    });
-    render(
-      <AppStateProvider>
-        <LibraryDataProvider>
-          <Sidebar active={{ kind: "smart", id: "outside-watched" }} onSectionChange={vi.fn()} />
-        </LibraryDataProvider>
-      </AppStateProvider>,
-    );
-
-    const item = await screen.findByRole("button", { name: "Loose Books" });
-    expect(item).toHaveClass("bg-accent");
-    expect(item).not.toHaveClass("text-muted-foreground");
+    expect(await screen.findByRole("button", { name: "All Books" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Loose Books" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Outside Watched Folders" }),
+    ).not.toBeInTheDocument();
   });
 
   it("marks the active section and updates on click", async () => {

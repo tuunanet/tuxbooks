@@ -24,7 +24,6 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
-import type { LibrarySection } from "@/state/appState";
 import { useImport } from "@/state/importState";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
@@ -294,10 +293,6 @@ function SettingsNavigation({
   );
 }
 
-export interface SettingsShellProps {
-  onSelectSection: (section: LibrarySection) => void;
-}
-
 /**
  * Settings screen. General holds the app theme plus the library import
  * actions; Reading and PDF hold real, persisted default appearance controls
@@ -306,7 +301,7 @@ export interface SettingsShellProps {
  * Keyboard Shortcuts describes the bindings; About shows the app version,
  * creator credit, and contributor doc links.
  */
-export function SettingsShell({ onSelectSection }: SettingsShellProps) {
+export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
 
   return (
@@ -321,7 +316,7 @@ export function SettingsShell({ onSelectSection }: SettingsShellProps) {
         ) : active === "reading" || active === "pdf" ? (
           <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
         ) : active === "data" ? (
-          <DataSettings onSelectSection={onSelectSection} />
+          <DataSettings />
         ) : active === "folders" ? (
           <FoldersSettings />
         ) : active === "about" ? (

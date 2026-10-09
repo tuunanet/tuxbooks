@@ -43,7 +43,7 @@ describe("AboutSection", () => {
       <ThemeStateProvider>
         <LibraryDataProvider>
           <ImportProvider>
-            <SettingsShell onSelectSection={() => {}} />
+            <SettingsShell />
           </ImportProvider>
         </LibraryDataProvider>
       </ThemeStateProvider>,

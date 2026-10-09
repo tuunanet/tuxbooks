@@ -1214,58 +1214,22 @@ describe("LibraryView empty states", () => {
   });
 });
 
-describe("LibraryView outside watched folders", () => {
-  it("shows only loose books in the loose-books section", async () => {
+describe("LibraryView section explainer", () => {
+  it("shows no explainer under the managed sections", async () => {
     mockInvoke({
-      get_library_stats: { bookCount: 2, collectionCount: 0 },
-      list_books: [
-        makeBook({ id: 1, title: "Inside", loose: false }),
-        makeBook({ id: 2, title: "Dropped In", loose: true }),
-      ],
+      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      list_books: [makeBook({ id: 1, title: "Inside" })],
     });
 
-    renderLibrary({ kind: "smart", id: "outside-watched" });
-
-    const cards = await screen.findAllByTestId("book-card");
-    expect(cards).toHaveLength(1);
-    expect(cards[0]).toHaveTextContent("Dropped In");
-    expect(screen.getByRole("heading", { name: "Loose Books" })).toBeInTheDocument();
-  });
-
-  it("explains that loose books are not watched", async () => {
-    mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Dropped In", loose: true })],
-    });
-
-    renderLibrary({ kind: "smart", id: "outside-watched" });
-
-    expect(await screen.findByTestId("library-section-explainer")).toHaveTextContent(
-      "Files live outside your watched folders, so TuxBooks doesn't track changes to them. Import a book's folder to start watching it.",
-    );
-  });
-
-  it("does not explain watching on sections that are always managed", async () => {
-    mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Inside", loose: false })],
-    });
-
-    renderLibrary({ kind: "smart", id: "all-books" });
-
-    expect(await screen.findByTestId("library-stats")).toBeInTheDocument();
-    expect(screen.queryByTestId("library-section-explainer")).not.toBeInTheDocument();
-  });
-
-  it("falls back to All Books when no loose book remains", async () => {
-    mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 0 },
-      list_books: [makeBook({ id: 1, title: "Inside", loose: false })],
-    });
-
-    renderLibrary({ kind: "smart", id: "outside-watched" });
-
-    expect(await screen.findByRole("heading", { name: "All Books" })).toBeInTheDocument();
-    expect(screen.getByTestId("book-card")).toHaveTextContent("Inside");
+    for (const section of [
+      { kind: "smart", id: "all-books" },
+      { kind: "smart", id: "recently-added" },
+      { kind: "collection", id: 1 },
+    ] as LibrarySection[]) {
+      const { container, unmount } = renderLibrary(section);
+      expect(await within(container).findByTestId("library-stats")).toBeInTheDocument();
+      expect(within(container).queryByTestId("library-section-explainer")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });
