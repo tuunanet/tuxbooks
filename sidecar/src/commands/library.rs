@@ -188,21 +188,18 @@ pub async fn import_paths(
     Ok(report)
 }
 
-/// Unwatch one or more folders: the rows leave the watch list and the
-/// filesystem watcher stops observing those paths. Files on disk are never
-/// touched either way. With `remove_books` set, the books those folders own
-/// (the same set the dialog counted) also leave the catalog through
-/// `remove_book`, the delete cascade the library's own Remove uses, so
-/// progress, collections, and annotations go with the row. Otherwise the
-/// books stay and any that fell out of every watched folder read back as
-/// loose. Both paths announce the result through the existing
-/// `library-changed` event, so the library view updates without a restart.
-/// Returns how many folders were actually listed.
+/// Unwatch one or more folders: the rows leave the watch list, every book
+/// the folders own leaves the catalog, and the filesystem watcher stops
+/// observing those paths. The purge runs through `remove_book`, the delete
+/// cascade the library's own Remove uses, so progress, collections, and
+/// annotations go with the row, and every removal announces itself through
+/// the existing `library-changed` event so the library view updates
+/// without a restart. Files on disk are never touched. Returns how many
+/// folders were actually listed.
 pub async fn unwatch_locations(
     state: &AppState,
     events: &EventEmitter,
     paths: Vec<String>,
-    remove_books: bool,
 ) -> Result<usize, AppError> {
     let mut roots = Vec::with_capacity(paths.len());
     for raw in &paths {
@@ -217,14 +214,10 @@ pub async fn unwatch_locations(
     // the dialog counts each folder with `storage_stats`, and that count is
     // the promise "these N books are removed". Ownership flips the moment a
     // row is deleted, so the removal set is read while the rows still stand.
-    // The keep path needs no snapshot: it reads `loose` from what remains,
-    // because a book a surviving folder still owns did not change at all.
     let mut doomed = Vec::new();
-    if remove_books {
-        for path in &roots {
-            for book in books::books_owned_by(&state.db, path).await? {
-                doomed.push(book.id);
-            }
+    for path in &roots {
+        for book in books::books_owned_by(&state.db, path).await? {
+            doomed.push(book.id);
         }
     }
 
@@ -237,17 +230,6 @@ pub async fn unwatch_locations(
             continue;
         }
         removed += 1;
-        if remove_books {
-            continue;
-        }
-        // The row is gone, so `loose` is now computed without it. Only books
-        // that fell out of every watched folder read back loose, and only
-        // they earn a live event.
-        for book in books::list_books_in_prefix(&state.db, path).await? {
-            if book.loose {
-                emit_changed_book(events, book);
-            }
-        }
     }
 
     // The same delete cascade the library's own Remove uses: progress,

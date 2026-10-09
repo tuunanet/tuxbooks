@@ -204,9 +204,22 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch /home/u/Books?");
-    expect(dialog).toHaveTextContent("12 books stay in your library under “Loose Books”");
-    expect(dialog).toHaveTextContent("Your files on disk stay untouched.");
+    expect(dialog).toHaveTextContent("The 12 books in this folder are removed from your library");
     expect(within(dialog).queryByTestId("unwatch-names")).toBeNull();
+  });
+
+  it("states the progress loss and the files-stay promise with no remove checkbox", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(within(dialog).queryByTestId("unwatch-remove-books")).toBeNull();
+    expect(dialog).toHaveTextContent(
+      "The 12 books in this folder are removed from your library, along with their reading progress and annotations. Your files on disk stay untouched.",
+    );
   });
 
   it("aggregates several folders and overflows the name list", async () => {
@@ -219,7 +232,9 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch 5 folders?");
-    expect(dialog).toHaveTextContent("10 books stay in your library under “Loose Books”");
+    expect(dialog).toHaveTextContent(
+      "The 10 books in these folders are removed from your library, along with their reading progress and annotations.",
+    );
 
     const names = within(dialog).getByTestId("unwatch-names");
     expect(within(names).getAllByRole("listitem")).toHaveLength(3);
@@ -242,7 +257,9 @@ describe("FoldersSettings unwatch", () => {
     await userEvent.click(screen.getByTestId("unwatch-confirm"));
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", expect.anything()),
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/home/u/Books"],
+      }),
     );
     await waitFor(() => {
       const rows = within(screen.getByTestId("folders-list")).getAllByRole("listitem");
@@ -286,22 +303,7 @@ describe("FoldersSettings unwatch", () => {
     expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
     expect(storageReportMock).toHaveBeenCalledTimes(1);
   });
-  it("offers the remove-from-library box, off by default", async () => {
-    renderFolders();
-    await screen.findByTestId("folders-list");
-
-    await userEvent.click(screen.getByTestId("folder-select-1"));
-    await userEvent.click(screen.getByTestId("folders-unwatch"));
-
-    const dialog = await screen.findByTestId("unwatch-dialog");
-    const box = within(dialog).getByTestId("unwatch-remove-books");
-    expect(box).not.toBeChecked();
-    // The default promise still stands until the box is ticked.
-    expect(dialog).toHaveTextContent("12 books stay in your library under “Loose Books”");
-    expect(box).toHaveAccessibleName("Also remove these 12 books from the library");
-  });
-
-  it("sends removeBooks false when the box is left alone", async () => {
+  it("sends only the paths: the command carries no keep/remove choice", async () => {
     renderFolders();
     await screen.findByTestId("folders-list");
 
@@ -313,34 +315,11 @@ describe("FoldersSettings unwatch", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
         paths: ["/home/u/Books"],
-        removeBooks: false,
       }),
     );
   });
 
-  it("sends removeBooks true when the box is ticked", async () => {
-    renderFolders();
-    await screen.findByTestId("folders-list");
-
-    await userEvent.click(screen.getByTestId("folder-select-1"));
-    await userEvent.click(screen.getByTestId("folders-unwatch"));
-    const dialog = await screen.findByTestId("unwatch-dialog");
-
-    await userEvent.click(within(dialog).getByTestId("unwatch-remove-books"));
-    expect(within(dialog).getByTestId("unwatch-remove-books")).toBeChecked();
-    // The keep promise must not survive the tick.
-    expect(dialog).toHaveTextContent("The 12 books in this folder are removed from your library.");
-
-    await userEvent.click(screen.getByTestId("unwatch-confirm"));
-    await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
-        paths: ["/home/u/Books"],
-        removeBooks: true,
-      }),
-    );
-  });
-
-  it("still offers the box for a folder with no books", async () => {
+  it("keeps the zero-books copy with no checkbox left to disable", async () => {
     storageReportMock.mockResolvedValue({
       ...REPORT,
       bookLocations: [
@@ -363,28 +342,34 @@ describe("FoldersSettings unwatch", () => {
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch /home/u/Empty?");
     expect(dialog).toHaveTextContent("No books live in this folder.");
-    const box = within(dialog).getByTestId("unwatch-remove-books");
-    expect(box).not.toBeChecked();
-    expect(box).toBeDisabled();
-    expect(box).toHaveAccessibleName("Also remove these 0 books from the library");
+    expect(dialog).toHaveTextContent("Your files on disk stay untouched.");
+    expect(within(dialog).queryByTestId("unwatch-remove-books")).toBeNull();
+    expect(screen.getByTestId("unwatch-confirm")).toBeEnabled();
   });
 
-  it("reopens with the box off after a cancelled confirmation", async () => {
+  it("uses the singular for the one book in a folder", async () => {
+    storageReportMock.mockResolvedValue({
+      ...REPORT,
+      bookLocations: [
+        {
+          id: 1,
+          path: "/home/u/One",
+          addedAt: "2026-01-01T00:00:00.000Z",
+          bookCount: 1,
+          totalBytes: 1024,
+          missingFromDisk: false,
+        },
+      ],
+    });
     renderFolders();
     await screen.findByTestId("folders-list");
 
     await userEvent.click(screen.getByTestId("folder-select-1"));
     await userEvent.click(screen.getByTestId("folders-unwatch"));
-    const first = await screen.findByTestId("unwatch-dialog");
-    await userEvent.click(within(first).getByTestId("unwatch-remove-books"));
-    expect(within(first).getByTestId("unwatch-remove-books")).toBeChecked();
 
-    await userEvent.click(screen.getByTestId("unwatch-cancel"));
-    await waitFor(() => expect(screen.queryByTestId("unwatch-dialog")).toBeNull());
-
-    await userEvent.click(screen.getByTestId("folders-unwatch"));
-    const second = await screen.findByTestId("unwatch-dialog");
-    expect(within(second).getByTestId("unwatch-remove-books")).not.toBeChecked();
-    expect(invokeMock).not.toHaveBeenCalledWith("unwatch_locations", expect.anything());
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(dialog).toHaveTextContent(
+      "The 1 book in this folder is removed from your library, along with its reading progress and annotations.",
+    );
   });
 });

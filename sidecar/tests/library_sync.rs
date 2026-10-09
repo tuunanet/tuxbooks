@@ -153,33 +153,14 @@ impl TestEnv {
 
     /// Drive `unwatch_locations` through the real JSON-RPC boundary and
     /// return its `result`. Panics on a JSON-RPC error so a failing call
-    /// never reads as "nothing was unwatched". The flag is left out, so
-    /// this is also the proof that the default keeps the books.
+    /// never reads as "nothing was unwatched". There is one path: the call
+    /// carries paths and nothing else.
     async fn unwatch(&self, paths: &[&str]) -> Value {
-        self.unwatch_call(paths, None).await
-    }
-
-    /// The same call with the dialog's remove-from-library box checked.
-    async fn unwatch_and_remove(&self, paths: &[&str]) -> Value {
-        self.unwatch_call(paths, Some(true)).await
-    }
-
-    /// The same call with the box present but unchecked, which is what the
-    /// dialog actually sends until the user ticks it.
-    async fn unwatch_keeping_books(&self, paths: &[&str]) -> Value {
-        self.unwatch_call(paths, Some(false)).await
-    }
-
-    async fn unwatch_call(&self, paths: &[&str], remove_books: Option<bool>) -> Value {
-        let mut params = serde_json::json!({ "paths": paths });
-        if let Some(flag) = remove_books {
-            params["removeBooks"] = serde_json::json!(flag);
-        }
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "unwatch_locations",
-            "params": params,
+            "params": { "paths": paths },
         });
         let state = self.state();
         match handle_request_line(&state, &self.emitter, &request.to_string()).await {
@@ -193,23 +174,6 @@ impl TestEnv {
             }
             RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
         }
-    }
-
-    /// Every book pushed through a live `library-changed` event, as the
-    /// wire payload the renderer would receive.
-    fn changed_books(&self) -> Vec<Value> {
-        self.fired
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(name, _)| *name == "library-changed")
-            .filter_map(
-                |(_, payload)| match payload.get("kind").and_then(Value::as_str) {
-                    Some("changed") => payload.get("book").cloned(),
-                    _ => None,
-                },
-            )
-            .collect()
     }
 
     /// Book ids the client was told to drop outright (`kind: removed`).
@@ -664,13 +628,17 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
     assert_eq!(report.changes, 0);
 }
 
-/// Unwatch is the escape hatch from ADR 0007: the folder leaves the watch
-/// list, its books stay, and the client hears about it without a restart.
+/// Unwatch is the mirror promise: the folder leaves the watch list, its
+/// books leave the catalog through the delete cascade, and every file on
+/// disk stays byte-for-byte what it was. The client hears about it without
+/// a restart.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_a_folder_drops_the_row_and_keeps_the_books() {
+async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte() {
     let env = setup().await;
     let kept = env.write_book("kept.epub", "Kept Book");
     wait_for_titles(&env, ["Kept Book"]);
+    let before = std::fs::read(&kept).unwrap();
+    let book_id = env.books().await[0].id;
 
     let root = env.library.to_string_lossy().into_owned();
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
@@ -681,23 +649,21 @@ async fn unwatching_a_folder_drops_the_row_and_keeps_the_books() {
         .unwrap()
         .is_empty());
 
-    // ...the file on disk is left exactly where it was...
-    assert!(kept.exists(), "unwatching must never touch files on disk");
-
-    // ...and the book survives, now reading back as a loose book.
+    // ...the catalog row is gone, not merely detached...
     let books = env.books().await;
-    assert_eq!(books.len(), 1, "unwatching must not drop catalog rows");
-    assert_eq!(books[0].title, "Kept Book");
-    assert!(
-        books[0].loose,
-        "a book outside the watch list reads back loose"
+    assert_eq!(books.len(), 0, "unwatching must purge the catalog rows");
+    assert_eq!(
+        env.removed_book_ids(),
+        vec![book_id],
+        "the library hears `removed`, so the row drops without a restart"
     );
 
-    // The library hears about it live through the existing change event.
-    let changed = env.changed_books();
-    assert_eq!(changed.len(), 1, "one live event per book that went loose");
-    assert_eq!(changed[0]["title"], "Kept Book");
-    assert_eq!(changed[0]["loose"], true);
+    // ...and the file itself is untouched, byte for byte.
+    assert_eq!(
+        std::fs::read(&kept).unwrap(),
+        before,
+        "unwatching must never touch files on disk"
+    );
 }
 
 /// A disk change inside the unwatched folder must not reach the catalog,
@@ -787,11 +753,11 @@ async fn unwatching_a_folder_already_gone_from_disk_still_works() {
         .is_empty());
 }
 
-/// The opt-in half of unwatch: same call, one more flag, and the selected
-/// folders' catalog rows leave through the delete cascade while every file
-/// stays where it was.
+/// What purge takes with it: the books leave through the same delete
+/// cascade the library's own Remove uses, so reading progress and
+/// annotations go with the row while every file stays where it was.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_with_remove_books_drops_the_rows_and_keeps_the_files() {
+async fn unwatching_cascades_progress_and_annotations_with_the_books() {
     let env = setup().await;
     let file = env.write_book("dropped.epub", "Dropped Book");
     wait_for_titles(&env, ["Dropped Book"]);
@@ -820,7 +786,7 @@ async fn unwatching_with_remove_books_drops_the_rows_and_keeps_the_files() {
         .is_some());
 
     let root = env.library.to_string_lossy().into_owned();
-    assert_eq!(env.unwatch_and_remove(&[root.as_str()]).await, 1);
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
     // The catalog rows are gone, not merely detached...
     assert_eq!(env.count().await, 0, "the book must leave the library");
@@ -854,36 +820,12 @@ async fn unwatching_with_remove_books_drops_the_rows_and_keeps_the_files() {
     assert_eq!(env.removed_book_ids(), vec![book.id]);
 }
 
-/// The dialog default: the box unchecked keeps every book, exactly as
-/// ticket 2 built it.
+/// The purge set is the books the unwatched folder owns, not "whatever sits
+/// under the prefix": a child folder keeps owning its books until its row
+/// goes, and a parent still watching the same tree does not make them the
+/// parent's.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_with_the_box_unchecked_keeps_the_books() {
-    let env = setup().await;
-    let file = env.write_book("kept.epub", "Kept Book");
-    wait_for_titles(&env, ["Kept Book"]);
-
-    let root = env.library.to_string_lossy().into_owned();
-    assert_eq!(env.unwatch_keeping_books(&[root.as_str()]).await, 1);
-
-    let books = env.books().await;
-    assert_eq!(
-        books.len(),
-        1,
-        "the unchecked box must keep the catalog rows"
-    );
-    assert!(books[0].loose);
-    assert!(file.exists());
-    assert!(
-        env.removed_book_ids().is_empty(),
-        "nothing may be announced as removed on the keep path"
-    );
-}
-
-/// The removal set is the books the dialog named, not "whatever goes
-/// loose": a child folder keeps owning its books until its row goes, and a
-/// parent still watching the same tree does not make them the parent's.
-#[tokio::test(flavor = "multi_thread")]
-async fn removing_a_child_folder_takes_its_books_while_the_parent_stays() {
+async fn unwatching_a_child_folder_takes_its_books_while_the_parent_stays() {
     let env = setup().await;
     let sub = env.library.join("shelf");
     std::fs::create_dir_all(&sub).unwrap();
@@ -898,10 +840,10 @@ async fn removing_a_child_folder_takes_its_books_while_the_parent_stays() {
     wait_for_titles(&env, ["Root Book", "Shelf Book"]);
 
     let shelf = sub.to_string_lossy().into_owned();
-    assert_eq!(env.unwatch_and_remove(&[shelf.as_str()]).await, 1);
+    assert_eq!(env.unwatch(&[shelf.as_str()]).await, 1);
 
-    // The child's book goes; the parent's book, which the dialog never
-    // counted under the child, stays.
+    // The child's book goes; the parent's book, which the child never
+    // owned, stays.
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(titles, vec!["Root Book".to_string()]);
     assert_eq!(env.removed_book_ids().len(), 1);
@@ -916,7 +858,7 @@ async fn removing_a_child_folder_takes_its_books_while_the_parent_stays() {
 /// the subfolder's books survive with it even though they sit under the
 /// prefix that was just removed.
 #[tokio::test(flavor = "multi_thread")]
-async fn removing_a_parent_leaves_a_surviving_subfolders_books_alone() {
+async fn unwatching_a_parent_leaves_a_surviving_subfolders_books_alone() {
     let env = setup().await;
     let sub = env.library.join("shelf");
     std::fs::create_dir_all(&sub).unwrap();
@@ -931,7 +873,7 @@ async fn removing_a_parent_leaves_a_surviving_subfolders_books_alone() {
     wait_for_titles(&env, ["Root Book", "Shelf Book"]);
 
     let root = env.library.to_string_lossy().into_owned();
-    assert_eq!(env.unwatch_and_remove(&[root.as_str()]).await, 1);
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(titles, vec!["Shelf Book".to_string()]);
@@ -942,8 +884,8 @@ async fn removing_a_parent_leaves_a_surviving_subfolders_books_alone() {
         vec![sub.to_string_lossy().into_owned()]
     );
 
-    // The subfolder is still a watched folder, so it still syncs (the rule
-    // ticket 2 established, unchanged by the removal path).
+    // The subfolder is still a watched folder, so it still syncs (its own
+    // watch, unchanged by the parent's purge).
     write_epub(&sub.join("second.epub"), "Second Shelf Book");
     wait_for_titles(&env, ["Second Shelf Book"]);
 }
