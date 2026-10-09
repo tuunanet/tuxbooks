@@ -18,9 +18,9 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
-use tuxbooks_lib::domain::{AnnotationKind, Book, NewAnnotation, ProgressUpdate};
+use tuxbooks_lib::domain::{AnnotationKind, Book, NewAnnotation, NewBook, ProgressUpdate};
 use tuxbooks_lib::repository::{
-    annotations, books as book_repo, library_locations, reading_progress,
+    annotations, books as book_repo, collections, library_locations, reading_progress,
 };
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{LibraryChange, Reconciler};
@@ -888,4 +888,176 @@ async fn unwatching_a_parent_leaves_a_surviving_subfolders_books_alone() {
     // watch, unchanged by the parent's purge).
     write_epub(&sub.join("second.epub"), "Second Shelf Book");
     wait_for_titles(&env, ["Second Shelf Book"]);
+}
+
+/// A catalog row an upgrade would find outside every watched folder, with the
+/// file it points at already on disk.
+fn stray_book(path: &Path, title: &str) -> NewBook {
+    NewBook {
+        path: path.to_string_lossy().into_owned(),
+        title: title.into(),
+        subtitle: None,
+        author: None,
+        authors: Vec::new(),
+        subjects: Vec::new(),
+        publisher: None,
+        language: None,
+        isbn: None,
+        description: None,
+        cover_path: None,
+        publication_date: None,
+        series: None,
+        series_index: None,
+        file_size: 10,
+        file_mtime: 1_700_000_000,
+    }
+}
+
+/// Apply the one-time outside-watched purge exactly as an upgrade does: the
+/// purge's row leaves the migration journal (version 11 is
+/// `0011_purge_outside_watched.sql`), so the embedded migrator runs that
+/// migration again against the catalog as it now stands.
+async fn run_the_upgrade_purge(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 11")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(pool).await.unwrap();
+}
+
+/// The upgrade purge is the mirror promise applied once to an old catalog:
+/// every book outside all watched folders leaves through the delete cascade,
+/// watched-folder books stay, and not one file on disk moves.
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_purge_removes_books_outside_every_watched_folder() {
+    let env = setup().await;
+
+    // The watched folder keeps its book — a real reconciler import.
+    let kept = env.write_book("kept.epub", "Kept Book");
+    wait_for_titles(&env, ["Kept Book"]);
+    let kept_id = env.books().await[0].id;
+
+    // Two books an older version left outside the mirror: one in a folder
+    // nothing watches, one whose path merely shares a string prefix with the
+    // watched folder (`…/libraryx` next to `…/library`).
+    let stray_file = env.sibling("outside").join("stray.epub");
+    write_epub(&stray_file, "Stray Book");
+    let stray_id = book_repo::insert_book(&env.pool, &stray_book(&stray_file, "Stray Book"))
+        .await
+        .unwrap();
+    let sibling_file = env.tmp.path().join("libraryx").join("c.epub");
+    write_epub(&sibling_file, "Prefix-mate Book");
+    book_repo::insert_book(&env.pool, &stray_book(&sibling_file, "Prefix-mate Book"))
+        .await
+        .unwrap();
+
+    // Purged metadata goes with the row: progress, an annotation, and a
+    // collection shared with the surviving book.
+    add_progress(&env.pool, stray_id, 42).await;
+    annotations::insert_annotation(
+        &env.pool,
+        stray_id,
+        &NewAnnotation {
+            kind: AnnotationKind::Bookmark,
+            cfi: Some("epubcfi(/6/4)".into()),
+            chapter_href: None,
+            page_number: None,
+            page_fraction: None,
+            text: None,
+            color: None,
+            geometry: None,
+        },
+    )
+    .await
+    .unwrap();
+    let favorites = collections::create_collection(&env.pool, "Favorites")
+        .await
+        .unwrap();
+    collections::add_book_to_collection(&env.pool, stray_id, favorites)
+        .await
+        .unwrap();
+    collections::add_book_to_collection(&env.pool, kept_id, favorites)
+        .await
+        .unwrap();
+
+    let before: Vec<(PathBuf, Vec<u8>)> = [kept.clone(), stray_file.clone(), sibling_file.clone()]
+        .into_iter()
+        .map(|path| (path.clone(), std::fs::read(&path).unwrap()))
+        .collect();
+
+    run_the_upgrade_purge(&env.pool).await;
+
+    // Exactly the outside rows left the catalog; the watched book stayed.
+    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+    assert_eq!(titles, vec!["Kept Book".to_string()]);
+
+    // The cascade took the purged books' metadata with them, while the
+    // surviving book's collection membership is untouched.
+    assert!(reading_progress::get_progress(&env.pool, stray_id)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(annotations::list_annotations(&env.pool, stray_id)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(
+        collections::list_collection_ids_for_book(&env.pool, stray_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        collections::list_collection_ids_for_book(&env.pool, kept_id)
+            .await
+            .unwrap(),
+        vec![favorites]
+    );
+
+    // The watch list is not part of the purge: the mirror keeps its folders.
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()]
+    );
+
+    // Every file is still on disk, byte for byte.
+    for (path, bytes) in before {
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "the purge must never touch files on disk"
+        );
+    }
+}
+
+/// The purge is one-time work: applying it a second time deletes nothing
+/// more, so a replayed journal or a repeat upgrade leaves the mirror
+/// exactly as the first run shaped it.
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_purge_is_idempotent() {
+    let env = setup().await;
+    let kept = env.write_book("kept.epub", "Kept Book");
+    wait_for_titles(&env, ["Kept Book"]);
+    let stray_file = env.sibling("outside").join("stray.epub");
+    write_epub(&stray_file, "Stray Book");
+    book_repo::insert_book(&env.pool, &stray_book(&stray_file, "Stray Book"))
+        .await
+        .unwrap();
+    let before = std::fs::read(&kept).unwrap();
+
+    run_the_upgrade_purge(&env.pool).await;
+    run_the_upgrade_purge(&env.pool).await;
+
+    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+    assert_eq!(
+        titles,
+        vec!["Kept Book".to_string()],
+        "a second purge run must delete nothing"
+    );
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()]
+    );
+    assert_eq!(std::fs::read(&kept).unwrap(), before);
+    assert!(stray_file.exists());
 }
