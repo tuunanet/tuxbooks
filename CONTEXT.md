@@ -98,15 +98,8 @@ _Avoid_: library location, book folder
 
 **Unwatch**:
 Removing a watched folder from the watch list. Its files stay on disk and its
-books stay in the catalog as loose books unless the user also asks to remove
-them.
+books are removed from the catalog.
 _Avoid_: remove folder, stop tracking
-
-**Loose book**:
-A book whose path sits outside every watched folder, usually added by a
-single-file import. TuxBooks shows it in the library and never watches its
-folder.
-_Avoid_: unwatched book
 
 ## Verification
 
