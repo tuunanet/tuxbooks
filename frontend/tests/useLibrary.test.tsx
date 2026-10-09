@@ -146,28 +146,27 @@ describe("useLibraryData post-import refresh", () => {
     const { result } = renderHook(() => useLibraryData());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    // A watched-folder import streams every book while the location row is
-    // still absent, so the event payloads truthfully say loose at emit time.
-    // The first batch lands before the import completes.
-    act_emit(makeBook({ id: 1, title: "Early Book", loose: true }));
+    // The first batch lands before the import completes, so the streamed
+    // rows still carry no reading position.
+    act_emit(makeBook({ id: 1, title: "Early Book", progressPercent: null }));
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
     // The final batch is still inside the flush window when the completing
-    // refresh fetches the reconciled truth: the folder now owns both books.
-    act_emit(makeBook({ id: 2, title: "Late Book", loose: true }));
+    // refresh fetches the reconciled truth for both books.
+    act_emit(makeBook({ id: 2, title: "Late Book", progressPercent: null }));
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
       list_books: [
-        makeBook({ id: 1, title: "Early Book", loose: false }),
-        makeBook({ id: 2, title: "Late Book", loose: false }),
+        makeBook({ id: 1, title: "Early Book", progressPercent: 37 }),
+        makeBook({ id: 2, title: "Late Book", progressPercent: 37 }),
       ],
     });
     await act(() => result.current.refresh());
-    expect(result.current.books.every((book) => !book.loose)).toBe(true);
+    expect(result.current.books.every((book) => book.progressPercent === 37)).toBe(true);
 
     // The buffered batch must not overwrite the fetched rows afterwards.
     await act(() => new Promise((resolve) => setTimeout(resolve, EVENT_FLUSH_MS + 50)));
-    expect(result.current.books.find((book) => book.id === 2)?.loose).toBe(false);
+    expect(result.current.books.find((book) => book.id === 2)?.progressPercent).toBe(37);
   });
 });
 

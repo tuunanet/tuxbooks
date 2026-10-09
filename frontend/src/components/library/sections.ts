@@ -9,17 +9,6 @@ export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
   "recently-read": "Recently Read",
   "in-progress": "In Progress",
   finished: "Finished",
-  "outside-watched": "Loose Books",
-};
-
-/**
- * One line shown under the view header where a section needs to explain
- * itself. Only the loose-books view qualifies: the others read as managed
- * by definition, while its files are not watched.
- */
-export const SMART_SECTION_SUBTITLES: Partial<Record<SmartSectionId, string>> = {
-  "outside-watched":
-    "Files live outside your watched folders, so TuxBooks doesn't track changes to them. Import a book's folder to start watching it.",
 };
 
 export function sectionTitle(section: LibrarySection): string {
@@ -61,9 +50,6 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
         .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
-    case "outside-watched":
-      // Books whose path no watched folder owns (single-file imports).
-      return books.filter((book) => book.loose);
   }
 }
 

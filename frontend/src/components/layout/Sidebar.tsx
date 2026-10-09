@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { EyeOff, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CollectionDialog } from "@/components/collections/CollectionDialog";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
-import { SMART_SECTION_TITLES } from "@/components/library/sections";
 import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
 
 interface SidebarProps {
@@ -23,18 +22,6 @@ const LIBRARY_ITEMS: { id: SmartSectionId; label: string }[] = [
   { id: "finished", label: "Finished" },
 ];
 
-/**
- * The loose-books item shows only while the library has at least one book
- * outside every watched folder; an import can bring the first one. It wears
- * the eye-off icon and a muted label so it does not read as a peer of the
- * managed views above it.
- */
-const OUTSIDE_WATCHED_ITEM: { id: SmartSectionId; tooltip: string } = {
-  id: "outside-watched",
-  tooltip:
-    "Not watched — these files sit outside your watched folders, so TuxBooks won't track changes to them.",
-};
-
 function GroupLabel({ children }: { children: string }) {
   return (
     <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -48,28 +35,16 @@ interface ItemButtonProps {
   onClick: () => void;
   children: React.ReactNode;
   disabled?: boolean;
-  title?: string;
   trailing?: React.ReactNode;
-  /** Dim the label while inactive: a weaker treatment than the managed views. */
-  muted?: boolean;
 }
 
-function ItemButton({
-  active,
-  onClick,
-  children,
-  disabled,
-  title,
-  trailing,
-  muted,
-}: ItemButtonProps) {
+function ItemButton({ active, onClick, children, disabled, trailing }: ItemButtonProps) {
   return (
     <div className="group/item relative">
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
-        title={title}
         aria-current={active ? "true" : undefined}
         className={cn(
           "w-full rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
@@ -77,7 +52,6 @@ function ItemButton({
           active
             ? "bg-accent font-medium text-accent-foreground"
             : "text-foreground hover:bg-accent/60",
-          muted && !active && "text-muted-foreground",
           disabled && "cursor-not-allowed opacity-50",
         )}
       >
@@ -90,11 +64,8 @@ function ItemButton({
 
 export function Sidebar({ active, onSectionChange }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { collections, books } = useLibrary();
+  const { collections } = useLibrary();
   const { create, remove } = useCollectionActions();
-
-  const looseCount = books.filter((book) => book.loose).length;
-  const outsideSection: LibrarySection = { kind: "smart", id: OUTSIDE_WATCHED_ITEM.id };
 
   return (
     <aside
@@ -130,19 +101,6 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
                 </ItemButton>
               );
             })}
-            {looseCount > 0 && (
-              <ItemButton
-                active={sameSection(outsideSection, active)}
-                onClick={() => onSectionChange(outsideSection)}
-                muted
-                title={OUTSIDE_WATCHED_ITEM.tooltip}
-              >
-                <span className="flex items-center gap-1.5">
-                  <EyeOff aria-hidden="true" className="size-3.5 shrink-0" />
-                  {SMART_SECTION_TITLES[OUTSIDE_WATCHED_ITEM.id]}
-                </span>
-              </ItemButton>
-            )}
           </div>
         </div>
 

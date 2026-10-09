@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLibrary } from "@/hooks/useLibrary";
-import type { LibrarySection } from "@/state/appState";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -43,21 +41,11 @@ const CATALOG_ROWS = [
 ] as const;
 
 /**
- * The Data tab is rendered inside Settings; the loose-books row routes to the
- * smart section the sidebar uses, so the shell passes down its dispatcher.
- */
-export interface DataSettingsProps {
-  onSelectSection: (section: LibrarySection) => void;
-}
-
-/**
  * The Data tab (data-management spec): where TuxBooks keeps its own data and
  * how large it is. Main resolves every path; the renderer displays the report
  * and acts on rows by stable id, never by a path it supplies.
  */
-export function DataSettings({ onSelectSection }: DataSettingsProps) {
-  const { books } = useLibrary();
-  const looseCount = books.filter((book) => book.loose).length;
+export function DataSettings() {
   const [report, setReport] = useState<StorageReport | null>(null);
   const [failed, setFailed] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -343,24 +331,6 @@ export function DataSettings({ onSelectSection }: DataSettingsProps) {
               </span>
             </li>
           ))}
-          <li
-            data-testid="storage-catalog-outside-watched"
-            className="flex items-center justify-between gap-4 py-2"
-          >
-            <span className="text-sm">Loose books</span>
-            <span className="flex items-center gap-3">
-              <span className="text-xs tabular-nums text-muted-foreground">{looseCount}</span>
-              <Button
-                data-testid="storage-catalog-outside-watched-show"
-                variant="outline"
-                size="sm"
-                disabled={looseCount === 0}
-                onClick={() => onSelectSection({ kind: "smart", id: "outside-watched" })}
-              >
-                Show books
-              </Button>
-            </span>
-          </li>
         </ul>
       </div>
 
