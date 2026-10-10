@@ -158,6 +158,8 @@ export interface ImportReport {
   /** Files whose size+mtime still matched the stored row — never re-parsed. */
   skipped: number;
   failed: { path: string; error: string }[];
+  /** Folders this run newly registered as watched locations. */
+  watched: string[];
 }
 
 /**

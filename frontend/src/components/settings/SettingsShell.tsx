@@ -219,8 +219,8 @@ function AppThemeRow() {
 
 /**
  * General holds the app theme and the library import actions. Folders become
- * watched locations; picked files import in place — both go through the shared
- * import flow the header menu uses.
+ * watched locations, and a picked file adopts its folder the same way — both
+ * go through the shared import flow the header menu uses.
  */
 function GeneralSection() {
   const { importPaths } = useImport();
@@ -250,8 +250,8 @@ function GeneralSection() {
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Single files import in place and are not watched. Folders you add become watched
-            folders. You can also drag files onto the window to import them.
+            Importing a file or folder watches its folder, so every book there stays in sync. You
+            can also drag files onto the window to import them.
           </p>
         </dd>
       </div>

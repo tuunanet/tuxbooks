@@ -183,6 +183,17 @@ impl TestEnv {
             .await
     }
 
+    /// Drive `import_paths` through the real JSON-RPC boundary — the same
+    /// call Import Files, drag-and-drop, and the folder picker issue.
+    async fn import_paths(&self, paths: &[&Path]) -> Value {
+        let paths: Vec<String> = paths
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        self.rpc("import_paths", serde_json::json!({ "paths": paths }))
+            .await
+    }
+
     /// Book ids the client was told to drop outright (`kind: removed`).
     fn removed_book_ids(&self) -> Vec<i64> {
         self.fired
@@ -1100,4 +1111,110 @@ async fn list_books_payloads_carry_no_loose_field() {
             "the loose flag must not appear on the wire: {book}"
         );
     }
+}
+
+/// A picked file adopts its folder (ADR 0009): the parent lands on the
+/// watch list, the folder's other books arrive with the import, and a
+/// sibling dropped on disk afterwards appears without a second import.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    write_epub(&shelf.join("first.epub"), "Shelf First");
+    write_epub(&shelf.join("second.epub"), "Shelf Second");
+
+    let report = env.import_paths(&[&shelf.join("first.epub")]).await;
+
+    // The whole folder's book set arrived with the picked file...
+    assert_eq!(
+        report["imported"].as_u64(),
+        Some(2),
+        "the folder's books arrive with the file: {report}"
+    );
+    assert!(report["failed"].as_array().unwrap().is_empty(), "{report}");
+    assert_eq!(env.count().await, 2);
+
+    // ...the parent became a watched location...
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![
+            env.library.to_string_lossy().into_owned(),
+            shelf.to_string_lossy().into_owned()
+        ]
+    );
+
+    // ...and the report disclosed the new watch instead of starting it
+    // silently.
+    assert_eq!(
+        report["watched"],
+        serde_json::json!([shelf.to_string_lossy()]),
+        "the new watch must be disclosed on the report: {report}"
+    );
+
+    // A sibling dropped on disk afterwards appears without a second import.
+    write_epub(&shelf.join("late.epub"), "Shelf Late");
+    wait_for_titles(&env, ["Shelf Late"]);
+    assert_eq!(env.count().await, 3);
+}
+
+/// Importing a file from a folder that is already watched neither
+/// duplicates rows nor errors: the scan skips the unchanged files, the
+/// registration is a no-op, and no second watch is disclosed.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_file_from_a_watched_folder_is_idempotent() {
+    let env = setup().await;
+    let path = env.write_book("resident.epub", "Resident Book");
+    let first = match env
+        .wait_for(|c| matches!(c, LibraryChange::Changed { book } if book.title == "Resident Book"))
+    {
+        LibraryChange::Changed { book } => book,
+        _ => unreachable!(),
+    };
+
+    let report = env.import_paths(&[&path]).await;
+
+    assert!(report["failed"].as_array().unwrap().is_empty(), "{report}");
+    assert_eq!(
+        env.count().await,
+        1,
+        "re-importing a watched file must not create a duplicate row"
+    );
+    let stored = book_repo::get_book_by_path(&env.pool, &path.to_string_lossy())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.id, first.id, "the existing row must keep its id");
+    assert_eq!(
+        report["watched"],
+        serde_json::json!([]),
+        "an already-watched parent is not a new watch: {report}"
+    );
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()],
+        "the watch list must not grow a second row for the same folder"
+    );
+}
+
+/// A file that is not a supported book fails as before and registers
+/// nothing: a failed import turns no folder into a watched location.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_non_book_file_watches_nothing() {
+    let env = setup().await;
+    let shelf = env.sibling("stray");
+    std::fs::create_dir_all(&shelf).unwrap();
+    let notes = shelf.join("notes.txt");
+    std::fs::write(&notes, b"not a book").unwrap();
+
+    let report = env.import_paths(&[&notes]).await;
+
+    assert_eq!(report["failed"].as_array().unwrap().len(), 1, "{report}");
+    assert_eq!(report["watched"], serde_json::json!([]), "{report}");
+    assert_eq!(env.count().await, 0);
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()],
+        "a failed import must not register its folder"
+    );
 }

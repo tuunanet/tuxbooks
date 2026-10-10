@@ -104,9 +104,10 @@ export function scanLibrary(path: string): Promise<ImportReport> {
 }
 
 /**
- * Import a mixed batch of files and/or folders. Folders become watched
- * library locations; plain files are imported in place. Per-path failures
- * come back in the report.
+ * Import a mixed batch of files and/or folders. Both end up watched: a
+ * folder is registered as a library location, and a plain file adopts its
+ * parent folder the same way. The report lists every folder the run newly
+ * watched; per-path failures come back in the report too.
  */
 export function importPaths(paths: string[]): Promise<ImportReport> {
   return invoke("import_paths", { paths });

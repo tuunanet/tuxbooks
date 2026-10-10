@@ -39,7 +39,7 @@ function renderFolders(extra: Record<string, unknown> = {}) {
     get_library_stats: { bookCount: 15, collectionCount: 0 },
     list_books: [],
     list_collections: [],
-    import_paths: { imported: 1, updated: 0, skipped: 0, failed: [] },
+    import_paths: { imported: 1, updated: 0, skipped: 0, failed: [], watched: [] },
     unwatch_locations: 1,
     ...extra,
   });

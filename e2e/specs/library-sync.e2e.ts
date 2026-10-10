@@ -93,6 +93,64 @@ test.describe("tuxbooks filesystem synchronization", () => {
     expect(await missingOverlays(page)).toBe(0);
   });
 
+  test("importing a single file watches its folder so siblings arrive alone", async ({ page }) => {
+    // A shelf outside the seeded library, so the mirror round trip never
+    // disturbs the fixtures the other suites run against.
+    const shelf = path.join(scratchDir, "single-file-shelf");
+    mkdirSync(shelf, { recursive: true });
+    const first = path.join(shelf, "single-first.epub");
+    copyFileSync(epubFixture, first);
+
+    // The native file dialog cannot be driven from the automation surface,
+    // so the file comes in through the same bridge command Import Files
+    // issues (same rule as the unwatch scenario below).
+    const report = (await page.evaluate(
+      (file) => window.tuxbooks!.invoke("import_paths", { paths: [file] }),
+      first,
+    )) as { imported: number; failed: unknown[]; watched: string[] };
+    expect(report.failed).toEqual([]);
+    expect(report.watched).toEqual([shelf]);
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the imported shelf book never appeared in the library",
+      })
+      .toBe(seededLibraryBookCount + 1);
+
+    // Watching never happens silently: the shelf is listed where the user
+    // manages watches — Settings > Folders.
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByRole("button", { name: "Folders" }).click();
+    const list = page.getByTestId("folders-list");
+    await expect(list.locator("li", { hasText: shelf })).toBeVisible();
+    await page.getByRole("button", { name: "All Books" }).click();
+    await expect(page.getByTestId("library-view")).toBeVisible();
+
+    // A sibling dropped on disk afterwards appears without a second import.
+    copyFileSync(epubFixture, path.join(shelf, "single-second.epub"));
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "a sibling dropped into the newly watched folder never appeared",
+      })
+      .toBe(seededLibraryBookCount + 2);
+
+    // Clean up the way a user would: unwatch purges the shelf's books and
+    // stops the watch; the files on disk stay for the rm below.
+    await page.evaluate(
+      (dir) => window.tuxbooks!.invoke("unwatch_locations", { paths: [dir] }),
+      shelf,
+    );
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the unwatched shelf's books never left the library",
+      })
+      .toBe(seededLibraryBookCount);
+    rmSync(shelf, { recursive: true, force: true });
+  });
+
   test("unwatching a folder empties the app of its books while files stay", async ({ page }) => {
     // A shelf outside the seeded library, so the mirror round trip never
     // disturbs the fixtures the other suites run against.

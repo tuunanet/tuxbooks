@@ -1,6 +1,6 @@
 # ADR 0006: Single-file imports stay unwatched
 
-Status: accepted
+Status: superseded by ADR 0009
 Date: 2026-09-23
 Decides: whether importing one book adds its folder to the watched locations
 Relates to: `CONTEXT.md` (Watched folder, Loose book)

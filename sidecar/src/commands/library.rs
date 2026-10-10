@@ -88,24 +88,26 @@ pub async fn scan_library(
     let covers = covers_dir(&state.db_path);
     let pdfium_dirs = pdfium_library_dirs();
     let batch = Mutex::new(ProgressBatcher::new(events));
-    let report = import_directory(&state.db, &root, &covers, &pdfium_dirs, &|book| {
+    let mut report = import_directory(&state.db, &root, &covers, &pdfium_dirs, &|book| {
         batch.lock().unwrap().push(book.clone());
     })
     .await?;
     batch.lock().unwrap().flush();
 
-    library_locations::add_location(&state.db, &root.to_string_lossy()).await?;
-    state.watcher.watch(&root);
+    register_and_watch(state, &root, &mut report).await?;
     Ok(report)
 }
 
 /// Import a mixed batch of files and/or folders (milestone 10). Folders are
 /// scanned and registered as watched library locations exactly like
-/// `scan_library`; plain files are imported in place and stay unwatched
-/// (a stray single file does not turn its folder into a library root).
-/// Persisted books stream out as batched `import-progress` events;
-/// per-path failures come back in the report so the UI can surface them
-/// honestly.
+/// `scan_library`; a plain file is imported in place and its parent
+/// directory gets the same folder treatment — scanned, registered, and
+/// watched (ADR 0009), so every catalog book comes from a watched folder.
+/// Registering an already-watched folder is idempotent: no duplicate rows,
+/// no error, and no second disclosure. Persisted books stream out as
+/// batched `import-progress` events; per-path failures come back in the
+/// report so the UI can surface them honestly, and every folder this run
+/// newly watched is listed in the report so the UI can disclose it.
 pub async fn import_paths(
     state: &AppState,
     events: &EventEmitter,
@@ -131,27 +133,15 @@ pub async fn import_paths(
             continue;
         }
         if path.is_dir() {
-            let root = path.clone();
-            match import_directory(&state.db, &root, &covers, &pdfium_dirs, &emit_progress).await {
-                Ok(mut folder_report) => {
-                    report.imported += folder_report.imported;
-                    report.updated += folder_report.updated;
-                    report.skipped += folder_report.skipped;
-                    report.failed.append(&mut folder_report.failed);
-                    if library_locations::add_location(&state.db, &root.to_string_lossy())
-                        .await
-                        .is_ok()
-                    {
-                        state.watcher.watch(&root);
-                    }
-                }
-                Err(err) => report
-                    .failed
-                    .push(crate::services::book_importer::FailedImport {
-                        path: path.to_string_lossy().into_owned(),
-                        error: err.to_string(),
-                    }),
-            }
+            import_and_watch_folder(
+                state,
+                &path,
+                &covers,
+                &pdfium_dirs,
+                &emit_progress,
+                &mut report,
+            )
+            .await;
         } else if path.is_file() {
             match import_file(&state.db, &path, &covers, &pdfium_dirs).await {
                 Ok(Some(outcome)) => {
@@ -161,6 +151,22 @@ pub async fn import_paths(
                         report.updated += 1;
                     }
                     emit_progress(&outcome.book);
+                    // A picked file adopts its folder (ADR 0009): the
+                    // parent gets the folder import's treatment, so the
+                    // mirror never holds a book no watched folder owns.
+                    if let Some(parent) = path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            import_and_watch_folder(
+                                state,
+                                parent,
+                                &covers,
+                                &pdfium_dirs,
+                                &emit_progress,
+                                &mut report,
+                            )
+                            .await;
+                        }
+                    }
                 }
                 Ok(None) => report
                     .failed
@@ -186,6 +192,67 @@ pub async fn import_paths(
     }
     batch.lock().unwrap().flush();
     Ok(report)
+}
+
+/// Scan `root` for book files, register it as a watched library location,
+/// and start the filesystem watcher on it — the one folder treatment both
+/// folder imports and picked files' parents get (ADR 0009). Book counts
+/// and per-path failures merge into `report`; a folder this run newly
+/// registered is disclosed in `report.watched`. Registration is
+/// idempotent: an already-watched folder produces no disclosure and no
+/// duplicate row.
+async fn import_and_watch_folder(
+    state: &AppState,
+    root: &Path,
+    covers: &Path,
+    pdfium_dirs: &[PathBuf],
+    emit_progress: &(dyn Fn(&crate::domain::Book) + Send + Sync),
+    report: &mut ImportReport,
+) {
+    match import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await {
+        Ok(mut folder_report) => {
+            report.imported += folder_report.imported;
+            report.updated += folder_report.updated;
+            report.skipped += folder_report.skipped;
+            report.failed.append(&mut folder_report.failed);
+        }
+        Err(err) => {
+            report
+                .failed
+                .push(crate::services::book_importer::FailedImport {
+                    path: root.to_string_lossy().into_owned(),
+                    error: err.to_string(),
+                });
+            // The scan failed, so there is nothing trustworthy to
+            // register or watch; the failure line already said so.
+            return;
+        }
+    }
+    if let Err(err) = register_and_watch(state, root, report).await {
+        report
+            .failed
+            .push(crate::services::book_importer::FailedImport {
+                path: root.to_string_lossy().into_owned(),
+                error: err.to_string(),
+            });
+    }
+}
+
+/// Register `root` as a watched library location, start the filesystem
+/// watcher on it, and disclose a first-time registration in `report.watched`
+/// — one tail every import path shares, so the disclosure rule lives in one
+/// place. Registration is idempotent: an already-watched folder produces no
+/// disclosure and no duplicate row.
+async fn register_and_watch(
+    state: &AppState,
+    root: &Path,
+    report: &mut ImportReport,
+) -> Result<(), AppError> {
+    if library_locations::add_location(&state.db, &root.to_string_lossy()).await? {
+        report.watched.push(root.to_string_lossy().into_owned());
+    }
+    state.watcher.watch(root);
+    Ok(())
 }
 
 /// Unwatch one or more folders: the rows leave the watch list, every book
