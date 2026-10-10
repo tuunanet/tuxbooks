@@ -53,10 +53,8 @@ real modifications from duplicate events without re-parsing documents.
 reconciled. Unwatching a folder deletes its row, which is what stops the
 sync, and removes the books those folders owned from the catalog through
 the normal delete cascade — files on disk are never touched. Books outside
-watched locations are never touched by
-reconciliation — a fresh database that predates milestone 3 stays
-unwatched until the next folder import. The library derives a book's
-`loose` flag from this table: true when no location owns its path.
+watched locations are never touched by reconciliation — a fresh database
+that predates milestone 3 stays unwatched until the next folder import.
 
 ### collections
 

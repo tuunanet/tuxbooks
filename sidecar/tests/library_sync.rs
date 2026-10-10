@@ -151,16 +151,15 @@ impl TestEnv {
         })
     }
 
-    /// Drive `unwatch_locations` through the real JSON-RPC boundary and
-    /// return its `result`. Panics on a JSON-RPC error so a failing call
-    /// never reads as "nothing was unwatched". There is one path: the call
-    /// carries paths and nothing else.
-    async fn unwatch(&self, paths: &[&str]) -> Value {
+    /// Drive one method through the real JSON-RPC boundary and return its
+    /// `result`. Panics on a JSON-RPC error so a failing call never reads as
+    /// "nothing happened".
+    async fn rpc(&self, method: &str, params: Value) -> Value {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
-            "method": "unwatch_locations",
-            "params": { "paths": paths },
+            "method": method,
+            "params": params,
         });
         let state = self.state();
         match handle_request_line(&state, &self.emitter, &request.to_string()).await {
@@ -168,12 +167,20 @@ impl TestEnv {
                 let response: Value = serde_json::from_str(line.trim()).unwrap();
                 assert!(
                     response.get("error").is_none(),
-                    "unwatch_locations failed: {response}"
+                    "{method} failed: {response}"
                 );
                 response["result"].clone()
             }
             RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
         }
+    }
+
+    /// Drive `unwatch_locations` through the real JSON-RPC boundary and
+    /// return its `result`. There is one path: the call carries paths and
+    /// nothing else.
+    async fn unwatch(&self, paths: &[&str]) -> Value {
+        self.rpc("unwatch_locations", serde_json::json!({ "paths": paths }))
+            .await
     }
 
     /// Book ids the client was told to drop outright (`kind: removed`).
@@ -1060,4 +1067,37 @@ async fn upgrade_purge_is_idempotent() {
     );
     assert_eq!(std::fs::read(&kept).unwrap(), before);
     assert!(stray_file.exists());
+}
+
+/// The wire carries no loose flag. The retired mechanism leaves no field for
+/// future code to build on, in a watched book or one outside the mirror.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_books_payloads_carry_no_loose_field() {
+    let env = setup().await;
+
+    // A book the mirror owns, imported by the reconciler.
+    env.write_book("watched.epub", "Watched Book");
+    wait_for_titles(&env, ["Watched Book"]);
+
+    // A row outside every watched folder — the case that used to arrive
+    // flagged, since the purge only runs on upgrade.
+    let stray_file = env.sibling("outside").join("stray.epub");
+    write_epub(&stray_file, "Stray Book");
+    book_repo::insert_book(&env.pool, &stray_book(&stray_file, "Stray Book"))
+        .await
+        .unwrap();
+
+    let payload = env.rpc("list_books", serde_json::json!({})).await;
+    let books = payload.as_array().expect("list_books returns an array");
+    let titles: Vec<&str> = books
+        .iter()
+        .filter_map(|book| book.get("title").and_then(Value::as_str))
+        .collect();
+    assert_eq!(titles, vec!["Stray Book", "Watched Book"]);
+    for book in books {
+        assert!(
+            book.get("loose").is_none(),
+            "the loose flag must not appear on the wire: {book}"
+        );
+    }
 }

@@ -114,7 +114,7 @@ mod tests {
         assert_eq!(owning_location("/libx/c.epub", &index), None);
         assert_eq!(owning_location("/lib_sub/d.epub", &index), None);
 
-        // A path outside every watched location is loose.
-        assert_eq!(owning_location("/loose.epub", &index), None);
+        // A path outside every watched location belongs to no location.
+        assert_eq!(owning_location("/outside.epub", &index), None);
     }
 }

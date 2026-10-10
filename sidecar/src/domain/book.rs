@@ -67,16 +67,11 @@ pub struct Book {
     /// When the reading position was last saved; drives "In Progress" /
     /// "Finished" recency assumptions in the UI.
     pub progress_updated_at: Option<DateTime<Utc>>,
-    /// True when the book's path sits outside every watched library location,
-    /// so the watcher never reconciles it. Computed by `list_books`, not a
-    /// column, hence `default` for the other queries that select a `Book`.
-    #[sqlx(default)]
-    pub loose: bool,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 24)?;
+        let mut state = serializer.serialize_struct("Book", 23)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("path", &self.path)?;
         state.serialize_field("format", &BookFormat::from_path(&self.path))?;
@@ -100,7 +95,6 @@ impl Serialize for Book {
         state.serialize_field("seriesName", &self.series_name)?;
         state.serialize_field("progressPercent", &self.progress_percent)?;
         state.serialize_field("progressUpdatedAt", &self.progress_updated_at)?;
-        state.serialize_field("loose", &self.loose)?;
         state.end()
     }
 }
@@ -184,7 +178,6 @@ mod tests {
             series_name: None,
             progress_percent: None,
             progress_updated_at: None,
-            loose: false,
         }
     }
 
@@ -196,8 +189,15 @@ mod tests {
         assert!(json.get("available").is_some());
         assert!(json.get("fileSize").is_some());
         assert!(json.get("fileMtime").is_some());
-        assert!(json.get("loose").is_some());
         assert!(json.get("added_at").is_none());
+    }
+
+    #[test]
+    fn book_payload_carries_no_loose_field() {
+        // The loose mechanism is retired (ADR 0008): no payload offers the
+        // flag for future code to build on.
+        let json = serde_json::to_value(sample("/tmp/book.epub")).unwrap();
+        assert!(json.get("loose").is_none());
     }
 
     #[test]
