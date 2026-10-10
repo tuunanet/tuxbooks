@@ -14,9 +14,10 @@ function toMessage(err: unknown): string {
 
 /**
  * Shared import flow state (milestone 10). The `import_paths` command accepts
- * a mixed batch of files and folders — folders become watched locations,
- * files import in place — so picked and dropped entries go through one
- * call; per-path failures are surfaced honestly instead of being hidden.
+ * a mixed batch of files and folders; both end up watched — a picked file
+ * adopts its folder — so picked and dropped entries go through one call;
+ * per-path failures are surfaced honestly instead of being hidden, and every
+ * folder the run newly watched is disclosed instead of starting silently.
  */
 export function ImportProvider({ children }: { children: ReactNode }) {
   const { refresh } = useLibrary();
@@ -40,12 +41,13 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           imported: report.imported,
           updated: report.updated,
           skipped: report.skipped,
+          watched: report.watched,
         });
         setFailures(report.failed);
         setPhase("done");
       } catch (err) {
         setFailures(targets.map((path) => ({ path, error: toMessage(err) })));
-        setSummary({ imported: 0, updated: 0, skipped: 0 });
+        setSummary({ imported: 0, updated: 0, skipped: 0, watched: [] });
         setPhase("done");
       }
     },

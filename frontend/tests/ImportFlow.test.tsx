@@ -14,7 +14,7 @@ import {
 
 function renderShellWithLibrary(
   books: ReturnType<typeof makeBook>[] = [],
-  importReport: unknown = { imported: 0, updated: 0, skipped: 0, failed: [] },
+  importReport: unknown = { imported: 0, updated: 0, skipped: 0, failed: [], watched: [] },
 ) {
   mockInvoke({
     get_library_stats: { bookCount: books.length, collectionCount: 0 },
@@ -68,7 +68,7 @@ describe("Import via the header menu", () => {
 
   it("offers the folder picker from the empty library state", async () => {
     pickDirectoryMock.mockResolvedValue("/first/library");
-    renderShellWithLibrary([], { imported: 4, updated: 0, skipped: 0, failed: [] });
+    renderShellWithLibrary([], { imported: 4, updated: 0, skipped: 0, failed: [], watched: [] });
     await screen.findByTestId("empty-library");
 
     await userEvent.click(screen.getByTestId("empty-library-import"));
@@ -79,7 +79,13 @@ describe("Import via the header menu", () => {
 
   it("reports unchanged files as already in the library", async () => {
     pickDirectoryMock.mockResolvedValue("/same/library");
-    renderShellWithLibrary([makeBook()], { imported: 0, updated: 1, skipped: 12, failed: [] });
+    renderShellWithLibrary([makeBook()], {
+      imported: 0,
+      updated: 1,
+      skipped: 12,
+      failed: [],
+      watched: [],
+    });
     await screen.findByTestId("library-header");
 
     await userEvent.click(screen.getByTestId("import-menu"));
@@ -92,7 +98,13 @@ describe("Import via the header menu", () => {
 
   it("imports the picked folder through import_paths and reports the result", async () => {
     pickDirectoryMock.mockResolvedValue("/picked/books");
-    renderShellWithLibrary([makeBook()], { imported: 2, updated: 1, skipped: 0, failed: [] });
+    renderShellWithLibrary([makeBook()], {
+      imported: 2,
+      updated: 1,
+      skipped: 0,
+      failed: [],
+      watched: [],
+    });
     await screen.findByTestId("library-header");
 
     await userEvent.click(screen.getByTestId("import-menu"));
@@ -113,7 +125,13 @@ describe("Import via the header menu", () => {
 
   it("imports picked files through import_paths", async () => {
     pickBookFilesMock.mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
-    renderShellWithLibrary([makeBook()], { imported: 2, updated: 0, skipped: 0, failed: [] });
+    renderShellWithLibrary([makeBook()], {
+      imported: 2,
+      updated: 0,
+      skipped: 0,
+      failed: [],
+      watched: [],
+    });
     await screen.findByTestId("library-header");
 
     await userEvent.click(screen.getByTestId("import-menu"));
@@ -125,13 +143,33 @@ describe("Import via the header menu", () => {
     expect(await screen.findByTestId("import-status")).toHaveTextContent("Imported 2 new");
   });
 
+  it("discloses a folder the import turned into a watched folder", async () => {
+    pickBookFilesMock.mockResolvedValue(["/picked/shelf/stray.epub"]);
+    renderShellWithLibrary([makeBook()], {
+      imported: 1,
+      updated: 0,
+      skipped: 0,
+      failed: [],
+      watched: ["/picked/shelf"],
+    });
+    await screen.findByTestId("library-header");
+
+    await userEvent.click(screen.getByTestId("import-menu"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Import Files…" }));
+
+    const status = await screen.findByTestId("import-status");
+    expect(status).toHaveTextContent("Imported 1 new");
+    // Watching never happens silently: the report's new watch is said out loud.
+    expect(status).toHaveTextContent("Watching /picked/shelf");
+  });
+
   it("shows a summary without pretending success when nothing was imported", async () => {
     pickDirectoryMock.mockResolvedValue("/picked/empty");
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
       list_collections: [],
-      import_paths: { imported: 0, updated: 0, skipped: 0, failed: [] },
+      import_paths: { imported: 0, updated: 0, skipped: 0, failed: [], watched: [] },
     });
 
     render(<AppShell />);
@@ -153,6 +191,7 @@ describe("Import via the header menu", () => {
         imported: 0,
         updated: 0,
         failed: [{ path: "/picked/stray.epub", error: "not a supported book file (.epub/.pdf)" }],
+        watched: [],
       },
     });
 
@@ -171,7 +210,7 @@ describe("Import via the header menu", () => {
 
 describe("Import via drag-and-drop", () => {
   it("shows the overlay while dragging and imports dropped paths", async () => {
-    renderShellWithLibrary([], { imported: 1, updated: 0, skipped: 0, failed: [] });
+    renderShellWithLibrary([], { imported: 1, updated: 0, skipped: 0, failed: [], watched: [] });
     await screen.findByTestId("empty-library");
 
     const files = [new File([], "books")];
@@ -189,6 +228,7 @@ describe("Import via drag-and-drop", () => {
       imported: 0,
       updated: 0,
       failed: [{ path: "/dropped/loose.epub", error: "not a supported book file (.epub/.pdf)" }],
+      watched: [],
     });
     await screen.findByTestId("empty-library");
 
@@ -202,7 +242,7 @@ describe("Import via drag-and-drop", () => {
   });
 
   it("resolves dropped files to absolute paths through the preload", async () => {
-    renderShellWithLibrary([], { imported: 1, updated: 0, skipped: 0, failed: [] });
+    renderShellWithLibrary([], { imported: 1, updated: 0, skipped: 0, failed: [], watched: [] });
     await screen.findByTestId("empty-library");
     pathForFileMock.mockReturnValueOnce("/elsewhere/dropped.epub");
 

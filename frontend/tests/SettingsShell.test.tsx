@@ -15,7 +15,7 @@ function renderSettings() {
     get_library_stats: { bookCount: 0, collectionCount: 0 },
     list_books: [],
     list_collections: [],
-    import_paths: { imported: 0, updated: 0, skipped: 0, failed: [] },
+    import_paths: { imported: 0, updated: 0, skipped: 0, failed: [], watched: [] },
   });
   return render(
     <ThemeStateProvider>
@@ -100,8 +100,8 @@ describe("SettingsShell", () => {
     expect(rows).not.toHaveTextContent("Library folder");
     expect(rows).not.toHaveTextContent("Header → Import");
     expect(rows).not.toHaveTextContent("Managed from the sidebar");
-    expect(rows).toHaveTextContent("Single files import in place and are not watched");
-    expect(rows).toHaveTextContent("Folders you add become watched folders");
+    expect(rows).toHaveTextContent("Importing a file or folder watches its folder");
+    expect(rows).toHaveTextContent("drag files onto the window");
     expect(rows).not.toHaveTextContent("watched library locations");
   });
 

@@ -30,6 +30,10 @@ pub struct ImportReport {
     /// re-parsed. A re-import of an existing library is a stat-only pass.
     pub skipped: u64,
     pub failed: Vec<FailedImport>,
+    /// Folders this run newly registered as watched locations, so the UI
+    /// can disclose the watch instead of starting it silently (ADR 0009).
+    /// Already-watched folders never appear here.
+    pub watched: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -92,8 +92,9 @@ outside it.
 _Avoid_: app data, temporary files
 
 **Watched folder**:
-A directory the user added for TuxBooks to watch. TuxBooks imports the books
-inside it and keeps them in sync as files change.
+A directory the user added for TuxBooks to watch — by importing the folder
+itself or any single file inside it. TuxBooks imports the books inside it
+and keeps them in sync as files change.
 _Avoid_: library location, book folder
 
 **Unwatch**:

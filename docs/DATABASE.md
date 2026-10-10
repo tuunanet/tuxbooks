@@ -49,12 +49,13 @@ real modifications from duplicate events without re-parsing documents.
 ### library_locations
 
 `id`, `path` (UNIQUE), `added_at`. The filesystem roots registered by
-`scan_library` (or the test seeding); only these are watched and
+`import_paths` (a folder import, or the parent of a picked file), by
+`scan_library`, or by the test seeding; only these are watched and
 reconciled. Unwatching a folder deletes its row, which is what stops the
 sync, and removes the books those folders owned from the catalog through
 the normal delete cascade — files on disk are never touched. Books outside
 watched locations are never touched by reconciliation — a fresh database
-that predates milestone 3 stays unwatched until the next folder import.
+that predates milestone 3 stays unwatched until the next import.
 
 ### collections
 

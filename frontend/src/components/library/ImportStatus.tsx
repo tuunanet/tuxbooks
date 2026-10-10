@@ -40,6 +40,11 @@ export function ImportStatus() {
           )}
           <div className="min-w-0 text-sm">
             <p>{summaryLine}</p>
+            {summary?.watched.map((folder) => (
+              <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
+                Watching {folder}
+              </p>
+            ))}
             {failures.length > 0 && (
               <p className="mt-1 text-muted-foreground">
                 {failures.length} {failureWord} could not be imported:

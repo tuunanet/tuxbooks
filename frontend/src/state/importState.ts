@@ -10,6 +10,8 @@ export interface ImportSummary {
   updated: number;
   /** Files already in the library whose file had not changed. */
   skipped: number;
+  /** Folders the run turned into watched folders, to disclose out loud. */
+  watched: string[];
 }
 
 export type ImportPhase = "idle" | "importing" | "done";
