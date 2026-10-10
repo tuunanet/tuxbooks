@@ -62,8 +62,11 @@ Used by `/wayfinder`. The map is one issue; tickets are its child issues.
 Issues live in a local Dolt DB; branch-aware sync rides `refs/dolt/data` on the
 git remote (`bd dolt push` / `bd dolt pull`). Two files are tracked so a plain
 clone can read the tracker: `.beads/issues.jsonl` (the export) and
-`.beads/interactions.jsonl` (the audit log). Keep both out of task PRs; commit
-them in a follow-up `chore(bd): sync the tracker export` PR (AGENTS.md,
+`.beads/interactions.jsonl` (the audit log). Keep both out of task PRs and
+leave them staged while an issue's tickets are still landing. The follow-up
+`chore(bd): sync the tracker export` PR opens once the issue's last open
+ticket has merged, and for a standalone ticket once that ticket merges. One
+sync PR then carries every tracker change the issue produced (AGENTS.md,
 Completing a task).
 
 `.beads/config.yaml` enables `export.auto` and `export.git-add`: bd refreshes
