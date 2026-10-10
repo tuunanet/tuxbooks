@@ -20,9 +20,9 @@ never build on `main`.
    (every claim backed by evidence), before/after proof, and any risks or
    follow-up work. Run the title and body through `unslop` before posting.
 6. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
-   them out of the task PR. After that PR merges, open a
-   `chore(bd): sync the tracker export` PR for the export files. Full rules
-   live in `docs/agents/issue-tracker.md`.
+   them out of the task PR and leave them staged: the
+   `chore(bd): sync the tracker export` PR opens only after the issue's final
+   ticket merges. Full rules live in `docs/agents/issue-tracker.md`.
 7. Remove the worktree after the PR merges.
 
 ## Multi-agent rules
