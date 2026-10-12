@@ -918,6 +918,7 @@ export function PdfReader({
   const scrollReportedPageRef = useRef<number | null>(null);
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
+  const previousPresentationRef = useRef(presentationMode);
   const previousSlotsRef = useRef(slots);
   const mountedRef = useRef(false);
 
@@ -1129,8 +1130,10 @@ export function PdfReader({
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
     const previousScale = previousScaleRef.current;
+    const presentationExited = previousPresentationRef.current && !presentationMode;
     previousPageRef.current = currentPage;
     previousScaleRef.current = scale;
+    previousPresentationRef.current = presentationMode;
 
     // A wheel-gesture commit pins the cursor point through its own scroll
     // fixup, which supersedes the reading-spot anchor for exactly the
@@ -1150,6 +1153,36 @@ export function PdfReader({
       // Scroll tracking is off here, so keep the re-anchor anchor on the
       // flipped-to page; exiting the mode then restores that page.
       if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
+      return;
+    }
+    if (presentationExited) {
+      // Presentation exit (docs/PDF.md, Presentation mode): the mode's
+      // single centred page leaves the scroll container at the top of a
+      // surface that no longer exists, so the fractional re-anchor below
+      // would map "top" to "top" and drop the reader at page 1 (the scroll
+      // tracker then confirms that page into position). Resume on the page
+      // that was being presented: its slot's top edge at the viewport top,
+      // the landing a navigation page change takes. This effect is declared
+      // before the scroll tracker's, so the tracker's first sample on
+      // re-enable reads the restored offset and reports the presented page,
+      // not page 1.
+      const laidOut = slotsRef.current;
+      const container = scrollContainerRef?.current ?? null;
+      const documentEl = documentRef.current;
+      const slot = laidOut[currentPage - 1] ?? null;
+      // The layout in effect now is the one a later re-anchor compares
+      // against, so the bookkeeping stays current through this path too.
+      previousSlotsRef.current = laidOut;
+      if (container && documentEl && slot !== null) {
+        const documentTop =
+          documentEl.getBoundingClientRect().top -
+          container.getBoundingClientRect().top +
+          container.scrollTop;
+        setScrollTop(container, documentTop + slot.top);
+        rootRef.current?.setAttribute("data-pdf-scroll-policy", "presentation-exit");
+      } else {
+        activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
+      }
       return;
     }
     if (scaleChanged && !pageChanged) {

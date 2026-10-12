@@ -258,6 +258,84 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
+  // Leaving presentation must resume on the page that was being presented.
+  // The mode's single centred page leaves the scroll container at the top of
+  // a surface that no longer exists, so a bare exit dropped the reader back
+  // to page 1 (the scroll tracker then wrote that page into position).
+  test("resumes on the presented page after leaving presentation mode", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+
+    // Enter presentation and flip to page 3: that is the page in view when
+    // the mode ends.
+    await page.keyboard.press("Control+l");
+    const bar = page.getByTestId("pdf-presentation-bar");
+    await expect(bar).toBeVisible({ timeout: 10000 });
+    const input = bar.getByTestId("pdf-page-input");
+    await input.fill("3");
+    await input.press("Enter");
+    await expect(bar.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 10000,
+    });
+
+    await page.getByTestId("pdf-pres-exit").click();
+    await expect(page.getByTestId("pdf-presentation-bar")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 3 of 3", {
+      timeout: 10000,
+    });
+
+    // The reported page is not enough: page 3's slot must be the one at the
+    // top of the scroll container, not two pages further down.
+    const geometry = await page.evaluate(() => {
+      const slot = document.querySelector('[data-pdf-slot="3"]');
+      if (!slot) return null;
+      let element: Element | null = slot.parentElement;
+      while (element && !(element.scrollHeight > element.clientHeight + 1)) {
+        element = element.parentElement;
+      }
+      if (!element) return null;
+      return {
+        top: slot.getBoundingClientRect().top - element.getBoundingClientRect().top,
+        clientHeight: element.clientHeight,
+      };
+    });
+    if (!geometry) throw new Error("presented page slot or its scroll container not found");
+    expect(geometry.top).toBeLessThan(geometry.clientHeight / 2);
+
+    await returnToLibrary(page);
+  });
+
+  // Same contract without a flip: entering presentation clamps the scroll
+  // container to the single centred page, so the exit has to restore the
+  // entry page as well. jsdom lays out nothing and cannot clamp, which is
+  // why this path is proven here rather than in the unit suite.
+  test("returns to the entry page when presentation is left without flipping", async ({ page }) => {
+    await openInReader(page, "A Minimal Manual (PDF)");
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    await page.keyboard.press("Home");
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
+      timeout: 30000,
+    });
+    await page.getByTestId("pdf-next").click();
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+      timeout: 30000,
+    });
+
+    await page.keyboard.press("Control+l");
+    await expect(page.getByTestId("pdf-presentation-bar")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("pdf-pres-exit").click();
+    await expect(page.getByTestId("pdf-presentation-bar")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+      timeout: 10000,
+    });
+
+    await returnToLibrary(page);
+  });
+
   // Presentation steppers pre-render the neighbour (Papers' next/prev job
   // model), so a step blits instead of rastering fresh behind a blank page.
   // Deterministic signal: the cache holds the neighbour while the current page
@@ -511,6 +589,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("tracks the current page while scrolling continuously", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    // Progress persists across tests, so start from a known page: the
+    // presentation specs now leave the reader on the page they ended on.
+    await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
@@ -656,6 +737,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("restores the reading position when a PDF is reopened", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
+    // Progress persists across tests, so start from a known page before
+    // proving the restore.
+    await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
