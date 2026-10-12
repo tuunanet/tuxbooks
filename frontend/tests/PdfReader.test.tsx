@@ -2173,7 +2173,7 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
 
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 10, clientY: 10 });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("240");
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("240"));
     await settle();
     expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
     await waitFor(() => expectCanvasWidthNear(612 * 2.4));
