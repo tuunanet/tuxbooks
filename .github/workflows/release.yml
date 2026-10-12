@@ -165,21 +165,27 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.19 makes the reader keyboard-friendly and surfaces books outside your watched folders.
+          TuxBooks 0.0.20 makes your watched folders the single source of truth for the library.
 
-          What changed since 0.0.18:
+          What changed since 0.0.19:
 
-          - The PDF page number is an editable field in the toolbar and the
-            presentation bar: type a page and press Enter to jump, step pages
-            with the wheel or arrow keys while the field is focused.
-          - Shortcuts open the reader panels (thumbnails, appearance, contents
-            drawer, bookmarks, highlights), and Settings lists every shortcut
-            from one source of truth.
-          - Books outside every watched folder appear under Outside Watched
-            Folders. The Data tab counts them and can jump there. Copy path in
-            Settings works again.
-          - The CLI accepts \`--help\` and \`--version\` and rejects unknown
-            flags.
+          - Settings gains a Folders section. It lists the folders TuxBooks
+            watches, marks one that is missing from disk, and lets you add or
+            unwatch a folder. Unwatching removes that folder's books from your
+            library along with their reading progress and annotations; your
+            files on disk are never touched.
+          - The library mirrors your watched folders. Importing a single file
+            also watches its folder, so books added next to it appear on their
+            own, and a one-time cleanup removes books left outside every
+            watched folder when you upgrade. The Outside Watched Folders view
+            from 0.0.19 is gone: the library now matches the watch list.
+          - Select several books with Shift or Ctrl and act on all of them at
+            once: remove them from the library, add or remove them from a
+            collection, or mark them finished.
+          - Settings gains an About tab with the version, its creator, and
+            links to the contributor and contributing pages. An import that
+            finishes now wins over events still in flight, fixing a library
+            view that could go stale right after an import.
 
           Install on Ubuntu/Debian:
 
