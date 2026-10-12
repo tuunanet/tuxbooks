@@ -33,21 +33,22 @@ Continuously audited means three layers: the weekly Audit workflow sweep
 weekly npm and GitHub-Actions update PRs, and `just audit` before releases.
 
 Locked versions of the high-risk set at the time of the last review
-(2026-09-16, this task):
+(2026-10-12, this task; the electron, navigator, and shared rows moved
+with the Dependabot train merged as #205):
 
-| Dependency         | Locked        | Latest stable | Status                                                        |
-| ------------------ | ------------- | ------------- | ------------------------------------------------------------- |
-| electron           | 44.2.0        | 44.4.1        | Latest major, in-support line; patch delta rides Dependabot   |
-| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                 |
-| @readium/navigator | 2.8.2         | 2.10.1        | No advisories; minors tracked via Dependabot                  |
-| @readium/shared    | 2.4.0         | 2.5.1         | No advisories; minors tracked via Dependabot                  |
-| @readium/css       | 2.0.5         | 2.0.5         | Current                                                       |
-| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                            |
-| zip                | 2.4.2         | 8.6.0         | No advisories; majors tracked deliberately (see below)        |
-| quick-xml          | 0.41.0        | 0.41.0/0.42.0 | Upgraded from 0.37.5 this task (RUSTSEC-2026-0194/0195, high) |
-| image              | 0.25.10       | 0.25.10       | Current                                                       |
-| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                            |
-| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)          |
+| Dependency         | Locked        | Latest stable | Status                                                            |
+| ------------------ | ------------- | ------------- | ----------------------------------------------------------------- |
+| electron           | 44.3.0        | 44.7.0        | Latest major, in-support line; deltas ride Dependabot             |
+| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                     |
+| @readium/navigator | 2.10.0        | 2.12.1        | No advisories; minors tracked via Dependabot                      |
+| @readium/shared    | 2.5.0         | 2.8.0         | No advisories; minors tracked via Dependabot                      |
+| @readium/css       | 2.0.5         | 2.0.5         | Current                                                           |
+| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                                |
+| zip                | 2.4.2         | 9.0.2         | No advisories; majors tracked deliberately (see below)            |
+| quick-xml          | 0.41.0        | 0.42.0        | Upgraded from 0.37.5 on 2026-09-16 (RUSTSEC-2026-0194/0195, high) |
+| image              | 0.25.10       | 0.25.10       | Current                                                           |
+| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                                |
+| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)              |
 
 Upgrade policy: take security fixes as the smallest viable upgrade that
 clears the advisory, run the full test suite, and never batch unrelated
