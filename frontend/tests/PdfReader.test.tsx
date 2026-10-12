@@ -2161,6 +2161,12 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(input).toHaveValue("10000");
   });
 
+  // The derived fit scale reaches the wheel handler through the layout
+  // pipeline, which the react-virtual bumps (#205, tuxbooks-4yc) can defer
+  // past the input's own update under load: wheeling too early then multiplies
+  // the stale base (100% × 1.2 = 120 instead of 200% × 1.2 = 240). Waiting for
+  // the fit commit to reach the document engine waits out that pipeline; the
+  // WHEEL_SETTLE_MS commit that follows gets its own budget for the same reason.
   it("multiplies the derived fit scale on the first wheel tick out of a fit mode", async () => {
     const container = document.createElement("div");
     const { doc } = await renderZoomableReader(container);
@@ -2171,14 +2177,17 @@ describe("PdfReader zoom modes (issue #65)", () => {
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
+    await waitFor(() => expect(doc.scales).toContain(2));
 
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 10, clientY: 10 });
-    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("240"));
     await settle();
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("240"), {
+      timeout: 5000,
+    });
     expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
     await waitFor(() => expectCanvasWidthNear(612 * 2.4));
     expect(doc.scales).toContain(2.4);
-  });
+  }, 15000);
 
   it("flushes a pending wheel gesture immediately when another zoom action runs", async () => {
     const container = document.createElement("div");
