@@ -15,6 +15,17 @@ const BLOCK_AT = "high";
 // BLOCK_AT fails. Add an entry only when no viable upgrade exists.
 const TRIAGE = [
   // { id: "GHSA-example-0000", module: "package-name", reason: "...", revisit: "2027-01-01" },
+  {
+    id: "GHSA-vfj7-8cjw-p6xm",
+    module: "braces",
+    reason:
+      "No upstream fix: 3.0.3 (2024-05-21) is the latest release and the advisory lists " +
+      "no patched version (micromatch/braces#70 open). Dev-only: braces reaches the tree " +
+      "through micromatch <- fast-glob (@ts-morph/common, shadcn) and expands glob patterns " +
+      "from first-party config (vitest, tailwind, package globs); no untrusted pattern is " +
+      "ever compiled, and nothing here ships in the packaged app.",
+    revisit: "2026-11-12",
+  },
 ];
 
 // Returns { blocked, accepted, informational } for the bulk advisory JSON
