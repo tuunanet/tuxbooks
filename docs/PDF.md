@@ -238,7 +238,10 @@ distraction-free one-page view:
   shape (portrait, landscape, or wide slides) stays fully visible. Only the
   selected page is laid out, centred in the viewport, so neighbours never
   show through. Entering preserves the current page; leaving restores the
-  pre-presentation zoom state exactly.
+  pre-presentation zoom state exactly and resumes on the page being
+  presented, landed at that page's top edge. The centred single-page
+  surface leaves the scroll container at the top, so the exit restores the
+  scroll offset instead of inheriting it.
 - Page flips come from navigation rather than scrolling. `PageDown`/`Space`/
   `PageUp`/`Shift+Space`/arrows step whole pages (the shell's page-based
   steps, not percentage stepping, so rounding error cannot map a midpoint

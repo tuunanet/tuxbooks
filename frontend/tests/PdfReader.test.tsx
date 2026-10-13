@@ -2403,7 +2403,9 @@ describe("PdfReader presentation mode (issue #65)", () => {
       Object.defineProperty(area, "clientWidth", { value: areaWidth, configurable: true });
       window.dispatchEvent(new Event("resize"));
     }
-    return view;
+    // Exposed so scroll-dependent tests can stub the viewport geometry the
+    // way a live browser reports it (rect.top moves with scrollTop).
+    return Object.assign(view, { container });
   }
 
   it("presents only the selected page, fit inside the area", async () => {
@@ -2467,6 +2469,67 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
     // The pre-presentation zoom state is restored exactly.
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
+  });
+
+  it("stays on the page reached in presentation after exiting", async () => {
+    // Enter on page 2 so page 1, the entry page and the flipped-to page are
+    // all distinguishable after the exit.
+    const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
+    // Scroll-dependent assertions need live viewport geometry: jsdom's rects
+    // are all zero, which would make the reading anchor independent of the
+    // scroll offset (always page 1).
+    stubScrollGeometry(view.container, screen.getByTestId("pdf-document"));
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    view.rerenderBook({ presentationMode: true });
+    await waitFor(() => expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument());
+
+    // Flip forward inside the mode: this is the page the user is reading.
+    await userEvent.click(screen.getByTestId("pdf-pres-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+
+    view.rerenderBook({ presentationMode: false });
+    await waitFor(() => expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull());
+
+    // The reader resumes exactly where the presentation left off: not at
+    // the document start and not back at the entry page. The scroll offset
+    // must actually move off the top too, because an exit that only
+    // suppressed the scroll tracker would keep the indicator right while
+    // the viewport still showed page 1.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+    );
+    expect(view.container.scrollTop).toBeGreaterThan(0);
+    expect(slot(3)).not.toBeNull();
+  });
+
+  it("returns to the entry page when presentation is left without flipping", async () => {
+    const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
+    stubScrollGeometry(view.container, screen.getByTestId("pdf-document"));
+    await userEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+
+    view.rerenderBook({ presentationMode: true });
+    await waitFor(() => expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument());
+    // jsdom lays out nothing, so the single centred page cannot shrink the
+    // container's scroll range the way a browser does. Apply the clamp a
+    // browser applies when the surface fits the viewport.
+    view.container.scrollTop = 0;
+
+    view.rerenderBook({ presentationMode: false });
+    await waitFor(() => expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull());
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+    );
+    expect(view.container.scrollTop).toBeGreaterThan(0);
   });
 
   it("navigates and exits through the presentation bar", async () => {

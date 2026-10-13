@@ -918,6 +918,7 @@ export function PdfReader({
   const scrollReportedPageRef = useRef<number | null>(null);
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
+  const previousPresentationRef = useRef(presentationMode);
   const previousSlotsRef = useRef(slots);
   const mountedRef = useRef(false);
 
@@ -1109,12 +1110,43 @@ export function PdfReader({
     [scrollContainerRef, slots, scale],
   );
 
-  // Keep the latest re-anchoring logic reachable from the effect below
-  // without re-running that effect on every slots change (geometry
-  // corrections must never yank the viewport).
+  // Presentation exit (docs/PDF.md, Presentation mode): the mode's single
+  // centred page leaves the scroll container at the top of a surface that no
+  // longer exists, so the fractional re-anchor would map "top" to "top" and
+  // drop the reader at page 1 (the scroll tracker then confirms that page
+  // into position). Resume on the page that was being presented instead: its
+  // slot's top edge at the viewport top, the landing a navigation page change
+  // takes. The re-anchor effect calls this before the scroll tracker
+  // re-enables, so the tracker's first sample reads the restored offset and
+  // reports the presented page, not page 1.
+  const restorePresentedPage = useCallback(() => {
+    const laidOut = slotsRef.current;
+    const container = scrollContainerRef?.current ?? null;
+    const documentEl = documentRef.current;
+    const slot = laidOut[currentPage - 1] ?? null;
+    // The layout in effect now is the one a later re-anchor compares
+    // against, so the bookkeeping stays current through this path too.
+    previousSlotsRef.current = laidOut;
+    if (!container || !documentEl || slot === null) {
+      activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
+      return;
+    }
+    const documentTop =
+      documentEl.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop;
+    setScrollTop(container, documentTop + slot.top);
+    rootRef.current?.setAttribute("data-pdf-scroll-policy", "presentation-exit");
+  }, [currentPage, scrollContainerRef]);
+
+  // Keep the latest re-anchoring and presentation-exit logic reachable from
+  // the effect below without re-running it on every slots or render change
+  // (geometry corrections must never yank the viewport).
   const reanchorRef = useRef<(oldScale: number) => void>(() => {});
+  const restoreRef = useRef<() => void>(() => {});
   useEffect(() => {
     reanchorRef.current = reanchorByFraction;
+    restoreRef.current = restorePresentedPage;
   });
 
   // The loop guard: a page change that *originated from scrolling* must not
@@ -1124,13 +1156,16 @@ export function PdfReader({
   // recalculation) re-anchors by fraction; a page change from navigation
   // (toolbar, restore) lands on the new page's top edge. Presentation mode
   // lays out one centred page, so there is nothing to scroll: the effect
-  // only keeps its page/scale bookkeeping current.
+  // only keeps its page/scale bookkeeping current, and an exit from the mode
+  // resumes on the presented page (restorePresentedPage).
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
     const previousScale = previousScaleRef.current;
+    const presentationExited = previousPresentationRef.current && !presentationMode;
     previousPageRef.current = currentPage;
     previousScaleRef.current = scale;
+    previousPresentationRef.current = presentationMode;
 
     // A wheel-gesture commit pins the cursor point through its own scroll
     // fixup, which supersedes the reading-spot anchor for exactly the
@@ -1150,6 +1185,11 @@ export function PdfReader({
       // Scroll tracking is off here, so keep the re-anchor anchor on the
       // flipped-to page; exiting the mode then restores that page.
       if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
+      return;
+    }
+    if (presentationExited) {
+      // The geometry lives outside this effect: see restorePresentedPage.
+      restoreRef.current();
       return;
     }
     if (scaleChanged && !pageChanged) {
