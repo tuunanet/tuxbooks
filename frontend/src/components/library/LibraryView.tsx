@@ -580,6 +580,12 @@ export function LibraryView({ section }: LibraryViewProps) {
           </p>
         )
       ) : (
+        // The selection and focus rings paint outside the card (ring-2 and
+        // ring-3 box-shadows) and this box is their clip, so the scrollport
+        // needs room around the grid. The padding keeps the rings inside it
+        // on every edge; the matching negative margins keep the cards aligned
+        // with the header and leave the content box, and with it the column
+        // count, exactly where it was.
         <div
           ref={attachScroller}
           data-testid={isGrid ? "book-grid" : "book-list"}
@@ -589,7 +595,7 @@ export function LibraryView({ section }: LibraryViewProps) {
             const el = scrollElRef.current;
             if (el) scrollPositions.set(sectionKeyRef.current, el.scrollTop);
           }}
-          className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
+          className="-m-1.5 min-h-0 flex-1 overflow-y-auto p-1.5 [scrollbar-gutter:stable]"
         >
           {unvirtualized ? (
             <div>
