@@ -10,8 +10,12 @@ import { describeStartupFailure } from "./bootRecovery";
  * error, then dry-run over reset-data. `--` ends option parsing, positionals
  * (executable and entry paths included) are ignored, and the pass-through
  * list keeps the Chromium switches launchers put in argv (the e2e fixture's,
- * plus `--disable-gpu`) from counting as unknown options. Writers, version,
- * and exit are injected, so the policy unit-tests without Electron.
+ * plus `--disable-gpu`) from counting as unknown options. Switches after
+ * `--` are forwarded to Chromium verbatim (via the injected `forwardSwitch`)
+ * so any debugging switch can reach the GPU/compositor stack without
+ * widening the strict option set — typo strictness before `--` is
+ * unchanged. Writers, version, and exit are injected, so the policy
+ * unit-tests without Electron.
  */
 
 export interface CliDeps {
@@ -22,6 +26,11 @@ export interface CliDeps {
   version: string;
   runDryRun: () => void;
   runResetData: () => Promise<unknown>;
+  /**
+   * Forwards one post-`--` switch to Chromium (`app.commandLine.appendSwitch`
+   * in the app); `value` is the part after `=`, undefined for a bare switch.
+   */
+  forwardSwitch: (name: string, value: string | undefined) => void;
 }
 
 type CliCommand =
@@ -30,7 +39,7 @@ type CliCommand =
   | { kind: "usage-error"; message: string }
   | { kind: "dry-run" }
   | { kind: "reset-data" }
-  | { kind: "gui" };
+  | { kind: "gui"; forwarded: string[] };
 
 /**
  * Exact `--help` text; the fixed program name is never derived from
@@ -44,7 +53,9 @@ Options:
   -h, --help     Show this help and exit
   -v, --version  Show version and exit
   --dry-run      Print app data locations and sizes; change nothing
-  --reset-data   Clear app data and caches; never touch book files`;
+  --reset-data   Clear app data and caches; never touch book files
+  -- <switches>  Pass every following switch to Chromium
+                 (e.g. tuxbooks -- --force-gpu-mem-available-mb=256)`;
 
 const USAGE_HINT = "Run 'tuxbooks --help' for usage.";
 
@@ -83,34 +94,60 @@ function classify(token: string): TokenEvent | null {
   return { error: `unknown option '${name}'` };
 }
 
+/** One forward pass over the tokens: flags found, first error, pass-through. */
+interface CliScan {
+  help: boolean;
+  version: boolean;
+  dryRun: boolean;
+  resetData: boolean;
+  error: string | null;
+  /** Everything after `--`, handed to Chromium verbatim; empty when absent. */
+  forwarded: string[];
+}
+
 /** Recognize the command; every scan runs, precedence breaks all ties. */
 function parseCli(argv: readonly string[]): CliCommand {
-  let help = false;
-  let version = false;
-  let dryRun = false;
-  let resetData = false;
-  let error: string | null = null;
+  const scan = scanArgv(argv);
+  if (scan.help) return { kind: "help" };
+  if (scan.version) return { kind: "version" };
+  if (scan.error !== null) return { kind: "usage-error", message: scan.error };
+  if (scan.dryRun) return { kind: "dry-run" };
+  if (scan.resetData) return { kind: "reset-data" };
+  return { kind: "gui", forwarded: scan.forwarded };
+}
 
-  for (const token of argv) {
-    if (token === "--") break;
+/**
+ * One forward scan of the tokens. `--` ends option parsing and everything
+ * after it is forwarded verbatim; the first usage error wins, so the report
+ * names the earliest typo.
+ */
+function scanArgv(argv: readonly string[]): CliScan {
+  const scan: CliScan = {
+    help: false,
+    version: false,
+    dryRun: false,
+    resetData: false,
+    error: null,
+    forwarded: [],
+  };
+  for (const [index, token] of argv.entries()) {
+    if (token === "--") {
+      // Everything after the separator is handed to Chromium verbatim.
+      scan.forwarded = [...argv.slice(index + 1)];
+      break;
+    }
     const event = classify(token);
     if (event === null) continue;
     if (typeof event !== "string") {
-      error ??= event.error;
+      scan.error ??= event.error;
       continue;
     }
-    if (event === "help") help = true;
-    else if (event === "version") version = true;
-    else if (event === "dry-run") dryRun = true;
-    else resetData = true;
+    if (event === "help") scan.help = true;
+    else if (event === "version") scan.version = true;
+    else if (event === "dry-run") scan.dryRun = true;
+    else scan.resetData = true;
   }
-
-  if (help) return { kind: "help" };
-  if (version) return { kind: "version" };
-  if (error !== null) return { kind: "usage-error", message: error };
-  if (dryRun) return { kind: "dry-run" };
-  if (resetData) return { kind: "reset-data" };
-  return { kind: "gui" };
+  return scan;
 }
 
 /**
@@ -150,6 +187,15 @@ export function runCli(argv: readonly string[], deps: CliDeps): boolean {
       );
       return true;
     case "gui":
+      // Post-`--` switches reach Chromium (this runs before app ready, where
+      // appendSwitch is legal); bare positionals after the separator stay
+      // ignored, exactly like positionals before it.
+      for (const token of command.forwarded) {
+        if (!token.startsWith("-") || token === "-" || token === "--") continue;
+        const separator = token.indexOf("=");
+        const name = separator === -1 ? token : token.slice(0, separator);
+        deps.forwardSwitch(name, separator === -1 ? undefined : token.slice(separator + 1));
+      }
       return false;
   }
 }

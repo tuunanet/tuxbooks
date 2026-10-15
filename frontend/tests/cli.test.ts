@@ -17,11 +17,13 @@ function harness(overrides: Partial<CliDeps> = {}): {
   err: string[];
   exits: number[];
   calls: { dryRun: number; resetData: number };
+  forwarded: { name: string; value: string | undefined }[];
 } {
   const out: string[] = [];
   const err: string[] = [];
   const exits: number[] = [];
   const calls = { dryRun: 0, resetData: 0 };
+  const forwarded: { name: string; value: string | undefined }[] = [];
   const deps: CliDeps = {
     stdout: (message) => out.push(message),
     stderr: (message) => err.push(message),
@@ -33,9 +35,10 @@ function harness(overrides: Partial<CliDeps> = {}): {
     runResetData: async () => {
       calls.resetData += 1;
     },
+    forwardSwitch: (name, value) => forwarded.push({ name, value }),
     ...overrides,
   };
-  return { deps, out, err, exits, calls };
+  return { deps, out, err, exits, calls, forwarded };
 }
 
 /** Let runCli's async --reset-data branch settle. */
@@ -189,6 +192,37 @@ describe("command recognition", () => {
     expect(help.exits).toEqual([0]);
   });
 
+  it("forwards post-`--` switches to Chromium, verbatim and split on `=`", () => {
+    const gui = harness();
+    expect(
+      runCli(
+        [
+          "tuxbooks",
+          "--",
+          "--force-gpu-mem-available-mb=256",
+          "--enable-unsafe-swiftshader",
+          "book.epub", // positional after the separator stays ignored
+          "--", // a second separator is not a switch
+        ],
+        gui.deps,
+      ),
+    ).toBe(false);
+    expect(gui.forwarded).toEqual([
+      { name: "--force-gpu-mem-available-mb", value: "256" },
+      { name: "--enable-unsafe-swiftshader", value: undefined },
+    ]);
+    expect(gui.out).toEqual([]);
+    expect(gui.err).toEqual([]);
+    expect(gui.exits).toEqual([]);
+
+    // An action before the separator wins and forwards nothing.
+    const action = harness();
+    expect(runCli(["tuxbooks", "--dry-run", "--", "--disable-gpu"], action.deps)).toBe(true);
+    expect(action.calls).toEqual({ dryRun: 1, resetData: 0 });
+    expect(action.forwarded).toEqual([]);
+    expect(action.exits).toEqual([0]);
+  });
+
   it("passes launcher Chromium switches through without treating them as unknown", () => {
     const launcherArgs = [
       "tuxbooks",
@@ -228,7 +262,9 @@ Options:
   -h, --help     Show this help and exit
   -v, --version  Show version and exit
   --dry-run      Print app data locations and sizes; change nothing
-  --reset-data   Clear app data and caches; never touch book files`,
+  --reset-data   Clear app data and caches; never touch book files
+  -- <switches>  Pass every following switch to Chromium
+                 (e.g. tuxbooks -- --force-gpu-mem-available-mb=256)`,
     ]);
     expect(err).toEqual([]);
     expect(exits).toEqual([0]);
