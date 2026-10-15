@@ -185,6 +185,7 @@ export function PdfDocumentView({
               slot={slot}
               gapAbove={index > 0}
               state={state}
+              pageBackground={pageBackground}
               registerRef={
                 slot.pageNumber === anchorPage
                   ? (element) => {

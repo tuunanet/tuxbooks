@@ -408,6 +408,20 @@ describe("PdfReader loading", () => {
       const plainWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
       expect((plainWrapper as HTMLElement | null)?.style.backgroundColor).toBe("");
     });
+
+    // The same treatment reaches a slot with NO mounted canvas: pages 2-3
+    // were never visible, so their page box is the only placeholder there
+    // is. Paper white by default, the dark palette in Smart Dark, back
+    // again on default — an unloaded page never punches a hole (R4).
+    expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    await waitFor(() => {
+      expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(16, 16, 19)");
+    });
+    await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
+    await waitFor(() => {
+      expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
+    });
   });
 
   it("shows an honest error when the document cannot be opened", async () => {
@@ -803,9 +817,43 @@ describe("PdfReader virtualization", () => {
     firePreload(slot(3) as Element, false);
 
     await waitFor(() => expect(canvasPages()).toEqual(["1"]));
-    // Evicted pages keep their reserved geometry as honest unloaded slots.
+    // Evicted pages keep their reserved geometry as honest unloaded slots,
+    // and the empty box is paper white — the page reads as unprinted
+    // paper, never as a hole onto the content area (R4, the reason Papers
+    // paints a CSS rect behind every page).
     expect(slot(2)).toHaveAttribute("data-render-state", "unloaded");
     expect(slot(2)).toHaveStyle({ height: "792px" });
+    expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
+  });
+
+  it("retains rendered pages within three of the visible range (Papers ring)", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    fireVisible(slot(2) as Element, true);
+    fireVisible(slot(5) as Element, true);
+    fireVisible(slot(6) as Element, true);
+    await waitFor(() => {
+      expect(slot(6)).toHaveAttribute("data-render-state", "rendered");
+      expect(canvasPages()).toHaveLength(4);
+    });
+
+    // The viewport moves back to page 2: page 5 sits exactly three from
+    // the visible range and keeps its mounted canvas (Papers holds
+    // MAX_PRELOADED_PAGES 3 pages each side painted, pps-pixbuf-cache.c:105),
+    // page 6 sits four away and evicts to its geometry slot. The ring is
+    // mount-only: it never asked the engine to render either page anew.
+    fireVisible(slot(5) as Element, false);
+    fireVisible(slot(6) as Element, false);
+    await waitFor(() => expect(canvasPages()).not.toContain("6"));
+    expect(canvasPages()).toContain("5");
+    expect(canvasPages()).toContain("2");
+    expect(slot(5)).toHaveAttribute("data-render-state", "rendered");
+    expect(slot(6)).toHaveAttribute("data-render-state", "unloaded");
   });
 
   it("caps active canvases at the render budget, closest pages first", async () => {
