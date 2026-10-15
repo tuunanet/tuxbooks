@@ -192,10 +192,11 @@ describe("PdfReader loading", () => {
     expect(canvas).toHaveAttribute("height", "792");
     expect(canvas).toHaveAttribute("data-pdf-page", "1");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
-    // Scale-1 viewport calls, in order: geometry reference (page 1), then
-    // the page-1 canvas render. Further pages measure when they approach
-    // visibility (see the virtualization suite).
-    expect(doc.scales).toEqual([1, 1]);
+    // Scale-1 viewport calls, in order: the geometry opening sample (pages
+    // 1, 2, and the last page, measured in parallel for the estimate's
+    // median), then the page-1 canvas render. Further pages measure when
+    // they approach visibility (see the virtualization suite).
+    expect(doc.scales).toEqual([1, 1, 1, 1]);
   });
 
   it("shows the loading state until the document and layout are ready", async () => {
@@ -248,15 +249,79 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    // Page 2 approaches visibility: the preload set measures it and mounts
-    // its canvas, and the slot corrects from the 612x792 estimate to the
-    // real landscape size while its siblings keep theirs.
+    // Every page of a 3-page document is in the opening sample, so the
+    // landscape page already has its real box before anything approaches;
+    // firePreload below only mounts its canvas. (The snap-on-approach path
+    // for pages outside the sample is covered by the 20-page test after
+    // this one.)
     firePreload(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveStyle({ width: "792px", height: "612px" }));
     expect(slot(1)).toHaveStyle({ width: "612px", height: "792px" });
     expect(slot(3)).toHaveStyle({ width: "612px", height: "792px" });
     expect(slot(2)?.style.marginTop).toBe("8px");
     expect(canvasPages()).toEqual(["1", "2"]);
+  });
+
+  it("estimates unmeasured pages from the sampled median, not an odd page 1", async () => {
+    // The incident book's shape (Python Debugging for ML and Cloud): page
+    // 1 is the document's only wide page (827x1180 pt), every other page
+    // is 504x720 pt. Estimating from page 1 stamped the wide box onto the
+    // whole document, so each ordinary page visibly snapped narrower as
+    // its measurement landed on approach: a width flash per page.
+    const doc = makeFakePdfDocument(20, (pageNumber) =>
+      pageNumber === 1 ? { width: 827, height: 1180 } : { width: 504, height: 720 },
+    );
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+
+    // The wide page keeps its real box, and with it the max-page fit
+    // reference the scale derives from (no global rescale when the other
+    // pages measure).
+    await waitFor(() => expect(slot(1)).toHaveStyle({ width: "827px", height: "1180px" }));
+    // Unmeasured pages already reserve their REAL box from the median
+    // estimate: nothing snaps when they come into view.
+    expect(slot(2)).toHaveStyle({ width: "504px", height: "720px" });
+    expect(slot(12)).toHaveStyle({ width: "504px", height: "720px" });
+  });
+
+  it("corrects a differing page's box when it is measured on approach", async () => {
+    // The mirror case: the odd page sits in the document's body, outside
+    // the opening sample, so it starts at the median estimate and snaps to
+    // its real (wider) box exactly once, when measured. That snap is the
+    // only one left for the incident book's shape.
+    const doc = makeFakePdfDocument(20, (pageNumber) =>
+      pageNumber === 10 ? { width: 827, height: 1180 } : { width: 504, height: 720 },
+    );
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    expect(slot(10)).toHaveStyle({ width: "504px", height: "720px" });
+
+    // With a measured area the fit starts against the sampled max (504pt):
+    // (1248 - 24) / 504 = 242.9%.
+    const area = screen.getByTestId("pdf-content-area");
+    Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("242.9"));
+
+    // The late measurement raises the fit reference to the page's real
+    // width (pps_document_get_max_page_size): the scale drops to
+    // (1248 - 24) / 827 = 148%, and the slot swaps to the real box in the
+    // same correction. Neighbours keep their boxes.
+    fireVisible(slot(10) as Element, true);
+    await waitFor(() => expect(slot(10)).toHaveStyle({ width: "1224px", height: "1746px" }));
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("148"));
+    expect(slot(9)).toHaveStyle({ width: "746px", height: "1066px" });
+    expect(slot(11)).toHaveStyle({ width: "746px", height: "1066px" });
   });
 
   it("reports the loaded page count to the shell", async () => {
@@ -407,6 +472,20 @@ describe("PdfReader loading", () => {
     await waitFor(() => {
       const plainWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
       expect((plainWrapper as HTMLElement | null)?.style.backgroundColor).toBe("");
+    });
+
+    // The same treatment reaches a slot with NO mounted canvas: pages 2-3
+    // were never visible, so their page box is the only placeholder there
+    // is. Paper white by default, the dark palette in Smart Dark, back
+    // again on default — an unloaded page never punches a hole (R4).
+    expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
+    await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
+    await waitFor(() => {
+      expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(16, 16, 19)");
+    });
+    await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
+    await waitFor(() => {
+      expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
     });
   });
 
@@ -803,9 +882,43 @@ describe("PdfReader virtualization", () => {
     firePreload(slot(3) as Element, false);
 
     await waitFor(() => expect(canvasPages()).toEqual(["1"]));
-    // Evicted pages keep their reserved geometry as honest unloaded slots.
+    // Evicted pages keep their reserved geometry as honest unloaded slots,
+    // and the empty box is paper white — the page reads as unprinted
+    // paper, never as a hole onto the content area (R4, the reason Papers
+    // paints a CSS rect behind every page).
     expect(slot(2)).toHaveAttribute("data-render-state", "unloaded");
     expect(slot(2)).toHaveStyle({ height: "792px" });
+    expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
+  });
+
+  it("retains rendered pages within three of the visible range (Papers ring)", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(100) as unknown as EngineDocument);
+    mockInvoke({
+      get_reading_progress: null,
+      save_reading_progress: null,
+    });
+
+    await renderLoadedReader();
+    fireVisible(slot(2) as Element, true);
+    fireVisible(slot(5) as Element, true);
+    fireVisible(slot(6) as Element, true);
+    await waitFor(() => {
+      expect(slot(6)).toHaveAttribute("data-render-state", "rendered");
+      expect(canvasPages()).toHaveLength(4);
+    });
+
+    // The viewport moves back to page 2: page 5 sits exactly three from
+    // the visible range and keeps its mounted canvas (Papers holds
+    // MAX_PRELOADED_PAGES 3 pages each side painted, pps-pixbuf-cache.c:105),
+    // page 6 sits four away and evicts to its geometry slot. The ring is
+    // mount-only: it never asked the engine to render either page anew.
+    fireVisible(slot(5) as Element, false);
+    fireVisible(slot(6) as Element, false);
+    await waitFor(() => expect(canvasPages()).not.toContain("6"));
+    expect(canvasPages()).toContain("5");
+    expect(canvasPages()).toContain("2");
+    expect(slot(5)).toHaveAttribute("data-render-state", "rendered");
+    expect(slot(6)).toHaveAttribute("data-render-state", "unloaded");
   });
 
   it("caps active canvases at the render budget, closest pages first", async () => {
@@ -1129,18 +1242,15 @@ describe("PdfReader fit width and zoom anchoring", () => {
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
-    // Page 1 alone is the reference until the widest page is measured, so the
-    // fit lands at (1248 - 24) / 612 = 2×.
-    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200"));
-
-    // Measuring the 1224pt-wide page raises the fit reference
-    // (pps_document_get_max_page_size) to its width. The scale drops to
-    // (1248 - 24) / 1224 = 1, so page 1 renders at its native width instead
-    // of being blown up.
-    firePreload(slot(2) as Element, true);
-    await waitFor(() => expect(slot(1)).toHaveStyle({ width: "612px" }));
+    // The opening sample measures all three pages of this short document,
+    // so the fit reference is the widest page (pps_document_get_max_page_size)
+    // from the very first layout: (1248 - 24) / 1224 = 1. There is no
+    // page-1-only 2x phase that later snaps down when the wide page is
+    // measured; that snap only survives for wide pages a big document has
+    // not reached yet (see the sampled-median test above).
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100"));
+    expect(slot(1)).toHaveStyle({ width: "612px" });
     expect(slot(2)).toHaveStyle({ width: "1224px" });
-    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100");
   });
 
   it("recomputes the fit scale when the window resizes", async () => {
@@ -1665,8 +1775,10 @@ describe("PdfReader zoom", () => {
     });
 
     renderPdfReader();
-    await waitFor(() => expect(pending).toHaveLength(1));
-    (pending.shift() as (page: unknown) => void)(gatedPage); // geometry init → layout ready
+    // The opening sample measures pages 1, 2, and the last page in
+    // parallel; all three getPage calls gate on the same resolver queue.
+    await waitFor(() => expect(pending).toHaveLength(3));
+    for (const resolve of pending.splice(0)) resolve(gatedPage); // geometry ready
 
     await screen.findByTestId("pdf-canvas"); // canvas mounted, render gated
     expect(pending).toHaveLength(1);
@@ -2431,7 +2543,8 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(slot(1)).toBeNull();
     expect(slot(3)).toBeNull();
 
-    // Measure page 2 (landscape) as the visible observer would.
+    // Page 2 was measured by the opening sample; bring it into view as the
+    // visible observer would.
     fireVisible(slot(2) as Element, true);
     // The 1224pt-wide page is width-bound: the contain scale is
     // (1224 - 24) / 1224, so it fills the area minus the Papers margin
@@ -2457,12 +2570,13 @@ describe("PdfReader presentation mode (issue #65)", () => {
     // The header toolbar is gone; the floating bar carries the controls.
     expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
     expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
-    // Page is preserved. Page 2 is still the page-1 estimate in jsdom, so
-    // the contained height is the 792px page less the Papers margin (768px).
+    // Page is preserved. Page 2 is in the opening sample, so its real
+    // landscape box is known at enter; with the unmeasurable jsdom area
+    // the contained height is the page's own 612px at scale 1.
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
-    expect(slot(2)).toHaveStyle({ height: "768px" });
+    expect(slot(2)).toHaveStyle({ height: "612px" });
 
     view.rerenderBook({ presentationMode: false });
     expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull();

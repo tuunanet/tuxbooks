@@ -196,3 +196,56 @@ export function capByBytes<T>(items: T[], byteOf: (item: T) => number, maxBytes:
   }
   return kept;
 }
+
+/**
+ * How many pages before and after the visible range keep their rendered
+ * canvas mounted after the page leaves the render window (retention ring,
+ * docs/research/papers-scrolling.md R3). Papers holds `MAX_PRELOADED_PAGES 3`
+ * pages each side of the visible range in its pixbuf cache
+ * (pps-pixbuf-cache.c:105), so a page that just scrolled past stays painted
+ * instead of dropping to the page-box background and paying a re-entry blit.
+ */
+export const RETAIN_NEAR_VISIBLE_PAGES = 3;
+
+/**
+ * Which of `candidates` should stay mounted because they hold pixels within
+ * `depth` page-indices of the visible range — closest to the range first, so
+ * a later byte-budget cut drops the farthest ring pages first (the shrink
+ * order of `pps_pixbuf_cache_get_preload_size`, pps-pixbuf-cache.c:416-469).
+ *
+ * The candidates decide *which pages are offered* (already-rendered or
+ * scale-stale pages only — the ring never mounts a page that has no pixels),
+ * the visible range decides which are kept. Pages inside the visible range
+ * come out with distance 0 and are excluded: every visible page already
+ * belongs to the render order's priority prefix. An empty visible set retains
+ * nothing — visibility tracking has not started, and a ring around no range
+ * would keep the whole document alive.
+ */
+export function retentionRing(
+  visiblePages: Iterable<number>,
+  candidates: Iterable<number>,
+  depth: number = RETAIN_NEAR_VISIBLE_PAGES,
+): number[] {
+  if (depth <= 0) return [];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const page of visiblePages) {
+    if (page < min) min = page;
+    if (page > max) max = page;
+  }
+  if (min > max) return [];
+  const distance = (page: number): number =>
+    page < min ? min - page : page > max ? page - max : 0;
+  const ring: Array<{ page: number; distance: number }> = [];
+  const seen = new Set<number>();
+  for (const page of candidates) {
+    if (seen.has(page)) continue;
+    seen.add(page);
+    const distanceToRange = distance(page);
+    if (distanceToRange > 0 && distanceToRange <= depth) {
+      ring.push({ page, distance: distanceToRange });
+    }
+  }
+  ring.sort((a, b) => a.distance - b.distance || a.page - b.page);
+  return ring.map((entry) => entry.page);
+}
