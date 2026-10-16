@@ -11,6 +11,7 @@ import {
   documentMaxPageSize,
   displayedSizes,
   estimatePageSizes,
+  medianPageSize,
   fitHeightScale,
   fitPageScale,
   fitWidthScale,
@@ -434,6 +435,26 @@ describe("estimatePageSizes", () => {
 
   it("handles an empty document", () => {
     expect(estimatePageSizes(0, LETTER)).toEqual([]);
+  });
+});
+
+describe("medianPageSize", () => {
+  const WIDE = { width: 827, height: 1180 };
+  const ORDINARY = { width: 504, height: 720 };
+
+  it("takes the middle sample by area, width and height as a pair", () => {
+    expect(medianPageSize([WIDE, ORDINARY, ORDINARY])).toEqual(ORDINARY);
+    expect(medianPageSize([ORDINARY, ORDINARY, WIDE])).toEqual(ORDINARY);
+  });
+
+  it("takes the lower middle for even sample counts, deterministically", () => {
+    expect(medianPageSize([WIDE, ORDINARY])).toEqual(ORDINARY);
+    expect(medianPageSize([ORDINARY, WIDE])).toEqual(ORDINARY);
+  });
+
+  it("returns the only sample, and null for none", () => {
+    expect(medianPageSize([WIDE])).toEqual(WIDE);
+    expect(medianPageSize([])).toBeNull();
   });
 });
 

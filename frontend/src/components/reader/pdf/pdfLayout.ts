@@ -306,6 +306,24 @@ export function estimatePageSizes(
 }
 
 /**
+ * The sample every unmeasured page's estimate takes: the median by area, so
+ * one odd page (a wide cover, a foldout) does not stamp its box onto the
+ * whole document and then snap away again page by page as each one gets
+ * measured. That snap is a visible width flash on every approaching page.
+ * Odd sample counts take the middle entry, even counts the lower middle, so
+ * the choice is deterministic; the chosen entry's width and height are used
+ * as a pair (never mixed across samples, which would invent a page aspect).
+ * An empty sample returns null so callers keep their previous fallback.
+ */
+export function medianPageSize(
+  samples: Array<Pick<PageSize, "width" | "height">>,
+): Pick<PageSize, "width" | "height"> | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a.width * a.height - b.width * b.height);
+  return sorted[Math.floor((sorted.length - 1) / 2)] ?? null;
+}
+
+/**
  * Papers' integer page sizing (`pps-render-context.c`
  * `pps_render_context_compute_scaled_size:112`): a scaled page is rounded to
  * whole pixels with `(int)(points * scale + 0.5)`. Rounding before any scroll

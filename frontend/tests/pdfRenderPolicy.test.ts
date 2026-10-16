@@ -12,6 +12,7 @@ import {
   regionRenderRatio,
   regionRenderRatioForPage,
   renderBufferBytes,
+  retentionRing,
 } from "@/components/reader/pdf/pdfRenderPolicy";
 
 /**
@@ -167,6 +168,44 @@ describe("render window byte budget (PERF-4)", () => {
     const sizes = [10, 20, 30, 40, 50];
     const kept = capByBytes(sizes, (bytes) => bytes, 60);
     expect(kept).toEqual([10, 20, 30]);
+  });
+});
+
+describe("retentionRing", () => {
+  it("keeps rendered candidates within three of the visible range, closest first", () => {
+    // Visible range [10, 11]; candidates 7 (far side, dist 3), 9 and 12
+    // (dist 1), 13 (dist 2), 15 (beyond depth). Pages inside the range
+    // (distance 0) belong to the render order already and stay out.
+    expect(retentionRing([10, 11], [15, 7, 10, 12, 9, 13, 11])).toEqual([9, 12, 13, 7]);
+  });
+
+  it("drops candidates beyond the depth", () => {
+    // Exactly three stays, four goes — the boundary Papers draws with
+    // MAX_PRELOADED_PAGES 3.
+    expect(retentionRing([5], [8, 9])).toEqual([8]);
+    expect(retentionRing([5], [])).toEqual([]);
+  });
+
+  it("retains nothing before visibility tracking starts", () => {
+    // An empty visible set must not turn into "keep the whole document":
+    // the ring exists to bridge a moving viewport, and there is none yet.
+    expect(retentionRing([], [1, 2, 3])).toEqual([]);
+  });
+
+  it("never invents pages: only offered candidates come back", () => {
+    // Unrendered pages have no pixels; the ring only decides what stays
+    // mounted, never what may render (that is renderPermittedPages' job).
+    expect(retentionRing([5], [6])).toEqual([6]);
+    expect(retentionRing([5], [50, 60])).toEqual([]);
+  });
+
+  it("counts each candidate once even when offered twice", () => {
+    expect(retentionRing([1], [4, 4, 3, 3])).toEqual([3, 4]);
+  });
+
+  it("honors a custom depth", () => {
+    expect(retentionRing([10], [12, 14], 5)).toEqual([12, 14]);
+    expect(retentionRing([10], [12, 14], 0)).toEqual([]);
   });
 });
 

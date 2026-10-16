@@ -74,6 +74,10 @@ const cliHandled = runCli(process.argv, {
   version: app.getVersion(),
   runDryRun: () => runDryRun(resetDeps()),
   runResetData: () => runResetData(resetDeps()),
+  // Debug hatch: switches after `--` reach Chromium (still before app
+  // ready, where appendSwitch is legal), so any GPU/compositor switch can
+  // be tried on a packaged build without widening the strict option set.
+  forwardSwitch: (name, value) => app.commandLine.appendSwitch(name, value ?? ""),
 });
 
 // Anchor segment: bundle evaluation itself (module graph + protocol setup).

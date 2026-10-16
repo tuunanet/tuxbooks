@@ -14,6 +14,15 @@ interface PdfPageSlotProps {
   /** True for every slot except the first (the gap sits above it). */
   gapAbove: boolean;
   state: PdfPageLifecycle;
+  /**
+   * The page-box placeholder behind the canvas: paper white by default, the
+   * theme's page background in Smart Dark (issue #67) — an unloaded or
+   * pending page must read as unprinted paper, never as a hole punched
+   * through the document (docs/research/papers-scrolling.md, R4: Papers
+   * paints a paper-colored CSS rect before the page snapshot for the same
+   * reason).
+   */
+  pageBackground?: string;
   /** Slot content: the page canvas when active, nothing while unloaded. */
   children?: ReactNode;
   /** Registers the slot element for visibility tracking and scroll targeting. */
@@ -32,6 +41,7 @@ export function PdfPageSlot({
   slot,
   gapAbove,
   state,
+  pageBackground,
   children,
   registerRef,
   onRetry,
@@ -63,6 +73,12 @@ export function PdfPageSlot({
         width: `${slot.width}px`,
         height: `${slot.height}px`,
         marginTop: gapAbove ? PAGE_GAP_PX : 0,
+        // The page box under every state, painted inline so it exists even
+        // without the stylesheet: paper white by default, the theme's page
+        // background in Smart Dark (issue #67). While a canvas is mounted
+        // the wrapper covers this exactly, so the two never compete; with
+        // no canvas mounted this is what a fast scroll shows.
+        backgroundColor: pageBackground ?? "#ffffff",
       }}
       className="shrink-0 scroll-mt-12"
     >

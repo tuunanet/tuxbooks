@@ -55,6 +55,7 @@ import {
   capByBytes,
   effectiveRenderRatio,
   renderBufferBytes,
+  retentionRing,
 } from "./pdfRenderPolicy";
 import {
   adjustmentValueForPolicy,
@@ -756,7 +757,22 @@ export function PdfReader({
   // page-sized buffers fit) and then by the MAX_ACTIVE_CANVASES count
   // fallback; on eviction the pixels move into the per-document bitmap
   // cache, so re-entry blits instead of re-rendering. Distant pages keep
-  // only their geometry slots.
+  // only their geometry slots. Between the window and "distant" sits the
+  // retention ring (below): rendered pages within three of the visible
+  // range stay mounted even once the window has moved on.
+  //
+  // One byte estimator feeds both the window and the ring: a slot's capped
+  // buffer (CSS size × effective ratio² × 4, Phase 1's policy).
+  const bufferBytes = useMemo(() => {
+    const slotsByPage = new Map(documentSlots.map((slot) => [slot.pageNumber, slot]));
+    return (page: number): number => {
+      const slot = slotsByPage.get(page);
+      if (!slot) return 0;
+      const ratio = effectiveRenderRatio(slot.width / scale, slot.height / scale, scale, dpr);
+      return renderBufferBytes(slot.width, slot.height, ratio);
+    };
+  }, [documentSlots, scale, dpr]);
+
   const renderOrder = useMemo(() => {
     const active = [...new Set([currentPage, ...visiblePages])].sort(
       (a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage),
@@ -765,30 +781,45 @@ export function PdfReader({
       .sort((a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage))
       .find((page) => !active.includes(page));
     if (preloaded !== undefined) active.push(preloaded);
-    // PERF-4: slice by each slot's capped buffer bytes (CSS size ×
-    // effective ratio² × 4, Phase 1's policy) before the count fallback.
-    // The anchor survives any budget (capByBytes keeps the first page).
-    const slotsByPage = new Map(documentSlots.map((slot) => [slot.pageNumber, slot]));
-    const bufferBytes = (page: number): number => {
-      const slot = slotsByPage.get(page);
-      if (!slot) return 0;
-      const ratio = effectiveRenderRatio(slot.width / scale, slot.height / scale, scale, dpr);
-      return renderBufferBytes(slot.width, slot.height, ratio);
-    };
+    // PERF-4: slice by each slot's capped buffer bytes before the count
+    // fallback. The anchor survives any budget (capByBytes keeps the first
+    // page).
     return capByBytes(active, bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(0, MAX_ACTIVE_CANVASES);
-  }, [currentPage, visiblePages, preloadPages, documentSlots, scale, dpr]);
+  }, [currentPage, visiblePages, preloadPages, bufferBytes]);
 
   // The render set, derived purely from the priority order and the
   // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
   // pages of `renderOrder` own the render budget (bounded concurrency in
   // flight), and completed canvases stay mounted while their page remains
-  // in-window. A zoom does not unmount the pages that held pixels: they are
-  // kept as display-only scale-and-swap (stalePages) until either the render
-  // budget admits them or they leave the window, so the visible surface is
-  // never blank through the commit. `renderPermittedPages` is exactly the
-  // budget, and PdfPageCanvas refuses to raster outside it.
+  // in-window or inside the retention ring. A zoom does not unmount the
+  // pages that held pixels: they are kept as display-only scale-and-swap
+  // (stalePages) until either the render budget admits them or they leave
+  // the window, so the visible surface is never blank through the commit.
+  // `renderPermittedPages` is exactly the budget, and PdfPageCanvas refuses
+  // to raster outside it.
   const { canvasPages, renderPermittedPages } = useMemo(() => {
+    // Retention ring (docs/research/papers-scrolling.md R3): pages that
+    // hold pixels but fell out of the render window stay mounted while
+    // they are within RETAIN_NEAR_VISIBLE_PAGES of the visible range —
+    // Papers keeps MAX_PRELOADED_PAGES 3 pages each side painted
+    // (pps-pixbuf-cache.c:105). The ring is appended after the render
+    // window and passes through the same byte/count caps, so it only ever
+    // consumes leftover budget: at 4K it shrinks to nothing instead of
+    // pushing PERF-4 over (the shrink order of
+    // pps_pixbuf_cache_get_preload_size, pps-pixbuf-cache.c:416-469).
+    // The ring only decides what stays MOUNTED — it never adds a page to
+    // `renderPermittedPages`, so it cannot start a raster.
     const window = new Set(renderOrder);
+    const retained = retentionRing(
+      visiblePages,
+      [...renderedPages, ...stalePages].filter((page) => !window.has(page)),
+    );
+    const mountWindow = new Set(
+      capByBytes([...renderOrder, ...retained], bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(
+        0,
+        MAX_ACTIVE_CANVASES,
+      ),
+    );
     const rendering: number[] = [];
     for (const page of renderOrder) {
       if (rendering.length >= MAX_CONCURRENT_RENDERS) break;
@@ -796,11 +827,11 @@ export function PdfReader({
       rendering.push(page);
     }
     const mounted = new Set<number>();
-    for (const page of renderedPages) if (window.has(page)) mounted.add(page);
-    for (const page of stalePages) if (window.has(page)) mounted.add(page);
+    for (const page of renderedPages) if (mountWindow.has(page)) mounted.add(page);
+    for (const page of stalePages) if (mountWindow.has(page)) mounted.add(page);
     for (const page of rendering) mounted.add(page);
     return { canvasPages: [...mounted], renderPermittedPages: new Set(rendering) };
-  }, [renderOrder, renderedPages, failedPages, stalePages]);
+  }, [renderOrder, renderedPages, failedPages, stalePages, visiblePages, bufferBytes]);
 
   // Per-document bitmap cache: eviction stashes finished buffers and window
   // re-entry blits them, so scrolling back across a heavy page never
