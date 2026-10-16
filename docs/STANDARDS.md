@@ -57,6 +57,10 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   `no-restricted-imports` enforces this (ADR 0002, `tuxbooks-koe.10`); add a
   new engine package to the rule when the engine changes.
 
+## Tests
+
+Test changes are judged by `docs/TESTING.md` "Rules for agents": what makes a test keepable or deletable (behavior through public interfaces, the deletion criterion for stale tests) lives there, not here.
+
 ## Dependencies
 
 - No new dependency (Rust crate or npm package) without a clear, stated

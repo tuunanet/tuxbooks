@@ -5,11 +5,14 @@ coverage. When a category falls below its floor, the fix is more tests, not
 a lower floor — thresholds are changed only case by case, with the reason
 recorded in the same change as the table row.
 
-Frontend floors are enforced by coverage runs — CI's `coverage` job and
-`just coverage` (`coverage.thresholds` in `frontend/vite.config.ts`; the
-run fails when any category drops below its floor). A plain `vitest run`
-or `just check` does not collect coverage and never checks thresholds.
-Rust floors are enforced by `just coverage`
+Frontend floors are enforced by every `just check` and `just test` run:
+the `test-frontend` recipe runs vitest with `--coverage`
+(`coverage.thresholds` in `frontend/vite.config.ts`; the run fails when
+any category drops below its floor). CI's `coverage` job runs the same
+check, and `just coverage` adds the Rust instrumented run plus the
+json-summary the badge script reads. A plain `vitest run` or
+`pnpm --filter frontend test:ci` does not collect coverage and never
+checks thresholds. Rust floors are enforced by `just coverage`
 (`scripts/coverage-gate.mjs`); it is not part of `just check` because the
 instrumented build pays a full rebuild in its own target dir — run it when
 touching a Rust module's behavior or tests.

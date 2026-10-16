@@ -183,8 +183,15 @@ test: test-parallel
 test-rust: fetch-pdfium
     {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml
 
+# Frontend unit tests. --coverage binds the docs/COVERAGE.md floors;
+# --testTimeout=15000 (default 5000) because instrumented tests under this
+# recipe's parallel load (rust + lint + tsc alongside) push render-heavy
+# cases past the default — the suite passes standalone at 5s. --maxWorkers=6
+# caps vitest's CPU appetite so the concurrent rust stream keeps cores (the
+# deadline-sensitive worker test flakes without it, bd tuxbooks-6r2); the
+# cap costs no wall time on a 16-core box.
 test-frontend:
-    {{_test_timeout}} pnpm --filter frontend test:ci
+    {{_test_timeout}} pnpm --filter frontend exec vitest run --coverage --testTimeout=15000 --maxWorkers=6
 
 test-parallel:
     bash scripts/run-parallel.sh \
@@ -374,8 +381,10 @@ check:
     @echo "check: OK"
 
 # Coverage gate (docs/COVERAGE.md). Frontend thresholds are enforced by
-# every vitest run; this recipe adds the Rust instrumented run (slow first
-# time: cargo-llvm-cov keeps its own target dir).
+# every `just check`/`just test` run (test-frontend passes --coverage)
+# and by CI's coverage job; this recipe adds the Rust instrumented run
+# (slow first time: cargo-llvm-cov keeps its own target dir) and the
+# json-summary the badge script reads.
 coverage:
     node scripts/coverage-gate.mjs
     pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
