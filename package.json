@@ -24,6 +24,7 @@
     "electron": "^44.3.0",
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
+    "lint-staged": "^17.5.1",
     "prettier": "^3.6.2",
     "typescript": "^7.0.2"
   },
