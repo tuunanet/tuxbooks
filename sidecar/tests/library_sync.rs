@@ -23,7 +23,7 @@ use tuxbooks_lib::repository::{
     annotations, books as book_repo, collections, library_locations, reading_progress,
 };
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
-use tuxbooks_lib::services::library_reconciler::{LibraryChange, Reconciler};
+use tuxbooks_lib::services::library_reconciler::{LibraryChange, PathChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
 use tuxbooks_lib::AppState;
 
@@ -596,6 +596,11 @@ async fn corrupt_file_is_skipped_and_imports_once_fixed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn startup_reconciliation_diffs_the_location_incrementally() {
     let env = setup().await;
+    // The startup contract is files landing while the app is off: silence
+    // the fs watcher so only the explicit reconcile runs. With the watcher
+    // live its 50ms debounce races reconcile_location for the same files
+    // and the report counts stop being deterministic (bd tuxbooks-6r2).
+    env.watcher.unwatch(&env.library);
 
     // Two files land before reconciliation knows about them.
     env.write_book("a.epub", "Startup A");
@@ -845,16 +850,29 @@ async fn unwatching_cascades_progress_and_annotations_with_the_books() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unwatching_a_child_folder_takes_its_books_while_the_parent_stays() {
     let env = setup().await;
+    // Drive the import pipeline directly instead of through the fs watcher:
+    // the parent's recursive watch covers the child too, so notify events
+    // queued before the unwatch race the purge and re-import the child's
+    // books through the parent's prefix (bd tuxbooks-crn). The reconciler
+    // cannot tell that stale event from new activity, and which of the two
+    // wins is load-dependent. The dedicated disk-silence test below keeps
+    // the fs round-trip covered; this test pins the unwatch contract.
+    env.watcher.unwatch(&env.library);
     let sub = env.library.join("shelf");
     std::fs::create_dir_all(&sub).unwrap();
     library_locations::add_location(&env.pool, &sub.to_string_lossy())
         .await
         .unwrap();
-    env.watcher.watch(&sub);
 
     let root_file = env.write_book("root.epub", "Root Book");
     let shelf_file = sub.join("shelf-book.epub");
     write_epub(&shelf_file, "Shelf Book");
+    env.reconciler
+        .apply(vec![
+            PathChange::Created(root_file.clone()),
+            PathChange::Created(shelf_file.clone()),
+        ])
+        .await;
     wait_for_titles(&env, ["Root Book", "Shelf Book"]);
 
     let shelf = sub.to_string_lossy().into_owned();
@@ -906,6 +924,45 @@ async fn unwatching_a_parent_leaves_a_surviving_subfolders_books_alone() {
     // watch, unchanged by the parent's purge).
     write_epub(&sub.join("second.epub"), "Second Shelf Book");
     wait_for_titles(&env, ["Second Shelf Book"]);
+}
+
+/// The unwatch ghost, made deterministic: an event that was already queued
+/// when the unwatch ran must not re-import the book the unwatch just
+/// purged. Under load this race failed `titles == ["Root Book"]`
+/// intermittently (bd tuxbooks-crn) — the event path never re-checked the
+/// watch list, so the ghost came back. The fs watcher stays off here: the
+/// test replays the reconciler's own input directly instead of racing
+/// notify for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn queued_events_for_an_unwatched_folder_never_resurrect_its_books() {
+    let env = setup().await;
+    env.watcher.unwatch(&env.library);
+
+    // Positive control: a registered location imports through apply.
+    write_epub(&env.path("live.epub"), "Live Book");
+    env.reconciler
+        .apply(vec![PathChange::Created(env.path("live.epub"))])
+        .await;
+    assert_eq!(env.count().await, 1, "registered locations keep importing");
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+    assert_eq!(env.count().await, 0);
+
+    // The ghost: an event queued before the unwatch, replayed after the
+    // purge. The file is still on disk (unwatch never touches files) but
+    // its location is gone from the watch list, so apply must drop it.
+    write_epub(&env.path("ghost.epub"), "Ghost Book");
+    env.reconciler
+        .apply(vec![PathChange::Modified(env.path("ghost.epub"))])
+        .await;
+
+    assert_eq!(
+        env.count().await,
+        0,
+        "a queued event must never resurrect a folder the user unwatched"
+    );
+    assert!(env.path("ghost.epub").exists());
 }
 
 /// A catalog row an upgrade would find outside every watched folder, with the
