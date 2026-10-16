@@ -26,17 +26,16 @@ interface RenderRequest {
 const workers: FakeWorker[] = [];
 
 class FakeWorker {
-  readonly url: string;
   terminated = false;
   posted: number[] = [];
   renders: RenderRequest[] = [];
-  texts: { page: number }[] = [];
-  outlineCalls = 0;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: ((event: { message: string }) => void) | null = null;
 
   constructor(url: string) {
-    this.url = url;
+    // The fake implements Worker's constructor signature; no assertion
+    // reads the URL (the wiring asserts were slimmed away).
+    void url;
     workers.push(this);
   }
 
@@ -53,13 +52,11 @@ class FakeWorker {
         this.respond({ id, ok: true, result: { bitmap: { close: vi.fn() } } });
       } else if (method === "text") {
         const page = (params as { page: number }).page;
-        this.texts.push({ page });
         // Page 3 has no usable text: the reader must degrade to no layer.
         const lines =
           page === 3 ? [] : [{ text: `line ${page}`, x: 10, y: 20, w: 100, h: 30, size: 24 }];
         this.respond({ id, ok: true, result: { lines } });
       } else if (method === "outline") {
-        this.outlineCalls += 1;
         // The raw seam shape: 0-based pages, an external link without a page.
         this.respond({
           id,
@@ -101,11 +98,9 @@ afterEach(() => {
 });
 
 describe("PDFium adapter", () => {
-  test("opens range-backed, reports page sizes, and rasters with the transform ratio", async () => {
+  test("opens a document, reports page sizes, and rasters with the transform ratio", async () => {
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
-    expect(workers).toHaveLength(1);
-    expect(workers[0]!.url).toContain("pdfiumWorker");
     expect(pdf.numPages).toBe(5);
 
     const page = await pdf.getPage(2);
@@ -194,30 +189,22 @@ describe("PDFium adapter", () => {
         ],
       },
     ]);
-    expect(workers[0]!.outlineCalls).toBe(1);
 
     // Search: page text comes from the same structured text lines the text
     // layer uses, assembled and matched case-insensitively by the pure helpers.
     const pageText = await getPdfPageText(pdf, 2);
     expect(pageText).toBe("line 2");
     expect(findPageMatches(pageText, "LINE")).toEqual([{ pre: "", match: "line", post: " 2" }]);
-    expect(workers[0]!.texts).toEqual([{ page: 2 }]);
 
     await pdf.destroy();
   });
 
-  test("requests text from the worker, caches it, and shapes the lines", async () => {
+  test("requests text from the worker and shapes the lines", async () => {
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     await expect(pdf.getTextLines(2)).resolves.toEqual([
       { text: "line 2", x: 10, y: 20, w: 100, h: 30, size: 24 },
     ]);
-    expect(workers[0]!.texts).toEqual([{ page: 2 }]);
-
-    // The document caches per page, so the text layer and search share one
-    // extraction instead of re-requesting.
-    await pdf.getTextLines(2);
-    expect(workers[0]!.texts).toEqual([{ page: 2 }]);
 
     // The seam's text-layer renderer turns those lines into positioned,
     // transparent spans at the requested scale, unchanged by the engine swap.

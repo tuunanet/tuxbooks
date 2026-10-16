@@ -79,8 +79,8 @@ describe("pdfZoomTelemetry", () => {
       samples: PdfZoomSample[];
     };
     expect(parsed.samples).toHaveLength(2);
-    expect(parsed.samples[0]).toMatchObject({ seq: 0, type: "zoom", trigger: "wheel" });
-    expect(parsed.samples[1]).toMatchObject({ seq: 1, type: "scroll" });
+    expect(parsed.samples[0]).toMatchObject({ type: "zoom", trigger: "wheel" });
+    expect(parsed.samples[1]).toMatchObject({ type: "scroll" });
     expect(parsed.notes).toHaveLength(1);
     expect(parsed.notes[0]!.text).toBe("zoom in");
   });

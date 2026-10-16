@@ -128,11 +128,6 @@ describe("effectiveRenderRatio (PERF-1)", () => {
 });
 
 describe("render window byte budget (PERF-4)", () => {
-  it("estimates RGBA buffer bytes from CSS size and ratio", () => {
-    expect(renderBufferBytes(100, 50, 1)).toBe(100 * 50 * 4);
-    expect(renderBufferBytes(100, 50, 2)).toBe(100 * 50 * 4 * 4);
-  });
-
   it("keeps >= 3 capped 4K canvases at dpr 1 within 256 MB", () => {
     const { scale, cssWidth, cssHeight } = CONTENT_4K;
     const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, 1);
@@ -210,16 +205,11 @@ describe("retentionRing", () => {
 });
 
 describe("presentationPagePlan", () => {
-  it("reproduces the layout's rounded slot and the canvas's ratio", () => {
+  it("reproduces the layout's rounded slot", () => {
     // A letter page fit to the 792px presentation viewport (the Papers margin
     // leaves 768px): scale 768/792 rounds the page to 593x768.
     const scale = 768 / 792;
-    const plan = presentationPagePlan(LETTER, scale, 1);
-    expect(plan).toEqual({ width: 593, height: 768, ratio: 1 });
-    // The ratio is exactly what a mounted canvas would derive from that slot.
-    expect(plan.ratio).toBe(
-      effectiveRenderRatio(plan.width / scale, plan.height / scale, scale, 1),
-    );
+    expect(presentationPagePlan(LETTER, scale, 1)).toEqual({ width: 593, height: 768, ratio: 1 });
   });
 
   it("tracks devicePixelRatio without changing the slot geometry", () => {

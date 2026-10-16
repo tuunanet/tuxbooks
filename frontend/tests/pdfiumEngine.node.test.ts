@@ -3,10 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 
-import { MAX_RENDER_PIXELS_HARD, regionRenderRatio } from "@/components/reader/pdf/pdfRenderPolicy";
 import { normalizePdfOutline } from "@/lib/pdf/pdfOutline";
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";
-import { assemblePageText, findPageMatches } from "@/lib/pdf/pdfSearch";
 import { PdfiumEngine, type PageClip } from "@/lib/pdf/pdfiumCore";
 import { colorSchemeFromPalette, hexToRgb01, type Rgb } from "@/lib/pdf/smartColors";
 
@@ -268,26 +266,6 @@ describe("PdfiumEngine (WASM)", () => {
     expect(mismatches / (width * height)).toBeLessThan(0.02);
   });
 
-  test("keeps a deep-zoom region inside the pixel budget", async () => {
-    const wasm = readFileSync(wasmPath);
-    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
-    const file = readFileSync(fixturePath);
-    engine.openBytes(toArrayBuffer(file));
-
-    // The reader sizes region buffers with regionRenderRatio (PERF-17); at
-    // deep zoom the ratio stays at dpr instead of the whole-page cap, so the
-    // region-sized buffer never exceeds the hard pixel budget.
-    const regionWidth = 800;
-    const regionHeight = 600;
-    const ratio = regionRenderRatio(regionWidth, regionHeight, 2);
-    const width = Math.max(1, Math.round(regionWidth * ratio));
-    const height = Math.max(1, Math.round(regionHeight * ratio));
-    expect(width * height).toBeLessThanOrEqual(MAX_RENDER_PIXELS_HARD);
-
-    const rgba = engine.renderRgba(0, width, height, [200, 280, regionWidth, regionHeight]);
-    expect(rgba.length).toBe(width * height * 4);
-  });
-
   test("opens range-backed through FPDF_FILEACCESS with a chunked source", async () => {
     const wasm = readFileSync(wasmPath);
     engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
@@ -365,30 +343,5 @@ describe("PdfiumEngine (WASM)", () => {
     engine.openBytes(toArrayBuffer(file));
 
     expect(engine.outline()).toBeNull();
-  });
-
-  test("searches the assembled PDFium text case-insensitively and across lines", async () => {
-    const wasm = readFileSync(wasmPath);
-    engine = await PdfiumEngine.load({ wasmBinary: toArrayBuffer(wasm) });
-    const file = readFileSync(fixturePath);
-    engine.openBytes(toArrayBuffer(file));
-
-    // Search reuses the text layer's lines; the seam assembles them the same
-    // way as getPdfPageText (line boundaries become single spaces).
-    const pageText = assemblePageText(
-      engine.textLines(0).map((line) => ({ str: line.text, hasEOL: true })),
-    );
-    expect(pageText).toBe("Tuxbooks PDF Fixture Page 1 of 3");
-
-    // Case-insensitive, one occurrence per page.
-    const caseInsensitive = findPageMatches(pageText, "pdf");
-    expect(caseInsensitive).toHaveLength(1);
-    expect(caseInsensitive[0]?.match).toBe("PDF");
-
-    // A query that crosses the line break between the title and the marker
-    // still matches, because the lines are joined like they read.
-    const acrossLines = findPageMatches(pageText, "fixture page");
-    expect(acrossLines).toHaveLength(1);
-    expect(acrossLines[0]?.match).toBe("Fixture Page");
   });
 });

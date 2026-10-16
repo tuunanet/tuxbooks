@@ -65,6 +65,11 @@ describe("PDF theme treatments", () => {
       expect(theme in PDF_THEME_TREATMENTS).toBe(true);
       expect(isPdfThemeChoice(theme)).toBe(true);
     }
+    // Every EPUB theme is mapped too: a new EPUB palette must either get a
+    // PDF treatment or an explicit EPUB-only entry below.
+    for (const theme of Object.keys(EPUB_THEME_COLORS)) {
+      expect(theme in PDF_THEME_TREATMENTS).toBe(true);
+    }
     expect(pdfThemeTreatment("contrast").filter).toBeTruthy();
     // The recolor-only presets have no faithful treatment for a raster
     // page, so they are EPUB-only.
@@ -72,11 +77,6 @@ describe("PDF theme treatments", () => {
     expect(isPdfThemeChoice("mint-contrast")).toBe(false);
     expect(pdfThemeTreatment("blue-contrast")).toEqual({});
     expect(pdfThemeTreatment("mint-contrast")).toEqual({});
-    // Every theme key is still mapped (total map over the theme set: the
-    // EPUB palette names + the neutral default + the PDF-only Invert).
-    expect(Object.keys(PDF_THEME_TREATMENTS).length).toBe(
-      Object.keys(EPUB_THEME_COLORS).length + 2,
-    );
   });
 
   it("offers the menu choices with Invert and the Smart dark label", () => {
