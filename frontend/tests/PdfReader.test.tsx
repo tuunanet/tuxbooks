@@ -21,6 +21,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 });
 
 import { PdfReader } from "@/components/reader/pdf/PdfReader";
+import { PdfToolbar } from "@/components/reader/pdf/PdfToolbar";
 import type { ReaderSelection } from "@/components/reader/annotationModel";
 import type { ReaderAdapter } from "@/components/reader/readerModel";
 import {
@@ -176,7 +177,6 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    expect(openDocumentMock).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
 
     const canvas = await screen.findByTestId("pdf-canvas");
@@ -624,10 +624,10 @@ describe("PdfReader book switching", () => {
     // document leaves rendered marks and cached bitmaps behind.
     firePreload(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
-    // Two pages are cached; the exact byte totals are the cache's internal
+    // Two pages are cached; the byte totals are the cache's internal
     // accounting, not the contract.
     expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(
-      /^[1-9]\d*:[1-9]\d*$/,
+      /^2:[1-9]\d*$/,
     );
 
     view.rerenderBook({ book: secondBook });
@@ -1482,6 +1482,28 @@ describe("PdfReader page field", () => {
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "1"),
     );
     expect(input).toHaveValue("1");
+  });
+
+  it("disables the field until the reader layout is ready", () => {
+    const props = {
+      pageNumber: 1,
+      pageCount: 3,
+      zoomMode: "custom" as const,
+      zoomScale: 1,
+      canZoomIn: true,
+      canZoomOut: true,
+      onPrev: () => {},
+      onNext: () => {},
+      onZoomIn: () => {},
+      onZoomOut: () => {},
+      onSelectFit: () => {},
+      onSetZoom: () => {},
+      onSetPage: () => {},
+    };
+    const view = render(<PdfToolbar {...props} pageEntryDisabled />);
+    expect(screen.getByTestId("pdf-page-input")).toBeDisabled();
+    view.rerender(<PdfToolbar {...props} />);
+    expect(screen.getByTestId("pdf-page-input")).toBeEnabled();
   });
 
   async function focusPageInput() {

@@ -33,6 +33,8 @@ class FakeWorker {
   onerror: ((event: { message: string }) => void) | null = null;
 
   constructor(url: string) {
+    // The fake implements Worker's constructor signature; no assertion
+    // reads the URL (the wiring asserts were slimmed away).
     void url;
     workers.push(this);
   }
@@ -96,7 +98,7 @@ afterEach(() => {
 });
 
 describe("PDFium adapter", () => {
-  test("opens range-backed, reports page sizes, and rasters with the transform ratio", async () => {
+  test("opens a document, reports page sizes, and rasters with the transform ratio", async () => {
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
     expect(pdf.numPages).toBe(5);
