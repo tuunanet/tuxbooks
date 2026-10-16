@@ -16,7 +16,7 @@ the single required check for `main` in branch protection.
 
 A first job, `Detect changes`, classifies the diff into two flags. `code` is
 false when every changed file is non-code (markdown anywhere, `docs/`, `site/`,
-`.beads/`, `.agents/`, `.opencode/`, `.codex/`, `graft/`, `oracle/`, `vendor/`,
+`.beads/`, `.agents/`, `.opencode/`, `graft/`, `oracle/`, `vendor/`,
 or `.gitignore`); the heavy jobs (`Frontend`, `Coverage`, `Rust`, `Release
 build`) then skip. `packaging` is true only when the diff touches a path that
 can reach the deb payload (`electron/`, `sidecar/`, the builder config, the

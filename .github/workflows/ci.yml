@@ -63,7 +63,7 @@ jobs:
           printf 'Changed files:\n%s\n' "$changed"
           if printf '%s\n' "$changed" \
             | grep -vE '\.md$|^\.gitignore$' \
-            | grep -vE '^(docs/|site/|\.beads/|\.agents/|\.opencode/|\.codex/|graft/|oracle/|vendor/)' \
+            | grep -vE '^(docs/|site/|\.beads/|\.agents/|\.opencode/|graft/|oracle/|vendor/)' \
             | grep -q .; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
