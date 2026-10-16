@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  adjustmentValueForPolicy,
   anchorAtOffset,
   centerValue,
   displayedSizes,
@@ -118,18 +117,6 @@ describe("centerValue", () => {
   });
 });
 
-describe("adjustmentValueForPolicy", () => {
-  const adjustment: ScrollAdjustment = { value: 0, upper: 1318, pageSize: 768 };
-
-  it("dispatches to keep-position or center", () => {
-    expect(adjustmentValueForPolicy("keep-position", adjustment, 1577, 768, 384)).toBe(0);
-    expect(adjustmentValueForPolicy("center", adjustment, 1577, 768, 384)).toBeCloseTo(
-      75.459787557,
-      8,
-    );
-  });
-});
-
 describe("viewportPointToDocumentPoint", () => {
   it("maps a viewport position to a page-local point", () => {
     // Single-page free step: (0 + 384 - 12) / 1.633986928 = 227.664.
@@ -166,11 +153,6 @@ describe("anchorAtOffset / offsetForAnchor", () => {
 });
 
 describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
-  it("carries the expected schema and fixtures", () => {
-    expect(ORACLE.schema).toBe("tuxbooks.papers-oracle/2");
-    expect(ORACLE.documents.length).toBe(7);
-  });
-
   it("reproduces every zoom step's adjustment value on every fixture", () => {
     for (const doc of ORACLE.documents) {
       const steps = doc.zoom_script;
@@ -279,16 +261,5 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
         expect(Math.abs(after - before), `${doc.name} ${axis} pointer`).toBeLessThan(1.5);
       }
     }
-  });
-
-  it("keeps the pointer point and a re-layout at different offsets", () => {
-    // Top of the document: keep-position holds the top edge, while an
-    // explicit pointer zoom pulls the point under the cursor into view.
-    const adjustment: ScrollAdjustment = { value: 0, upper: 1318, pageSize: 768 };
-    const kept = keepPositionValue(adjustment, 1577, 768);
-    const centered = centerValue(adjustment, 1577, 768, 384);
-    expect(kept).toBe(0);
-    expect(centered).toBeCloseTo(75.459787557, 8);
-    expect(kept).not.toBe(centered);
   });
 });

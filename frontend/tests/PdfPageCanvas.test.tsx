@@ -313,27 +313,34 @@ describe("PdfPageCanvas scale-and-swap", () => {
     const view = renderPage(doc);
     const canvas = screen.getByTestId("pdf-canvas");
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
-    const requestsAfterFirst = doc.getPage.mock.calls.length;
+    const rendersBefore = doc.renderOptions.length;
 
-    view.rerender(
-      <PdfPageCanvas
-        document={doc as never}
-        pageNumber={1}
-        width={200}
-        height={258}
-        scale={2}
-        renderEnabled={false}
-      />,
-    );
+    vi.useFakeTimers();
+    try {
+      view.rerender(
+        <PdfPageCanvas
+          document={doc as never}
+          pageNumber={1}
+          width={200}
+          height={258}
+          scale={2}
+          renderEnabled={false}
+        />,
+      );
 
-    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
-    expect(canvas.style.transform).toBe("scale(2, 2)");
-    // Wait out the render-settle window: a display-only canvas must not ask
-    // the engine for a page it is not budgeted to rasterize.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    });
-    expect(doc.getPage.mock.calls.length).toBe(requestsAfterFirst);
-    expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+      expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+      expect(canvas.style.transform).toBe("scale(2, 2)");
+
+      // Drive the render-settle window (RENDER_SETTLE_MS) to its end: a
+      // display-only canvas must never ask the engine for a page it is not
+      // budgeted to rasterize.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(doc.renderOptions).toHaveLength(rendersBefore);
+      expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

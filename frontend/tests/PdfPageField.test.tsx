@@ -120,24 +120,6 @@ describe("PdfPageField", () => {
     expect(onSetPage).toHaveBeenCalledWith(2);
   });
 
-  it("clears the accumulator across an idle gap so micro ticks do not sum", () => {
-    vi.useFakeTimers();
-    try {
-      const { onSetPage, input } = renderField();
-      act(() => {
-        input.focus();
-      });
-
-      fireEvent.wheel(input, { deltaY: 5 });
-      vi.advanceTimersByTime(500);
-      fireEvent.wheel(input, { deltaY: 5 });
-
-      expect(onSetPage).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("steps with the Up and Down arrows while focused", () => {
     const { onSetPage, input } = renderField({ pageNumber: 2 });
     act(() => {

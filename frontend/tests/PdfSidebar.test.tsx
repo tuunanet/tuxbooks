@@ -121,10 +121,14 @@ describe("PdfSidebar virtualization", () => {
     fireVisible(slot(3), true);
     firePreload(slot(4), true);
 
-    await waitFor(() => expect(measurePages).toHaveBeenCalled());
-    const measured = measurePages.mock.calls.at(-1)?.[0] as number[];
-    expect(measured).toContain(3);
-    expect(measured).toContain(4);
+    // Both the visible page and the preload-window page get measured (their
+    // real aspect can differ from the estimate); which call carries them is
+    // the window policy's business, not the contract.
+    await waitFor(() => {
+      const measured = measurePages.mock.calls.flatMap((call) => call[0] as number[]);
+      expect(measured).toContain(3);
+      expect(measured).toContain(4);
+    });
   });
 });
 

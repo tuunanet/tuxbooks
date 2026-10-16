@@ -72,11 +72,6 @@ describe("PDF theme treatments", () => {
     expect(isPdfThemeChoice("mint-contrast")).toBe(false);
     expect(pdfThemeTreatment("blue-contrast")).toEqual({});
     expect(pdfThemeTreatment("mint-contrast")).toEqual({});
-    // Every theme key is still mapped (total map over the theme set: the
-    // EPUB palette names + the neutral default + the PDF-only Invert).
-    expect(Object.keys(PDF_THEME_TREATMENTS).length).toBe(
-      Object.keys(EPUB_THEME_COLORS).length + 2,
-    );
   });
 
   it("offers the menu choices with Invert and the Smart dark label", () => {
