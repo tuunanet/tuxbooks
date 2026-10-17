@@ -887,10 +887,13 @@ async fn unwatching_a_child_folder_is_refused_while_its_parent_stays_watched() {
     // that contract; the disk-silence test keeps the fs round-trip covered.
     env.watcher.unwatch(&env.library);
     let sub = env.library.join("shelf");
-    std::fs::create_dir_all(&sub).unwrap();
-    library_locations::add_location(&env.pool, &sub.to_string_lossy())
-        .await
-        .unwrap();
+    let deep = sub.join("deep");
+    std::fs::create_dir_all(&deep).unwrap();
+    for folder in [&sub, &deep] {
+        library_locations::add_location(&env.pool, &folder.to_string_lossy())
+            .await
+            .unwrap();
+    }
 
     let root_file = env.write_book("root.epub", "Root Book");
     let shelf_file = sub.join("shelf-book.epub");
@@ -905,19 +908,22 @@ async fn unwatching_a_child_folder_is_refused_while_its_parent_stays_watched() {
 
     let library = env.library.to_string_lossy().into_owned();
     let shelf = sub.to_string_lossy().into_owned();
-    let response = env.unwatch_error(&[shelf.as_str()], false).await;
+    let deepest = deep.to_string_lossy().into_owned();
+    let response = env.unwatch_error(&[deepest.as_str()], false).await;
 
-    // The refusal names the watched folder the user has to take instead...
+    // ...and it names the shallowest one as the folder to take, which is the
+    // one that has to go for the books to stay gone. The folder directly
+    // above would leave the hole in place, so it is never offered.
     let message = response["error"]["message"].as_str().unwrap();
     assert!(
-        message.contains(&library),
-        "the refusal must name the watched ancestor, said: {message}"
+        message.contains(&format!("unwatch {library} instead")),
+        "the refusal must offer the shallowest watched folder, said: {message}"
     );
 
-    // ...and nothing moved: both rows stand, both books stand, files stand.
+    // ...and nothing moved: every row stands, both books stand, files stand.
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
-        vec![library.clone(), shelf.clone()]
+        vec![library, shelf, deepest]
     );
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(

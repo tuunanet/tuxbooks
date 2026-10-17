@@ -11,6 +11,18 @@ import {
 import { formatMb } from "@/lib/format";
 import { useImport } from "@/state/importState";
 
+/** The plan before Unwatch is clicked: the dialog is closed, nothing runs. */
+const IDLE_PLAN: UnwatchPlan = {
+  kind: "plain",
+  ancestors: [],
+  inside: [],
+  cascade: false,
+  folders: [],
+  paths: [],
+  extraFolders: 0,
+  extraBooks: 0,
+};
+
 type FolderRow = StorageReport["bookLocations"][number];
 
 /**
@@ -30,65 +42,57 @@ function booksIn(locations: FolderRow[], roots: string[]): number {
     .reduce((total, location) => total + location.bookCount, 0);
 }
 
-/**
- * What the selection implies, read off the watch list alone (ADR 0010).
- * A selected folder under a folder that stays watched is refused by the
- * sidecar, so the plan offers the only move that holds: take the watched
- * folder above it, and everything that comes with it. Folders *inside* a
- * selected folder are a plain choice, because keeping them watched is a
- * state the library can express.
- */
-function planUnwatch(locations: FolderRow[], chosen: FolderRow[]): UnwatchPlan {
-  const chosenPaths = new Set(chosen.map((folder) => folder.path));
-  const staying = locations.filter((location) => !chosenPaths.has(location.path));
+function planUnwatch(locations: FolderRow[], chosen: FolderRow[], cascade = false): UnwatchPlan {
+  const chosenPaths = chosen.map((folder) => folder.path);
+  const chosenSet = new Set(chosenPaths);
+  const staying = locations.filter((location) => !chosenSet.has(location.path));
 
-  // The shallowest watched folder above a selected one — the folder whose
-  // recursive watch covers the selected folder's files.
-  const ancestors = new Map<string, string>();
+  // The shallowest watched folder above a selected one, which is the folder
+  // whose recursive watch covers the selected folder's files and the one the
+  // sidecar names in its refusal.
+  const ancestors = new Set<string>();
   for (const folder of chosen) {
     const above = staying
       .map((location) => location.path)
       .filter((root) => root !== folder.path && isUnder(folder.path, root))
       .sort((a, b) => a.length - b.length)[0];
-    if (above) ancestors.set(folder.path, above);
+    if (above) ancestors.add(above);
   }
+
+  const inside = staying
+    .filter((location) => chosenPaths.some((root) => isUnder(location.path, root)))
+    .map((location) => location.path);
+
+  const plan = (kind: UnwatchPlan["kind"], cascade: boolean): UnwatchPlan => {
+    // Expanding by subtree is what a steer or a cascade does; without one,
+    // the folders are exactly the ones the user ticked.
+    const expand = kind === "steer" || cascade;
+    const roots = [...chosenPaths, ...(kind === "steer" ? ancestors : cascade ? inside : [])];
+    return {
+      kind,
+      ancestors: [...ancestors],
+      inside,
+      cascade,
+      folders: expand
+        ? locations.filter((location) => roots.some((root) => isUnder(location.path, root)))
+        : chosen,
+      paths: kind === "steer" ? [...chosenPaths, ...ancestors] : chosenPaths,
+      extraFolders: 0,
+      extraBooks: 0,
+    };
+  };
 
   if (ancestors.size > 0) {
-    const roots = [...new Set(ancestors.values())];
-    const inside = staying.filter((location) => roots.some((root) => isUnder(location.path, root)));
+    const kept = plan("steer", true);
+    const chosenBooks = booksIn(locations, chosenPaths);
     return {
-      kind: "steer",
-      ancestors: roots,
-      extraFolders: inside.length,
-      extraBooks:
-        booksIn(locations, [...chosenPaths, ...roots]) - booksIn(locations, [...chosenPaths]),
+      ...kept,
+      extraFolders: kept.folders.length - chosen.length,
+      extraBooks: booksIn(locations, kept.paths) - chosenBooks,
     };
   }
-
-  const nested = staying.filter((location) =>
-    chosen.some((folder) => isUnder(location.path, folder.path)),
-  );
-  if (nested.length > 0) {
-    return { kind: "ask", inside: nested.map((location) => location.path), cascade: false };
-  }
-  return { kind: "plain" };
-}
-
-/** The folders this unwatch removes: the selection plus whatever the plan adds. */
-function foldersRemoved(
-  locations: FolderRow[],
-  chosen: FolderRow[],
-  plan: UnwatchPlan,
-): FolderRow[] {
-  if (plan.kind === "ask" && plan.cascade) {
-    const roots = [...chosen.map((folder) => folder.path), ...plan.inside];
-    return locations.filter((location) => roots.some((root) => isUnder(location.path, root)));
-  }
-  if (plan.kind === "steer") {
-    const roots = [...chosen.map((folder) => folder.path), ...plan.ancestors];
-    return locations.filter((location) => roots.some((root) => isUnder(location.path, root)));
-  }
-  return chosen;
+  if (inside.length > 0) return plan("ask", cascade);
+  return plan("plain", false);
 }
 
 /**
@@ -107,7 +111,7 @@ export function FoldersSettings() {
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [confirming, setConfirming] = useState(false);
   const [unwatching, setUnwatching] = useState(false);
-  const [plan, setPlan] = useState<UnwatchPlan>({ kind: "plain" });
+  const [plan, setPlan] = useState<UnwatchPlan>(IDLE_PLAN);
 
   const load = useCallback(
     () =>
@@ -162,20 +166,25 @@ export function FoldersSettings() {
     }
   }, [importPaths, load]);
 
-  const confirmUnwatch = useCallback(async () => {
-    // The plan is the whole truth about scope: a steer takes the watched
-    // folder above the selection and everything in it, a cascade takes the
-    // folders inside, and anything else removes exactly what was selected.
-    const cascade = plan.kind === "steer" || (plan.kind === "ask" && plan.cascade);
-    const paths =
-      plan.kind === "steer"
-        ? [...chosen.map((location) => location.path), ...plan.ancestors]
-        : chosen.map((location) => location.path);
+  // Toggling the cascade changes what gets removed, so the plan is rebuilt
+  // from the watch list rather than patched: the dialog's book count is a
+  // promise about the operation, and it has to follow the choice.
+  const changePlan = useCallback(
+    (next: UnwatchPlan) => {
+      setPlan(
+        next.kind === "ask" && next.cascade !== plan.cascade
+          ? planUnwatch(locations, chosen, next.cascade)
+          : next,
+      );
+    },
+    [chosen, locations, plan],
+  );
 
+  const confirmUnwatch = useCallback(async () => {
     setUnwatching(true);
     let unwatched = false;
     try {
-      await unwatchLocations(paths, cascade);
+      await unwatchLocations(plan.paths, plan.cascade);
       unwatched = true;
     } catch (error) {
       console.error("unwatch_locations failed:", error);
@@ -188,7 +197,7 @@ export function FoldersSettings() {
     setSelected(new Set());
     setConfirming(false);
     await load();
-  }, [chosen, load, plan]);
+  }, [load, plan]);
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
@@ -300,9 +309,8 @@ export function FoldersSettings() {
 
       <UnwatchFoldersDialog
         open={confirming}
-        folders={foldersRemoved(locations, chosen, plan)}
         plan={plan}
-        onPlanChange={setPlan}
+        onPlanChange={changePlan}
         busy={unwatching}
         onConfirm={() => void confirmUnwatch()}
         onCancel={() => setConfirming(false)}

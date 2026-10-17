@@ -8,31 +8,43 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import type { StorageReport } from "@/lib/bridge";
 
 const MAX_LISTED = 3;
 
-/**
- * What the unwatch will actually remove, and what the dialog has to say
- * about it (ADR 0010). The watch list is the library: a watched folder owns
- * its whole subtree, so a folder sitting inside one that stays watched has
- * no unwatch of its own — the parent would bring its books straight back.
- * The dialog answers that with the move that works (take the watched folder
- * above), never with hidden state the user cannot see or undo.
- */
-export type UnwatchPlan =
-  /** Nothing nested: the selection is the whole story. */
-  | { kind: "plain" }
-  /** A watched folder above the selection has to go too. */
-  | { kind: "steer"; ancestors: string[]; extraFolders: number; extraBooks: number }
-  /** Watched folders inside the selection can stay or go with it. */
-  | { kind: "ask"; inside: string[]; cascade: boolean };
+type FolderRow = StorageReport["bookLocations"][number];
 
-export interface UnwatchFoldersDialogProps {
+/**
+ * What one Unwatch click will do, read off the watch list alone (ADR 0010).
+ * A watched folder owns its whole subtree, so a folder sitting inside one
+ * that stays watched has no unwatch of its own: the folder above would bring
+ * its books straight back. The dialog answers that with the move that works
+ * (take the folder above), never with hidden state the user cannot see or
+ * undo. Computed once so the promise in this dialog, the folders it lists,
+ * and the payload the sidecar gets cannot disagree.
+ */
+export interface UnwatchPlan {
+  /** What the dialog has to ask: nothing, or the steer, or the cascade. */
+  kind: "plain" | "steer" | "ask";
+  /** Watched folders above the selection; the sidecar refuses without them. */
+  ancestors: string[];
+  /** Watched folders inside the selection, kept unless the user cascades. */
+  inside: string[];
+  /** Whether a watched folder inside the selection goes too. */
+  cascade: boolean;
+  /** Every folder this unwatch removes: the selection plus what the plan adds. */
+  folders: FolderRow[];
+  /** Exactly what to send. */
+  paths: string[];
+  /** What the plan adds on top of the selection, for the steer's wording. */
+  extraFolders: number;
+  extraBooks: number;
+}
+
+interface UnwatchFoldersDialogProps {
   open: boolean;
-  /** Every folder this unwatch removes: the selection plus whatever the plan adds. */
-  folders: { path: string; bookCount: number }[];
   plan: UnwatchPlan;
-  onPlanChange?: (plan: UnwatchPlan) => void;
+  onPlanChange: (plan: UnwatchPlan) => void;
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
@@ -42,7 +54,7 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-function steerWording(plan: Extract<UnwatchPlan, { kind: "steer" }>): string {
+function steerWording(plan: UnwatchPlan): string {
   const above =
     plan.ancestors.length === 1
       ? `the watched folder ${plan.ancestors[0]}`
@@ -57,18 +69,17 @@ function steerWording(plan: Extract<UnwatchPlan, { kind: "steer" }>): string {
 
 export function UnwatchFoldersDialog({
   open,
-  folders,
   plan,
   onPlanChange,
   onConfirm,
   onCancel,
   busy = false,
 }: UnwatchFoldersDialogProps) {
-  const several = folders.length > 1;
-  const books = folders.reduce((total, folder) => total + folder.bookCount, 0);
+  const several = plan.folders.length > 1;
+  const books = plan.folders.reduce((total, folder) => total + folder.bookCount, 0);
   const title = several
-    ? `Unwatch ${folders.length} folders?`
-    : `Unwatch ${folders[0]?.path ?? ""}?`;
+    ? `Unwatch ${plan.folders.length} folders?`
+    : `Unwatch ${plan.folders[0]?.path ?? ""}?`;
   const scope = several ? "these folders" : "this folder";
   const one = books === 1;
   const noun = one ? "book" : "books";
@@ -83,7 +94,7 @@ export function UnwatchFoldersDialog({
       : plan.kind === "steer"
         ? "Unwatch those too"
         : several
-          ? `Unwatch ${folders.length} Folders`
+          ? `Unwatch ${plan.folders.length} Folders`
           : "Unwatch";
 
   return (
@@ -101,7 +112,7 @@ export function UnwatchFoldersDialog({
 
         {several && (
           <ul data-testid="unwatch-names" className="space-y-1">
-            {folders.slice(0, MAX_LISTED).map((folder) => (
+            {plan.folders.slice(0, MAX_LISTED).map((folder) => (
               <li
                 key={folder.path}
                 title={folder.path}
@@ -112,9 +123,9 @@ export function UnwatchFoldersDialog({
             ))}
           </ul>
         )}
-        {folders.length > MAX_LISTED && (
+        {plan.folders.length > MAX_LISTED && (
           <p data-testid="unwatch-overflow" className="text-xs text-muted-foreground">
-            {`+${folders.length - MAX_LISTED} more`}
+            {`+${plan.folders.length - MAX_LISTED} more`}
           </p>
         )}
 
@@ -124,7 +135,7 @@ export function UnwatchFoldersDialog({
           </p>
         )}
 
-        {plan.kind === "ask" && onPlanChange && (
+        {plan.kind === "ask" && (
           <div data-testid="unwatch-ask" className="space-y-2">
             <p className="text-xs text-muted-foreground">
               {plan.inside.length === 1

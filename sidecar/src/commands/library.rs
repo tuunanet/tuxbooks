@@ -308,9 +308,15 @@ pub async fn unwatch_locations(
     }
 
     for root in &roots {
+        // The shallowest folder above it, which is the one the dialog names:
+        // taking that folder takes everything between the two, so naming a
+        // deeper one would offer a move that leaves the hole in place.
         let ancestor = registered
             .iter()
-            .find(|candidate| **candidate != *root && library_locations::is_under(root, candidate));
+            .filter(|candidate| {
+                **candidate != *root && library_locations::is_under(root, candidate)
+            })
+            .min_by_key(|candidate| candidate.len());
         if let Some(ancestor) = ancestor {
             if !roots.iter().any(|kept| kept == ancestor) {
                 return Err(AppError::InvalidInput(format!(
