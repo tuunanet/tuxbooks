@@ -16,6 +16,7 @@ const IDLE_PLAN: UnwatchPlan = {
   kind: "plain",
   ancestors: [],
   inside: [],
+  spared: [],
   cascade: false,
   folders: [],
   paths: [],
@@ -33,13 +34,6 @@ type FolderRow = StorageReport["bookLocations"][number];
  */
 function isUnder(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
-}
-
-/** Books owned by any folder at or under `roots`; ownership is per location. */
-function booksIn(locations: FolderRow[], roots: string[]): number {
-  return locations
-    .filter((location) => roots.some((root) => isUnder(location.path, root)))
-    .reduce((total, location) => total + location.bookCount, 0);
 }
 
 function planUnwatch(locations: FolderRow[], chosen: FolderRow[], cascade = false): UnwatchPlan {
@@ -73,15 +67,25 @@ function planUnwatch(locations: FolderRow[], chosen: FolderRow[], cascade = fals
 
   const plan = (kind: UnwatchPlan["kind"], cascade: boolean): UnwatchPlan => {
     const roots = [...chosenPaths, ...added(kind, cascade)];
+    // A cascade expands to the whole subtree. A steer does not: it takes the
+    // folder above and the ones ticked, because a watched folder beside them
+    // keeps its own watch when its parent leaves the list.
+    const folders = cascade
+      ? locations.filter((location) => roots.some((root) => isUnder(location.path, root)))
+      : locations.filter((location) => roots.includes(location.path));
     return {
       kind,
       ancestors: [...ancestors],
       inside,
+      spared: staying
+        .filter(
+          (location) =>
+            !roots.includes(location.path) &&
+            [...ancestors].some((ancestor) => isUnder(location.path, ancestor)),
+        )
+        .map((location) => location.path),
       cascade,
-      folders:
-        kind === "steer" || cascade
-          ? locations.filter((location) => roots.some((root) => isUnder(location.path, root)))
-          : chosen,
+      folders,
       paths: kind === "steer" ? [...chosenPaths, ...ancestors] : chosenPaths,
       extraFolders: 0,
       extraBooks: 0,
@@ -89,12 +93,14 @@ function planUnwatch(locations: FolderRow[], chosen: FolderRow[], cascade = fals
   };
 
   if (ancestors.size > 0) {
-    const kept = plan("steer", true);
-    const chosenBooks = booksIn(locations, chosenPaths);
+    // No cascade here on purpose: the folder above and the ones ticked are
+    // enough to close the hole, and a sibling keeps its own watch.
+    const kept = plan("steer", false);
+    const booksOf = (rows: FolderRow[]) => rows.reduce((total, row) => total + row.bookCount, 0);
     return {
       ...kept,
       extraFolders: kept.folders.length - chosen.length,
-      extraBooks: booksIn(locations, kept.paths) - chosenBooks,
+      extraBooks: booksOf(kept.folders) - booksOf(chosen),
     };
   }
   if (inside.length > 0) return plan("ask", cascade);

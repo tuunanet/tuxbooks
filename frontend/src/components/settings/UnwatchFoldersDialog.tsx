@@ -30,6 +30,8 @@ export interface UnwatchPlan {
   ancestors: string[];
   /** Watched folders inside the selection, kept unless the user cascades. */
   inside: string[];
+  /** Watched folders under a steered ancestor that stay watched. */
+  spared: string[];
   /** Whether a watched folder inside the selection goes too. */
   cascade: boolean;
   /** Every folder this unwatch removes: the selection plus what the plan adds. */
@@ -59,11 +61,15 @@ function steerWording(plan: UnwatchPlan): string {
     plan.ancestors.length === 1
       ? `the watched folder ${plan.ancestors[0]}`
       : `${plan.ancestors.length} watched folders above them`;
+  const spared =
+    plan.spared.length === 0
+      ? ""
+      : ` ${plan.spared.length === 1 ? "A folder beside it stays" : "Folders beside them stay"} watched, since its own watch survives.`;
   return (
     `${above} still watches everything under it, so these books would come ` +
-    `back the next time a file there changes. Unwatching them goes further: ` +
+    `back the next time a file there changes. Unwatching it goes further: ` +
     `${plural(plan.extraFolders, "more folder")} and ` +
-    `${plural(plan.extraBooks, "more book")}.`
+    `${plural(plan.extraBooks, "more book")}.${spared}`
   );
 }
 

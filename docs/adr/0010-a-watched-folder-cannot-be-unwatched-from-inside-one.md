@@ -35,11 +35,15 @@ to see or undo the decision.
    above instead, stating how many more folders and books that takes. The
    sidecar enforces the same rule, so no caller can create the hole the
    dialog declines to create.
-2. Unwatching a folder may take every watched folder at or under it, at any
+2. The steer takes the folder above and the folders the user selected, and
+   nothing else. A watched folder beside them keeps its own watch when its
+   parent leaves the list, so it is never dragged along. The dialog says so,
+   and counts only what the move actually removes.
+3. Unwatching a folder may take every watched folder _under_ it, at any
    depth. The dialog asks when some are watched separately, and keeps them by
    default, because the purge takes reading progress and annotations with it
    and that cannot be undone.
-3. No exclusion is recorded anywhere. The watch list in Settings stays the
+4. No exclusion is recorded anywhere. The watch list in Settings stays the
    only statement of what is watched, so every state this leaves behind is
    one the user can read and change.
 
@@ -57,17 +61,23 @@ to see or undo the decision.
 - Offer to unwatch the folder above as well, which is what the dialog does.
   Accepted. The move it offers ends in a state the library can express, and
   the cost is stated before the user commits to it.
+- Have the steer take the folder above and everything under it. Rejected in
+  UAT (bd tuxbooks-yof): a user unwatching one subfolder lost every sibling
+  beside it, though nothing about closing the hole required that. A sibling's
+  own watch survives its parent leaving the watch list, so it never had to
+  go.
 
 ## Consequences
 
-- Unwatching a nested folder takes the watched folder above it and everything
-  that folder holds. To drop one subfolder and keep the rest, unwatch the
-  folder above and add the survivors back, which is the same end state the
-  "keep the folders inside" answer produces.
-- The purge reaches every folder the cascade takes. The book count in the
-  dialog describes the whole operation, not just what was selected.
-- A watched folder left behind by a cascade is no longer possible, so the
-  re-registration the watcher does for a surviving subfolder now only ever
-  runs for a folder the user chose to keep.
+- Unwatching a nested folder takes the folder above it and the folders the
+  user selected. Siblings keep watching on their own, with their books
+  intact, and the dialog names them as staying rather than as leaving.
+- The purge reaches every folder the call names. The book count in the
+  dialog describes that set, not the whole subtree under the folder above.
+- A watched folder left behind by a steer is the ordinary case now, so the
+  re-registration the watcher does for a surviving subfolder is on the main
+  path rather than an edge.
+- Unwatching a folder that has watched folders inside it still offers the
+  cascade, and that cascade does take the whole subtree at any depth.
 - ADR 0007's "importing a folder watches it" still holds; this ADR only
   constrains the way back out.

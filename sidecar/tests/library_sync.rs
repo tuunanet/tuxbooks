@@ -992,6 +992,80 @@ async fn unwatching_with_cascade_takes_every_watched_folder_underneath() {
     );
 }
 
+/// The steer's call shape, at the sidecar: the user unwatches one subfolder,
+/// so the dialog sends that folder *and* the watched folder above it, with no
+/// cascade. The sibling beside them was never selected and keeps its own watch
+/// (bd tuxbooks-yof, found in UAT).
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_child_and_its_parent_leaves_a_sibling_watched() {
+    let env = setup().await;
+    let child = env.library.join("child");
+    let sibling = env.library.join("sibling");
+    for folder in [&child, &sibling] {
+        std::fs::create_dir_all(folder).unwrap();
+        library_locations::add_location(&env.pool, &folder.to_string_lossy())
+            .await
+            .unwrap();
+        env.watcher.watch(folder);
+    }
+
+    let child_file = child.join("child-book.epub");
+    write_epub(&child_file, "Child Book");
+    let sibling_file = sibling.join("sibling-book.epub");
+    write_epub(&sibling_file, "Sibling Book");
+    env.write_book("parent-book.epub", "Parent Book");
+    // Let every straggler flush while the locations still stand, so the
+    // unwatch below is not racing an in-flight batch (bd tuxbooks-crn).
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // What the dialog sends after the user confirms the steer.
+    let root = env.library.to_string_lossy().into_owned();
+    let child_path = child.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[child_path.as_str(), root.as_str()]).await, 2);
+
+    // The sibling keeps its row and its books...
+    let titles = || {
+        let pool = env.pool.clone();
+        async move {
+            book_repo::list_books(&pool)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|book| book.title)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(titles().await, vec!["Sibling Book".to_string()]);
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![sibling.to_string_lossy().into_owned()]
+    );
+
+    // ...and keeps syncing, since notify's recursive unwatch on the parent
+    // took its watch down and the unwatch put it back.
+    write_epub(&sibling.join("second.epub"), "Second Sibling Book");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if titles().await.contains(&"Second Sibling Book".to_string()) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the sibling stopped syncing");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Nothing under the removed folders reaches the catalog again: the parent
+    // is gone, so no watch covers the child's files.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    write_epub(&child.join("late.epub"), "Late Book");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let after = titles().await;
+    assert!(
+        !after.contains(&"Late Book".to_string()),
+        "the unwatched child must stay quiet, got {after:?}"
+    );
+    assert!(child_file.exists() && sibling_file.exists());
+}
+
 /// The mirror case: the parent's row goes, the subfolder's row survives, so
 /// the subfolder's books survive with it even though they sit under the
 /// prefix that was just removed.

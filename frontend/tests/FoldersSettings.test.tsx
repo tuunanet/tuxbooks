@@ -178,6 +178,39 @@ function nestedReport(): StorageReport {
   };
 }
 
+/** `/books` with two watched folders inside it: `/books/a` and `/books/b`. */
+function siblingReport(): StorageReport {
+  return {
+    ...REPORT,
+    bookLocations: [
+      {
+        id: 1,
+        path: "/books",
+        addedAt: "2026-01-01T00:00:00.000Z",
+        bookCount: 6,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+      {
+        id: 2,
+        path: "/books/a",
+        addedAt: "2026-01-02T00:00:00.000Z",
+        bookCount: 4,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+      {
+        id: 3,
+        path: "/books/b",
+        addedAt: "2026-01-03T00:00:00.000Z",
+        bookCount: 5,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+    ],
+  };
+}
+
 describe("FoldersSettings unwatch", () => {
   beforeEach(() => {
     storageReportMock.mockReset();
@@ -290,7 +323,42 @@ describe("FoldersSettings unwatch", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
         paths: ["/books/a", "/books"],
-        cascade: true,
+        cascade: false,
+      }),
+    );
+  });
+
+  it("spares the sibling folders when it takes the one above", async () => {
+    storageReportMock.mockResolvedValue(siblingReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    // `/books/a` sits inside the watched `/books`, and `/books/b` is a
+    // watched folder beside it that was never selected. Taking `/books` is
+    // what keeps `/books/a` out, but nothing about that forces `/books/b`
+    // to go: its own watch survives a parent leaving the list.
+    await userEvent.click(screen.getByTestId("folder-select-2"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(dialog).toHaveTextContent("Unwatch 2 folders?");
+    const names = within(dialog).getByTestId("unwatch-names");
+    expect(
+      within(names)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["/books", "/books/a"]);
+
+    // Only the parent's own books are the extra cost, not the sibling's five.
+    expect(dialog).toHaveTextContent("1 more folder and 6 more books");
+    expect(dialog).toHaveTextContent("The 10 books in these folders are removed");
+
+    // No cascade: the sibling must stay a watched folder of its own.
+    await userEvent.click(within(dialog).getByTestId("unwatch-confirm"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/books/a", "/books"],
+        cascade: false,
       }),
     );
   });
