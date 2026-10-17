@@ -63,19 +63,25 @@ function planUnwatch(locations: FolderRow[], chosen: FolderRow[], cascade = fals
     .filter((location) => chosenPaths.some((root) => isUnder(location.path, root)))
     .map((location) => location.path);
 
+  // What the plan adds to the selection: the folders above it, or the ones
+  // inside it. Expanding the folder list by subtree is what a steer or a
+  // cascade does; without one, the folders are exactly the ones ticked.
+  const added = (kind: UnwatchPlan["kind"], cascade: boolean): string[] => {
+    if (kind === "steer") return [...ancestors];
+    return cascade ? inside : [];
+  };
+
   const plan = (kind: UnwatchPlan["kind"], cascade: boolean): UnwatchPlan => {
-    // Expanding by subtree is what a steer or a cascade does; without one,
-    // the folders are exactly the ones the user ticked.
-    const expand = kind === "steer" || cascade;
-    const roots = [...chosenPaths, ...(kind === "steer" ? ancestors : cascade ? inside : [])];
+    const roots = [...chosenPaths, ...added(kind, cascade)];
     return {
       kind,
       ancestors: [...ancestors],
       inside,
       cascade,
-      folders: expand
-        ? locations.filter((location) => roots.some((root) => isUnder(location.path, root)))
-        : chosen,
+      folders:
+        kind === "steer" || cascade
+          ? locations.filter((location) => roots.some((root) => isUnder(location.path, root)))
+          : chosen,
       paths: kind === "steer" ? [...chosenPaths, ...ancestors] : chosenPaths,
       extraFolders: 0,
       extraBooks: 0,

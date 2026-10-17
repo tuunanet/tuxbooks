@@ -67,6 +67,81 @@ function steerWording(plan: UnwatchPlan): string {
   );
 }
 
+function confirmLabelFor(plan: UnwatchPlan): string {
+  if (plan.kind === "steer") {
+    return plan.ancestors.length === 1 ? `Unwatch ${plan.ancestors[0]} too` : "Unwatch those too";
+  }
+  return plan.folders.length > 1 ? `Unwatch ${plan.folders.length} Folders` : "Unwatch";
+}
+
+function titleFor(folders: FolderRow[]): string {
+  return folders.length > 1
+    ? `Unwatch ${folders.length} folders?`
+    : `Unwatch ${folders[0]?.path ?? ""}?`;
+}
+
+/** The loss statement: what this unwatch takes, which is the whole plan. */
+function bodyFor(folders: FolderRow[], books: number): string {
+  if (books === 0)
+    return `No books live in ${folders.length > 1 ? "these folders" : "this folder"}.`;
+  const one = books === 1;
+  const scope = folders.length > 1 ? "these folders" : "this folder";
+  return `The ${books} ${one ? "book" : "books"} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
+}
+
+/** Why the folder above has to go with this one (ADR 0010). */
+function SteerNotice({ plan }: { plan: UnwatchPlan }) {
+  return (
+    <p data-testid="unwatch-steer" className="text-xs text-muted-foreground">
+      {steerWording(plan)}
+    </p>
+  );
+}
+
+/** The choice about the watched folders inside the selection. */
+function CascadeChoice({
+  plan,
+  onChange,
+}: {
+  plan: UnwatchPlan;
+  onChange: (plan: UnwatchPlan) => void;
+}) {
+  const inside = plan.inside.length;
+  return (
+    <div data-testid="unwatch-ask" className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        {inside === 1
+          ? "A folder inside is watched on its own and keeps syncing without this one. Unwatch it too?"
+          : `${inside} folders inside are watched on their own and keep syncing without these. Unwatch them too?`}
+      </p>
+      <ToggleGroup
+        type="single"
+        size="sm"
+        variant="outline"
+        value={plan.cascade ? "yes" : "no"}
+        onValueChange={(next) => {
+          if (next) onChange({ ...plan, cascade: next === "yes" });
+        }}
+      >
+        <ToggleGroupItem
+          data-testid="unwatch-keep-inside"
+          value="no"
+          aria-label="Keep the folders inside watched"
+        >
+          No, keep them watched
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          data-testid="unwatch-drop-inside"
+          value="yes"
+          aria-label="Unwatch the folders inside too"
+        >
+          Yes, unwatch them too
+        </ToggleGroupItem>
+      </ToggleGroup>
+    </div>
+  );
+}
+
 export function UnwatchFoldersDialog({
   open,
   plan,
@@ -77,25 +152,6 @@ export function UnwatchFoldersDialog({
 }: UnwatchFoldersDialogProps) {
   const several = plan.folders.length > 1;
   const books = plan.folders.reduce((total, folder) => total + folder.bookCount, 0);
-  const title = several
-    ? `Unwatch ${plan.folders.length} folders?`
-    : `Unwatch ${plan.folders[0]?.path ?? ""}?`;
-  const scope = several ? "these folders" : "this folder";
-  const one = books === 1;
-  const noun = one ? "book" : "books";
-  const body =
-    books === 0
-      ? `No books live in ${scope}.`
-      : `The ${books} ${noun} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
-
-  const confirmLabel =
-    plan.kind === "steer" && plan.ancestors.length === 1
-      ? `Unwatch ${plan.ancestors[0]} too`
-      : plan.kind === "steer"
-        ? "Unwatch those too"
-        : several
-          ? `Unwatch ${plan.folders.length} Folders`
-          : "Unwatch";
 
   return (
     <Dialog
@@ -106,8 +162,8 @@ export function UnwatchFoldersDialog({
     >
       <DialogContent data-testid="unwatch-dialog" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{`${body} Your files on disk stay untouched.`}</DialogDescription>
+          <DialogTitle>{titleFor(plan.folders)}</DialogTitle>
+          <DialogDescription>{`${bodyFor(plan.folders, books)} Your files on disk stay untouched.`}</DialogDescription>
         </DialogHeader>
 
         {several && (
@@ -129,45 +185,8 @@ export function UnwatchFoldersDialog({
           </p>
         )}
 
-        {plan.kind === "steer" && (
-          <p data-testid="unwatch-steer" className="text-xs text-muted-foreground">
-            {steerWording(plan)}
-          </p>
-        )}
-
-        {plan.kind === "ask" && (
-          <div data-testid="unwatch-ask" className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              {plan.inside.length === 1
-                ? "A folder inside is watched on its own and keeps syncing without this one. Unwatch it too?"
-                : `${plan.inside.length} folders inside are watched on their own and keep syncing without these. Unwatch them too?`}
-            </p>
-            <ToggleGroup
-              type="single"
-              size="sm"
-              variant="outline"
-              value={plan.cascade ? "yes" : "no"}
-              onValueChange={(next) => {
-                if (next) onPlanChange({ ...plan, cascade: next === "yes" });
-              }}
-            >
-              <ToggleGroupItem
-                data-testid="unwatch-keep-inside"
-                value="no"
-                aria-label="Keep the folders inside watched"
-              >
-                No, keep them watched
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                data-testid="unwatch-drop-inside"
-                value="yes"
-                aria-label="Unwatch the folders inside too"
-              >
-                Yes, unwatch them too
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-        )}
+        {plan.kind === "steer" && <SteerNotice plan={plan} />}
+        {plan.kind === "ask" && <CascadeChoice plan={plan} onChange={onPlanChange} />}
 
         <DialogFooter>
           <Button
@@ -188,7 +207,7 @@ export function UnwatchFoldersDialog({
             disabled={busy}
             onClick={onConfirm}
           >
-            {confirmLabel}
+            {confirmLabelFor(plan)}
           </Button>
         </DialogFooter>
       </DialogContent>
