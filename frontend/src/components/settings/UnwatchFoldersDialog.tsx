@@ -7,37 +7,59 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-/** How many folder names the dialog spells out before it overflows. */
 const MAX_LISTED = 3;
 
-/** One folder on its way out of the watch list. */
-interface UnwatchTarget {
-  path: string;
-  bookCount: number;
-}
+/**
+ * What the unwatch will actually remove, and what the dialog has to say
+ * about it (ADR 0010). The watch list is the library: a watched folder owns
+ * its whole subtree, so a folder sitting inside one that stays watched has
+ * no unwatch of its own — the parent would bring its books straight back.
+ * The dialog answers that with the move that works (take the watched folder
+ * above), never with hidden state the user cannot see or undo.
+ */
+export type UnwatchPlan =
+  /** Nothing nested: the selection is the whole story. */
+  | { kind: "plain" }
+  /** A watched folder above the selection has to go too. */
+  | { kind: "steer"; ancestors: string[]; extraFolders: number; extraBooks: number }
+  /** Watched folders inside the selection can stay or go with it. */
+  | { kind: "ask"; inside: string[]; cascade: boolean };
 
-interface UnwatchFoldersDialogProps {
+export interface UnwatchFoldersDialogProps {
   open: boolean;
-  folders: UnwatchTarget[];
+  /** Every folder this unwatch removes: the selection plus whatever the plan adds. */
+  folders: { path: string; bookCount: number }[];
+  plan: UnwatchPlan;
+  onPlanChange?: (plan: UnwatchPlan) => void;
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
 }
 
-/**
- * The single confirmation in front of Unwatch, and the only outcome there
- * is: the folders leave the watch list and every book they own leaves the
- * catalog with them, so the copy says exactly that — how many books go,
- * that their reading progress and annotations go with them, and that the
- * files on disk stay untouched. It names what is affected (one folder by
- * name, several as a count plus a list that overflows). A folder with no
- * books has nothing to lose, so that case keeps its own copy. Cancel (or
- * Escape) closes it and does nothing else.
- */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function steerWording(plan: Extract<UnwatchPlan, { kind: "steer" }>): string {
+  const above =
+    plan.ancestors.length === 1
+      ? `the watched folder ${plan.ancestors[0]}`
+      : `${plan.ancestors.length} watched folders above them`;
+  return (
+    `${above} still watches everything under it, so these books would come ` +
+    `back the next time a file there changes. Unwatching them goes further: ` +
+    `${plural(plan.extraFolders, "more folder")} and ` +
+    `${plural(plan.extraBooks, "more book")}.`
+  );
+}
+
 export function UnwatchFoldersDialog({
   open,
   folders,
+  plan,
+  onPlanChange,
   onConfirm,
   onCancel,
   busy = false,
@@ -54,6 +76,15 @@ export function UnwatchFoldersDialog({
     books === 0
       ? `No books live in ${scope}.`
       : `The ${books} ${noun} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
+
+  const confirmLabel =
+    plan.kind === "steer" && plan.ancestors.length === 1
+      ? `Unwatch ${plan.ancestors[0]} too`
+      : plan.kind === "steer"
+        ? "Unwatch those too"
+        : several
+          ? `Unwatch ${folders.length} Folders`
+          : "Unwatch";
 
   return (
     <Dialog
@@ -87,6 +118,46 @@ export function UnwatchFoldersDialog({
           </p>
         )}
 
+        {plan.kind === "steer" && (
+          <p data-testid="unwatch-steer" className="text-xs text-muted-foreground">
+            {steerWording(plan)}
+          </p>
+        )}
+
+        {plan.kind === "ask" && onPlanChange && (
+          <div data-testid="unwatch-ask" className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {plan.inside.length === 1
+                ? "A folder inside is watched on its own and keeps syncing without this one. Unwatch it too?"
+                : `${plan.inside.length} folders inside are watched on their own and keep syncing without these. Unwatch them too?`}
+            </p>
+            <ToggleGroup
+              type="single"
+              size="sm"
+              variant="outline"
+              value={plan.cascade ? "yes" : "no"}
+              onValueChange={(next) => {
+                if (next) onPlanChange({ ...plan, cascade: next === "yes" });
+              }}
+            >
+              <ToggleGroupItem
+                data-testid="unwatch-keep-inside"
+                value="no"
+                aria-label="Keep the folders inside watched"
+              >
+                No, keep them watched
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                data-testid="unwatch-drop-inside"
+                value="yes"
+                aria-label="Unwatch the folders inside too"
+              >
+                Yes, unwatch them too
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
+
         <DialogFooter>
           <Button
             type="button"
@@ -106,7 +177,7 @@ export function UnwatchFoldersDialog({
             disabled={busy}
             onClick={onConfirm}
           >
-            {several ? `Unwatch ${folders.length} Folders` : "Unwatch"}
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

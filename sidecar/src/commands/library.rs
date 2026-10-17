@@ -263,10 +263,19 @@ async fn register_and_watch(
 /// the existing `library-changed` event so the library view updates
 /// without a restart. Files on disk are never touched. Returns how many
 /// folders were actually listed.
+///
+/// `cascade` takes every watched folder at or under each path with it, at
+/// any depth. A folder sitting inside a *staying* watched folder is refused
+/// either way: the parent's recursive watch still covers its files, so the
+/// books this unwatch purges would come back on the next modify, now as a
+/// parent-owned row with the id, the progress, and the annotations gone
+/// (ADR 0010, bd tuxbooks-yof). The refusal names the folder that has to go
+/// instead, which is exactly what the unwatch dialog offers.
 pub async fn unwatch_locations(
     state: &AppState,
     events: &EventEmitter,
     paths: Vec<String>,
+    cascade: bool,
 ) -> Result<usize, AppError> {
     let mut roots = Vec::with_capacity(paths.len());
     for raw in &paths {
@@ -275,6 +284,41 @@ pub async fn unwatch_locations(
             return Err(AppError::InvalidInput("folder path is empty".into()));
         }
         roots.push(path.to_string());
+    }
+
+    // Read once, while every row still stands: both the cascade and the
+    // refusal below reason about the watch list as the user sees it.
+    let registered = library_locations::list_locations(&state.db).await?;
+
+    if cascade {
+        let inside: Vec<String> = registered
+            .iter()
+            .filter(|candidate| {
+                roots
+                    .iter()
+                    .any(|root| library_locations::is_under(candidate, root))
+            })
+            .cloned()
+            .collect();
+        for candidate in inside {
+            if !roots.contains(&candidate) {
+                roots.push(candidate);
+            }
+        }
+    }
+
+    for root in &roots {
+        let ancestor = registered
+            .iter()
+            .find(|candidate| **candidate != *root && library_locations::is_under(root, candidate));
+        if let Some(ancestor) = ancestor {
+            if !roots.iter().any(|kept| kept == ancestor) {
+                return Err(AppError::InvalidInput(format!(
+                    "{root} is inside the watched folder {ancestor}, which still watches \
+                     everything under it; unwatch {ancestor} instead"
+                )));
+            }
+        }
     }
 
     // Which books these folders own has to be settled before any row goes:
@@ -288,11 +332,15 @@ pub async fn unwatch_locations(
         }
     }
 
+    // Stop the taps first: a row left behind is visible and retryable, a
+    // watch left behind would keep syncing a folder the user just left. The
+    // whole set goes as one operation so a cascaded subfolder is not
+    // re-registered on its way out.
+    let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
+    state.watcher.unwatch_all(&dying);
+
     let mut removed = 0usize;
     for path in &roots {
-        // Stop the taps first: a row left behind is visible and retryable,
-        // a watch left behind would keep syncing a folder the user just left.
-        state.watcher.unwatch(Path::new(path));
         if !library_locations::remove_location(&state.db, path).await? {
             continue;
         }
