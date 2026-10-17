@@ -214,6 +214,90 @@ test.describe("tuxbooks filesystem synchronization", () => {
     rmSync(shelf, { recursive: true, force: true });
   });
 
+  test("unwatching a folder inside a watched one steers to the folder above", async ({ page }) => {
+    // Two watched folders, one inside the other, both outside the seeded
+    // library so the suites that follow still find it intact.
+    const parent = path.join(scratchDir, "ghost-parent");
+    const child = path.join(parent, "child");
+    const childBook = path.join(child, "ghost-book.epub");
+    mkdirSync(child, { recursive: true });
+    copyFileSync(epubFixture, childBook);
+    const before = readFileSync(childBook);
+
+    // A watched folder beside the child, never selected. Unwatching the
+    // child takes the parent (the folder whose watch covers it), but nothing
+    // about that forces the sibling out: its own watch survives.
+    const sibling = path.join(parent, "sibling");
+    mkdirSync(sibling, { recursive: true });
+    copyFileSync(epubFixture, path.join(sibling, "sibling-book.epub"));
+
+    for (const dir of [parent, child, sibling]) {
+      const report = (await page.evaluate(
+        (folder) => window.tuxbooks!.invoke("import_paths", { paths: [folder] }),
+        dir,
+      )) as { failed: unknown[] };
+      expect(report.failed).toEqual([]);
+    }
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByRole("button", { name: "Folders" }).click();
+    const list = page.getByTestId("folders-list");
+    const childRow = list.locator("li", { hasText: child });
+    await expect(childRow).toBeVisible();
+    await childRow.getByRole("checkbox", { name: `Select ${child}` }).click();
+    await page.getByTestId("folders-unwatch").click();
+
+    // The dialog refuses to leave a hole: `child` sits inside the watched
+    // `parent`, so unwatching it alone would let the parent's recursive
+    // watch bring its books straight back as parent-owned rows. It names
+    // the parent as the folder that has to go, and names only the two.
+    const dialog = page.getByTestId("unwatch-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("unwatch-steer")).toContainText(parent);
+    await expect(dialog.getByTestId("unwatch-names")).not.toContainText(sibling);
+    await expect(dialog.getByTestId("unwatch-confirm")).toHaveText(`Unwatch ${parent} too`);
+    await page.getByTestId("unwatch-confirm").click();
+
+    // The child and its parent leave the watch list. Matched on the row's
+    // own label: a path filter would also hit the sibling, whose path
+    // begins with the parent's.
+    const selectBox = (folder: string) => page.getByRole("checkbox", { name: `Select ${folder}` });
+    await expect(selectBox(child)).toHaveCount(0);
+    await expect(selectBox(parent)).toHaveCount(0);
+
+    // ...the sibling stays a watched folder, still listed...
+    await expect(selectBox(sibling)).toBeVisible();
+
+    // ...and its book stays in the library while the child's leaves.
+    await page.getByRole("button", { name: "All Books" }).click();
+    await expect(page.getByTestId("library-view")).toBeVisible();
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the unwatched folders' books never left the library",
+      })
+      .toBe(seededLibraryBookCount + 1);
+    expect(readFileSync(childBook).equals(before)).toBe(true);
+
+    // The sibling keeps syncing: a new file under it arrives.
+    copyFileSync(epubFixture, path.join(sibling, "sibling-late.epub"));
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the sibling stopped syncing after its parent was unwatched",
+      })
+      .toBe(seededLibraryBookCount + 2);
+
+    // The ghost stays dead. A fresh file under the old child is covered by
+    // no watch at all, so nothing re-imports it.
+    copyFileSync(epubFixture, path.join(child, "late.epub"));
+    await page.waitForTimeout(3000);
+    expect(await cardCount(page)).toBe(seededLibraryBookCount + 2);
+
+    rmSync(parent, { recursive: true, force: true });
+  });
+
   test("leaves the seeded library intact for the other suites", async ({ page }) => {
     const allText = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]"))

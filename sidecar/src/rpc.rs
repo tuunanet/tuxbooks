@@ -153,6 +153,15 @@ struct PathsArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UnwatchArgs {
+    paths: Vec<String>,
+    /// Take every watched folder at or under each path with it (ADR 0010).
+    #[serde(default)]
+    cascade: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct NameArgs {
     name: String,
 }
@@ -238,11 +247,9 @@ async fn dispatch(
             )))
         }
         "unwatch_locations" => {
-            // Paths only: unwatching always purges the folders' books, so
-            // there is no keep/remove choice to pass.
-            let p: PathsArgs = parse_params(params)?;
+            let p: UnwatchArgs = parse_params(params)?;
             Ok(call!(commands::library::unwatch_locations(
-                state, events, p.paths
+                state, events, p.paths, p.cascade
             )))
         }
         "reconnect_book" => {

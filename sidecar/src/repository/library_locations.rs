@@ -41,6 +41,17 @@ pub async fn add_location(pool: &SqlitePool, path: &str) -> Result<bool, AppErro
     Ok(result.rows_affected() > 0)
 }
 
+/// True when `book_path` is `root` or lies under it. The split is on a path
+/// separator, so a sibling directory with a shared string prefix (`/libx`
+/// against `/lib`) is never under the root. This is the separator rule
+/// [`owning_location`] walks, spelled as a predicate.
+pub fn is_under(path: &str, root: &str) -> bool {
+    path == root
+        || (path.len() > root.len()
+            && path.starts_with(root)
+            && path.as_bytes().get(root.len()) == Some(&b'/'))
+}
+
 /// Drop a watched filesystem root from the watch list. Returns true when a
 /// row went away; unwatching something that was never listed changes nothing.
 pub async fn remove_location(pool: &SqlitePool, path: &str) -> Result<bool, AppError> {
@@ -62,6 +73,19 @@ pub async fn list_locations(pool: &SqlitePool) -> Result<Vec<String>, AppError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_under_splits_on_separators_only() {
+        assert!(is_under("/lib", "/lib"));
+        assert!(is_under("/lib/a.epub", "/lib"));
+        assert!(is_under("/lib/sub/deep.epub", "/lib"));
+
+        // The sibling-prefix guard, same rule as `owning_location`: a shared
+        // string prefix is not an ancestor.
+        assert!(!is_under("/libx/c.epub", "/lib"));
+        assert!(!is_under("/lib_sub/d.epub", "/lib"));
+        assert!(!is_under("/other.epub", "/lib"));
+    }
 
     #[tokio::test]
     async fn add_location_is_idempotent_and_ordered() {

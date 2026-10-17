@@ -120,8 +120,8 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
  * annotations go with the row, files on disk are never touched. Returns
  * how many folders were actually listed.
  */
-export function unwatchLocations(paths: string[]): Promise<number> {
-  return invoke("unwatch_locations", { paths });
+export function unwatchLocations(paths: string[], cascade = false): Promise<number> {
+  return invoke("unwatch_locations", { paths, cascade });
 }
 
 /**

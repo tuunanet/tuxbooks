@@ -99,7 +99,8 @@ _Avoid_: library location, book folder
 
 **Unwatch**:
 Removing a watched folder from the watch list. Its files stay on disk and its
-books are removed from the catalog.
+books are removed from the catalog. A watched folder inside another watched
+folder cannot be unwatched on its own — the folder above it goes too.
 _Avoid_: remove folder, stop tracking
 
 ## Verification

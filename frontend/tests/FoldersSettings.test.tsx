@@ -153,6 +153,64 @@ function manyFolders(count: number): StorageReport {
   return { ...REPORT, bookLocations };
 }
 
+/** A watched folder with a watched folder inside it: `/books` and `/books/a`. */
+function nestedReport(): StorageReport {
+  return {
+    ...REPORT,
+    bookLocations: [
+      {
+        id: 1,
+        path: "/books",
+        addedAt: "2026-01-01T00:00:00.000Z",
+        bookCount: 10,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+      {
+        id: 2,
+        path: "/books/a",
+        addedAt: "2026-01-02T00:00:00.000Z",
+        bookCount: 4,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+    ],
+  };
+}
+
+/** `/books` with two watched folders inside it: `/books/a` and `/books/b`. */
+function siblingReport(): StorageReport {
+  return {
+    ...REPORT,
+    bookLocations: [
+      {
+        id: 1,
+        path: "/books",
+        addedAt: "2026-01-01T00:00:00.000Z",
+        bookCount: 6,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+      {
+        id: 2,
+        path: "/books/a",
+        addedAt: "2026-01-02T00:00:00.000Z",
+        bookCount: 4,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+      {
+        id: 3,
+        path: "/books/b",
+        addedAt: "2026-01-03T00:00:00.000Z",
+        bookCount: 5,
+        totalBytes: 1024 * 1024,
+        missingFromDisk: false,
+      },
+    ],
+  };
+}
+
 describe("FoldersSettings unwatch", () => {
   beforeEach(() => {
     storageReportMock.mockReset();
@@ -242,6 +300,132 @@ describe("FoldersSettings unwatch", () => {
     expect(dialog).toHaveTextContent("Unwatch 5 Folders");
   });
 
+  it("steers to the watched folder above instead of leaving a hole", async () => {
+    storageReportMock.mockResolvedValue(nestedReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    // `/books/a` sits inside the watched `/books`: unwatching it alone would
+    // leave the parent's recursive watch to bring its books straight back.
+    await userEvent.click(screen.getByTestId("folder-select-2"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(within(dialog).queryByTestId("unwatch-ask")).toBeNull();
+    expect(dialog).toHaveTextContent("the watched folder /books still watches everything under it");
+    expect(dialog).toHaveTextContent("1 more folder and 10 more books");
+
+    // The promise covers the whole operation, not just the selection.
+    expect(dialog).toHaveTextContent("The 14 books in these folders are removed");
+    expect(within(dialog).getByTestId("unwatch-confirm")).toHaveTextContent("Unwatch /books too");
+
+    await userEvent.click(within(dialog).getByTestId("unwatch-confirm"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/books/a", "/books"],
+        cascade: false,
+      }),
+    );
+  });
+
+  it("spares the sibling folders when it takes the one above", async () => {
+    storageReportMock.mockResolvedValue(siblingReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    // `/books/a` sits inside the watched `/books`, and `/books/b` is a
+    // watched folder beside it that was never selected. Taking `/books` is
+    // what keeps `/books/a` out, but nothing about that forces `/books/b`
+    // to go: its own watch survives a parent leaving the list.
+    await userEvent.click(screen.getByTestId("folder-select-2"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(dialog).toHaveTextContent("Unwatch 2 folders?");
+    const names = within(dialog).getByTestId("unwatch-names");
+    expect(
+      within(names)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["/books", "/books/a"]);
+
+    // Only the parent's own books are the extra cost, not the sibling's five.
+    expect(dialog).toHaveTextContent("1 more folder and 6 more books");
+    expect(dialog).toHaveTextContent("The 10 books in these folders are removed");
+
+    // No cascade: the sibling must stay a watched folder of its own.
+    await userEvent.click(within(dialog).getByTestId("unwatch-confirm"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/books/a", "/books"],
+        cascade: false,
+      }),
+    );
+  });
+
+  it("asks about the folders inside, keeping them watched by default", async () => {
+    storageReportMock.mockResolvedValue(nestedReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    // Unwatching `/books` leaves `/books/a` a watched folder of its own.
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(within(dialog).queryByTestId("unwatch-steer")).toBeNull();
+    expect(dialog).toHaveTextContent("A folder inside is watched on its own and keeps syncing");
+    expect(within(dialog).getByTestId("unwatch-keep-inside")).toBeChecked();
+
+    // The default removes only what was named.
+    expect(dialog).toHaveTextContent("The 10 books in this folder are removed");
+    await userEvent.click(within(dialog).getByTestId("unwatch-confirm"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/books"],
+        cascade: false,
+      }),
+    );
+  });
+
+  it("takes the folders inside when the user asks for the cascade", async () => {
+    storageReportMock.mockResolvedValue(nestedReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    await userEvent.click(within(dialog).getByTestId("unwatch-drop-inside"));
+
+    // The book count follows the choice: the dialog never promises fewer
+    // books than the operation removes.
+    expect(dialog).toHaveTextContent("The 14 books in these folders are removed");
+    await userEvent.click(within(dialog).getByTestId("unwatch-confirm"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
+        paths: ["/books"],
+        cascade: true,
+      }),
+    );
+  });
+
+  it("asks nothing when the nested folder is being unwatched anyway", async () => {
+    storageReportMock.mockResolvedValue(nestedReport());
+    renderFolders();
+    await screen.findByTestId("folders-list");
+
+    // Both go together, so there is no folder left behind to ask about.
+    await userEvent.click(screen.getByTestId("folders-select-all"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+
+    const dialog = await screen.findByTestId("unwatch-dialog");
+    expect(within(dialog).queryByTestId("unwatch-ask")).toBeNull();
+    expect(within(dialog).queryByTestId("unwatch-steer")).toBeNull();
+    expect(dialog).toHaveTextContent("The 14 books in these folders are removed");
+  });
+
   it("unwatches the selection and re-reads the folder list", async () => {
     renderFolders();
     await screen.findByTestId("folders-list");
@@ -259,6 +443,7 @@ describe("FoldersSettings unwatch", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
         paths: ["/home/u/Books"],
+        cascade: false,
       }),
     );
     await waitFor(() => {
@@ -303,7 +488,7 @@ describe("FoldersSettings unwatch", () => {
     expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
     expect(storageReportMock).toHaveBeenCalledTimes(1);
   });
-  it("sends only the paths: the command carries no keep/remove choice", async () => {
+  it("sends the paths and the scope, never a keep/remove choice", async () => {
     renderFolders();
     await screen.findByTestId("folders-list");
 
@@ -312,9 +497,12 @@ describe("FoldersSettings unwatch", () => {
     await screen.findByTestId("unwatch-dialog");
 
     await userEvent.click(screen.getByTestId("unwatch-confirm"));
+    // `cascade` is a scope choice (does a watched folder inside go too?),
+    // not the keep/remove choice ADR 0008 retired: the books always go.
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
         paths: ["/home/u/Books"],
+        cascade: false,
       }),
     );
   });
