@@ -40,16 +40,18 @@ pub struct WatcherConfig {
 /// Handle to the running watcher. Dropping it stops event delivery and winds
 /// the reconciler thread down once its event channel disconnects.
 pub struct LibraryWatcher {
-    inner: Mutex<WatcherHandle>,
+    inner: Mutex<Option<WatcherHandle>>,
 }
 
 /// The notify watcher plus the roots the app asked for. The root set is what
 /// lets a nested location survive its parent's [`LibraryWatcher::unwatch`]:
 /// notify drops every watch under a path, including one a subfolder
-/// registered for itself.
+/// registered for itself. The reconciler thread is owned here so dropping
+/// the watcher can join it before the runtime it borrows goes away.
 struct WatcherHandle {
     watcher: notify::RecommendedWatcher,
     roots: HashSet<PathBuf>,
+    thread: std::thread::JoinHandle<()>,
 }
 
 impl std::fmt::Debug for LibraryWatcher {
@@ -74,15 +76,16 @@ impl LibraryWatcher {
 
         let reconciler = config.reconciler;
         let debounce = config.debounce;
-        spawn_thread("library-reconciler", move || {
+        let thread = spawn_thread("library-reconciler", move || {
             run_reconciler_loop(event_rx, reconciler, debounce);
         })?;
 
         Ok(Self {
-            inner: Mutex::new(WatcherHandle {
+            inner: Mutex::new(Some(WatcherHandle {
                 watcher: inner,
                 roots: HashSet::new(),
-            }),
+                thread,
+            })),
         })
     }
 
@@ -90,7 +93,8 @@ impl LibraryWatcher {
     /// registered — subsequent filesystem changes on `root` are observed.
     /// Safe to call repeatedly for the same root.
     pub fn watch(&self, root: &Path) {
-        let mut handle = self.inner.lock().expect("watcher mutex poisoned");
+        let mut slot = self.inner.lock().expect("watcher mutex poisoned");
+        let handle = slot.as_mut().expect("watcher already dropped");
         handle.roots.insert(root.to_path_buf());
         register(&mut handle.watcher, root);
     }
@@ -102,7 +106,8 @@ impl LibraryWatcher {
     /// them down with the parent, but they are separate watched folders and
     /// must keep syncing on their own.
     pub fn unwatch(&self, root: &Path) {
-        let mut handle = self.inner.lock().expect("watcher mutex poisoned");
+        let mut slot = self.inner.lock().expect("watcher mutex poisoned");
+        let handle = slot.as_mut().expect("watcher already dropped");
         handle.roots.remove(root);
         let nested: Vec<PathBuf> = handle
             .roots
@@ -120,6 +125,27 @@ impl LibraryWatcher {
     }
 }
 
+impl Drop for LibraryWatcher {
+    fn drop(&mut self) {
+        // Take the handle out first: dropping it drops the notify watcher,
+        // which drops the event sender, which makes the reconciler loop
+        // return on Disconnected. The join then guarantees the thread is
+        // gone before the runtime it calls block_on on shuts down — without
+        // it the thread can wake into "A Tokio 1.x context is being
+        // shutdown" while the test runtime tears down (bd tuxbooks-crn).
+        let slot = self.inner.lock().expect("watcher mutex poisoned").take();
+        if let Some(WatcherHandle {
+            watcher,
+            roots: _,
+            thread,
+        }) = slot
+        {
+            drop(watcher);
+            let _ = thread.join();
+        }
+    }
+}
+
 fn register(watcher: &mut notify::RecommendedWatcher, root: &Path) {
     if let Err(err) = watcher.watch(root, notify::RecursiveMode::Recursive) {
         eprintln!("watcher: cannot watch {}: {err}", root.display());
@@ -130,12 +156,14 @@ fn io_error(err: notify::Error) -> std::io::Error {
     std::io::Error::other(err.to_string())
 }
 
-fn spawn_thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), AppError> {
+fn spawn_thread(
+    name: &str,
+    body: impl FnOnce() + Send + 'static,
+) -> Result<std::thread::JoinHandle<()>, AppError> {
     std::thread::Builder::new()
         .name(name.into())
         .spawn(body)
-        .map_err(|err| AppError::Io(std::io::Error::other(err.to_string())))?;
-    Ok(())
+        .map_err(|err| AppError::Io(std::io::Error::other(err.to_string())))
 }
 
 fn run_reconciler_loop(

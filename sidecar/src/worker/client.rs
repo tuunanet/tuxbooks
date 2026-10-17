@@ -680,9 +680,18 @@ mod tests {
         let path = dir.path().join("doc.bin");
         std::fs::write(&path, b"x").unwrap();
         let (_sdir, client) = client_with("head -c 3000000000 /dev/zero | tr '\\0' 'x'");
-        let err = client
-            .run(&self_test_job(ResourceLimits::DEFAULTS), &path)
-            .unwrap_err();
+        // The cap is 2 GiB and the reader has to stream all of it before
+        // the cap can trip, while `tr` burns a core transforming every
+        // byte. Under the parallel gate's load the DEFAULTS budget (31s)
+        // expired first and the deadline beat the cap three runs in a row
+        // (bd tuxbooks-6r2). This assertion is about the cap, so the job
+        // gets 4x headroom: a healthy cap still fails fast (SIGPIPE at
+        // 2 GiB), a broken one fails bounded at 121s instead of passing.
+        let limits = ResourceLimits {
+            max_parse_seconds: 120,
+            ..ResourceLimits::DEFAULTS
+        };
+        let err = client.run(&self_test_job(limits), &path).unwrap_err();
         assert!(matches!(err, WorkerError::Protocol(_)), "got: {err:?}");
     }
 

@@ -112,7 +112,35 @@ impl Reconciler {
     /// Apply a debounced batch of filesystem changes. Runs on the watcher
     /// thread; each change is independent and safe to process in any order.
     pub async fn apply(&self, changes: Vec<PathChange>) {
+        // A queued batch can outlive the location it came from: the user
+        // unwatchs a folder while its debounce is still in flight, and the
+        // trailing modify would re-import the very books the unwatch just
+        // purged (the ghost comes back). The watch list is the source of
+        // truth, so drop events whose paths no registered location holds
+        // anymore (bd tuxbooks-crn).
+        let registered = match library_locations::list_locations(&self.pool).await {
+            Ok(locations) => locations,
+            Err(err) => {
+                eprintln!("reconciler: cannot list watched locations: {err}");
+                return;
+            }
+        };
+        let under_watch = |paths: &[&Path]| {
+            paths
+                .iter()
+                .any(|path| registered.iter().any(|root| path.starts_with(root)))
+        };
+
         for change in changes {
+            let keep = match &change {
+                PathChange::Created(path)
+                | PathChange::Modified(path)
+                | PathChange::Removed(path) => under_watch(&[path]),
+                PathChange::Renamed { from, to } => under_watch(&[from, to]),
+            };
+            if !keep {
+                continue;
+            }
             match change {
                 PathChange::Created(path) => {
                     // A folder appearing inside the watch (dragged in, or a
