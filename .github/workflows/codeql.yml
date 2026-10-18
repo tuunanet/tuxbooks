@@ -7,11 +7,22 @@ name: CodeQL
 # - javascript-typescript — every PR and every main push. The renderer is
 #   exposed to file contents (EPUB/PDF parsing in JS), so it stays on the
 #   PR path; at ~1 minute it runs beside CI, invisible.
-# - rust — main pushes and the weekly schedule only, never PRs. The sidecar
-#   is the true attack surface (it parses untrusted documents), but its
-#   extraction re-pays a full cargo build per head SHA, which is too
-#   expensive to block a PR on. Clippy (`just check`, CI) covers PR-time
-#   linting; the deep scan still lands weekly and on every main merge.
+# - rust — every PR and every main push, plus the weekly schedule. The
+#   sidecar is the true attack surface (it parses untrusted documents), so
+#   its deep scan has to run when the sidecar changes, not up to a week
+#   later. It used to be main+weekly only because extraction re-pays a full
+#   cargo build per head SHA (the reason advanced setup replaced the
+#   default-setup matrix); the cargo cache keyed on sidecar/Cargo.lock
+#   (below) should cut a hit well under that ~7-minute full extraction, a
+#   miss pays full price, and JS-only PRs pay only the cache lookup. Clippy
+#   (`just check`, CI) remains the required PR gate; this workflow stays
+#   advisory.
+#
+# Both languages upload on every PR on purpose: the code-scanning check
+# compares the categories the PR uploaded against the base branch, so a
+# skipped rust upload leaves the check neutral ("1 configuration not
+# found"). Path-filtering rust to Rust-only PRs would not fix that — every
+# PR has to run both.
 #
 # python and actions are intentionally absent: the Python footprint is five
 # dev-tooling scripts (~2.4k lines, fixture generation, nothing shipped),
@@ -79,17 +90,37 @@ jobs:
         with:
           category: "/language:javascript-typescript"
 
-  # Weekly + main-push deep scan.
+  # PR + main-push deep scan (weekly stays as the cold-cache full build).
   analyze-rust:
     name: Analyze (rust)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request'))
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       security-events: write
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The implicit autobuild extracts the sidecar by running its cargo
+      # build and re-pays it per head SHA. Cache the registry sources and
+      # the build dir, keyed on the sidecar lockfile, so unchanged
+      # dependencies come back fresh instead of recompiling. Deliberately a
+      # plain lockfile-keyed actions/cache rather than the
+      # Swatinem/rust-cache action ci.yml and release.yml use: CodeQL
+      # drives the build here, so only the registry and build dir need
+      # restoring. The action is already in the tree (ci.yml, release.yml);
+      # SHA-pinned here like everything else in this file, so S-5
+      # (docs/SUPPLY_CHAIN.md) needs no new allowance.
+      - name: Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry
+            sidecar/target
+          key: ${{ runner.os }}-codeql-rust-${{ hashFiles('sidecar/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-codeql-rust-
 
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
