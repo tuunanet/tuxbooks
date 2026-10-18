@@ -214,6 +214,79 @@ test.describe("tuxbooks filesystem synchronization", () => {
     rmSync(shelf, { recursive: true, force: true });
   });
 
+  test("a folder inside a watched one gains no row, and the parent owns its books", async ({
+    page,
+  }) => {
+    // A watched folder with a folder inside it, both outside the seeded
+    // library so the suites that follow still find it intact (ADR 0010).
+    const parent = path.join(scratchDir, "flat-parent");
+    const child = path.join(parent, "child");
+    const childBook = path.join(child, "child-book.epub");
+    mkdirSync(child, { recursive: true });
+    copyFileSync(epubFixture, childBook);
+    const before = readFileSync(childBook);
+
+    const importFolder = (dir: string) =>
+      page.evaluate(
+        (folder) => window.tuxbooks!.invoke("import_paths", { paths: [folder] }),
+        dir,
+      ) as Promise<{
+        imported: number;
+        failed: unknown[];
+        watched: string[];
+        covered: string[];
+      }>;
+
+    const imported = await importFolder(parent);
+    expect(imported.failed).toEqual([]);
+
+    // The folder inside a watched one registers nothing: the folder above
+    // already watches the whole subtree, so a row of its own would add
+    // nothing and could never be unwatched on its own.
+    const covered = await importFolder(child);
+    expect(covered.failed).toEqual([]);
+    expect(covered.watched).toEqual([]);
+    expect(covered.covered).toEqual([child]);
+
+    // The list carries one row, not two.
+    await page.getByRole("button", { name: "Settings" }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByRole("button", { name: "Folders" }).click();
+    const list = page.getByTestId("folders-list");
+    const parentBox = list.getByRole("checkbox", { name: `Select ${parent}` });
+    await expect(parentBox).toBeVisible();
+    await expect(list.getByRole("checkbox", { name: `Select ${child}` })).toHaveCount(0);
+
+    // Unwatching it is unambiguous: the folder and everything inside it go,
+    // with nothing to ask and nothing left behind to re-import them.
+    await parentBox.click();
+    await page.getByTestId("folders-unwatch").click();
+    const dialog = page.getByTestId("unwatch-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(parent);
+    await expect(dialog.getByTestId("unwatch-names")).toHaveCount(0);
+    await page.getByTestId("unwatch-confirm").click();
+
+    await expect(parentBox).toHaveCount(0);
+
+    // The book leaves the library and the file stays byte-for-byte, with no
+    // ghost coming back through a watch nothing covers anymore.
+    await page.getByRole("button", { name: "All Books" }).click();
+    await expect(page.getByTestId("library-view")).toBeVisible();
+    await expect
+      .poll(() => cardCount(page), {
+        timeout: 30000,
+        message: "the unwatched folder's books never left the library",
+      })
+      .toBe(seededLibraryBookCount);
+    expect(readFileSync(childBook).equals(before)).toBe(true);
+
+    copyFileSync(epubFixture, path.join(child, "late.epub"));
+    await page.waitForTimeout(3000);
+    expect(await cardCount(page)).toBe(seededLibraryBookCount);
+
+    rmSync(parent, { recursive: true, force: true });
+  });
   test("leaves the seeded library intact for the other suites", async ({ page }) => {
     const allText = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]"))

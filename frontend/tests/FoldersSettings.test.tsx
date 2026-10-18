@@ -39,7 +39,7 @@ function renderFolders(extra: Record<string, unknown> = {}) {
     get_library_stats: { bookCount: 15, collectionCount: 0 },
     list_books: [],
     list_collections: [],
-    import_paths: { imported: 1, updated: 0, skipped: 0, failed: [], watched: [] },
+    import_paths: { imported: 1, updated: 0, skipped: 0, failed: [], watched: [], covered: [] },
     unwatch_locations: 1,
     ...extra,
   });
@@ -312,6 +312,8 @@ describe("FoldersSettings unwatch", () => {
     await screen.findByTestId("unwatch-dialog");
 
     await userEvent.click(screen.getByTestId("unwatch-confirm"));
+    // The command carries paths and nothing else: unwatching always removes
+    // the books (ADR 0008), and a flat watch list leaves no scope to pass.
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("unwatch_locations", {
         paths: ["/home/u/Books"],

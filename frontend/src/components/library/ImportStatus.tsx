@@ -45,6 +45,11 @@ export function ImportStatus() {
                 Watching {folder}
               </p>
             ))}
+            {summary?.covered.map((folder) => (
+              <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
+                Already covered by a folder you watch: {folder}
+              </p>
+            ))}
             {failures.length > 0 && (
               <p className="mt-1 text-muted-foreground">
                 {failures.length} {failureWord} could not be imported:

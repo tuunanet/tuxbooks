@@ -34,6 +34,11 @@ pub struct ImportReport {
     /// can disclose the watch instead of starting it silently (ADR 0009).
     /// Already-watched folders never appear here.
     pub watched: Vec<String>,
+    /// Folders this run declined to register because a watched folder above
+    /// them already covers them (ADR 0010). Their books still arrive, so
+    /// the report says where they came from instead of naming a watch that
+    /// was never started.
+    pub covered: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

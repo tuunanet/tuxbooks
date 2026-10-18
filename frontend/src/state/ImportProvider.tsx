@@ -42,12 +42,13 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           updated: report.updated,
           skipped: report.skipped,
           watched: report.watched,
+          covered: report.covered,
         });
         setFailures(report.failed);
         setPhase("done");
       } catch (err) {
         setFailures(targets.map((path) => ({ path, error: toMessage(err) })));
-        setSummary({ imported: 0, updated: 0, skipped: 0, watched: [] });
+        setSummary({ imported: 0, updated: 0, skipped: 0, watched: [], covered: [] });
         setPhase("done");
       }
     },

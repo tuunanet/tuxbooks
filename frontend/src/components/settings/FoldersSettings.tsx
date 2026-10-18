@@ -207,10 +207,7 @@ export function FoldersSettings() {
 
       <UnwatchFoldersDialog
         open={confirming}
-        folders={chosen.map((location) => ({
-          path: location.path,
-          bookCount: location.bookCount,
-        }))}
+        folders={chosen}
         busy={unwatching}
         onConfirm={() => void confirmUnwatch()}
         onCancel={() => setConfirming(false)}

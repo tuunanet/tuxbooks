@@ -1,3 +1,4 @@
+use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -243,16 +244,47 @@ async fn import_and_watch_folder(
 /// — one tail every import path shares, so the disclosure rule lives in one
 /// place. Registration is idempotent: an already-watched folder produces no
 /// disclosure and no duplicate row.
+///
+/// A folder already inside a watched folder is not registered at all (ADR
+/// 0010). The folder above watches the whole subtree recursively, so a row
+/// of its own would add nothing and could never be unwatched on its own. It
+/// is disclosed in `report.covered` instead, so importing one still says
+/// where its books came from.
 async fn register_and_watch(
     state: &AppState,
     root: &Path,
     report: &mut ImportReport,
 ) -> Result<(), AppError> {
-    if library_locations::add_location(&state.db, &root.to_string_lossy()).await? {
-        report.watched.push(root.to_string_lossy().into_owned());
+    let root = root.to_string_lossy().into_owned();
+    if covered_by_watched_ancestor(&state.db, &root).await? {
+        if !report.covered.contains(&root) {
+            report.covered.push(root);
+        }
+        return Ok(());
     }
-    state.watcher.watch(root);
+    // The reverse order gets the same treatment: folders this root now
+    // covers were registered before it did, and a watched folder inside
+    // another adds nothing (ADR 0010). Their rows go without a purge and
+    // their books stay, owned by this folder from here on.
+    for gone in library_locations::collapse_descendants(&state.db, &root).await? {
+        state.watcher.unwatch(Path::new(&gone));
+    }
+    if library_locations::add_location(&state.db, &root).await? {
+        report.watched.push(root.clone());
+    }
+    state.watcher.watch(Path::new(&root));
     Ok(())
+}
+
+/// True when `path` is already inside a watched folder, which watches the
+/// whole subtree recursively and so needs no row of its own (ADR 0010). A
+/// sibling sharing a string prefix is never inside it, since the split is
+/// on a path separator.
+async fn covered_by_watched_ancestor(pool: &SqlitePool, path: &str) -> Result<bool, AppError> {
+    let registered = library_locations::list_locations(pool).await?;
+    Ok(registered
+        .iter()
+        .any(|candidate| candidate != path && library_locations::is_under(path, candidate)))
 }
 
 /// Unwatch one or more folders: the rows leave the watch list, every book
@@ -263,6 +295,13 @@ async fn register_and_watch(
 /// the existing `library-changed` event so the library view updates
 /// without a restart. Files on disk are never touched. Returns how many
 /// folders were actually listed.
+///
+/// A folder inside another watched folder is refused (ADR 0010). The folder
+/// above watches the whole subtree recursively, so the books this unwatch
+/// purges would come straight back on the next modify, now as a row of the
+/// folder above with a new id and the progress and annotations gone. The
+/// watch list is kept flat, so the settings view never offers such a path;
+/// this refuses the case for a caller that reaches the command directly.
 pub async fn unwatch_locations(
     state: &AppState,
     events: &EventEmitter,
@@ -277,6 +316,30 @@ pub async fn unwatch_locations(
         roots.push(path.to_string());
     }
 
+    // Read once, while every row still stands, so the refusal reasons about
+    // the watch list the user is looking at.
+    let registered = library_locations::list_locations(&state.db).await?;
+
+    for root in &roots {
+        // The shallowest folder above it, which is the one the dialog would
+        // name: taking that folder takes everything between the two, so
+        // naming a deeper one would offer a move that leaves the hole open.
+        let ancestor = registered
+            .iter()
+            .filter(|candidate| {
+                **candidate != *root && library_locations::is_under(root, candidate)
+            })
+            .min_by_key(|candidate| candidate.len());
+        if let Some(ancestor) = ancestor {
+            if !roots.iter().any(|kept| kept == ancestor) {
+                return Err(AppError::InvalidInput(format!(
+                    "{root} is inside the watched folder {ancestor}, which still watches \
+                     everything under it; unwatch {ancestor} instead"
+                )));
+            }
+        }
+    }
+
     // Which books these folders own has to be settled before any row goes:
     // the dialog counts each folder with `storage_stats`, and that count is
     // the promise "these N books are removed". Ownership flips the moment a
@@ -288,11 +351,15 @@ pub async fn unwatch_locations(
         }
     }
 
+    // Stop the taps first: a row left behind is visible and retryable, a
+    // watch left behind would keep syncing a folder the user just left. The
+    // whole set goes as one operation so a cascaded subfolder is not
+    // re-registered on its way out.
+    let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
+    state.watcher.unwatch_all(&dying);
+
     let mut removed = 0usize;
     for path in &roots {
-        // Stop the taps first: a row left behind is visible and retryable,
-        // a watch left behind would keep syncing a folder the user just left.
-        state.watcher.unwatch(Path::new(path));
         if !library_locations::remove_location(&state.db, path).await? {
             continue;
         }

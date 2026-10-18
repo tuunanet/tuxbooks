@@ -7,33 +7,44 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { StorageReport } from "@/lib/bridge";
 
-/** How many folder names the dialog spells out before it overflows. */
 const MAX_LISTED = 3;
 
-/** One folder on its way out of the watch list. */
-interface UnwatchTarget {
-  path: string;
-  bookCount: number;
-}
+type FolderRow = StorageReport["bookLocations"][number];
 
 interface UnwatchFoldersDialogProps {
   open: boolean;
-  folders: UnwatchTarget[];
+  /** Every folder this unwatch removes. Never nested: the list stays flat. */
+  folders: FolderRow[];
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
 }
 
+function titleFor(folders: FolderRow[]): string {
+  return folders.length > 1
+    ? `Unwatch ${folders.length} folders?`
+    : `Unwatch ${folders[0]?.path ?? ""}?`;
+}
+
+/** The loss statement: what this unwatch takes, which is the whole selection. */
+function bodyFor(folders: FolderRow[], books: number): string {
+  const scope = folders.length > 1 ? "these folders" : "this folder";
+  if (books === 0) return `No books live in ${scope}.`;
+  const one = books === 1;
+  return `The ${books} ${one ? "book" : "books"} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
+}
+
+function confirmLabelFor(folders: FolderRow[]): string {
+  return folders.length > 1 ? `Unwatch ${folders.length} Folders` : "Unwatch";
+}
+
 /**
- * The single confirmation in front of Unwatch, and the only outcome there
- * is: the folders leave the watch list and every book they own leaves the
- * catalog with them, so the copy says exactly that — how many books go,
- * that their reading progress and annotations go with them, and that the
- * files on disk stay untouched. It names what is affected (one folder by
- * name, several as a count plus a list that overflows). A folder with no
- * books has nothing to lose, so that case keeps its own copy. Cancel (or
- * Escape) closes it and does nothing else.
+ * The unwatch confirmation (ADR 0010). The watch list holds no folder inside
+ * another, so every folder named here is one the user ticked and one that
+ * can be unwatched on its own. There is nothing else to ask: a folder above
+ * would not be in the list, and a folder below would not exist as a row.
  */
 export function UnwatchFoldersDialog({
   open,
@@ -44,16 +55,6 @@ export function UnwatchFoldersDialog({
 }: UnwatchFoldersDialogProps) {
   const several = folders.length > 1;
   const books = folders.reduce((total, folder) => total + folder.bookCount, 0);
-  const title = several
-    ? `Unwatch ${folders.length} folders?`
-    : `Unwatch ${folders[0]?.path ?? ""}?`;
-  const scope = several ? "these folders" : "this folder";
-  const one = books === 1;
-  const noun = one ? "book" : "books";
-  const body =
-    books === 0
-      ? `No books live in ${scope}.`
-      : `The ${books} ${noun} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
 
   return (
     <Dialog
@@ -64,8 +65,8 @@ export function UnwatchFoldersDialog({
     >
       <DialogContent data-testid="unwatch-dialog" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{`${body} Your files on disk stay untouched.`}</DialogDescription>
+          <DialogTitle>{titleFor(folders)}</DialogTitle>
+          <DialogDescription>{`${bodyFor(folders, books)} Your files on disk stay untouched.`}</DialogDescription>
         </DialogHeader>
 
         {several && (
@@ -106,7 +107,7 @@ export function UnwatchFoldersDialog({
             disabled={busy}
             onClick={onConfirm}
           >
-            {several ? `Unwatch ${folders.length} Folders` : "Unwatch"}
+            {confirmLabelFor(folders)}
           </Button>
         </DialogFooter>
       </DialogContent>

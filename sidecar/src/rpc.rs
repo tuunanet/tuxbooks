@@ -238,8 +238,6 @@ async fn dispatch(
             )))
         }
         "unwatch_locations" => {
-            // Paths only: unwatching always purges the folders' books, so
-            // there is no keep/remove choice to pass.
             let p: PathsArgs = parse_params(params)?;
             Ok(call!(commands::library::unwatch_locations(
                 state, events, p.paths

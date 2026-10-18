@@ -41,6 +41,43 @@ pub async fn add_location(pool: &SqlitePool, path: &str) -> Result<bool, AppErro
     Ok(result.rows_affected() > 0)
 }
 
+/// True when `book_path` is `root` or lies under it. The split is on a path
+/// separator, so a sibling directory with a shared string prefix (`/libx`
+/// against `/lib`) is never under the root. This is the separator rule
+/// [`owning_location`] walks, spelled as a predicate.
+pub fn is_under(path: &str, root: &str) -> bool {
+    path == root
+        || (path.len() > root.len()
+            && path.starts_with(root)
+            && path.as_bytes().get(root.len()) == Some(&b'/'))
+}
+
+/// Registered folders strictly under `root`, in registration order. The root
+/// itself is not a descendant of itself, and an unrelated folder never is.
+pub async fn descendants(pool: &SqlitePool, root: &str) -> Result<Vec<String>, AppError> {
+    let paths = list_locations(pool).await?;
+    Ok(paths
+        .into_iter()
+        .filter(|path| is_under(path, root) && path != root)
+        .collect())
+}
+
+/// Drop the registered folders `root` now covers, so the watch list never
+/// holds a folder inside another (ADR 0010). This is deliberately not an
+/// unwatch: the rows go, the books stay, owned by `root` from here on.
+/// Returns the paths that were dropped so the caller can withdraw the
+/// watches that went with them.
+pub async fn collapse_descendants(pool: &SqlitePool, root: &str) -> Result<Vec<String>, AppError> {
+    let nested = descendants(pool, root).await?;
+    for path in &nested {
+        sqlx::query("DELETE FROM library_locations WHERE path = ?1")
+            .bind(path)
+            .execute(pool)
+            .await?;
+    }
+    Ok(nested)
+}
+
 /// Drop a watched filesystem root from the watch list. Returns true when a
 /// row went away; unwatching something that was never listed changes nothing.
 pub async fn remove_location(pool: &SqlitePool, path: &str) -> Result<bool, AppError> {
@@ -62,6 +99,58 @@ pub async fn list_locations(pool: &SqlitePool) -> Result<Vec<String>, AppError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_under_splits_on_separators_only() {
+        assert!(is_under("/lib", "/lib"));
+        assert!(is_under("/lib/a.epub", "/lib"));
+        assert!(is_under("/lib/sub/deep.epub", "/lib"));
+
+        // The sibling-prefix guard, same rule as `owning_location`: a shared
+        // string prefix is not an ancestor.
+        assert!(!is_under("/libx/c.epub", "/lib"));
+        assert!(!is_under("/lib_sub/d.epub", "/lib"));
+        assert!(!is_under("/other.epub", "/lib"));
+    }
+
+    #[tokio::test]
+    async fn collapse_descendants_drops_only_the_folders_strictly_inside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        add_location(&pool, "/lib").await.unwrap();
+        add_location(&pool, "/lib/a").await.unwrap();
+        add_location(&pool, "/lib/a/deep").await.unwrap();
+        add_location(&pool, "/libx").await.unwrap();
+        add_location(&pool, "/other").await.unwrap();
+
+        // The sibling sharing a string prefix is not inside, so it stays.
+        let mut dropped = collapse_descendants(&pool, "/lib").await.unwrap();
+        dropped.sort();
+        assert_eq!(
+            dropped,
+            vec!["/lib/a".to_string(), "/lib/a/deep".to_string()]
+        );
+
+        let mut left = list_locations(&pool).await.unwrap();
+        left.sort();
+        assert_eq!(
+            left,
+            vec![
+                "/lib".to_string(),
+                "/libx".to_string(),
+                "/other".to_string()
+            ]
+        );
+
+        // Collapsing a folder with nothing inside it changes nothing.
+        assert!(collapse_descendants(&pool, "/lib")
+            .await
+            .unwrap()
+            .is_empty());
+    }
 
     #[tokio::test]
     async fn add_location_is_idempotent_and_ordered() {

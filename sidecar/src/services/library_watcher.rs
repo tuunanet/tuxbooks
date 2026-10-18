@@ -106,21 +106,35 @@ impl LibraryWatcher {
     /// them down with the parent, but they are separate watched folders and
     /// must keep syncing on their own.
     pub fn unwatch(&self, root: &Path) {
+        self.unwatch_all(&[root.to_path_buf()]);
+    }
+
+    /// Stop watching several roots as one operation — the set a cascading
+    /// unwatch sends (ADR 0010). Every dying root leaves the registered set
+    /// *before* any notify unwatch runs, so a subfolder going with its
+    /// parent is never re-registered on the way out; only the survivors
+    /// nested under a dropped root are, which is what [`Self::unwatch`]
+    /// repairs for a single root.
+    pub fn unwatch_all(&self, roots: &[PathBuf]) {
         let mut slot = self.inner.lock().expect("watcher mutex poisoned");
         let handle = slot.as_mut().expect("watcher already dropped");
-        handle.roots.remove(root);
-        let nested: Vec<PathBuf> = handle
-            .roots
-            .iter()
-            .filter(|candidate| candidate.starts_with(root))
-            .cloned()
-            .collect();
-
-        if let Err(err) = handle.watcher.unwatch(root) {
-            eprintln!("watcher: cannot unwatch {}: {err}", root.display());
+        for root in roots {
+            handle.roots.remove(root);
         }
-        for candidate in nested {
-            register(&mut handle.watcher, &candidate);
+        for root in roots {
+            let survivors: Vec<PathBuf> = handle
+                .roots
+                .iter()
+                .filter(|candidate| candidate.starts_with(root))
+                .cloned()
+                .collect();
+
+            if let Err(err) = handle.watcher.unwatch(root) {
+                eprintln!("watcher: cannot unwatch {}: {err}", root.display());
+            }
+            for survivor in survivors {
+                register(&mut handle.watcher, &survivor);
+            }
         }
     }
 }

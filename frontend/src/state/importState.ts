@@ -12,6 +12,12 @@ export interface ImportSummary {
   skipped: number;
   /** Folders the run turned into watched folders, to disclose out loud. */
   watched: string[];
+  /**
+   * Folders the run declined to register because a watched folder above
+   * already covers them. Their books still arrive, so the report says where
+   * they came from instead of naming a watch that was never started.
+   */
+  covered: string[];
 }
 
 export type ImportPhase = "idle" | "importing" | "done";

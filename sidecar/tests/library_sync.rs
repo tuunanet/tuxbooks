@@ -155,6 +155,17 @@ impl TestEnv {
     /// `result`. Panics on a JSON-RPC error so a failing call never reads as
     /// "nothing happened".
     async fn rpc(&self, method: &str, params: Value) -> Value {
+        let response = self.rpc_response(method, params).await;
+        assert!(
+            response.get("error").is_none(),
+            "{method} failed: {response}"
+        );
+        response["result"].clone()
+    }
+
+    /// The raw response, error included. A refusal is the behavior under
+    /// test for unwatch, so some calls must be allowed to fail.
+    async fn rpc_response(&self, method: &str, params: Value) -> Value {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -163,14 +174,7 @@ impl TestEnv {
         });
         let state = self.state();
         match handle_request_line(&state, &self.emitter, &request.to_string()).await {
-            RequestLineOutcome::Response(line) => {
-                let response: Value = serde_json::from_str(line.trim()).unwrap();
-                assert!(
-                    response.get("error").is_none(),
-                    "{method} failed: {response}"
-                );
-                response["result"].clone()
-            }
+            RequestLineOutcome::Response(line) => serde_json::from_str(line.trim()).unwrap(),
             RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
         }
     }
@@ -180,6 +184,13 @@ impl TestEnv {
     /// nothing else.
     async fn unwatch(&self, paths: &[&str]) -> Value {
         self.rpc("unwatch_locations", serde_json::json!({ "paths": paths }))
+            .await
+    }
+
+    /// The refusal half of `unwatch`: the raw response of a call that is
+    /// expected to be turned down.
+    async fn unwatch_error(&self, paths: &[&str]) -> Value {
+        self.rpc_response("unwatch_locations", serde_json::json!({ "paths": paths }))
             .await
     }
 
@@ -395,6 +406,24 @@ async fn renamed_file_relinks_the_book_in_place() {
 
 /// Consume change events until every title in `titles` has been seen (in
 /// any order). Returns everything that was drained in between.
+/// Poll the catalog until a book with `title` is in it. For imports that
+/// stream `import-progress` rather than `library-changed`, so there is no
+/// event to wait on.
+async fn wait_for_book_title(env: &TestEnv, title: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+        if titles.contains(&title.to_string()) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the catalog never gained {title}, has {titles:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 fn wait_for_titles<const N: usize>(env: &TestEnv, titles: [&str; N]) -> Vec<LibraryChange> {
     let mut wanted: Vec<&str> = titles.into_iter().collect();
     let mut drained: Vec<LibraryChange> = Vec::new();
@@ -843,26 +872,30 @@ async fn unwatching_cascades_progress_and_annotations_with_the_books() {
     assert_eq!(env.removed_book_ids(), vec![book.id]);
 }
 
-/// The purge set is the books the unwatched folder owns, not "whatever sits
-/// under the prefix": a child folder keeps owning its books until its row
-/// goes, and a parent still watching the same tree does not make them the
-/// parent's.
+/// You cannot carve a hole in a watched folder from inside it (ADR 0010).
+/// A child folder under a still-watched parent has no unwatch of its own to
+/// offer: the parent's recursive watch covers the child's files, so the
+/// books the unwatch purged would come straight back as parent-owned rows —
+/// the ghost (bd tuxbooks-yof). The call is refused, naming the folder that
+/// has to go instead, and the watch list is left exactly as it was.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_a_child_folder_takes_its_books_while_the_parent_stays() {
+async fn unwatching_a_child_folder_is_refused_while_its_parent_stays_watched() {
     let env = setup().await;
-    // Drive the import pipeline directly instead of through the fs watcher:
-    // the parent's recursive watch covers the child too, so notify events
-    // queued before the unwatch race the purge and re-import the child's
-    // books through the parent's prefix (bd tuxbooks-crn). The reconciler
-    // cannot tell that stale event from new activity, and which of the two
-    // wins is load-dependent. The dedicated disk-silence test below keeps
-    // the fs round-trip covered; this test pins the unwatch contract.
+    // Drive the import pipeline directly instead of through the fs watcher,
+    // the way the predecessor test pinned the unwatch contract: the parent's
+    // recursive watch covers the child too, so notify events queued before
+    // the unwatch race the purge and re-import the child's books through the
+    // parent's prefix (bd tuxbooks-crn). The refusal below is the new home of
+    // that contract; the disk-silence test keeps the fs round-trip covered.
     env.watcher.unwatch(&env.library);
     let sub = env.library.join("shelf");
-    std::fs::create_dir_all(&sub).unwrap();
-    library_locations::add_location(&env.pool, &sub.to_string_lossy())
-        .await
-        .unwrap();
+    let deep = sub.join("deep");
+    std::fs::create_dir_all(&deep).unwrap();
+    for folder in [&sub, &deep] {
+        library_locations::add_location(&env.pool, &folder.to_string_lossy())
+            .await
+            .unwrap();
+    }
 
     let root_file = env.write_book("root.epub", "Root Book");
     let shelf_file = sub.join("shelf-book.epub");
@@ -875,19 +908,100 @@ async fn unwatching_a_child_folder_takes_its_books_while_the_parent_stays() {
         .await;
     wait_for_titles(&env, ["Root Book", "Shelf Book"]);
 
+    let library = env.library.to_string_lossy().into_owned();
     let shelf = sub.to_string_lossy().into_owned();
-    assert_eq!(env.unwatch(&[shelf.as_str()]).await, 1);
+    let deepest = deep.to_string_lossy().into_owned();
+    let response = env.unwatch_error(&[deepest.as_str()]).await;
 
-    // The child's book goes; the parent's book, which the child never
-    // owned, stays.
-    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
-    assert_eq!(titles, vec!["Root Book".to_string()]);
-    assert_eq!(env.removed_book_ids().len(), 1);
-    assert!(shelf_file.exists() && root_file.exists());
+    // ...and it names the shallowest one as the folder to take, which is the
+    // one that has to go for the books to stay gone. The folder directly
+    // above would leave the hole in place, so it is never offered.
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("unwatch {library} instead")),
+        "the refusal must offer the shallowest watched folder, said: {message}"
+    );
+
+    // ...and nothing moved: every row stands, both books stand, files stand.
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
-        vec![env.library.to_string_lossy().into_owned()]
+        vec![library, shelf, deepest]
     );
+    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+    assert_eq!(
+        titles,
+        vec!["Root Book".to_string(), "Shelf Book".to_string()]
+    );
+    assert!(shelf_file.exists() && root_file.exists());
+}
+
+/// The flat watch list (ADR 0010): a folder already inside a watched folder
+/// gets no row of its own. The folder above watches the whole subtree
+/// recursively, so a nested row would add nothing and could never be
+/// unwatched on its own. The books still arrive, and the report says why
+/// instead of naming a watch that was never started.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_folder_inside_a_watched_folder_registers_nothing() {
+    let env = setup().await;
+    let sub = env.library.join("shelf");
+    std::fs::create_dir_all(&sub).unwrap();
+    write_epub(&sub.join("shelf-book.epub"), "Shelf Book");
+
+    let report = env.import_paths(&[sub.as_path()]).await;
+
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()],
+        "a folder inside a watched folder must not gain a row"
+    );
+    assert_eq!(report["watched"], serde_json::json!([]));
+    assert_eq!(
+        report["covered"],
+        serde_json::json!([sub.to_string_lossy().into_owned()]),
+        "the report must say the folder is already covered"
+    );
+    wait_for_book_title(&env, "Shelf Book").await;
+}
+
+/// The other order gets the same treatment: a folder registered before the
+/// folder above it loses its row the moment the parent is imported. No purge
+/// runs, so the books stay, now owned by the folder that covers them.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_folder_collapses_the_folders_it_now_covers() {
+    let env = setup().await;
+    let outer = env.sibling("outer");
+    let shelf = outer.join("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    library_locations::add_location(&env.pool, &shelf.to_string_lossy())
+        .await
+        .unwrap();
+    env.watcher.watch(&shelf);
+    write_epub(&shelf.join("shelf-book.epub"), "Shelf Book");
+    wait_for_titles(&env, ["Shelf Book"]);
+
+    let report = env.import_paths(&[outer.as_path()]).await;
+
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![
+            env.library.to_string_lossy().into_owned(),
+            outer.to_string_lossy().into_owned()
+        ],
+        "the nested row must go the moment the folder above it is watched"
+    );
+    assert_eq!(
+        report["watched"],
+        serde_json::json!([outer.to_string_lossy().into_owned()])
+    );
+    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+    assert!(
+        titles.contains(&"Shelf Book".to_string()),
+        "collapsing a row must never purge its books, got {titles:?}"
+    );
+
+    // The folder keeps syncing, under the watch of the folder above it.
+    write_epub(&shelf.join("second.epub"), "Second Shelf Book");
+    wait_for_titles(&env, ["Second Shelf Book"]);
 }
 
 /// The mirror case: the parent's row goes, the subfolder's row survives, so
@@ -998,6 +1112,153 @@ async fn run_the_upgrade_purge(pool: &SqlitePool) {
         .await
         .unwrap();
     sqlx::migrate!("./migrations").run(pool).await.unwrap();
+}
+
+/// Undo the collapse migration so it can be replayed against a watch list
+/// that predates it.
+async fn run_the_upgrade_collapse(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 12")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(pool).await.unwrap();
+}
+
+/// The upgrade flattens a watched folder nested inside another watched
+/// folder (ADR 0010). The row goes and the books do not: they stay in the
+/// catalog owned by the folder above, with reading progress and annotations
+/// intact, because a collapse is not an unwatch.
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
+    let env = setup().await;
+
+    // The shape older versions produced by importing a folder that already
+    // sat under a watched one.
+    let sub = env.library.join("shelf");
+    std::fs::create_dir_all(&sub).unwrap();
+    library_locations::add_location(&env.pool, &sub.to_string_lossy())
+        .await
+        .unwrap();
+    env.watcher.watch(&sub);
+
+    // A sibling whose path shares a string prefix with the watched folder.
+    // It is not inside it, so the collapse must leave it alone.
+    let prefix_mate = env.sibling("libraryx");
+    std::fs::create_dir_all(&prefix_mate).unwrap();
+    library_locations::add_location(&env.pool, &prefix_mate.to_string_lossy())
+        .await
+        .unwrap();
+
+    let parent_file = env.write_book("parent-book.epub", "Parent Book");
+    let sub_file = sub.join("sub-book.epub");
+    write_epub(&sub_file, "Sub Book");
+    env.reconciler
+        .apply(vec![
+            PathChange::Created(parent_file.clone()),
+            PathChange::Created(sub_file.clone()),
+        ])
+        .await;
+    wait_for_titles(&env, ["Parent Book", "Sub Book"]);
+
+    // Metadata on the nested folder's book, so the test can prove the
+    // collapse takes none of it along.
+    let sub_id = book_repo::find_id_by_path(&env.pool, &sub_file.to_string_lossy())
+        .await
+        .unwrap()
+        .unwrap();
+    add_progress(&env.pool, sub_id, 42).await;
+    annotations::insert_annotation(
+        &env.pool,
+        sub_id,
+        &NewAnnotation {
+            kind: AnnotationKind::Bookmark,
+            cfi: Some("epubcfi(/6/4)".into()),
+            chapter_href: None,
+            page_number: None,
+            page_fraction: None,
+            text: None,
+            color: None,
+            geometry: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let bytes_before = std::fs::read(&sub_file).unwrap();
+    run_the_upgrade_collapse(&env.pool).await;
+
+    // Only the redundant row left the watch list: the prefix-sharing
+    // sibling is not inside the watched folder.
+    let mut locations = library_locations::list_locations(&env.pool).await.unwrap();
+    locations.sort();
+    let mut expected = vec![
+        env.library.to_string_lossy().into_owned(),
+        prefix_mate.to_string_lossy().into_owned(),
+    ];
+    expected.sort();
+    assert_eq!(locations, expected);
+
+    // Both books stay in the catalog with their metadata, owned now by the
+    // folder above. Nothing was purged and no file moved.
+    let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+    assert_eq!(
+        titles,
+        vec!["Parent Book".to_string(), "Sub Book".to_string()]
+    );
+    assert!(
+        reading_progress::get_progress(&env.pool, sub_id)
+            .await
+            .unwrap()
+            .is_some(),
+        "a collapse must never take reading progress"
+    );
+    assert_eq!(
+        annotations::list_annotations(&env.pool, sub_id)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "a collapse must never take annotations"
+    );
+    assert_eq!(std::fs::read(&sub_file).unwrap(), bytes_before);
+
+    // And the collapse holds: the parent's own watch covers the subfolder,
+    // so a change there still reaches the catalog as the parent's book.
+    write_epub(&sub_file, "Sub Book Edited");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
+        if titles.contains(&"Sub Book Edited".to_string()) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the flattened folder stopped syncing"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// The collapse is one-time work: replaying it deletes nothing more, so a
+/// replayed journal or a repeat upgrade leaves the watch list as it was.
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_collapse_is_idempotent() {
+    let env = setup().await;
+    let sub = env.library.join("shelf");
+    std::fs::create_dir_all(&sub).unwrap();
+    library_locations::add_location(&env.pool, &sub.to_string_lossy())
+        .await
+        .unwrap();
+
+    run_the_upgrade_collapse(&env.pool).await;
+    let first = library_locations::list_locations(&env.pool).await.unwrap();
+    run_the_upgrade_collapse(&env.pool).await;
+
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        first
+    );
+    assert_eq!(first, vec![env.library.to_string_lossy().into_owned()]);
 }
 
 /// The upgrade purge is the mirror promise applied once to an old catalog:
