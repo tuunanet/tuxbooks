@@ -81,12 +81,12 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
             variant="ghost"
             size="sm"
             data-testid="metadata-panel-reset"
-            title="Discard library edits and restore the book file's values"
+            title="Restore the book file's values. Your library edits are removed; the file itself is never touched."
             disabled={!metadata || saving || embedding || loading || !anyOverridden}
             onClick={() => void reset()}
           >
             <RotateCcw data-icon="inline-start" />
-            Reset to original
+            Discard library edits
           </Button>
         </div>
 
