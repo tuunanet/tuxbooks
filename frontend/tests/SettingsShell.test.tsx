@@ -15,7 +15,7 @@ function renderSettings() {
     get_library_stats: { bookCount: 0, collectionCount: 0 },
     list_books: [],
     list_collections: [],
-    import_paths: { imported: 0, updated: 0, skipped: 0, failed: [], watched: [] },
+    import_paths: { imported: 0, updated: 0, skipped: 0, failed: [], watched: [], covered: [] },
   });
   return render(
     <ThemeStateProvider>

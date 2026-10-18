@@ -167,13 +167,6 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
     ) {
       throw policyError("invalid paths");
     }
-    // `unwatch_locations` also carries a scope flag the renderer sets. A
-    // wrong-typed one has no honest reading, so it is rejected here instead
-    // of being left to the sidecar's deserializer.
-    const cascade = record.cascade;
-    if (method === "unwatch_locations" && cascade !== undefined && typeof cascade !== "boolean") {
-      throw policyError("invalid cascade");
-    }
     return;
   }
   if (method === "search_books" && typeof record.query !== "string") {

@@ -160,6 +160,12 @@ export interface ImportReport {
   failed: { path: string; error: string }[];
   /** Folders this run newly registered as watched locations. */
   watched: string[];
+  /**
+   * Folders this run declined to register because a watched folder above
+   * already covers them (ADR 0010). Their books still arrive, so the report
+   * says where they came from instead of naming a watch that never started.
+   */
+  covered: string[];
 }
 
 /**
