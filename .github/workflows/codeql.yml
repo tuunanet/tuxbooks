@@ -7,22 +7,22 @@ name: CodeQL
 # - javascript-typescript — every PR and every main push. The renderer is
 #   exposed to file contents (EPUB/PDF parsing in JS), so it stays on the
 #   PR path; at ~1 minute it runs beside CI, invisible.
-# - rust — every PR and every main push, plus the weekly schedule. The
-#   sidecar is the true attack surface (it parses untrusted documents), so
-#   its deep scan has to run when the sidecar changes, not up to a week
-#   later. It used to be main+weekly only because extraction re-pays a full
-#   cargo build per head SHA (the reason advanced setup replaced the
-#   default-setup matrix); the cargo cache keyed on sidecar/Cargo.lock
-#   (below) should cut a hit well under that ~7-minute full extraction, a
-#   miss pays full price, and JS-only PRs pay only the cache lookup. Clippy
-#   (`just check`, CI) remains the required PR gate; this workflow stays
-#   advisory.
+# - rust — every main push and the weekly schedule, plus PRs that touch the
+#   sidecar (the `changes` job classifies the diff; ci.yml uses the same
+#   shape). The sidecar is the true attack surface (it parses untrusted
+#   documents), so the scan still lands on main and weekly; on the PR path it
+#   runs only when the diff can contain Rust, because extraction costs ~6
+#   minutes warm even with the cargo cache below and it has produced no
+#   findings. A JS-only PR skips it and uploads only the js category.
 #
-# Both languages upload on every PR on purpose: the code-scanning check
-# compares the categories the PR uploaded against the base branch, so a
-# skipped rust upload leaves the check neutral ("1 configuration not
-# found"). Path-filtering rust to Rust-only PRs would not fix that — every
-# PR has to run both.
+# A JS-only PR therefore reports the code-scanning check as neutral ("1
+# configuration not found"): the check compares the categories the PR
+# uploaded against the base branch, and rust is missing. Neutral does not
+# block a merge (this workflow is advisory; the required "CI gate" is
+# ci.yml's), so the ~6 minutes saved on every JS-only PR is worth the
+# cosmetic neutral. This reverses the earlier decision to run rust on every
+# PR, which was made to clear that check before its cost was measured.
+# Clippy (`just check`, CI) remains the required PR-time rust gate.
 #
 # python and actions are intentionally absent: the Python footprint is five
 # dev-tooling scripts (~2.4k lines, fixture generation, nothing shipped),
@@ -70,6 +70,52 @@ concurrency:
 # head SHA was already verified by the pull_request run (same rationale as
 # ci.yml; default setup could not express this).
 jobs:
+  # Classify the PR diff to decide whether the rust deep scan runs. Same
+  # first-party shape as ci.yml's `changes` job (no third-party paths-filter
+  # action, which the S-5 maturity gate would have to review). Rust stays on
+  # every main push and the weekly cron regardless; only the PR path is
+  # filtered, because that is where the ~6-minute extraction cost lands on
+  # every change. The classifier is cheap (~5s) and always runs.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Classify the diff
+        run: |
+          set -euo pipefail
+          # Only a pull_request diff can skip the rust scan. A push to main or
+          # the weekly schedule always scans: those are the deep-scan paths and
+          # nothing is waiting on them.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base...HEAD")"
+          printf 'Changed files:\n%s\n' "$changed"
+          # The rust extractor only reads the sidecar crate. Anything under
+          # sidecar/ can change what it compiles, so scan; a diff confined to
+          # frontend/electron/e2e/docs has no Rust for it to extract.
+          if printf '%s\n' "$changed" | grep -q '^sidecar/'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
   analyze-javascript:
     name: Analyze (javascript-typescript)
     runs-on: ubuntu-24.04
@@ -90,12 +136,15 @@ jobs:
         with:
           category: "/language:javascript-typescript"
 
-  # PR + main-push deep scan (weekly stays as the cold-cache full build).
+  # Deep scan: every main push, the weekly schedule, and PRs whose diff
+  # touched the sidecar (needs.changes above). A JS-only PR skips it and the
+  # code-scanning check goes neutral, which does not block (see header).
   analyze-rust:
     name: Analyze (rust)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request'))
+    needs: [changes]
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request')) || (github.event_name == 'pull_request' && needs.changes.outputs.rust == 'true')
     permissions:
       security-events: write
       contents: read
