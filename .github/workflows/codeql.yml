@@ -7,11 +7,22 @@ name: CodeQL
 # - javascript-typescript — every PR and every main push. The renderer is
 #   exposed to file contents (EPUB/PDF parsing in JS), so it stays on the
 #   PR path; at ~1 minute it runs beside CI, invisible.
-# - rust — main pushes and the weekly schedule only, never PRs. The sidecar
-#   is the true attack surface (it parses untrusted documents), but its
-#   extraction re-pays a full cargo build per head SHA, which is too
-#   expensive to block a PR on. Clippy (`just check`, CI) covers PR-time
-#   linting; the deep scan still lands weekly and on every main merge.
+# - rust — every PR and every main push, plus the weekly schedule. The
+#   sidecar is the true attack surface (it parses untrusted documents), so
+#   its deep scan has to run when the sidecar changes, not up to a week
+#   later. It used to be main+weekly only because extraction re-pays a full
+#   cargo build per head SHA (the reason advanced setup replaced the
+#   default-setup matrix); the cargo cache keyed on sidecar/Cargo.lock
+#   (below) should cut a hit well under that ~7-minute full extraction, a
+#   miss pays full price, and JS-only PRs pay only the cache lookup. Clippy
+#   (`just check`, CI) remains the required PR gate; this workflow stays
+#   advisory.
+#
+# Both languages upload on every PR on purpose: the code-scanning check
+# compares the categories the PR uploaded against the base branch, so a
+# skipped rust upload leaves the check neutral ("1 configuration not
+# found"). Path-filtering rust to Rust-only PRs would not fix that — every
+# PR has to run both.
 #
 # python and actions are intentionally absent: the Python footprint is five
 # dev-tooling scripts (~2.4k lines, fixture generation, nothing shipped),
@@ -79,17 +90,50 @@ jobs:
         with:
           category: "/language:javascript-typescript"
 
-  # Weekly + main-push deep scan.
+  # PR + main-push deep scan (weekly stays as the cold-cache full build).
   analyze-rust:
     name: Analyze (rust)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request'))
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Merge pull request'))
     permissions:
       security-events: write
       contents: read
+    # The implicit autobuild extracts the sidecar by running its cargo
+    # build and re-pays it per head SHA. By default the Rust extractor
+    # builds into a throwaway scratch dir (the run log shows
+    # `cargo_target_dir: None`), so a cache over sidecar/target saves only
+    # the ~68MB crate registry and none of the compile. Point the
+    # extractor at a persistent dir instead (option cargo_target_dir, set
+    # via the documented CODEQL_EXTRACTOR_<LANG>_OPTION_<NAME> env var) so
+    # the cached build artifacts are what the next run reuses. The
+    # extractor's own docs say a persistent target dir "may reduce
+    # execution time of consecutive extractor runs", i.e. CodeQL is built
+    # to reuse a warm dir, unlike a hand-pointed sidecar/target.
+    env:
+      CODEQL_EXTRACTOR_RUST_OPTION_CARGO_TARGET_DIR: ${{ github.workspace }}/codeql-rust-target
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Cache the crate registry and the extractor's persistent build dir,
+      # keyed on the sidecar lockfile. The -v2 key segment forces one
+      # fresh save: the pre-v2 entry is registry-only (68MB) and a cache
+      # key is immutable, so keeping the old key would restore it forever
+      # and never persist the compile. Deliberately a plain lockfile-keyed
+      # actions/cache rather than the Swatinem/rust-cache action ci.yml and
+      # release.yml use: CodeQL drives the build here, so only the registry
+      # and build dir matter. First-party action, already in the tree
+      # (ci.yml, release.yml); SHA-pinned here like everything else in this
+      # file, so S-5 (docs/SUPPLY_CHAIN.md) needs no new allowance.
+      - name: Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry
+            codeql-rust-target
+          key: ${{ runner.os }}-codeql-rust-v2-${{ hashFiles('sidecar/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-codeql-rust-v2-
 
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
