@@ -99,28 +99,41 @@ jobs:
     permissions:
       security-events: write
       contents: read
+    # The implicit autobuild extracts the sidecar by running its cargo
+    # build and re-pays it per head SHA. By default the Rust extractor
+    # builds into a throwaway scratch dir (the run log shows
+    # `cargo_target_dir: None`), so a cache over sidecar/target saves only
+    # the ~68MB crate registry and none of the compile. Point the
+    # extractor at a persistent dir instead (option cargo_target_dir, set
+    # via the documented CODEQL_EXTRACTOR_<LANG>_OPTION_<NAME> env var) so
+    # the cached build artifacts are what the next run reuses. The
+    # extractor's own docs say a persistent target dir "may reduce
+    # execution time of consecutive extractor runs", i.e. CodeQL is built
+    # to reuse a warm dir, unlike a hand-pointed sidecar/target.
+    env:
+      CODEQL_EXTRACTOR_RUST_OPTION_CARGO_TARGET_DIR: ${{ github.workspace }}/codeql-rust-target
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # The implicit autobuild extracts the sidecar by running its cargo
-      # build and re-pays it per head SHA. Cache the registry sources and
-      # the build dir, keyed on the sidecar lockfile, so unchanged
-      # dependencies come back fresh instead of recompiling. Deliberately a
-      # plain lockfile-keyed actions/cache rather than the
-      # Swatinem/rust-cache action ci.yml and release.yml use: CodeQL
-      # drives the build here, so only the registry and build dir need
-      # restoring. The action is already in the tree (ci.yml, release.yml);
-      # SHA-pinned here like everything else in this file, so S-5
-      # (docs/SUPPLY_CHAIN.md) needs no new allowance.
+      # Cache the crate registry and the extractor's persistent build dir,
+      # keyed on the sidecar lockfile. The -v2 key segment forces one
+      # fresh save: the pre-v2 entry is registry-only (68MB) and a cache
+      # key is immutable, so keeping the old key would restore it forever
+      # and never persist the compile. Deliberately a plain lockfile-keyed
+      # actions/cache rather than the Swatinem/rust-cache action ci.yml and
+      # release.yml use: CodeQL drives the build here, so only the registry
+      # and build dir matter. First-party action, already in the tree
+      # (ci.yml, release.yml); SHA-pinned here like everything else in this
+      # file, so S-5 (docs/SUPPLY_CHAIN.md) needs no new allowance.
       - name: Cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry
-            sidecar/target
-          key: ${{ runner.os }}-codeql-rust-${{ hashFiles('sidecar/Cargo.lock') }}
+            codeql-rust-target
+          key: ${{ runner.os }}-codeql-rust-v2-${{ hashFiles('sidecar/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-codeql-rust-
+            ${{ runner.os }}-codeql-rust-v2-
 
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
         with:
