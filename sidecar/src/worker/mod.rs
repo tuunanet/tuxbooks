@@ -229,11 +229,6 @@ fn dispatch(job: &WorkerJob, document: &mut std::fs::File) -> Result<WorkerRespo
             let book = crate::pdf::parse_pdf_bytes(&bytes, limits)?;
             done_json(serde_json::to_value(book).map_err(|err| JobError::worker(err.to_string()))?)
         }
-        WorkerOp::PdfProperties => {
-            let bytes = read_fd_bounded(document, limits)?;
-            let props = crate::pdf::read_file_properties_bytes(&bytes, limits)?;
-            done_json(serde_json::to_value(props).map_err(|err| JobError::worker(err.to_string()))?)
-        }
         WorkerOp::PdfCover => {
             let bytes = read_fd_bounded(document, limits)?;
             let pdfium = crate::pdf::render::loaded_pdfium()

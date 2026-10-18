@@ -5,15 +5,8 @@ import {
   getBookMetadata,
   resetBookMetadata,
   setBookCover,
-  setMetadataFieldSource,
-  updateBookMetadata,
 } from "@/lib/bridge";
-import type {
-  BookMetadata,
-  MetadataFieldSource,
-  MetadataFieldSources,
-  MetadataFields,
-} from "@/types/domain";
+import type { BookMetadata, MetadataFields } from "@/types/domain";
 
 interface LoadedView {
   bookId: number;
@@ -65,25 +58,6 @@ export function useBookMetadata(bookId: number | null) {
   const metadata = current === null ? null : current.metadata;
   const error = current === null ? null : current.error;
 
-  const save = useCallback(
-    async (form: MetadataFields) => {
-      if (bookId === null) return undefined;
-      setSaving(true);
-      setEmbedDone(null);
-      try {
-        const saved = await updateBookMetadata(bookId, form);
-        setLoaded({ bookId, metadata: saved, error: null });
-        return saved;
-      } catch (err) {
-        setLoaded({ bookId, metadata: null, error: toMessage(err) });
-        return undefined;
-      } finally {
-        setSaving(false);
-      }
-    },
-    [bookId],
-  );
-
   const reset = useCallback(async () => {
     if (bookId === null) return;
     setSaving(true);
@@ -121,31 +95,10 @@ export function useBookMetadata(bookId: number | null) {
   }, [bookId]);
 
   /**
-   * Choose which layer is authoritative for one field (`null` restores the
-   * default). The override is kept either way, so switching back is lossless.
-   */
-  const setFieldSource = useCallback(
-    async (field: keyof MetadataFieldSources, source: MetadataFieldSource | null) => {
-      if (bookId === null) return;
-      setSaving(true);
-      setEmbedDone(null);
-      try {
-        const view = await setMetadataFieldSource(bookId, field, source);
-        setLoaded({ bookId, metadata: view, error: null });
-      } catch (err) {
-        setLoaded({ bookId, metadata: null, error: toMessage(err) });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [bookId],
-  );
-
-  /**
-   * Explicit "Embed into file": the backend persists the form and writes it
-   * into the source EPUB/PDF, then re-parses the file. Passing the form means
-   * unsaved edits are embedded too — Save is not required first. Failures
-   * keep the form and show an inline message.
+   * Save: persist the form and write the fields the format supports into
+   * the source EPUB/PDF, then re-parse the file. Fields the format cannot
+   * store stay as library edits. Failures keep the form and show an inline
+   * message.
    */
   const embed = useCallback(
     async (form: MetadataFields) => {
@@ -178,11 +131,9 @@ export function useBookMetadata(bookId: number | null) {
     error,
     embedError,
     embedSuccess,
-    save,
     reset,
     changeCover,
     restoreCover,
-    setFieldSource,
     embed,
   };
 }

@@ -27,7 +27,6 @@ pub enum WorkerOp {
     EpubMember,
     EpubEmbed,
     PdfParse,
-    PdfProperties,
     PdfCover,
     PdfEmbed,
     /// Diagnostic op: applies the sandbox and reports what it observes.

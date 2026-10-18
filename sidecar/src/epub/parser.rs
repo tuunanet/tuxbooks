@@ -99,61 +99,6 @@ pub(crate) fn check_archive_totals<R: Read + Seek>(
     Ok(())
 }
 
-/// Native metadata entries for the read-only "Original File Metadata" panel,
-/// built from the same OPF parse the importer uses. Only non-empty values are
-/// returned, in a stable display order.
-pub fn read_file_properties(
-    path: &Path,
-    limits: &ResourceLimits,
-) -> Result<Vec<(String, String)>, EpubError> {
-    read_file_properties_reader(BufReader::new(File::open(path)?), limits)
-}
-
-/// Reader-based core of [`read_file_properties`]; the path wrapper owns the
-/// source-size quota check (see [`parse_epub_reader`]).
-pub fn read_file_properties_reader<R: Read + Seek>(
-    reader: BufReader<R>,
-    limits: &ResourceLimits,
-) -> Result<Vec<(String, String)>, EpubError> {
-    let book = parse_epub_reader(reader, limits)?;
-    Ok(file_properties_from_metadata(book.metadata))
-}
-
-/// Display projection of already-parsed EPUB metadata (no hostile input is
-/// touched here — the parse itself happens in the document worker). Shared
-/// by the path-based test wrapper and the metadata service, which receives
-/// the parsed book from the worker client.
-pub fn file_properties_from_metadata(metadata: super::EpubMetadata) -> Vec<(String, String)> {
-    let mut entries = Vec::new();
-    let mut push = |key: &str, value: Option<String>| {
-        if let Some(value) = value.filter(|v| !v.is_empty()) {
-            entries.push((key.to_string(), value));
-        }
-    };
-    push("Title", Some(metadata.title));
-    push("Subtitle", metadata.subtitle);
-    push(
-        "Creator(s)",
-        (!metadata.authors.is_empty()).then(|| metadata.authors.join(", ")),
-    );
-    push(
-        "Subject(s)",
-        (!metadata.subjects.is_empty()).then(|| metadata.subjects.join(", ")),
-    );
-    push("Publisher", metadata.publisher);
-    push("Language", metadata.language);
-    push("Date", metadata.publication_date);
-    push("Identifier (ISBN)", metadata.isbn);
-    if let Some(series) = metadata.series {
-        let value = match metadata.series_index {
-            Some(index) => format!("{series} #{index}"),
-            None => series,
-        };
-        entries.push(("Series".to_string(), value));
-    }
-    entries
-}
-
 fn read_mimetype<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     limits: &ResourceLimits,
@@ -645,21 +590,6 @@ mod tests {
         assert_eq!(book.metadata.author.as_deref(), Some("Ada Lovelace"));
         assert_eq!(book.metadata.language.as_deref(), Some("en"));
         assert_eq!(book.metadata.isbn.as_deref(), Some("978-3-16-148410-0"));
-    }
-
-    #[test]
-    fn file_properties_list_native_metadata() {
-        let entries = read_file_properties(&fixture_epub(), &ResourceLimits::DEFAULTS).unwrap();
-        assert_eq!(
-            entries[0],
-            ("Title".to_string(), "A Minimal Book".to_string())
-        );
-        assert!(entries.contains(&(
-            "Identifier (ISBN)".to_string(),
-            "978-3-16-148410-0".to_string()
-        )));
-        assert!(entries.contains(&("Language".to_string(), "en".to_string())));
-        assert!(!entries.iter().any(|(_, value)| value.is_empty()));
     }
 
     #[test]

@@ -11,7 +11,6 @@ belongs to the frontend engine (see "Rendering" below).
 
 ```rust
 pub fn parse_pdf(path: &Path) -> Result<PdfBook, PdfError>;
-pub fn read_file_properties(path: &Path) -> Result<Vec<(String, String)>, PdfError>;
 
 pub struct PdfBook {
     pub metadata: PdfMetadata,
@@ -36,15 +35,6 @@ pub struct PdfMetadata {
    humanized file name (underscores become spaces); titles are mandatory in
    the library schema.
 
-## File properties (read-only)
-
-`read_file_properties(path)` returns every non-empty document information
-dictionary entry in a stable order — Title, Author, Subject, Keywords,
-Creator, Producer, Creation date, Modification date — for the book detail
-view's "Original File Metadata" panel. Unlike `parse_pdf` there is no
-file-name title fallback: the panel reports what the file actually carries.
-PDF date strings (`D:YYYYMMDD…`) are rendered as `YYYY-MM-DD HH:mm`.
-
 ## Import mapping
 
 | PDF field  | Library column                                                     |
@@ -62,10 +52,10 @@ whole documents for the reading surface, while import-time covers need a
 per-file, no-UI rasterization in the sidecar; keeping native PDFium avoids
 loading every full document during a scan for identical quality.
 
-## Metadata writing (embed)
+## Metadata writing (save)
 
-`write_metadata(path, &PdfMetadata)` supports the metadata dialog's explicit
-"Embed into file" action: it sets `/Title`, `/Author`, and `/Subject` in the
+`write_metadata(path, &PdfMetadata)` supports the metadata form's Save: it
+sets `/Title`, `/Author`, and `/Subject` in the
 document information dictionary (creating one when absent and preserving every
 other Info entry), saves through `lopdf`, and swaps the file atomically.
 Non-ASCII values are written as UTF-16BE hex strings with a byte-order mark —

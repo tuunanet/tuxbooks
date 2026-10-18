@@ -1,7 +1,7 @@
 //! Write bibliographic metadata back into a PDF's document information
 //! dictionary.
 //!
-//! "Embed into file" support (metadata curation). PDFs only have standard
+//! Save support (metadata curation). PDFs only have standard
 //! Info fields for a subset of the library's metadata: `/Title`, `/Author`,
 //! and `/Subject` (the library's description). Publisher, language, ISBN,
 //! publication date, series, and subtitle have no faithful PDF field and stay
