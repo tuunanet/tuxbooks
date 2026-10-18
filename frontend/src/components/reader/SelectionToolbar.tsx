@@ -1,13 +1,7 @@
 import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  HIGHLIGHT_COLORS,
-  type HighlightAction,
-  type HighlightColor,
-  type ReaderSelection,
-} from "./annotationModel";
-
-const COLOR_ORDER: HighlightColor[] = ["yellow", "green", "blue", "red", "purple"];
+import { HIGHLIGHT_COLOR_KEYS, type HighlightColor } from "@/lib/highlightPalette";
+import type { HighlightAction, ReaderSelection } from "./annotationModel";
 
 interface SelectionToolbarProps {
   /** The live selection or clicked highlight; null when nothing is active. */
@@ -20,6 +14,8 @@ interface SelectionToolbarProps {
   onAction: (action: HighlightAction) => void;
   /** Dismisses the selection without changing anything. */
   onDismiss: () => void;
+  /** Resolves a persisted palette slot to the active theme family's wash. */
+  colorFor: (color: HighlightColor) => string;
 }
 
 /**
@@ -29,7 +25,12 @@ interface SelectionToolbarProps {
  * annotation. The active reader owns the selection itself; this bar only
  * reports the chosen action back.
  */
-export function SelectionToolbar({ selection, onAction, onDismiss }: SelectionToolbarProps) {
+export function SelectionToolbar({
+  selection,
+  onAction,
+  onDismiss,
+  colorFor,
+}: SelectionToolbarProps) {
   if (!selection) return null;
   const editing = selection.highlightId !== null;
   return (
@@ -45,7 +46,7 @@ export function SelectionToolbar({ selection, onAction, onDismiss }: SelectionTo
       >
         {selection.text}
       </span>
-      {COLOR_ORDER.map((color) => (
+      {HIGHLIGHT_COLOR_KEYS.map((color) => (
         <button
           key={color}
           type="button"
@@ -54,7 +55,7 @@ export function SelectionToolbar({ selection, onAction, onDismiss }: SelectionTo
           title={editing ? `Change highlight to ${color}` : `Highlight in ${color}`}
           onClick={() => onAction({ type: "setColor", color })}
           className="size-5 shrink-0 rounded-full border border-black/20 outline-none hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
-          style={{ background: HIGHLIGHT_COLORS[color] }}
+          style={{ background: colorFor(color) }}
         />
       ))}
       {editing && (

@@ -1108,6 +1108,11 @@ export class ReadiumEpubHandle {
         style: {
           type: "highlight",
           tint: highlightTint(key === undefined ? "" : (this.highlights.get(key) ?? "")),
+          // Washes arrive pre-tuned (lib/highlightPalette); the toolkit's
+          // contrast enforcement would otherwise darken low-contrast tints
+          // toward 3:1 against the page, ignoring their alpha and
+          // destroying the translucent look.
+          enforceContrast: false,
         },
       });
     });

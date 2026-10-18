@@ -11,6 +11,7 @@ import {
 } from "@/lib/epub/appearance";
 import type { ResolvedTheme } from "@/lib/theme";
 import type { ReaderTheme } from "@/lib/epub/appearance";
+import { EMPTY_HIGHLIGHT_OVERRIDES, type HighlightOverrides } from "@/lib/highlightPalette";
 
 /** Visual theme of the reader surface; "default" keeps publisher colors. */
 export type { ReaderTheme } from "@/lib/epub/appearance";
@@ -61,6 +62,12 @@ export type ReaderFontFamily = EpubFontFamily;
    * links, visited, and selection keep their theme colors. EPUB-only.
    */
   foreground: string | null;
+  /**
+   * Highlight color overrides per theme family: slot key → hex hue, absent
+   * key = default ink. Resolution applies the family's wash, so any picked
+   * hue adapts to light and dark (lib/highlightPalette).
+   */
+  highlightOverrides: HighlightOverrides;
   theme: ReaderTheme;
   layout: ReaderLayout;
 }
@@ -76,6 +83,7 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   pageGutter: EPUB_DEFAULT_PAGE_GUTTER_PX,
   textAlign: EPUB_DEFAULT_TEXT_ALIGNMENT,
   foreground: null,
+  highlightOverrides: EMPTY_HIGHLIGHT_OVERRIDES,
   theme: EPUB_DEFAULT_THEME,
   layout: "paginated",
 };

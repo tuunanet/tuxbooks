@@ -1,5 +1,6 @@
 import { useMemo, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
+import type { HighlightOverrides, HighlightThemeFamily } from "@/lib/highlightPalette";
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
@@ -64,6 +65,10 @@ interface PdfDocumentViewProps {
   onRetryPage?: (pageNumber: number) => void;
   /** Persisted highlights by page number; drawn over rendered pages. */
   highlightsByPage?: Map<number, Annotation[]>;
+  /** Theme family of the active reader theme; picks highlight washes + blend. */
+  highlightFamily: HighlightThemeFamily;
+  /** Per-family highlight hue overrides (lib/highlightPalette). */
+  highlightOverrides: HighlightOverrides;
   /** CSS filter implementing the reader theme over the fixed pages
    *  (undefined = pages as-is); see lib/pdf/theme.ts. */
   themeFilter?: string;
@@ -116,6 +121,8 @@ export function PdfDocumentView({
   contentAreaRef,
   onRetryPage,
   highlightsByPage,
+  highlightFamily,
+  highlightOverrides,
   themeFilter,
   themeTint,
   smartColors,
@@ -245,7 +252,11 @@ export function PdfDocumentView({
                       scale={scale}
                     />
                   )}
-                  <PdfHighlightOverlay highlights={highlightsByPage?.get(slot.pageNumber) ?? []} />
+                  <PdfHighlightOverlay
+                    highlights={highlightsByPage?.get(slot.pageNumber) ?? []}
+                    family={highlightFamily}
+                    overrides={highlightOverrides}
+                  />
                 </div>
               ) : null}
             </PdfPageSlot>

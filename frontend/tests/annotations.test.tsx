@@ -6,7 +6,6 @@ import {
   annotationRects,
   byKind,
   highlightAtPoint,
-  highlightCssColor,
   highlightForSelection,
   isBookmarkAtLocator,
   isBookmarkAtPage,
@@ -16,12 +15,6 @@ import { makeAnnotation } from "./factories";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 describe("annotationModel", () => {
-  it("maps stored color names to CSS colors with a yellow fallback", () => {
-    expect(highlightCssColor("green")).toBe("#4ade80");
-    expect(highlightCssColor("magenta")).toBe("#facc15");
-    expect(highlightCssColor(null)).toBe("#facc15");
-  });
-
   it("filters annotations by kind and bookmark locators", () => {
     const bookmarkCfi = makeAnnotation({ kind: "bookmark", cfi: "epubcfi(/6/2)" });
     const bookmarkPage = makeAnnotation({ kind: "bookmark", pageNumber: 3, cfi: null });

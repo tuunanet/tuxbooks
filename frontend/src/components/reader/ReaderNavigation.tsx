@@ -53,6 +53,8 @@ interface ReaderNavigationProps {
   /** The selected navigation tab (controlled by the shell). */
   tab: ReaderNavTab;
   onTabChange: (tab: ReaderNavTab) => void;
+  /** Resolves a persisted palette slot to the active theme family's wash. */
+  colorFor: (color: string | null | undefined) => string;
   /** Active reader theme; the portaled sheet re-themes its app tokens to it. */
   theme: ReaderTheme;
 }
@@ -191,6 +193,7 @@ export function ReaderNavigation({
   onSearchPick,
   tab,
   onTabChange,
+  colorFor,
   theme,
 }: ReaderNavigationProps) {
   const isEpub = book.format === "epub";
@@ -388,6 +391,7 @@ export function ReaderNavigation({
               <ReaderAnnotationList
                 annotations={bookmarks}
                 withColor={false}
+                colorFor={colorFor}
                 label={bookmarkLabel}
                 onJump={jumpToAnnotation}
                 onDelete={onDeleteAnnotation}
@@ -409,6 +413,7 @@ export function ReaderNavigation({
               <ReaderAnnotationList
                 annotations={highlights}
                 withColor
+                colorFor={colorFor}
                 label={highlightLabel}
                 onJump={jumpToAnnotation}
                 onDelete={onDeleteAnnotation}

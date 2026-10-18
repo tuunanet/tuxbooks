@@ -1,4 +1,5 @@
 import type { Annotation, AnnotationKind, AnnotationRect } from "@/types/domain";
+import type { HighlightColor } from "@/lib/highlightPalette";
 
 /**
  * Format-agnostic annotation state shared by the reader shell, the
@@ -6,29 +7,10 @@ import type { Annotation, AnnotationKind, AnnotationRect } from "@/types/domain"
  * locator: EPUB annotations point at a canonical CFI, PDF annotations at a
  * 1-based page (+ optional page-local fraction); PDF highlights add
  * normalized page-space rects.
+ *
+ * The persisted highlight `color` is a palette slot key; its CSS value comes
+ * from `lib/highlightPalette` (family-aware washes, user overrides).
  */
-
-/** Highlight palette. The key is the stable persisted `color` value. */
-export const HIGHLIGHT_COLORS = {
-  yellow: "#facc15",
-  green: "#4ade80",
-  blue: "#60a5fa",
-  red: "#f87171",
-  purple: "#c084fc",
-} as const;
-
-export type HighlightColor = keyof typeof HIGHLIGHT_COLORS;
-
-export const DEFAULT_HIGHLIGHT_COLOR: HighlightColor = "yellow";
-
-export function isHighlightColor(value: string | null | undefined): value is HighlightColor {
-  return value !== null && value !== undefined && value in HIGHLIGHT_COLORS;
-}
-
-/** CSS color of a stored highlight color name, falling back to yellow. */
-export function highlightCssColor(color: string | null | undefined): string {
-  return isHighlightColor(color) ? HIGHLIGHT_COLORS[color] : HIGHLIGHT_COLORS.yellow;
-}
 
 /**
  * A highlight operation from the selection toolbar. A color choice creates

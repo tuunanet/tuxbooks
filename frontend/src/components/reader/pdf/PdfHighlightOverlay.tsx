@@ -1,12 +1,28 @@
 import type { Annotation } from "@/types/domain";
-import { annotationRects, highlightCssColor } from "../annotationModel";
+import { annotationRects } from "../annotationModel";
+import {
+  highlightCss,
+  type HighlightOverrides,
+  type HighlightThemeFamily,
+} from "@/lib/highlightPalette";
+
+interface PdfHighlightOverlayProps {
+  highlights: Annotation[];
+  /** Theme family of the active reader theme; picks the wash set + blend. */
+  family: HighlightThemeFamily;
+  /** Per-family hue overrides (lib/highlightPalette). */
+  overrides: HighlightOverrides;
+}
 
 /**
- * Drawn highlights for one page: absolutely positioned translucent rects in
- * normalized page space, so they track the canvas exactly at every zoom.
- * Pointer-transparent — they must never block text selection.
+ * Persisted highlights over the page canvas: absolutely positioned
+ * translucent rects in normalized page space, so they track the canvas at
+ * every zoom. Pointer-transparent — clicks resolve through the selection
+ * handler (docs/PDF.md). Light pages multiply the wash into the paper; on
+ * dark treatments multiply would pull it toward mud, so it composites
+ * normally there.
  */
-export function PdfHighlightOverlay({ highlights }: { highlights: Annotation[] }) {
+export function PdfHighlightOverlay({ highlights, family, overrides }: PdfHighlightOverlayProps) {
   const drawn = highlights.flatMap((highlight) =>
     annotationRects(highlight).map((rect, index) => ({ highlight, rect, index })),
   );
@@ -23,9 +39,8 @@ export function PdfHighlightOverlay({ highlights }: { highlights: Annotation[] }
             top: `${rect.y * 100}%`,
             width: `${rect.width * 100}%`,
             height: `${rect.height * 100}%`,
-            background: highlightCssColor(highlight.color),
-            opacity: 0.35,
-            mixBlendMode: "multiply",
+            background: highlightCss(highlight.color, family, overrides),
+            mixBlendMode: family === "dark" ? "normal" : "multiply",
           }}
         />
       ))}

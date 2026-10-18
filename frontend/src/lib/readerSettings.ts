@@ -34,6 +34,7 @@ import {
   type ReaderLayout,
   type ReaderPreferences,
 } from "@/state/readerState";
+import { sanitizeHighlightOverrides } from "@/lib/highlightPalette";
 
 export const READER_SETTINGS_STORAGE_KEY = "tuxbooks.reader";
 
@@ -113,6 +114,7 @@ export function sanitizeReaderPreferences(raw: unknown): ReaderPreferences {
     pageGutter: nearestEpubPageGutter(asNumber(source.pageGutter, defaults.pageGutter)),
     textAlign,
     foreground,
+    highlightOverrides: sanitizeHighlightOverrides(source.highlightOverrides),
     theme,
     layout,
   };
