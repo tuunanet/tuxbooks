@@ -53,8 +53,15 @@ class FakeWorker {
       } else if (method === "text") {
         const page = (params as { page: number }).page;
         // Page 3 has no usable text: the reader must degrade to no layer.
+        // Page 4 reports a lying font size (a degenerate text matrix: the
+        // char boxes stand 30 units while GetFontSize says 1.2), the shape
+        // that collapsed PDF mouse selection when the text layer trusted it.
         const lines =
-          page === 3 ? [] : [{ text: `line ${page}`, x: 10, y: 20, w: 100, h: 30, size: 24 }];
+          page === 3
+            ? []
+            : page === 4
+              ? [{ text: "degenerate", x: 10, y: 20, w: 100, h: 30, size: 1.2 }]
+              : [{ text: `line ${page}`, x: 10, y: 20, w: 100, h: 30, size: 24 }];
         this.respond({ id, ok: true, result: { lines } });
       } else if (method === "outline") {
         // The raw seam shape: 0-based pages, an external link without a page.
@@ -207,16 +214,57 @@ describe("PDFium adapter", () => {
     ]);
 
     // The seam's text-layer renderer turns those lines into positioned,
-    // transparent spans at the requested scale, unchanged by the engine swap.
+    // transparent spans at the requested scale. No fixed width: the box
+    // shrink-wraps its run, and the width is fitted in the browser
+    // (unmeasurable in jsdom). The font stays under the line box so the
+    // painted selection band cannot exceed the line pitch.
     const container = document.createElement("div");
     await renderPdfTextLayer(pdf, 2, container, 2);
     const span = container.querySelector("span")!;
     expect(span.textContent).toBe("line 2");
     expect(span.style.left).toBe("20px");
     expect(span.style.top).toBe("40px");
-    expect(span.style.width).toBe("200px");
+    expect(span.style.width).toBe("");
     expect(span.style.height).toBe("60px");
-    expect(span.style.fontSize).toBe("48px");
+    expect(span.style.lineHeight).toBe("60px");
+    expect(span.style.fontSize).toBe("42px");
+
+    await pdf.destroy();
+  });
+
+  test("a lying reported font size still sizes the span from the box", async () => {
+    const pdf = await openPdfDocumentFromBook(1, "pdf");
+
+    const container = document.createElement("div");
+    await renderPdfTextLayer(pdf, 4, container, 2);
+    const span = container.querySelector("span")!;
+    expect(span.textContent).toBe("degenerate");
+    // 1.2 (reported) x 2 would be an invisible 2.4px text run inside a
+    // 60px hit box; the char box keeps selection hit-testing aligned.
+    expect(span.style.fontSize).toBe("42px");
+
+    await pdf.destroy();
+  });
+
+  test("a superseded layer's cancel keeps the live layer's spans", async () => {
+    const pdf = await openPdfDocumentFromBook(1, "pdf");
+
+    // StrictMode (dev) mounts the layer effect twice; the first build's
+    // promise can resolve after the second has painted. Its cancel must
+    // remove only its own spans — a container-wide clear left dev-mode
+    // layers empty until a resize forced a rebuild.
+    const container = document.createElement("div");
+    const [first, second] = await Promise.all([
+      renderPdfTextLayer(pdf, 2, container, 1),
+      renderPdfTextLayer(pdf, 2, container, 1),
+    ]);
+    expect(container.querySelectorAll("span").length).toBe(2);
+
+    first.cancel();
+    expect(container.querySelectorAll("span").length).toBe(1);
+
+    second.cancel();
+    expect(container.querySelectorAll("span").length).toBe(0);
 
     await pdf.destroy();
   });

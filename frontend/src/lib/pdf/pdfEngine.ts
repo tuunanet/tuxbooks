@@ -118,21 +118,128 @@ export async function renderPdfTextLayer(
   container: HTMLElement,
   scale: number,
 ): Promise<{ cancel(): void }> {
+  let cancelled = false;
+  // The run measurements below depend on the app font, which loads
+  // asynchronously; measuring before the swap bakes in stale metrics. Wait
+  // for the font set to settle (bounded — the layer is an affordance, never
+  // worth blocking on), and honor a cancel that lands during the wait.
+  const fonts = container.ownerDocument.fonts;
+  if (fonts !== undefined && fonts.status === "loading") {
+    await Promise.race([fonts.ready, new Promise((resolve) => setTimeout(resolve, 1000))]);
+  }
+  if (cancelled) return { cancel: () => {} };
   const lines = await document.getTextLines(pageNumber);
-  for (const line of lines) {
+  if (cancelled) return { cancel: () => {} };
+  /** Distance to the nearest other line top, in page units. */
+  const linePitch = (index: number): number => {
+    const y = lines[index]!.y;
+    let pitch = Infinity;
+    for (let other = 0; other < lines.length; other++) {
+      if (other === index) continue;
+      const dy = Math.abs(lines[other]!.y - y);
+      if (dy > 0.5) pitch = Math.min(pitch, dy);
+    }
+    return pitch === Infinity ? lines[index]!.h : pitch;
+  };
+  const spans: HTMLSpanElement[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
     const span = container.ownerDocument.createElement("span");
     span.textContent = line.text;
+    // Native selection bands follow the inline line box, not the font: a
+    // small font still paints a band the height of line-height. PDFium's
+    // char boxes carry ascent and descent and usually exceed the distance
+    // between line tops, so a band as tall as the box overlaps the next
+    // line. Pin line-height to the gap to the neighbouring line (never more
+    // than the box) and nudge the box down by the difference, keeping the
+    // band centred on the text row.
+    const boxHeight = Math.max(line.h, 1) * scale;
+    const bandHeight = Math.min(boxHeight, linePitch(index) * scale);
+    // The painted band is the larger of the line box and the font's glyph
+    // box (~1.3x the font size), so both have to fit the pitch.
+    const fontHeight = Math.min(boxHeight, bandHeight * 0.7);
     span.style.left = `${line.x * scale}px`;
-    span.style.top = `${line.y * scale}px`;
-    span.style.width = `${Math.max(line.w, 1) * scale}px`;
-    span.style.height = `${Math.max(line.h, 1) * scale}px`;
-    span.style.fontSize = `${Math.min(line.size, line.h) * scale}px`;
-    span.style.lineHeight = `${line.h * scale}px`;
+    span.style.top = `${line.y * scale + (boxHeight - bandHeight) / 2}px`;
+    span.style.height = `${boxHeight}px`;
+    span.style.fontSize = `${fontHeight}px`;
+    span.style.lineHeight = `${bandHeight}px`;
     container.appendChild(span);
+    spans.push(span);
   }
+  // Selection hit-testing works in the span's text-layout space, so the text
+  // run must span the line's char-box width. Two things get in the way. The
+  // reported font size cannot be trusted: some PDFs carry degenerate text
+  // matrices (a 12pt line reporting ~1pt), which lays the text out into a
+  // sliver of the line and collapses every mouse drag to a caret. And a
+  // transform cannot fix sizing: scaling the span scales its box and its run
+  // together, leaving their ratio untouched. The font comes from the
+  // char-box height, and the width is fitted with letter-spacing — a purely
+  // horizontal adjustment — so every x in the hit area maps to a character.
+  //
+  // The layer can mount before the page slot has layout (a restored
+  // position builds it during reader initialization, and StrictMode
+  // double-mounts in dev), where the Range measures zero and a one-shot fit
+  // would silently leave the run at pass-1 sizing. Measure after the first
+  // frame, and if the container still has no layout, fit the moment it gets
+  // some.
+  const nextFrame = (): Promise<void> =>
+    new Promise((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(resolve, 16);
+      }
+    });
+  let fittedOnce = false;
+  const fitToLineWidths = (): boolean => {
+    if (fittedOnce) return true;
+    const widths = spans.map((span) => {
+      const range = container.ownerDocument.createRange();
+      range.selectNodeContents(span);
+      // jsdom's Range cannot measure geometry; no measurement, no fit.
+      const width = range.getBoundingClientRect?.()?.width ?? 0;
+      range.detach();
+      return width;
+    });
+    let measurable = false;
+    for (let i = 0; i < spans.length; i++) {
+      const natural = widths[i]!;
+      if (natural < 1) continue;
+      measurable = true;
+      const boxWidth = Math.max(lines[i]!.w, 1) * scale;
+      const spacing = (boxWidth - natural) / Math.max(lines[i]!.text.length, 1);
+      spans[i]!.style.letterSpacing = `${spacing}px`;
+      spans[i]!.dataset.pdfTextFitted = "true";
+    }
+    fittedOnce = measurable;
+    return measurable;
+  };
+
+  await nextFrame();
+  if (cancelled) return { cancel: () => {} };
+  fitToLineWidths();
+  let layoutObserver: ResizeObserver | null = null;
+  if (!fittedOnce && spans.length > 0 && typeof ResizeObserver === "function") {
+    layoutObserver = new ResizeObserver(() => {
+      if (fitToLineWidths()) {
+        layoutObserver?.disconnect();
+        layoutObserver = null;
+      }
+    });
+    layoutObserver.observe(container);
+  }
+
   return {
     cancel: () => {
-      container.textContent = "";
+      cancelled = true;
+      layoutObserver?.disconnect();
+      layoutObserver = null;
+      // Remove only this build's spans. The layer container is shared across
+      // effect re-runs (StrictMode mounts twice in dev), so a superseded
+      // build resolving late must never wipe the live build's spans; a
+      // container-wide clear here left dev-mode layers empty until the next
+      // layout change forced a rebuild.
+      for (const span of spans) span.remove();
     },
   };
 }

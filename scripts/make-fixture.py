@@ -584,6 +584,53 @@ def write_pdf(path: Path, pages: list[dict], title: str, subject: str, outline: 
     print(f"wrote {path} ({path.stat().st_size} bytes)")
 
 
+def write_dense_pdf(path: Path) -> None:
+    """A full page of text drawn with a degenerate text matrix: a tiny Tf
+    inside a large Tm scale, so glyphs render ~12pt while FPDFText_GetFontSize
+    reports the raw 1.152. This is the lying-size shape that collapsed PDF
+    mouse selection when the text layer trusted the reported size (the text
+    laid out into a sliver of its hit box); the layer must derive its font
+    from the char boxes. Deterministic placeholder text, no timestamps."""
+
+    def pdf_string(value: str) -> str:
+        escaped = value.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+        return f"({escaped})"
+
+    lines = [
+        "reliable systems fail at the seams where two correct components meet and disagree",
+        "every retry needs a budget because unbounded retries are just outages in disguise",
+        "a queue is a promise that work happens later, never proof that it happens at all",
+        "caching is the art of deciding which stale answer is still true enough to serve",
+        "timeouts are a design decision about how long you are willing to wait for bad news",
+        "backpressure is what you owe downstream when you cannot say no upstream",
+        "an idempotency key turns a scary repeat into a boring no-op at the sink",
+        "the fallback path is production the moment the primary path has a bad day",
+        "observability is paying attention in production instead of hoping in staging",
+        "degrade on purpose rather than by accident, and say which parts bend first",
+        "small batch sizes turn a catastrophe into a changelog entry nobody reads",
+        "feature flags are how you ship code without shipping the behavior on day one",
+        "the health check must ask a question the service can actually answer",
+        "capacity planning is guessing honestly, in writing, with numbers attached",
+        "rollbacks are a feature you buy before the incident, never during it",
+        "every alert should page a human only when a human can change the outcome",
+    ]
+    parts = ["BT /F1 14 Tf 72 748 Td (A Dense Fixture) Tj ET"]
+    y = 716.0
+    for line in lines:
+        parts.append(
+            f"BT 10.59 0 0 10.59 72 {y:.0f} Tm /F1 1.152 Tf {pdf_string(line)} Tj ET"
+        )
+        y -= 26.0
+    stream = "\n".join(parts).encode("ascii")
+    path.write_bytes(
+        build_pdf(
+            [{"mediabox": (0, 0, 612, 792), "stream": stream, "label": "dense"}],
+            "A Dense Fixture",
+            "A PDF whose reported font sizes lie (degenerate text matrix).",
+        )
+    )
+
+
 def main() -> None:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     write_epub()
@@ -605,6 +652,7 @@ def main() -> None:
         "A PDF with varying page dimensions.",
     )
     write_smart_pdf(FIXTURES / "smart.pdf")
+    write_dense_pdf(FIXTURES / "dense.pdf")
 
 
 if __name__ == "__main__":
