@@ -9,10 +9,7 @@ pub mod session;
 pub mod writer;
 
 pub use metadata::EpubMetadata;
-pub use parser::{
-    file_properties_from_metadata, parse_container_xml, parse_epub, parse_epub_reader,
-    read_file_properties, read_file_properties_reader, CoverImage, EpubBook,
-};
+pub use parser::{parse_container_xml, parse_epub, parse_epub_reader, CoverImage, EpubBook};
 pub use session::{
     build_session, build_session_reader, guess_member_media_type, read_member, read_member_reader,
     EpubReadingSession,

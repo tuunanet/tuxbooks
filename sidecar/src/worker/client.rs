@@ -415,32 +415,6 @@ impl WorkerClient {
         }
     }
 
-    /// Read the PDF's native Info-dictionary entries in the worker.
-    pub fn pdf_properties(
-        &self,
-        document: &Path,
-        limits: &ResourceLimits,
-    ) -> Result<Vec<(String, String)>, WorkerError> {
-        let job = WorkerJob {
-            op: WorkerOp::PdfProperties,
-            limits: *limits,
-            member: None,
-            metadata: None,
-            pdfium_dirs: Vec::new(),
-        };
-        match self.run(&job, document)? {
-            WorkerResponse::Done {
-                json: Some(value), ..
-            } => {
-                serde_json::from_value(value).map_err(|err| WorkerError::Protocol(err.to_string()))
-            }
-            WorkerResponse::Done { json: None, .. } => Err(WorkerError::Protocol(
-                "pdf_properties returned no payload".to_string(),
-            )),
-            WorkerResponse::Failed { .. } => unreachable!("run() maps Failed to Err"),
-        }
-    }
-
     /// Render page 1 as a PNG cover in the worker (PDFium runs only there,
     /// P-1). `Ok(None)` when no library binds or the document has no pages.
     pub fn pdf_cover(

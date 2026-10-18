@@ -1,6 +1,6 @@
 //! Write bibliographic metadata back into an EPUB package document.
 //!
-//! "Embed into file" support (metadata curation): the OPF `<metadata>`
+//! Save support (metadata curation): the OPF `<metadata>`
 //! section is rewritten in place — the fields TuxBooks manages are replaced
 //! while every other child (`dcterms:modified`, non-ISBN identifiers, cover
 //! metas, custom metadata) is preserved byte-for-byte. The whole archive is

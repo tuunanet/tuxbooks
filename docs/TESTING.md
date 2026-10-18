@@ -286,10 +286,11 @@ Five isolated invocations per run:
    formats, each revisited after close/reopen — plus an EPUB highlight
    created from a real selection and asserted to paint again after
    reopen and after a drawer jump) and `metadata.e2e.ts`
-   (edit → grid/detail/search update, source bytes untouched, reset round
-   trip) and `collections.e2e.ts` (create a collection from the sidebar,
-   add and remove a book through the card context menu, mark a book
-   finished, delete the collection).
+   (edit → save writes the storeable fields into the file behind a
+   one-time `.bak`, grid/detail/search update, reset disables itself
+   once nothing is overridden) and `collections.e2e.ts` (create a
+   collection from the sidebar, add and remove a book through the card
+   context menu, mark a book finished, delete the collection).
 
 Two more invocations exist beyond the default four:
 

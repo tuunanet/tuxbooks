@@ -12,11 +12,9 @@ import type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
-  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
-  MetadataFieldSource,
   MetadataFields,
   ReadingProgressInput,
   ReadingProgressRecord,
@@ -30,7 +28,6 @@ export type {
   BookFormat,
   BookMetadata,
   CollectionSummary,
-  FileProperties,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -157,34 +154,6 @@ export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
   return invoke("get_book_metadata", { bookId });
 }
 
-/**
- * Native metadata read fresh from the book's source file, for the read-only
- * "Original File Metadata" panel. Null for unknown ids.
- */
-export function getBookFileProperties(bookId: number): Promise<FileProperties | null> {
-  return invoke("get_book_file_properties", { bookId });
-}
-
-/**
- * Choose which layer is authoritative for one field (`null` restores the
- * default). The override is kept either way, so switching back is lossless.
- */
-export function setMetadataFieldSource(
-  bookId: number,
-  field: string,
-  source: MetadataFieldSource | null,
-): Promise<BookMetadata> {
-  return invoke("set_metadata_field_source", { bookId, field, source });
-}
-
-/**
- * Save the metadata edit form. Only fields that differ from the source file
- * become overrides — source files are never rewritten.
- */
-export function updateBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
-  return invoke("update_book_metadata", { bookId, form });
-}
-
 /** Drop every override; the book returns to its source-file metadata. */
 export function resetBookMetadata(bookId: number): Promise<BookMetadata> {
   return invoke("reset_book_metadata", { bookId });
@@ -201,10 +170,10 @@ export function clearBookCoverOverride(bookId: number): Promise<Book> {
 }
 
 /**
- * Write the given metadata into the book's source EPUB/PDF file (explicit
- * user action). The form is persisted first, so Embed also saves unsaved
- * edits. The file is re-parsed, so fields the format can hold stop being
- * overrides. Covers are not embedded.
+ * Save the given metadata into the library and the book's source EPUB/PDF
+ * file (a one-time `.bak` backup is kept). Fields the format cannot store
+ * stay as library edits. The file is re-parsed, so storeable fields stop
+ * being overrides. Covers are not embedded.
  */
 export function embedBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
   return invoke("embed_book_metadata", { bookId, form });

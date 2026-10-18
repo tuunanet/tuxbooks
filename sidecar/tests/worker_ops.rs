@@ -77,15 +77,11 @@ fn epub_parse_enforces_the_job_quota_table() {
 }
 
 #[test]
-fn pdf_parse_and_properties_return_the_fixture_metadata() {
+fn pdf_parse_returns_the_fixture_metadata() {
     let book = client()
         .pdf_parse(&fixture("minimal.pdf"), &ResourceLimits::DEFAULTS)
         .unwrap();
     assert!(!book.metadata.title.is_empty());
-    let props = client()
-        .pdf_properties(&fixture("minimal.pdf"), &ResourceLimits::DEFAULTS)
-        .unwrap();
-    assert!(!props.is_empty());
 }
 
 #[test]

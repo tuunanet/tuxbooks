@@ -87,7 +87,6 @@ const ISSUED_PATH_METHODS = new Set(["scan_library", "reconnect_book", "set_book
 const BOOK_ID_METHODS = new Set([
   "remove_book",
   "get_book_metadata",
-  "get_book_file_properties",
   "reset_book_metadata",
   "clear_book_cover_override",
   "get_reading_progress",

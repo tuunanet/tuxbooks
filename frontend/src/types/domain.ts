@@ -76,32 +76,11 @@ export interface MetadataOverridden {
   subjects: boolean;
 }
 
-/** Which layer is authoritative for one field (issue #58, phase 4). */
-export type MetadataFieldSource = "library" | "file";
-
-/**
- * Explicit per-field authority choices. A `null` field uses the default:
- * the library override when one exists, otherwise the file value.
- */
-export interface MetadataFieldSources {
-  title: MetadataFieldSource | null;
-  subtitle: MetadataFieldSource | null;
-  publisher: MetadataFieldSource | null;
-  language: MetadataFieldSource | null;
-  isbn: MetadataFieldSource | null;
-  description: MetadataFieldSource | null;
-  publicationDate: MetadataFieldSource | null;
-  /** The series name and index travel as one unit. */
-  series: MetadataFieldSource | null;
-  authors: MetadataFieldSource | null;
-  subjects: MetadataFieldSource | null;
-}
-
 /**
  * Full curation view of one book (mirrors `domain::BookMetadata`): the
  * effective metadata, the untouched source-file values, and which fields
- * differ. The source file is never rewritten; overrides live in the library
- * database only.
+ * differ. Overrides live in the library database; saving writes the fields
+ * the format supports into the file as well.
  */
 export interface BookMetadata {
   bookId: number;
@@ -111,21 +90,6 @@ export interface BookMetadata {
   coverPath: string | null;
   /** The extracted source-file cover; differs from `coverPath` when overridden. */
   sourceCoverPath: string | null;
-  /** Explicit per-field authority choices; null fields use the default. */
-  fieldSources: MetadataFieldSources;
-}
-
-/** One native metadata entry read from a book file (read-only detail panel). */
-export interface FileProperty {
-  key: string;
-  value: string;
-}
-
-/** Read-only native metadata of a book's source file, read fresh from disk. */
-export interface FileProperties {
-  bookId: number;
-  format: BookFormat;
-  entries: FileProperty[];
 }
 
 /**

@@ -240,11 +240,6 @@ describe("BookDetail", () => {
         coverPath: null,
         sourceCoverPath: null,
       },
-      get_book_file_properties: {
-        bookId: 1,
-        format: "epub",
-        entries: [{ key: "Title", value: "File Garbled Title" }],
-      },
     });
 
     render(
@@ -268,13 +263,6 @@ describe("BookDetail", () => {
     expect(await screen.findByTestId("metadata-panel")).toBeInTheDocument();
     // The title diverges from the file, so it carries the orange-dot marker.
     expect(screen.getByTestId("metadata-title-overridden")).toBeInTheDocument();
-    // The file's own value and the native file properties are both visible.
-    expect(await screen.findByTestId("file-properties-list")).toHaveTextContent(
-      "File Garbled Title",
-    );
-    expect(screen.getByTestId("metadata-title").closest("div")).toHaveTextContent(
-      "File Garbled Title",
-    );
   });
 
   it("returns to the library from the back button", async () => {
