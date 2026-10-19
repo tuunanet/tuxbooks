@@ -343,7 +343,7 @@ interface PdfReaderProps {
   /** Streams one page's worth of matches up to the shell. */
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
-  onSearchDone?: (bookId: number) => void;
+  onSearchDone?: (bookId: number, truncated: boolean) => void;
   /** Highlights of the open book; drawn over rendered pages. */
   highlights?: Annotation[];
   /**

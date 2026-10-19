@@ -50,7 +50,7 @@ interface EpubReaderProps {
   /** Streams one chapter's worth of matches up to the shell. */
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
-  onSearchDone?: (bookId: number) => void;
+  onSearchDone?: (bookId: number, truncated: boolean) => void;
   /** Highlights of the open book; drawn into the engine's overlays. */
   highlights?: Annotation[];
   /** Persists a highlight created from a text selection. */
@@ -434,7 +434,7 @@ export function EpubReader({
                 })),
               });
             },
-            onDone: () => onSearchDoneRef.current?.(book.id),
+            onDone: (truncated) => onSearchDoneRef.current?.(book.id, truncated),
           });
         },
         cancel: () => cancelLast?.(),

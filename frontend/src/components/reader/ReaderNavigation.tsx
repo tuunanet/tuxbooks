@@ -20,10 +20,8 @@ import type { Annotation, AnnotationPatch } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { epubHrefJump, type ReaderJump } from "./readerModel";
 import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
-import { ReaderSearchTab } from "./ReaderSearchTab";
-import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
 
-export type ReaderNavTab = "contents" | "pages" | "outline" | "bookmarks" | "highlights" | "search";
+export type ReaderNavTab = "contents" | "pages" | "outline" | "bookmarks" | "highlights";
 
 interface ReaderNavigationProps {
   open: boolean;
@@ -44,12 +42,6 @@ interface ReaderNavigationProps {
   onDeleteAnnotation: (id: number) => void;
   /** Updates an annotation's color and/or note. */
   onUpdateAnnotation: (id: number, patch: AnnotationPatch) => void;
-  /** In-book search state for the open book; null before the first search. */
-  search: ReaderSearchState | null;
-  /** Starts (or clears) the in-book search for the open book. */
-  onSearch: (query: string) => void;
-  /** Navigates to an in-book search match. */
-  onSearchPick: (match: ReaderSearchMatch) => void;
   /** The selected navigation tab (controlled by the shell). */
   tab: ReaderNavTab;
   onTabChange: (tab: ReaderNavTab) => void;
@@ -103,12 +95,6 @@ const NAV_TAB_HINTS: Record<ReaderNavTab, ReaderNavTabHint> = {
     testId: "nav-tab-highlights",
     description: "Text you highlighted, with any notes you added.",
     combo: READER_PANEL_SHORTCUTS.highlights,
-  },
-  search: {
-    label: "Search",
-    testId: "nav-tab-search",
-    description: "Find text in this book.",
-    combo: "mod+f",
   },
 };
 
@@ -173,8 +159,7 @@ function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null
  * Reading navigation drawer: EPUB contents from the Readium engine (real
  * labels, real destinations); PDF pages, thumbnails, and outline from the
  * loaded PDFium document; persistent bookmarks, highlights, and notes from
- * the backend annotations; in-book search streamed from the open book's
- * reader.
+ * the backend annotations. In-book search lives in its own overlay.
  */
 export function ReaderNavigation({
   open,
@@ -188,9 +173,6 @@ export function ReaderNavigation({
   onAnnotationJump,
   onDeleteAnnotation,
   onUpdateAnnotation,
-  search,
-  onSearch,
-  onSearchPick,
   tab,
   onTabChange,
   colorFor,
@@ -266,7 +248,6 @@ export function ReaderNavigation({
             {!isEpub && navTabTrigger("outline", tab === "outline")}
             {navTabTrigger("bookmarks", tab === "bookmarks")}
             {navTabTrigger("highlights", tab === "highlights")}
-            {navTabTrigger("search", tab === "search")}
           </TabsList>
 
           {isEpub && (
@@ -421,10 +402,6 @@ export function ReaderNavigation({
                 testIdPrefix="nav-highlight"
               />
             )}
-          </TabsContent>
-
-          <TabsContent value="search" className="min-h-0 flex-1 overflow-hidden">
-            <ReaderSearchTab search={search} onSearch={onSearch} onPickMatch={onSearchPick} />
           </TabsContent>
         </Tabs>
       </SheetContent>

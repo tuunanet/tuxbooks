@@ -430,7 +430,7 @@ describe("EpubReader in-book search", () => {
   interface SearchProps {
     adapterRef?: { current: ReaderAdapter | null };
     onSearchGroup?: (bookId: number, group: unknown) => void;
-    onSearchDone?: (bookId: number) => void;
+    onSearchDone?: (bookId: number, truncated: boolean) => void;
   }
 
   function renderSearchableReader(props: SearchProps = {}) {
@@ -453,11 +453,13 @@ describe("EpubReader in-book search", () => {
     const adapterRef: { current: ReaderAdapter | null } = { current: null };
     const groups: Array<{ label: string; matches: unknown[] }> = [];
     let done = false;
+    let truncated = false;
     renderSearchableReader({
       adapterRef,
       onSearchGroup: (_id, group) => groups.push(group as never),
-      onSearchDone: () => {
+      onSearchDone: (_id, wasTruncated) => {
         done = true;
+        truncated = wasTruncated;
       },
     });
     await waitFor(() =>
@@ -467,19 +469,24 @@ describe("EpubReader in-book search", () => {
 
     adapterRef.current!.search.run("mole");
     await waitFor(() => expect(handle.lastSearchCallbacks).not.toBeNull());
-    emitSearchResults(handle, [
-      {
-        label: "Chapter One",
-        subitems: [
-          {
-            locator: FAKE_LOCATOR.section1,
-            excerpt: { pre: "The ", match: "mole", post: " was digging" },
-          },
-        ],
-      },
-    ]);
+    emitSearchResults(
+      handle,
+      [
+        {
+          label: "Chapter One",
+          subitems: [
+            {
+              locator: FAKE_LOCATOR.section1,
+              excerpt: { pre: "The ", match: "mole", post: " was digging" },
+            },
+          ],
+        },
+      ],
+      true,
+    );
 
     await waitFor(() => expect(done).toBe(true));
+    expect(truncated).toBe(true);
     expect(groups).toEqual([
       {
         label: "Chapter One",

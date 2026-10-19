@@ -166,9 +166,10 @@ export function lastFakeHandle(): FakeEpubHandle {
 export function emitSearchResults(
   handle: FakeEpubHandle,
   sections: Parameters<EpubSearchCallbacks["onSection"]>[0][],
+  truncated = false,
 ): void {
   for (const section of sections) handle.lastSearchCallbacks?.onSection(section);
-  handle.lastSearchCallbacks?.onDone();
+  handle.lastSearchCallbacks?.onDone(truncated);
 }
 
 /** The module shape installed by the `vi.mock` factory in test files. */

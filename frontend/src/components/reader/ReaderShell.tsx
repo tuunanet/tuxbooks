@@ -12,7 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
-import { formatShortcutAria, READER_PANEL_SHORTCUTS } from "@/lib/readerShortcuts";
+import {
+  formatShortcutAria,
+  formatShortcutDisplay,
+  READER_PANEL_SHORTCUTS,
+  READER_SEARCH_SHORTCUTS,
+} from "@/lib/readerShortcuts";
 import { markBookOpened } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useAnnotations } from "@/hooks/useAnnotations";
@@ -43,6 +48,7 @@ import type { Annotation, AnnotationInput } from "@/types/domain";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
+import { ReaderSearchOverlay } from "./ReaderSearchOverlay";
 import { ReaderAppearance } from "./ReaderAppearance";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { useAxisLockedWheel } from "./useAxisLockedWheel";
@@ -96,13 +102,16 @@ export function ReaderShell() {
       highlightCss(color, readerThemeFamily(preferences.theme), preferences.highlightOverrides),
     [preferences.theme, preferences.highlightOverrides],
   );
-  // The navigation drawer plus its selected tab: the Search toolbar button
-  // and Ctrl/Cmd+F open the drawer straight onto the Search tab.
+  // The navigation drawer plus its selected tab. In-book search is a
+  // separate overlay (below), not a drawer tab.
   const [nav, setNav] = useState<{ open: boolean; tab: ReaderNavTab }>({
     open: false,
     tab: "contents",
   });
   const openNav = (tab: ReaderNavTab) => setNav({ open: true, tab });
+  // Spotlight-style in-book search. The query and results live in
+  // `searchState` below, so closing the overlay never discards them.
+  const [searchOpen, setSearchOpen] = useState(false);
   // Drawer shortcut behavior: any drawer key closes the drawer whatever tab
   // is showing and never switches tabs while it is open; otherwise it opens
   // straight onto the requested tab.
@@ -251,7 +260,11 @@ export function ReaderShell() {
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
   useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
-  useShortcut("mod+f", () => openNav("search"));
+  // Both the primary binding and the familiar alias toggle the overlay, so
+  // a second press closes it without reaching for the mouse.
+  const toggleSearch = useCallback(() => setSearchOpen((open) => !open), []);
+  useShortcut(READER_SEARCH_SHORTCUTS.primary, toggleSearch);
+  useShortcut(READER_SEARCH_SHORTCUTS.alias, toggleSearch);
 
   // Panel shortcuts: thumbnails is a PDF affordance (the same `isEpub ? null`
   // gate as the page-turn combos), while the appearance popover and the
@@ -321,6 +334,13 @@ export function ReaderShell() {
     setPresentation(false);
     setFullscreenEntered(false);
   }
+  // A search overlay never outlives its book: the next book starts with the
+  // overlay closed and its own (empty) query.
+  const [searchBookId, setSearchBookId] = useState(bookId);
+  if (searchBookId !== bookId) {
+    setSearchBookId(bookId);
+    setSearchOpen(false);
+  }
   // Reading session lifecycle: stamp `last_opened_at` once per open so the
   // "Recently read" section and the detail view's "Last opened" reflect this
   // session even if the reader closes without a position save. Best-effort —
@@ -344,8 +364,8 @@ export function ReaderShell() {
   const appendSearchGroupFrom = useCallback((id: number, group: ReaderSearchGroup) => {
     setSearchState((prev) => (prev ? appendSearchGroup(prev, id, group) : prev));
   }, []);
-  const finishSearchFrom = useCallback((id: number) => {
-    setSearchState((prev) => (prev ? finishSearchGroup(prev, id) : prev));
+  const finishSearchFrom = useCallback((id: number, truncated: boolean) => {
+    setSearchState((prev) => (prev ? finishSearchGroup(prev, id, truncated) : prev));
   }, []);
   // Every navigation entry point funnels through the open adapter: search
   // matches, annotations, TOC entries, outline entries, and pages all jump
@@ -551,12 +571,15 @@ export function ReaderShell() {
                 size="icon-sm"
                 data-testid="reader-search"
                 aria-label="Search in book"
-                onClick={() => openNav("search")}
+                aria-keyshortcuts={formatShortcutAria(READER_SEARCH_SHORTCUTS.primary)}
+                onClick={() => setSearchOpen(true)}
               >
                 <Search />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Search in book (Ctrl+F)</TooltipContent>
+            <TooltipContent>
+              Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
+            </TooltipContent>
           </Tooltip>
 
           {isPdf && (
@@ -747,12 +770,18 @@ export function ReaderShell() {
         onAnnotationJump={jumpToAnnotation}
         onDeleteAnnotation={(id) => void remove(id)}
         onUpdateAnnotation={(id, patch) => void update(id, patch)}
-        search={searchState !== null && searchState.bookId === book.id ? searchState : null}
-        onSearch={runSearch}
-        onSearchPick={pickSearchMatch}
         tab={nav.tab}
         onTabChange={(tab) => setNav((prev) => ({ ...prev, tab }))}
         colorFor={highlightColorFor}
+        theme={preferences.theme}
+      />
+
+      <ReaderSearchOverlay
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        search={searchState !== null && searchState.bookId === book.id ? searchState : null}
+        onSearch={runSearch}
+        onPickMatch={pickSearchMatch}
         theme={preferences.theme}
       />
 

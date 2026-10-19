@@ -104,6 +104,18 @@ watched folder are ever listed, so every one of them can be unwatched on its
 own.
 _Avoid_: remove folder, stop tracking
 
+## Search
+
+**In-book search**:
+A query over the text of the open book, returning matches in document order
+with a location and a surrounding excerpt.
+_Avoid_: find, full-text search (that term belongs to the library catalog)
+
+**Search overlay**:
+The transient search surface over the reader: a query field and a result list
+that jumps to the picked match. It is not a navigation drawer tab.
+_Avoid_: Spotlight (the Apple feature it borrows its interaction from), search dialog
+
 ## Verification
 
 **Fidelity oracle**:

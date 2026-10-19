@@ -134,7 +134,7 @@ export interface EpubSearchCallbacks {
   /** Overall progress (0–1) across the spine; optional. */
   onProgress?: (fraction: number) => void;
   /** Always called once the search finishes (success or partial failure). */
-  onDone: () => void;
+  onDone: (truncated: boolean) => void;
 }
 
 /** Reflow layout of the reading surface. */
@@ -1009,10 +1009,14 @@ export class ReadiumEpubHandle {
     const items = this.publication.readingOrder.items.filter(
       (item) => item.type === XHTML_TYPE || item.type === HTML_TYPE,
     );
-    void this.consumeSearch(query.trim(), items, generation, callbacks).finally(() => {
-      // A superseded walk never fires its predecessor's callbacks.
-      if (generation === this.searchGeneration) callbacks.onDone();
-    });
+    void this.consumeSearch(query.trim(), items, generation, callbacks)
+      .then((truncated) => {
+        // A superseded walk never fires its predecessor's callbacks.
+        if (generation === this.searchGeneration) callbacks.onDone(truncated);
+      })
+      .catch(() => {
+        if (generation === this.searchGeneration) callbacks.onDone(false);
+      });
     return () => {
       if (generation === this.searchGeneration) this.clearSearch();
     };
@@ -1023,19 +1027,19 @@ export class ReadiumEpubHandle {
     items: Link[],
     generation: number,
     callbacks: EpubSearchCallbacks,
-  ): Promise<void> {
-    if (query.length === 0) return;
+  ): Promise<boolean> {
+    if (query.length === 0) return false;
     const decorations: Decoration[] = [];
     let matchCount = 0;
     let unlabeledOrdinal = 0;
     for (let index = 0; index < items.length; index += 1) {
-      if (generation !== this.searchGeneration) return;
+      if (generation !== this.searchGeneration) return false;
       if (matchCount >= SEARCH_MAX_MATCHES) break;
       callbacks.onProgress?.(index / Math.max(items.length, 1));
       const item = items[index];
       if (item === undefined) continue;
       const doc = await this.readDocument(item);
-      if (generation !== this.searchGeneration) return;
+      if (generation !== this.searchGeneration) return false;
       if (!doc) continue;
       const subitems: EpubSearchMatch[] = [];
       const href = item.href;
@@ -1066,6 +1070,7 @@ export class ReadiumEpubHandle {
       // Yield between sections so a superseded search cancels promptly.
       await Promise.resolve();
     }
+    return matchCount >= SEARCH_MAX_MATCHES;
   }
 
   /** Removes all match highlights from the rendered pages. */

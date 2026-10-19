@@ -255,9 +255,12 @@ does not fire while the content frame holds focus.
 Search runs through the seam over the publication, streaming per-section
 results (`{ label, subitems: [{ locator, excerpt }] }`). The UI side is
 format-agnostic: `ReaderShell` owns the shared `ReaderSearchState`
-(`components/reader/searchModel.ts`) and `ReaderSearchTab` renders query,
-match count, per-section groups, and excerpts; picking a match calls
-`goTo(locator)`. A new search supersedes the running one by generation.
+(`components/reader/searchModel.ts`) and `ReaderSearchOverlay` renders the
+Spotlight-style query field and one document-order result list with the
+chapter label as row metadata; picking a match calls `goTo(locator)` and
+closes the overlay. A new search supersedes the running one by generation,
+and both engines stop at their 500-match limit, reporting the truncation so
+the overlay can say so.
 
 ### Annotations
 

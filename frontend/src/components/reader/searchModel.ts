@@ -1,6 +1,6 @@
 /**
  * Format-agnostic in-book search state shared by the reader shell and the
- * navigation drawer. A match carries exactly one locator: EPUB matches
+ * search overlay. A match carries exactly one locator: EPUB matches
  * point at a serialized locator the engine can jump to, PDF matches at a
  * 1-based page.
  */
@@ -31,6 +31,8 @@ export interface ReaderSearchState {
   status: "running" | "done";
   groups: ReaderSearchGroup[];
   totalMatches: number;
+  /** The engine stopped at its match limit; more may exist. */
+  truncated: boolean;
 }
 
 export const emptySearchState = (bookId: number, query: string): ReaderSearchState => ({
@@ -39,6 +41,7 @@ export const emptySearchState = (bookId: number, query: string): ReaderSearchSta
   status: "running",
   groups: [],
   totalMatches: 0,
+  truncated: false,
 });
 
 /** Streams one group into the state, ignoring anything from another book. */
@@ -56,14 +59,18 @@ export function appendSearchGroup(
 }
 
 /** Marks the state done, again ignoring anything from another book. */
-export function finishSearchGroup(state: ReaderSearchState, bookId: number): ReaderSearchState {
+export function finishSearchGroup(
+  state: ReaderSearchState,
+  bookId: number,
+  truncated = false,
+): ReaderSearchState {
   if (state.bookId !== bookId) return state;
-  return { ...state, status: "done" };
+  return { ...state, status: "done", truncated };
 }
 
 /**
- * What each reader (EPUB/PDF) registers with the shell so the navigation
- * drawer can drive in-book search without knowing the document format.
+ * What each reader (EPUB/PDF) registers with the shell so the search
+ * overlay can drive in-book search without knowing the document format.
  */
 export interface ReaderSearchController {
   run(query: string): void;
