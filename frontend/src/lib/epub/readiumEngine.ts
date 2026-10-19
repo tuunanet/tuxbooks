@@ -32,6 +32,7 @@ import type { BasicTextSelection } from "@readium/navigator-html-injectables";
 import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
+import { buildKeyboardPeripherals, dispatchForwardedShortcut } from "./keyboardShortcuts";
 import {
   classifyPublicationHref,
   policyFetchClient,
@@ -62,6 +63,12 @@ import {
   type ProgressSource,
   type SerializedLocator,
 } from "./progressMigration";
+
+/**
+ * Forwarded reader combos are fixed for the reader surface's lifetime; the
+ * navigator takes the config at construction.
+ */
+const EPUB_KEYBOARD_PERIPHERALS = buildKeyboardPeripherals();
 
 /** Node of the EPUB 2/3 table of contents as reported by the engine. */
 export interface EpubTocItem {
@@ -405,13 +412,13 @@ export class ReadiumEpubHandle {
           customEvent: () => {},
           contentProtection: () => {},
           contextMenu: () => {},
-          peripheral: () => {},
+          peripheral: (data) => dispatchForwardedShortcut(data),
           tap: () => false,
           click: () => false,
         },
         this.positions,
         initialLocator,
-        { preferences: {}, defaults: {} },
+        { preferences: {}, defaults: {}, keyboardPeripherals: EPUB_KEYBOARD_PERIPHERALS },
       );
       this.navigator = navigator;
       if (this.lastAppearance !== null) void this.setAppearance(this.lastAppearance);
