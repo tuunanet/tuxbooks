@@ -241,6 +241,15 @@ These are PDF-only and do not apply to EPUB: page thumbnails
 `Ctrl/Cmd+Minus`, `Ctrl/Cmd+0`, `Ctrl/Cmd+1`, `Ctrl/Cmd+2`, `Ctrl/Cmd+3`),
 and reverse page flip in presentation (`Shift+Space`).
 
+The app-wide shortcut registry listens on the host window, so keydown inside
+the content frame would never reach it. The seam forwards the reader's combos
+through the toolkit's keyboard-peripheral bridge: the list comes from
+`READER_SHORTCUTS` (global and reader groups, in `keyboardShortcuts.ts`),
+the injectable intercepts those combos inside the frame, and the host
+re-dispatches a window keydown for the registry. Adding a reader-scope
+shortcut therefore needs no extra wiring, but a combo outside those groups
+does not fire while the content frame holds focus.
+
 ### In-book search
 
 Search runs through the seam over the publication, streaming per-section
