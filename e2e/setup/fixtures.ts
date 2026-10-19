@@ -35,6 +35,7 @@ export const pdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "min
 export const largePdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "large.pdf");
 export const mixedPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "mixed.pdf");
 export const smartPdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "smart.pdf");
+export const densePdfFixture = path.join(repoRoot, "tests", "fixtures", "books", "dense.pdf");
 
 /**
  * Reader-regression fixtures (generated corpus, tests/fixtures/epub): each
@@ -98,6 +99,7 @@ export const seededBookTitles = {
   largePdf: "A Large Fixture",
   mixedPdf: "Odd Sizes",
   smartPdf: "Smart Colors",
+  densePdf: "A Dense Fixture",
 } as const;
 
 /**

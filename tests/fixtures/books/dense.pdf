@@ -1,0 +1,52 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Title (A Dense Fixture) /Author (Grace Hopper) /Subject (A PDF whose reported font sizes lie \(degenerate text matrix\).) >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2059 >>
+stream
+BT /F1 14 Tf 72 748 Td (A Dense Fixture) Tj ET
+BT 10.59 0 0 10.59 72 716 Tm /F1 1.152 Tf (reliable systems fail at the seams where two correct components meet and disagree) Tj ET
+BT 10.59 0 0 10.59 72 690 Tm /F1 1.152 Tf (every retry needs a budget because unbounded retries are just outages in disguise) Tj ET
+BT 10.59 0 0 10.59 72 664 Tm /F1 1.152 Tf (a queue is a promise that work happens later, never proof that it happens at all) Tj ET
+BT 10.59 0 0 10.59 72 638 Tm /F1 1.152 Tf (caching is the art of deciding which stale answer is still true enough to serve) Tj ET
+BT 10.59 0 0 10.59 72 612 Tm /F1 1.152 Tf (timeouts are a design decision about how long you are willing to wait for bad news) Tj ET
+BT 10.59 0 0 10.59 72 586 Tm /F1 1.152 Tf (backpressure is what you owe downstream when you cannot say no upstream) Tj ET
+BT 10.59 0 0 10.59 72 560 Tm /F1 1.152 Tf (an idempotency key turns a scary repeat into a boring no-op at the sink) Tj ET
+BT 10.59 0 0 10.59 72 534 Tm /F1 1.152 Tf (the fallback path is production the moment the primary path has a bad day) Tj ET
+BT 10.59 0 0 10.59 72 508 Tm /F1 1.152 Tf (observability is paying attention in production instead of hoping in staging) Tj ET
+BT 10.59 0 0 10.59 72 482 Tm /F1 1.152 Tf (degrade on purpose rather than by accident, and say which parts bend first) Tj ET
+BT 10.59 0 0 10.59 72 456 Tm /F1 1.152 Tf (small batch sizes turn a catastrophe into a changelog entry nobody reads) Tj ET
+BT 10.59 0 0 10.59 72 430 Tm /F1 1.152 Tf (feature flags are how you ship code without shipping the behavior on day one) Tj ET
+BT 10.59 0 0 10.59 72 404 Tm /F1 1.152 Tf (the health check must ask a question the service can actually answer) Tj ET
+BT 10.59 0 0 10.59 72 378 Tm /F1 1.152 Tf (capacity planning is guessing honestly, in writing, with numbers attached) Tj ET
+BT 10.59 0 0 10.59 72 352 Tm /F1 1.152 Tf (rollbacks are a feature you buy before the incident, never during it) Tj ET
+BT 10.59 0 0 10.59 72 326 Tm /F1 1.152 Tf (every alert should page a human only when a human can change the outcome) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000259 00000 n 
+0000000385 00000 n 
+0000002496 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R /Info 3 0 R >>
+startxref
+2593
+%%EOF

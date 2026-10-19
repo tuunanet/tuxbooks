@@ -16,6 +16,7 @@ import {
   benchEpubFixture,
   benchPdfFixture,
   electronDistPath,
+  densePdfFixture,
   epubFixture,
   readerRegressionFixtures,
   largePdfFixture,
@@ -147,6 +148,7 @@ export function prepareEnvironment(seeded: boolean): void {
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
     copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
     copyFileSync(smartPdfFixture, path.join(libraryDir, "smart.pdf"));
+    copyFileSync(densePdfFixture, path.join(libraryDir, "dense.pdf"));
     // Real-world crash regression (2026-09-20): Smart Dark + the mesh
     // shadings on GeoTopo page 35 corrupt a worker's wasm heap. The churn
     // spec drives the exact book when the corpus has been fetched
