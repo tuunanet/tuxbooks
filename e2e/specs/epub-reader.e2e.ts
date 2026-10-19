@@ -572,6 +572,9 @@ test.describe("tuxbooks EPUB reader", () => {
       () => document.querySelector("[data-testid=reader-search-match]")?.textContent ?? "",
     );
     expect(matchText).toContain("deterministic");
+    // The excerpt must keep the space after the match, not read
+    // "deterministicto open".
+    expect(matchText).toContain("deterministic to open");
     const resultsText = await page.evaluate(
       () => document.querySelector("[data-testid=reader-search-results]")?.textContent ?? "",
     );

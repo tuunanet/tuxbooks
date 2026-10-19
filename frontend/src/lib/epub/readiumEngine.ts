@@ -33,6 +33,7 @@ import "./readiumEngine.css";
 import { getEpubSession } from "@/lib/bridge";
 import type { ReadingProgressRecord } from "@/types/domain";
 import { buildKeyboardPeripherals, dispatchForwardedShortcut } from "./keyboardShortcuts";
+import { excerptAround, type EpubSearchExcerpt } from "./searchExcerpt";
 import {
   classifyPublicationHref,
   policyFetchClient,
@@ -109,12 +110,7 @@ export interface EpubLoadDetail {
   doc: Document;
 }
 
-/** Surrounding text around one search match. */
-export interface EpubSearchExcerpt {
-  pre: string;
-  match: string;
-  post: string;
-}
+export type { EpubSearchExcerpt } from "./searchExcerpt";
 
 /** One content match: the locator to jump to plus its excerpt. */
 export interface EpubSearchMatch {
@@ -1360,16 +1356,6 @@ function* matchInDocument(
     }
     node = walker.nextNode();
   }
-}
-
-/** Excerpt around a match inside one text node. */
-function excerptAround(text: string, at: number, length: number): EpubSearchExcerpt {
-  const context = 48;
-  return {
-    pre: text.slice(Math.max(0, at - context), at).trim(),
-    match: text.slice(at, at + length),
-    post: text.slice(at + length, at + length + context).trim(),
-  };
 }
 
 /** Short text immediately before/after a live DOM range, for quote context. */
