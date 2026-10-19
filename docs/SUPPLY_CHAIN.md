@@ -36,19 +36,19 @@ Locked versions of the high-risk set at the time of the last review
 (2026-10-12, this task; the electron, navigator, and shared rows moved
 with the Dependabot train merged as #205):
 
-| Dependency         | Locked        | Latest stable | Status                                                            |
-| ------------------ | ------------- | ------------- | ----------------------------------------------------------------- |
-| electron           | 44.3.0        | 44.7.0        | Latest major, in-support line; deltas ride Dependabot             |
-| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                     |
-| @readium/navigator | 2.10.0        | 2.12.1        | No advisories; minors tracked via Dependabot                      |
-| @readium/shared    | 2.5.0         | 2.8.0         | No advisories; minors tracked via Dependabot                      |
-| @readium/css       | 2.0.5         | 2.0.5         | Current                                                           |
-| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                                |
-| zip                | 2.4.2         | 9.0.2         | No advisories; majors tracked deliberately (see below)            |
-| quick-xml          | 0.41.0        | 0.42.0        | Upgraded from 0.37.5 on 2026-09-16 (RUSTSEC-2026-0194/0195, high) |
-| image              | 0.25.10       | 0.25.10       | Current                                                           |
-| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                                |
-| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)              |
+| Dependency         | Locked        | Latest stable | Status                                                                                        |
+| ------------------ | ------------- | ------------- | --------------------------------------------------------------------------------------------- |
+| electron           | 44.3.0        | 44.7.0        | Latest major, in-support line; deltas ride Dependabot                                         |
+| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                                                 |
+| @readium/navigator | 2.10.0        | 2.12.1        | No advisories; minors tracked via Dependabot                                                  |
+| @readium/shared    | 2.5.0         | 2.8.0         | No advisories; minors tracked via Dependabot                                                  |
+| @readium/css       | 2.0.5         | 2.0.5         | Current                                                                                       |
+| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                                                            |
+| zip                | 2.4.2         | 9.0.2         | RUSTSEC-2026-0367/0368/0369 triaged: extraction APIs unused; upgrade tracked (`tuxbooks-zjy`) |
+| quick-xml          | 0.41.0        | 0.42.0        | Upgraded from 0.37.5 on 2026-09-16 (RUSTSEC-2026-0194/0195, high)                             |
+| image              | 0.25.10       | 0.25.10       | Current                                                                                       |
+| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                                                            |
+| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)                                          |
 
 Upgrade policy: take security fixes as the smallest viable upgrade that
 clears the advisory, run the full test suite, and never batch unrelated
@@ -71,11 +71,12 @@ with a reason and a revisit date.
 
 Current triage:
 
-| Finding                                                                                                                        | Severity | Blocked? | Resolution                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| RUSTSEC-2026-0194/0195 (quick-xml quadratic runtime, unbounded namespace allocation — both in the hostile EPUB/XML parse path) | high     | yes      | Fixed by upgrading quick-xml 0.37.5 -> 0.41.0 (2026-09-16, this task)                                                                                                                                                                                                   |
-| RUSTSEC-2023-0071 (rsa, Marvin key-recovery side channel)                                                                      | medium   | no       | Ignored in `sidecar/.cargo/audit.toml`: `rsa` enters the lockfile only as an optional dependency of sqlx-mysql, which is never compiled (sqlite-only build), and no fixed release exists. Revisit when the tree changes.                                                |
-| GHSA-vfj7-8cjw-p6xm (braces stack exhaustion via deeply nested glob patterns)                                                  | high     | no       | Triaged 2026-10-12 in `scripts/npm-audit-gate.mjs`: no upstream fix (3.0.3 is the latest release, micromatch/braces#70 open), dev-only via micromatch <- fast-glob, and the patterns it compiles come from first-party config, not untrusted input. Revisit 2026-11-12. |
+| Finding                                                                                                                        | Severity | Blocked? | Resolution                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RUSTSEC-2026-0194/0195 (quick-xml quadratic runtime, unbounded namespace allocation — both in the hostile EPUB/XML parse path) | high     | yes      | Fixed by upgrading quick-xml 0.37.5 -> 0.41.0 (2026-09-16, this task)                                                                                                                                                                                                                                   |
+| RUSTSEC-2023-0071 (rsa, Marvin key-recovery side channel)                                                                      | medium   | no       | Ignored in `sidecar/.cargo/audit.toml`: `rsa` enters the lockfile only as an optional dependency of sqlx-mysql, which is never compiled (sqlite-only build), and no fixed release exists. Revisit when the tree changes.                                                                                |
+| GHSA-vfj7-8cjw-p6xm (braces stack exhaustion via deeply nested glob patterns)                                                  | high     | no       | Triaged 2026-10-12 in `scripts/npm-audit-gate.mjs`: no upstream fix (3.0.3 is the latest release, micromatch/braces#70 open), dev-only via micromatch <- fast-glob, and the patterns it compiles come from first-party config, not untrusted input. Revisit 2026-11-12.                                 |
+| RUSTSEC-2026-0367/0368/0369 (zip symlink targets and SUID preservation in `extract()`)                                         | critical | no       | Triaged 2026-10-19 in `sidecar/.cargo/audit.toml`: the sidecar reads entries with `by_index`/`by_name` and writes with `ZipWriter`; it never calls `ZipArchive::extract` or `ZipStreamReader::extract`, so no attacker-controlled extraction path exists. Upgrade to zip 9.x tracked as `tuxbooks-zjy`. |
 
 ## S-3: build/install scripts
 
