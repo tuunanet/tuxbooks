@@ -47,6 +47,7 @@ describe("appStateReducer", () => {
       selectedBookIds: [],
       selectionAnchorId: null,
       detailTab: "overview",
+      readerTargetAnnotationId: null,
       libraryQuery: "",
     });
   });
@@ -64,6 +65,29 @@ describe("appStateReducer", () => {
     const state = appStateReducer(initialAppState, { type: "open-reader", bookId: 5 });
     expect(state.view).toBe("reader");
     expect(state.selectedBookId).toBe(5);
+    expect(state.readerTargetAnnotationId).toBeNull();
+  });
+
+  it("opening the reader from a highlight carries its target until consumed", () => {
+    const opened = appStateReducer(initialAppState, {
+      type: "open-reader",
+      bookId: 5,
+      annotationId: 12,
+    });
+    expect(opened.readerTargetAnnotationId).toBe(12);
+
+    const consumed = appStateReducer(opened, { type: "reader-target-consumed" });
+    expect(consumed.readerTargetAnnotationId).toBeNull();
+    // Consuming twice is a no-op, like any already-cleared target.
+    expect(appStateReducer(consumed, { type: "reader-target-consumed" })).toBe(consumed);
+  });
+
+  it("a plain reader open clears a stale highlight target", () => {
+    const state = appStateReducer(
+      { ...initialAppState, readerTargetAnnotationId: 12 },
+      { type: "open-reader", bookId: 5 },
+    );
+    expect(state.readerTargetAnnotationId).toBeNull();
   });
 
   it("returning to the library keeps section and selection", () => {

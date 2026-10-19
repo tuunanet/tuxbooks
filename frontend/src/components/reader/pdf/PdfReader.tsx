@@ -23,6 +23,7 @@ import {
   parsePdfProgress,
   pdfProgressPayload,
   type ReaderAdapter,
+  type ReaderJump,
   type ReaderPosition,
 } from "../readerModel";
 import { useReaderProgress } from "../useReaderProgress";
@@ -330,6 +331,11 @@ interface PdfReaderProps {
    */
   adapterRef?: { current: ReaderAdapter | null };
   /**
+   * Initial destination for a reader opened from a highlight. Applied as
+   * part of the restore so the saved position cannot overwrite it.
+   */
+  initialJump?: ReaderJump | null;
+  /**
    * Reports the reading position (1-based page + anchor fraction) whenever
    * the page changes — the position a bookmark placed right now would keep.
    */
@@ -385,6 +391,7 @@ export function PdfReader({
   controlsHost,
   scrollContainerRef,
   adapterRef,
+  initialJump,
   onPositionChange,
   onSearchGroup,
   onSearchDone,
@@ -406,6 +413,9 @@ export function PdfReader({
   } = usePdfDocument(book.id, onDocumentLoad);
   const { sizes, measurePages, isMeasured } = usePdfGeometry(pdfDocument, pageCount);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
+  // The initial destination is captured when the reader mounts: the shell
+  // clears the app-state target as soon as the annotation list resolves.
+  const initialJumpRef = useRef(initialJump);
 
   // Theme treatment (issue #67): the dark preset is Smart Dark — pages
   // rasterize with worker-side object-aware recoloring (no CSS filter);
@@ -531,8 +541,11 @@ export function PdfReader({
     parseRestored: (record) => parsePdfProgress(record, effectivePageCount),
     onRestored: useCallback(
       (savedPage: number | null) => {
-        if (savedPage !== null) {
-          setPosition(pageToPosition(savedPage, effectivePageCount));
+        const targetPage =
+          initialJumpRef.current?.format === "pdf" ? initialJumpRef.current.page : null;
+        const page = targetPage === null ? savedPage : clampPage(targetPage, effectivePageCount);
+        if (page !== null) {
+          setPosition(pageToPosition(page, effectivePageCount));
         }
         setRestored(true);
         setRestoredAtMs(performance.now() - (openStartedAt ?? performance.now()));

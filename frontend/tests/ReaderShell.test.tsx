@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Annotation } from "@/types/domain";
+import type { AppState } from "@/state/appState";
 
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
@@ -38,7 +39,16 @@ beforeEach(() => {
   fakeEpubHandles.length = 0;
 });
 
-function renderReader(bookFormat: "epub" | "pdf" = "epub") {
+function renderReader(
+  bookFormat: "epub" | "pdf" = "epub",
+  {
+    annotations = [],
+    state = {},
+  }: {
+    annotations?: Annotation[];
+    state?: Partial<AppState>;
+  } = {},
+) {
   const book =
     bookFormat === "epub"
       ? makeBook()
@@ -60,7 +70,7 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
     get_reading_progress: null,
     save_reading_progress: null,
     mark_book_opened: null,
-    list_annotations: [],
+    list_annotations: annotations,
     create_annotation: makeAnnotation({
       id: 1,
       kind: "bookmark",
@@ -84,6 +94,7 @@ function renderReader(bookFormat: "epub" | "pdf" = "epub") {
           section: { kind: "smart", id: "all-books" },
           selectedBookId: 1,
           libraryQuery: "",
+          ...state,
         }}
       />
     </ThemeStateProvider>,
@@ -1735,5 +1746,31 @@ describe("Reader highlight toolbar", () => {
     // A click on unhighlighted page space reports no target.
     await pointer.click(480, 480);
     await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
+  });
+});
+
+describe("Reader highlight target", () => {
+  it("jumps to the highlight opened from the book detail view", async () => {
+    const highlight = makeAnnotation({
+      id: 77,
+      kind: "highlight",
+      cfi: FAKE_LOCATOR.section2,
+      chapterHref: "chapter2.xhtml",
+      pageNumber: null,
+      text: "a stored passage",
+      rects: null,
+    });
+
+    renderReader("epub", {
+      annotations: [highlight],
+      state: { readerTargetAnnotationId: 77 },
+    });
+
+    await screen.findByTestId("reader-view");
+    // The target waits for the engine's adapter, then jumps in the book's
+    // own locator grammar.
+    await waitFor(() => expect(lastFakeHandle().goTo).toHaveBeenCalledWith(FAKE_LOCATOR.section2), {
+      timeout: 5000,
+    });
   });
 });
