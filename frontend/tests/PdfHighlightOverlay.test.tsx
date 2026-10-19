@@ -5,36 +5,58 @@ import { PdfHighlightOverlay } from "@/components/reader/pdf/PdfHighlightOverlay
 import { EMPTY_HIGHLIGHT_OVERRIDES } from "@/lib/highlightPalette";
 import { makeAnnotation } from "./factories";
 
-/** The overlay draws one rect div per annotation rect (docs/PDF.md). */
-function firstRectStyle(container: HTMLElement): string {
-  return container.querySelector<HTMLElement>("[data-pdf-highlight]")!.getAttribute("style") ?? "";
+/**
+ * The overlay must composite one wash per annotation: selection rects overlap
+ * at line boundaries, and per-rect translucent + multiplied fills darken the
+ * overlaps into seams. The group carries the wash alpha and the blend mode
+ * once; the rects inside are solid.
+ */
+function groupOf(container: HTMLElement, id: number): HTMLElement {
+  const group = container.querySelector<HTMLElement>(`[data-pdf-highlight-group="${id}"]`);
+  expect(group).not.toBeNull();
+  return group!;
 }
 
 describe("PdfHighlightOverlay", () => {
-  it("multiplies the wash into light pages and composites normally on dark", () => {
+  it("multiplies one wash per annotation into light pages", () => {
     const highlight = makeAnnotation({ kind: "highlight", color: "yellow" });
-
-    const light = render(
+    const { container, unmount } = render(
       <PdfHighlightOverlay
         highlights={[highlight]}
         family="light"
         overrides={EMPTY_HIGHLIGHT_OVERRIDES}
       />,
     );
-    expect(firstRectStyle(light.container)).toContain("rgba(255, 189, 26, 0.42)");
-    expect(firstRectStyle(light.container)).toContain("mix-blend-mode: multiply");
-    light.unmount();
 
-    const dark = render(
+    const group = groupOf(container, highlight.id);
+    expect(group.style.opacity).toBe("0.42");
+    expect(group.style.mixBlendMode).toBe("multiply");
+
+    const rects = group.querySelectorAll<HTMLElement>("[data-pdf-highlight]");
+    expect(rects.length).toBeGreaterThan(0);
+    for (const rect of rects) {
+      // Solid fills: overlapping rects inside the group cannot darken.
+      expect(rect.style.background).not.toContain("rgba");
+      expect(rect.style.mixBlendMode).toBe("");
+      expect(rect.style.opacity).toBe("");
+    }
+    unmount();
+  });
+
+  it("composites normally on dark pages", () => {
+    const highlight = makeAnnotation({ kind: "highlight", color: "yellow" });
+    const { container, unmount } = render(
       <PdfHighlightOverlay
         highlights={[highlight]}
         family="dark"
         overrides={EMPTY_HIGHLIGHT_OVERRIDES}
       />,
     );
-    expect(firstRectStyle(dark.container)).toContain("rgba(255, 193, 7, 0.32)");
-    expect(firstRectStyle(dark.container)).toContain("mix-blend-mode: normal");
-    dark.unmount();
+
+    const group = groupOf(container, highlight.id);
+    expect(group.style.opacity).toBe("0.32");
+    expect(group.style.mixBlendMode).toBe("normal");
+    unmount();
   });
 
   it("paints an override hue instead of the default ink", () => {
@@ -46,7 +68,27 @@ describe("PdfHighlightOverlay", () => {
         overrides={{ light: { purple: "#2dd4bf" }, dark: {} }}
       />,
     );
-    expect(firstRectStyle(container)).toContain("rgba(45, 212, 191, 0.28)");
+
+    const group = groupOf(container, highlight.id);
+    expect(group.style.opacity).toBe("0.28");
+    const rect = group.querySelector<HTMLElement>("[data-pdf-highlight]")!;
+    expect(rect.style.background).toBe("rgb(45, 212, 191)");
+    unmount();
+  });
+
+  it("keeps annotations in separate groups", () => {
+    const first = makeAnnotation({ kind: "highlight", color: "green" });
+    const second = makeAnnotation({ kind: "highlight", color: "red" });
+    const { container, unmount } = render(
+      <PdfHighlightOverlay
+        highlights={[first, second]}
+        family="light"
+        overrides={EMPTY_HIGHLIGHT_OVERRIDES}
+      />,
+    );
+
+    expect(groupOf(container, first.id).querySelectorAll("[data-pdf-highlight]").length).toBe(1);
+    expect(groupOf(container, second.id).querySelectorAll("[data-pdf-highlight]").length).toBe(1);
     unmount();
   });
 });

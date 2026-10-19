@@ -42,7 +42,7 @@ export function readerThemeFamily(theme: ReaderTheme): HighlightThemeFamily {
 }
 
 /** One ink: the hue plus the wash alpha for its family. */
-interface HighlightInk {
+export interface HighlightInk {
   hex: string;
   alpha: number;
 }
@@ -103,6 +103,23 @@ function hexToRgbTriplet(hex: string): string {
 }
 
 /**
+ * Resolve a highlight slot to its ink. Surfaces that composite several
+ * shapes as one wash (the PDF overlay's per-line rects) paint solid `hex`
+ * inside a group and apply `alpha` once, so overlapping shapes cannot
+ * darken; single washes (the EPUB tint, chrome swatches) compose rgba.
+ * Unknown slots fall back to the yellow default.
+ */
+export function highlightInk(
+  color: string | null | undefined,
+  family: HighlightThemeFamily,
+  overrides: HighlightOverrides,
+): HighlightInk {
+  const key = isHighlightColor(color) ? color : DEFAULT_HIGHLIGHT_COLOR;
+  const ink = DEFAULT_INKS[family][key];
+  return { hex: overrides[family][key] ?? ink.hex, alpha: ink.alpha };
+}
+
+/**
  * CSS color of a highlight slot on a theme family: the override hue or the
  * default ink, as the family's translucent wash. Unknown slots fall back to
  * the yellow default.
@@ -112,8 +129,6 @@ export function highlightCss(
   family: HighlightThemeFamily,
   overrides: HighlightOverrides,
 ): string {
-  const key = isHighlightColor(color) ? color : DEFAULT_HIGHLIGHT_COLOR;
-  const ink = DEFAULT_INKS[family][key];
-  const hex = overrides[family][key] ?? ink.hex;
-  return `rgba(${hexToRgbTriplet(hex)}, ${ink.alpha})`;
+  const { hex, alpha } = highlightInk(color, family, overrides);
+  return `rgba(${hexToRgbTriplet(hex)}, ${alpha})`;
 }
