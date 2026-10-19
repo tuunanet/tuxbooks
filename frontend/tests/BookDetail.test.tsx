@@ -8,7 +8,8 @@ import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
-import { makeBook } from "./factories";
+import { useAppState } from "@/state/appState";
+import { makeAnnotation, makeBook } from "./factories";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function renderDetail(
@@ -353,5 +354,134 @@ describe("BookDetail", () => {
       bookId: 1,
       path: "/library/located/renamed.epub",
     });
+  });
+
+  it("lists only the book's highlights with their locations and notes", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_annotations: [
+        makeAnnotation({
+          id: 11,
+          kind: "highlight",
+          cfi: '{"href":"chapter-01.xhtml"}',
+          chapterHref: "OEBPS/chapter-01.xhtml",
+          pageNumber: null,
+          text: "A marked passage",
+          color: "green",
+          note: "remember this",
+          rects: null,
+        }),
+        makeAnnotation({
+          id: 12,
+          kind: "bookmark",
+          cfi: '{"href":"chapter-01.xhtml"}',
+          chapterHref: "OEBPS/chapter-01.xhtml",
+          pageNumber: null,
+          text: null,
+          rects: null,
+        }),
+        makeAnnotation({
+          id: 13,
+          kind: "highlight",
+          cfi: null,
+          chapterHref: null,
+          pageNumber: 7,
+          text: "Page seven line",
+          color: "blue",
+          note: null,
+        }),
+      ],
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          detailTab: "highlights",
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    const list = await screen.findByTestId("detail-highlights");
+    expect(invokeMock).toHaveBeenCalledWith("list_annotations", { bookId: 1 });
+    expect(screen.getByText("2 highlights")).toBeInTheDocument();
+    expect(list).toHaveTextContent("A marked passage");
+    expect(list).toHaveTextContent("remember this");
+    expect(list).toHaveTextContent("Chapter 01");
+    expect(list).toHaveTextContent("Page seven line");
+    expect(list).toHaveTextContent("Page 7");
+    // Bookmarks belong to the reader's drawer, not the highlights review.
+    expect(screen.queryByTestId("detail-highlight-12")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty state when the book has no highlights", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_annotations: [],
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          detailTab: "highlights",
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByTestId("detail-highlights-empty")).toHaveTextContent(
+      /no highlights yet/i,
+    );
+  });
+
+  it("opens the reader at the clicked highlight", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_annotations: [makeAnnotation({ id: 21, text: "Jump back here" })],
+    });
+
+    function StateProbe() {
+      const { view, readerTargetAnnotationId } = useAppState();
+      return (
+        <span data-testid="state-probe">{`${view}:${readerTargetAnnotationId ?? "none"}`}</span>
+      );
+    }
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          detailTab: "highlights",
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+          <StateProbe />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await userEvent.click(await screen.findByTestId("detail-highlight-21"));
+    expect(screen.getByTestId("state-probe")).toHaveTextContent("reader:21");
   });
 });

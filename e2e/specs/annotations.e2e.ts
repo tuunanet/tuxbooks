@@ -2,6 +2,8 @@ import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import {
   closeReaderNavigation,
+  ensureLibrary,
+  openBookDetail,
   openReaderTab,
   openInReader,
   openReaderNavigation,
@@ -436,5 +438,87 @@ test.describe("reading annotations", () => {
     await waitForRendered(page, 1, 60000);
     await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0, { timeout: 10000 });
     await returnToLibrary(page);
+  });
+
+  test("lists a book's highlights in the detail view and jumps to one", async ({ page }) => {
+    await ensureLibrary(page);
+
+    // Seed one highlight at the database level: this test is about the
+    // detail surface and its jump, not selection-to-highlight creation.
+    const seeded = await page.evaluate(async () => {
+      const books = (await window.tuxbooks!.invoke("list_books")) as {
+        id: number;
+        format: string;
+        title: string;
+      }[];
+      const pdf = books.find((book) => book.format === "pdf" && book.title === "A Minimal Manual");
+      if (!pdf) throw new Error("no A Minimal Manual PDF in the scratch library");
+      const existing = (await window.tuxbooks!.invoke("list_annotations", {
+        bookId: pdf.id,
+      })) as { id: number; kind: string }[];
+      for (const annotation of existing) {
+        if (annotation.kind === "highlight") {
+          await window.tuxbooks!.invoke("delete_annotation", { id: annotation.id });
+        }
+      }
+      const created = (await window.tuxbooks!.invoke("create_annotation", {
+        bookId: pdf.id,
+        annotation: {
+          kind: "highlight",
+          pageNumber: 2,
+          text: "detail tab probe",
+          color: "blue",
+          rects: [{ x: 0.1, y: 0.1, width: 0.3, height: 0.02 }],
+        },
+      })) as { id: number };
+      // Pin the stored position to page 1 so a passing jump can only come
+      // from the clicked highlight, not from restored progress.
+      await window.tuxbooks!.invoke("save_reading_progress", {
+        bookId: pdf.id,
+        progress: { pageNumber: 1, progressPercent: 0 },
+      });
+      return { id: created.id, bookId: pdf.id };
+    });
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            async ({ bookId, id }) =>
+              (
+                (await window.tuxbooks!.invoke("list_annotations", {
+                  bookId,
+                })) as { id: number }[]
+              ).some((annotation) => annotation.id === id),
+            seeded,
+          ),
+        { timeout: 10000 },
+      )
+      .toBe(true);
+
+    try {
+      await openBookDetail(page, "A Minimal Manual (PDF)");
+      await page.getByTestId("detail-tab-highlights").click();
+      const row = page.getByTestId(`detail-highlight-${seeded.id}`);
+      await expect(row).toContainText("detail tab probe", { timeout: 10000 });
+      await expect(row).toContainText("Page 2");
+
+      // The row opens the reader at the highlight's page, not at the
+      // stored reading position.
+      await row.click();
+      await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
+        timeout: 30000,
+      });
+      await waitForRendered(page, 2);
+      await page
+        .locator("[data-pdf-highlight]")
+        .first()
+        .waitFor({ state: "attached", timeout: 10000 });
+    } finally {
+      await page.evaluate(async (id) => {
+        await window.tuxbooks!.invoke("delete_annotation", { id });
+      }, seeded.id);
+    }
   });
 });

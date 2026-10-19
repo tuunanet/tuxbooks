@@ -3,8 +3,8 @@ import { createContext, useContext, type Dispatch } from "react";
 /** The three major application states. Everything else is subordinate. */
 export type AppView = "library" | "detail" | "reader";
 
-/** Sections inside the book detail view; only the first two ship today. */
-export type DetailTab = "overview" | "metadata";
+/** Sections inside the book detail view. */
+export type DetailTab = "overview" | "metadata" | "highlights";
 
 export type SmartSectionId =
   "all-books" | "epubs" | "pdfs" | "recently-added" | "recently-read" | "in-progress" | "finished";
@@ -45,6 +45,12 @@ export interface AppState {
    */
   detailTab?: DetailTab;
   /**
+   * Highlight the reader should reveal once its document is ready. The
+   * detail view's Highlights tab sets it when a row is clicked; the reader
+   * consumes it once, so a later plain open never restores it.
+   */
+  readerTargetAnnotationId?: number | null;
+  /**
    * Search text for the library header. Scoped to the active section and
    * cleared whenever the section changes, so it lives beside `section`
    * instead of in view-local state.
@@ -62,7 +68,8 @@ export type AppAction =
   | { type: "library-range-select"; bookId: number; visibleIds: number[] }
   | { type: "clear-library-selection" }
   | { type: "open-book-detail"; bookId: number; tab?: DetailTab }
-  | { type: "open-reader"; bookId: number }
+  | { type: "open-reader"; bookId: number; annotationId?: number }
+  | { type: "reader-target-consumed" }
   | { type: "return-to-library" }
   | { type: "select-detail-tab"; tab: DetailTab }
   | { type: "set-library-query"; query: string };
@@ -74,6 +81,7 @@ export const initialAppState: AppState = {
   selectedBookIds: [],
   selectionAnchorId: null,
   detailTab: "overview",
+  readerTargetAnnotationId: null,
   libraryQuery: "",
 };
 
@@ -134,7 +142,16 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         detailTab: action.tab ?? "overview",
       };
     case "open-reader":
-      return { ...state, view: "reader", selectedBookId: action.bookId };
+      return {
+        ...state,
+        view: "reader",
+        selectedBookId: action.bookId,
+        readerTargetAnnotationId: action.annotationId ?? null,
+      };
+    case "reader-target-consumed":
+      return state.readerTargetAnnotationId == null
+        ? state
+        : { ...state, readerTargetAnnotationId: null };
     case "return-to-library":
       return { ...state, view: "library" };
     case "select-detail-tab":

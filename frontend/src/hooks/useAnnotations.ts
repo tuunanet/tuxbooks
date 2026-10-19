@@ -22,6 +22,9 @@ interface AnnotationSnapshot {
 export function useAnnotations(bookId: number | null) {
   const [snapshot, setSnapshot] = useState<AnnotationSnapshot>({ bookId: -1, annotations: [] });
   const current = snapshot.bookId === bookId ? snapshot.annotations : [];
+  // True once the list belongs to the requested book — including an empty
+  // list after a failed load, so consumers can tell "none" from "not yet".
+  const loaded = bookId !== null && snapshot.bookId === bookId;
   const bookIdRef = useRef(bookId);
   useEffect(() => {
     bookIdRef.current = bookId;
@@ -87,5 +90,5 @@ export function useAnnotations(bookId: number | null) {
     }
   }, []);
 
-  return { annotations: current, create, update, remove };
+  return { annotations: current, loaded, create, update, remove };
 }

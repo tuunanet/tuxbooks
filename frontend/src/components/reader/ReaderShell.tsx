@@ -84,7 +84,7 @@ const THEME_CLASSES: Record<ReaderTheme, string> = {
  * own rendering models and engines.
  */
 export function ReaderShell() {
-  const { selectedBookId } = useAppState();
+  const { selectedBookId, readerTargetAnnotationId } = useAppState();
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
   const { preferences, position, setPosition } = useReader();
@@ -177,7 +177,13 @@ export function ReaderShell() {
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
   // Persistent annotations of the open book: bookmarks, highlights, notes.
-  const { annotations, create, remove, update } = useAnnotations(book?.id ?? null);
+  const {
+    annotations,
+    loaded: annotationsLoaded,
+    create,
+    remove,
+    update,
+  } = useAnnotations(book?.id ?? null);
   const epubToc =
     epubTocState !== null && epubTocState.bookId === book?.id ? epubTocState.toc : null;
   const pdfOutline =
@@ -362,6 +368,23 @@ export function ReaderShell() {
     [jump],
   );
 
+  // A highlight opened from the book detail view becomes the reader's
+  // initial destination: the readers apply it as part of their restore, so
+  // the initial scroll sample cannot read it back as the saved page.
+  const targetAnnotation =
+    readerTargetAnnotationId == null
+      ? null
+      : (annotations.find((annotation) => annotation.id === readerTargetAnnotationId) ?? null);
+  const initialJump = targetAnnotation === null ? null : annotationJumpTarget(targetAnnotation);
+
+  // The target is single-use: readers capture it at mount (as part of their
+  // restore), so the shell drops it once the annotation list resolved.
+  useEffect(() => {
+    if (readerTargetAnnotationId != null && annotationsLoaded) {
+      dispatch({ type: "reader-target-consumed" });
+    }
+  }, [readerTargetAnnotationId, annotationsLoaded, dispatch]);
+
   // Selection toolbar state, tagged with the book whose reader reported it
   // (readers remount per book, so a stale book can never write here). The
   // report carries the existing highlight the selection or click targets,
@@ -447,6 +470,20 @@ export function ReaderShell() {
           <ArrowLeft data-icon="inline-start" />
           Back to Library
         </Button>
+      </div>
+    );
+  }
+
+  // The initial highlight is read from the annotation list; wait for it so
+  // the reader's first restore can land on the row the user clicked instead
+  // of opening at the saved position first.
+  if (readerTargetAnnotationId != null && !annotationsLoaded) {
+    return (
+      <div
+        data-testid="reader-opening-highlight"
+        className="flex h-screen items-center justify-center text-sm text-muted-foreground"
+      >
+        Opening highlight…
       </div>
     );
   }
@@ -637,6 +674,7 @@ export function ReaderShell() {
               onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
               onPositionChange={(position) => setReportedPosition({ bookId: book.id, position })}
               adapterRef={adapterRef}
+              initialJump={initialJump}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
               highlights={highlights}
@@ -656,6 +694,7 @@ export function ReaderShell() {
               scrollContainerRef={readerContentRef}
               onPositionChange={(position) => setReportedPosition({ bookId: book.id, position })}
               adapterRef={adapterRef}
+              initialJump={initialJump}
               onSearchGroup={appendSearchGroupFrom}
               onSearchDone={finishSearchFrom}
               highlights={highlights}

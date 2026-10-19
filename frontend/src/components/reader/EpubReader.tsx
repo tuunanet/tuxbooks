@@ -17,6 +17,7 @@ import {
   epubProgressPayload,
   type EpubLocator,
   type ReaderAdapter,
+  type ReaderJump,
   type ReaderPosition,
 } from "./readerModel";
 import { useReaderProgress } from "./useReaderProgress";
@@ -41,6 +42,11 @@ interface EpubReaderProps {
    * search, and highlight creation. Nulled on unmount/book switch.
    */
   adapterRef?: MutableRefObject<ReaderAdapter | null>;
+  /**
+   * Initial destination for a reader opened from a highlight. Applied as
+   * part of the restore so the saved position cannot overwrite it.
+   */
+  initialJump?: ReaderJump | null;
   /** Streams one chapter's worth of matches up to the shell. */
   onSearchGroup?: (bookId: number, group: ReaderSearchGroup) => void;
   /** Reports that the running search finished (for this book). */
@@ -95,6 +101,7 @@ export function EpubReader({
   onTocLoad,
   onPositionChange,
   adapterRef,
+  initialJump,
   onSearchGroup,
   onSearchDone,
   highlights = [],
@@ -113,6 +120,9 @@ export function EpubReader({
   // states commit together).
   const [section, setSection] = useState<EpubSectionProgress | null>(null);
   const { status, handle, error } = useEpubDocument(book.id);
+  // The initial destination is captured when the reader mounts: the shell
+  // clears the app-state target as soon as the annotation list resolves.
+  const initialJumpRef = useRef(initialJump);
   const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
     onPositionChangeRef.current = onPositionChange;
@@ -215,13 +225,16 @@ export function EpubReader({
       (saved: EpubSavedState | null) => {
         const record = saved !== null && "record" in saved ? saved.record : null;
         if (handle) {
+          const target = initialJumpRef.current;
           // A stale saved locator can make the engine's load never settle
           // — bound it and fall back to the start of the book instead of
           // wedging the reader on a blank loading surface. A late-settling
           // load is harmless: the engine jumps only to a valid location.
           void Promise.race([
-            handle
-              .init(record)
+            (target?.format === "epub"
+              ? handle.init(null).then(() => handle.goTo(target.locator))
+              : handle.init(record)
+            )
               .then(() => {
                 restoredRef.current = true;
               })
