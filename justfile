@@ -31,6 +31,13 @@ fetch-ebooks:
 check-ebooks:
     python3 scripts/fetch-ebook-fixtures.py --check
 
+# Per-worktree dev profile: database, settings, and caches live in .build/dev
+# instead of the installed app's profile. Sharing them meant `just dev` lost
+# the single-instance lock to a running installed TuxBooks (the launch quit
+# silently after ~2s) and, when the lock was free, put two processes on one
+# SQLite database.
+_dev_home := justfile_directory() + "/.build/dev"
+
 # Launch the app in development mode: Vite dev server (hot reload for the
 # renderer), the Rust sidecar (debug build), and the Electron shell.
 dev:
@@ -84,6 +91,7 @@ dev:
     fi
     cargo build --manifest-path sidecar/Cargo.toml
     node scripts/build-electron.mjs
+    mkdir -p "{{_dev_home}}/config" "{{_dev_home}}/data" "{{_dev_home}}/cache"
     # setsid makes Vite a process-group leader: cleanup kills the whole group
     # (pnpm + node + vite), not just the direct PID — descendants survive a
     # plain `kill $pid` and hold port 1420, which is what forced the old
@@ -112,6 +120,9 @@ dev:
         fi
         sleep 0.5
     done
+    XDG_CONFIG_HOME="{{_dev_home}}/config" \
+    XDG_DATA_HOME="{{_dev_home}}/data" \
+    XDG_CACHE_HOME="{{_dev_home}}/cache" \
     VITE_DEV_SERVER_URL=http://localhost:1420 pnpm exec electron .
 
 # GNU timeout is the last-resort hang guard for test commands (linux only:

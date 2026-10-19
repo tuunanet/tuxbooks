@@ -40,7 +40,9 @@ Verify downloads against `SHA256SUMS.txt` in the same release. See
 [docs/RELEASE.md](docs/RELEASE.md) for how releases are cut and packaged.
 
 On Ubuntu/Kubuntu, local app data (database, settings) lives in
-`~/.local/share/com.tuxbooks.app`.
+`~/.local/share/com.tuxbooks.app`. `just dev` uses its own profile under
+`.build/dev/` (database, settings, caches), so it can run while the installed
+app is open. Delete that folder to reset the dev profile.
 
 ## Getting started
 
