@@ -262,6 +262,8 @@ closes the overlay. A new search supersedes the running one by generation,
 and both engines stop at their 500-match limit, reporting the truncation so
 the overlay can say so.
 
+![The in-book search overlay showing a query, a document-order result list, and chapter metadata](images/search/after-results.png)
+
 ### Annotations
 
 Highlights live in the engine's overlay layer, behind the seam: add/remove
