@@ -88,8 +88,22 @@ const cliHandled = runCli(process.argv, {
 if (!cliHandled) bootElapsed("electron process");
 
 // One library database owner: a second app instance quits immediately.
+// quit() only schedules the exit, so startup would still spawn a sidecar on
+// the first instance's database and create a window that never loads. Exit
+// now, and report why: without the line a lost lock looks like a silent
+// no-start.
 if (!cliHandled && !app.requestSingleInstanceLock()) {
-  app.quit();
+  // fs.writeSync, not console.error: app.exit() terminates immediately and
+  // a queued stderr write would be lost.
+  try {
+    fs.writeSync(
+      2,
+      `[startup] another TuxBooks instance already owns this profile (${app.getPath("userData")}); exiting\n`,
+    );
+  } catch {
+    // stderr unavailable (closed or broken); the exit still has to happen.
+  }
+  app.exit(0);
 }
 
 /**
