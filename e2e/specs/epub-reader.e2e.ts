@@ -1,12 +1,6 @@
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
-import {
-  closeReaderNavigation,
-  epubLocator,
-  openInReader,
-  returnToLibrary,
-  textOf,
-} from "./helpers.js";
+import { epubLocator, openInReader, returnToLibrary, textOf } from "./helpers.js";
 
 /** Waits until the EPUB engine reports the given spine section. */
 async function waitForSection(page: Page, section: number): Promise<void> {
@@ -538,9 +532,9 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Milestone 5 — in-book search: the drawer's Search tab streams matches
-  // from the engine (query, count, excerpt, chapter) and navigating to a
-  // match moves the engine to the match's CFI.
+  // Milestone 5 — in-book search: the overlay streams matches from the
+  // engine (query, count, excerpt, chapter) and navigating to a match moves
+  // the engine to the match's CFI.
   test("finds text in the book and navigates to a match", async ({ page }) => {
     await openReadyEpub(page);
 
@@ -549,9 +543,22 @@ test.describe("tuxbooks EPUB reader", () => {
     await waitForSection(page, 2);
     await page.getByTestId("reader-nav").waitFor({ state: "detached", timeout: 30000 });
 
-    await page.getByTestId("reader-search").click();
+    // The primary binding opens the overlay; the PDF twin covers the
+    // toolbar button.
+    await page.keyboard.press("Control+Shift+F");
     const searchInput = page.getByTestId("reader-search-input");
     await expect(searchInput).toBeVisible({ timeout: 30000 });
+
+    // Regression: the EPUB navigator installs a capture-phase listener on the
+    // host document. Space typed into the overlay must stay in the field and
+    // must not reach the reader's page-turn shortcut.
+    await searchInput.fill("first");
+    await page.keyboard.press("Space");
+    await expect(searchInput).toHaveValue("first ");
+    await page.keyboard.type("chapter");
+    await expect(searchInput).toHaveValue("first chapter");
+    await waitForSection(page, 2);
+
     await searchInput.fill("deterministic");
 
     // "deterministic" occurs exactly once, in Chapter One's text.
@@ -565,18 +572,20 @@ test.describe("tuxbooks EPUB reader", () => {
       () => document.querySelector("[data-testid=reader-search-match]")?.textContent ?? "",
     );
     expect(matchText).toContain("deterministic");
+    // The excerpt must keep the space after the match, not read
+    // "deterministicto open".
+    expect(matchText).toContain("deterministic to open");
     const resultsText = await page.evaluate(
       () => document.querySelector("[data-testid=reader-search-results]")?.textContent ?? "",
     );
     expect(resultsText).toContain("Chapter One");
 
-    // Clicking the match drives the engine back to Chapter One (section 0);
-    // the drawer stays open so the next hit is one click away.
+    // Clicking the match drives the engine back to Chapter One (section 0)
+    // and closes the overlay so the page is visible.
     await page.getByTestId("reader-search-match").click();
     await waitForSection(page, 0);
-    await expect(page.getByTestId("reader-nav")).toBeVisible();
+    await expect(page.getByTestId("reader-search-overlay")).toBeHidden({ timeout: 30000 });
 
-    await closeReaderNavigation(page);
     await returnToLibrary(page);
   });
 });

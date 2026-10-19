@@ -42,7 +42,7 @@ describe("READER_SHORTCUTS", () => {
     expect(shortcut("reader.next").combos).toEqual(["arrowright", "space", "pagedown"]);
     expect(shortcut("reader.previous").combos).toEqual(["arrowleft", "pageup"]);
     expect(shortcut("reader.first-last").combos).toEqual(["home", "end"]);
-    expect(shortcut("reader.search").combos).toEqual(["mod+f"]);
+    expect(shortcut("reader.search").combos).toEqual(["mod+shift+f", "mod+f"]);
     expect(shortcut("reader.bookmark").combos).toEqual(["mod+b"]);
     expect(shortcut("reader.presentation").combos).toEqual(["mod+l"]);
     expect(shortcut("reader.leave-presentation").combos).toEqual(["escape"]);

@@ -430,15 +430,15 @@ spaces, so queries match across them like they read on the page).
 `components/reader/pdf/hooks/usePdfSearch.ts` walks pages sequentially
 (worker-serialized), matches case-insensitively, streams one group per page
 with matches up to the shell, and stops at 500 total matches so a
-pathological document cannot flood the drawer. Each page's text is cached
+pathological document cannot flood the overlay. Each page's text is cached
 for the document's lifetime (dropped on document switch), so refining a
 query re-searches without re-parsing; a generation token makes a new query
 supersede the running one.
 
-The drawer's Search tab is the shared `ReaderSearchTab`; PDF matches carry
-`page` (EPUB matches carry a locator — see `searchModel.ts`). Picking a
-match navigates with the same `pageToPosition` model as scrolling,
-thumbnails, outline, and restore.
+The shared `ReaderSearchOverlay` renders matches from both formats; PDF
+matches carry `page` (EPUB matches carry a locator — see `searchModel.ts`).
+Picking a match navigates with the same `pageToPosition` model as
+scrolling, thumbnails, outline, and restore.
 
 ### Text layer, selection, and highlights
 

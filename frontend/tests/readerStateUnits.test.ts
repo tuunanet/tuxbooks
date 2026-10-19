@@ -15,6 +15,7 @@ describe("searchModel stream accumulation", () => {
     expect(state.status).toBe("running");
     expect(state.groups).toEqual([]);
     expect(state.totalMatches).toBe(0);
+    expect(state.truncated).toBe(false);
     expect(state.query).toBe("needle");
   });
 
@@ -40,10 +41,12 @@ describe("searchModel stream accumulation", () => {
     };
     state = appendSearchGroup(state, 99, group);
     expect(state.groups).toHaveLength(0);
-    state = finishSearchGroup(state, 99);
+    state = finishSearchGroup(state, 99, true);
     expect(state.status).toBe("running");
-    state = finishSearchGroup(state, 7);
+    expect(state.truncated).toBe(false);
+    state = finishSearchGroup(state, 7, true);
     expect(state.status).toBe("done");
+    expect(state.truncated).toBe(true);
   });
 });
 

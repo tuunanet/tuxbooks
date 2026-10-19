@@ -5,7 +5,6 @@ import {
   bitmapCacheUsage,
   canvasIsNonBlank,
   clickUntilEffect,
-  closeReaderNavigation,
   currentPageNumber,
   fitFactor,
   maxSingleBitmapBytes,
@@ -984,12 +983,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     );
     expect(resultsText).toContain("Page 2");
 
-    // Clicking the match navigates to page 2; the drawer stays open.
+    // Clicking the match navigates to page 2 and closes the overlay.
     await page.getByTestId("reader-search-match").click();
     await expect.poll(() => currentPageNumber(page), { timeout: 30000 }).toBe(2);
-    await expect(page.getByTestId("reader-nav")).toBeVisible();
+    await expect(page.getByTestId("reader-search-overlay")).toBeHidden({ timeout: 30000 });
 
-    await closeReaderNavigation(page);
     await returnToLibrary(page);
   });
 });

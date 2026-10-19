@@ -163,7 +163,7 @@ describe("ReaderShell chrome", () => {
     );
   });
 
-  it("opens the navigation drawer onto the Search tab", async () => {
+  it("opens the in-book search overlay from the toolbar", async () => {
     renderReader();
 
     expect(await screen.findByTestId("reader-view")).toBeInTheDocument();
@@ -173,8 +173,23 @@ describe("ReaderShell chrome", () => {
     expect(screen.queryByTestId("reader-sidebar-toggle")).toBeNull();
 
     await userEvent.click(searchButton);
-    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
+    expect(await screen.findByTestId("reader-search-overlay")).toBeInTheDocument();
     expect(screen.getByTestId("reader-search-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("reader-nav")).toBeNull();
+  });
+
+  it("toggles the search overlay with both search shortcuts", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByTestId("reader-search-overlay")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByTestId("reader-search-overlay")).toBeNull());
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(await screen.findByTestId("reader-search-overlay")).toBeInTheDocument();
   });
 });
 
@@ -413,7 +428,7 @@ describe("ReaderNavigation", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
   });
 
-  it("hints every EPUB tab with its shortcut and exposes aria-keyshortcuts", async () => {
+  it("hints every EPUB navigation tab with its shortcut and exposes aria-keyshortcuts", async () => {
     renderReader();
 
     await openNavigation();
@@ -431,7 +446,6 @@ describe("ReaderNavigation", () => {
         "Control+Shift+H",
         "Text you highlighted, with any notes you added. (Ctrl+Shift+H)",
       ],
-      ["nav-tab-search", "Control+F", "Find text in this book. (Ctrl+F)"],
     ] as const;
 
     for (const [testId, keyshortcuts, tooltip] of hints) {
@@ -440,6 +454,18 @@ describe("ReaderNavigation", () => {
       fireEvent.focus(trigger);
       await screen.findByRole("tooltip", { name: tooltip });
     }
+
+    expect(screen.queryByTestId("nav-tab-search")).toBeNull();
+  });
+
+  it("hints the in-book search button with its primary shortcut", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+
+    const searchButton = screen.getByRole("button", { name: "Search in book" });
+    expect(searchButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+F");
+    fireEvent.focus(searchButton);
+    await screen.findByRole("tooltip", { name: "Search in book (Ctrl+Shift+F)" });
   });
 
   it("hints the PDF Pages tab with a key and the Outline tab without one", async () => {
@@ -636,9 +662,6 @@ describe("ReaderNavigation", () => {
           onAnnotationJump={() => {}}
           onDeleteAnnotation={() => {}}
           onUpdateAnnotation={() => {}}
-          search={null}
-          onSearch={() => {}}
-          onSearchPick={() => {}}
           tab="contents"
           onTabChange={() => {}}
           colorFor={() => "#facc15"}

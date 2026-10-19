@@ -37,6 +37,15 @@ export const READER_PANEL_SHORTCUTS = {
   highlights: "mod+shift+h",
 } as const;
 
+/**
+ * In-book search. `mod+f` is the familiar alias; the primary binding adds
+ * Shift so the overlay reads as a separate surface from the app-wide search.
+ */
+export const READER_SEARCH_SHORTCUTS = {
+  primary: "mod+shift+f",
+  alias: "mod+f",
+} as const;
+
 export const READER_SHORTCUTS: ReaderShortcut[] = [
   { id: "global.focus-search", group: "global", label: "Focus search", combos: ["mod+k"] },
   {
@@ -76,7 +85,12 @@ export const READER_SHORTCUTS: ReaderShortcut[] = [
     label: "First or last page",
     combos: ["home", "end"],
   },
-  { id: "reader.search", group: "reader", label: "Search in book", combos: ["mod+f"] },
+  {
+    id: "reader.search",
+    group: "reader",
+    label: "Search in book",
+    combos: [READER_SEARCH_SHORTCUTS.primary, READER_SEARCH_SHORTCUTS.alias],
+  },
   { id: "reader.bookmark", group: "reader", label: "Bookmark page", combos: ["mod+b"] },
   { id: "reader.presentation", group: "reader", label: "Presentation mode", combos: ["mod+l"] },
   {

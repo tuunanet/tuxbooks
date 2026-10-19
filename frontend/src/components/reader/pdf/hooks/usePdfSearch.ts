@@ -15,7 +15,7 @@ interface UsePdfSearchOptions {
   document: PdfDocument | null;
   bookId: number;
   onGroup: (bookId: number, group: ReaderSearchGroup) => void;
-  onDone: (bookId: number) => void;
+  onDone: (bookId: number, truncated: boolean) => void;
 }
 
 /**
@@ -91,7 +91,9 @@ export function usePdfSearch({
           }
           if (totalMatches >= MAX_TOTAL_MATCHES) break;
         }
-        if (generation === generationRef.current) onDoneRef.current?.(bookId);
+        if (generation === generationRef.current) {
+          onDoneRef.current?.(bookId, totalMatches >= MAX_TOTAL_MATCHES);
+        }
       })();
     },
     [pdfDocument, bookId],
