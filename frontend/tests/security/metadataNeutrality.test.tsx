@@ -9,6 +9,7 @@ import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ReaderAnnotationList } from "@/components/reader/ReaderAnnotationTabs";
 import { SelectionToolbar } from "@/components/reader/SelectionToolbar";
+import { highlightCss } from "@/lib/highlightPalette";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { initialAppState } from "@/state/appState";
@@ -173,6 +174,9 @@ describe("GlobalSearch (search-result and snippet interpolation)", () => {
 
 describe("ReaderAnnotationList (stored annotation strings)", () => {
   const noop = vi.fn();
+  // The real resolver: untrusted stored strings must never reach a style.
+  const colorFor = (color: string | null | undefined) =>
+    highlightCss(color, "light", { light: {}, dark: {} });
 
   it("renders hostile note, text, and locator strings as text nodes", () => {
     const { container } = render(
@@ -186,6 +190,7 @@ describe("ReaderAnnotationList (stored annotation strings)", () => {
           }),
         ]}
         withColor
+        colorFor={colorFor}
         label={(annotation) => annotation.chapterHref ?? "Highlight"}
         onJump={noop}
         onDelete={noop}
@@ -208,6 +213,7 @@ describe("ReaderAnnotationList (stored annotation strings)", () => {
           }),
         ]}
         withColor
+        colorFor={colorFor}
         label={() => "Page 2"}
         onJump={noop}
         onDelete={noop}
@@ -217,7 +223,7 @@ describe("ReaderAnnotationList (stored annotation strings)", () => {
     );
     const dot = container.querySelector<HTMLElement>(`[data-testid="hostile-color-color-0"]`);
     expect(dot).not.toBeNull();
-    expect(dot!.getAttribute("style")).toBe("background: rgb(250, 204, 21);");
+    expect(dot!.getAttribute("style")).toBe("background: rgba(255, 189, 26, 0.42);");
   });
 });
 
@@ -228,6 +234,7 @@ describe("SelectionToolbar (live publication selection)", () => {
         selection={{ text: `${IMG_PAYLOAD}${SCRIPT_PAYLOAD}`, highlightId: null }}
         onAction={vi.fn()}
         onDismiss={vi.fn()}
+        colorFor={() => "rgba(255, 189, 26, 0.42)"}
       />,
     );
     expectNoInjectedElements(container);

@@ -25,6 +25,7 @@ import {
   readerScrollbarColor,
 } from "@/lib/epub/appearance";
 import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
+import { highlightCss, readerThemeFamily } from "@/lib/highlightPalette";
 import {
   bookmarkInputFor,
   isBookmarkAtPosition,
@@ -87,6 +88,14 @@ export function ReaderShell() {
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
   const { preferences, position, setPosition } = useReader();
+  // Highlight swatches and painted washes resolve through the palette so a
+  // theme-family flip or a Settings override restyles without touching the
+  // annotations themselves (they persist slot keys).
+  const highlightColorFor = useCallback(
+    (color: string | null | undefined) =>
+      highlightCss(color, readerThemeFamily(preferences.theme), preferences.highlightOverrides),
+    [preferences.theme, preferences.highlightOverrides],
+  );
   // The navigation drawer plus its selected tab: the Search toolbar button
   // and Ctrl/Cmd+F open the drawer straight onto the Search tab.
   const [nav, setNav] = useState<{ open: boolean; tab: ReaderNavTab }>({
@@ -704,6 +713,7 @@ export function ReaderShell() {
         onSearchPick={pickSearchMatch}
         tab={nav.tab}
         onTabChange={(tab) => setNav((prev) => ({ ...prev, tab }))}
+        colorFor={highlightColorFor}
         theme={preferences.theme}
       />
 
@@ -711,6 +721,7 @@ export function ReaderShell() {
         selection={activeSelection}
         onAction={handleHighlightAction}
         onDismiss={handleDismissSelection}
+        colorFor={highlightColorFor}
       />
     </div>
   );

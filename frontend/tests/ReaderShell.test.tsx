@@ -331,7 +331,9 @@ describe("Reader bookmarks", () => {
     await userEvent.click(screen.getByTestId("nav-tab-highlights"));
     const row = await screen.findByTestId("nav-highlight-0");
     expect(row).toHaveTextContent("the quoted words");
-    expect(screen.getByTestId("nav-highlight-color-0")).toHaveStyle({ background: "#facc15" });
+    expect(screen.getByTestId("nav-highlight-color-0")).toHaveStyle({
+      background: "rgba(255, 189, 26, 0.42)",
+    });
 
     await userEvent.click(screen.getByTestId("nav-highlight-delete-0"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 7 }));
@@ -624,6 +626,7 @@ describe("ReaderNavigation", () => {
           onSearchPick={() => {}}
           tab="contents"
           onTabChange={() => {}}
+          colorFor={() => "#facc15"}
           theme="dark"
         />
       </TooltipProvider>,

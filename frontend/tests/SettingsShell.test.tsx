@@ -243,4 +243,36 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByTestId("reader-settings-reset"));
     expect(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY)).toBeNull();
   });
+
+  it("persists and resets highlight color overrides from the Reading section", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
+    expect(screen.getByTestId("highlight-settings")).toBeInTheDocument();
+
+    // Pick a custom hue for the light-family yellow slot.
+    await userEvent.click(screen.getByTestId("highlight-color-light-yellow"));
+    const hexInput = within(await screen.findByTestId("highlight-hex-light-yellow")).getByRole(
+      "textbox",
+    );
+    await userEvent.clear(hexInput);
+    await userEvent.type(hexInput, "1e90ff");
+
+    const readOverrides = (): { light?: Record<string, string>; dark?: Record<string, string> } => {
+      const stored = JSON.parse(
+        window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}",
+      ) as {
+        preferences?: {
+          highlightOverrides?: { light?: Record<string, string>; dark?: Record<string, string> };
+        };
+      };
+      return stored.preferences?.highlightOverrides ?? {};
+    };
+    expect(readOverrides().light?.yellow).toBe("#1e90ff");
+
+    // Resetting the family clears its overrides, defaults stay untouched.
+    await userEvent.click(screen.getByTestId("highlight-reset-light"));
+    expect(readOverrides().light).toEqual({});
+  });
 });

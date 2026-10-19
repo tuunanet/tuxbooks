@@ -11,7 +11,8 @@ import {
 import { epubSurfaceTheme, epubThemeColorScheme } from "@/lib/epub/appearance";
 import { useShortcut } from "@/lib/shortcuts";
 import { useReader } from "@/state/readerState";
-import { highlightCssColor, isHighlightColor, type ReaderSelection } from "./annotationModel";
+import { highlightCss, isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
+import type { ReaderSelection } from "./annotationModel";
 import {
   epubProgressPayload,
   type EpubLocator,
@@ -352,24 +353,31 @@ export function EpubReader({
   // Draw highlights through the engine and keep them in step with the
   // persisted list (created in the tabs, deleted, recolored). The navigator
   // re-applies group decorations to mounted frames, so this only has to
-  // move the diff since the last commit.
+  // move the diff since the last commit. The diff runs on resolved CSS, so
+  // a palette override or theme-family flip with the book open repaints.
   const drawnHighlightsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (!handle) return;
+    const family = readerThemeFamily(preferences.theme);
     const next = new Map<string, string>();
     for (const highlight of highlights) {
-      if (highlight.cfi !== null) next.set(highlight.cfi, highlight.color ?? "");
+      if (highlight.cfi !== null) {
+        next.set(
+          highlight.cfi,
+          highlightCss(highlight.color, family, preferences.highlightOverrides),
+        );
+      }
     }
-    for (const [locator, color] of next) {
-      if (drawnHighlightsRef.current.get(locator) !== color) {
-        handle.addHighlight(locator, highlightCssColor(color));
+    for (const [locator, css] of next) {
+      if (drawnHighlightsRef.current.get(locator) !== css) {
+        handle.addHighlight(locator, css);
       }
     }
     for (const locator of drawnHighlightsRef.current.keys()) {
       if (!next.has(locator)) handle.removeHighlight(locator);
     }
     drawnHighlightsRef.current = next;
-  }, [handle, highlights]);
+  }, [handle, highlights, preferences.theme, preferences.highlightOverrides]);
 
   // The shell's selection toolbar drives highlight creation through this
   // controller; the reader owns the selection → locator translation.

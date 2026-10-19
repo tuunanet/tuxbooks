@@ -78,6 +78,22 @@ describe("readerSettings persistence", () => {
     const settings = sanitizeReaderPreferences({ foreground: "#AABBCC" });
     expect(settings.foreground).toBe("#aabbcc");
   });
+
+  it("round-trips highlight overrides and drops invalid ones", () => {
+    const stored = {
+      preferences: {
+        ...DEFAULT_READER_PREFERENCES,
+        highlightOverrides: { light: { yellow: "#1E90FF" }, dark: { red: "nope" } },
+      },
+      themePinned: true,
+    };
+    writeReaderSettings(stored);
+    const read = readReaderSettings();
+    expect(read.preferences.highlightOverrides).toEqual({
+      light: { yellow: "#1e90ff" },
+      dark: {},
+    });
+  });
 });
 
 describe("effectiveReaderPreferences", () => {

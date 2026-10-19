@@ -698,7 +698,10 @@ describe("EpubReader highlights and selection", () => {
     const handle = lastFakeHandle();
 
     await waitFor(() =>
-      expect(handle.addHighlight).toHaveBeenCalledWith(FAKE_LOCATOR.section1, "#4ade80"),
+      expect(handle.addHighlight).toHaveBeenCalledWith(
+        FAKE_LOCATOR.section1,
+        "rgba(52, 189, 125, 0.34)",
+      ),
     );
 
     // Recoloring redraws the same locator with the new color; removing clears it.
@@ -711,7 +714,10 @@ describe("EpubReader highlights and selection", () => {
       </ShortcutProvider>,
     );
     await waitFor(() =>
-      expect(handle.addHighlight).toHaveBeenCalledWith(FAKE_LOCATOR.section1, "#60a5fa"),
+      expect(handle.addHighlight).toHaveBeenCalledWith(
+        FAKE_LOCATOR.section1,
+        "rgba(58, 148, 248, 0.28)",
+      ),
     );
 
     rerender(

@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import type { AnnotationPatch } from "@/types/domain";
 import type { Annotation } from "@/types/domain";
-import { highlightCssColor, HIGHLIGHT_COLORS, type HighlightColor } from "./annotationModel";
-
-const COLOR_ORDER: HighlightColor[] = ["yellow", "green", "blue", "red", "purple"];
+import { HIGHLIGHT_COLOR_KEYS } from "@/lib/highlightPalette";
 
 interface ReaderAnnotationListProps {
   annotations: Annotation[];
   /** Shows the color dot and the color swatches (highlights). */
   withColor: boolean;
+  /** Resolves a persisted palette slot to the active theme family's wash. */
+  colorFor: (color: string | null | undefined) => string;
   /** One-line title of a row ("Page 3", a chapter label, …). */
   label: (annotation: Annotation) => string;
   /** Navigates the reader to the annotation's position. */
@@ -30,6 +30,7 @@ interface ReaderAnnotationListProps {
 export function ReaderAnnotationList({
   annotations,
   withColor,
+  colorFor,
   label,
   onJump,
   onDelete,
@@ -58,7 +59,7 @@ export function ReaderAnnotationList({
                 aria-hidden
                 className="size-2.5 shrink-0 rounded-full border border-black/20"
                 data-testid={`${testIdPrefix}-color-${index}`}
-                style={{ background: highlightCssColor(annotation.color) }}
+                style={{ background: colorFor(annotation.color) }}
               />
             )}
             <button
@@ -116,7 +117,7 @@ export function ReaderAnnotationList({
                   className="flex items-center gap-1.5"
                   data-testid={`${testIdPrefix}-swatches-${index}`}
                 >
-                  {COLOR_ORDER.map((color) => (
+                  {HIGHLIGHT_COLOR_KEYS.map((color) => (
                     <button
                       key={color}
                       type="button"
@@ -124,7 +125,7 @@ export function ReaderAnnotationList({
                       title={`Change highlight color to ${color}`}
                       onClick={() => onUpdate(annotation.id, { color })}
                       className="size-4 rounded-full border border-black/20 outline-none hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
-                      style={{ background: HIGHLIGHT_COLORS[color] }}
+                      style={{ background: colorFor(color) }}
                     />
                   ))}
                 </div>

@@ -13,12 +13,12 @@ import { getPdfOutline, pdfWorkerSrc, type PdfOutlineItem } from "@/lib/pdf/pdfE
 import { useReader } from "@/state/readerState";
 import { pdfThemeTreatment } from "@/lib/pdf/theme";
 import {
-  isHighlightColor,
   highlightAtPoint,
   highlightForSelection,
   normalizeRect,
   type ReaderSelection,
 } from "../annotationModel";
+import { isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
 import {
   parsePdfProgress,
   pdfProgressPayload,
@@ -1742,6 +1742,8 @@ export function PdfReader({
         contentAreaRef={contentAreaRef}
         onRetryPage={retryPage}
         highlightsByPage={highlightsByPage}
+        highlightFamily={readerThemeFamily(preferences.theme)}
+        highlightOverrides={preferences.highlightOverrides}
         themeFilter={treatment.filter}
         themeTint={treatment.tint}
         smartColors={treatment.smart}
