@@ -283,7 +283,9 @@ describe("Reader bookmarks", () => {
         },
       }),
     );
-    expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true"),
+    );
 
     // The drawer lists the stored bookmark (from the create response).
     await openNavigation();
@@ -295,7 +297,9 @@ describe("Reader bookmarks", () => {
     // Toggling again removes the bookmark at the same locator.
     fireEvent.click(screen.getByTestId("reader-bookmark"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 1 }));
-    expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false"),
+    );
   });
 
   it("lists stored bookmarks and highlights on open and deletes from the drawer", async () => {
