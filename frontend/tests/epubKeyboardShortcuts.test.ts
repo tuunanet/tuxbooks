@@ -43,6 +43,12 @@ describe("epub keyboard shortcuts bridge", () => {
     expect(space).toMatchObject({ ctrl: false, meta: false, shift: false, alt: false });
     expect(combos.some((combo) => combo.keyCode === 39)).toBe(true); // arrowright
 
+    // Typing keys must reach a focused field; only modifier shortcuts pass
+    // through the navigator's capture-phase host listener.
+    expect(space?.suppressOnInteractiveElement).toBe(true);
+    expect(ctrlShiftH?.suppressOnInteractiveElement).toBe(false);
+    expect(metaShiftH?.suppressOnInteractiveElement).toBe(false);
+
     // PDF-only combos stay out of the frame.
     expect(combos.some((combo) => combo.keyCode === 61)).toBe(false); // mod+=
   });

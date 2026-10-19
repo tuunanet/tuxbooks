@@ -90,6 +90,12 @@ export function buildKeyboardPeripherals(): IKeyboardPeripheralsConfig {
           meta: base.meta,
           shift: parsed.shift,
           alt: parsed.alt,
+          // The navigator also installs a capture-phase listener on the host
+          // document. Without this flag it eats Space and the arrow keys
+          // before the search overlay's input can see them. Modifier combos
+          // still reach the host registry while a field is focused, matching
+          // the shortcut provider's own policy.
+          suppressOnInteractiveElement: !parsed.mod && !parsed.alt,
         };
         const id = JSON.stringify(combo);
         if (seen.has(id)) continue;

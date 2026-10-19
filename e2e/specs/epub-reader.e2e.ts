@@ -548,6 +548,17 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.keyboard.press("Control+Shift+F");
     const searchInput = page.getByTestId("reader-search-input");
     await expect(searchInput).toBeVisible({ timeout: 30000 });
+
+    // Regression: the EPUB navigator installs a capture-phase listener on the
+    // host document. Space typed into the overlay must stay in the field and
+    // must not reach the reader's page-turn shortcut.
+    await searchInput.fill("first");
+    await page.keyboard.press("Space");
+    await expect(searchInput).toHaveValue("first ");
+    await page.keyboard.type("chapter");
+    await expect(searchInput).toHaveValue("first chapter");
+    await waitForSection(page, 2);
+
     await searchInput.fill("deterministic");
 
     // "deterministic" occurs exactly once, in Chapter One's text.
