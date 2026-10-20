@@ -200,8 +200,6 @@ export function ReaderShell() {
       ? pdfOutlineState.outline
       : null;
   const pageCount = isPdf ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT) : 0;
-  // The pages drawer lists real pages only; 0 keeps it in its loading state.
-  const knownPageCount = isPdf ? (pdfPageCount ?? 0) : 0;
   // Percentage stepping is only meaningful with a known page count; the
   // EPUB surface owns these keys instead (engine page turns).
   const step = pageCount > 0 ? 100 / pageCount : 0;
@@ -260,16 +258,24 @@ export function ReaderShell() {
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
   useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
-  // Both the primary binding and the familiar alias toggle the overlay, so
-  // a second press closes it without reaching for the mouse.
+  // Ctrl/Cmd+F toggles the overlay, so a second press closes it without
+  // reaching for the mouse.
   const toggleSearch = useCallback(() => setSearchOpen((open) => !open), []);
   useShortcut(READER_SEARCH_SHORTCUTS.primary, toggleSearch);
-  useShortcut(READER_SEARCH_SHORTCUTS.alias, toggleSearch);
 
   // Panel shortcuts: thumbnails is a PDF affordance (the same `isEpub ? null`
   // gate as the page-turn combos), while the appearance popover and the
   // navigation drawer exist in both formats. The drawer keys toggle — a
   // second press closes the drawer instead of switching its tab.
+  const focusReadingSurface = () => {
+    // Only claim focus when nothing owns it. A shortcut fired from the EPUB
+    // content frame (activeElement is the iframe) or a toolbar button must
+    // keep that focus; focus left on body, by contrast, lets the drawer's
+    // modal focus guard grab it when async contents land.
+    if (document.activeElement === document.body) {
+      readerContentRef.current?.focus({ preventScroll: true });
+    }
+  };
   useShortcut(isEpub ? null : READER_PANEL_SHORTCUTS.thumbnails, () =>
     setPdfSidebarOpen((open) => !open),
   );
@@ -279,9 +285,18 @@ export function ReaderShell() {
   // Close the controlled appearance popover through the same registry that
   // receives the forwarded key.
   useShortcut(appearanceOpen ? "escape" : null, () => setAppearanceOpen(false));
-  useShortcut(READER_PANEL_SHORTCUTS.contents, () => toggleNav(isEpub ? "contents" : "pages"));
-  useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => toggleNav("bookmarks"));
-  useShortcut(READER_PANEL_SHORTCUTS.highlights, () => toggleNav("highlights"));
+  useShortcut(READER_PANEL_SHORTCUTS.contents, () => {
+    focusReadingSurface();
+    toggleNav(isEpub ? "contents" : "outline");
+  });
+  useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => {
+    focusReadingSurface();
+    toggleNav("bookmarks");
+  });
+  useShortcut(READER_PANEL_SHORTCUTS.highlights, () => {
+    focusReadingSurface();
+    toggleNav("highlights");
+  });
 
   // Presentation mode (issues #65 PDF / #64 EPUB): Ctrl+L toggles, Esc
   // exits, and a native fullscreen exit (Esc while really fullscreen) ends
@@ -556,37 +571,6 @@ export function ReaderShell() {
             />
           )}
 
-          {/* Spacer: keeps the trailing controls at the right edge. The title
-              is centered on the header itself, not on the space between the
-              unequal left and right groups, since the PDF zoom controls make
-              the left group much wider. */}
-          <div className="min-w-0 flex-1" />
-
-          <p
-            data-testid="reader-title"
-            className="pointer-events-none absolute top-1/2 left-1/2 max-w-[45%] -translate-x-1/2 -translate-y-1/2 truncate text-center text-sm font-medium"
-          >
-            {book.title}
-          </p>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                data-testid="reader-search"
-                aria-label="Search in book"
-                aria-keyshortcuts={formatShortcutAria(READER_SEARCH_SHORTCUTS.primary)}
-                onClick={() => setSearchOpen(true)}
-              >
-                <Search />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
-            </TooltipContent>
-          </Tooltip>
-
           {isPdf && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -605,6 +589,53 @@ export function ReaderShell() {
               <TooltipContent>Page thumbnails (Ctrl+Shift+T)</TooltipContent>
             </Tooltip>
           )}
+
+          {/* Spacer: keeps the trailing controls at the right edge. The title
+              is centered on the header itself, not on the space between the
+              unequal left and right groups, since the PDF zoom controls make
+              the left group much wider. */}
+          <div className="min-w-0 flex-1" />
+
+          <p
+            data-testid="reader-title"
+            className="pointer-events-none absolute top-1/2 left-1/2 max-w-[45%] -translate-x-1/2 -translate-y-1/2 truncate text-center text-sm font-medium"
+          >
+            {book.title}
+          </p>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-nav-trigger"
+                aria-label="Contents and bookmarks"
+                aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
+                onClick={() => openNav(isEpub ? "contents" : "outline")}
+              >
+                <TableOfContents />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Contents (Ctrl+Shift+C)</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-search"
+                aria-label="Search in book"
+                aria-keyshortcuts={formatShortcutAria(READER_SEARCH_SHORTCUTS.primary)}
+                onClick={() => setSearchOpen(true)}
+              >
+                <Search />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
+            </TooltipContent>
+          </Tooltip>
 
           <ReaderAppearance
             format={book?.format}
@@ -636,22 +667,6 @@ export function ReaderShell() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                data-testid="reader-nav-trigger"
-                aria-label="Contents and bookmarks"
-                aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
-                onClick={() => openNav(isEpub ? "contents" : "pages")}
-              >
-                <TableOfContents />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Contents (Ctrl+Shift+C)</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
                 data-testid="reader-bookmark"
                 aria-label={bookmarked ? "Remove bookmark" : "Add bookmark"}
                 aria-pressed={bookmarked}
@@ -677,6 +692,10 @@ export function ReaderShell() {
         <main
           ref={readerContentRef}
           data-testid="reader-content"
+          // Programmatic focus target for panel shortcuts: keeps focus on the
+          // reading surface so the nav drawer's focus guard does not grab it
+          // when its async contents load.
+          tabIndex={-1}
           aria-label="Reading view"
           // overflow-anchor off: Chromium's scroll anchoring adjusts scrollTop
           // when the PDF virtualizer corrects slot heights above the
@@ -767,7 +786,6 @@ export function ReaderShell() {
         open={nav.open}
         onOpenChange={(open) => setNav((prev) => ({ ...prev, open }))}
         book={book}
-        pageCount={knownPageCount}
         onJump={jump}
         epubToc={isEpub ? epubToc : null}
         pdfOutline={isPdf ? pdfOutline : null}
