@@ -258,11 +258,10 @@ export function ReaderShell() {
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
   useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
-  // Both the primary binding and the familiar alias toggle the overlay, so
-  // a second press closes it without reaching for the mouse.
+  // Ctrl/Cmd+F toggles the overlay, so a second press closes it without
+  // reaching for the mouse.
   const toggleSearch = useCallback(() => setSearchOpen((open) => !open), []);
   useShortcut(READER_SEARCH_SHORTCUTS.primary, toggleSearch);
-  useShortcut(READER_SEARCH_SHORTCUTS.alias, toggleSearch);
 
   // Panel shortcuts: thumbnails is a PDF affordance (the same `isEpub ? null`
   // gate as the page-turn combos), while the appearance popover and the
@@ -572,37 +571,6 @@ export function ReaderShell() {
             />
           )}
 
-          {/* Spacer: keeps the trailing controls at the right edge. The title
-              is centered on the header itself, not on the space between the
-              unequal left and right groups, since the PDF zoom controls make
-              the left group much wider. */}
-          <div className="min-w-0 flex-1" />
-
-          <p
-            data-testid="reader-title"
-            className="pointer-events-none absolute top-1/2 left-1/2 max-w-[45%] -translate-x-1/2 -translate-y-1/2 truncate text-center text-sm font-medium"
-          >
-            {book.title}
-          </p>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                data-testid="reader-search"
-                aria-label="Search in book"
-                aria-keyshortcuts={formatShortcutAria(READER_SEARCH_SHORTCUTS.primary)}
-                onClick={() => setSearchOpen(true)}
-              >
-                <Search />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
-            </TooltipContent>
-          </Tooltip>
-
           {isPdf && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -621,6 +589,53 @@ export function ReaderShell() {
               <TooltipContent>Page thumbnails (Ctrl+Shift+T)</TooltipContent>
             </Tooltip>
           )}
+
+          {/* Spacer: keeps the trailing controls at the right edge. The title
+              is centered on the header itself, not on the space between the
+              unequal left and right groups, since the PDF zoom controls make
+              the left group much wider. */}
+          <div className="min-w-0 flex-1" />
+
+          <p
+            data-testid="reader-title"
+            className="pointer-events-none absolute top-1/2 left-1/2 max-w-[45%] -translate-x-1/2 -translate-y-1/2 truncate text-center text-sm font-medium"
+          >
+            {book.title}
+          </p>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-nav-trigger"
+                aria-label="Contents and bookmarks"
+                aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
+                onClick={() => openNav(isEpub ? "contents" : "outline")}
+              >
+                <TableOfContents />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Contents (Ctrl+Shift+C)</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-search"
+                aria-label="Search in book"
+                aria-keyshortcuts={formatShortcutAria(READER_SEARCH_SHORTCUTS.primary)}
+                onClick={() => setSearchOpen(true)}
+              >
+                <Search />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
+            </TooltipContent>
+          </Tooltip>
 
           <ReaderAppearance
             format={book?.format}
@@ -646,22 +661,6 @@ export function ReaderShell() {
               <TooltipContent>Presentation mode (Ctrl+L)</TooltipContent>
             </Tooltip>
           )}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                data-testid="reader-nav-trigger"
-                aria-label="Contents and bookmarks"
-                aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
-                onClick={() => openNav(isEpub ? "contents" : "outline")}
-              >
-                <TableOfContents />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Contents (Ctrl+Shift+C)</TooltipContent>
-          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>

@@ -178,14 +178,18 @@ describe("ReaderShell chrome", () => {
     expect(screen.queryByTestId("reader-nav")).toBeNull();
   });
 
-  it("toggles the search overlay with both search shortcuts", async () => {
+  it("toggles the search overlay with Ctrl+F", async () => {
     renderReader();
     await screen.findByTestId("reader-view");
 
-    fireEvent.keyDown(window, { key: "f", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     expect(await screen.findByTestId("reader-search-overlay")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByTestId("reader-search-overlay")).toBeNull());
+
+    // Ctrl+Shift+F no longer opens the overlay; only the plain chord does.
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-search-overlay")).toBeNull());
 
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
@@ -463,9 +467,9 @@ describe("ReaderNavigation", () => {
     await screen.findByTestId("reader-view");
 
     const searchButton = screen.getByRole("button", { name: "Search in book" });
-    expect(searchButton).toHaveAttribute("aria-keyshortcuts", "Control+Shift+F");
+    expect(searchButton).toHaveAttribute("aria-keyshortcuts", "Control+F");
     fireEvent.focus(searchButton);
-    await screen.findByRole("tooltip", { name: "Search in book (Ctrl+Shift+F)" });
+    await screen.findByRole("tooltip", { name: "Search in book (Ctrl+F)" });
   });
 
   it("hints the PDF Contents tab with the contents shortcut", async () => {
@@ -636,6 +640,30 @@ describe("ReaderNavigation", () => {
 
     fireEvent.keyDown(window, { key: "PageUp" });
     expect(container.scrollTop).toBe(648);
+  });
+
+  it("places thumbnails beside the PDF presentation control and contents first on the right", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const header = screen.getByTestId("reader-back").closest("header");
+    expect(header).not.toBeNull();
+    const order = Array.from(header!.children)
+      .map((child) => child.getAttribute("data-testid"))
+      .filter((id): id is string => id !== null);
+
+    // Page thumbnails follow the portaled PDF toolbar, whose last control is
+    // presentation mode.
+    expect(order.indexOf("reader-sidebar-toggle")).toBe(order.indexOf("pdf-header-controls") + 1);
+
+    // The trailing group starts with Contents, then search, appearance, and
+    // bookmark.
+    expect(order.slice(order.indexOf("reader-title") + 1)).toEqual([
+      "reader-nav-trigger",
+      "reader-search",
+      "appearance-trigger",
+      "reader-bookmark",
+    ]);
   });
 
   it("themes the portaled drawer with the active reader theme", async () => {

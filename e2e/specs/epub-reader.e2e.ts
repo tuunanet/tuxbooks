@@ -545,7 +545,7 @@ test.describe("tuxbooks EPUB reader", () => {
 
     // The primary binding opens the overlay; the PDF twin covers the
     // toolbar button.
-    await page.keyboard.press("Control+Shift+F");
+    await page.keyboard.press("Control+F");
     const searchInput = page.getByTestId("reader-search-input");
     await expect(searchInput).toBeVisible({ timeout: 30000 });
 
