@@ -41,6 +41,18 @@ The `Release` workflow runs the headless E2E (`just test-e2e`) on every `v*`
 tag; the unit and integration suites were already proven by CI on the tagged
 commit.
 
+### Manual E2E on a PR
+
+The E2E suite is not part of the required PR checks because it takes several
+minutes. `e2e-pr.yml` runs it on demand:
+
+- add the `run-e2e` label to a PR, or
+- `gh workflow run e2e-pr.yml -f pr=<number>`
+
+The workflow resolves the PR head, runs `just test-e2e`, and uploads failure
+artifacts. The run appears as the optional `E2E (manual)` check; it never
+blocks merge.
+
 ## Timeouts and termination
 
 Every test invocation is guaranteed to terminate; a wedged run is killed,

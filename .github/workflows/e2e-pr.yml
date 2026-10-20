@@ -1,0 +1,92 @@
+name: E2E (manual)
+
+# Optional, not a required branch-protection check. Add the `run-e2e` label
+# to a PR, or dispatch this workflow with a PR number, to run the same
+# real-binary E2E suite the release verify job uses. The suite takes several
+# minutes; ordinary PRs stay on the fast unit/lint/typecheck gate.
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to test. Leave empty to test the selected branch."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: e2e-pr-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: E2E (manual)
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-e2e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - id: target
+        name: Resolve the target commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            sha="$EVENT_SHA"
+          else
+            sha="$HEAD_SHA"
+          fi
+          if [ -z "$sha" ]; then
+            echo "::error::could not resolve a commit to test"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: sidecar
+
+      - name: E2E (headless)
+        run: |
+          pnpm install --frozen-lockfile
+          bash scripts/fetch-pdfium.sh
+          just test-e2e
+
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: e2e-artifacts-pr
+          path: artifacts/e2e
+          if-no-files-found: ignore
