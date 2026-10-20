@@ -19,7 +19,7 @@ import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationPatch } from "@/types/domain";
 import type { Book } from "@/types/domain";
-import { epubHrefJump, type ReaderJump } from "./readerModel";
+import { bookmarkBaseLabel, epubHrefJump, tocLabelFor, type ReaderJump } from "./readerModel";
 import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
 
 export type ReaderNavTab = "contents" | "outline" | "bookmarks" | "highlights";
@@ -141,15 +141,6 @@ function flattenOutline(items: PdfOutlineItem[], depth = 0): OutlineRow[] {
   return items.flatMap((item) => [{ item, depth }, ...flattenOutline(item.items, depth + 1)]);
 }
 
-/** TOC label for a spine href, or null when the book has no matching entry. */
-function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null {
-  if (!epubToc) return null;
-  for (const { item } of flattenToc(epubToc)) {
-    if (item.href === href) return item.label || item.href;
-  }
-  return null;
-}
-
 /**
  * Reading navigation drawer: EPUB contents from the Readium engine (real
  * labels, real destinations); the PDF's own outline from the loaded PDFium
@@ -194,22 +185,16 @@ export function ReaderNavigation({
     onOpenChange(false);
   };
 
-  const bookmarkBaseLabel = (annotation: Annotation): string => {
-    if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
-    if (annotation.chapterHref) {
-      return tocLabelFor(epubToc, annotation.chapterHref) ?? annotation.chapterHref;
-    }
-    return "Bookmark";
-  };
-
   const bookmarkLabel = (annotation: Annotation): string => {
     const label = annotation.label?.trim();
-    return label ? label : bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation));
+    return label
+      ? label
+      : bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation, epubToc));
   };
 
   const bookmarkSubLabel = (annotation: Annotation): string | null =>
     annotation.label?.trim()
-      ? bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation))
+      ? bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation, epubToc))
       : null;
 
   const highlightLabel = (annotation: Annotation): string => {

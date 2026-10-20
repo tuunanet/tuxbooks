@@ -472,6 +472,219 @@ describe("Reader bookmarks", () => {
   });
 });
 
+describe("Bookmark label popover", () => {
+  // The reader's canned TOC names chapter1.xhtml "Chapter One"; the create
+  // response carries the section2 locator (55% through the chapter).
+  const HINT = "Chapter One · 55% through chapter · Saved just now";
+
+  async function bookmarkAtSection2() {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    // A distinct total progression makes the wait below prove the relocate
+    // reached the shell (0% is also the pre-relocate value).
+    lastFakeHandle().emitRelocate({ locator: FAKE_LOCATOR.section2, totalProgression: 0.55 });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("55%"));
+    fireEvent.click(screen.getByTestId("reader-bookmark"));
+    await screen.findByTestId("bookmark-label-popover");
+  }
+
+  it("opens under the bookmark button after creation and commits the label on Enter", async () => {
+    await bookmarkAtSection2();
+
+    // The button is the popover's anchor, the input takes focus, and the
+    // hint names what is being labeled.
+    expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(HINT);
+    expect(screen.getByTestId("bookmark-label-input")).toHaveFocus();
+    // The tooltip would stack on the same corner, so it stays away.
+    expect(screen.queryByText("Bookmark (Ctrl+B)")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByTestId("bookmark-label-input"), "Opening scene");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 1,
+        patch: { label: "Opening scene" },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("bookmark-label-popover")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps the typed label on Escape and clamps it at 50 characters", async () => {
+    await bookmarkAtSection2();
+
+    const input = screen.getByTestId("bookmark-label-input");
+    await userEvent.type(input, "x".repeat(60));
+    // Silent clamp, code-point safe, same as the drawer and details editors.
+    expect(input).toHaveValue("x".repeat(50));
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 1,
+        patch: { label: "x".repeat(50) },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("bookmark-label-popover")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("commits the label when the popover loses the pointer outside", async () => {
+    await bookmarkAtSection2();
+
+    await userEvent.type(screen.getByTestId("bookmark-label-input"), "note to self");
+    await userEvent.click(screen.getByTestId("reader-content"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 1,
+        patch: { label: "note to self" },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("bookmark-label-popover")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("leaves the label unset when the popover closes with an empty draft", async () => {
+    await bookmarkAtSection2();
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("bookmark-label-popover")).not.toBeInTheDocument(),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("update_annotation", expect.anything());
+  });
+
+  it("removes the bookmark and drops the draft on a second Ctrl+B", async () => {
+    await bookmarkAtSection2();
+    await userEvent.type(screen.getByTestId("bookmark-label-input"), "draft");
+
+    // Ctrl+B still means "toggle": the bookmark goes, and the draft with it.
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 1 }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("bookmark-label-popover")).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "false"),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("update_annotation", expect.anything());
+  });
+
+  it("rebinds to a new bookmark after moving on, leaving the first unlabeled", async () => {
+    await bookmarkAtSection2();
+    await userEvent.type(screen.getByTestId("bookmark-label-input"), "First draft");
+
+    // Moving on and pressing Ctrl+B again bookmarks the new position: the
+    // popover follows the newest bookmark with a blank draft.
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [],
+      create_annotation: makeAnnotation({
+        id: 2,
+        kind: "bookmark",
+        cfi: FAKE_LOCATOR.section1,
+        chapterHref: "chapter1.xhtml",
+        pageNumber: null,
+        rects: null,
+        text: null,
+      }),
+      update_annotation: null,
+      delete_annotation: true,
+    });
+    lastFakeHandle().emitRelocate({ locator: FAKE_LOCATOR.section1, totalProgression: 0.1 });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("10%"));
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+
+    // The old popover is still mounted while the second create round-trips,
+    // so wait on the rebind's own hint before grabbing the elements —
+    // otherwise the assertions land on the detached first instance.
+    await waitFor(() =>
+      expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(
+        "Chapter One · 10% through chapter · Saved just now",
+      ),
+    );
+    const popover = screen.getByTestId("bookmark-label-popover");
+    expect(within(popover).getByTestId("bookmark-label-input")).toHaveValue("");
+
+    await userEvent.type(within(popover).getByTestId("bookmark-label-input"), "Second draft");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 2,
+        patch: { label: "Second draft" },
+      }),
+    );
+    // The first bookmark never got the draft typed for it.
+    expect(invokeMock).not.toHaveBeenCalledWith("update_annotation", {
+      id: 1,
+      patch: { label: "First draft" },
+    });
+  });
+
+  it("labels a PDF bookmark and names the page in the hint", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+    // The PDF reader reports its page on mount, so the shell can bookmark it.
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [
+        makeBook({
+          id: 1,
+          format: "pdf",
+          path: "/tmp/library/minimal.pdf",
+          title: "A Minimal PDF",
+        }),
+      ],
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [],
+      create_annotation: makeAnnotation({
+        id: 4,
+        kind: "bookmark",
+        cfi: null,
+        chapterHref: null,
+        pageNumber: 1,
+        rects: null,
+        text: null,
+      }),
+      update_annotation: null,
+      delete_annotation: true,
+    });
+
+    fireEvent.click(screen.getByTestId("reader-bookmark"));
+
+    const popover = await screen.findByTestId("bookmark-label-popover");
+    expect(within(popover).getByTestId("bookmark-label-hint")).toHaveTextContent(
+      "Page 1 · Saved just now",
+    );
+
+    await userEvent.type(within(popover).getByTestId("bookmark-label-input"), "Front matter");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 4,
+        patch: { label: "Front matter" },
+      }),
+    );
+  });
+});
+
 describe("ReaderNavigation", () => {
   it("lists the engine's EPUB contents and jumps through the engine", async () => {
     renderReader();
