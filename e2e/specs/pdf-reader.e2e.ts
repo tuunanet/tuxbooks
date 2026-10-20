@@ -765,21 +765,12 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("keeps the current page rendered when zooming deep in the document", async ({ page }) => {
     await openLargeFixture(page);
 
-    // Jump deep via the semantic Pages drawer (not pixel coordinates). The
-    // condition is the rendered state, not the indicator: right after the
-    // jump the render set holds page 87, but a layout re-anchor racing the
-    // drawer's exit animation can bounce the viewport back — re-driving the
-    // jump converges (same retry pattern as the outline navigation).
-    await page.getByTestId("reader-nav-trigger").click();
-    await expect(page.getByTestId("nav-pages")).toBeVisible({ timeout: 30000 });
-    await clickUntilEffect(
-      page,
-      "[data-testid=nav-page-87]",
-      async () =>
-        (await page.evaluate(() =>
-          document.querySelector('[data-pdf-slot="87"]')?.getAttribute("data-render-state"),
-        )) === "rendered",
-    );
+    // Jump deep via the toolbar's page field (not pixel coordinates). The
+    // drawer no longer lists page numbers; typed jumps go through the same
+    // page locator as scrolling.
+    const pageInput = page.getByTestId("pdf-page-input");
+    await pageInput.fill("87");
+    await pageInput.press("Enter");
 
     await waitForRendered(page, 87);
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 87 of 100", {

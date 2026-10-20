@@ -468,23 +468,19 @@ describe("ReaderNavigation", () => {
     await screen.findByRole("tooltip", { name: "Search in book (Ctrl+Shift+F)" });
   });
 
-  it("hints the PDF Pages tab with a key and the Outline tab without one", async () => {
+  it("hints the PDF Contents tab with the contents shortcut", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
 
     await openNavigation();
 
-    const pages = await screen.findByTestId("nav-tab-pages");
-    expect(pages).toHaveAttribute("aria-keyshortcuts", "Control+Shift+C");
-    fireEvent.focus(pages);
-    await screen.findByRole("tooltip", {
-      name: "Thumbnails of every page, click one to jump there. (Ctrl+Shift+C)",
-    });
-
-    const outline = screen.getByTestId("nav-tab-outline");
-    expect(outline).not.toHaveAttribute("aria-keyshortcuts");
+    const outline = await screen.findByTestId("nav-tab-outline");
+    expect(outline).toHaveTextContent("Contents");
+    expect(outline).toHaveAttribute("aria-keyshortcuts", "Control+Shift+C");
     fireEvent.focus(outline);
-    await screen.findByRole("tooltip", { name: "The document's own headings, in order." });
+    await screen.findByRole("tooltip", {
+      name: "The document's own headings, in order. (Ctrl+Shift+C)",
+    });
   });
 
   it("shows a loading state while the EPUB document is still opening", async () => {
@@ -517,7 +513,7 @@ describe("ReaderNavigation", () => {
     expect(await screen.findByText("Loading contents…")).toBeInTheDocument();
   });
 
-  it("gives PDFs Pages and a real outline that jumps to pages", async () => {
+  it("gives PDFs a Contents tab from the document outline that jumps to pages", async () => {
     vi.mocked(getPdfOutline).mockResolvedValueOnce([
       { title: "Chapter One", page: 1, items: [] },
       {
@@ -530,38 +526,35 @@ describe("ReaderNavigation", () => {
     await screen.findByTestId("pdf-canvas");
 
     await openNavigation();
-    expect(await screen.findByTestId("nav-pages")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-page-3")).toBeInTheDocument();
-    expect(vi.mocked(openPdfDocumentFromBook)).toHaveBeenCalledWith(1, "pdf");
+    expect(screen.getByTestId("nav-tab-outline")).toHaveTextContent("Contents");
+    expect(screen.getByTestId("nav-tab-outline")).toHaveAttribute("data-state", "active");
+    expect(screen.queryByTestId("nav-tab-pages")).toBeNull();
+    expect(screen.queryByTestId("nav-pages")).toBeNull();
+    // Hierarchical entries flatten with depth; leaf navigation jumps pages.
+    expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Chapter One");
+    expect(screen.getByTestId("nav-outline-item-1")).toHaveTextContent("Part Two");
+    expect(screen.getByTestId("nav-outline-item-2")).toHaveTextContent("Section Two-A");
 
-    await userEvent.click(screen.getByTestId("nav-page-2"));
+    await userEvent.click(screen.getByTestId("nav-outline-item-1"));
     // PDF has no footer, so the shell exposes the position as a deterministic
     // attribute for tests instead.
     await waitFor(() =>
       expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "50"),
     );
 
-    // Re-open for the Outline tab (Radix unmounts inactive tab content).
     await openNavigation();
-    await userEvent.click(await screen.findByTestId("nav-tab-outline"));
-    // Hierarchical entries flatten with depth; leaf navigation jumps pages.
-    expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Chapter One");
-    expect(screen.getByTestId("nav-outline-item-1")).toHaveTextContent("Part Two");
-    expect(screen.getByTestId("nav-outline-item-2")).toHaveTextContent("Section Two-A");
-
-    await userEvent.click(screen.getByTestId("nav-outline-item-2"));
+    await userEvent.click(await screen.findByTestId("nav-outline-item-2"));
     await waitFor(() =>
       expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "100"),
     );
     expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument();
   });
 
-  it("shows an empty outline state for documents without one", async () => {
+  it("shows an empty contents state for documents without an outline", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
 
     await openNavigation();
-    await userEvent.click(await screen.findByTestId("nav-tab-outline"));
     expect(await screen.findByTestId("nav-outline-empty")).toHaveTextContent(/no outline/i);
   });
 
@@ -654,7 +647,6 @@ describe("ReaderNavigation", () => {
           open
           onOpenChange={() => {}}
           book={makeBook()}
-          pageCount={0}
           onJump={() => {}}
           epubToc={null}
           pdfOutline={null}
@@ -877,12 +869,11 @@ describe("Reader panel shortcuts", () => {
     expect(screen.queryByTestId("reader-nav")).toBeNull();
 
     fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
-    expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-tab-pages")).toHaveAttribute("data-state", "active");
+    const drawer = await screen.findByTestId("reader-nav");
+    expect(drawer).toHaveAttribute("data-side", "right");
+    expect(screen.getByTestId("nav-tab-outline")).toHaveAttribute("data-state", "active");
     // The shortcut must not pull focus off the reading surface.
-    expect(screen.getByTestId("reader-nav")).not.toContainElement(
-      document.activeElement as HTMLElement,
-    );
+    expect(drawer).not.toContainElement(document.activeElement as HTMLElement);
 
     fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
@@ -1571,7 +1562,6 @@ describe("Reader book switching", () => {
     expect(screen.queryByTestId("epub-reader")).not.toBeInTheDocument();
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "0");
     await openNavigation();
-    await userEvent.click(await screen.findByTestId("nav-tab-outline"));
     expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Part One");
     expect(screen.queryByTestId("toc-item-0")).not.toBeInTheDocument();
 

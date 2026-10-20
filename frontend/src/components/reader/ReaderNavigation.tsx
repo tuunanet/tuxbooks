@@ -21,13 +21,12 @@ import type { Book } from "@/types/domain";
 import { epubHrefJump, type ReaderJump } from "./readerModel";
 import { ReaderAnnotationList } from "./ReaderAnnotationTabs";
 
-export type ReaderNavTab = "contents" | "pages" | "outline" | "bookmarks" | "highlights";
+export type ReaderNavTab = "contents" | "outline" | "bookmarks" | "highlights";
 
 interface ReaderNavigationProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   book: Book;
-  pageCount: number;
   /** Navigates the open reader to a position in the document's own coordinates. */
   onJump: (target: ReaderJump) => void;
   /** Engine-reported EPUB table of contents; null while the book opens. */
@@ -62,9 +61,9 @@ interface ReaderNavTabHint {
 }
 
 /**
- * Hint copy keyed by tab value so the triggers stay in one place. Pages and
- * Contents share the contents combo: the header's Contents button opens the
- * drawer onto Pages for a PDF and Contents for an EPUB.
+ * Hint copy keyed by tab value so the triggers stay in one place. The header's
+ * Contents button and its shortcut open the drawer onto Contents for both
+ * formats: the EPUB TOC or the PDF's own outline.
  */
 const NAV_TAB_HINTS: Record<ReaderNavTab, ReaderNavTabHint> = {
   contents: {
@@ -73,16 +72,11 @@ const NAV_TAB_HINTS: Record<ReaderNavTab, ReaderNavTabHint> = {
     description: "The book's chapters, in order.",
     combo: READER_PANEL_SHORTCUTS.contents,
   },
-  pages: {
-    label: "Pages",
-    testId: "nav-tab-pages",
-    description: "Thumbnails of every page, click one to jump there.",
-    combo: READER_PANEL_SHORTCUTS.contents,
-  },
   outline: {
-    label: "Outline",
+    label: "Contents",
     testId: "nav-tab-outline",
     description: "The document's own headings, in order.",
+    combo: READER_PANEL_SHORTCUTS.contents,
   },
   bookmarks: {
     label: "Bookmarks",
@@ -157,15 +151,14 @@ function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null
 
 /**
  * Reading navigation drawer: EPUB contents from the Readium engine (real
- * labels, real destinations); PDF pages, thumbnails, and outline from the
- * loaded PDFium document; persistent bookmarks, highlights, and notes from
- * the backend annotations. In-book search lives in its own overlay.
+ * labels, real destinations); the PDF's own outline from the loaded PDFium
+ * document; persistent bookmarks, highlights, and notes from the backend
+ * annotations. In-book search lives in its own overlay.
  */
 export function ReaderNavigation({
   open,
   onOpenChange,
   book,
-  pageCount,
   onJump,
   epubToc,
   pdfOutline,
@@ -220,7 +213,7 @@ export function ReaderNavigation({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         data-testid="reader-nav"
-        side="left"
+        side="right"
         className="flex w-80 flex-col gap-0 p-0"
         // Focus must stay on the reading surface when the drawer opens (from
         // the toolbar or a shortcut), so arrows and space keep turning pages
@@ -244,7 +237,6 @@ export function ReaderNavigation({
         >
           <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2">
             {isEpub && navTabTrigger("contents", tab === "contents")}
-            {!isEpub && navTabTrigger("pages", tab === "pages")}
             {!isEpub && navTabTrigger("outline", tab === "outline")}
             {navTabTrigger("bookmarks", tab === "bookmarks")}
             {navTabTrigger("highlights", tab === "highlights")}
@@ -282,82 +274,52 @@ export function ReaderNavigation({
           )}
 
           {!isEpub && (
-            <>
-              <TabsContent value="pages" className="min-h-0 flex-1 px-4 py-3">
-                <ScrollArea className="h-full">
-                  {pageCount === 0 ? (
-                    <p
-                      data-testid="nav-pages-loading"
-                      className="text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
-                    >
-                      Loading pages…
-                    </p>
-                  ) : (
-                    <div data-testid="nav-pages" className="grid grid-cols-4 gap-2">
-                      {Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => (
-                        <button
-                          key={page}
-                          type="button"
-                          data-testid={`nav-page-${page}`}
-                          aria-label={`Go to page ${page}`}
-                          onClick={() => jump({ format: "pdf", page })}
-                          className="rounded-md border py-2 text-sm tabular-nums outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
-                        >
-                          {page}
-                        </button>
-                      ))}
-                    </div>
+            <TabsContent
+              data-testid="nav-outline"
+              value="outline"
+              className="min-h-0 flex-1 px-2 py-2"
+            >
+              <ScrollArea className="h-full pr-2">
+                {pdfOutline === null && (
+                  <p className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]">
+                    Loading outline…
+                  </p>
+                )}
+                {pdfOutline !== null && pdfOutline.length === 0 && (
+                  <p
+                    data-testid="nav-outline-empty"
+                    className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
+                  >
+                    This document has no outline.
+                  </p>
+                )}
+                {pdfOutline !== null &&
+                  pdfOutline.length > 0 &&
+                  flattenOutline(pdfOutline).map(({ item, depth }, index) =>
+                    item.page === null ? (
+                      <p
+                        key={`${item.title}-${index}`}
+                        style={{ paddingLeft: `${8 + depth * 16}px` }}
+                        className="block max-w-full truncate px-2 py-1.5 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
+                      >
+                        {item.title}
+                      </p>
+                    ) : (
+                      <button
+                        key={`${item.title}-${index}`}
+                        type="button"
+                        data-testid={`nav-outline-item-${index}`}
+                        onClick={() => jumpToOutlinePage(item.page as number)}
+                        style={{ paddingLeft: `${8 + depth * 16}px` }}
+                        className="block w-full max-w-full truncate rounded-md py-1.5 pr-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        {item.title}
+                      </button>
+                    ),
                   )}
-                  <ScrollBar />
-                </ScrollArea>
-              </TabsContent>
-              <TabsContent
-                data-testid="nav-outline"
-                value="outline"
-                className="min-h-0 flex-1 px-2 py-2"
-              >
-                <ScrollArea className="h-full pr-2">
-                  {pdfOutline === null && (
-                    <p className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]">
-                      Loading outline…
-                    </p>
-                  )}
-                  {pdfOutline !== null && pdfOutline.length === 0 && (
-                    <p
-                      data-testid="nav-outline-empty"
-                      className="px-2 py-1 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
-                    >
-                      This document has no outline.
-                    </p>
-                  )}
-                  {pdfOutline !== null &&
-                    pdfOutline.length > 0 &&
-                    flattenOutline(pdfOutline).map(({ item, depth }, index) =>
-                      item.page === null ? (
-                        <p
-                          key={`${item.title}-${index}`}
-                          style={{ paddingLeft: `${8 + depth * 16}px` }}
-                          className="block max-w-full truncate px-2 py-1.5 text-sm text-[var(--reader-chrome-muted,var(--muted-foreground))]"
-                        >
-                          {item.title}
-                        </p>
-                      ) : (
-                        <button
-                          key={`${item.title}-${index}`}
-                          type="button"
-                          data-testid={`nav-outline-item-${index}`}
-                          onClick={() => jumpToOutlinePage(item.page as number)}
-                          style={{ paddingLeft: `${8 + depth * 16}px` }}
-                          className="block w-full max-w-full truncate rounded-md py-1.5 pr-2 text-left text-sm outline-none hover:bg-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50"
-                        >
-                          {item.title}
-                        </button>
-                      ),
-                    )}
-                  <ScrollBar />
-                </ScrollArea>
-              </TabsContent>
-            </>
+                <ScrollBar />
+              </ScrollArea>
+            </TabsContent>
           )}
 
           <TabsContent value="bookmarks" className="min-h-0 flex-1 px-2 py-2">

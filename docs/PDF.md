@@ -390,7 +390,7 @@ engine with rendering instead of growing a second parser in Rust. The worker
 walks PDFium's bookmarks (`FPDFBookmark_*`, `FPDFDest_GetDestPageIndex`) and
 the pure normalizer maps destinations to pages. Every
 destination resolves to the same 1-based page locator the reader persists;
-PdfReader reports the normalized tree upward and ReaderNavigation's Outline
+PdfReader reports the normalized tree upward and ReaderNavigation's Contents
 tab renders it with depth indentation. Outline navigation reuses
 `pageToPosition`, so jumping lands in the same position model as scrolling,
 thumbnails, and restore.

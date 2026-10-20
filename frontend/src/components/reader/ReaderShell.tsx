@@ -200,8 +200,6 @@ export function ReaderShell() {
       ? pdfOutlineState.outline
       : null;
   const pageCount = isPdf ? (pdfPageCount ?? PDF_PLACEHOLDER_PAGE_COUNT) : 0;
-  // The pages drawer lists real pages only; 0 keeps it in its loading state.
-  const knownPageCount = isPdf ? (pdfPageCount ?? 0) : 0;
   // Percentage stepping is only meaningful with a known page count; the
   // EPUB surface owns these keys instead (engine page turns).
   const step = pageCount > 0 ? 100 / pageCount : 0;
@@ -270,6 +268,15 @@ export function ReaderShell() {
   // gate as the page-turn combos), while the appearance popover and the
   // navigation drawer exist in both formats. The drawer keys toggle — a
   // second press closes the drawer instead of switching its tab.
+  const focusReadingSurface = () => {
+    // Only claim focus when nothing owns it. A shortcut fired from the EPUB
+    // content frame (activeElement is the iframe) or a toolbar button must
+    // keep that focus; focus left on body, by contrast, lets the drawer's
+    // modal focus guard grab it when async contents land.
+    if (document.activeElement === document.body) {
+      readerContentRef.current?.focus({ preventScroll: true });
+    }
+  };
   useShortcut(isEpub ? null : READER_PANEL_SHORTCUTS.thumbnails, () =>
     setPdfSidebarOpen((open) => !open),
   );
@@ -279,9 +286,18 @@ export function ReaderShell() {
   // Close the controlled appearance popover through the same registry that
   // receives the forwarded key.
   useShortcut(appearanceOpen ? "escape" : null, () => setAppearanceOpen(false));
-  useShortcut(READER_PANEL_SHORTCUTS.contents, () => toggleNav(isEpub ? "contents" : "pages"));
-  useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => toggleNav("bookmarks"));
-  useShortcut(READER_PANEL_SHORTCUTS.highlights, () => toggleNav("highlights"));
+  useShortcut(READER_PANEL_SHORTCUTS.contents, () => {
+    focusReadingSurface();
+    toggleNav(isEpub ? "contents" : "outline");
+  });
+  useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => {
+    focusReadingSurface();
+    toggleNav("bookmarks");
+  });
+  useShortcut(READER_PANEL_SHORTCUTS.highlights, () => {
+    focusReadingSurface();
+    toggleNav("highlights");
+  });
 
   // Presentation mode (issues #65 PDF / #64 EPUB): Ctrl+L toggles, Esc
   // exits, and a native fullscreen exit (Esc while really fullscreen) ends
@@ -639,7 +655,7 @@ export function ReaderShell() {
                 data-testid="reader-nav-trigger"
                 aria-label="Contents and bookmarks"
                 aria-keyshortcuts={formatShortcutAria(READER_PANEL_SHORTCUTS.contents)}
-                onClick={() => openNav(isEpub ? "contents" : "pages")}
+                onClick={() => openNav(isEpub ? "contents" : "outline")}
               >
                 <TableOfContents />
               </Button>
@@ -677,6 +693,10 @@ export function ReaderShell() {
         <main
           ref={readerContentRef}
           data-testid="reader-content"
+          // Programmatic focus target for panel shortcuts: keeps focus on the
+          // reading surface so the nav drawer's focus guard does not grab it
+          // when its async contents load.
+          tabIndex={-1}
           aria-label="Reading view"
           // overflow-anchor off: Chromium's scroll anchoring adjusts scrollTop
           // when the PDF virtualizer corrects slot heights above the
@@ -767,7 +787,6 @@ export function ReaderShell() {
         open={nav.open}
         onOpenChange={(open) => setNav((prev) => ({ ...prev, open }))}
         book={book}
-        pageCount={knownPageCount}
         onJump={jump}
         epubToc={isEpub ? epubToc : null}
         pdfOutline={isPdf ? pdfOutline : null}
