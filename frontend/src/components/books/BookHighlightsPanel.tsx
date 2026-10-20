@@ -1,25 +1,11 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useAnnotations } from "@/hooks/useAnnotations";
+import { annotationLocationLabel } from "@/lib/annotationLocation";
 import { highlightInk } from "@/lib/highlightPalette";
 import { readReaderSettings } from "@/lib/readerSettings";
 import { useAppDispatch } from "@/state/appState";
-import type { Annotation, Book } from "@/types/domain";
-
-/** A readable location for a highlight when no table of contents is loaded. */
-function locationLabel(annotation: Annotation): string {
-  if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
-  if (annotation.chapterHref) {
-    const path = annotation.chapterHref.split("#")[0] ?? annotation.chapterHref;
-    const file = path.split("/").pop() ?? path;
-    const stem = file
-      .replace(/\.[^.]+$/, "")
-      .replaceAll(/[-_]+/g, " ")
-      .trim();
-    if (stem !== "") return stem.charAt(0).toUpperCase() + stem.slice(1);
-  }
-  return "Highlight";
-}
+import type { Book } from "@/types/domain";
 
 /**
  * Every highlight stored for one book, in document order. Rows open the
@@ -86,7 +72,7 @@ export function BookHighlightsPanel({ book }: { book: Book }) {
                 )}
               </span>
               <span className="shrink-0 text-xs text-muted-foreground">
-                {locationLabel(highlight)}
+                {annotationLocationLabel(highlight)}
               </span>
               <ChevronRight aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             </button>

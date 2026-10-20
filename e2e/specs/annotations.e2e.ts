@@ -290,6 +290,17 @@ test.describe("reading annotations", () => {
     await closeReaderNavigation(page);
 
     await returnToLibrary(page);
+
+    // The detail view reviews the same bookmark and opens the reader at its
+    // stored position.
+    await openBookDetail(page, "A Minimal Book (EPUB)");
+    await page.getByTestId("detail-tab-bookmarks").click();
+    const rows = page.locator('[data-testid^="detail-bookmark-"]');
+    await expect(rows).toHaveCount(1, { timeout: 10000 });
+    await expect(rows.first()).toContainText(/Chapter/i);
+    await rows.first().click();
+    await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
+    await returnToLibrary(page);
   });
 
   test("truncates long bookmark labels and keeps the row actions inside the drawer", async ({

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
+import { BookBookmarksPanel } from "./BookBookmarksPanel";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
 import { useBookActions } from "@/hooks/useBookActions";
@@ -27,7 +28,8 @@ function formatDate(iso: string | null): string {
  * `get_book` command yet (decision D1). Reading position comes from the
  * same payload's progress join (milestone 10). The Overview/Metadata rail
  * makes metadata the primary, transparent surface (issue #58); Highlights
- * reviews what the reader captured and opens the book at a row's position.
+ * and Bookmarks review what the reader captured and open the book at a row's
+ * position.
  */
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
@@ -161,6 +163,9 @@ export function BookDetail() {
           <TabsTrigger value="highlights" data-testid="detail-tab-highlights">
             Highlights
           </TabsTrigger>
+          <TabsTrigger value="bookmarks" data-testid="detail-tab-bookmarks">
+            Bookmarks
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -225,6 +230,10 @@ export function BookDetail() {
 
         <TabsContent value="highlights">
           <BookHighlightsPanel book={book} />
+        </TabsContent>
+
+        <TabsContent value="bookmarks">
+          <BookBookmarksPanel book={book} />
         </TabsContent>
       </Tabs>
     </section>
