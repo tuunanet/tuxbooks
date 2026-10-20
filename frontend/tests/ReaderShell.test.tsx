@@ -28,6 +28,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ReaderNavigation } from "@/components/reader/ReaderNavigation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
+import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
+import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
@@ -490,6 +492,26 @@ describe("Bookmark label popover", () => {
     fireEvent.click(screen.getByTestId("reader-bookmark"));
     await screen.findByTestId("bookmark-label-popover");
   }
+
+  it("carries the reader theme into the portaled card (UAT: dark theme)", async () => {
+    // The popover portals outside the reader root, so the theme reaches it
+    // only through the app tokens the style scope redefines. Pin the dark
+    // preset and check the card's --popover background matches it (#101013);
+    // without that style the card kept the app's light background.
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "dark" },
+        themePinned: true,
+      }),
+    );
+    await bookmarkAtSection2();
+
+    const background = screen
+      .getByTestId("bookmark-label-popover")
+      .style.getPropertyValue("--popover");
+    expect(background.toLowerCase()).toBe("#101013");
+  });
 
   it("opens under the bookmark button after creation and commits the label on Enter", async () => {
     await bookmarkAtSection2();

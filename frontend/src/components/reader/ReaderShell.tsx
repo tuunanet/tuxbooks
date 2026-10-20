@@ -733,6 +733,7 @@ export function ReaderShell() {
                 key={labelTarget.bookmark.id}
                 bookmarkId={labelTarget.bookmark.id}
                 hint={labelTarget.hint}
+                theme={preferences.theme}
                 onCommit={commitBookmarkLabel}
                 onClose={closeLabelPopover}
               />
