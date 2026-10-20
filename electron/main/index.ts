@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { locateSidecar, Sidecar } from "./sidecar";
 import { clearGpuFallbackMarker, readGpuFallbackMarker, recordGpuCrashes } from "./gpuFallback";
+import { recordRendererConsole, replayRendererConsoleTail } from "./rendererConsole";
 import { reportStartupFailure, surfaceStartupQuarantine } from "./bootRecovery";
 import { runCli } from "./cli";
 import { runDryRun, runResetData, type ResetDataDeps } from "./resetData";
@@ -644,31 +645,9 @@ app.on("child-process-gone", (_event, details) => {
   }
 });
 
-/**
- * Renderer console tail (crash survival): renderer and worker diagnostics
- * are lost the moment the renderer crashes, so main mirrors every console
- * message and replays the most recent ones when the process dies. Warnings
- * and errors are also echoed live — they are rare and usually the signal.
- * The buffer is small on purpose: enough to hold the operations in flight
- * (the engine logs one breadcrumb pair per worker request), never a log sink.
- */
-const RENDERER_CONSOLE_LIMIT = 200;
-const RENDERER_CONSOLE_TAIL = 40;
-const rendererConsole: string[] = [];
-
-function recordRendererConsole(details: {
-  message: string;
-  level: string;
-  lineNumber: number;
-  sourceId: string;
-}): void {
-  const line = `[renderer:${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})`;
-  rendererConsole.push(line);
-  if (rendererConsole.length > RENDERER_CONSOLE_LIMIT) rendererConsole.shift();
-  // Echo errors live; warnings are common (React) and stay buffered for the
-  // crash dump unless something actually fails.
-  if (details.level === "error") console.error(line);
-}
+// Renderer console mirroring (crash survival) lives in rendererConsole.ts:
+// it buffers every renderer message and echoes live errors, except the known
+// benign browser noise that would otherwise spam the terminal.
 
 // Renderer deaths are fatal to the page but distinct from GPU failures;
 // Electron restarts nothing here, so the log must carry the failure mode
@@ -678,10 +657,5 @@ function logRenderProcessGone(details: Electron.RenderProcessGoneDetails): void 
     `[electron] renderer gone: reason=${details.reason} exitCode=${details.exitCode}` +
       ` electron=${process.versions.electron} chromium=${process.versions.chrome}`,
   );
-  if (rendererConsole.length === 0) return;
-  console.error(
-    `[electron] last ${Math.min(rendererConsole.length, RENDERER_CONSOLE_TAIL)} renderer messages:`,
-  );
-  for (const line of rendererConsole.slice(-RENDERER_CONSOLE_TAIL)) console.error(`  ${line}`);
-  rendererConsole.length = 0;
+  replayRendererConsoleTail();
 }
