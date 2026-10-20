@@ -11,4 +11,13 @@ ignore = [
   # and no RSA operation is reachable. Revisit when sqlx drops sqlx-mysql
   # from its dependency tree or an rsa fix ships.
   "RUSTSEC-2023-0071",
+  # 2026-10-19: RUSTSEC-2026-0367/0368/0369 (zip symlink and SUID preservation
+  # in ZipArchive::extract / ZipStreamReader::extract). The sidecar never
+  # calls extract: it reads entries with by_index/by_name (session.rs,
+  # parser.rs, writer.rs) and writes through ZipWriter, so no
+  # attacker-controlled filesystem extraction path exists. Upgrade to zip
+  # 9.x tracked as tuxbooks-zjy; revisit when that lands.
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
 ]
