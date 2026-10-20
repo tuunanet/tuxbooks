@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
-import { openInReader, returnToLibrary, textOf } from "./helpers.js";
+import { ensureLibrary, openInReader, returnToLibrary, textOf } from "./helpers.js";
 
 /**
  * Reading-progress migration E2E (docs/TESTING.md): stored progress is
@@ -48,11 +48,28 @@ function scratchDatabase(): DatabaseSync {
   return db;
 }
 
-function bookIdByTitle(db: DatabaseSync, title: string): number {
-  const row = db.prepare("SELECT id FROM books WHERE title = ?").get(title) as
-    { id: number } | undefined;
-  if (!row) throw new Error(`fixture book "${title}" not found in the scratch database`);
-  return row.id;
+/**
+ * Playwright retries relaunch the worker, which launches a fresh app against
+ * the same scratch database and re-imports the seeded library asynchronously.
+ * Reading the DB immediately after that relaunch can beat the import, so wait
+ * for the seeded rows instead of failing the whole suite.
+ */
+async function bookIdByTitle(db: DatabaseSync, title: string): Promise<number> {
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    try {
+      const row = db.prepare("SELECT id FROM books WHERE title = ?").get(title) as
+        { id: number } | undefined;
+      if (row) return row.id;
+    } catch (error) {
+      // The app may have created the SQLite file but not the schema yet.
+      if (!(error instanceof Error) || !error.message.includes("no such table")) throw error;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`fixture book "${title}" not found in the scratch database`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 /** Insert a progress row shaped like the previous app's writes. */
@@ -94,13 +111,19 @@ async function waitForEpubSection(page: Page, section: string): Promise<void> {
 
 test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   let db: DatabaseSync;
-  let epubId: number;
-  let pdfId: number;
+  let epubId = 0;
+  let pdfId = 0;
 
   test.beforeAll(() => {
     db = scratchDatabase();
-    epubId = bookIdByTitle(db, EPUB_TITLE);
-    pdfId = bookIdByTitle(db, PDF_TITLE);
+  });
+
+  // A Playwright retry relaunches the worker and the app. Wait for the
+  // library view to trigger the seeded import, then for the rows it writes.
+  test.beforeEach(async ({ page }) => {
+    await ensureLibrary(page);
+    epubId = await bookIdByTitle(db, EPUB_TITLE);
+    pdfId = await bookIdByTitle(db, PDF_TITLE);
   });
 
   test("restores the beginning of the book from an old foliate row", async ({ page }) => {
@@ -196,10 +219,19 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test.afterAll(() => {
+    if (db === undefined || epubId === 0 || pdfId === 0) return;
     // Clean up this suite's DB writes so later specs in the phase see the
     // state they expect (no spec may assume fresh state, but leaving seeded
     // rows behind would spread restore side effects across every reader).
-    db.prepare("DELETE FROM reading_progress WHERE book_id = ? OR book_id = ?").run(epubId, pdfId);
-    db.close();
+    try {
+      db.prepare("DELETE FROM reading_progress WHERE book_id = ? OR book_id = ?").run(
+        epubId,
+        pdfId,
+      );
+    } catch {
+      // beforeAll failed before the scratch schema existed; nothing to clean.
+    } finally {
+      db.close();
+    }
   });
 });
