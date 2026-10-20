@@ -415,6 +415,61 @@ describe("Reader bookmarks", () => {
       }),
     );
   });
+
+  it("labels a bookmark and shows its chapter progress in the drawer", async () => {
+    invokeMock.mockClear();
+    const bookmark = makeAnnotation({
+      id: 9,
+      kind: "bookmark",
+      cfi: '{"href":"chapter1.xhtml","locations":{"progression":0.4}}',
+      chapterHref: "chapter1.xhtml",
+      pageNumber: null,
+      text: null,
+      rects: null,
+    });
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      get_reading_progress: null,
+      save_reading_progress: null,
+      list_annotations: [bookmark],
+      update_annotation: makeAnnotation({ ...bookmark, label: "Opening scene" }),
+      delete_annotation: true,
+    });
+    render(
+      <ThemeStateProvider>
+        <AppShell
+          initialState={{
+            view: "reader",
+            section: { kind: "smart", id: "all-books" },
+            selectedBookId: 1,
+            libraryQuery: "",
+          }}
+        />
+      </ThemeStateProvider>,
+    );
+    await screen.findByTestId("reader-view");
+
+    await openNavigation();
+    await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
+    expect(await screen.findByTestId("nav-bookmark-0")).toHaveTextContent(
+      "Chapter One · 40% through chapter",
+    );
+
+    await userEvent.click(screen.getByTestId("nav-bookmark-note-0"));
+    await userEvent.type(screen.getByTestId("annotation-label-input"), "Opening scene");
+    await userEvent.click(screen.getByTestId("annotation-note-save"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("update_annotation", {
+        id: 9,
+        patch: { label: "Opening scene", note: "" },
+      }),
+    );
+    const row = await screen.findByTestId("nav-bookmark-0");
+    expect(row).toHaveTextContent("Opening scene");
+    expect(row).toHaveTextContent("Chapter One · 40% through chapter");
+  });
 });
 
 describe("ReaderNavigation", () => {

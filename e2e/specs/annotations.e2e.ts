@@ -274,6 +274,12 @@ test.describe("reading annotations", () => {
     });
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
+    await page.getByTestId("nav-bookmark-note-0").click();
+    await page.getByTestId("annotation-label-input").fill("Opening scene");
+    await page.getByTestId("annotation-note-save").click();
+    await expect(page.getByTestId("nav-bookmark-0")).toContainText("Opening scene", {
+      timeout: 10000,
+    });
     await closeReaderNavigation(page);
 
     await returnToLibrary(page);
@@ -287,8 +293,23 @@ test.describe("reading annotations", () => {
     });
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
+    // The label and the in-chapter progress both come back from the store.
+    await expect(page.getByTestId("nav-bookmark-0")).toContainText("Opening scene");
+    await expect(page.getByTestId("nav-bookmark-0")).toContainText(/% through chapter/);
     await closeReaderNavigation(page);
 
+    await returnToLibrary(page);
+
+    // The detail view reviews the same bookmark and opens the reader at its
+    // stored position.
+    await openBookDetail(page, "A Minimal Book (EPUB)");
+    await page.getByTestId("detail-tab-bookmarks").click();
+    const rows = page.locator('[data-testid="detail-bookmarks"] > li');
+    await expect(rows).toHaveCount(1, { timeout: 10000 });
+    await expect(rows.first()).toContainText("Opening scene");
+    await expect(rows.first()).toContainText(/% through chapter/);
+    await rows.first().locator("button").first().click();
+    await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
     await returnToLibrary(page);
   });
 

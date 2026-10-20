@@ -43,6 +43,8 @@ pub struct Annotation {
     pub color: Option<String>,
     /// JSON-encoded `Vec<AnnotationRect>` (PDF highlights); `None` otherwise.
     pub geometry: Option<String>,
+    /// Short bookmark label, capped at 50 characters.
+    pub label: Option<String>,
     pub note: Option<String>,
     pub created_at: DateTime<Utc>,
     pub modified_at: DateTime<Utc>,
@@ -62,10 +64,12 @@ pub struct NewAnnotation {
     pub geometry: Option<String>,
 }
 
-/// Editable subset of an existing annotation: highlight color and the
-/// attached note. Locators are immutable once created.
+/// Editable subset of an existing annotation: highlight color, the short
+/// bookmark label, and the attached note. Locators are immutable once
+/// created.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AnnotationPatch {
     pub color: Option<String>,
+    pub label: Option<String>,
     pub note: Option<String>,
 }

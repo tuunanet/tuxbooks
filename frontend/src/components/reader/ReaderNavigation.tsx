@@ -13,6 +13,7 @@ import {
   formatShortcutDisplay,
   READER_PANEL_SHORTCUTS,
 } from "@/lib/readerShortcuts";
+import { bookmarkLocationAndProgress } from "@/lib/annotationLocation";
 import { epubSurfaceTheme, readerPopoverVariables, type ReaderTheme } from "@/lib/epub/appearance";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
@@ -193,13 +194,23 @@ export function ReaderNavigation({
     onOpenChange(false);
   };
 
-  const bookmarkLabel = (annotation: Annotation): string => {
+  const bookmarkBaseLabel = (annotation: Annotation): string => {
     if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
     if (annotation.chapterHref) {
       return tocLabelFor(epubToc, annotation.chapterHref) ?? annotation.chapterHref;
     }
     return "Bookmark";
   };
+
+  const bookmarkLabel = (annotation: Annotation): string => {
+    const label = annotation.label?.trim();
+    return label ? label : bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation));
+  };
+
+  const bookmarkSubLabel = (annotation: Annotation): string | null =>
+    annotation.label?.trim()
+      ? bookmarkLocationAndProgress(annotation, bookmarkBaseLabel(annotation))
+      : null;
 
   const highlightLabel = (annotation: Annotation): string => {
     if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
@@ -336,6 +347,7 @@ export function ReaderNavigation({
                 withColor={false}
                 colorFor={colorFor}
                 label={bookmarkLabel}
+                subLabel={bookmarkSubLabel}
                 onJump={jumpToAnnotation}
                 onDelete={onDeleteAnnotation}
                 onUpdate={onUpdateAnnotation}

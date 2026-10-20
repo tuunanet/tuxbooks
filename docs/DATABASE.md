@@ -87,8 +87,8 @@ change.
 ### annotations
 
 One row per persistent reading annotation (milestone 6): bookmarks,
-highlights, and the note attached to either (1:1 through the nullable
-`note` column — there is no separate notes table).
+highlights, the short bookmark label, and the note attached to either (1:1
+through the nullable `note` column — there is no separate notes table).
 
 | column        | type                                           | notes                                                         |
 | ------------- | ---------------------------------------------- | ------------------------------------------------------------- |
@@ -102,6 +102,7 @@ highlights, and the note attached to either (1:1 through the nullable
 | text          | TEXT                                           | selected text (highlights; mandatory for EPUB, optional PDF)  |
 | color         | TEXT                                           | highlight palette key (`yellow`, `green`, …)                  |
 | geometry      | TEXT                                           | JSON array of rects normalized to page space (PDF highlights) |
+| label         | TEXT, CHECK <= 50 characters                   | short bookmark label (bookmarks only)                         |
 | note          | TEXT                                           | the attached note (empty string = no note text)               |
 | created_at    | TEXT NOT NULL, DB default                      |                                                               |
 | modified_at   | TEXT NOT NULL, DB default                      | bumped on UPDATE                                              |

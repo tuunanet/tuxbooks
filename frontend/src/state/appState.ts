@@ -4,7 +4,7 @@ import { createContext, useContext, type Dispatch } from "react";
 export type AppView = "library" | "detail" | "reader";
 
 /** Sections inside the book detail view. */
-export type DetailTab = "overview" | "metadata" | "highlights";
+export type DetailTab = "overview" | "metadata" | "highlights" | "bookmarks";
 
 export type SmartSectionId =
   "all-books" | "epubs" | "pdfs" | "recently-added" | "recently-read" | "in-progress" | "finished";

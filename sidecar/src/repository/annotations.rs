@@ -4,7 +4,7 @@ use crate::domain::{Annotation, AnnotationKind, AnnotationPatch, NewAnnotation};
 use crate::error::AppError;
 
 const COLUMNS: &str = "id, book_id, kind, cfi, chapter_href, page_number, page_fraction, \
-                       text, color, geometry, note, created_at, modified_at";
+                       text, color, geometry, label, note, created_at, modified_at";
 
 /// Document order: PDF rows by page (all EPUB rows have `NULL` page numbers
 /// and therefore sort together by spine href, then CFI). `id` breaks ties.
@@ -27,7 +27,7 @@ pub async fn insert_annotation(
         INSERT INTO annotations (book_id, kind, cfi, chapter_href, page_number, page_fraction, text, color, geometry)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         RETURNING id, book_id, kind, cfi, chapter_href, page_number, page_fraction,
-                  text, color, geometry, note, created_at, modified_at
+                  text, color, geometry, label, note, created_at, modified_at
         "#,
     )
     .bind(book_id)
@@ -67,8 +67,9 @@ pub async fn get_annotation(pool: &SqlitePool, id: i64) -> Result<Option<Annotat
     Ok(annotation)
 }
 
-/// Applies the color/note patch; returns the updated row, or `None` when
-/// the id does not exist.
+/// Applies the color/label/note patch; returns the updated row, or `None`
+/// when the id does not exist. Omitted fields keep their stored value; an
+/// empty label clears it.
 pub async fn update_annotation(
     pool: &SqlitePool,
     id: i64,
@@ -78,16 +79,18 @@ pub async fn update_annotation(
         r#"
         UPDATE annotations SET
             color = COALESCE(?2, color),
-            note = ?3,
+            note = COALESCE(?3, note),
+            label = CASE WHEN ?4 IS NULL THEN label ELSE NULLIF(?4, '') END,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
         RETURNING id, book_id, kind, cfi, chapter_href, page_number, page_fraction,
-                  text, color, geometry, note, created_at, modified_at
+                  text, color, geometry, label, note, created_at, modified_at
         "#,
     )
     .bind(id)
     .bind(&patch.color)
     .bind(&patch.note)
+    .bind(&patch.label)
     .fetch_optional(pool)
     .await?;
     Ok(annotation)
@@ -238,6 +241,7 @@ mod tests {
             stored.id,
             &AnnotationPatch {
                 color: Some("green".into()),
+                label: Some("Key idea".into()),
                 note: Some("remember this".into()),
             },
         )
@@ -259,6 +263,7 @@ mod tests {
             999,
             &AnnotationPatch {
                 color: None,
+                label: None,
                 note: Some("x".into())
             }
         )

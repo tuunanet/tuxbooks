@@ -219,6 +219,8 @@ export interface Annotation {
   text: string | null;
   color: string | null;
   rects: AnnotationRect[] | null;
+  /** Short bookmark label, capped at 50 characters. */
+  label: string | null;
   note: string | null;
   createdAt: string;
   modifiedAt: string;
@@ -242,5 +244,7 @@ export interface AnnotationInput {
  */
 export interface AnnotationPatch {
   color?: string | null;
+  /** Replaces the label; an empty string clears it, omitted keeps it. */
+  label?: string | null;
   note?: string | null;
 }
