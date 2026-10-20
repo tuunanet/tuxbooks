@@ -33,6 +33,27 @@ fn clean_optional(value: &Option<String>) -> Option<&str> {
         .filter(|trimmed| !trimmed.is_empty())
 }
 
+/// Bookmark labels are short identity strings, measured in characters so
+/// non-ASCII labels are not cut short by a byte limit.
+const LABEL_MAX_CHARS: usize = 50;
+
+/// Trims a label and rejects anything past the cap. `None` keeps the stored
+/// label; an empty trimmed value clears it.
+fn normalize_label(value: &Option<String>) -> Result<Option<String>, AppError> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.chars().count() > LABEL_MAX_CHARS {
+                return Err(AppError::InvalidInput(
+                    "bookmark label must be 50 characters or fewer".into(),
+                ));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+    }
+}
+
 /// A locator must name one stable document position: an EPUB CFI or a 1-based
 /// PDF page. The optional page fraction stays inside the page.
 fn validate_locator(new: &NewAnnotation) -> Result<(), AppError> {
@@ -93,8 +114,8 @@ pub async fn list_annotations(
     annotations::list_annotations(pool, book_id).await
 }
 
-/// Applies a color/note patch to an existing annotation; `None` when the id
-/// does not exist.
+/// Applies a color/label/note patch to an existing annotation; `None` when
+/// the id does not exist.
 pub async fn update_annotation(
     pool: &SqlitePool,
     id: i64,
@@ -105,7 +126,12 @@ pub async fn update_annotation(
             return Err(AppError::InvalidInput("color name too long".into()));
         }
     }
-    annotations::update_annotation(pool, id, patch).await
+    let normalized = AnnotationPatch {
+        color: patch.color.clone(),
+        label: normalize_label(&patch.label)?,
+        note: patch.note.clone(),
+    };
+    annotations::update_annotation(pool, id, &normalized).await
 }
 
 pub async fn delete_annotation(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
@@ -305,6 +331,7 @@ mod tests {
             stored.id,
             &AnnotationPatch {
                 color: Some("x".repeat(33)),
+                label: None,
                 note: None,
             },
         )
@@ -317,6 +344,7 @@ mod tests {
             999,
             &AnnotationPatch {
                 color: Some("blue".into()),
+                label: None,
                 note: None
             }
         )
@@ -336,6 +364,7 @@ mod tests {
             stored.id,
             &AnnotationPatch {
                 color: None,
+                label: None,
                 note: Some("first".into()),
             },
         )
@@ -347,6 +376,7 @@ mod tests {
             stored.id,
             &AnnotationPatch {
                 color: None,
+                label: None,
                 note: Some(String::new()),
             },
         )
@@ -354,5 +384,91 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(cleared.note.as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn update_accepts_50_character_labels_and_rejects_longer() {
+        let (_tmp, pool, book_id) = pool_with_book().await;
+        let stored = create_annotation(&pool, book_id, &epub_bookmark())
+            .await
+            .unwrap();
+
+        // Count characters, not bytes: 50 two-byte characters fit.
+        let fifty = "ä".repeat(50);
+        let updated = update_annotation(
+            &pool,
+            stored.id,
+            &AnnotationPatch {
+                color: None,
+                label: Some(fifty.clone()),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(updated.label.as_deref(), Some(fifty.as_str()));
+
+        let err = update_annotation(
+            &pool,
+            stored.id,
+            &AnnotationPatch {
+                color: None,
+                label: Some("x".repeat(51)),
+                note: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AppError::InvalidInput(_)), "got: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn update_trims_labels_and_keeps_notes_when_only_the_label_changes() {
+        let (_tmp, pool, book_id) = pool_with_book().await;
+        let stored = create_annotation(&pool, book_id, &epub_bookmark())
+            .await
+            .unwrap();
+        update_annotation(
+            &pool,
+            stored.id,
+            &AnnotationPatch {
+                color: None,
+                label: None,
+                note: Some("keep this note".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let labeled = update_annotation(
+            &pool,
+            stored.id,
+            &AnnotationPatch {
+                color: None,
+                label: Some("  Key idea  ".into()),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(labeled.label.as_deref(), Some("Key idea"));
+        assert_eq!(labeled.note.as_deref(), Some("keep this note"));
+
+        let cleared = update_annotation(
+            &pool,
+            stored.id,
+            &AnnotationPatch {
+                color: None,
+                label: Some(String::new()),
+                note: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(cleared.label.is_none());
+        assert_eq!(cleared.note.as_deref(), Some("keep this note"));
     }
 }

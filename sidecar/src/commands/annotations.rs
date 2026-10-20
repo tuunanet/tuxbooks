@@ -88,7 +88,11 @@ impl AnnotationInput {
 #[serde(rename_all = "camelCase")]
 pub struct AnnotationPatchInput {
     pub color: Option<String>,
+    /// Attached note. `Some` replaces the stored note, `None` keeps it.
     pub note: Option<String>,
+    /// Short bookmark label. `Some` replaces the stored label (an empty
+    /// string clears it), `None` keeps it.
+    pub label: Option<String>,
 }
 
 /// A stored annotation, with `geometry` decoded into typed rects for the UI.
@@ -136,7 +140,8 @@ pub async fn create_annotation(
     Ok(AnnotationDto::from_row(stored))
 }
 
-/// Updates an annotation's color and note; null when the id does not exist.
+/// Updates an annotation's color, label, and note; null when the id does not
+/// exist.
 pub async fn update_annotation(
     state: &AppState,
     id: i64,
@@ -147,6 +152,7 @@ pub async fn update_annotation(
         id,
         &AnnotationPatch {
             color: patch.color,
+            label: patch.label,
             note: patch.note,
         },
     )

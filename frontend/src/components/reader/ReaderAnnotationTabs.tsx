@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NotebookPen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { clampBookmarkLabel } from "@/lib/annotationLocation";
 import type { AnnotationPatch } from "@/types/domain";
 import type { Annotation } from "@/types/domain";
 import { HIGHLIGHT_COLOR_KEYS } from "@/lib/highlightPalette";
@@ -14,6 +15,8 @@ interface ReaderAnnotationListProps {
   colorFor: (color: string | null | undefined) => string;
   /** One-line title of a row ("Page 3", a chapter label, …). */
   label: (annotation: Annotation) => string;
+  /** Optional second line, e.g. a bookmark's location when it has a label. */
+  subLabel?: (annotation: Annotation) => string | null;
   /** Navigates the reader to the annotation's position. */
   onJump: (annotation: Annotation) => void;
   onDelete: (id: number) => void;
@@ -24,24 +27,33 @@ interface ReaderAnnotationListProps {
 
 /**
  * Rows of persistent annotations (bookmarks or highlights) with per-row
- * note editing, optional recoloring, deletion, and jump-to-position.
- * Shared by the navigation drawer's Bookmarks and Highlights tabs.
+ * label (bookmarks) and note editing, optional recoloring, deletion, and
+ * jump-to-position. Shared by the navigation drawer's Bookmarks and
+ * Highlights tabs.
  */
 export function ReaderAnnotationList({
   annotations,
   withColor,
   colorFor,
   label,
+  subLabel,
   onJump,
   onDelete,
   onUpdate,
   testIdPrefix,
 }: ReaderAnnotationListProps) {
-  const [editing, setEditing] = useState<{ id: number; draft: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: number;
+    note: string;
+    label: string | null;
+  } | null>(null);
 
-  const saveNote = () => {
+  const saveEdit = () => {
     if (!editing) return;
-    onUpdate(editing.id, { note: editing.draft });
+    onUpdate(editing.id, {
+      ...(editing.label !== null ? { label: editing.label } : {}),
+      note: editing.note,
+    });
     setEditing(null);
   };
 
@@ -69,6 +81,11 @@ export function ReaderAnnotationList({
               className="min-w-0 flex-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <span className="block truncate text-sm">{label(annotation)}</span>
+              {subLabel?.(annotation) && (
+                <span className="block truncate text-xs text-muted-foreground">
+                  {subLabel(annotation)}
+                </span>
+              )}
               {annotation.text && (
                 <span className="block truncate text-xs text-muted-foreground">
                   {annotation.text}
@@ -85,12 +102,22 @@ export function ReaderAnnotationList({
               size="icon-sm"
               className="shrink-0"
               data-testid={`${testIdPrefix}-note-${index}`}
-              aria-label={annotation.note ? "Edit note" : "Add note"}
+              aria-label={
+                annotation.kind === "bookmark"
+                  ? "Edit bookmark label and note"
+                  : annotation.note
+                    ? "Edit note"
+                    : "Add note"
+              }
               onClick={() =>
                 setEditing((current) =>
                   current?.id === annotation.id
                     ? null
-                    : { id: annotation.id, draft: annotation.note ?? "" },
+                    : {
+                        id: annotation.id,
+                        note: annotation.note ?? "",
+                        label: annotation.kind === "bookmark" ? (annotation.label ?? "") : null,
+                      },
                 )
               }
             >
@@ -130,12 +157,30 @@ export function ReaderAnnotationList({
                   ))}
                 </div>
               )}
+              {editing.label !== null && (
+                <label className="block text-xs font-medium text-muted-foreground">
+                  Bookmark label
+                  <input
+                    data-testid="annotation-label-input"
+                    aria-label="Bookmark label"
+                    value={editing.label}
+                    onChange={(event) =>
+                      setEditing({
+                        ...editing,
+                        label: clampBookmarkLabel(event.target.value),
+                      })
+                    }
+                    placeholder="Short description"
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1.5 text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                </label>
+              )}
               <textarea
                 data-testid="annotation-note-input"
                 aria-label="Note"
                 rows={3}
-                value={editing.draft}
-                onChange={(event) => setEditing({ id: annotation.id, draft: event.target.value })}
+                value={editing.note}
+                onChange={(event) => setEditing({ ...editing, note: event.target.value })}
                 className="w-full rounded-md border bg-transparent p-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               />
               <div className="flex justify-end gap-1">
@@ -147,8 +192,8 @@ export function ReaderAnnotationList({
                 >
                   Cancel
                 </Button>
-                <Button size="sm" data-testid="annotation-note-save" onClick={saveNote}>
-                  Save note
+                <Button size="sm" data-testid="annotation-note-save" onClick={saveEdit}>
+                  {editing.label !== null ? "Save" : "Save note"}
                 </Button>
               </div>
             </div>
