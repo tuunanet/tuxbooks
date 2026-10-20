@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test, type Page } from "../fixtures/electron-app.js";
@@ -35,6 +35,22 @@ async function openMetadataPanel(page: Page, ariaLabel: string): Promise<void> {
 }
 
 test.describe("metadata curation (milestone 7)", () => {
+  // This suite rewrites the seeded EPUB. Restore it after every test so the
+  // specs that follow (progress-migration in particular) keep the source
+  // title and file bytes they assert against.
+  test.afterEach(async ({ page }) => {
+    if (!existsSync(seededEpubBackup)) return;
+    copyFileSync(seededEpubBackup, seededEpub);
+    rmSync(seededEpubBackup);
+    await ensureLibrary(page);
+    await expect
+      .poll(() => cardTexts(page), {
+        timeout: 30000,
+        message: "the seeded EPUB title was not restored after the metadata edit",
+      })
+      .toContain(seededBookTitles.epub);
+  });
+
   /**
    * One end-to-end save flow against the real binary: edit in the detail
    * panel → Save writes the fields the EPUB format supports into the file
