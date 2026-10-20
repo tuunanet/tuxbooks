@@ -4,6 +4,7 @@ import {
   isBookmarkAtLocator,
   type ReaderAnnotationController,
 } from "./annotationModel";
+import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { ReaderSearchController, ReaderSearchMatch } from "./searchModel";
 
 /**
@@ -67,6 +68,30 @@ export function isBookmarkAtPosition(annotation: Annotation, position: ReaderPos
   return position.format === "epub"
     ? isBookmarkAtLocator(annotation, position.locator)
     : isBookmarkAtPage(annotation, position.page);
+}
+
+/** TOC label for a spine href, or null when the book has no matching entry. */
+export function tocLabelFor(epubToc: EpubTocItem[] | null, href: string): string | null {
+  if (!epubToc) return null;
+  for (const item of epubToc) {
+    if (item.href === href) return item.label || item.href;
+    const nested = tocLabelFor(item.subitems, href);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+/**
+ * `Page 12` / the TOC's chapter label for a bookmark. The reader drawer and
+ * the toolbar's label popover share it so the same bookmark reads the same
+ * in both places.
+ */
+export function bookmarkBaseLabel(annotation: Annotation, epubToc: EpubTocItem[] | null): string {
+  if (annotation.pageNumber !== null) return `Page ${annotation.pageNumber}`;
+  if (annotation.chapterHref) {
+    return tocLabelFor(epubToc, annotation.chapterHref) ?? annotation.chapterHref;
+  }
+  return "Bookmark";
 }
 
 /** The annotation input that persists a bookmark at `position`. */

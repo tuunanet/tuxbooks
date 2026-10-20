@@ -9,6 +9,7 @@ import {
   TableOfContents,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
@@ -31,7 +32,9 @@ import {
 } from "@/lib/epub/appearance";
 import { byKind, type HighlightAction, type ReaderSelection } from "./annotationModel";
 import { highlightCss, readerThemeFamily } from "@/lib/highlightPalette";
+import { bookmarkLocationAndProgress } from "@/lib/annotationLocation";
 import {
+  bookmarkBaseLabel,
   bookmarkInputFor,
   isBookmarkAtPosition,
   jumpToAnnotation as annotationJumpTarget,
@@ -47,6 +50,7 @@ import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationInput } from "@/types/domain";
 import { EpubReader } from "./EpubReader";
 import { PdfReader } from "./pdf/PdfReader";
+import { BookmarkLabelPopover } from "./BookmarkLabelPopover";
 import { ReaderNavigation, type ReaderNavTab } from "./ReaderNavigation";
 import { ReaderSearchOverlay } from "./ReaderSearchOverlay";
 import { ReaderAppearance } from "./ReaderAppearance";
@@ -444,16 +448,51 @@ export function ReaderShell() {
       : null;
 
   // Bookmarks: toggle at the exact current position (EPUB CFI / PDF page),
-  // so the button also removes a bookmark placed on the same spot.
-  const toggleBookmark = useCallback(() => {
-    if (!activePosition) return;
+  // so the button also removes a bookmark placed on the same spot. Creating
+  // one opens the label popover, which always binds to the newest bookmark;
+  // the busy flag swallows presses while a create/remove round-trips, so a
+  // double-press cannot make two bookmarks.
+  const [labelTarget, setLabelTarget] = useState<{
+    bookmark: Annotation;
+    hint: string;
+  } | null>(null);
+  const bookmarkBusyRef = useRef(false);
+  const toggleBookmark = useCallback(async () => {
+    if (!activePosition || bookmarkBusyRef.current) return;
     const existing = annotations.find((annotation) =>
       isBookmarkAtPosition(annotation, activePosition),
     );
-    if (existing) void remove(existing.id);
-    else void create(bookmarkInputFor(activePosition));
-  }, [activePosition, annotations, create, remove]);
+    bookmarkBusyRef.current = true;
+    try {
+      if (existing) {
+        // Removing closes the popover; its half-typed draft goes with the
+        // bookmark it belonged to.
+        setLabelTarget(null);
+        await remove(existing.id);
+        return;
+      }
+      const created = await create(bookmarkInputFor(activePosition));
+      // A failed create stays silent (console-only), and no popover opens.
+      if (!created) return;
+      // The popover's hint names what is being labeled: the chapter/page,
+      // the in-chapter progress when the locator carries it, and the save.
+      const baseLabel = bookmarkBaseLabel(created, isEpub ? epubToc : null);
+      setLabelTarget({
+        bookmark: created,
+        hint: `${bookmarkLocationAndProgress(created, baseLabel)} · Saved just now`,
+      });
+    } finally {
+      bookmarkBusyRef.current = false;
+    }
+  }, [activePosition, annotations, create, remove, epubToc, isEpub]);
   useShortcut("mod+b", toggleBookmark);
+  const closeLabelPopover = useCallback(() => setLabelTarget(null), []);
+  const commitBookmarkLabel = useCallback(
+    (bookmarkId: number, label: string) => {
+      void update(bookmarkId, { label });
+    },
+    [update],
+  );
 
   const bookmarked =
     activePosition !== null &&
@@ -662,21 +701,44 @@ export function ReaderShell() {
             </Tooltip>
           )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                data-testid="reader-bookmark"
-                aria-label={bookmarked ? "Remove bookmark" : "Add bookmark"}
-                aria-pressed={bookmarked}
-                onClick={() => toggleBookmark()}
-              >
-                {bookmarked ? <BookmarkCheck className="fill-current" /> : <Bookmark />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Bookmark (Ctrl+B)</TooltipContent>
-          </Tooltip>
+          <Popover
+            open={labelTarget !== null}
+            onOpenChange={(open) => {
+              if (!open) closeLabelPopover();
+            }}
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverAnchor asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    data-testid="reader-bookmark"
+                    aria-label={bookmarked ? "Remove bookmark" : "Add bookmark"}
+                    aria-pressed={bookmarked}
+                    onClick={() => void toggleBookmark()}
+                  >
+                    {bookmarked ? <BookmarkCheck className="fill-current" /> : <Bookmark />}
+                  </Button>
+                </PopoverAnchor>
+              </TooltipTrigger>
+              {/* The label popover sits over the same corner: no tooltip on
+                  top of it. */}
+              {labelTarget === null && <TooltipContent>Bookmark (Ctrl+B)</TooltipContent>}
+            </Tooltip>
+            {labelTarget !== null && (
+              // Keyed by id: a rebind (Ctrl+B at a new position while the
+              // popover is up) discards the previous draft and starts blank.
+              <BookmarkLabelPopover
+                key={labelTarget.bookmark.id}
+                bookmarkId={labelTarget.bookmark.id}
+                hint={labelTarget.hint}
+                theme={preferences.theme}
+                onCommit={commitBookmarkLabel}
+                onClose={closeLabelPopover}
+              />
+            )}
+          </Popover>
         </header>
       )}
 

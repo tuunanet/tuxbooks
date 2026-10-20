@@ -272,11 +272,13 @@ test.describe("reading annotations", () => {
     await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
       timeout: 10000,
     });
+    // Naming happens right at the toggle: the popover drops out of the
+    // button and commits on Enter.
+    await page.getByTestId("bookmark-label-input").fill("Opening scene");
+    await page.getByTestId("bookmark-label-input").press("Enter");
+    await expect(page.getByTestId("bookmark-label-popover")).toBeHidden();
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
-    await page.getByTestId("nav-bookmark-note-0").click();
-    await page.getByTestId("annotation-label-input").fill("Opening scene");
-    await page.getByTestId("annotation-note-save").click();
     await expect(page.getByTestId("nav-bookmark-0")).toContainText("Opening scene", {
       timeout: 10000,
     });
