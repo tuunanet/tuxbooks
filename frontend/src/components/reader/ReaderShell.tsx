@@ -274,6 +274,11 @@ export function ReaderShell() {
     setPdfSidebarOpen((open) => !open),
   );
   useShortcut(READER_PANEL_SHORTCUTS.appearance, () => setAppearanceOpen((open) => !open));
+  // The EPUB navigator's capture-phase host listener intercepts Escape while
+  // the reading frame owns focus, so Radix's popover never sees the key.
+  // Close the controlled appearance popover through the same registry that
+  // receives the forwarded key.
+  useShortcut(appearanceOpen ? "escape" : null, () => setAppearanceOpen(false));
   useShortcut(READER_PANEL_SHORTCUTS.contents, () => toggleNav(isEpub ? "contents" : "pages"));
   useShortcut(READER_PANEL_SHORTCUTS.bookmarks, () => toggleNav("bookmarks"));
   useShortcut(READER_PANEL_SHORTCUTS.highlights, () => toggleNav("highlights"));
