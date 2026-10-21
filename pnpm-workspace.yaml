@@ -17,6 +17,10 @@ minimumReleaseAge: 43200
 # only to get unstuck, then replace with pins. Each entry carries a dated
 # comment naming the advisory; remove entries once the versions age out.
 minimumReleaseAgeExclude:
+  # 2026-10-21: vite GHSA-587h-7wmj-h5pm (high, dev-only build tool; npm
+  # files it against vite 7.3.6 via launch-editor). 7.3.7 fixes, and the
+  # repo's ^7.1.0 range already admits it. Remove 2026-11-05.
+  - "vite@7.3.7"
   # 2026-10-12: security fix train for the 2026-09-18 advisories blocking
   # `just audit` before the 0.0.20 release. Every patched version is younger
   # than the 30-day floor, and all are transitive, so the pins are exact.
