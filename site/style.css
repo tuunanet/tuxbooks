@@ -239,7 +239,7 @@ code {
 
 .lede {
   max-width: 620px;
-  margin: 0 auto 32px;
+  margin: 0 auto 24px;
   color: var(--muted);
   font-size: 1.15rem;
 }
@@ -256,6 +256,23 @@ code {
   color: var(--muted);
   font-size: 0.85rem;
   margin: 0;
+}
+
+/* Stability callout: pre-1.0 releases carry no data-compatibility promise */
+
+.notice {
+  max-width: 620px;
+  margin: 0 auto 28px;
+  padding: 12px 18px;
+  border: 1px solid rgba(232, 160, 76, 0.35);
+  border-radius: 10px;
+  background: rgba(232, 160, 76, 0.08);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.notice strong {
+  color: var(--accent-strong);
 }
 
 /* Decorative book spines */

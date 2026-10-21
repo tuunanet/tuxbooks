@@ -11,7 +11,7 @@
     <meta property="og:title" content="TuxBooks — a local-first ebook library for Linux" />
     <meta
       property="og:description"
-      content="A fast, native-feeling personal library for your local EPUB and PDF files."
+      content="A personal ebook library and reader for your local EPUB and PDF files."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://tuxbooks.github.io/" />
@@ -67,8 +67,13 @@
           <h1>Your books. Your shelf.<br />Your machine.</h1>
           <p class="lede">
             TuxBooks is a local-first, bookshelf-style ebook library and reader for Linux. Point it
-            at a folder of EPUB and PDF files &mdash; it indexes your library, remembers where you
-            stopped reading, and keeps everything on your machine.
+            at a folder of EPUB and PDF files. It indexes your library, remembers where you stopped
+            reading, and keeps everything on your machine.
+          </p>
+          <p class="notice">
+            <strong>Pre&#8209;1.0 software, still changing fast.</strong> There is no
+            data&#8209;compatibility promise yet. A release can change the library database, and
+            your books may need re&#8209;importing. Keep a backup of your files.
           </p>
           <p class="hero-cta">
             <a class="btn btn--primary" href="https://github.com/tuunanet/tuxbooks/releases/latest"
@@ -109,9 +114,9 @@
               </div>
               <h3>A real bookshelf</h3>
               <p>
-                Point TuxBooks at a folder of EPUB and PDF files and every book shows up with its
-                cover and details. Group books into collections, and keep an eye on what you are
-                reading and what you have finished.
+                Point TuxBooks at a folder of EPUB and PDF files, and every book shows up with its
+                cover and details. Group books into collections, and track what you are reading and
+                what you finished.
               </p>
             </article>
             <article class="card">
@@ -131,8 +136,8 @@
               </div>
               <h3>Readers for EPUB and PDF</h3>
               <p>
-                Choose your font, text size, and line spacing for EPUB, and read PDFs with crisp
-                zoom, fast scrolling, and a dark mode that keeps photographs in color.
+                Choose your font, text size, and line spacing for EPUB. Read PDFs with zoom, fast
+                scrolling, and a dark mode that keeps photographs in color.
               </p>
             </article>
             <article class="card">
@@ -150,7 +155,7 @@
                   <path d="M11 8v6M8 11h6" />
                 </svg>
               </div>
-              <h3>PDF reading, rebuilt</h3>
+              <h3>A new PDF engine</h3>
               <p>
                 The PDF engine is new. Wheel and pinch zoom keep the point under your cursor in
                 place, deep zoom stays sharp, and the page stays visible while the next render
@@ -173,7 +178,7 @@
               <h3>Pick up where you left off</h3>
               <p>
                 Every book remembers your place. Close the app mid-chapter, come back tomorrow, and
-                you are on the same page &mdash; in EPUB and PDF alike.
+                you are on the same page, in EPUB and PDF alike.
               </p>
             </article>
             <article class="card">
@@ -192,8 +197,8 @@
               </div>
               <h3>Find any book, any passage</h3>
               <p>
-                Search your whole library from anywhere with one keystroke, or search inside the
-                book you are reading and jump straight to the match.
+                Search your whole library with a keyboard shortcut, or search inside the book you
+                are reading and jump to the match.
               </p>
             </article>
             <article class="card">
@@ -212,8 +217,8 @@
               </div>
               <h3>Bookmarks, highlights &amp; notes</h3>
               <p>
-                Mark a passage in any book: bookmark the page, highlight a line in color, attach a
-                note. All of it is waiting in the sidebar next time you open the book.
+                Bookmark a page, highlight a line in color, or attach a note. It all waits in the
+                sidebar next time you open the book.
               </p>
             </article>
           </div>
@@ -223,7 +228,7 @@
       <section class="section section--alt" id="screenshots">
         <div class="wrap wrap--wide">
           <h2>Screenshots</h2>
-          <p class="section-lede">Early development screenshots of TuxBooks in action.</p>
+          <p class="section-lede">Screenshots from recent development builds.</p>
           <div class="shots">
             <figure class="shot">
               <img
@@ -278,11 +283,10 @@
         <div class="wrap wrap--narrow">
           <h2>Roadmap</h2>
           <p class="section-lede">
-            TuxBooks shipped its first public release (0.0.1) in September 2026 and its first minor
-            release, 0.1.0, in October 2026. The basic functionality is in place: a local-first
-            library and readers for EPUB and PDF that hold up to daily use. The focus now is not on
-            adding lots of new features, but on making the existing experience reliable, polished,
-            and pleasant to use. The full roadmap lives in
+            TuxBooks shipped 0.0.1 in September 2026 and 0.1.0 in October 2026. The core is in
+            place: a local-first library and readers for EPUB and PDF. The project is young and
+            moving fast, so releases may change stored data before 1.0. The next work is reliability
+            and polish, not new features. The full roadmap lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
@@ -321,7 +325,7 @@
               <h3>What may come next</h3>
               <p>
                 Once syncing, architecture, and performance settle, development can move toward
-                larger features &mdash; directions being explored, not commitments:
+                larger features. These directions are open, not committed:
               </p>
               <ul class="chips">
                 <li>Local RAG powered search across all library documents</li>
@@ -334,8 +338,7 @@
             </li>
           </ol>
           <p class="principles">
-            The roadmap is intentionally flexible &mdash; quality and a great reading experience
-            take priority over feature count.
+            The roadmap is a plan, not a promise. Quality comes before feature count.
           </p>
         </div>
       </section>
