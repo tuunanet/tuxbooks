@@ -62,8 +62,7 @@
             height="140"
           />
           <p class="badge">
-            <span class="badge-dot" aria-hidden="true"></span> v0.0.24 &middot; in active
-            development
+            <span class="badge-dot" aria-hidden="true"></span> v0.1.0 &middot; first minor release
           </p>
           <h1>Your books. Your shelf.<br />Your machine.</h1>
           <p class="lede">
@@ -279,49 +278,40 @@
         <div class="wrap wrap--narrow">
           <h2>Roadmap</h2>
           <p class="section-lede">
-            TuxBooks shipped its first public release (0.0.1) in September 2026 and is in active
-            pre-1.0 development. Release 0.0.14 fixed what surfaced in use, 0.0.15 aligned PDF zoom
-            with GNOME Papers, and 0.0.20 makes watched folders the single source of truth for the
-            library, adds multi-select, and adds an About tab. The focus now is not on adding lots
-            of new features, but on making the existing experience reliable, polished, and pleasant
-            to use. The full roadmap lives in
+            TuxBooks shipped its first public release (0.0.1) in September 2026 and its first minor
+            release, 0.1.0, in October 2026. The basic functionality is in place: a local-first
+            library and readers for EPUB and PDF that hold up to daily use. The focus now is not on
+            adding lots of new features, but on making the existing experience reliable, polished,
+            and pleasant to use. The full roadmap lives in
             <a href="https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md">ROADMAP.md</a>.
           </p>
           <ol class="timeline">
             <li class="mile milestone--now">
-              <span class="mile-status">Now &middot; 0.0.20</span>
-              <h3>Stabilize &amp; polish</h3>
-              <p>
-                Squash the remaining bugs and finish the smaller pieces needed for a solid next
-                release, in four areas:
-              </p>
+              <span class="mile-status">Now &middot; after 0.1.0</span>
+              <h3>The next three milestones</h3>
+              <p>Three pieces of work come next, in this order:</p>
               <ul class="focus-grid">
                 <li>
-                  <strong>Core reliability</strong>
+                  <strong>Syncing data</strong>
                   <span>
-                    Fix remaining library, import, sync, and persistence bugs and reader edge-case
-                    crashes; keep reading progress reliable across restarts.
+                    Keep reading progress, bookmarks, and highlights in sync across machines,
+                    without giving up the local-first promise: the library stays usable with no
+                    network.
                   </span>
                 </li>
                 <li>
-                  <strong>Reader polish</strong>
+                  <strong>Improving architecture</strong>
                   <span>
-                    Faster, more responsive PDF and EPUB reading; smooth out navigation, search,
-                    annotation, and rendering edge cases; refine reader controls.
+                    Untangle the reader, library, and settings layers so a change stops rippling;
+                    pay down the debt from the engine swap and the watched-folder rewrite.
                   </span>
                 </li>
                 <li>
-                  <strong>Library polish</strong>
+                  <strong>Optimizing performance</strong>
                   <span>
-                    Make grid, list, and detail views consistent; polish collections, metadata
-                    editing, covers, and reading-progress UI; remove rough edges and dead ends.
-                  </span>
-                </li>
-                <li>
-                  <strong>Release readiness</strong>
-                  <span>
-                    Complete pre-release testing, verify packaging and installation on supported
-                    Linux environments, and publish the next release.
+                    Bring the PDF render p95 back within budget at high device pixel ratio, cut
+                    import and startup time for large libraries, and remove the remaining jank from
+                    scrolling and reflow.
                   </span>
                 </li>
               </ul>
@@ -330,15 +320,15 @@
               <span class="mile-status">Later</span>
               <h3>What may come next</h3>
               <p>
-                Once the core experience is solid, development can move toward larger features and
-                quality-of-life improvements &mdash; directions being explored, not commitments:
+                Once syncing, architecture, and performance settle, development can move toward
+                larger features &mdash; directions being explored, not commitments:
               </p>
               <ul class="chips">
+                <li>Local RAG powered search across all library documents</li>
+                <li>CLI or MCP for agents</li>
                 <li>More powerful library organization</li>
                 <li>Improved reading customization</li>
                 <li>Additional ebook formats</li>
-                <li>Better import &amp; metadata workflows</li>
-                <li>Performance improvements</li>
                 <li>Accessibility &amp; usability</li>
               </ul>
             </li>
