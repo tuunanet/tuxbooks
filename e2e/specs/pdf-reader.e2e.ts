@@ -841,8 +841,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
       ).toBeLessThanOrEqual(1);
     }
 
-    // The bounded render budget holds on a mixed-size document too.
-    expect(await renderedCount(page)).toBeLessThan(6);
+    // The bounded render budget holds on a mixed-size document too. The
+    // eviction set is derived from the visible pages and lands a render after
+    // the scroll commits, so poll rather than reading the count once: the
+    // budget must hold, it just may not have flushed yet at the first read.
+    await expect.poll(() => renderedCount(page), { timeout: 10_000 }).toBeLessThan(6);
     await returnToLibrary(page);
   });
 
