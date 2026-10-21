@@ -157,6 +157,13 @@ else depends on its types and the seam's handle:
   unit-guaranteed on their theme family. EPUB-only (hidden for PDFs).
 - `onRelocate` delivers the current locator + progression + TOC context;
   external links are intercepted, never navigated.
+- Outside position changes (bookmarks, Home/End, the shell's progress
+  footer) map through `goToTotalProgression(fraction)`: the seam resolves
+  the fraction onto the sidecar's positions list (nearest position at-or-
+  before the fraction) and `navigator.go`s it — the same rule the restore
+  path uses, so click-jumps, restore, and persistence share one landing
+  granularity (`timelineIndexFor` exposes that same list as the 1-based
+  "Location N of M" the footer's hover label reads).
 
 Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
 POSITION_RESTORED → INTERACTIVE) and the shared
@@ -192,12 +199,21 @@ Readium locators, validated against the actual EPUB:
 - `EpubReader` registers the shell's `ReaderAdapter` (`readerModel.ts`)
   while its navigator is open: `jump` (TOC hrefs and bookmark/search
   locators share the seam's locator grammar), the shared
-  `ReaderSearchController`, and the shared `ReaderAnnotationController`.
-  ReaderShell drives all three without format branches; the adapter is
+  `ReaderSearchController`, and the shared `ReaderAnnotationController`;
+  plus the optional `progressionIndexFor` the EPUB footer's hover label
+  reads (formats without a position list omit it — percent-only).
+  ReaderShell drives these without format branches; the adapter is
   nulled on unmount/book switch so a stale engine can never be driven.
 - The reader reports its position as the tagged `ReaderPosition`
   (`{ format: "epub", locator, chapterHref }`) through `onPositionChange`;
   that tagged value is what bookmark placement persists.
+- The EPUB progress footer is an interactive slider: dragging previews on
+  a local value and only the release commit (`onValueCommit`) writes the
+  provider position, whose change the reader maps onto the nearest
+  position (`goToTotalProgression`) — one navigation per gesture; the
+  Thumb's own arrow/step keys are suppressed at the window level by the
+  `ShortcutProvider`'s `role="slider"` rule, so they step the bar without
+  doubling as engine page turns.
 - Arrow/space/PageUp/PageDown are owned exclusively by the EPUB engine
   while an EPUB is open: the shell must not register its
   percentage-stepping/scrolling handlers for EPUB (null-combo gating in
