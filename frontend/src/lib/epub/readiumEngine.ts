@@ -1188,6 +1188,23 @@ export class ReadiumEpubHandle {
     });
   }
 
+  /**
+   * The 1-based position index (and list size) at-or-before a book fraction
+   * (0..1), or null without a position list. The footer's "Location N of M"
+   * tooltip resolves its target through this while the bar is being
+   * positioned; it stays percent-only when no index can be named.
+   */
+  timelineIndexFor(totalProgression: number): { index: number; total: number } | null {
+    if (this.positions.length === 0) return null;
+    const locator = this.locatorForTotalProgression(clamp01(totalProgression));
+    if (!locator) return null;
+    const index = this.positions.indexOf(locator);
+    // locatorForTotalProgression returns members of this.positions, so this
+    // always resolves; the -1 branch only degrades the label to percent.
+    if (index === -1) return null;
+    return { index: index + 1, total: this.positions.length };
+  }
+
   /** Destroys the navigator and frees the publication. */
   async close(): Promise<void> {
     this.searchGeneration += 1;

@@ -418,6 +418,7 @@ export function EpubReader({
         if (target.format !== "epub") return;
         void handle.goTo(target.locator);
       },
+      progressionIndexFor: (fraction) => handle.timelineIndexFor(fraction),
       search: {
         run: (query: string) => {
           cancelLast?.();

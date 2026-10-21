@@ -57,6 +57,12 @@ export type ReaderJump = { format: "epub"; locator: string } | { format: "pdf"; 
 export interface ReaderAdapter {
   /** Navigate the open document to a position in its own coordinates. */
   jump(target: ReaderJump): void;
+  /**
+   * A book fraction (0..1) resolved onto the engine's own position list,
+   * for the footer's hover "Location N of M" readout. Formats without a
+   * position list omit the method — the label degrades to percent-only.
+   */
+  progressionIndexFor?(fraction: number): { index: number; total: number } | null;
   /** Streaming in-book search over the open document. */
   readonly search: ReaderSearchController;
   /** Selection → highlight creation on the open document. */
@@ -203,4 +209,20 @@ export function parsePdfProgress(
 
 export function pdfProgressPayload(page: number, position: number): ReadingProgressInput {
   return { pageNumber: page, progressPercent: position };
+}
+
+/**
+ * The footer's positioning label: the Kindle-style "Location N of M • P%"
+ * when the engine resolved a book position (a sidecar positions entry,
+ * ~128 characters of chapter text each), or the bare rounded percent while
+ * the position list is unavailable. `location` may be from a hover preview
+ * or the landed position; this is presentation only.
+ */
+export function locationLabel(
+  location: { index: number; total: number } | null,
+  percent: number,
+): string {
+  const rounded = Math.min(100, Math.max(0, Math.round(percent)));
+  if (location === null) return `${rounded}%`;
+  return `Location ${location.index} of ${location.total} • ${rounded}%`;
 }

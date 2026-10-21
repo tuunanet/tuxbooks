@@ -8,9 +8,9 @@ import {
   Search,
   TableOfContents,
 } from "lucide-react";
+import { Slider as SliderPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
-import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcut } from "@/lib/shortcuts";
 import {
@@ -39,6 +39,7 @@ import {
   isBookmarkAtPosition,
   jumpToAnnotation as annotationJumpTarget,
   jumpToSearchMatch,
+  locationLabel,
   type ReaderAdapter,
   type ReaderJump,
   type ReaderPosition,
@@ -189,6 +190,19 @@ export function ReaderShell() {
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
+  // While the pointer drags the footer's slider, the thumb and percent show
+  // this preview; only the release commit navigates the engine — one jump
+  // per gesture (the preview is presentation, not position).
+  const [progressPreview, setProgressPreview] = useState<number | null>(null);
+  // While you hover or drag the bar it shows the Kindle-style positioning
+  // label ("Location N of M • P%"); leaving the bar clears it. The adapter
+  // query runs inside the pointer handlers — refs stay out of render — and
+  // a null open adapter degrades the label to percent-only.
+  const [barPositioningLabel, setBarPositioningLabel] = useState<string | null>(null);
+  const readPositioningLabel = (percent: number) => {
+    const location = adapterRef.current?.progressionIndexFor?.(percent / 100) ?? null;
+    setBarPositioningLabel(locationLabel(location, percent));
+  };
   // Persistent annotations of the open book: bookmarks, highlights, notes.
   const {
     annotations,
@@ -820,7 +834,11 @@ export function ReaderShell() {
       {/* Progress footer: EPUB only. A fixed-layout PDF has no meaningful
           "percent read", so the PDF reader shows no bottom bar at all; the
           scrolled EPUB flow keeps an always-visible bar stacked below the
-          document. */}
+          document. The bar is a slider: clicking (or dragging and releasing)
+          it maps that book fraction through the engine's position list
+          (EpubReader maps outside position changes onto the nearest
+          position). Dragging previews on a local value; only the release
+          commits a navigation. */}
       {!presentation && isEpub && (
         <footer
           data-testid="reader-footer"
@@ -828,17 +846,57 @@ export function ReaderShell() {
           className="shrink-0 border-t border-[var(--reader-chrome-border,var(--border))] px-4 py-2"
         >
           <div className="mx-auto flex max-w-3xl items-center gap-3">
-            <Progress
+            <SliderPrimitive.Root
               data-testid="reader-progress"
-              aria-label="Reading position"
-              value={position}
-              className="flex-1"
-            />
+              className="relative flex w-full touch-none select-none items-center"
+              value={[progressPreview ?? position]}
+              min={0}
+              max={100}
+              step={0.1}
+              onValueChange={(values) => {
+                const next = values[0] ?? 0;
+                setProgressPreview(next);
+                readPositioningLabel(next);
+              }}
+              onValueCommit={(values) => {
+                const committed = values[0] ?? 0;
+                setProgressPreview(null);
+                setPosition(committed);
+                readPositioningLabel(committed);
+              }}
+              onPointerEnter={() => readPositioningLabel(progressPreview ?? position)}
+              onPointerDown={() => readPositioningLabel(progressPreview ?? position)}
+              onPointerLeave={() => setBarPositioningLabel(null)}
+            >
+              {barPositioningLabel !== null && (
+                <span
+                  data-testid="reader-progress-tooltip"
+                  className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background"
+                  style={{ left: `${progressPreview ?? position}%` }}
+                >
+                  {barPositioningLabel}
+                </span>
+              )}
+              <SliderPrimitive.Track
+                data-slot="slider-track"
+                className="relative h-1 grow overflow-hidden rounded-full bg-[var(--reader-progress-track,var(--muted))]"
+              >
+                <SliderPrimitive.Range
+                  data-slot="slider-range"
+                  className="absolute h-full bg-[var(--reader-progress-fill,var(--primary))]"
+                />
+              </SliderPrimitive.Track>
+              <SliderPrimitive.Thumb
+                data-slot="slider-thumb"
+                aria-label="Reading position"
+                className="block size-3.5 shrink-0 cursor-pointer rounded-full border border-[var(--reader-chrome-border,var(--border))] bg-[var(--reader-chrome-card,var(--muted-foreground))] shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--reader-progress-fill,var(--primary))]"
+              />
+            </SliderPrimitive.Root>
             <span
               data-testid="reader-position"
               className="w-10 text-right text-xs text-[var(--reader-chrome-muted,var(--muted-foreground))] tabular-nums"
             >
-              {Math.round(position)}%
+              {Math.round(progressPreview ?? position)}%
             </span>
           </div>
         </footer>

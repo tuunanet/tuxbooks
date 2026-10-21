@@ -32,7 +32,7 @@ import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
-import { scrollTo, stubScrollGeometry } from "./mocks/dom";
+import { makeDomRect, scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
 import { lastFakeHandle, fakeEpubHandles, FAKE_LOCATOR } from "./mocks/readiumEngine";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
@@ -128,6 +128,137 @@ describe("Reader progress footer", () => {
 
     expect(screen.getByTestId("reader-footer")).toHaveAttribute("data-progress-visible", "true");
     expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
+  });
+
+  it("teleports the EPUB reading position to a clicked bar fraction", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // jsdom performs no layout: pin the slider's geometry to a 1000px span
+    // so a click at clientX 510 reads as 51%. Radix computes the value from
+    // the slider root's rect.
+    const bar = screen.getByTestId("reader-progress");
+    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+      ...makeDomRect(400),
+      height: 4,
+      bottom: 404,
+    });
+    // Radix commits on release only through the pointer-capture pair; the
+    // test setup stubs capture out globally, so give this slider a working
+    // one (record the id like the real API would).
+    let capturedPointerId: number | null = null;
+    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
+    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
+      capturedPointerId = id;
+    });
+    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
+      if (capturedPointerId === id) capturedPointerId = null;
+    });
+    fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+
+    // The click maps through the engine's position-list snap (at-or-before).
+    await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenCalledWith(0.51));
+  });
+
+  it("commits one engine jump per dragging gesture, on release", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const bar = screen.getByTestId("reader-progress");
+    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+      ...makeDomRect(400),
+      height: 4,
+      bottom: 404,
+    });
+    let capturedPointerId: number | null = null;
+    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
+    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
+      capturedPointerId = id;
+    });
+    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
+      if (capturedPointerId === id) capturedPointerId = null;
+    });
+
+    // Drag 10% → 30% → 70%: the preview follows the pointer, but the engine
+    // must not be re-rendered per move; only the release commits a jump.
+    fireEvent.pointerDown(bar, { button: 0, clientX: 100, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerMove(bar, { clientX: 300, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerMove(bar, { clientX: 700, pointerId: 1, pointerType: "mouse" });
+    const handle = lastFakeHandle();
+    expect(handle.goToTotalProgression).not.toHaveBeenCalled();
+    fireEvent.pointerUp(bar, { button: 0, clientX: 700, pointerId: 1, pointerType: "mouse" });
+
+    await waitFor(() => expect(handle.goToTotalProgression).toHaveBeenCalledTimes(1));
+    expect(handle.goToTotalProgression).toHaveBeenCalledWith(0.7);
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("70%"));
+  });
+
+  it("steps and jumps the bar from the keyboard through the engine", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // Thumb focus: the bar steps like a slider and jumps like Home/End, and
+    // (per the ShortcutProvider's role="slider" rule) the keys never double
+    // as engine page turns.
+    const thumb = screen.getByRole("slider", { name: "Reading position" });
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(
+        expect.closeTo(0.001, 12),
+      ),
+    );
+    fireEvent.keyDown(thumb, { key: "End" });
+    await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(1));
+    fireEvent.keyDown(thumb, { key: "Home" });
+    await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(0));
+  });
+
+  it("shows a Kindle-style location tooltip while positioning", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    const bar = screen.getByTestId("reader-progress");
+    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+      ...makeDomRect(400),
+      height: 4,
+      bottom: 404,
+    });
+    let capturedPointerId: number | null = null;
+    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
+    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
+      capturedPointerId = id;
+    });
+    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
+      if (capturedPointerId === id) capturedPointerId = null;
+    });
+
+    // No tooltip while you are not positioning the bar.
+    expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull();
+
+    // Press at 25.5%: the preview tooltip shows the location label resolved
+    // against the engine's position list (the "Location" unit is a sidecar
+    // positions entry, ~128 characters of chapter text).
+    fireEvent.pointerDown(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
+    const tooltip = screen.queryByTestId("reader-progress-tooltip");
+    expect(tooltip).not.toBeNull();
+    expect(tooltip).toHaveTextContent(/Location \d+ of \d+ • 26%/);
+
+    // Release and leave: the tooltip goes away again.
+    fireEvent.pointerUp(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerLeave(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
+    await waitFor(() => expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull());
   });
 });
 

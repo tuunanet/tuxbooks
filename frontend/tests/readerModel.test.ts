@@ -6,6 +6,7 @@ import {
   isBookmarkAtPosition,
   jumpToAnnotation,
   jumpToSearchMatch,
+  locationLabel,
   parseEpubProgress,
   parsePdfProgress,
   pdfProgressPayload,
@@ -173,5 +174,19 @@ describe("progress persistence mapping", () => {
     expect(payload).not.toHaveProperty("cfi");
     expect(payload).not.toHaveProperty("chapterHref");
     expect(pdfProgressPayload(3, 66)).toEqual({ pageNumber: 3, progressPercent: 66 });
+  });
+});
+
+describe("progress label", () => {
+  it("shows the Kindle-style location label when a position index is known", () => {
+    expect(locationLabel({ index: 2563, total: 5913 }, 51)).toBe("Location 2563 of 5913 • 51%");
+  });
+
+  it("falls back to the bare percent while no position index is available", () => {
+    expect(locationLabel(null, 7.6)).toBe("8%");
+  });
+
+  it("rounds the percent of the committed fraction", () => {
+    expect(locationLabel({ index: 1, total: 10 }, 99.4)).toBe("Location 1 of 10 • 99%");
   });
 });

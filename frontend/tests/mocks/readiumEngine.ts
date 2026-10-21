@@ -28,6 +28,8 @@ export interface FakeEpubHandle {
   close: ReturnType<typeof vi.fn>;
   goTo: ReturnType<typeof vi.fn>;
   goToTotalProgression: ReturnType<typeof vi.fn>;
+  /** Deterministic position-index answer for the footer's location label. */
+  timelineIndexFor: (fraction: number) => { index: number; total: number } | null;
   next: ReturnType<typeof vi.fn>;
   prev: ReturnType<typeof vi.fn>;
   setFlow: ReturnType<typeof vi.fn>;
@@ -70,6 +72,11 @@ function makeFakeHandle(toc: EpubTocItem[]): FakeEpubHandle {
     close: vi.fn(async () => {}),
     goTo: vi.fn(async () => {}),
     goToTotalProgression: vi.fn(async () => {}),
+    timelineIndexFor: (fraction: number) => {
+      const total = 5913;
+      const clamped = Math.min(1, Math.max(0, fraction));
+      return { index: Math.max(1, Math.round(clamped * total)), total };
+    },
     next: vi.fn(async () => {}),
     prev: vi.fn(async () => {}),
     setFlow: vi.fn(async () => {}),
