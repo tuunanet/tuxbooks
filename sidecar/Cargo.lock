@@ -2364,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "tuxbooks"
-version = "0.0.24"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",

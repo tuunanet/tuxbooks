@@ -169,27 +169,16 @@ jobs:
           # Release notes are curated per release; rewrite them when the next
           # version is cut.
           cat > "$notes_file" <<EOF
-          TuxBooks 0.0.20 makes your watched folders the single source of truth for the library.
+          TuxBooks 0.1.0 is the first minor release: the basic functionality is in place, and the app is usable end to end for a real library of EPUB and PDF books.
 
-          What changed since 0.0.19:
+          What changed since 0.0.24:
 
-          - Settings gains a Folders section. It lists the folders TuxBooks
-            watches, marks one that is missing from disk, and lets you add or
-            unwatch a folder. Unwatching removes that folder's books from your
-            library along with their reading progress and annotations; your
-            files on disk are never touched.
-          - The library mirrors your watched folders. Importing a single file
-            also watches its folder, so books added next to it appear on their
-            own, and a one-time cleanup removes books left outside every
-            watched folder when you upgrade. The Outside Watched Folders view
-            from 0.0.19 is gone: the library now matches the watch list.
-          - Select several books with Shift or Ctrl and act on all of them at
-            once: remove them from the library, add or remove them from a
-            collection, or mark them finished.
-          - Settings gains an About tab with the version, its creator, and
-            links to the contributor and contributing pages. An import that
-            finishes now wins over events still in flight, fixing a library
-            view that could go stale right after an import.
+          - Bookmarks now have a home in book details. The Bookmarks tab sits next to Highlights, lists every bookmark with its chapter or page and when it was saved, and jumps the reader to that spot.
+          - Bookmarking is quicker and less forgettable. Toggling a bookmark drops a small label box out of the toolbar button, so you can name the spot right away instead of hunting for it later. It shows where the bookmark sits (chapter and in-chapter progress for EPUB, page for PDF), and you can edit labels later from the drawer or the details tab.
+          - The reader navigation moved to the right side, the Contents tab was renamed, and the toolbar order was tidied. Ctrl+F opens in-book search.
+          - The PDF and EPUB readers, the library, and the release pipeline carry the fixes from the 0.0.21 to 0.0.24 cycle: a Spotlight-style in-book search, theme-aware highlights, more reliable watched-folder sync, and faster PDF scrolling.
+
+          The next milestones are syncing your data across machines, improving the architecture, and optimizing performance. See the roadmap for what follows: https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md
 
           Install on Ubuntu/Debian:
 
