@@ -1,10 +1,32 @@
 # TuxBooks Roadmap
 
-TuxBooks shipped its first public release (0.0.1) in September 2026 and is in active pre-1.0 development.
+TuxBooks shipped its first public release (0.0.1) in September 2026 and its first minor release (0.1.0) in October 2026. The basic functionality is in place: a local-first library and readers for EPUB and PDF that hold up to daily use.
 
 The focus is not on adding lots of new features. It is on making the existing experience **reliable, polished, and pleasant to use**.
 
-## Now: 0.0.20
+## Now: after 0.1.0
+
+Three milestones come next, in this order.
+
+### Syncing data
+
+- Keep reading progress, bookmarks, and highlights in sync across machines
+- Decide the sync transport and the conflict rules before building anything
+- Keep the local-first promise: the library stays usable with no network
+
+### Improving architecture
+
+- Untangle the reader, library, and settings layers so a change stops rippling
+- Pay down the debt left by the engine swap and the watched-folder rewrite
+- Make the sidecar's boundaries explicit so features stop reaching across them
+
+### Optimizing performance
+
+- Bring the PDF render p95 back within budget at high device pixel ratio
+- Cut import and startup time for large libraries
+- Remove the remaining jank from scrolling and reflow
+
+## Recent releases
 
 Release 0.0.13 rebuilt the PDF reader. It runs on PDFium compiled to WebAssembly instead of MuPDF.js, so the app no longer ships an AGPL-only dependency, and its zoom and scrolling follow GNOME Papers: wheel and pinch zoom hold the point under the pointer, page sizes round to whole pixels, deep zoom renders only the visible region, and the previous render stays on screen while the sharp one loads.
 
@@ -20,44 +42,23 @@ Release 0.0.19 makes the reader usable without a mouse and names the books the a
 
 Release 0.0.20 makes the watched folders the single source of truth for the library. Settings gains a Folders section that lists the watched folders, marks one missing from disk, and adds or removes them. Unwatching removes that folder's books from the catalog through the same cascade Remove uses, so reading progress and annotations go with them while files on disk stay untouched. The library mirrors the watch list exactly: importing a single file watches its folder, a one-time migration purges books outside every watched folder, and the loose-books mechanism 0.0.19 introduced is retired from the UI and the wire. The library gains multi-select with a selection bar and bulk remove, collection, and mark-as-finished actions, Settings gains an About tab, and an import's completing refresh now wins over buffered import events.
 
-With the engine swap done, work continues in four areas.
-
-### Core reliability
-
-- Fix remaining library, import, synchronization, and persistence bugs
-- Fix reader lifecycle and edge-case crashes
-- Apply page rotation to PDF text selection, highlights, and outline navigation
-- Keep reading progress and navigation reliable across restarts
-
-### Reader polish
-
-- Bring the PDF render p95 back within budget at high device pixel ratio
-- Fix remaining navigation, search, annotation, and rendering edge cases
-- Polish reader controls and interaction details
-
-### Library polish
-
-- Fix remaining grid/list/detail inconsistencies
-- Polish collections, metadata editing, covers, and reading-progress UI
-- Remove remaining rough edges and dead ends in the library experience
-
-### Release readiness
-
-- Keep the release pipeline green and the packaging gate passing
-- Verify packaging and installation on supported Linux environments
-- Cut the next release when the work above settles
+Release 0.1.0 marks the first minor version. The basic functionality is in place: the library indexes a folder of EPUB and PDF books, remembers where you stopped reading, and keeps everything on your machine. Bookmarks and highlights work in both readers, a bookmark can be named the moment it is placed, and book detail lists every bookmark and highlight with a jump back to its spot. The reader navigation sits on the right, in-book search opens with Ctrl+F, and watched folders are the single source of truth for the library.
 
 ## Later
 
-Once the core experience is solid, development can move toward larger features and quality-of-life improvements.
+Once syncing, architecture, and performance settle, development can move toward larger features.
 
-Potential areas include:
+The two biggest ideas on the table:
+
+- **Local RAG powered search across all library documents.** Index the text of every book and answer questions from it, with embeddings and retrieval running on your own machine. No cloud, no upload.
+- **CLI or MCP for agents.** Expose the library to scripts and coding agents, so a book's metadata, notes, and highlights can be read and organized from outside the app.
+
+Beyond those:
 
 - More powerful library organization
 - Improved reading customization
 - Additional ebook formats
 - Better import and metadata workflows
-- Performance improvements
 - Accessibility and usability improvements
 
 The roadmap is intentionally kept flexible. TuxBooks is developed incrementally, with **quality and a great reading experience taking priority over feature count**.
