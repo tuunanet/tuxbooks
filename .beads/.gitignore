@@ -48,6 +48,12 @@ ephemeral.sqlite3-shm
 dolt-server.pid
 dolt-server.log
 dolt-server.lock
+
+# Data files are Dolt-only (bd dolt push/pull against the git origin).
+# The JSONL export and the audit log stay local; upstream: issues.jsonl is
+# "a passive export, never the database".
+issues.jsonl
+interactions.jsonl
 dolt-server.port
 dolt-server.activity
 

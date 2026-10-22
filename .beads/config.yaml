@@ -66,6 +66,16 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 sync.remote: "git+https://github.com/tuunanet/tuxbooks.git"
+
+# Explicit off: bd 1.2.2 defaults these to on, and the JSONL must never
+# auto-stage (data files are Dolt-only, see .beads/.gitignore).
 export:
-    auto: true
-    git-add: true
+    auto: false
+    git-add: false
+
+# Dolt-native auto-backup: local copy, guards against local DB corruption.
+# Cross-machine sync is bd dolt push/pull against the git origin above.
+backup:
+    enabled: true
+    interval: 15m
+    git-push: false
