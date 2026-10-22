@@ -42,6 +42,13 @@ export default defineConfig({
     tasks: {
       "frontend:build": {
         command: "pnpm --filter frontend build",
+        cache: {
+          // The e2e suites write artifacts/ into the workspace root during
+          // a run, which would change this task's fingerprint mid-run and
+          // cost one redundant real build per fresh runner. The build never
+          // reads that directory.
+          input: [{ auto: true }, "!artifacts/**"],
+        },
       },
       "frontend:test": {
         command:
