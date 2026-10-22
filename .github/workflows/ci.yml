@@ -11,7 +11,7 @@ on:
 # and blocks the merge. Instead the `changes` job classifies the diff and the
 # heavy jobs skip when every changed file is non-code: markdown (README, docs/,
 # AGENTS.md, CONTEXT.md, ROADMAP.md, LICENSE.md), the static site (published by
-# publish-site.yml), the bd tracker export, agent skills and config, the graft
+# publish-site.yml), the bd tracker config, agent skills and config, the graft
 # graph, the oracle, the reference submodule, and the ignore file. The gate
 # treats a skipped job as a pass.
 

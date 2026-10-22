@@ -59,19 +59,18 @@ Used by `/wayfinder`. The map is one issue; tickets are its child issues.
 
 ## Sync and commit discipline
 
-Issues live in a local Dolt DB; branch-aware sync rides `refs/dolt/data` on the
-git remote (`bd dolt push` / `bd dolt pull`). Two files are tracked so a plain
-clone can read the tracker: `.beads/issues.jsonl` (the export) and
-`.beads/interactions.jsonl` (the audit log). Keep both out of task PRs and
-leave them staged while an issue's tickets are still landing. The follow-up
-`chore(bd): sync the tracker export` PR opens once the issue's last open
-ticket has merged, and for a standalone ticket once that ticket merges. One
-sync PR then carries every tracker change the issue produced (AGENTS.md,
-Completing a task).
+Issues live in a local embedded Dolt database; the Dolt remote is the project's
+own git origin (`sync.remote` in `.beads/config.yaml`), stored under
+`refs/dolt/data`, outside every code branch. The sync channel is `bd dolt pull`
+before a session's tracker work and `bd dolt push` after it (create, update,
+close, label, remember). Same remote, same credentials as `git push`; there is
+no tracker PR.
 
-`.beads/config.yaml` enables `export.auto` and `export.git-add`: bd refreshes
-the export and stages it for the next commit. Run
-`bd export -o .beads/issues.jsonl` if it looks stale.
-
-Database files, locks, and credentials stay local; the nested
-`.beads/.gitignore` excludes them.
+The JSONL files never enter a commit. `.beads/issues.jsonl` is a passive
+export (upstream's words: "never the database"); it refreshes only on demand
+(`bd export`). `.beads/interactions.jsonl` is the audit log as bd writes it;
+the audit trail itself lives in the Dolt database and syncs with it. Both
+files are gitignored. A fresh clone runs `bd bootstrap` once to clone the
+Dolt history, then works as above. `bd backup` (config: `backup.enabled`,
+every 15 minutes, local) is the corruption-insurance copy; the off-machine
+copy is `refs/dolt/data` on origin after each push.

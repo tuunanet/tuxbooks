@@ -22,10 +22,10 @@ before running tests; `just check` assumes installed dependencies.
    `--force-with-lease`). Open the PR with the `pr` skill's body template
    (summary, evidence, merge danger) and run the title and body through
    `unslop` before posting.
-7. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
-   them out of the task PR and leave them staged: the
-   `chore(bd): sync the tracker export` PR opens only after the issue's final
-   ticket merges. Full rules live in `docs/agents/issue-tracker.md`.
+7. Tracker data rides Dolt, not git: `bd dolt pull` before tracker work in a
+   session, `bd dolt push` after it. Beads never adds files to a task PR
+   (`.beads/*.jsonl` are local-only). Full rules live in
+   `docs/agents/issue-tracker.md`.
 8. Remove the worktree after the PR merges.
 
 ## Multi-agent rules

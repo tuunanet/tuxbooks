@@ -31,7 +31,7 @@ name: CodeQL
 # hand-reviewed files at ~45s per run.
 #
 # `paths-ignore` covers the same non-code paths ci.yml skips as jobs: markdown,
-# the site, the bd tracker export, agent skills and config, the graft graph,
+# the site, the bd tracker config, agent skills and config, the graft graph,
 # the oracle, and the reference submodule. This workflow is advisory, so it can
 # skip wholesale; the required "CI gate" lives in ci.yml and always runs.
 on:
