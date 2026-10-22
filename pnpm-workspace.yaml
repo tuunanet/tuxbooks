@@ -69,6 +69,12 @@ minimumReleaseAgeExclude:
   # files it against vite 7.3.6 via launch-editor). 7.3.7 fixes, and the
   # repo's ^7.1.0 range already admits it. Remove 2026-11-05.
   - "vite@7.3.7"
+  # 2026-10-22: hono GHSA-5r4p-p66f-jhc7 (moderate; serveStatic
+  # double-decodes the request path, bypassing middleware on static paths).
+  # Dev-only: hono reaches the tree through @modelcontextprotocol/sdk (and
+  # its @hono/node-server dep) under shadcn's CLI. 4.13.11 fixes, and
+  # ^4.11.4 resolves to 4.13.13. Remove 2026-11-03.
+  - "hono@4.13.13"
   # 2026-10-12: security fix train for the 2026-09-18 advisories blocking
   # `just audit` before the 0.0.20 release. Every patched version is younger
   # than the 30-day floor, and all are transitive, so the pins are exact.
