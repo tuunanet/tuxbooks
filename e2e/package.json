@@ -16,8 +16,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "@types/node": "^24.13.4",
-    "electron": "^44.3.0",
+    "@types/node": "^24.13.6",
+    "electron": "^44.4.3",
     "playwright": "^1.63.0",
     "tslib": "^2.8.1"
   }
