@@ -17,11 +17,17 @@ canonical roles as bd labels (`docs/agents/triage-labels.md`).
 
 1. Keep changes limited to the assigned task.
 2. Run the full gate once: `just check` (run `just format` first if needed).
+   Skip it for docs-only changes, meaning the diff touches only `*.md` files
+   or other non-code scopes; `.github/workflows/ci.yml`'s classify step
+   defines that set and skips CI's heavy jobs for it. Proofread the diff
+   instead.
 3. Review the branch with the `code-review` skill (Standards + Spec, fixed
-   point `origin/main`) and fold findings in before pushing.
+   point `origin/main`) and fold findings in before pushing. Docs-only
+   changes use one pass instead of both axes: check each factual claim
+   against the doc it cites.
 4. Assemble the evidence captured along the way into before/after pairs.
 5. Commit with a clear message (conventional commits), rebase onto the latest
-   `origin/main`, and rerun the gate.
+   `origin/main`, and rerun the gate (the docs-only skip in step 2 applies).
 6. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
    `--force-with-lease`). Open the PR with the `pr` skill's body template
    (summary, evidence, merge danger) and run the title and body through
@@ -119,13 +125,14 @@ cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- 
 # electron (main + preload; not a vp project, pnpm exec just resolves tsc)
 pnpm exec tsc -p electron --noEmit
 
-# full gate, once before you declare done
+# full gate, once before you declare done (docs-only changes skip it)
 just check          # format + lint + typecheck + unit tests, parallel streams
 just format         # only if you touched formatting-sensitive code
 ```
 
 Do not run `just check`, `just test`, or `just test-e2e` after every edit.
-Iterate with the single narrowest command, then run the full gate once.
+Iterate with the single narrowest command, then run the full gate once on
+code changes; docs-only changes skip it per "Completing a task" step 2.
 Area-specific layout and commands live in the nearest `AGENTS.md`
 (`frontend/`, `sidecar/`, `electron/`, `e2e/`) and load automatically in that subtree.
 

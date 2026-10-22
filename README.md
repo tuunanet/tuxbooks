@@ -45,6 +45,35 @@ On Ubuntu/Kubuntu, local app data (database, settings) lives in
 `.build/dev/` (database, settings, caches), so it can run while the installed
 app is open. Delete that folder to reset the dev profile.
 
+## Security
+
+TuxBooks is built to open untrusted files without trusting them, and nothing
+leaves your machine. There is no backend, no account, and no network
+dependency; the app works offline and keeps everything in a SQLite database
+and a cover cache under your user profile.
+
+- **Book parsing happens outside the app.** Each file is parsed by a
+  short-lived worker process that denies itself filesystem access with
+  Landlock, blocks socket creation with seccomp so it cannot reach the
+  network, and runs under rlimits with a hard deadline.
+- **The interface runs sandboxed.** The UI has no Node.js access and talks to
+  a small Rust service over a strict, allowlisted IPC channel, under a fixed
+  CSP with navigation, permissions, and external links gated.
+- **Supply chain controls run in CI.** The npm gate blocks the build on
+  untriaged high or critical advisories, the RustSec gate on any untriaged
+  finding, and a weekly workflow sweeps for new ones. Dependency install
+  scripts are denied by default and reviewed one by one. No JavaScript
+  dependency younger than 30 days can enter the tree, so a freshly hijacked
+  release has to sit out a month of public exposure first. Every release
+  ships a CycloneDX SBOM next to `SHA256SUMS.txt`.
+
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the process
+model and window hardening, and [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md)
+the dependency policy. Found a vulnerability? Please report it privately
+through [GitHub security
+advisories](https://github.com/tuunanet/tuxbooks/security/advisories/new)
+rather than a public issue.
+
 ## Getting started
 
 Prerequisites: Rust (stable) and the [vite-plus CLI](https://viteplus.dev/).
