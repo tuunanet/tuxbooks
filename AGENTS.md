@@ -9,6 +9,10 @@ Work happens in a fresh git worktree branched from `origin/main` under `.worktre
 never build on `main`. After creating a worktree, run `pnpm install` at its root
 before running tests; `just check` assumes installed dependencies.
 
+Work is tracked in bd (Beads), the repo's issue tracker; see
+`docs/agents/issue-tracker.md` for the workflow. Triage uses the five
+canonical roles as bd labels (`docs/agents/triage-labels.md`).
+
 ## Completing a task
 
 1. Keep changes limited to the assigned task.
@@ -92,11 +96,13 @@ skip it when `graft` already answers the question.
 - Module boundaries and process model: `docs/ARCHITECTURE.md`.
 - Coding standards: `docs/STANDARDS.md`; coverage floors: `docs/COVERAGE.md`.
 - Dependency and SBOM policy: `docs/SUPPLY_CHAIN.md`; project overview: `docs/ABOUT.md`.
+- Domain model and decisions: `CONTEXT.md` plus `docs/adr/` (conventions: `docs/agents/domain.md`).
 
 ## Commands and verification
 
 Use the narrowest command first. Run the full gate once, near the end, not
-during iteration.
+during iteration. The frontend stack is vite-plus (`vp`); load the
+`vite-plus` skill before running vp commands or touching the toolchain config.
 
 ```sh
 # frontend (React + vitest via vite-plus)
@@ -131,13 +137,6 @@ code comments, and the closing reply. It strips AI tells (em dashes, filler,
 hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
 plain ones and passive voice for active. Apply it to text you wrote or changed,
 not to prose you did not touch.
-
-## Agent skills
-
-- Issue tracker: bd (Beads), the repo's tracker; use the `bd` CLI. See `docs/agents/issue-tracker.md`.
-- Triage labels: the five canonical roles use their default strings as bd labels. See `docs/agents/triage-labels.md`.
-- Domain docs: single context, one `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
-- Toolchain: vite-plus; load the `vite-plus` skill before vp or toolchain work.
 
 ## External knowledge
 
