@@ -99,15 +99,16 @@ Use the narrowest command first. Run the full gate once, near the end, not
 during iteration.
 
 ```sh
-# frontend (React + vitest via vite-plus)
-pnpm --filter frontend exec vp test run <file-or-pattern>
-pnpm --filter frontend typecheck && pnpm --filter frontend lint
+# frontend (React + vitest via vite-plus; pnpm exec resolves the pinned
+# local vp, so no global install is required)
+pnpm exec vp -C frontend test run <file-or-pattern>
+pnpm exec vp -C frontend run typecheck && pnpm exec vp lint
 
 # rust sidecar
 cargo test --manifest-path sidecar/Cargo.toml <target>
 cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 
-# electron (main + preload)
+# electron (main + preload; not a vp project, pnpm exec just resolves tsc)
 pnpm exec tsc -p electron --noEmit
 
 # full gate, once before you declare done
