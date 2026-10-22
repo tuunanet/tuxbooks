@@ -24,17 +24,20 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
 - `vp lint`, `vp fmt`, and `vp check` work from the repo root; their config
   lives in the root `vite.config.ts` (`lint`, `fmt`, and `run` blocks).
 - `vp test` at the root is not wired here. Frontend tests run through the
-  cached task (`pnpm exec vp run frontend:test`) or
-  `pnpm --filter frontend exec vp test run <file-or-pattern>`.
+  cached task (`vp run frontend:test`) or
+  `vp -C frontend test run <file-or-pattern>`.
 - The `frontend:test` and `frontend:build` tasks are content-cached with
   automatic input tracking: an unchanged tree replays the recorded run, and
   any changed input forces a real run that names the file which changed.
-  `pnpm exec vp run --no-cache <task>` bypasses the cache and
-  `vp cache clean` resets it. The input/output exclusions (coverage
-  artifacts, boundary-test fixtures) are documented next to the task
-  definitions in the root config.
+  `vp run --no-cache <task>` bypasses the cache and `vp cache clean` resets
+  it. The input/output exclusions (coverage artifacts, boundary-test
+  fixtures) are documented next to the task definitions in the root config.
 - Git hooks stay owned by beads (`core.hooksPath` points at `.beads/hooks`),
   so vp's hook dispatcher is intentionally not installed.
+
+No global vp installed? Prefix vp commands with `pnpm exec`, which resolves
+the project-pinned copy (the justfile does this everywhere so CI works
+without a global install).
 
 ## Tool versions and troubleshooting
 

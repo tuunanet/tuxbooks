@@ -99,10 +99,12 @@ Use the narrowest command first. Run the full gate once, near the end, not
 during iteration.
 
 ```sh
-# frontend (React + vitest via vite-plus; pnpm exec resolves the pinned
-# local vp, so no global install is required)
-pnpm exec vp -C frontend test run <file-or-pattern>
-pnpm exec vp -C frontend run typecheck && pnpm exec vp lint
+# frontend (React + vitest via vite-plus)
+vp -C frontend test run <file-or-pattern>
+vp -C frontend run typecheck && vp lint
+
+# no global vp installed? prefix vp commands with pnpm exec (the justfile
+# does exactly that, which is why it also works in CI)
 
 # rust sidecar
 cargo test --manifest-path sidecar/Cargo.toml <target>
