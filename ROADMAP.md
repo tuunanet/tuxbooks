@@ -6,7 +6,7 @@ The focus is not on adding lots of new features. It is on making the existing ex
 
 ## Now: after 0.1.0
 
-Three milestones come next, in this order.
+Three milestones come next.
 
 ### Syncing data
 
@@ -60,5 +60,3 @@ Beyond those:
 - Additional ebook formats
 - Better import and metadata workflows
 - Accessibility and usability improvements
-
-The roadmap is intentionally kept flexible. TuxBooks is developed incrementally, with **quality and a great reading experience taking priority over feature count**.
