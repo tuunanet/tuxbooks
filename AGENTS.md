@@ -19,9 +19,9 @@ before running tests; `just check` assumes installed dependencies.
 5. Commit with a clear message (conventional commits), rebase onto the latest
    `origin/main`, and rerun the gate.
 6. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
-   `--force-with-lease`). Open the PR with what changed, how it was tested
-   (every claim backed by evidence), before/after proof, and any risks or
-   follow-up work. Run the title and body through `unslop` before posting.
+   `--force-with-lease`). Open the PR with the `pr` skill's body template
+   (summary, evidence, merge danger) and run the title and body through
+   `unslop` before posting.
 7. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
    them out of the task PR and leave them staged: the
    `chore(bd): sync the tracker export` PR opens only after the issue's final
