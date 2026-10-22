@@ -6,7 +6,7 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`. After creating a worktree, run `pnpm install` at its root
+never build on `main`. After creating a worktree, run `vp install` at its root
 before running tests; `just check` assumes installed dependencies.
 
 Work is tracked in bd (Beads), the repo's issue tracker; see

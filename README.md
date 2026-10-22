@@ -54,7 +54,7 @@ yourself; the project-local `vp` binary comes with `pnpm install` either way.
 
 ```sh
 curl -fsSL https://vite.plus | bash   # one-time vp install
-pnpm install
+vp install
 just dev        # Electron window with hot reload (Vite renderer + Rust sidecar)
 just build      # release build (renderer, Electron main/preload, sidecar binary)
 ```
