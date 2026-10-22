@@ -6,24 +6,27 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`.
+never build on `main`. After creating a worktree, run `pnpm install` at its root
+before running tests; `just check` assumes installed dependencies.
 
 ## Completing a task
 
 1. Keep changes limited to the assigned task.
 2. Run the full gate once: `just check` (run `just format` first if needed).
-3. Assemble the evidence captured along the way into before/after pairs.
-4. Commit with a clear message (conventional commits), rebase onto the latest
+3. Review the branch with the `code-review` skill (Standards + Spec, fixed
+   point `origin/main`) and fold findings in before pushing.
+4. Assemble the evidence captured along the way into before/after pairs.
+5. Commit with a clear message (conventional commits), rebase onto the latest
    `origin/main`, and rerun the gate.
-5. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
-   `--force-with-lease`). Open the PR with what changed, how it was tested
-   (every claim backed by evidence), before/after proof, and any risks or
-   follow-up work. Run the title and body through `unslop` before posting.
-6. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
+6. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
+   `--force-with-lease`). Open the PR with the `pr` skill's body template
+   (summary, evidence, merge danger) and run the title and body through
+   `unslop` before posting.
+7. When bd stages `.beads/issues.jsonl` or `.beads/interactions.jsonl`, keep
    them out of the task PR and leave them staged: the
    `chore(bd): sync the tracker export` PR opens only after the issue's final
    ticket merges. Full rules live in `docs/agents/issue-tracker.md`.
-7. Remove the worktree after the PR merges.
+8. Remove the worktree after the PR merges.
 
 ## Multi-agent rules
 

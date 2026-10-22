@@ -56,6 +56,10 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   re-exported types and helpers, never on an engine directly. ESLint
   `no-restricted-imports` enforces this (ADR 0002, `tuxbooks-koe.10`); add a
   new engine package to the rule when the engine changes.
+- React Compiler bans reading refs during render (`react-hooks/refs`): read
+  adapter and feature refs inside event handlers and effects, never in the
+  component body. When a render needs the value, the handler stores it in
+  state (the reader footer's positioning label is the worked example).
 
 ## Tests
 
