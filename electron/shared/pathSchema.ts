@@ -100,7 +100,9 @@ export function isValidLibraryPath(candidate: string): boolean {
 
 /** Result of parsing a `Range` header. */
 export type RangeParse =
-  { kind: "none" } | { kind: "invalid" } | { kind: "ok"; start?: number; end?: number };
+  | { kind: "none" }
+  | { kind: "invalid" }
+  | { kind: "ok"; start?: number; end?: number };
 
 const RANGE_PATTERN = /^bytes=(\d*)-(\d*)$/;
 

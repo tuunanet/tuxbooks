@@ -42,9 +42,10 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
   `react-hooks/set-state-in-effect`): do state updates after an `await`
   (see `frontend/src/hooks/useLibrary.ts` for the pattern).
 - TypeScript is strict; `any` is banned via lint rule.
-- Do not suppress lints globally. A targeted `eslint-disable` needs a
-  reason comment (the shadcn `*Variants` exports in `components/ui/` are
-  the known cases).
+- Do not suppress lints globally. A targeted disable comment needs a
+  reason comment (Oxlint honors the `eslint-disable` comment syntax; the
+  shadcn `*Variants` suppressions were retired with the react-refresh
+  rule in the vite-plus migration).
 - Components grouped by feature under `src/components/`; the only files
   allowed to talk to the outside world are `src/lib/bridge.ts` (IPC via
   the preload API) and the two engine seams
@@ -86,7 +87,7 @@ Test changes are judged by `docs/TESTING.md` "Rules for agents": what makes a te
 ## Commits
 
 - Conventional Commits, required: `type: imperative subject` (e.g. `feat: add
-reading progress command`, `fix: keep FTS index in sync on book update`,
+  reading progress command`, `fix: keep FTS index in sync on book update`,
   `test:`, `docs:`, `refactor:`, `chore:`). Scope optional; use the layer as
   scope when helpful (`feat(rust):`, `fix(frontend):`).
 - Nothing enforces this (no commitlint/husky) — do not commit until the message

@@ -7,7 +7,12 @@ import { PAGE_GAP_PX, type LayoutSlot } from "./pdfLayout";
  * geometry in every state so evicted canvases never collapse the layout.
  */
 export type PdfPageLifecycle =
-  "unloaded" | "queued" | "loading" | "rendering" | "rendered" | "error";
+  | "unloaded"
+  | "queued"
+  | "loading"
+  | "rendering"
+  | "rendered"
+  | "error";
 
 interface PdfPageSlotProps {
   slot: LayoutSlot;

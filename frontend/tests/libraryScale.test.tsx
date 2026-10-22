@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vite-plus/test";
 import { act, render, screen, waitFor } from "@testing-library/react";
 
 import { LibraryView } from "@/components/library/LibraryView";

@@ -36,7 +36,8 @@ export interface EpubLocator {
  * fields exist — the union is the format check.
  */
 export type ReaderPosition =
-  ({ format: "epub" } & EpubLocator) | { format: "pdf"; page: number; fraction: number };
+  | ({ format: "epub" } & EpubLocator)
+  | { format: "pdf"; page: number; fraction: number };
 
 export type EpubReaderPosition = Extract<ReaderPosition, { format: "epub" }>;
 export type PdfReaderPosition = Extract<ReaderPosition, { format: "pdf" }>;

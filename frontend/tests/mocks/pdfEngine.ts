@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 /**
  * Fake of the `@/lib/pdf/pdfEngine` surface for unit tests. Test files must

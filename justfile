@@ -202,7 +202,7 @@ test-rust: fetch-pdfium
 # deadline-sensitive worker test flakes without it, bd tuxbooks-6r2); the
 # cap costs no wall time on a 16-core box.
 test-frontend:
-    {{_test_timeout}} pnpm --filter frontend exec vitest run --coverage --testTimeout=15000 --maxWorkers=6
+    {{_test_timeout}} pnpm --filter frontend exec vp test run --coverage --testTimeout=15000 --maxWorkers=6
 
 test-parallel:
     bash scripts/run-parallel.sh \
@@ -373,6 +373,7 @@ format-check-frontend:
 typecheck:
     pnpm --filter frontend typecheck
     pnpm exec tsc -p electron --noEmit
+    pnpm exec tsc -p tsconfig.json --noEmit
     pnpm --filter e2e exec tsc -p . --noEmit
 
 # Full local validation. The streams are independent toolchains, so they run
@@ -398,7 +399,7 @@ check:
 # json-summary the badge script reads.
 coverage:
     node scripts/coverage-gate.mjs
-    pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+    pnpm --filter frontend exec vp test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
 
 # Fuzzing (issue #88, docs/TESTING.md "Fuzzing"). libFuzzer via cargo-fuzz:
 # needs the nightly toolchain and the cargo-fuzz subcommand

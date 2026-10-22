@@ -59,7 +59,8 @@ async function bookIdByTitle(db: DatabaseSync, title: string): Promise<number> {
   for (;;) {
     try {
       const row = db.prepare("SELECT id FROM books WHERE title = ?").get(title) as
-        { id: number } | undefined;
+        | { id: number }
+        | undefined;
       if (row) return row.id;
     } catch (error) {
       // The app may have created the SQLite file but not the schema yet.

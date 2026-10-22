@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";
 

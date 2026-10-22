@@ -99,8 +99,8 @@ Use the narrowest command first. Run the full gate once, near the end, not
 during iteration.
 
 ```sh
-# frontend (React + vitest)
-pnpm --filter frontend exec vitest run <file-or-pattern>
+# frontend (React + vitest via vite-plus)
+pnpm --filter frontend exec vp test run <file-or-pattern>
 pnpm --filter frontend typecheck && pnpm --filter frontend lint
 
 # rust sidecar

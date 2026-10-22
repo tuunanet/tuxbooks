@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 /**
  * Fake of the `@/lib/epub/readiumEngine` surface for unit tests. Test files

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { renderHook } from "@testing-library/react";
 import { useAxisLockedWheel, AXIS_LOCK_QUIET_MS } from "@/components/reader/useAxisLockedWheel";
 

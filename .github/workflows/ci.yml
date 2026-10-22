@@ -130,10 +130,10 @@ jobs:
       - name: TypeScript
         run: pnpm typecheck
 
-  # The coverage job owns the frontend test run: it executes the full vitest
-  # suite with coverage and fails on any test failure or floor breach
-  # (docs/COVERAGE.md). The lint/typecheck job above no longer re-runs the
-  # same suite.
+  # The coverage job owns the frontend test run: it executes the full vp
+  # test (vitest) suite with coverage and fails on any test failure or floor
+  # breach (docs/COVERAGE.md). The lint/typecheck job above no longer re-runs
+  # the same suite.
 
   coverage:
     name: Coverage (frontend gate + badge)
@@ -161,8 +161,8 @@ jobs:
       # The gate is docs/COVERAGE.md's frontend floors (coverage.thresholds
       # in frontend/vite.config.ts): the run itself fails below any floor.
       # json-summary feeds scripts/coverage-badge.mjs.
-      - name: Vitest with coverage
-        run: pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+      - name: Coverage (owns the frontend test run)
+        run: pnpm --filter frontend exec vp test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
 
       - name: Compute badge JSON
         run: node scripts/coverage-badge.mjs

@@ -8,7 +8,7 @@ covers the content-fence policy, `tests/mocks/` holds shared fixtures.
 Narrow commands:
 
 ```sh
-pnpm --filter frontend exec vitest run <file-or-pattern>   # one test file
+pnpm --filter frontend exec vp test run <file-or-pattern>   # one test file
 pnpm --filter frontend typecheck
 pnpm --filter frontend lint
 ```

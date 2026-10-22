@@ -109,7 +109,7 @@ and `pnpm-workspace.yaml`). No JS dependency — direct or transitive —
 younger than 30 days may enter the tree:
 
 - `minimumReleaseAge: 43200` in `pnpm-workspace.yaml` gates `pnpm
-install`/`update` (verified: `ERR_PNPM_NO_MATURE_MATCHING_VERSION`).
+  install`/`update` (verified: `ERR_PNPM_NO_MATURE_MATCHING_VERSION`).
 - Dependabot's `cooldown: default-days: 30` gates update PRs, including
   the GitHub-Actions bumps (moved-tag attacks ride the same floor).
 
@@ -118,4 +118,10 @@ can land here (the Shai-Hulud pattern), while Dependabot security updates
 still bypass the cooldown so patched releases are not delayed. The urgent
 path is `minimumReleaseAgeExclude` in `pnpm-workspace.yaml`: exact
 `name@version` pins, only for patched releases of already-vulnerable
-packages, each with a dated comment, removed once the versions age out.
+packages or a deliberate toolchain adoption that cannot wait out the
+floor, each with a dated comment, removed once the versions age out.
+Scoped patterns (`@org/*`) may stand in for pins only where a parent
+package pins the dependency to an exact version (binary binding trains
+shipped by a pinned tool), so the pattern cannot admit anything newer
+than the reviewed version; the entries still carry the dated comment and
+aging-out discipline.

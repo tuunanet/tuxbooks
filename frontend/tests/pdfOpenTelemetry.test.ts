@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { pdfOpenState, pdfOpenTiming } from "@/components/reader/pdf/pdfOpenTelemetry";
 
 describe("pdfOpenState", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { IssuedPaths, validateInvokeParams } from "../../../electron/main/ipcPolicy";
 import { MAX_IPC_PARAM_BYTES } from "../../../electron/shared/pathSchema";

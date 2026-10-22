@@ -1,7 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Mock } from "vitest";
+import type { Mock } from "vite-plus/test";
 
 vi.mock("@/lib/epub/readiumEngine", async () => {
   const { makeFakeReadiumModule } = await import("./mocks/readiumEngine");

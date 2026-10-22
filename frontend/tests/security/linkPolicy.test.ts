@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { MAX_EXTERNAL_URL_LENGTH, parseExternalHttpUrl } from "../../../electron/shared/linkPolicy";
 

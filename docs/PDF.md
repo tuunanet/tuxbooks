@@ -536,10 +536,10 @@ theme, which for PDFs is really a set of **color modes**
   recoloring.
 
 - **Invert** — the explicit full-page negative (`invert(1)
-hue-rotate(180deg)`, the recipe Foliate popularized), kept from the old
+  hue-rotate(180deg)`, the recipe Foliate popularized), kept from the old
   Dark behavior for users who actually want inversion. A CSS filter over
   the document surface, like High contrast (`grayscale + invert +
-contrast`).
+  contrast`).
 
 The recolor-only EPUB presets (Blue, Mint) have no faithful raster
 treatment and remain EPUB-only. "Invert" is a PDF-only stored theme name

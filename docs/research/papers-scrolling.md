@@ -404,7 +404,7 @@ device's per-event delta, so perceived velocity is `step x event rate`. Both
 factors sit below the application layer:
 
 - GDK X11 computes the delta linearly as `(valuator_value - last_value) /
-increment` with no clamp
+  increment` with no clamp
   ([gdk/x11/gdkdevice-xi2.c:722-760](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/x11/gdkdevice-xi2.c)).
 - GDK compresses queued scroll events by summing their deltas into one event
   per batch, which preserves total distance and therefore does not cap speed;

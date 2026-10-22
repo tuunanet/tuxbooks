@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import userEvent from "@testing-library/user-event";
 
 import { AppShell } from "@/components/layout/AppShell";
