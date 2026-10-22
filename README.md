@@ -79,14 +79,21 @@ drives Vite, Vitest, oxlint, and oxfmt. The `just` recipes stay the daily
 driver because they also orchestrate the Rust sidecar, E2E, and packaging.
 For frontend-only work, run `vp` directly:
 
-| Command                                   | Does                                             |
-| ----------------------------------------- | ------------------------------------------------ |
-| `vp check`                                | oxfmt check + oxlint in one pass                 |
-| `vp fmt`                                  | Format the repo (`vp fmt --check` verifies only) |
-| `vp lint`                                 | oxlint over the frontend scope                   |
-| `pnpm --filter frontend exec vp test run` | Frontend unit tests; append a path for one file  |
-| `vp build`                                | Renderer production build                        |
-| `vp dev`                                  | Renderer dev server alone (port 1420)            |
+| Command                                   | Does                                               |
+| ----------------------------------------- | -------------------------------------------------- |
+| `vp check`                                | oxfmt check + oxlint in one pass                   |
+| `vp fmt`                                  | Format the repo (`vp fmt --check` verifies only)   |
+| `vp lint`                                 | oxlint over the frontend scope                     |
+| `pnpm --filter frontend exec vp test run` | Frontend unit tests; append a path for one file    |
+| `vp run frontend:test`                    | Cached frontend unit tests (what `just test` runs) |
+| `vp run frontend:build`                   | Cached renderer build (typecheck + bundle)         |
+| `vp build`                                | Renderer production build                          |
+| `vp dev`                                  | Renderer dev server alone (port 1420)              |
+
+The two `vp run` tasks are content-cached: an unchanged tree replays the
+recorded run in milliseconds, and any changed input forces a real run that
+names the file which changed. `pnpm exec vp run --no-cache <task>` skips the
+cache; `vp cache clean` resets it.
 
 Config lives in the root `vite.config.ts` (lint and format rules) and
 `frontend/vite.config.ts` (app build and test setup). Commits run `vp fmt`

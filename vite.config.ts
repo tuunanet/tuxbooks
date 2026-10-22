@@ -31,6 +31,51 @@ const ENGINE_IMPORT_PATTERNS = [
 ];
 
 export default defineConfig({
+  // Task definitions for Vite Task (`vp run`). Tasks are cached by default
+  // (package.json scripts are not): automatic input tracking records what
+  // each command actually reads, a changed input forces a real re-run, and
+  // an unchanged tree replays the recorded output. Use
+  // `pnpm exec vp run --no-cache <task>` to bypass, and `vp cache clean`
+  // to reset. The commands mirror the pre-task justfile lines exactly so
+  // cache-keyed behavior matches what ran before the indirection.
+  run: {
+    tasks: {
+      "frontend:build": {
+        command: "pnpm --filter frontend build",
+      },
+      "frontend:test": {
+        command:
+          "pnpm --filter frontend exec vp test run --coverage --testTimeout=15000 --maxWorkers=6",
+        cache: {
+          // The coverage tooling both reads and writes under
+          // frontend/coverage/ within a single run (a random-named remap
+          // file in coverage/.tmp, plus probes of previously generated
+          // report pages), which would flag every run as "modified its
+          // inputs". Nothing treats coverage artifacts as inputs, so they
+          // are out of input tracking; writes stay tracked (minus the
+          // pointless random-named temp dir), so a cache hit restores the
+          // html report and summary. Note a replayed run restores the
+          // cached run's artifacts, not fresh ones. The engine-boundary
+          // fixtures are likewise written and lint-read within the run
+          // (tests/pdfEngineImportBoundary.test.ts), so they stay out of
+          // input tracking too.
+          input: [
+            { auto: true },
+            "!frontend/coverage/**",
+            "!frontend/tests/fixtures/engine-boundary/**",
+          ],
+          output: [
+            { auto: true },
+            "!frontend/coverage/.tmp/**",
+            // The boundary fixtures are deleted again before the task ends;
+            // restoring their recorded writes on a replay would resurrect
+            // violation fixtures onto disk and fail repo-wide lint.
+            "!frontend/tests/fixtures/engine-boundary/**",
+          ],
+        },
+      },
+    },
+  },
   // Carried over from the removed .prettierrc.json: printWidth 100. The
   // remaining options there (semi, double quotes, trailing commas) are the
   // formatter defaults, so they need no entry.
@@ -83,14 +128,16 @@ export default defineConfig({
         // engine package or its bundler assets; every other file gets the
         // restriction above. The workers are included so the engine-side
         // modules can reach their engine; the main-thread adapters own the
-        // worker URL and WASM URL. The __engine_boundary_adapters__ fixtures
-        // stand in for the adapters in tests/pdfEngineImportBoundary.test.ts,
-        // which proves the allowance without touching real adapter files.
+        // worker URL and WASM URL. The fixtures under tests/fixtures/
+        // engine-boundary/ stand in for the adapters in
+        // tests/pdfEngineImportBoundary.test.ts, which proves the allowance
+        // without touching real adapter files (which other tests import
+        // concurrently).
         files: [
           "frontend/src/lib/pdf/pdfiumCore.ts",
           "frontend/src/lib/pdf/pdfiumEngine.ts",
           "frontend/src/lib/pdf/pdfiumWorker.ts",
-          "frontend/src/lib/pdf/__engine_boundary_adapters__/**",
+          "frontend/tests/fixtures/engine-boundary/adapters/**",
         ],
         rules: {
           "no-restricted-imports": "off",

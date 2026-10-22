@@ -13,10 +13,11 @@ import { afterAll, describe, expect, test } from "vite-plus/test";
  * `src/lib/pdf/` may import an engine package or its bundler assets; reader
  * components and the seam must not.
  *
- * Probes are written to dedicated fixture paths — the adapter override in the
- * root vite.config.ts covers `src/lib/pdf/__engine_boundary_adapters__/**` so
- * the allowance can be proven without touching the real adapter files (which
- * other tests import concurrently). Fixture sources carry `// @ts-nocheck`
+ * Probes are written to dedicated fixture paths under tests/fixtures/ — the
+ * adapter override in the root vite.config.ts covers tests/fixtures/
+ * engine-boundary/adapters/** so the allowance can be proven without touching
+ * the real adapter files (which other tests import concurrently). Fixture
+ * sources carry `// @ts-nocheck`
  * so a file left behind by a crashed run cannot break `tsc` (the synthetic
  * `virtual:pdfium-wasm-url` import has no type declaration); the next run of
  * this file deletes leftovers before writing.
@@ -73,17 +74,17 @@ afterAll(() => {
 const VIOLATIONS = [
   {
     label: "a reader component importing the PDFium package",
-    filePath: "src/components/reader/pdf/__engine_boundary__/fixture.tsx",
+    filePath: "tests/fixtures/engine-boundary/reader/fixture.tsx",
     source: 'import { init } from "@embedpdf/pdfium";\nexport const value = init;',
   },
   {
     label: "the seam importing the PDFium worker module",
-    filePath: "src/lib/pdf/__engine_boundary_seam__/fixture.ts",
+    filePath: "tests/fixtures/engine-boundary/seam/fixture.ts",
     source: 'import url from "./pdfiumWorker?worker&url";\nexport default url;',
   },
   {
     label: "the seam importing the PDFium WASM URL",
-    filePath: "src/lib/pdf/__engine_boundary_seam__/fixture.ts",
+    filePath: "tests/fixtures/engine-boundary/seam/fixture.ts",
     source: 'import url from "virtual:pdfium-wasm-url";\nexport default url;',
   },
 ];
@@ -91,12 +92,12 @@ const VIOLATIONS = [
 const ADAPTERS = [
   {
     label: "the PDFium core importing the PDFium package",
-    filePath: "src/lib/pdf/__engine_boundary_adapters__/pdfiumCore.ts",
+    filePath: "tests/fixtures/engine-boundary/adapters/pdfiumCore.ts",
     source: 'import { init } from "@embedpdf/pdfium";\nexport const value = init;',
   },
   {
     label: "the PDFium adapter importing its worker and WASM URL",
-    filePath: "src/lib/pdf/__engine_boundary_adapters__/pdfiumEngine.ts",
+    filePath: "tests/fixtures/engine-boundary/adapters/pdfiumEngine.ts",
     source:
       'import url from "./pdfiumWorker?worker&url";\nimport wasm from "virtual:pdfium-wasm-url";\nexport const value = [url, wasm];',
   },
@@ -129,7 +130,7 @@ describe("engine import boundary", () => {
     "leaves ordinary imports in reader components alone",
     async () => {
       const { findings, output } = await restrictedImportsFired(
-        "src/components/reader/pdf/__engine_boundary__/fixture.ts",
+        "tests/fixtures/engine-boundary/reader/fixture.ts",
         'import { openPdfDocument } from "@/lib/pdf/pdfEngine";\nexport const value = openPdfDocument;',
       );
       expect(findings, output).toBe(0);
