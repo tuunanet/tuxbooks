@@ -20,12 +20,12 @@
     "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^24.13.4",
-    "electron": "^44.3.0",
+    "@types/node": "^24.13.6",
+    "electron": "^44.4.3",
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
     "lint-staged": "^17.5.1",
-    "prettier": "^3.6.2",
+    "prettier": "^3.9.8",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@10.34.5",
