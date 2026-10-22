@@ -79,10 +79,34 @@ jobs:
         with:
           workspaces: sidecar
 
+      # Re-run speedup: restore Vite Task's result cache so frontend:build
+      # (which every e2e phase's build-debug depends on) replays from a
+      # previous run of this PR. Within one job the phases already share the
+      # runner-local cache; this covers fresh runners. Restored entries from
+      # an older commit simply miss and re-run for real. Restored after
+      # setup-vp because vp install can recreate node_modules.
+      - name: Restore Vite Task cache
+        id: vite-task-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: node_modules/.vite/task-cache
+          key: vite-task-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vite-task-${{ runner.os }}-${{ runner.arch }}-
+
       - name: E2E (headless)
         run: |
           bash scripts/fetch-pdfium.sh
           just test-e2e
+
+      # The rolling key makes every successful run save a fresh immutable
+      # entry; the restore prefix above picks the newest one next time.
+      - name: Save Vite Task cache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: node_modules/.vite/task-cache
+          key: ${{ steps.vite-task-cache.outputs.cache-primary-key }}
 
       - name: Upload E2E failure artifacts
         if: failure()
