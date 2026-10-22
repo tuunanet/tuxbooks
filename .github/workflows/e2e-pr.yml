@@ -58,12 +58,14 @@ jobs:
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      # Installs vp (the version pinned by the project catalog), its Node.js
+      # runtime, pnpm, and the frozen dependencies; cache: true caches the
+      # package-manager store. just test-e2e still calls pnpm exec / pnpm
+      # --filter internally, which works with the managed pnpm.
+      - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: 24
+          cache: true
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
@@ -77,11 +79,34 @@ jobs:
         with:
           workspaces: sidecar
 
+      # Re-run speedup: restore Vite Task's result cache so frontend:build
+      # (which every e2e phase's build-debug depends on) replays from a
+      # previous run of this PR. Within one job the phases already share the
+      # runner-local cache; this covers fresh runners. Restored entries from
+      # an older commit simply miss and re-run for real. Restored after
+      # setup-vp because vp install can recreate node_modules.
+      - name: Restore Vite Task cache
+        id: vite-task-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: node_modules/.vite/task-cache
+          key: vite-task-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vite-task-${{ runner.os }}-${{ runner.arch }}-
+
       - name: E2E (headless)
         run: |
-          pnpm install --frozen-lockfile
           bash scripts/fetch-pdfium.sh
           just test-e2e
+
+      # The rolling key makes every successful run save a fresh immutable
+      # entry; the restore prefix above picks the newest one next time.
+      - name: Save Vite Task cache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: node_modules/.vite/task-cache
+          key: ${{ steps.vite-task-cache.outputs.cache-primary-key }}
 
       - name: Upload E2E failure artifacts
         if: failure()

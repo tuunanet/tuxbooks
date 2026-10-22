@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { EVENT_FLUSH_MS, useLibraryData } from "@/hooks/useLibrary";
 import { makeBook } from "./factories";
 import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";

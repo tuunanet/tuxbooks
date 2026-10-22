@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { fromForm, toForm } from "@/components/books/metadata/metadataForm";
 import type { MetadataFields } from "@/types/domain";

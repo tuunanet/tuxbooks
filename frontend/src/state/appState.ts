@@ -7,7 +7,13 @@ export type AppView = "library" | "detail" | "reader";
 export type DetailTab = "overview" | "metadata" | "highlights" | "bookmarks";
 
 export type SmartSectionId =
-  "all-books" | "epubs" | "pdfs" | "recently-added" | "recently-read" | "in-progress" | "finished";
+  | "all-books"
+  | "epubs"
+  | "pdfs"
+  | "recently-added"
+  | "recently-read"
+  | "in-progress"
+  | "finished";
 
 /**
  * What the sidebar has selected. Smart sections are built-in views; collection
@@ -15,7 +21,9 @@ export type SmartSectionId =
  * exposes them.
  */
 export type LibrarySection =
-  { kind: "smart"; id: SmartSectionId } | { kind: "collection"; id: number } | { kind: "settings" };
+  | { kind: "smart"; id: SmartSectionId }
+  | { kind: "collection"; id: number }
+  | { kind: "settings" };
 
 export interface AppState {
   view: AppView;

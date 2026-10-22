@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,

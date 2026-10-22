@@ -110,30 +110,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      # Installs vp (the version pinned by the project catalog), its Node.js
+      # runtime, and the frozen dependencies; cache: true caches the
+      # package-manager store.
+      - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: 24
+          cache: true
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Format check (oxfmt)
+        run: vp fmt --check .
 
-      - name: Prettier check
-        run: pnpm format:check
-
-      - name: ESLint
-        run: pnpm --filter frontend lint
+      - name: Lint (oxlint over the frontend scope)
+        run: vp lint
 
       # Frontend + Electron main/preload (electron/tsconfig.json).
       - name: TypeScript
         run: pnpm typecheck
 
-  # The coverage job owns the frontend test run: it executes the full vitest
-  # suite with coverage and fails on any test failure or floor breach
-  # (docs/COVERAGE.md). The lint/typecheck job above no longer re-runs the
-  # same suite.
+  # The coverage job owns the frontend test run: it executes the full vp
+  # test (vitest) suite with coverage and fails on any test failure or floor
+  # breach (docs/COVERAGE.md). The lint/typecheck job above no longer re-runs
+  # the same suite.
 
   coverage:
     name: Coverage (frontend gate + badge)
@@ -148,21 +146,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      # Installs vp (the version pinned by the project catalog), its Node.js
+      # runtime, and the frozen dependencies; cache: true caches the
+      # package-manager store.
+      - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: 24
+          cache: true
 
       # The gate is docs/COVERAGE.md's frontend floors (coverage.thresholds
       # in frontend/vite.config.ts): the run itself fails below any floor.
       # json-summary feeds scripts/coverage-badge.mjs.
-      - name: Vitest with coverage
-        run: pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+      - name: Coverage (owns the frontend test run)
+        run: vp -C frontend test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
 
       - name: Compute badge JSON
         run: node scripts/coverage-badge.mjs

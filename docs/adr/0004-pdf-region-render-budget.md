@@ -66,7 +66,7 @@ mechanism.
   everywhere.
 - **B. Cap only pages containing a shading.** Ask PDFium for the page's objects
   (`FPDFPage_CountObjects` → `FPDFPage_GetObject` → `FPDFPageObj_GetType ==
-FPDF_PAGEOBJ_SHADING`), cache per page, and cap only those. Text PDFs regain
+  FPDF_PAGEOBJ_SHADING`), cache per page, and cap only those. Text PDFs regain
   sharp deep zoom; shaded plots stay soft but safe. Cost is plumbing through
   engine → worker → adapter → reader → canvas, and the detection is coarse (a
   shading anywhere on the page caps the whole page).
@@ -82,7 +82,7 @@ FPDF_PAGEOBJ_SHADING`), cache per page, and cap only those. Text PDFs regain
 - **E. Lower `MAX_ZOOM` so the spike scales are unreachable.** Rejected. GNOME
   Papers has no fixed max zoom: it derives one per document from a byte cache,
   `max_scale = min(sqrt(page_cache_size / (4·maxW·maxH)), 32767/maxH,
-32767/maxW)` (`libview/pps-view.c:5655`, `MIN_SCALE` at `:28`,
+  32767/maxW)` (`libview/pps-view.c:5655`, `MIN_SCALE` at `:28`,
   `MAX_IMAGE_SIZE` at `:5652`), with `page-cache-size` defaulting to 200 MiB
   (`org.gnome.Papers.gschema.xml`). That is roughly 1040% for a letter page and
   2747% for this plot, and it is user-adjustable and page-size and dpr

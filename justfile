@@ -142,7 +142,7 @@ sidecar-release:
 # main/preload bundles, and the release sidecar binary (portable glibc
 # floor via `just sidecar-release`).
 build: fetch-pdfium
-    pnpm --filter frontend build
+    pnpm exec vp run frontend:build
     node scripts/build-electron.mjs
     just sidecar-release
 
@@ -194,15 +194,18 @@ test: test-parallel
 test-rust: fetch-pdfium
     {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml
 
-# Frontend unit tests. --coverage binds the docs/COVERAGE.md floors;
+# Frontend unit tests, through the cached Vite Task (frontend:test in the
+# root vite.config.ts): --coverage binds the docs/COVERAGE.md floors;
 # --testTimeout=15000 (default 5000) because instrumented tests under this
 # recipe's parallel load (rust + lint + tsc alongside) push render-heavy
 # cases past the default — the suite passes standalone at 5s. --maxWorkers=6
 # caps vitest's CPU appetite so the concurrent rust stream keeps cores (the
 # deadline-sensitive worker test flakes without it, bd tuxbooks-6r2); the
-# cap costs no wall time on a 16-core box.
+# cap costs no wall time on a 16-core box. Unchanged inputs replay from the
+# task cache (node_modules/.vite/task-cache); `pnpm exec vp run --no-cache
+# frontend:test` forces a real run.
 test-frontend:
-    {{_test_timeout}} pnpm --filter frontend exec vitest run --coverage --testTimeout=15000 --maxWorkers=6
+    {{_test_timeout}} pnpm exec vp run frontend:test
 
 test-parallel:
     bash scripts/run-parallel.sh \
@@ -213,7 +216,7 @@ test-parallel:
 # main/preload bundles, and the debug sidecar. The Electron harness needs
 # no special frontend build (the old VITE_WDIO flag died with Tauri).
 build-debug:
-    pnpm --filter frontend build
+    pnpm exec vp run frontend:build
     node scripts/build-electron.mjs
     cargo build --manifest-path sidecar/Cargo.toml
 
@@ -373,6 +376,7 @@ format-check-frontend:
 typecheck:
     pnpm --filter frontend typecheck
     pnpm exec tsc -p electron --noEmit
+    pnpm exec tsc -p tsconfig.json --noEmit
     pnpm --filter e2e exec tsc -p . --noEmit
 
 # Full local validation. The streams are independent toolchains, so they run
@@ -398,7 +402,7 @@ check:
 # json-summary the badge script reads.
 coverage:
     node scripts/coverage-gate.mjs
-    pnpm --filter frontend exec vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+    pnpm --filter frontend exec vp test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
 
 # Fuzzing (issue #88, docs/TESTING.md "Fuzzing"). libFuzzer via cargo-fuzz:
 # needs the nightly toolchain and the cargo-fuzz subcommand

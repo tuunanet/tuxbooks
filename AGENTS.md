@@ -6,8 +6,12 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`. After creating a worktree, run `pnpm install` at its root
+never build on `main`. After creating a worktree, run `vp install` at its root
 before running tests; `just check` assumes installed dependencies.
+
+Work is tracked in bd (Beads), the repo's issue tracker; see
+`docs/agents/issue-tracker.md` for the workflow. Triage uses the five
+canonical roles as bd labels (`docs/agents/triage-labels.md`).
 
 ## Completing a task
 
@@ -92,22 +96,27 @@ skip it when `graft` already answers the question.
 - Module boundaries and process model: `docs/ARCHITECTURE.md`.
 - Coding standards: `docs/STANDARDS.md`; coverage floors: `docs/COVERAGE.md`.
 - Dependency and SBOM policy: `docs/SUPPLY_CHAIN.md`; project overview: `docs/ABOUT.md`.
+- Domain model and decisions: `CONTEXT.md` plus `docs/adr/` (conventions: `docs/agents/domain.md`).
 
 ## Commands and verification
 
 Use the narrowest command first. Run the full gate once, near the end, not
-during iteration.
+during iteration. The frontend stack is vite-plus (`vp`); load the
+`vite-plus` skill before running vp commands or touching the toolchain config.
 
 ```sh
-# frontend (React + vitest)
-pnpm --filter frontend exec vitest run <file-or-pattern>
-pnpm --filter frontend typecheck && pnpm --filter frontend lint
+# frontend (React + vitest via vite-plus)
+vp -C frontend test run <file-or-pattern>
+vp -C frontend run typecheck && vp lint
+
+# no global vp installed? prefix vp commands with pnpm exec (the justfile
+# does exactly that, which is why it also works in CI)
 
 # rust sidecar
 cargo test --manifest-path sidecar/Cargo.toml <target>
 cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 
-# electron (main + preload)
+# electron (main + preload; not a vp project, pnpm exec just resolves tsc)
 pnpm exec tsc -p electron --noEmit
 
 # full gate, once before you declare done
@@ -128,12 +137,6 @@ code comments, and the closing reply. It strips AI tells (em dashes, filler,
 hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
 plain ones and passive voice for active. Apply it to text you wrote or changed,
 not to prose you did not touch.
-
-## Agent skills
-
-- Issue tracker: bd (Beads), the repo's tracker; use the `bd` CLI. See `docs/agents/issue-tracker.md`.
-- Triage labels: the five canonical roles use their default strings as bd labels. See `docs/agents/triage-labels.md`.
-- Domain docs: single context, one `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
 
 ## External knowledge
 

@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 /**
  * Controllable ResizeObserver fake (jsdom has none). The no-op stub in

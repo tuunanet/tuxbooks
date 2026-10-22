@@ -1,4 +1,4 @@
-import { vi, type Mock } from "vitest";
+import { vi, type Mock } from "vite-plus/test";
 
 import type { StorageReport, StorageRootId } from "@/lib/bridge";
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { appStateReducer, initialAppState, sameSection, type AppState } from "@/state/appState";
 
 /** A library state with a multi-selection in place. */

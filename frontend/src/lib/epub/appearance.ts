@@ -235,7 +235,13 @@ export function epubTextAlignPreference(
  * selection colors) stays intact.
  */
 export type EpubThemeName =
-  "default" | "light" | "paper" | "dark" | "contrast" | "blue-contrast" | "mint-contrast";
+  | "default"
+  | "light"
+  | "paper"
+  | "dark"
+  | "contrast"
+  | "blue-contrast"
+  | "mint-contrast";
 
 /**
  * The reader surface's theme vocabulary: the EPUB presets plus the PDF-only

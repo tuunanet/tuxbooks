@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { GPU_FALLBACK_MARKER } from "../../../electron/main/gpuFallback";
 import { registerIpcHandlers, type IpcHandler } from "../../../electron/main/ipcHandlers";

@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from "vitest/config";
+import { defineConfig, type Plugin, lazyPlugins } from "vite-plus";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
@@ -47,7 +47,7 @@ const pdfiumWasmUrl: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), pdfiumWasmUrl],
+  plugins: lazyPlugins(() => [react(), tailwindcss(), pdfiumWasmUrl]),
   clearScreen: false,
   define: {
     __TUXBOOKS_VERSION__: JSON.stringify(appVersion),
@@ -117,7 +117,11 @@ export default defineConfig({
       ],
       reporter: ["text-summary", "html"],
       // Quality gate (docs/COVERAGE.md): per-category floors. Vitest fails
-      // the run when any glob drops below its threshold.
+      // the run when any glob drops below its threshold. The globs check
+      // their matching files as one group (aggregate), which is both the
+      // v4 behavior this config had and the docs/COVERAGE.md category
+      // semantic; v5 would need perFile: true on a glob to switch it to
+      // per-file checking, which this repo does not use.
       thresholds: {
         "src/App.tsx": { lines: 80 },
         "src/components/library/**": { lines: 80 },

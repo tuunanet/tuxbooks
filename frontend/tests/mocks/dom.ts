@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 /**
  * Geometry stubs for scroll-tracking tests. jsdom performs no layout, so

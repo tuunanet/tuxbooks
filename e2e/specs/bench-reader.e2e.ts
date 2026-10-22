@@ -98,7 +98,8 @@ interface BenchReport {
     liveCanvases: { count: number; bytes: number; onePageBound: number } | null;
     idle: FrameStats | null;
     drag:
-      (FrameStats & { wallMs: number; distancePx: number; renderMsDuringDrag: number[] }) | null;
+      | (FrameStats & { wallMs: number; distancePx: number; renderMsDuringDrag: number[] })
+      | null;
   };
   epub: {
     flow: "scrolled";

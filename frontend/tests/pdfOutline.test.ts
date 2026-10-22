@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { normalizePdfOutline, type RawPdfOutline } from "@/lib/pdf/pdfOutline";
 
 /** Builds a raw PDFium outline entry (0-based pages). */

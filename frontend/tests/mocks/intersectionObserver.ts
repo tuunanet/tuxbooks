@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 /**
  * Deterministic IntersectionObserver fake for jsdom (which has none).

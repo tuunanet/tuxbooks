@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { SECURITY_CORPUS } from "./index";
 import { HOSTILE_EPUB_CORPUS } from "./hostileEpub";

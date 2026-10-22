@@ -2,42 +2,47 @@
 
 Every category in the table below must stay at or above its required line
 coverage. When a category falls below its floor, the fix is more tests, not
-a lower floor — thresholds are changed only case by case, with the reason
+a lower floor. Thresholds change only case by case, with the reason
 recorded in the same change as the table row.
 
 Frontend floors are enforced by every `just check` and `just test` run:
-the `test-frontend` recipe runs vitest with `--coverage`
+the `test-frontend` recipe runs vitest through `vp test` with `--coverage`
 (`coverage.thresholds` in `frontend/vite.config.ts`; the run fails when
 any category drops below its floor). CI's `coverage` job runs the same
 check, and `just coverage` adds the Rust instrumented run plus the
-json-summary the badge script reads. A plain `vitest run` or
+json-summary the badge script reads. A plain `vp test run` or
 `pnpm --filter frontend test:ci` does not collect coverage and never
 checks thresholds. Rust floors are enforced by `just coverage`
 (`scripts/coverage-gate.mjs`); it is not part of `just check` because the
-instrumented build pays a full rebuild in its own target dir — run it when
+instrumented build pays a full rebuild in its own target dir. Run it when
 touching a Rust module's behavior or tests.
 
 ## Required coverage by category
 
-| Category            | Scope                                         | Required |
-| ------------------- | --------------------------------------------- | -------- |
-| EPUB parser         | `sidecar/src/epub/`                           | 80%      |
-| PDF parser          | `sidecar/src/pdf/`                            | 80%      |
-| Services            | `sidecar/src/services/`                       | 80%      |
-| Repository          | `sidecar/src/repository/`                     | 80%      |
-| Database            | `sidecar/src/db/`                             | 80%      |
-| Domain models       | `sidecar/src/domain/`                         | 80%      |
-| Library view        | `frontend/src/components/library/`            | 80%      |
-| Book cards/detail   | `frontend/src/components/books/`              | 80%      |
-| Reader (EPUB + PDF) | `frontend/src/components/reader/`             | 92%      |
-| Reader state        | `frontend/src/state/`                         | 92%      |
-| EPUB reader lib     | `frontend/src/lib/epub/`                      | 95%      |
-| Search              | `frontend/src/components/search/`             | 80%      |
-| Collections         | `frontend/src/components/collections/`        | 80%      |
-| Settings            | `frontend/src/components/settings/`           | 80%      |
-| App shell           | `frontend/src/components/layout/` + `App.tsx` | 80%      |
-| Hooks               | `frontend/src/hooks/`                         | 80%      |
-| Frontend lib        | `frontend/src/lib/`                           | 80%      |
+| Category            | Scope                                         | Required | v5 baseline |
+| ------------------- | --------------------------------------------- | -------- | ----------- |
+| EPUB parser         | `sidecar/src/epub/`                           | 80%      | n/a         |
+| PDF parser          | `sidecar/src/pdf/`                            | 80%      | n/a         |
+| Services            | `sidecar/src/services/`                       | 80%      | n/a         |
+| Repository          | `sidecar/src/repository/`                     | 80%      | n/a         |
+| Database            | `sidecar/src/db/`                             | 80%      | n/a         |
+| Domain models       | `sidecar/src/domain/`                         | 80%      | n/a         |
+| Library view        | `frontend/src/components/library/`            | 80%      | 91.05%      |
+| Book cards/detail   | `frontend/src/components/books/`              | 80%      | 84.00%      |
+| Reader (EPUB + PDF) | `frontend/src/components/reader/`             | 92%      | 95.78%      |
+| Reader state        | `frontend/src/state/`                         | 92%      | 93.59%      |
+| EPUB reader lib     | `frontend/src/lib/epub/`                      | 95%      | 97.00%      |
+| Search              | `frontend/src/components/search/`             | 80%      | 93.88%      |
+| Collections         | `frontend/src/components/collections/`        | 80%      | 100.00%     |
+| Settings            | `frontend/src/components/settings/`           | 80%      | 94.39%      |
+| App shell           | `frontend/src/components/layout/` + `App.tsx` | 80%      | 90.91%      |
+| Hooks               | `frontend/src/hooks/`                         | 80%      | 88.19%      |
+| Frontend lib        | `frontend/src/lib/`                           | 80%      | 88.36%      |
+
+The v5 baseline column (2026-10-22) was taken by the vite-plus migration,
+which moved the frontend to vitest 5. It records the first run on the new
+instrument; Rust rows are n/a because that change did not touch the Rust
+instrument.
 
 Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.
@@ -55,29 +60,32 @@ Numbers drift as code changes; rerun `just coverage` for current values
 The README coverage badge (shields.io endpoint) is generated by
 `scripts/coverage-badge.mjs` from the same `coverage-summary.json` the
 thresholds gate, published by CI's `coverage` job to the `badges` branch on
-main pushes (PR runs stop before publish — the badge only ever shows
+main pushes (PR runs stop before publish; the badge only ever shows
 numbers from green runs). The badge shows the **worst per-category** lines
-coverage plus the overall, never the overall alone — the worst category is
+coverage plus the overall, never the overall alone. The worst category is
 the gate's binding number. `maxAge` is 1 day, so a docs-only push (CI skip)
 leaves the badge at most a day stale.
 
 Instrument rule (PR #12/#21): a vitest/coverage-provider bump moves the
 instrument; any such change lands together with badge-script/threshold
-adjustments and a fresh baseline column here, in one change.
+adjustments and a fresh baseline column here, in one change. The 2026-10-22
+vite-plus migration (vitest 4 to 5, ast-v8-to-istanbul) took the current
+column and verified instrument parity against the v4 run: the same 122-file
+set, identical 92.55% total, worst per-file lines delta 0.15pp.
 
 ## Outside the gate (and why)
 
-| What                                                        | Why it is excluded                                                                                                               |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `sidecar/src/commands/` → sidecar method table              | IPC boundary — no business logic by contract (docs/ARCHITECTURE.md); every path is driven through the real app by the E2E suite. |
-| `sidecar/src/lib.rs`                                        | Wiring (pool init, state, method registration) — boots in every E2E run.                                                         |
-| `sidecar/src/error.rs`                                      | thiserror-derived Display/From code.                                                                                             |
-| `sidecar/src/main.rs`, `frontend/src/main.tsx`              | Entry points.                                                                                                                    |
-| `electron/main/`, `electron/preload/`                       | Process plumbing — exercised on every E2E run; no business logic by contract (docs/ARCHITECTURE.md).                             |
-| `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams — thin wrappers around Readium/PDFium; real behavior covered by the E2E reader suites, unit tests mock the seam.    |
-| `frontend/src/components/ui/`                               | shadcn/ui primitives — vendored scaffolding, not app logic.                                                                      |
-| `frontend/src/lib/fixtures.ts`                              | Sample data for tests/previews.                                                                                                  |
-| `frontend/src/types/`                                       | Pure type declarations, no runtime code.                                                                                         |
+| What                                                        | Why it is excluded                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `sidecar/src/commands/` → sidecar method table              | IPC boundary, no business logic by contract (docs/ARCHITECTURE.md); every path is driven through the real app by the E2E suite. |
+| `sidecar/src/lib.rs`                                        | Wiring (pool init, state, method registration), boots in every E2E run.                                                         |
+| `sidecar/src/error.rs`                                      | thiserror-derived Display/From code.                                                                                            |
+| `sidecar/src/main.rs`, `frontend/src/main.tsx`              | Entry points.                                                                                                                   |
+| `electron/main/`, `electron/preload/`                       | Process plumbing, exercised on every E2E run; no business logic by contract (docs/ARCHITECTURE.md).                             |
+| `src/lib/epub/readiumEngine.ts`, `src/lib/pdf/pdfEngine.ts` | Engine seams, thin wrappers around Readium/PDFium; real behavior covered by the E2E reader suites, unit tests mock the seam.    |
+| `frontend/src/components/ui/`                               | shadcn/ui primitives, vendored scaffolding, not app logic.                                                                      |
+| `frontend/src/lib/fixtures.ts`                              | Sample data for tests/previews.                                                                                                 |
+| `frontend/src/types/`                                       | Pure type declarations, no runtime code.                                                                                        |
 
 Adding a new feature area: add its glob/module to the gate tables
 (`frontend/vite.config.ts` and `scripts/coverage-gate.mjs`) and a row here

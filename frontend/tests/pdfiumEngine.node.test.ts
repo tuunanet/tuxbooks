@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 
 import { normalizePdfOutline } from "@/lib/pdf/pdfOutline";
 import { PdfRangeSource, type RangeFetcher } from "@/lib/pdf/pdfRangeSource";

@@ -2,9 +2,9 @@
   "name": "tuxbooks",
   "version": "0.1.0",
   "private": true,
-  "license": "GPL-3.0-or-later",
-  "homepage": "https://github.com/tuunanet/tuxbooks",
   "description": "Local-first ebook library manager (bookshelf style) built with Electron + React + a Rust sidecar.",
+  "homepage": "https://github.com/tuunanet/tuxbooks",
+  "license": "GPL-3.0-or-later",
   "main": "electron/dist/main.cjs",
   "scripts": {
     "postinstall": "node node_modules/electron/install.js",
@@ -14,10 +14,10 @@
     "test": "pnpm --filter frontend test",
     "test:ci": "pnpm --filter frontend test:ci",
     "lint": "pnpm --filter frontend lint && tsc -p electron --noEmit",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "vp fmt .",
+    "format:check": "vp fmt --check .",
     "typecheck:frontend": "tsc -p frontend --noEmit",
-    "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit"
+    "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.13.4",
@@ -25,8 +25,8 @@
     "electron-builder": "26.15.3",
     "esbuild": "^0.28.2",
     "lint-staged": "^17.5.1",
-    "prettier": "^3.6.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite-plus": "catalog:"
   },
   "packageManager": "pnpm@10.34.5",
   "desktopName": "tuxbooks.desktop"

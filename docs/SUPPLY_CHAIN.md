@@ -55,7 +55,7 @@ clears the advisory, run the full test suite, and never batch unrelated
 bumps into a security change (a wide upgrade is its own release risk).
 Functional minors/majors behind the pinned reader packages (Readium,
 zip) ride Dependabot PRs and are reviewed when they arrive, not pulled
-early — their APIs feed the reader seams in docs/EPUB.md and docs/PDF.md.
+early, because their APIs feed the reader seams in docs/EPUB.md and docs/PDF.md.
 
 ## S-2: audit tooling and triage
 
@@ -71,12 +71,12 @@ with a reason and a revisit date.
 
 Current triage:
 
-| Finding                                                                                                                        | Severity | Blocked? | Resolution                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| RUSTSEC-2026-0194/0195 (quick-xml quadratic runtime, unbounded namespace allocation — both in the hostile EPUB/XML parse path) | high     | yes      | Fixed by upgrading quick-xml 0.37.5 -> 0.41.0 (2026-09-16, this task)                                                                                                                                                                                                                                   |
-| RUSTSEC-2023-0071 (rsa, Marvin key-recovery side channel)                                                                      | medium   | no       | Ignored in `sidecar/.cargo/audit.toml`: `rsa` enters the lockfile only as an optional dependency of sqlx-mysql, which is never compiled (sqlite-only build), and no fixed release exists. Revisit when the tree changes.                                                                                |
-| GHSA-vfj7-8cjw-p6xm (braces stack exhaustion via deeply nested glob patterns)                                                  | high     | no       | Triaged 2026-10-12 in `scripts/npm-audit-gate.mjs`: no upstream fix (3.0.3 is the latest release, micromatch/braces#70 open), dev-only via micromatch <- fast-glob, and the patterns it compiles come from first-party config, not untrusted input. Revisit 2026-11-12.                                 |
-| RUSTSEC-2026-0367/0368/0369 (zip symlink targets and SUID preservation in `extract()`)                                         | critical | no       | Triaged 2026-10-19 in `sidecar/.cargo/audit.toml`: the sidecar reads entries with `by_index`/`by_name` and writes with `ZipWriter`; it never calls `ZipArchive::extract` or `ZipStreamReader::extract`, so no attacker-controlled extraction path exists. Upgrade to zip 9.x tracked as `tuxbooks-zjy`. |
+| Finding                                                                                                                          | Severity | Blocked? | Resolution                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RUSTSEC-2026-0194/0195 (quick-xml quadratic runtime and unbounded namespace allocation, both in the hostile EPUB/XML parse path) | high     | yes      | Fixed by upgrading quick-xml 0.37.5 -> 0.41.0 (2026-09-16, this task)                                                                                                                                                                                                                                   |
+| RUSTSEC-2023-0071 (rsa, Marvin key-recovery side channel)                                                                        | medium   | no       | Ignored in `sidecar/.cargo/audit.toml`: `rsa` enters the lockfile only as an optional dependency of sqlx-mysql, which is never compiled (sqlite-only build), and no fixed release exists. Revisit when the tree changes.                                                                                |
+| GHSA-vfj7-8cjw-p6xm (braces stack exhaustion via deeply nested glob patterns)                                                    | high     | no       | Triaged 2026-10-12 in `scripts/npm-audit-gate.mjs`: no upstream fix (3.0.3 is the latest release, micromatch/braces#70 open), dev-only via micromatch <- fast-glob, and the patterns it compiles come from first-party config, not untrusted input. Revisit 2026-11-12.                                 |
+| RUSTSEC-2026-0367/0368/0369 (zip symlink targets and SUID preservation in `extract()`)                                           | critical | no       | Triaged 2026-10-19 in `sidecar/.cargo/audit.toml`: the sidecar reads entries with `by_index`/`by_name` and writes with `ZipWriter`; it never calls `ZipArchive::extract` or `ZipStreamReader::extract`, so no attacker-controlled extraction path exists. Upgrade to zip 9.x tracked as `tuxbooks-zjy`. |
 
 ## S-3: build/install scripts
 
@@ -105,11 +105,11 @@ inventoried.
 ## S-5: dependency maturity period
 
 Decision: **adopted** (2026-09-11, recorded in `.github/dependabot.yml`
-and `pnpm-workspace.yaml`). No JS dependency — direct or transitive —
+and `pnpm-workspace.yaml`). No JS dependency, direct or transitive,
 younger than 30 days may enter the tree:
 
 - `minimumReleaseAge: 43200` in `pnpm-workspace.yaml` gates `pnpm
-install`/`update` (verified: `ERR_PNPM_NO_MATURE_MATCHING_VERSION`).
+  install`/`update` (verified: `ERR_PNPM_NO_MATURE_MATCHING_VERSION`).
 - Dependabot's `cooldown: default-days: 30` gates update PRs, including
   the GitHub-Actions bumps (moved-tag attacks ride the same floor).
 
@@ -118,4 +118,10 @@ can land here (the Shai-Hulud pattern), while Dependabot security updates
 still bypass the cooldown so patched releases are not delayed. The urgent
 path is `minimumReleaseAgeExclude` in `pnpm-workspace.yaml`: exact
 `name@version` pins, only for patched releases of already-vulnerable
-packages, each with a dated comment, removed once the versions age out.
+packages or a deliberate toolchain adoption that cannot wait out the
+floor, each with a dated comment, removed once the versions age out.
+Scoped patterns (`@org/*`) may stand in for pins only where a parent
+package pins the dependency to an exact version (binary binding trains
+shipped by a pinned tool), so the pattern cannot admit anything newer
+than the reviewed version; the entries still carry the dated comment and
+aging-out discipline.

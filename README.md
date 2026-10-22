@@ -21,7 +21,8 @@ progress, and provides EPUB and PDF reading experiences.
 - **Frontend:** React 19, TypeScript (strict), Vite, Tailwind CSS 4, shadcn/ui
 - **Testing:** Vitest + React Testing Library, Playwright Test
   (Playwright's Electron API), cargo test
-- **Tooling:** pnpm, just, rustfmt, clippy, ESLint, Prettier, GitHub Actions
+- **Tooling:** pnpm, just, vite-plus (`vp`: Vite, Vitest, oxlint, oxfmt),
+  rustfmt, clippy, GitHub Actions
 
 ## Install
 
@@ -46,10 +47,14 @@ app is open. Delete that folder to reset the dev profile.
 
 ## Getting started
 
-Prerequisites: Node ≥ 22, pnpm 10, Rust (stable).
+Prerequisites: Rust (stable) and the [vite-plus CLI](https://viteplus.dev/).
+`vp` provides Node (22.18+ or 24.11+) and selects this repo's pinned pnpm 10,
+so you don't need a Node version manager. Without vp, install Node and pnpm
+yourself; the project-local `vp` binary comes with `pnpm install` either way.
 
 ```sh
-pnpm install
+curl -fsSL https://vite.plus | bash   # one-time vp install
+vp install
 just dev        # Electron window with hot reload (Vite renderer + Rust sidecar)
 just build      # release build (renderer, Electron main/preload, sidecar binary)
 ```
@@ -62,15 +67,40 @@ just build      # release build (renderer, Electron main/preload, sidecar binary
 | `just build`           | Release build: renderer, Electron main/preload, sidecar binary       |
 | `just test`            | All unit tests (Rust + frontend, concurrently)                       |
 | `just test-rust`       | `cargo test` (unit + integration + property tests)                   |
-| `just test-frontend`   | Vitest in CI mode                                                    |
+| `just test-frontend`   | Frontend unit tests: vitest via vite-plus, with coverage floors      |
 | `just test-e2e`        | Real-app desktop E2E — headless on Linux (Xvfb), no display needed   |
 | `just test-e2e-headed` | Same E2E on your visible display (debugging)                         |
-| `just lint`            | clippy (`-D warnings`) + ESLint + Electron typecheck                 |
-| `just format`          | rustfmt + Prettier                                                   |
+| `just lint`            | clippy (`-D warnings`) + oxlint + Electron typecheck                 |
+| `just format`          | rustfmt + oxfmt                                                      |
 | `just check`           | format-check → lint → typecheck → tests (daily driver)               |
 
-Individual pieces: `pnpm --filter frontend test`,
-`cargo test --manifest-path sidecar/Cargo.toml`.
+The frontend stack is [vite-plus](https://viteplus.dev/): one CLI (`vp`)
+drives Vite, Vitest, oxlint, and oxfmt. The `just` recipes stay the daily
+driver because they also orchestrate the Rust sidecar, E2E, and packaging.
+For frontend-only work, run `vp` directly:
+
+| Command                                   | Does                                               |
+| ----------------------------------------- | -------------------------------------------------- |
+| `vp check`                                | oxfmt check + oxlint in one pass                   |
+| `vp fmt`                                  | Format the repo (`vp fmt --check` verifies only)   |
+| `vp lint`                                 | oxlint over the frontend scope                     |
+| `pnpm --filter frontend exec vp test run` | Frontend unit tests; append a path for one file    |
+| `vp run frontend:test`                    | Cached frontend unit tests (what `just test` runs) |
+| `vp run frontend:build`                   | Cached renderer build (typecheck + bundle)         |
+| `vp build`                                | Renderer production build                          |
+| `vp dev`                                  | Renderer dev server alone (port 1420)              |
+
+The two `vp run` tasks are content-cached: an unchanged tree replays the
+recorded run in milliseconds, and any changed input forces a real run that
+names the file which changed. `pnpm exec vp run --no-cache <task>` skips the
+cache; `vp cache clean` resets it.
+
+Config lives in the root `vite.config.ts` (lint and format rules) and
+`frontend/vite.config.ts` (app build and test setup). Commits run `vp fmt`
+over staged files plus a typecheck through the pre-commit hook.
+
+Individual pieces: `cargo test --manifest-path sidecar/Cargo.toml`, and a
+single frontend test file through the `vp test run` command above.
 
 E2E needs the `xvfb` package (`sudo apt install xvfb` on Debian/Ubuntu).
 `just test-e2e` is safe to run from SSH, CI, or anywhere without a desktop

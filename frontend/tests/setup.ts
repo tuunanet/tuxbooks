@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, afterEach, afterAll } from "vitest";
+import { beforeAll, beforeEach, afterEach, afterAll } from "vite-plus/test";
 import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import {

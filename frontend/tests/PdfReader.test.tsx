@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useState, type RefObject } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -406,7 +406,8 @@ describe("PdfReader loading", () => {
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     await waitFor(() => expect(doc.renderOptions.at(-1)?.smartColors).toBeDefined());
     const smart = doc.renderOptions.at(-1)?.smartColors as
-      { background: number[]; text: number[] } | undefined;
+      | { background: number[]; text: number[] }
+      | undefined;
     // #101013 background, #e4e4e7 text (0–1 components).
     expect(smart?.background[0]).toBeCloseTo(16 / 255, 3);
     expect(smart?.text[0]).toBeCloseTo(228 / 255, 3);
