@@ -137,7 +137,7 @@ not to prose you did not touch.
 - Issue tracker: bd (Beads), the repo's tracker; use the `bd` CLI. See `docs/agents/issue-tracker.md`.
 - Triage labels: the five canonical roles use their default strings as bd labels. See `docs/agents/triage-labels.md`.
 - Domain docs: single context, one `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
-- Toolchain: vite-plus (the `vp` CLI) drives frontend dev, build, test, lint, and format; load the `vite-plus` skill before running vp commands or editing the toolchain config.
+- Toolchain: vite-plus; load the `vite-plus` skill before vp or toolchain work.
 
 ## External knowledge
 

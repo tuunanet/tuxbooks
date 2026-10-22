@@ -23,8 +23,9 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
 
 - `vp lint`, `vp fmt`, and `vp check` work from the repo root; their config
   lives in the root `vite.config.ts` (`lint`, `fmt`, and `run` blocks).
-- `vp test` at the root is not wired here. Frontend tests run through the
-  cached task (`vp run frontend:test`) or
+- `vp test` from the root discovers `frontend/tests/` but runs it without
+  the frontend project config, so every file fails on the `@/` import
+  alias. Use the cached task (`vp run frontend:test`) or
   `vp -C frontend test run <file-or-pattern>`.
 - The `frontend:test` and `frontend:build` tasks are content-cached with
   automatic input tracking: an unchanged tree replays the recorded run, and
@@ -34,6 +35,20 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
   fixtures) are documented next to the task definitions in the root config.
 - Git hooks stay owned by beads (`core.hooksPath` points at `.beads/hooks`),
   so vp's hook dispatcher is intentionally not installed.
+
+## Upgrades and setup gotchas
+
+- Installing or upgrading the toolchain train trips the 30-day release-age
+  floor (`ERR_PNPM_NO_MATURE_MATCHING_VERSION`). The fix is dated
+  `name@version` pins in `minimumReleaseAgeExclude` in
+  `pnpm-workspace.yaml`; docs/SUPPLY_CHAIN.md documents the procedure.
+- A fresh clone bootstrapped with `vp install` alone links node_modules
+  without pnpm's ignored-builds record, which fails `just check`'s
+  supply-chain stream until a plain `pnpm install` relinks.
+- Do not run `vp create` or `vp migrate` with agent setup here: with no
+  marker section in AGENTS.md, it appends the generic vite-plus block back.
+  This skill is the agent guidance for this repo; re-sync it by hand from
+  `node_modules/vite-plus/AGENTS.md` when the packaged template changes.
 
 No global vp installed? Prefix vp commands with `pnpm exec`, which resolves
 the project-pinned copy (the justfile does this everywhere so CI works
