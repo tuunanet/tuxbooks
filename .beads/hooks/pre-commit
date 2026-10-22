@@ -33,9 +33,11 @@ fi
 # --- END BEADS INTEGRATION v1.2.2 ---
 
 # --- TUXBOOKS PRE-COMMIT (outside bd's markers; preserved per `bd hooks install`) ---
-# Format staged files (vp fmt via lint-staged) and typecheck. Both skip
-# with a warning when the tooling isn't installed (fresh clone before
-# pnpm install) — CI's frontend job still enforces format, lint, and types.
+# Format staged files (vp fmt via lint-staged) and typecheck. Staged files
+# that vp fmt ignores (hidden directories such as .agents/) pass through
+# unformatted. Both skip with a warning when the tooling isn't installed
+# (fresh clone before pnpm install) — CI's frontend job still enforces
+# format, lint, and types.
 # The test suite deliberately stays out of here: package.json's test script
 # is watch-mode vitest, and running the full gate per commit contradicts
 # docs/AGENTS.md (iterate narrow, run `just check` once before declaring done).

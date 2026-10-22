@@ -42,9 +42,12 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
   floor (`ERR_PNPM_NO_MATURE_MATCHING_VERSION`). The fix is dated
   `name@version` pins in `minimumReleaseAgeExclude` in
   `pnpm-workspace.yaml`; docs/SUPPLY_CHAIN.md documents the procedure.
-- A fresh clone bootstrapped with `vp install` alone links node_modules
-  without pnpm's ignored-builds record, which fails `just check`'s
-  supply-chain stream until a plain `pnpm install` relinks.
+- `vp install` is the primary install command and delegates to the repo's
+  pinned pnpm. If node_modules is stale or half-linked, the symptom is
+  `Cannot find module 'vite-plus/test'` across the test suite. Recover
+  with a plain `pnpm install`: it relinks node_modules and restores
+  pnpm's ignored-builds record, which `just check`'s supply-chain stream
+  reads through `pnpm ignored-builds`.
 - Do not run `vp create` or `vp migrate` with agent setup here: with no
   marker section in AGENTS.md, it appends the generic vite-plus block back.
   This skill is the agent guidance for this repo; re-sync it by hand from
