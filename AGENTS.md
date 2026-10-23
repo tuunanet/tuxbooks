@@ -108,7 +108,10 @@ skip it when `graft` already answers the question.
 
 Use the narrowest command first. Run the full gate once, near the end, not
 during iteration. The frontend stack is vite-plus (`vp`); load the
-`vite-plus` skill before running vp commands or touching the toolchain config.
+`vite-plus` skill before running vp commands, running package-manager
+commands (pnpm install/update/dedupe/audit), or touching the toolchain
+config. Task handovers and agent notes may point at skills but never
+narrow that list.
 
 ```sh
 # frontend (React + vitest via vite-plus)
