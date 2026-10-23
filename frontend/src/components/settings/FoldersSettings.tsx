@@ -12,12 +12,12 @@ import { formatMb } from "@/lib/format";
 import { useImport } from "@/state/importState";
 
 /**
- * The Folders tab: every folder TuxBooks watches, with its book count and
- * total size, and a label on the rows whose path is gone from disk so dead
- * entries stay visible. Rows carry checkboxes and one toolbar Unwatch acts
- * on the whole selection. Add folder runs the same import flow the header
- * menu uses, so a folder added here is watched exactly like one imported
- * from there.
+ * The Watched folders tab: every folder TuxBooks watches, with its book
+ * count and total size, and a label on the rows whose path is gone from
+ * disk so dead entries stay visible. Rows carry checkboxes and one toolbar
+ * Unwatch acts on the whole selection. Add folder runs the same import flow
+ * the header menu uses, so a folder added here is watched exactly like one
+ * imported from there.
  */
 export function FoldersSettings() {
   const { importPaths } = useImport();

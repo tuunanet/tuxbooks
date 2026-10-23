@@ -78,8 +78,8 @@ const REPORT: StorageReport = {
 };
 
 /**
- * The Data tab reads only the storage report, so it renders on its own with
- * no library provider behind it.
+ * The Application Data tab reads only the storage report, so it renders on
+ * its own with no library provider behind it.
  */
 function renderDataSettings() {
   render(<DataSettings />);
@@ -299,7 +299,7 @@ describe("DataSettings", () => {
       </ThemeStateProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("button", { name: "Application Data" }));
     expect(await screen.findByTestId("storage-total")).toBeInTheDocument();
     expect(screen.getByTestId("storage-root-app-config")).toBeInTheDocument();
   });
