@@ -1,8 +1,10 @@
 ---
 name: vite-plus
 description: This project's frontend toolchain is vite-plus (the vp CLI).
-  Load before running vp commands, editing the toolchain blocks in
-  vite.config.ts, or debugging vp install, versions, or the task cache.
+  Load before running vp commands, running package-manager commands
+  (install, update, dedupe, audit, why, outdated), editing the toolchain
+  blocks in vite.config.ts, or debugging vp installs, versions, or the
+  task cache.
 ---
 
 # vite-plus
@@ -36,6 +38,37 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
 - Git hooks stay owned by beads (`core.hooksPath` points at `.beads/hooks`),
   so vp's hook dispatcher is intentionally not installed.
 
+## Dependency maintenance
+
+Route package-manager work through vp. It forwards to the repo's pinned
+pnpm, so `vp install`, `vp add`, `vp remove`, `vp update`, `vp dedupe`,
+`vp outdated`, `vp why`, `vp info`, and `vp pm audit` cover dependency
+maintenance. The full command list lives in
+`node_modules/vite-plus/docs/guide/package-management.md`.
+
+Verified behavior worth knowing before you rely on a command:
+
+- `vp --help` lists only `install` under "Package Manager Commands".
+  The rest exist but appear only in `vp <command> --help`, so reading
+  the top-level help suggests pnpm is the only route. It is not.
+- `vp update`, like the pnpm behind it, moves direct dependencies
+  within their declared ranges. A transitive the lockfile already pins
+  does not move, whatever arguments you pass. To force one transitive
+  to re-resolve, delete its entries from `pnpm-lock.yaml` and
+  reinstall; pnpm regenerates only those entries.
+- `vp outdated` reports direct dependencies only. A transitive advisory
+  never appears there; reach those through `vp pm audit --json` or the
+  repo's audit gate.
+- `vp why` printed nothing in this repo for a dev-only transitive
+  package, and plain `pnpm why` was silent in the same checkout, while
+  `grep hono pnpm-lock.yaml` found it. Stale node_modules is the
+  unconfirmed suspect: every fresh scratch reproduction prints the
+  tree, flat or workspace, direct or transitive, pinned pnpm 10 or 12.
+  Treat empty why output as untrusted: grep the lockfile, reinstall if
+  the tree looks stale (see the install gotcha below).
+- `pnpm ignored-builds` has no vp equivalent; the supply-chain gate
+  reads it directly (see the install gotcha below).
+
 ## Upgrades and setup gotchas
 
 - Installing or upgrading the toolchain train trips the 30-day release-age
@@ -61,6 +94,7 @@ without a global install).
 
 `vp toolchain` shows the active release's version graph; add a tool name to
 select a part of it (`vp toolchain vite`), and `--global` ignores the local
-package. `vp why <package>` walks the dependency graph. If install, runtime,
-or package-manager behavior looks wrong, run `vp env doctor` and include its
-output when asking for help.
+package. If install, runtime, or package-manager behavior looks wrong, run
+`vp env doctor` and include its output when asking for help. `env` lives in
+the global CLI only; the project-local `vp` refuses it with a pointer, so
+install a global vp first or paste the refusal.
