@@ -109,17 +109,19 @@ skip it when `graft` already answers the question.
 Use the narrowest command first. Run the full gate once, near the end, not
 during iteration. The frontend stack is vite-plus (`vp`); load the
 `vite-plus` skill before running vp commands, running package-manager
-commands (pnpm install/update/dedupe/audit), or touching the toolchain
-config. Task handovers and agent notes may point at skills but never
-narrow that list.
+commands (vp or pnpm install/update/dedupe/audit), or touching the
+toolchain config. Task handovers and agent notes may point at skills but
+never narrow that list.
 
 ```sh
 # frontend (React + vitest via vite-plus)
 vp -C frontend test run <file-or-pattern>
 vp -C frontend run typecheck && vp lint
 
-# no global vp installed? prefix vp commands with pnpm exec (the justfile
-# does exactly that, which is why it also works in CI)
+# bare vp uses the global CLI when one is installed and delegates to
+# this repo's pinned toolchain; without a global (CI, containers) prefix
+# pnpm exec, as the justfile does. vp check is the JS slice only (fmt,
+# lint, types); just check below is the full polyglot gate.
 
 # rust sidecar
 cargo test --manifest-path sidecar/Cargo.toml <target>

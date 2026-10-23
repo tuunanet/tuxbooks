@@ -40,17 +40,24 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
 
 ## Dependency maintenance
 
-Route package-manager work through vp. It forwards to the repo's pinned
-pnpm, so `vp install`, `vp add`, `vp remove`, `vp update`, `vp dedupe`,
-`vp outdated`, `vp why`, `vp info`, and `vp pm audit` cover dependency
-maintenance. The full command list lives in
+Route package-manager work through vp. With the global CLI installed,
+the setup the docs recommend (global plus local together), bare `vp` is
+the entry point: it delegates to the project's pinned toolchain and its
+help lists the full command set. Where the global is absent (CI,
+containers), prefix `pnpm exec` as the fallback note below describes.
+The commands forward to the pinned pnpm, so `vp install`, `vp add`,
+`vp remove`, `vp update`, `vp dedupe`, `vp outdated`, `vp why`,
+`vp info`, and `vp pm audit` cover dependency maintenance. The full
+command list lives in
 `node_modules/vite-plus/docs/guide/package-management.md`.
 
 Verified behavior worth knowing before you rely on a command:
 
-- `vp --help` lists only `install` under "Package Manager Commands".
-  The rest exist but appear only in `vp <command> --help`, so reading
-  the top-level help suggests pnpm is the only route. It is not.
+- In vite-plus 1.3.0 the project-local CLI's `vp --help` lists only
+  `install`; the global CLI of the same version lists every command
+  under "Manage Dependencies". The local commands still run, so trust
+  `vp <command> --help` or the shipped guide over the local top-level
+  help. Worth re-checking after a toolchain bump.
 - `vp update`, like the pnpm behind it, moves direct dependencies
   within their declared ranges. A transitive the lockfile already pins
   does not move, whatever arguments you pass. To force one transitive
