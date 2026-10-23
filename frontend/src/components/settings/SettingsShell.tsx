@@ -8,7 +8,6 @@ import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { pickBookFiles, pickDirectory } from "@/lib/bridge";
 import { epubForegroundFitsTheme, epubSurfaceTheme, isEpubHexColor } from "@/lib/epub/appearance";
 import {
   HIGHLIGHT_COLOR_KEYS,
@@ -33,7 +32,6 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
-import { useImport } from "@/state/importState";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
@@ -401,43 +399,13 @@ function AppThemeRow() {
 }
 
 /**
- * General holds the app theme and the library import actions. Folders become
- * watched locations, and a picked file adopts its folder the same way — both
- * go through the shared import flow the header menu uses.
+ * General holds the app theme. Library contents are managed in the Watched
+ * folders tab; importing also runs from the header menu and by drag-and-drop.
  */
 function GeneralSection() {
-  const { importPaths } = useImport();
-
-  const importFolder = async () => {
-    const dir = await pickDirectory();
-    if (dir) await importPaths([dir]);
-  };
-
-  const importFiles = async () => {
-    const files = await pickBookFiles();
-    if (files.length > 0) await importPaths(files);
-  };
-
   return (
     <dl data-testid="settings-rows" className="mt-6 divide-y">
       <AppThemeRow />
-      <div className="grid grid-cols-[10rem_1fr] gap-4 py-3">
-        <dt className="text-sm text-muted-foreground">Library</dt>
-        <dd className="min-w-0">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void importFolder()}>
-              Add library folder…
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void importFiles()}>
-              Import books…
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Importing a file or folder watches its folder, so every book there stays in sync. You
-            can also drag files onto the window to import them.
-          </p>
-        </dd>
-      </div>
     </dl>
   );
 }
@@ -477,12 +445,12 @@ function SettingsNavigation({
 }
 
 /**
- * Settings screen. General holds the app theme plus the library import
- * actions; EPUB and PDF hold real, persisted default appearance controls
- * (saved on device and applied whenever a book opens); Watched folders
- * lists each watched location with its counts; Application Data shows the
- * app-owned storage roots; Keyboard Shortcuts describes the bindings;
- * About shows the app version, creator credit, and contributor doc links.
+ * Settings screen. General holds the app theme; EPUB and PDF hold real,
+ * persisted default appearance controls (saved on device and applied whenever
+ * a book opens); Watched folders lists each watched location with its counts;
+ * Application Data shows the app-owned storage roots; Keyboard Shortcuts
+ * describes the bindings; About shows the app version, creator credit, and
+ * contributor doc links.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
