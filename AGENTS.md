@@ -77,6 +77,8 @@ Exploration rules:
 
 `graft/` is a prebuilt graph of this repo, kept in sync with the code. Use the
 **graft CLI** (the MCP server is off by design); most tasks need one call.
+The CLI is a devDependency, so `vp install` provides it; like vp, bare `graft`
+uses a global install when one exists, and without a global prefix `pnpm exec`.
 
 ```sh
 graft ask "<question>" --source   # locate + understand; inlines the code crux

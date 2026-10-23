@@ -104,6 +104,18 @@ minimumReleaseAgeExclude:
   # package the lockfile pins). The rollup 4.63.1 pins that shared this
   # comment aged out and were removed on 2026-10-12.
   - "@noble/hashes@2.4.0"
+  # 2026-10-23: graft@0.24.1 adoption (the repo-graph CLI the agent docs
+  # instruct; published under the @nanonets npm scope). 0.24.1 shipped
+  # 2026-10-22, younger than the floor; exact-pinned in devDependencies.
+  # The install error named each transitive pin below (no mature match
+  # inside its range); graft's other deps resolved mature. Remove each
+  # pin once it is 30+ days old.
+  - "@nanonets/graft@0.24.1"
+  - "tree-sitter-wasm@2.0.4"
+  - "web-tree-sitter@0.27.1"
+  - "dotenv@18.0.9"
+  - "@anthropic-ai/sdk@0.133.0"
+  - "undici@7.30.1"
 
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:

@@ -80,14 +80,18 @@ Current triage:
 
 ## S-3: build/install scripts
 
-pnpm 10 refuses dependency lifecycle scripts by default. The reviewed sets
-live in `pnpm-workspace.yaml` and are asserted by the offline gate:
+pnpm 10 refuses dependency lifecycle scripts by default. The allowlist
+lives in `pnpm-workspace.yaml`; the reviewed-ignored set lives in
+`scripts/supply-chain-gate.mjs`. The offline gate asserts both:
 
 - Allowed to run (`onlyBuiltDependencies`): `esbuild` (platform binary),
   `electron` (runtime download). The root `package.json` `postinstall`
   hook is first-party code that re-runs electron's installer.
 - Reviewed and ignored: `electron-winstaller` (transitive of
-  electron-builder; its script is not needed for the Linux targets).
+  electron-builder; its script is not needed for the Linux targets), and
+  with the 2026-10-23 graft CLI adoption the `tree-sitter` family plus
+  `@nanonets/graft` itself (the CLI indexes through the wasm grammars it
+  ships; its own postinstall is a telemetry nudge).
 
 A new package with an install script shows up in `pnpm ignored-builds`
 and fails `just check` until it is reviewed into one of the two lists.
