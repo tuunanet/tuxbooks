@@ -35,9 +35,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
 
       # Installs vp (the version pinned by the project catalog), its Node.js
-      # runtime, pnpm, and the frozen dependencies; cache: true caches the
-      # package-manager store. just recipes call pnpm exec / pnpm --filter
-      # internally, which works with the managed pnpm.
+      # runtime, pnpm, and the frozen dependencies (vp install runs frozen
+      # under CI); cache: true caches the package-manager store. just
+      # recipes call bare vp and pnpm --filter internally, which works with
+      # the managed pnpm.
       - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
           node-version: 24
@@ -81,9 +82,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # Installs vp (the version pinned by the project catalog), its Node.js
-      # runtime, pnpm, and the frozen dependencies; cache: true caches the
-      # package-manager store. just recipes call pnpm exec / pnpm --filter
-      # internally, which works with the managed pnpm.
+      # runtime, pnpm, and the frozen dependencies (vp install runs frozen
+      # under CI); cache: true caches the package-manager store. just
+      # recipes call bare vp and pnpm --filter internally, which works with
+      # the managed pnpm.
       - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
           node-version: 24
@@ -144,7 +146,6 @@ jobs:
         env:
           TUXBOOKS_SIDECAR_CACHE: gha
         run: |
-          pnpm install --frozen-lockfile
           # Quoted: `package` takes one TARGETS argument; unquoted, just
           # would read the second token as another recipe to run.
           just package "deb AppImage"

@@ -142,7 +142,7 @@ sidecar-release:
 # main/preload bundles, and the release sidecar binary (portable glibc
 # floor via `just sidecar-release`).
 build: fetch-pdfium
-    pnpm exec vp run frontend:build
+    vp run frontend:build
     node scripts/build-electron.mjs
     just sidecar-release
 
@@ -202,10 +202,10 @@ test-rust: fetch-pdfium
 # caps vitest's CPU appetite so the concurrent rust stream keeps cores (the
 # deadline-sensitive worker test flakes without it, bd tuxbooks-6r2); the
 # cap costs no wall time on a 16-core box. Unchanged inputs replay from the
-# task cache (node_modules/.vite/task-cache); `pnpm exec vp run --no-cache
+# task cache (node_modules/.vite/task-cache); `vp run --no-cache
 # frontend:test` forces a real run.
 test-frontend:
-    {{_test_timeout}} pnpm exec vp run frontend:test
+    {{_test_timeout}} vp run frontend:test
 
 test-parallel:
     bash scripts/run-parallel.sh \
@@ -216,7 +216,7 @@ test-parallel:
 # main/preload bundles, and the debug sidecar. The Electron harness needs
 # no special frontend build (the old VITE_WDIO flag died with Tauri).
 build-debug:
-    pnpm exec vp run frontend:build
+    vp run frontend:build
     node scripts/build-electron.mjs
     cargo build --manifest-path sidecar/Cargo.toml
 
@@ -402,7 +402,7 @@ check:
 # json-summary the badge script reads.
 coverage:
     node scripts/coverage-gate.mjs
-    pnpm --filter frontend exec vp test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+    vp -C frontend test run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
 
 # Fuzzing (issue #88, docs/TESTING.md "Fuzzing"). libFuzzer via cargo-fuzz:
 # needs the nightly toolchain and the cargo-fuzz subcommand
