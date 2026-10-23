@@ -69,10 +69,7 @@ and a cover cache under your user profile.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the process
 model and window hardening, and [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md)
-the dependency policy. Found a vulnerability? Please report it privately
-through [GitHub security
-advisories](https://github.com/tuunanet/tuxbooks/security/advisories/new)
-rather than a public issue.
+the dependency policy.
 
 ## Getting started
 
