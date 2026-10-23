@@ -8,7 +8,7 @@ import { THEME_STORAGE_KEY } from "@/lib/theme";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
-import { mockInvoke, pickBookFilesMock, pickDirectoryMock, invokeMock } from "./mocks/bridge";
+import { mockInvoke } from "./mocks/bridge";
 
 function renderSettings() {
   mockInvoke({
@@ -87,21 +87,22 @@ describe("SettingsShell", () => {
     ]);
   });
 
-  it("starts on General with the app theme and library import actions", async () => {
+  it("starts on General with the app theme and no library actions", async () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "App theme" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add library folder…" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import books…" })).toBeInTheDocument();
 
+    // Guards against re-adding import UI to General: the Folders tab owns
+    // watched folders, and the header menu owns importing.
     const rows = screen.getByTestId("settings-rows");
+    expect(rows).not.toHaveTextContent("Add library folder");
+    expect(rows).not.toHaveTextContent("Import books");
+    expect(rows).not.toHaveTextContent("Importing a file or folder watches its folder");
     expect(rows).not.toHaveTextContent("Library folder");
     expect(rows).not.toHaveTextContent("Header → Import");
     expect(rows).not.toHaveTextContent("Managed from the sidebar");
-    expect(rows).toHaveTextContent("Importing a file or folder watches its folder");
-    expect(rows).toHaveTextContent("drag files onto the window");
     expect(rows).not.toHaveTextContent("watched library locations");
   });
 
@@ -183,30 +184,6 @@ describe("SettingsShell", () => {
     expect(rows).toHaveTextContent("Cmd+K");
     expect(rows).toHaveTextContent("Cmd+Shift+A");
     expect(rows).not.toHaveTextContent("Ctrl+K");
-  });
-
-  it("imports the picked folder from General", async () => {
-    pickDirectoryMock.mockResolvedValue("/picked/library");
-    renderSettings();
-
-    await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Add library folder…" }));
-
-    expect(pickDirectoryMock).toHaveBeenCalledTimes(1);
-    expect(invokeMock).toHaveBeenCalledWith("import_paths", { paths: ["/picked/library"] });
-  });
-
-  it("imports picked files from General", async () => {
-    pickBookFilesMock.mockResolvedValue(["/a/one.epub", "/b/two.pdf"]);
-    renderSettings();
-
-    await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Import books…" }));
-
-    expect(pickBookFilesMock).toHaveBeenCalledTimes(1);
-    expect(invokeMock).toHaveBeenCalledWith("import_paths", {
-      paths: ["/a/one.epub", "/b/two.pdf"],
-    });
   });
 
   it("applies and persists the app theme from the General section", async () => {
