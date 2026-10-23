@@ -43,8 +43,8 @@ script or a `vite.config.ts` task, and scripts cannot shadow built-ins, so
 Route package-manager work through vp. With the global CLI installed,
 the setup the docs recommend (global plus local together), bare `vp` is
 the entry point: it delegates to the project's pinned toolchain and its
-help lists the full command set. Where the global is absent (CI,
-containers), prefix `pnpm exec` as the fallback note below describes.
+help lists the full command set. Where the global is absent (containers),
+prefix `pnpm exec` as the fallback note below describes.
 The commands forward to the pinned pnpm, so `vp install`, `vp add`,
 `vp remove`, `vp update`, `vp dedupe`, `vp outdated`, `vp why`,
 `vp info`, and `vp pm audit` cover dependency maintenance. The full
@@ -94,8 +94,9 @@ Verified behavior worth knowing before you rely on a command:
   `node_modules/vite-plus/AGENTS.md` when the packaged template changes.
 
 No global vp installed? Prefix vp commands with `pnpm exec`, which resolves
-the project-pinned copy (the justfile does this everywhere so CI works
-without a global install).
+the project-pinned copy. The justfile calls bare vp and CI installs it
+via voidzero-dev/setup-vp, so pnpm exec is the fallback for bare
+containers, not the default route.
 
 ## Tool versions and troubleshooting
 

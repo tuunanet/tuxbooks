@@ -119,9 +119,10 @@ vp -C frontend test run <file-or-pattern>
 vp -C frontend run typecheck && vp lint
 
 # bare vp uses the global CLI when one is installed and delegates to
-# this repo's pinned toolchain; without a global (CI, containers) prefix
-# pnpm exec, as the justfile does. vp check is the JS slice only (fmt,
-# lint, types); just check below is the full polyglot gate.
+# this repo's pinned toolchain; the justfile calls it bare and CI
+# installs it (voidzero-dev/setup-vp). Without a global (containers),
+# prefix pnpm exec. vp check is the JS slice only (fmt, lint, types);
+# just check below is the full polyglot gate.
 
 # rust sidecar
 cargo test --manifest-path sidecar/Cargo.toml <target>

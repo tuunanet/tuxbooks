@@ -61,15 +61,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      # Installs vp (the version pinned by the project catalog), its Node.js
+      # runtime, pnpm, and the frozen dependencies (vp install runs frozen
+      # under CI); cache: true caches the package-manager store. Both gates
+      # shell out to the managed pnpm (pnpm audit) and read its install
+      # state (pnpm ignored-builds).
+      - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          node-version: 24
+          cache: true
 
       - name: Supply-chain gate (offline wiring checks)
         run: node scripts/supply-chain-gate.mjs
