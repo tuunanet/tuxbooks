@@ -24,7 +24,7 @@
   "mcp": {
     "graft": {
       "type": "local",
-      "command": ["graft", "mcp"],
+      "command": ["pnpm", "exec", "graft", "mcp"],
       "enabled": false
     }
   }

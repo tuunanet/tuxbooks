@@ -170,7 +170,26 @@ function selfTest() {
 {
   const ws = read("pnpm-workspace.yaml") ?? "";
   const allowedToRun = ["esbuild", "electron"];
-  const reviewedIgnored = ["electron-winstaller"];
+  // electron-winstaller was reviewed when first blocked; the rest were
+  // reviewed with the 2026-10-23 graft CLI adoption. Those blocked builds
+  // stay unbuilt on purpose: the tree-sitter family and graft's own
+  // postinstall (a telemetry nudge, per its scripts/postinstall.mjs) are
+  // unused at runtime. The CLI indexes through the wasm grammars the
+  // package ships, so `pnpm exec graft map` builds this repo's graph with
+  // every one of these blocked.
+  const reviewedIgnored = [
+    "@davisvaughan/tree-sitter-r",
+    "@nanonets/graft",
+    "electron-winstaller",
+    "tree-sitter",
+    "tree-sitter-go",
+    "tree-sitter-javascript",
+    "tree-sitter-java",
+    "tree-sitter-kotlin",
+    "tree-sitter-php",
+    "tree-sitter-python",
+    "tree-sitter-typescript",
+  ];
   const problems = allowlistProblems(ws, allowedToRun);
   check(
     "onlyBuiltDependencies matches the reviewed allowlist",
