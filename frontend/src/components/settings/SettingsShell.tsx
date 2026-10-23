@@ -41,11 +41,11 @@ type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "folders"
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
-  { id: "reading", label: "Reading" },
+  { id: "reading", label: "EPUB" },
   { id: "pdf", label: "PDF" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
-  { id: "folders", label: "Folders" },
-  { id: "data", label: "Data" },
+  { id: "folders", label: "Watched folders" },
+  { id: "data", label: "Application Data" },
   { id: "about", label: "About" },
 ];
 
@@ -249,7 +249,7 @@ function HighlightsSettingsCard({
   );
 }
 
-/** The interactive reader-appearance editor shared by Reading and PDF. */
+/** The interactive reader-appearance editor shared by EPUB and PDF. */
 function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
   const { resolvedTheme } = useThemeState();
   const { stored, setPreferences, reset } = useStoredReaderSettings(resolvedTheme);
@@ -478,11 +478,11 @@ function SettingsNavigation({
 
 /**
  * Settings screen. General holds the app theme plus the library import
- * actions; Reading and PDF hold real, persisted default appearance controls
- * (saved on device and applied whenever a book opens); Folders lists the
- * watched folders with their counts; Data shows the app-owned storage roots;
- * Keyboard Shortcuts describes the bindings; About shows the app version,
- * creator credit, and contributor doc links.
+ * actions; EPUB and PDF hold real, persisted default appearance controls
+ * (saved on device and applied whenever a book opens); Watched folders
+ * lists each watched location with its counts; Application Data shows the
+ * app-owned storage roots; Keyboard Shortcuts describes the bindings;
+ * About shows the app version, creator credit, and contributor doc links.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");

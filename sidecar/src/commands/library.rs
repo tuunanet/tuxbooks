@@ -400,9 +400,9 @@ pub async fn reconnect_book(
     Ok(book)
 }
 
-/// Aggregate stats for the Data tab (data-management spec): each watched
-/// location with its book count and total book bytes, the library's total
-/// book bytes, and the catalog row counts.
+/// Aggregate stats for the Application Data tab (data-management spec): each
+/// watched location with its book count and total book bytes, the library's
+/// total book bytes, and the catalog row counts.
 pub async fn get_storage_stats(state: &AppState) -> Result<StorageStats, AppError> {
     storage::storage_stats(&state.db).await
 }

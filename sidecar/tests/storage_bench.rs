@@ -4,8 +4,9 @@
 //!   cargo test --manifest-path sidecar/Cargo.toml --test storage_bench -- --ignored --nocapture
 //!
 //! It seeds a temp database at several (locations, books) scales and times
-//! `storage_stats`, the query the Data tab runs on open. It asserts nothing
-//! beyond the location count; the printed numbers are the output.
+//! `storage_stats`, the query the Application Data tab runs on open. It
+//! asserts nothing beyond the location count; the printed numbers are the
+//! output.
 
 use std::time::{Duration, Instant};
 

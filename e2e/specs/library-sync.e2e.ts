@@ -118,10 +118,10 @@ test.describe("tuxbooks filesystem synchronization", () => {
       .toBe(seededLibraryBookCount + 1);
 
     // Watching never happens silently: the shelf is listed where the user
-    // manages watches — Settings > Folders.
+    // manages watches — Settings > Watched folders.
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
-    await page.getByRole("button", { name: "Folders" }).click();
+    await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
     await expect(list.locator("li", { hasText: shelf })).toBeVisible();
     await page.getByRole("button", { name: "All Books" }).click();
@@ -175,10 +175,11 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount + 1);
 
-    // Unwatch it the way a user does: Settings > Folders > select > Unwatch.
+    // Unwatch it the way a user does: Settings > Watched folders > select >
+    // Unwatch.
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
-    await page.getByRole("button", { name: "Folders" }).click();
+    await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
     const row = list.locator("li", { hasText: shelf });
     await expect(row).toBeVisible();
@@ -251,7 +252,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     // The list carries one row, not two.
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
-    await page.getByRole("button", { name: "Folders" }).click();
+    await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
     const parentBox = list.getByRole("checkbox", { name: `Select ${parent}` });
     await expect(parentBox).toBeVisible();

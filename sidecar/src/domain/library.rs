@@ -22,7 +22,7 @@ pub struct LibraryLocationStat {
     pub missing_from_disk: bool,
 }
 
-/// Row counts for the catalog tables shown on the Data tab.
+/// Row counts for the catalog tables shown on the Application Data tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogCounts {
@@ -33,9 +33,9 @@ pub struct CatalogCounts {
     pub reading_progress: i64,
 }
 
-/// The storage read model for the Data tab: per-location book stats, the
-/// library's total book bytes, and the catalog row counts. Returned by the
-/// `get_storage_stats` IPC command.
+/// The storage read model for the Application Data tab: per-location book
+/// stats, the library's total book bytes, and the catalog row counts.
+/// Returned by the `get_storage_stats` IPC command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageStats {

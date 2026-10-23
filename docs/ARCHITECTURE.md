@@ -121,9 +121,9 @@ text/notes/locators, search hits, collection names, reader profile data) are
 rendered only through React text nodes and escaped attributes; the renderer
 has no `dangerouslySetInnerHTML`, no dynamic `href`, and no
 `document.title`/clipboard/notifications fed from publication-derived or
-user-stored strings. The Data tab copies app-owned filesystem paths (the data
-root and the watched-location paths) to the clipboard; those carry no
-publication data. The single URL-carrying
+user-stored strings. The Application Data tab copies app-owned filesystem
+paths (the data root and the watched-location paths) to the clipboard; those
+carry no publication data. The single URL-carrying
 sink is the stored cover path, which `lib/bridge.ts coverFileUrl` reduces to a
 percent-encoded file name under the fixed `tuxbooks://cover/` scheme. Reader
 profile values from localStorage are snapped back onto the supported scales on
@@ -319,7 +319,7 @@ The reading surface follows the global theme too (`autoReaderTheme` in
 default) until a theme is picked in the reader's appearance menu or in
 Settings, which pins it. Reader appearance preferences persist on device in
 `localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader
-writes them on every change and Settings → Reading/PDF edits the same store,
+writes them on every change and Settings → EPUB/PDF edits the same store,
 so defaults apply to every book. Values are re-validated and snapped onto the
 supported scales on read, so stale storage can never reach an engine.
 

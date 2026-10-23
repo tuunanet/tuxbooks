@@ -57,11 +57,11 @@ describe("SettingsShell", () => {
     expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
     for (const label of [
       "General",
-      "Reading",
+      "EPUB",
       "PDF",
       "Keyboard Shortcuts",
-      "Folders",
-      "Data",
+      "Watched folders",
+      "Application Data",
       "About",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
@@ -78,11 +78,11 @@ describe("SettingsShell", () => {
       .map((button) => button.textContent);
     expect(labels).toEqual([
       "General",
-      "Reading",
+      "EPUB",
       "PDF",
       "Keyboard Shortcuts",
-      "Folders",
-      "Data",
+      "Watched folders",
+      "Application Data",
       "About",
     ]);
   });
@@ -116,8 +116,8 @@ describe("SettingsShell", () => {
     expect(pdfRows).not.toHaveTextContent("Rendering");
     expect(pdfRows).not.toHaveTextContent("Outlines and thumbnails");
 
-    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
-    expect(screen.getByRole("heading", { name: "Reading" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
+    expect(screen.getByRole("heading", { name: "EPUB" })).toBeInTheDocument();
     const readingRows = screen.getByTestId("settings-rows");
     expect(readingRows).toHaveTextContent("Default reading appearance");
     expect(readingRows).not.toHaveTextContent("How defaults are saved");
@@ -127,8 +127,8 @@ describe("SettingsShell", () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Folders" }));
-    expect(screen.getByRole("heading", { name: "Folders" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Watched folders" }));
+    expect(screen.getByRole("heading", { name: "Watched folders" })).toBeInTheDocument();
     expect(screen.getByTestId("folders-empty")).toBeInTheDocument();
     expect(screen.getByTestId("folders-add")).toBeInTheDocument();
   });
@@ -231,7 +231,7 @@ describe("SettingsShell", () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
+    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
     expect(screen.getByRole("radio", { name: "Paginated" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
@@ -248,7 +248,7 @@ describe("SettingsShell", () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
+    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
     expect(screen.getByTestId("highlight-settings")).toBeInTheDocument();
 
     // Pick a custom hue for the light-family yellow slot.

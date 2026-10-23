@@ -41,9 +41,10 @@ const CATALOG_ROWS = [
 ] as const;
 
 /**
- * The Data tab (data-management spec): where TuxBooks keeps its own data and
- * how large it is. Main resolves every path; the renderer displays the report
- * and acts on rows by stable id, never by a path it supplies.
+ * The Application Data tab (data-management spec): where TuxBooks keeps its
+ * own data and how large it is. Main resolves every path; the renderer
+ * displays the report and acts on rows by stable id, never by a path it
+ * supplies.
  */
 export function DataSettings() {
   const [report, setReport] = useState<StorageReport | null>(null);

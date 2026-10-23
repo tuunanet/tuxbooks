@@ -6,10 +6,10 @@ use crate::domain::{CatalogCounts, LibraryLocationStat, StorageStats};
 use crate::error::AppError;
 use crate::repository::library_locations::owning_location;
 
-/// The Data tab's storage read model: one row per watched library location
-/// with its book count and total file bytes, whether the path is still on
-/// disk, the library's total book bytes, and the catalog row counts.
-/// Locations keep registration order.
+/// The Application Data tab's storage read model: one row per watched
+/// library location with its book count and total file bytes, whether the
+/// path is still on disk, the library's total book bytes, and the catalog
+/// row counts. Locations keep registration order.
 ///
 /// A book belongs to the most specific (longest matching) location whose
 /// path prefixes it, where a path matches when it equals the location or
