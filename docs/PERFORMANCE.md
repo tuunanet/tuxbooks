@@ -94,17 +94,28 @@ Re-run the relevant verifications when editing:
   page-walk `data-pdf-render-ms` (PERF-1/3/4 budget checks asserted),
   synthetic scrollbar drags on both readers with a rAF frame-interval
   sampler (p50/p95/max frame time and the dropped-frame share over
-  16.7/32/50 ms), interaction latency for the reader's real interaction
-  patterns (PDF rapid page turns, zoom steps, Ctrl+wheel gesture settle
-  (last event → sharp raster), large-document scroll jumps;
-  EPUB chapter changes), first-render latency (launch → first rendered
-  page), and live canvas memory (PERF-4). The PDF-open timeline
+  16.7/32/50 ms), rapid scroll on the PDF reader (real wheel input at
+  flick pace over the reader content, 260 events of 600 px paced to the
+  recorded baseline in `docs/research/pdf-viewer-perf-findings.md`, sampled
+  every 25 ms through `data-render-state` on the
+  slot under the viewport centre, reported as the render-state distribution
+  during motion (the `rendering` share, the white share, and the longest
+  continuous white streak) plus stop-to-sharp, the time from the last wheel
+  event to every visible slot `rendered`), interaction latency for the
+  reader's real interaction patterns (PDF rapid page turns, zoom steps,
+  Ctrl+wheel gesture settle (last event → sharp raster), large-document
+  scroll jumps; EPUB chapter changes), first-render latency (launch → first
+  rendered page), and live canvas memory (PERF-4). The PDF-open timeline
   (PERF-14) extends first-render measurement: the reader element carries
   `data-pdf-open-timing` (`bytes=range;open=…;firstPaint=…;interactive=…`),
   so click→document-open and click→first-useful-page are read from the same
   bench run (cold vs. prewarmed engine shows up as the `open=` delta).
   Results land in
-  `artifacts/e2e/<runId>/bench-results.json` plus a one-line summary in
+  `artifacts/e2e/<runId>/bench-results.json`, which every scenario merges
+  into as it finishes (e2e/setup/bench-report.ts), so a scenario that fails
+  late, or a Playwright worker restart that re-instantiates the suite with
+  an empty report, keeps the scenarios that already completed. One summary
+  line per run is appended to
   `bench-trend.jsonl` for run-over-run drift comparison. Never runs in CI —
   timings are unreliable headless and the suite is the manual-measurement
   tool for PERF-2. Timing thresholds are opt-in via `BENCH_ENFORCE_P95_MS`,

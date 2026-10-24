@@ -229,6 +229,9 @@ Five isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
+   It also runs `bench-report.e2e.ts`, the bench report-persistence
+   regression test, which exercises `e2e/setup/bench-report.ts` against a
+   scratch file and launches no app.
 2. **shell** (`test:shell`) — fresh scratch env; the desktop-shell
    regression suite (`desktop-shell.e2e.ts`,
    docs/fix-electron-main-window-behaviour.md §17): native window title +
@@ -333,12 +336,20 @@ only), runs headed on the real display with the window maximized (explicit
 because the real OS window is what the reader lays out against), and
 seeds the free-corpus fixtures (`just fetch-ebooks`) from
 `tests/fixtures/books/EBooks/` (missing fixtures are skipped with a
-notice). Both scenarios start mid-book. Measured, per reader:
+notice). The PDF scenarios start mid-book. Measured, per reader:
 
 - frame-time p50/p95/max while a synthetic scrollbar drag runs (continuous
   scroll deltas per ~16 ms tick) and while idle — plus the dropped-frame
   share over 16.7/32/50 ms, so a regression shows up as "95% → 82% of
   frames under 16.7 ms", not as "rendering completed";
+- rapid scroll (PDF): real wheel input at flick pace over the reader
+  content, 260 events of 600 px paced to the recorded baseline
+  (docs/research/pdf-viewer-perf-findings.md), with the render state under
+  the viewport centre sampled every 25 ms through the reader's own
+  `data-render-state` attribute. It reports the render-state distribution
+  during motion (the `rendering` share, the white share, and the longest
+  continuous white streak) and stop-to-sharp, the time from the last wheel
+  event to every visible slot `rendered`;
 - PDF page-walk render→blit latency (`data-pdf-render-ms`, p50/p95);
 - interaction latency (automation-visible click → observable effect):
   rapid page turns, zoom in/out steps, large-document scroll jumps, and
@@ -349,8 +360,12 @@ notice). Both scenarios start mid-book. Measured, per reader:
 
 Deterministic budget assertions still hold in this suite — they are
 policy, not timing: PERF-1/3/4. Timing results land in
-`artifacts/e2e/<runId>/bench-results.json`, and one summary line per run
-is appended to `bench-trend.jsonl` for run-over-run drift comparison.
+`artifacts/e2e/<runId>/bench-results.json`, which every scenario merges
+into as it finishes (e2e/setup/bench-report.ts), so a scenario that fails
+late, or a worker restart that re-instantiates the suite with an empty
+report, keeps the scenarios that already completed. The merge behavior is
+pinned by `bench-report.e2e.ts` in the `empty` phase. One summary line per
+run is appended to `bench-trend.jsonl` for run-over-run drift comparison.
 Timing thresholds are opt-in (`BENCH_ENFORCE_P95_MS`) — never CI policy.
 
 ### Headless on Linux (Xvfb)
