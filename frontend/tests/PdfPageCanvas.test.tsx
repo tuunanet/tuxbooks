@@ -344,3 +344,135 @@ describe("PdfPageCanvas scale-and-swap", () => {
     }
   });
 });
+
+describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      fakeCtx as unknown as CanvasRenderingContext2D,
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function props(
+    doc: ReturnType<typeof makeFakePdfDocument>,
+    overrides: Record<string, unknown> = {},
+  ) {
+    return {
+      document: doc as never,
+      pageNumber: 1,
+      width: 100,
+      height: 129,
+      scale: 1,
+      ...overrides,
+    };
+  }
+
+  it("keeps an in-flight raster alive through a priority change", async () => {
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const onPageRendered = vi.fn();
+    const view = render(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
+    await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
+
+    // The render budget reshuffles mid-raster: the page drops out of the
+    // two-slot budget before its raster lands.
+    view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
+
+    // The demotion cancelled nothing: the released raster still blits and
+    // reports completion.
+    doc.releaseRender(1);
+    await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
+  });
+
+  it("blits a started raster on a visible page after budget churn", async () => {
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const onPageRendered = vi.fn();
+    const view = render(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
+    await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
+
+    // Demote, promote, demote again while the raster runs — the churn a
+    // fast scroll's priority reshuffles produce.
+    view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
+    view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
+    view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
+
+    doc.releaseRender(1);
+    await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
+    // The pixels actually landed: the completed raster blitted, not the
+    // transparent placeholder.
+    expect(fakeCtx.drawImage).toHaveBeenCalled();
+    expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-quality", "final");
+  });
+
+  it("arms the settle once per render commitment, not on every effect re-run", async () => {
+    const doc = makeFakePdfDocument(1);
+    const view = render(<PdfPageCanvas {...props(doc)} />);
+    await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-quality", "final"),
+    );
+
+    vi.useFakeTimers();
+    try {
+      // A real input change opens the next commitment and its settle window.
+      view.rerender(<PdfPageCanvas {...props(doc, { width: 200, height: 258 })} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      // Priority churn inside the window must not re-arm it: the raster
+      // starts at the original commitment's deadline, not 150 ms after the
+      // last re-run.
+      view.rerender(
+        <PdfPageCanvas {...props(doc, { width: 200, height: 258, renderEnabled: false })} />,
+      );
+      view.rerender(<PdfPageCanvas {...props(doc, { width: 200, height: 258 })} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(140);
+      });
+      expect(doc.renderOptions).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a started raster through scroll-driven region moves and follows the latest target", async () => {
+    // Region mode at these geometry inputs (whole-page buffer over the
+    // pixel budget, so only viewport strips rasterize): region moves with
+    // every scroll frame — the churn that killed every generation inside
+    // its settle window during rapid scroll (issue tuxbooks-x27.2).
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const onPageRendered = vi.fn();
+    const regionAt = (top: number) => ({ left: 0, top, width: 6000, height: 600 });
+    const view = render(
+      <PdfPageCanvas
+        {...props(doc, { width: 6000, height: 6000, region: regionAt(0), onPageRendered })}
+      />,
+    );
+    await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
+
+    // Scroll-driven region moves while the raster runs — one per frame.
+    view.rerender(
+      <PdfPageCanvas
+        {...props(doc, { width: 6000, height: 6000, region: regionAt(256), onPageRendered })}
+      />,
+    );
+    view.rerender(
+      <PdfPageCanvas
+        {...props(doc, { width: 6000, height: 6000, region: regionAt(768), onPageRendered })}
+      />,
+    );
+    // The started raster survived every move: the release below is what
+    // lets it blit — a cancellation here would discard it.
+    expect(doc.cancelledPages).toEqual([]);
+
+    // The commitment follows the latest region target with one more pass
+    // instead of staying on the stale crop.
+    doc.releaseRender(1);
+    await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(doc.renderOptions.length).toBeGreaterThan(1));
+  });
+});

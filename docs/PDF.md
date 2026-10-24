@@ -300,7 +300,13 @@ critical path.
    reading anchor starts first, then visible pages (closest first).
 2. Exactly one prerender page beyond the viewport — and only while the
    concurrency budget has room to spare.
-3. A superseded render is unmounted (cancelled); it never starts or blits.
+3. Only an input change (scale, geometry, colour mode, document) or an
+   unmount supersedes a render; the superseded generation is cancelled and
+   never blits. A scroll-driven region move or a render-budget (priority)
+   change is not supersession: the budget gates starting renders only, a
+   started raster always blits, and a region move re-targets the running
+   commitment, which renders the latest strip after each settle window
+   (issue tuxbooks-x27.2).
 4. Completed canvases stay mounted while their page stays inside the
    virtualization window, bounded first by a byte budget
    (256 MB, `MAX_ACTIVE_CANVAS_BYTES`) and then by the count fallback
