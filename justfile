@@ -313,10 +313,12 @@ test-e2e-headed-seeded:
     {{_x11}} env E2E_PHASE=seeded E2E_SEED_LIBRARY=1 pnpm --filter e2e test:seeded
 
 # Reader performance benchmark (docs/PERFORMANCE.md "How to measure"):
-# MEASURES pdf render→blit and epub scrolled-flow latency on the real-book
-# Agents fixtures, starting mid-book, with the window MAXIMIZED on the real
-# display (explicit WxH argument overrides). Asserts only the deterministic
-# budgets (PERF-1/3/4) and writes artifacts/e2e/<runId>/bench-results.json.
+# MEASURES pdf render→blit, rapid-scroll render states + stop-to-sharp, and
+# epub scrolled-flow latency on the real-book Agents fixtures, starting
+# mid-book, with the window MAXIMIZED on the real display (explicit WxH
+# argument overrides). Asserts only the deterministic budgets (PERF-1/3/4)
+# and writes artifacts/e2e/<runId>/bench-results.json per scenario, so a
+# late failure keeps the earlier results.
 # HEADED and opt-in — never Xvfb, never CI (timing assertions are excluded
 # from CI by policy).
 _bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { "" }
