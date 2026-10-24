@@ -12,6 +12,7 @@
     "test:seeded": "playwright test --project=seeded",
     "test:regressions": "playwright test --project=regressions",
     "test:hidpi": "playwright test --project=hidpi",
+    "test:capture": "playwright test --project=capture",
     "test:bench": "playwright test --project=bench"
   },
   "devDependencies": {

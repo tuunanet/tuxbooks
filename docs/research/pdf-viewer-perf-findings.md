@@ -263,6 +263,81 @@ decision): a capture on a mixed-size document, and the user's own UAT
 reproduction. T3 (commit bursts delaying the thumb repaint) was not
 captured; it needs a trace taken during a heavy drag.
 
+### Capture evidence (2026-10-24, trusted thumb drag, committed mixed-size fixture)
+
+The owed mixed-size capture exists now as a committed, rerunnable
+procedure (issue tuxbooks-x27.4):
+
+- **Fixture** `tests/fixtures/books/thumb-capture-mixed.pdf`, sha256
+  `4349ac0a7e0c8628ddd0a2d7aad0501f0708504632fb81c93715318476b6b0fb`,
+  byte-deterministic from `scripts/make-thumb-capture-fixture.py`
+  (rerun the script and commit; the bytes do not change). 392 pages: 8
+  front-matter pages 500×650 win the opening sample (pages 1, 2, and
+  392, median by area), so all 384 body pages (612×792 / 612×900 /
+  612×720) are reserved at 650 pt and correct upward when measured;
+  page 200 is oversized 700×1100, wider than every sampled page, to
+  give the fit-width reference (T2) its chance. This is the synthetic
+  branch of the ticket: no user document was supplied. If one arrives,
+  the capture phase seeds exactly one book, so the user's document
+  replaces it by name in `e2e/setup/environment.ts` (and the open
+  label in the spec) and everything else stands.
+- **Procedure** `e2e/specs/thumb-drag-capture.e2e.ts` via
+  `just test-e2e-capture` (opt-in project, Xvfb, never CI): window
+  requested at 1600×1000, width asserted; open the book, jump to ~8% (page ~40); grab the
+  native thumb through a calibration probe around the arrow-buttons
+  model (both runs grabbed at offset 0 with a 3 px nudge); install
+  in-page instruments on the scroll container (8 ms per-frame sampler;
+  a `scrollTop` setter patch that records programmatic writes — a
+  native drag never writes the property, so every intercepted write is
+  an app-driven re-anchor); drag 60 trusted mousemoves × 10 cursor px;
+  then diff `scrollHeight` across samples, count intercepted writes
+  inside the drag window, and compute thumb-versus-cursor error against
+  the grab-time (frozen) geometry. The report lands in
+  `artifacts/e2e/<runId>/thumb-drag-capture.json`. Assertions cover
+  harness sanity only — the verdict is data, not a pass/fail gate.
+
+**Verdict: the jump reproduced, and the leading mechanism (T1, layout
+height corrections landing mid-drag) is confirmed by the numbers.** Two
+runs on 2026-10-24, same shape both times:
+
+|                                               | Run 1 (14:21Z)              | Run 2 (21:24Z)                                          |
+| --------------------------------------------- | --------------------------- | ------------------------------------------------------- |
+| Grab (scrollTop of scrollHeight 633,801)      | 52,260                      | 52,260                                                  |
+| Drag ratio at grab                            | 692.4 scroll px / cursor px | 692.4                                                   |
+| Predicted travel for 600 cursor px            | 415,432 px                  | 415,432 px                                              |
+| Actual travel                                 | 262,231 px                  | 255,526 px                                              |
+| Final thumb-vs-cursor error (frozen geometry) | −153,201 px (−58.4%)        | −159,906 px (−62.6%)                                    |
+| Lost travel (predicted − actual)              | 153,201 px ≈ 190 pages      | 159,906 px ≈ 199 pages                                  |
+| `scrollHeight` events during drag             | 23 (+21,871 px)             | 20 (+23,018 px)                                         |
+| End state, live geometry: cursor vs thumb     | thumb off cursor            | cursor at 73.6% of track, thumb at 46.9% — 248 px apart |
+| Re-anchor writes mid-drag (T2)                | 0                           | 0                                                       |
+
+- **The height corrections the fixture guarantees land mid-drag.** The
+  uniform-GeoTopo capture above saw zero `scrollHeight` events; here
+  20-23 events (deltas 173-2,284 px) fire strictly inside the drag
+  window as the render window measures reserved-at-650 pt pages, and
+  `scrollHeight` grows +21,871 / +23,018 px while the thumb is held.
+- **The thumb separates from the cursor materially.** Against the
+  grab-time mapping the drag loses 58-63% of its travel (≈190-199 body
+  pages); against live end-of-drag geometry the cursor sits at 73.6% of
+  the usable track while the thumb sits at 46.9%. This is the reported
+  symptom, quantified.
+- **T2 (reanchorByFraction) did not fire.** Zero programmatic
+  `scrollTop` writes mid-drag in either run, including across the
+  oversized page 200. On this evidence the drag-time guard the spec
+  mentions for T2 is not needed.
+- **Per-event attribution is open for the fix ticket's trace.** 23 of
+  59 per-step deltas were zero (run 2); frame-clock aliasing
+  redistributes deltas across steps but preserves totals, so the
+  153k-160k px shortfall is real lost travel. Whether each correction
+  event drops in-flight travel through thumb re-derivation, or
+  main-thread commit bursts eat the moves (T3's signature), needs a
+  trace taken during a heavy drag; both runs lost the same 36-38% of
+  predicted travel while corrections were landing.
+
+Fix ticket: tuxbooks-x27.5 (fix only if the user's UAT reproduction
+agrees; the capture covers the mixed-size half of the owed evidence).
+
 ## Tooling gaps
 
 - The bench's synthetic drag writes `container.scrollTop` on a 16 ms

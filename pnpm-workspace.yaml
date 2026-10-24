@@ -116,7 +116,12 @@ minimumReleaseAgeExclude:
   - "dotenv@18.0.9"
   - "@anthropic-ai/sdk@0.133.0"
   - "undici@7.30.1"
-
+  # 2026-10-24: electron GHSA-jr5w-w6x2-84p9 (high; compromised eMudhra
+  # intermediate certificate mitigation). 44.9.1 (2026-10-20) is the oldest
+  # patched release inside ^44.5.0; bumping it also re-resolves
+  # @electron/get onto undici 7.30.1, clearing that GHSA-xjj6-f33q-929c
+  # instance (advisory GHSA-xjj6-f33q-929c, 7.x path). Remove 2026-11-19.
+  - "electron@44.9.1"
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:
   # esbuild's install script places its platform binary; the Vite build needs it.

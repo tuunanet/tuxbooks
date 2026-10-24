@@ -25,6 +25,7 @@ import {
   repoRoot,
   sidecarBinaryPath,
   smartPdfFixture,
+  thumbCapturePdfFixture,
 } from "./fixtures.js";
 
 /** Unique per invocation; the launcher (or playwright.config) sets it. */
@@ -192,6 +193,13 @@ export function prepareEnvironment(seeded: boolean): void {
         console.warn(`[e2e] bench fixture missing, skipping: ${source}`);
       }
     }
+  }
+
+  // The thumb-drag capture phase (just test-e2e-capture, issue
+  // tuxbooks-x27.4) seeds only the mixed-size fixture the capture drives:
+  // a one-book scratch library keeps the open step unambiguous.
+  if (process.env.E2E_PHASE === "capture") {
+    copyFileSync(thumbCapturePdfFixture, path.join(libraryDir, "thumb-capture-mixed.pdf"));
   }
 
   // The app (spawned by the Playwright Electron launcher) inherits these;
