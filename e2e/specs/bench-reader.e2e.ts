@@ -19,6 +19,14 @@ import {
 } from "./helpers.js";
 import { artifactsDir } from "../setup/environment.js";
 import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
+import {
+  recordScenario,
+  readBenchReport,
+  type BenchEnvironment,
+  type BenchReport,
+  type FrameStats,
+  type PdfRapidScrollResult,
+} from "../setup/bench-report.js";
 
 /**
  * Reader performance benchmark (docs/PERFORMANCE.md "How to measure").
@@ -42,6 +50,11 @@ import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
  * is only the input/automation layer and its API time is never counted as
  * reader performance.
  *
+ * Each scenario persists its own section into bench-results.json as soon as
+ * it has collected its numbers (e2e/setup/bench-report.ts), so a scenario
+ * that fails late — or a worker restart — no longer wipes the results
+ * already collected.
+ *
  * Deterministic budget assertions still hold here — they are policy, not
  * timing: PERF-1 buffer caps, PERF-3 cache occupancy after an oscillation,
  * and the PERF-4 derived live-canvas byte bound.
@@ -51,6 +64,21 @@ const PDF_WALK_PAGES = 16;
 const DRAG_FRAMES = 240;
 const PDF_DRAG_PX_PER_FRAME = 48;
 const EPUB_DRAG_PX_PER_FRAME = 40;
+
+/**
+ * Rapid-scroll pass (issue tuxbooks-x27.1): the fast continuous wheel
+ * gesture the white-slot complaint is about. Constants mirror the baseline
+ * capture in docs/research/pdf-viewer-perf-findings.md — 260 wheel events
+ * of 600 px over ~9.0 s, sampled every 25 ms.
+ */
+const RAPID_WHEEL_EVENTS = 260;
+const RAPID_WHEEL_PX_PER_EVENT = 600;
+const RAPID_WHEEL_CADENCE_MS = 34.5;
+const RAPID_SAMPLE_MS = 25;
+/** Post-stop bound until the suite calls stop-to-sharp "never" (null). */
+const RAPID_STOP_TIMEOUT_MS = 30_000;
+/** Hard bound on a sampler's life, so a wedged scenario leaks no sampling. */
+const RAPID_MAX_LIFETIME_MS = 60_000;
 
 /** The config's per-test bound is too tight for a measured walk. */
 const BENCH_TEST_TIMEOUT_MS = 900_000;
@@ -66,86 +94,22 @@ interface DragResult {
   sectionJumps: number;
 }
 
-interface FrameStats {
-  n: number;
-  p50: number;
-  p95: number;
-  max: number;
-  /** Share of frames slower than 16.7 ms (dropped vs 60 fps), 30 fps, 20 fps. */
-  pctOver16: number;
-  pctOver32: number;
-  pctOver50: number;
+/**
+ * What the browser-side rapid-scroll sampler reports back; the Node side
+ * adds the scenario's start page and per-event pixel constant.
+ */
+type RapidSampled = Omit<PdfRapidScrollResult, "startPage" | "pxPerWheelEvent">;
+
+interface RapidHandle {
+  stop(): void;
+  done: Promise<RapidSampled>;
 }
 
-interface BenchReport {
-  timestamp: string;
-  environment: {
-    userAgent: string;
-    devicePixelRatio: number;
-    window: { width: number | null; height: number | null };
-    pdfRenderInfo: string | null;
-  };
-  pdf: {
-    startPage: number;
-    firstRenderLatencyMs: number | null;
-    renderMs: number[];
-    pageTurnLatencyMs: number[];
-    zoomLatencyMs: number[];
-    wheelSettleMs: number[];
-    bigJumpLatencyMs: number[];
-    buffers: { page: number; bufferPx: number; maxSide: number }[];
-    cacheAfterOscillation: { entries: number; bytes: number } | null;
-    liveCanvases: { count: number; bytes: number; onePageBound: number } | null;
-    idle: FrameStats | null;
-    drag:
-      | (FrameStats & { wallMs: number; distancePx: number; renderMsDuringDrag: number[] })
-      | null;
-  };
-  epub: {
-    flow: "scrolled";
-    measure: string | null;
-    firstRenderLatencyMs: number | null;
-    chapterChangeLatencyMs: number[];
-    idle: FrameStats | null;
-    drag: (FrameStats & { wallMs: number; distancePx: number; sectionJumps: number }) | null;
-  };
-}
-
-const report: BenchReport = {
-  timestamp: new Date().toISOString(),
-  environment: {
-    userAgent: "",
-    devicePixelRatio: 1,
-    window: { width: null, height: null },
-    pdfRenderInfo: null,
-  },
-  pdf: {
-    startPage: 0,
-    firstRenderLatencyMs: null,
-    renderMs: [],
-    pageTurnLatencyMs: [],
-    zoomLatencyMs: [],
-    wheelSettleMs: [],
-    bigJumpLatencyMs: [],
-    buffers: [],
-    cacheAfterOscillation: null,
-    liveCanvases: null,
-    idle: null,
-    drag: null,
-  },
-  epub: {
-    flow: "scrolled",
-    measure: null,
-    firstRenderLatencyMs: null,
-    chapterChangeLatencyMs: [],
-    idle: null,
-    drag: null,
-  },
-};
+const reportFile = path.join(artifactsDir, "bench-results.json");
 
 /** p-value of a sample list (0.5 = median); -1 when empty. */
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return -1;
+function percentile(values: number[] | undefined, p: number): number {
+  if (!values || values.length === 0) return -1;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!;
 }
@@ -200,40 +164,63 @@ async function interactionLatency(
   throw new Error("interaction never took effect");
 }
 
+/** The scenario sections, looked up once per reporting pass. */
+function scenarioSections(report: BenchReport) {
+  return {
+    walk: report.scenarios["pdf-page-walk"],
+    pdfDrag: report.scenarios["pdf-scroll-drag"],
+    interaction: report.scenarios["pdf-interaction"],
+    rapid: report.scenarios["pdf-rapid-scroll"],
+    chapter: report.scenarios["epub-chapter-change"],
+    epubDrag: report.scenarios["epub-scroll-drag"],
+  };
+}
+
+/** The one-line trend record, derived from the persisted report sections. */
+function trendRecord(report: BenchReport) {
+  const { walk, pdfDrag, interaction, rapid, chapter, epubDrag } = scenarioSections(report);
+  return {
+    timestamp: report.timestamp,
+    window: report.environment.window,
+    devicePixelRatio: report.environment.devicePixelRatio,
+    pdf: {
+      firstRenderLatencyMs: walk?.firstRenderLatencyMs ?? null,
+      renderP50: percentile(walk?.renderMs, 0.5),
+      renderP95: percentile(walk?.renderMs, 0.95),
+      pageTurnP50: percentile(interaction?.pageTurnLatencyMs, 0.5),
+      pageTurnP95: percentile(interaction?.pageTurnLatencyMs, 0.95),
+      zoomP50: percentile(interaction?.zoomLatencyMs, 0.5),
+      zoomP95: percentile(interaction?.zoomLatencyMs, 0.95),
+      wheelSettleP50: percentile(interaction?.wheelSettleMs, 0.5),
+      bigJumpP50: percentile(interaction?.bigJumpLatencyMs, 0.5),
+      dragP95: pdfDrag?.drag?.p95 ?? null,
+      dragDroppedPct: pdfDrag?.drag?.pctOver16 ?? null,
+      liveCanvasBytes: walk?.liveCanvases?.bytes ?? null,
+      rapidRenderingSharePct: rapid?.renderStateSharePct.rendering ?? null,
+      rapidWhiteStreakMs: rapid?.longestWhiteStreakMs ?? null,
+      rapidStopToSharpMs: rapid?.stopToSharpMs ?? null,
+    },
+    epub: {
+      firstRenderLatencyMs: chapter?.firstRenderLatencyMs ?? null,
+      chapterChangeP50: percentile(chapter?.chapterChangeLatencyMs, 0.5),
+      chapterChangeP95: percentile(chapter?.chapterChangeLatencyMs, 0.95),
+      dragP95: epubDrag?.drag?.p95 ?? null,
+      dragDroppedPct: epubDrag?.drag?.pctOver16 ?? null,
+    },
+  };
+}
+
 /**
  * Trend record: one JSON line per run appended to bench-trend.jsonl so
  * run-over-run drift (machine noise vs real regression) is visible without
  * any CI gate. Thresholds stay opt-in via BENCH_ENFORCE_P95_MS — CI timing
  * assertions are policy-excluded (docs/PERFORMANCE.md), and a threshold
- * that fires on machine variance is worse than none.
+ * that fires on machine variance is worse than none. Built from the
+ * persisted report, so a worker restart mid-run cannot zero the line.
  */
-function appendTrend(): void {
-  const record = {
-    timestamp: report.timestamp,
-    window: report.environment.window,
-    devicePixelRatio: report.environment.devicePixelRatio,
-    pdf: {
-      firstRenderLatencyMs: report.pdf.firstRenderLatencyMs,
-      renderP50: percentile(report.pdf.renderMs, 0.5),
-      renderP95: percentile(report.pdf.renderMs, 0.95),
-      pageTurnP50: percentile(report.pdf.pageTurnLatencyMs, 0.5),
-      pageTurnP95: percentile(report.pdf.pageTurnLatencyMs, 0.95),
-      zoomP50: percentile(report.pdf.zoomLatencyMs, 0.5),
-      zoomP95: percentile(report.pdf.zoomLatencyMs, 0.95),
-      wheelSettleP50: percentile(report.pdf.wheelSettleMs, 0.5),
-      bigJumpP50: percentile(report.pdf.bigJumpLatencyMs, 0.5),
-      dragP95: report.pdf.drag?.p95 ?? null,
-      dragDroppedPct: report.pdf.drag?.pctOver16 ?? null,
-      liveCanvasBytes: report.pdf.liveCanvases?.bytes ?? null,
-    },
-    epub: {
-      firstRenderLatencyMs: report.epub.firstRenderLatencyMs,
-      chapterChangeP50: percentile(report.epub.chapterChangeLatencyMs, 0.5),
-      chapterChangeP95: percentile(report.epub.chapterChangeLatencyMs, 0.95),
-      dragP95: report.epub.drag?.p95 ?? null,
-      dragDroppedPct: report.epub.drag?.pctOver16 ?? null,
-    },
-  };
+function appendTrend(report: BenchReport): void {
+  const record = trendRecord(report);
+  const { pdfDrag, epubDrag } = scenarioSections(report);
   mkdirSync(artifactsDir, { recursive: true });
   const trendFile = path.join(artifactsDir, "bench-trend.jsonl");
   writeFileSync(trendFile, `${JSON.stringify(record)}\n`, { flag: "a" });
@@ -242,8 +229,8 @@ function appendTrend(): void {
   const enforcedP95 = Number(process.env.BENCH_ENFORCE_P95_MS ?? "");
   if (Number.isFinite(enforcedP95) && enforcedP95 > 0) {
     for (const [label, stats] of [
-      ["pdf drag", report.pdf.drag],
-      ["epub drag", report.epub.drag],
+      ["pdf drag", pdfDrag?.drag],
+      ["epub drag", epubDrag?.drag],
     ] as const) {
       if (stats && stats.p95 > enforcedP95) {
         throw new Error(
@@ -255,30 +242,38 @@ function appendTrend(): void {
   }
 }
 
-function writeReport(): void {
-  mkdirSync(artifactsDir, { recursive: true });
-  const file = path.join(artifactsDir, "bench-results.json");
-  writeFileSync(file, JSON.stringify(report, null, 2));
-  console.log(`[bench] report written to ${file}`);
-  if (report.pdf.drag) {
-    console.log(`[bench] ${summarize("pdf drag frame ms", report.pdf.drag)}`);
-    console.log(`[bench] ${summarize("pdf idle frame ms", report.pdf.idle ?? undefined)}`);
+/** Console summaries of the persisted report (the file itself is written per scenario). */
+function logReport(report: BenchReport): void {
+  const { walk, pdfDrag, rapid, epubDrag } = scenarioSections(report);
+  console.log(`[bench] report persisted to ${reportFile}`);
+  if (pdfDrag) {
+    console.log(`[bench] ${summarize("pdf drag frame ms", pdfDrag.drag)}`);
+    console.log(`[bench] ${summarize("pdf idle frame ms", pdfDrag.idle)}`);
     console.log(
-      `[bench] ${summarize("pdf render->blit during drag", frameStats(report.pdf.drag.renderMsDuringDrag))}`,
+      `[bench] ${summarize("pdf render->blit during drag", frameStats(pdfDrag.drag?.renderMsDuringDrag))}`,
     );
   }
-  if (report.epub.drag) {
-    console.log(`[bench] ${summarize("epub drag frame ms", report.epub.drag)}`);
-    console.log(`[bench] ${summarize("epub idle frame ms", report.epub.idle ?? undefined)}`);
+  if (epubDrag) {
+    console.log(`[bench] ${summarize("epub drag frame ms", epubDrag.drag)}`);
+    console.log(`[bench] ${summarize("epub idle frame ms", epubDrag.idle)}`);
     console.log(
-      `[bench] epub drag: wall=${report.epub.drag.wallMs}ms distance=${report.epub.drag.distancePx}px jumps=${report.epub.drag.sectionJumps}`,
+      `[bench] epub drag: wall=${epubDrag.drag?.wallMs}ms distance=${epubDrag.drag?.distancePx}px jumps=${epubDrag.drag?.sectionJumps}`,
     );
-    if (report.epub.measure !== null)
-      console.log(`[bench] epub measure cap: ${report.epub.measure}`);
+    if (epubDrag.measure !== null) console.log(`[bench] epub measure cap: ${epubDrag.measure}`);
   }
-  if (report.pdf.renderMs.length > 0) {
+  if (walk && walk.renderMs.length > 0) {
+    console.log(`[bench] ${summarize("pdf page-walk render->blit ms", frameStats(walk.renderMs))}`);
+  }
+  if (rapid) {
     console.log(
-      `[bench] ${summarize("pdf page-walk render->blit ms", frameStats(report.pdf.renderMs))}`,
+      `[bench] pdf rapid scroll: wheelEvents=${rapid.wheelEvents} ` +
+        `distance=${rapid.distancePx.toFixed(0)}px motion=${rapid.motionMs.toFixed(0)}ms ` +
+        `samples=${rapid.samples} ` +
+        `rendering=${rapid.renderStateSharePct.rendering}% ` +
+        `unloaded=${rapid.renderStateSharePct.unloaded}% ` +
+        `rendered=${rapid.renderStateSharePct.rendered}% ` +
+        `whiteStreak=${rapid.longestWhiteStreakMs.toFixed(0)}ms ` +
+        `stopToSharp=${rapid.stopToSharpMs === null ? "never" : `${rapid.stopToSharpMs.toFixed(0)}ms`}`,
     );
   }
 }
@@ -450,6 +445,165 @@ const sampleIdleFrames = (page: Page, maxFrames: number): Promise<number[]> =>
     return stamps;
   }, maxFrames);
 
+/**
+ * Install the rapid-scroll sampler (issue tuxbooks-x27.1): every 25 ms it
+ * records the `data-render-state` of the slot under the viewport's top edge
+ * — the page the reader is looking at — plus wheel arrivals and scroll
+ * movement. Motion is the observed window from the first to the last
+ * position change, so the distribution is measured over motion, not over
+ * the settled time before the first wheel event.
+ */
+const startRapidScrollSampler = (page: Page): Promise<void> =>
+  page.evaluate(
+    ({ sampleMs, stopTimeoutMs, lifetimeMs }) => {
+      const globals = globalThis as typeof globalThis & { __tuxbooksBenchRapid?: RapidHandle };
+      // A previous failed scenario's sampler must not keep ticking.
+      globals.__tuxbooksBenchRapid?.stop();
+      const container = document.querySelector<HTMLElement>("[data-testid=reader-content]");
+      if (!container) throw new Error("reader-content not found");
+
+      interface Tick {
+        t: number;
+        state: string;
+      }
+      const ticks: Tick[] = [];
+      let finished = false;
+      let stopped = false;
+      let stopRequestedAt = 0;
+      let wheelEvents = 0;
+      let lastTop = container.scrollTop;
+      const startTop = lastTop;
+      const installedAt = performance.now();
+      let lastChangeAt = performance.now();
+      let motionStartAt = -1;
+      let motionEndAt = -1;
+      let resolveDone!: (value: RapidSampled) => void;
+      const done = new Promise<RapidSampled>((resolve) => {
+        resolveDone = resolve;
+      });
+      const onWheel = () => {
+        wheelEvents += 1;
+      };
+      window.addEventListener("wheel", onWheel, { passive: true });
+
+      // Every slot intersecting the reader viewport, in document order:
+      // the walk covers the slots above the viewport first, so the first
+      // entry is the topmost visible one — the page under the viewport's
+      // top edge, what the reader is looking at.
+      const visibleStates = (): string[] => {
+        const box = container.getBoundingClientRect();
+        const states: string[] = [];
+        for (const slot of document.querySelectorAll("[data-pdf-slot]")) {
+          const rect = slot.getBoundingClientRect();
+          if (rect.bottom > box.top && rect.top < box.bottom) {
+            states.push(slot.getAttribute("data-render-state") ?? "");
+          }
+        }
+        return states;
+      };
+
+      // The interval handle is a parameter: finish() is declared before the
+      // interval exists, and the interval's own callback passes its handle
+      // in when it decides to stop.
+      const finish = (interval: number, sharpAt: number, timedOut: boolean): void => {
+        if (finished) return;
+        finished = true;
+        window.clearInterval(interval);
+        window.removeEventListener("wheel", onWheel);
+        const motionTicks = ticks.filter(
+          (tick) => tick.t >= motionStartAt && tick.t <= motionEndAt,
+        );
+        const renderStates = { rendering: 0, unloaded: 0, rendered: 0, error: 0 };
+        for (const tick of motionTicks) {
+          if (tick.state in renderStates) {
+            renderStates[tick.state as keyof typeof renderStates] += 1;
+          }
+        }
+        const share = (count: number): number =>
+          motionTicks.length === 0 ? 0 : Number(((count / motionTicks.length) * 100).toFixed(1));
+        // Each sample stands for one interval of time, so a run of N white
+        // samples spans N × sampleMs (the baseline's 336 samples = 8,400 ms).
+        let longestWhiteStreakMs = 0;
+        let whiteSince = -1;
+        const lastT = motionTicks[motionTicks.length - 1]?.t ?? 0;
+        for (const tick of [...motionTicks, { t: lastT, state: "closed" }]) {
+          const white = tick.state === "rendering" || tick.state === "unloaded";
+          if (white && whiteSince < 0) whiteSince = tick.t;
+          if (!white && whiteSince >= 0) {
+            longestWhiteStreakMs = Math.max(longestWhiteStreakMs, tick.t - whiteSince + sampleMs);
+            whiteSince = -1;
+          }
+        }
+        resolveDone({
+          wheelEvents,
+          distancePx: lastTop - startTop,
+          motionMs: motionStartAt >= 0 ? motionEndAt - motionStartAt : 0,
+          samples: motionTicks.length,
+          renderStates,
+          renderStateSharePct: {
+            rendering: share(renderStates.rendering),
+            unloaded: share(renderStates.unloaded),
+            rendered: share(renderStates.rendered),
+            error: share(renderStates.error),
+          },
+          longestWhiteStreakMs,
+          stopToSharpMs: motionStartAt >= 0 && !timedOut ? sharpAt - motionEndAt : null,
+        });
+      };
+
+      const timer = window.setInterval(() => {
+        const now = performance.now();
+        // Hard bound: a scenario that dies before finish() was awaited must
+        // not keep sampling (layout reads at 40 Hz) through later scenarios
+        // in the same app session.
+        if (now - installedAt > lifetimeMs) {
+          finish(timer, now, true);
+          return;
+        }
+        const top = container.scrollTop;
+        if (top !== lastTop) {
+          if (motionStartAt < 0) motionStartAt = now;
+          motionEndAt = now;
+          lastChangeAt = now;
+          lastTop = top;
+        }
+        ticks.push({ t: now, state: visibleStates()[0] ?? "" });
+        if (!stopped || now - lastChangeAt < sampleMs) return;
+        if (visibleStates().every((state) => state === "rendered")) {
+          finish(timer, now, false);
+        } else if (now - stopRequestedAt > stopTimeoutMs) {
+          finish(timer, now, true);
+        }
+      }, sampleMs);
+
+      globals.__tuxbooksBenchRapid = {
+        stop() {
+          stopped = true;
+          stopRequestedAt = performance.now();
+        },
+        done,
+      };
+    },
+    {
+      sampleMs: RAPID_SAMPLE_MS,
+      stopTimeoutMs: RAPID_STOP_TIMEOUT_MS,
+      lifetimeMs: RAPID_MAX_LIFETIME_MS,
+    },
+  );
+
+/**
+ * End the motion phase and wait for stop-to-sharp: resolves once every
+ * visible slot is `rendered`, or once the post-stop bound passes.
+ */
+const finishRapidScroll = (page: Page): Promise<RapidSampled> =>
+  page.evaluate(() => {
+    const globals = globalThis as typeof globalThis & { __tuxbooksBenchRapid?: RapidHandle };
+    const handle = globals.__tuxbooksBenchRapid;
+    if (!handle) throw new Error("rapid-scroll sampler was never started");
+    handle.stop();
+    return handle.done;
+  });
+
 test.describe("reader performance benchmark", () => {
   /**
    * Reference conditions are a maximized window (docs/PERFORMANCE.md); an
@@ -458,9 +612,13 @@ test.describe("reader performance benchmark", () => {
    * through the renderer's window.resizeTo — the real OS window is what
    * the reader lays out against. Idempotent; called at each scenario start.
    */
-  async function prepareBenchEnvironment(page: Page): Promise<void> {
-    report.environment.userAgent = await page.evaluate(() => navigator.userAgent);
-    report.environment.devicePixelRatio = await page.evaluate(() => window.devicePixelRatio);
+  async function prepareBenchEnvironment(page: Page): Promise<BenchEnvironment> {
+    const environment: BenchEnvironment = {
+      userAgent: await page.evaluate(() => navigator.userAgent),
+      devicePixelRatio: await page.evaluate(() => window.devicePixelRatio),
+      window: { width: null, height: null },
+      pdfRenderInfo: null,
+    };
     const requested = process.env.BENCH_WINDOW_SIZE ?? "";
     const match = /^(\d+)x(\d+)$/.exec(requested);
     if (match) {
@@ -508,17 +666,18 @@ test.describe("reader performance benchmark", () => {
       width: window.innerWidth,
       height: window.outerHeight,
     }));
-    report.environment.window = { width: applied.width, height: applied.height };
+    environment.window = { width: applied.width, height: applied.height };
     console.log(
-      `[bench] window ${applied.width}x${applied.height} dpr ${report.environment.devicePixelRatio}`,
+      `[bench] window ${applied.width}x${applied.height} dpr ${environment.devicePixelRatio}`,
     );
+    return environment;
   }
 
   test("pdf: page-walk render→blit latency from mid-book with budget checks", async ({ page }) => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
     test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");
 
-    await prepareBenchEnvironment(page);
+    const environment = await prepareBenchEnvironment(page);
 
     // First-render latency: launch-to-first-page on the real-book fixture
     // (open + engine init + first page bitmap) — the cold-open cost a
@@ -543,11 +702,11 @@ test.describe("reader performance benchmark", () => {
       console.log(`[bench] first-render probe: ${JSON.stringify(probe)}`);
       throw err;
     }
-    report.pdf.firstRenderLatencyMs = Date.now() - firstRenderStart;
+    const firstRenderLatencyMs = Date.now() - firstRenderStart;
     await expect(page.getByTestId("pdf-page-indicator")).toContainText("of", {
       timeout: 30_000,
     });
-    report.environment.pdfRenderInfo = await page.evaluate(
+    const pdfRenderInfo = await page.evaluate(
       () =>
         document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-render-info") ??
         null,
@@ -557,10 +716,11 @@ test.describe("reader performance benchmark", () => {
     // Walk from the middle of the book: front matter and the ToC are the
     // least representative pages in the document.
     const startPage = Math.max(1, Math.floor(total / 2));
-    report.pdf.startPage = startPage;
     await scrollToSlot(page, startPage);
     await waitForRendered(page, startPage, 60_000);
 
+    const renderMs: number[] = [];
+    const buffers: { page: number; bufferPx: number; maxSide: number }[] = [];
     const walkTo = Math.min(startPage + PDF_WALK_PAGES, total);
     for (let pageNumber = startPage; pageNumber <= walkTo; pageNumber++) {
       await scrollToSlot(page, pageNumber);
@@ -581,8 +741,8 @@ test.describe("reader performance benchmark", () => {
         };
       }, pageNumber);
       if (sample && sample.ms >= 0) {
-        report.pdf.renderMs.push(sample.ms);
-        report.pdf.buffers.push({
+        renderMs.push(sample.ms);
+        buffers.push({
           page: pageNumber,
           bufferPx: sample.bufferPx,
           maxSide: sample.maxSide,
@@ -590,24 +750,13 @@ test.describe("reader performance benchmark", () => {
       }
     }
 
-    // PERF-1 (deterministic): every walked buffer stays under the caps.
-    expect(report.pdf.buffers.length).toBeGreaterThan(0);
-    for (const buffer of report.pdf.buffers) {
-      expect(buffer.bufferPx).toBeLessThanOrEqual(2 ** 25);
-      expect(buffer.maxSide).toBeLessThanOrEqual(8192);
-    }
-
-    // PERF-4 (derived from slot/canvas state): live canvases within the
-    // count cap and the per-window byte bound.
     const memory = await pdfSurfaceMemory(page);
     const onePage = await maxSingleBitmapBytes(page, 1);
-    report.pdf.liveCanvases = {
+    const liveCanvases = {
       count: memory.pageCanvases,
       bytes: memory.pageBytes,
       onePageBound: onePage,
     };
-    expect(memory.pageCanvases).toBeLessThanOrEqual(8);
-    expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePage);
 
     // PERF-3 (deterministic attribute): one down-up oscillation must
     // retain ≥ 2 buffers in the bitmap cache.
@@ -616,10 +765,38 @@ test.describe("reader performance benchmark", () => {
     await waitForRendered(page, down, 60_000);
     await scrollToSlot(page, walkTo);
     await waitForRendered(page, walkTo, 60_000);
-    const cache = await bitmapCacheUsage(page);
-    report.pdf.cacheAfterOscillation = cache;
-    expect(cache).not.toBeNull();
-    expect(cache!.entries).toBeGreaterThanOrEqual(2);
+    const cacheAfterOscillation = await bitmapCacheUsage(page);
+
+    // Persist before the budget asserts: a failed scenario still leaves its
+    // numbers on disk.
+    recordScenario(
+      reportFile,
+      "pdf-page-walk",
+      {
+        startPage,
+        firstRenderLatencyMs,
+        renderMs,
+        buffers,
+        cacheAfterOscillation,
+        liveCanvases,
+      },
+      { ...environment, pdfRenderInfo },
+    );
+
+    // PERF-1 (deterministic): every walked buffer stays under the caps.
+    expect(buffers.length).toBeGreaterThan(0);
+    for (const buffer of buffers) {
+      expect(buffer.bufferPx).toBeLessThanOrEqual(2 ** 25);
+      expect(buffer.maxSide).toBeLessThanOrEqual(8192);
+    }
+
+    // PERF-4 (derived from slot/canvas state): live canvases within the
+    // count cap and the per-window byte bound.
+    expect(memory.pageCanvases).toBeLessThanOrEqual(8);
+    expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePage);
+
+    expect(cacheAfterOscillation).not.toBeNull();
+    expect(cacheAfterOscillation!.entries).toBeGreaterThanOrEqual(2);
 
     await returnToLibrary(page);
   });
@@ -627,7 +804,7 @@ test.describe("reader performance benchmark", () => {
   test("pdf: scrollbar-drag frame timing through mid-book content", async ({ page }) => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
 
-    await prepareBenchEnvironment(page);
+    const environment = await prepareBenchEnvironment(page);
 
     await openInReader(page, benchBookTitles.pdf);
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
@@ -640,15 +817,87 @@ test.describe("reader performance benchmark", () => {
 
     const drag = await dragScroll(page, "pdf", DRAG_FRAMES, PDF_DRAG_PX_PER_FRAME);
     const idle = await sampleIdleFrames(page, 60);
-    report.pdf.idle = frameStats(idle);
-    report.pdf.drag = {
-      ...frameStats(drag.frames),
-      wallMs: drag.wallMs,
-      distancePx: drag.distancePx,
-      renderMsDuringDrag: drag.renderMs,
-    };
+    recordScenario(
+      reportFile,
+      "pdf-scroll-drag",
+      {
+        idle: frameStats(idle),
+        drag: {
+          ...frameStats(drag.frames),
+          wallMs: drag.wallMs,
+          distancePx: drag.distancePx,
+          renderMsDuringDrag: drag.renderMs,
+        },
+      },
+      environment,
+    );
     expect(drag.frames.length).toBeGreaterThan(DRAG_FRAMES / 2);
     expect(drag.distancePx).toBeGreaterThan(0);
+
+    await returnToLibrary(page);
+  });
+
+  test("pdf: rapid scroll render-state distribution and stop-to-sharp", async ({ page }) => {
+    test.setTimeout(BENCH_TEST_TIMEOUT_MS);
+    test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");
+
+    const environment = await prepareBenchEnvironment(page);
+
+    await openInReader(page, benchBookTitles.pdf);
+    await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
+    await expect(page.getByTestId("pdf-page-indicator")).toContainText("of", {
+      timeout: 30_000,
+    });
+    const total = Number((await textOf(page, "pdf-page-indicator")).match(/of (\d+)/)![1]);
+    const startPage = Math.max(1, Math.floor(total / 2));
+    await scrollToSlot(page, startPage);
+    await waitForRendered(page, startPage, 60_000);
+
+    // Real wheel input over the content area — the gesture the white-slot
+    // complaint is about, unlike the synthetic scrollTop drag above.
+    const box = await page.locator('[data-testid="reader-content"]').boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+    await startRapidScrollSampler(page);
+    const startedAt = Date.now();
+    for (let event = 0; event < RAPID_WHEEL_EVENTS; event++) {
+      await page.mouse.wheel(0, RAPID_WHEEL_PX_PER_EVENT);
+      // Absolute pacing: the CDP round trip of each dispatch must not
+      // stretch the pass, or the scroll speed — and with it the baseline —
+      // drifts.
+      const dueAt = startedAt + (event + 1) * RAPID_WHEEL_CADENCE_MS;
+      const waitMs = dueAt - Date.now();
+      if (waitMs > 0) await page.waitForTimeout(waitMs);
+    }
+    const sampled = await finishRapidScroll(page);
+
+    // Persist before the liveness asserts: a failed scenario still leaves
+    // its numbers on disk.
+    recordScenario(
+      reportFile,
+      "pdf-rapid-scroll",
+      {
+        startPage,
+        wheelEvents: sampled.wheelEvents,
+        pxPerWheelEvent: RAPID_WHEEL_PX_PER_EVENT,
+        distancePx: sampled.distancePx,
+        motionMs: sampled.motionMs,
+        samples: sampled.samples,
+        renderStates: sampled.renderStates,
+        renderStateSharePct: sampled.renderStateSharePct,
+        longestWhiteStreakMs: sampled.longestWhiteStreakMs,
+        stopToSharpMs: sampled.stopToSharpMs,
+      },
+      environment,
+    );
+
+    // Deterministic input and liveness checks only; the timing numbers are
+    // reported and compared against the recorded baseline by hand.
+    expect(sampled.wheelEvents).toBeGreaterThanOrEqual(RAPID_WHEEL_EVENTS);
+    expect(sampled.distancePx).toBeGreaterThan(0);
+    expect(sampled.samples).toBeGreaterThan(0);
+    expect(sampled.stopToSharpMs).not.toBeNull();
 
     await returnToLibrary(page);
   });
@@ -657,7 +906,7 @@ test.describe("reader performance benchmark", () => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
     test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");
 
-    await prepareBenchEnvironment(page);
+    const environment = await prepareBenchEnvironment(page);
 
     await openInReader(page, benchBookTitles.pdf);
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
@@ -672,6 +921,11 @@ test.describe("reader performance benchmark", () => {
     const indicatorPage = async () =>
       Number((await textOf(page, "pdf-page-indicator")).match(/Page (\d+)/)?.[1]);
 
+    const pageTurnLatencyMs: number[] = [];
+    const zoomLatencyMs: number[] = [];
+    const wheelSettleMs: number[] = [];
+    const bigJumpLatencyMs: number[] = [];
+
     // Rapid page turning: the toolbar's next/prev buttons, one sample each —
     // the interaction a reader repeats most. Turn down five pages, then up.
     for (let i = 0; i < 5; i++) {
@@ -681,7 +935,7 @@ test.describe("reader performance benchmark", () => {
         () => page.getByTestId("pdf-next").click(),
         async () => (await indicatorPage()) === before + 1,
       );
-      report.pdf.pageTurnLatencyMs.push(after);
+      pageTurnLatencyMs.push(after);
     }
     for (let i = 0; i < 3; i++) {
       const before = await indicatorPage();
@@ -690,7 +944,7 @@ test.describe("reader performance benchmark", () => {
         () => page.getByTestId("pdf-prev").click(),
         async () => (await indicatorPage()) === before - 1,
       );
-      report.pdf.pageTurnLatencyMs.push(after);
+      pageTurnLatencyMs.push(after);
     }
 
     // Zoom in/out: each step relayouts and re-renders the window; the
@@ -706,7 +960,7 @@ test.describe("reader performance benchmark", () => {
           () => button.click(),
           async () => (await inputValueOf(page, "pdf-zoom-input")) !== before,
         );
-        report.pdf.zoomLatencyMs.push(after);
+        zoomLatencyMs.push(after);
       }
     };
     await zoomSteps("in");
@@ -718,8 +972,8 @@ test.describe("reader performance benchmark", () => {
     // from a settled layout. Measured: last wheel event → the anchor slot
     // rasterized at the new scale (settle + first sharp raster).
     await page.mouse.move(
-      (report.environment.window.width ?? 1280) / 2,
-      (report.environment.window.height ?? 800) / 2,
+      (environment.window.width ?? 1280) / 2,
+      (environment.window.height ?? 800) / 2,
     );
     for (let i = 0; i < 3; i++) {
       // The anchor is the page being read, not the first canvas in DOM order:
@@ -757,7 +1011,7 @@ test.describe("reader performance benchmark", () => {
           return state.rendered === "rendered" && state.renderMs !== before.renderMs;
         })
         .toBe(true);
-      report.pdf.wheelSettleMs.push(Date.now() - start);
+      wheelSettleMs.push(Date.now() - start);
     }
     // Leave the big-jump walk at a comparable zoom to previous runs. The
     // reset re-anchors the document asynchronously; let it settle before the
@@ -781,19 +1035,20 @@ test.describe("reader performance benchmark", () => {
         () => scrollToSlot(page, target),
         async () => (await indicatorPage()) === target,
       );
-      report.pdf.bigJumpLatencyMs.push(after);
+      bigJumpLatencyMs.push(after);
     }
 
-    console.log(
-      `[bench] ${summarize("pdf page-turn latency", frameStats(report.pdf.pageTurnLatencyMs))}`,
+    recordScenario(
+      reportFile,
+      "pdf-interaction",
+      { pageTurnLatencyMs, zoomLatencyMs, wheelSettleMs, bigJumpLatencyMs },
+      environment,
     );
-    console.log(`[bench] ${summarize("pdf zoom latency", frameStats(report.pdf.zoomLatencyMs))}`);
-    console.log(
-      `[bench] wheel settle ms: ${report.pdf.wheelSettleMs.map((ms) => ms.toFixed(0)).join(", ")}`,
-    );
-    console.log(
-      `[bench] ${summarize("pdf big-jump nav latency", frameStats(report.pdf.bigJumpLatencyMs))}`,
-    );
+
+    console.log(`[bench] ${summarize("pdf page-turn latency", frameStats(pageTurnLatencyMs))}`);
+    console.log(`[bench] ${summarize("pdf zoom latency", frameStats(zoomLatencyMs))}`);
+    console.log(`[bench] wheel settle ms: ${wheelSettleMs.map((ms) => ms.toFixed(0)).join(", ")}`);
+    console.log(`[bench] ${summarize("pdf big-jump nav latency", frameStats(bigJumpLatencyMs))}`);
 
     await returnToLibrary(page);
   });
@@ -801,20 +1056,21 @@ test.describe("reader performance benchmark", () => {
   test("epub: chapter-change interaction latency", async ({ page }) => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
 
-    await prepareBenchEnvironment(page);
+    const environment = await prepareBenchEnvironment(page);
 
     const openStart = Date.now();
     await openInReader(page, benchBookTitles.epub);
     const host = page.locator("div[data-epub-host]");
     await host.waitFor({ state: "attached", timeout: 30_000 });
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30_000 });
-    report.epub.firstRenderLatencyMs = Date.now() - openStart;
+    const firstRenderLatencyMs = Date.now() - openStart;
 
     // Chapter changes through the contents drawer: open drawer → click TOC
     // entry → engine lands on the section. TOC entry indices are not spine
     // section indices in a real book, so the latency is measured to a
     // section CHANGE from the pre-click value; entries that resolve to the
     // section we are already in are skipped, not failed.
+    const chapterChangeLatencyMs: number[] = [];
     const sectionNow = async () =>
       page.evaluate(
         () =>
@@ -824,7 +1080,7 @@ test.describe("reader performance benchmark", () => {
       );
     // Query per iteration by index, up to the first 8 entries, until 3
     // changes have been sampled.
-    for (let index = 0; index < 8 && report.epub.chapterChangeLatencyMs.length < 3; index++) {
+    for (let index = 0; index < 8 && chapterChangeLatencyMs.length < 3; index++) {
       await openReaderNavigation(page);
       const item = page.getByTestId(`toc-item-${index}`);
       if ((await item.count()) === 0) break;
@@ -836,7 +1092,7 @@ test.describe("reader performance benchmark", () => {
         10_000,
       )
         .then((ms) => {
-          report.epub.chapterChangeLatencyMs.push(ms);
+          chapterChangeLatencyMs.push(ms);
           return true;
         })
         .catch(() => false);
@@ -851,9 +1107,17 @@ test.describe("reader performance benchmark", () => {
         await closeReaderNavigation(page);
       }
     }
-    expect(report.epub.chapterChangeLatencyMs.length).toBeGreaterThanOrEqual(3);
+    // Persist before the sample-count assert: a failed scenario still
+    // leaves its partial numbers on disk.
+    recordScenario(
+      reportFile,
+      "epub-chapter-change",
+      { firstRenderLatencyMs, chapterChangeLatencyMs },
+      environment,
+    );
+    expect(chapterChangeLatencyMs.length).toBeGreaterThanOrEqual(3);
     console.log(
-      `[bench] ${summarize("epub chapter-change latency", frameStats(report.epub.chapterChangeLatencyMs))}`,
+      `[bench] ${summarize("epub chapter-change latency", frameStats(chapterChangeLatencyMs))}`,
     );
 
     await returnToLibrary(page);
@@ -862,7 +1126,7 @@ test.describe("reader performance benchmark", () => {
   test("epub: scrolled-flow scrollbar-drag frame timing from mid-book", async ({ page }) => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
 
-    await prepareBenchEnvironment(page);
+    const environment = await prepareBenchEnvironment(page);
 
     await openInReader(page, benchBookTitles.epub);
     const host = page.locator("div[data-epub-host]");
@@ -902,7 +1166,7 @@ test.describe("reader performance benchmark", () => {
         timeout: 10_000,
       })
       .toBe(true);
-    report.epub.measure = await page.evaluate(
+    const measure = await page.evaluate(
       () => document.querySelector<HTMLElement>("[data-epub-measure]")?.style.maxWidth ?? "",
     );
 
@@ -919,20 +1183,33 @@ test.describe("reader performance benchmark", () => {
 
     const drag = await dragScroll(page, "epub", DRAG_FRAMES, EPUB_DRAG_PX_PER_FRAME);
     const idle = await sampleIdleFrames(page, 60);
-    report.epub.idle = frameStats(idle);
-    report.epub.drag = {
-      ...frameStats(drag.frames),
-      wallMs: drag.wallMs,
-      distancePx: drag.distancePx,
-      sectionJumps: drag.sectionJumps,
-    };
+    recordScenario(
+      reportFile,
+      "epub-scroll-drag",
+      {
+        flow: "scrolled",
+        measure,
+        idle: frameStats(idle),
+        drag: {
+          ...frameStats(drag.frames),
+          wallMs: drag.wallMs,
+          distancePx: drag.distancePx,
+          sectionJumps: drag.sectionJumps,
+        },
+      },
+      environment,
+    );
     expect(drag.frames.length).toBeGreaterThan(DRAG_FRAMES / 2);
 
     await returnToLibrary(page);
   });
 
   test.afterAll(() => {
-    writeReport();
-    appendTrend();
+    // The file is the source of truth (written per scenario): summaries and
+    // the trend line read it back, so a worker restart cannot zero them.
+    const report = readBenchReport(reportFile);
+    if (report === null) return;
+    logReport(report);
+    appendTrend(report);
   });
 });

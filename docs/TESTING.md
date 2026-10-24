@@ -333,13 +333,20 @@ only), runs headed on the real display with the window maximized (explicit
 because the real OS window is what the reader lays out against), and
 seeds the free-corpus fixtures (`just fetch-ebooks`) from
 `tests/fixtures/books/EBooks/` (missing fixtures are skipped with a
-notice). Both scenarios start mid-book. Measured, per reader:
+notice). The PDF walk and scroll scenarios start mid-book. Measured, per
+reader:
 
 - frame-time p50/p95/max while a synthetic scrollbar drag runs (continuous
   scroll deltas per ~16 ms tick) and while idle — plus the dropped-frame
   share over 16.7/32/50 ms, so a regression shows up as "95% → 82% of
   frames under 16.7 ms", not as "rendering completed";
 - PDF page-walk render→blit latency (`data-pdf-render-ms`, p50/p95);
+- rapid scroll on GeoTopo (real wheel input over the content, 25 ms
+  `data-render-state` samples): the render-state distribution during
+  motion, the longest white streak, and stop-to-sharp (last observed
+  scroll-position change → every visible slot rendered); the
+  distribution samples the slot under the viewport's top edge — the page
+  the reader is looking at, matching the recorded baseline capture;
 - interaction latency (automation-visible click → observable effect):
   rapid page turns, zoom in/out steps, large-document scroll jumps, and
   EPUB chapter changes through the contents drawer;
@@ -349,9 +356,11 @@ notice). Both scenarios start mid-book. Measured, per reader:
 
 Deterministic budget assertions still hold in this suite — they are
 policy, not timing: PERF-1/3/4. Timing results land in
-`artifacts/e2e/<runId>/bench-results.json`, and one summary line per run
-is appended to `bench-trend.jsonl` for run-over-run drift comparison.
-Timing thresholds are opt-in (`BENCH_ENFORCE_P95_MS`) — never CI policy.
+`artifacts/e2e/<runId>/bench-results.json`, written per scenario as each
+one finishes so a later failure or a worker restart cannot wipe earlier
+results, and one summary line per run is appended to `bench-trend.jsonl`
+for run-over-run drift comparison. Timing thresholds are opt-in
+(`BENCH_ENFORCE_P95_MS`) — never CI policy.
 
 ### Headless on Linux (Xvfb)
 

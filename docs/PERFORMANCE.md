@@ -98,14 +98,25 @@ Re-run the relevant verifications when editing:
   patterns (PDF rapid page turns, zoom steps, Ctrl+wheel gesture settle
   (last event → sharp raster), large-document scroll jumps;
   EPUB chapter changes), first-render latency (launch → first rendered
-  page), and live canvas memory (PERF-4). The PDF-open timeline
+  page), live canvas memory (PERF-4), and a GeoTopo rapid-scroll pass (real
+  wheel input, 25 ms `data-render-state` samples over the observed motion
+  window): the render-state distribution during motion, the longest white
+  streak, and stop-to-sharp (scroll-stop → every visible slot rendered).
+  Rapid-scroll baseline (2026-10-23,
+  `docs/research/pdf-viewer-perf-findings.md`): 98% rendering share during
+  motion, 8,400 ms longest white streak, 314 ms stop-to-sharp — compare
+  future runs against these when touching render scheduling or
+  virtualization. The PDF-open timeline
   (PERF-14) extends first-render measurement: the reader element carries
   `data-pdf-open-timing` (`bytes=range;open=…;firstPaint=…;interactive=…`),
   so click→document-open and click→first-useful-page are read from the same
   bench run (cold vs. prewarmed engine shows up as the `open=` delta).
   Results land in
   `artifacts/e2e/<runId>/bench-results.json` plus a one-line summary in
-  `bench-trend.jsonl` for run-over-run drift comparison. Never runs in CI —
+  `bench-trend.jsonl` for run-over-run drift comparison. Each scenario's
+  section is written to `bench-results.json` as soon as it has been
+  measured, so a scenario that fails late — or a Playwright worker restart
+  — no longer wipes the results already collected. Never runs in CI —
   timings are unreliable headless and the suite is the manual-measurement
   tool for PERF-2. Timing thresholds are opt-in via `BENCH_ENFORCE_P95_MS`,
   and a threshold that fires on machine variance is compared against the
