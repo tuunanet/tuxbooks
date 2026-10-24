@@ -26,6 +26,42 @@ const TRIAGE = [
       "ever compiled, and nothing here ships in the packaged app.",
     revisit: "2026-11-12",
   },
+  {
+    id: "GHSA-27r3-jxmh-p828",
+    module: "body-parser",
+    reason:
+      "No viable upgrade: express@5.2.1 (the latest release, 2025-12-01) pins " +
+      "body-parser 2.3.0 exactly, and 2.4.0 (2026-10-22, the fix) cannot enter the tree " +
+      "until express ships a release carrying it. Dev-only: body-parser reaches the tree " +
+      "through express <- @modelcontextprotocol/sdk <- shadcn's CLI, which is run manually " +
+      "against first-party files; it serves no untrusted compressed requests.",
+    revisit: "2026-11-24",
+  },
+  {
+    id: "GHSA-xjj6-f33q-929c",
+    module: "undici",
+    reason:
+      "The 8.x instance (8.11.0, via jsdom <- vitest <- vite-plus) is fixed only by " +
+      "8.12.2 (2026-10-15), which is younger than the 30-day release-age floor (S-5) and " +
+      "so cannot be installed yet; the 6.x and 7.x instances are already moved past the " +
+      "advisory. Dev-only: undici 8.x runs behind vitest's jsdom and graft's CLI clients, " +
+      "never in the packaged app, and handles no attacker-controlled responses here. " +
+      "Upgrade lands with the regular train once 8.12.2 matures (Dependabot bypasses the " +
+      "cooldown for security updates).",
+    revisit: "2026-11-14",
+  },
+  {
+    id: "GHSA-mrhx-c7xc-m3w5",
+    module: "zod",
+    reason:
+      "The fix (>=4.6.6; 4.6.7 shipped 2026-10-12) is younger than the 30-day " +
+      "release-age floor (S-5), and fresh resolution keeps the mature 3.25.76 because " +
+      "every parent range admits both lines. Dev-only: zod validates input for graft's " +
+      "CLI clients (openai/@anthropic-ai/sdk) and shadcn's MCP sdk, never the packaged " +
+      "app. Upgrade lands with the regular train once 4.6.7 matures (Dependabot " +
+      "bypasses the cooldown for security updates).",
+    revisit: "2026-11-11",
+  },
 ];
 
 // Returns { blocked, accepted, informational } for the bulk advisory JSON
