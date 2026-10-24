@@ -77,6 +77,8 @@ const RAPID_WHEEL_CADENCE_MS = 34.5;
 const RAPID_SAMPLE_MS = 25;
 /** Post-stop bound until the suite calls stop-to-sharp "never" (null). */
 const RAPID_STOP_TIMEOUT_MS = 30_000;
+/** Hard bound on a sampler's life, so a wedged scenario leaks no sampling. */
+const RAPID_MAX_LIFETIME_MS = 60_000;
 
 /** The config's per-test bound is too tight for a measured walk. */
 const BENCH_TEST_TIMEOUT_MS = 900_000;
@@ -174,17 +176,10 @@ function scenarioSections(report: BenchReport) {
   };
 }
 
-/**
- * Trend record: one JSON line per run appended to bench-trend.jsonl so
- * run-over-run drift (machine noise vs real regression) is visible without
- * any CI gate. Thresholds stay opt-in via BENCH_ENFORCE_P95_MS — CI timing
- * assertions are policy-excluded (docs/PERFORMANCE.md), and a threshold
- * that fires on machine variance is worse than none. Built from the
- * persisted report, so a worker restart mid-run cannot zero the line.
- */
-function appendTrend(report: BenchReport): void {
+/** The one-line trend record, derived from the persisted report sections. */
+function trendRecord(report: BenchReport) {
   const { walk, pdfDrag, interaction, rapid, chapter, epubDrag } = scenarioSections(report);
-  const record = {
+  return {
     timestamp: report.timestamp,
     window: report.environment.window,
     devicePixelRatio: report.environment.devicePixelRatio,
@@ -213,6 +208,19 @@ function appendTrend(report: BenchReport): void {
       dragDroppedPct: epubDrag?.drag?.pctOver16 ?? null,
     },
   };
+}
+
+/**
+ * Trend record: one JSON line per run appended to bench-trend.jsonl so
+ * run-over-run drift (machine noise vs real regression) is visible without
+ * any CI gate. Thresholds stay opt-in via BENCH_ENFORCE_P95_MS — CI timing
+ * assertions are policy-excluded (docs/PERFORMANCE.md), and a threshold
+ * that fires on machine variance is worse than none. Built from the
+ * persisted report, so a worker restart mid-run cannot zero the line.
+ */
+function appendTrend(report: BenchReport): void {
+  const record = trendRecord(report);
+  const { pdfDrag, epubDrag } = scenarioSections(report);
   mkdirSync(artifactsDir, { recursive: true });
   const trendFile = path.join(artifactsDir, "bench-trend.jsonl");
   writeFileSync(trendFile, `${JSON.stringify(record)}\n`, { flag: "a" });
@@ -447,7 +455,7 @@ const sampleIdleFrames = (page: Page, maxFrames: number): Promise<number[]> =>
  */
 const startRapidScrollSampler = (page: Page): Promise<void> =>
   page.evaluate(
-    ({ sampleMs, stopTimeoutMs }) => {
+    ({ sampleMs, stopTimeoutMs, lifetimeMs }) => {
       const globals = globalThis as typeof globalThis & { __tuxbooksBenchRapid?: RapidHandle };
       // A previous failed scenario's sampler must not keep ticking.
       globals.__tuxbooksBenchRapid?.stop();
@@ -459,13 +467,13 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         state: string;
       }
       const ticks: Tick[] = [];
-      let timer: number | undefined;
       let finished = false;
       let stopped = false;
       let stopRequestedAt = 0;
       let wheelEvents = 0;
       let lastTop = container.scrollTop;
       const startTop = lastTop;
+      const installedAt = performance.now();
       let lastChangeAt = performance.now();
       let motionStartAt = -1;
       let motionEndAt = -1;
@@ -494,10 +502,13 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         return states;
       };
 
-      const finish = (sharpAt: number, timedOut: boolean): void => {
+      // The interval handle is a parameter: finish() is declared before the
+      // interval exists, and the interval's own callback passes its handle
+      // in when it decides to stop.
+      const finish = (interval: number, sharpAt: number, timedOut: boolean): void => {
         if (finished) return;
         finished = true;
-        window.clearInterval(timer);
+        window.clearInterval(interval);
         window.removeEventListener("wheel", onWheel);
         const motionTicks = ticks.filter(
           (tick) => tick.t >= motionStartAt && tick.t <= motionEndAt,
@@ -540,8 +551,15 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         });
       };
 
-      timer = window.setInterval(() => {
+      const timer = window.setInterval(() => {
         const now = performance.now();
+        // Hard bound: a scenario that dies before finish() was awaited must
+        // not keep sampling (layout reads at 40 Hz) through later scenarios
+        // in the same app session.
+        if (now - installedAt > lifetimeMs) {
+          finish(timer, now, true);
+          return;
+        }
         const top = container.scrollTop;
         if (top !== lastTop) {
           if (motionStartAt < 0) motionStartAt = now;
@@ -552,9 +570,9 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         ticks.push({ t: now, state: visibleStates()[0] ?? "" });
         if (!stopped || now - lastChangeAt < sampleMs) return;
         if (visibleStates().every((state) => state === "rendered")) {
-          finish(now, false);
+          finish(timer, now, false);
         } else if (now - stopRequestedAt > stopTimeoutMs) {
-          finish(now, true);
+          finish(timer, now, true);
         }
       }, sampleMs);
 
@@ -566,7 +584,11 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         done,
       };
     },
-    { sampleMs: RAPID_SAMPLE_MS, stopTimeoutMs: RAPID_STOP_TIMEOUT_MS },
+    {
+      sampleMs: RAPID_SAMPLE_MS,
+      stopTimeoutMs: RAPID_STOP_TIMEOUT_MS,
+      lifetimeMs: RAPID_MAX_LIFETIME_MS,
+    },
   );
 
 /**
