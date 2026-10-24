@@ -289,6 +289,17 @@ test-e2e-security: build-debug
 test-e2e-hidpi: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=hidpi E2E_SEED_LIBRARY=1 E2E_DEVICE_SCALE_FACTOR=2 pnpm --filter e2e test:hidpi
 
+# Thumb-drag geometry capture (issue tuxbooks-x27.4): drives a real native
+# scrollbar thumb drag through trusted input over the committed mixed-size
+# fixture and records scroll-height events, thumb-versus-cursor error, and
+# re-anchor firings. Opt-in evidence for the thumb fix (tuxbooks-x27.5),
+# never CI and never part of `just test-e2e`; the report lands in
+# artifacts/e2e/<runId>/thumb-drag-capture.json.
+# The shell screen (1920x1080, not the 1280x1024 xvfb-run default) leaves
+# headroom for the capture's requested 1600x1000 window.
+test-e2e-capture: build-debug
+    {{_shell_headless}} {{_e2e_timeout}} env E2E_PHASE=capture E2E_SEED_LIBRARY=1 pnpm --filter e2e test:capture
+
 # Production-form build: same renderer/Electron bundles, but the RELEASE
 # sidecar binary through TUXBOOKS_SIDECAR (the packaged-app resource
 # resolution path; see docs/RELEASE.md for packaging).

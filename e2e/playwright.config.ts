@@ -14,6 +14,8 @@
  *             (own phase: it relaunches the app with different marker
  *             states and must not share a worker with other suites)
  *   hidpi   — seeded reader scenarios at devicePixelRatio 2
+ *   capture — the opt-in thumb-drag geometry capture (never CI; evidence
+ *             for issue tuxbooks-x27.4, not an assertion suite)
  *   bench   — the opt-in, headed performance benchmark (never CI)
  *
  * The environment is phase-global (E2E_PHASE / E2E_SEED_LIBRARY /
@@ -39,6 +41,7 @@ const SEEDED_EXCLUDE = [
   "app-hardening.e2e.ts",
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
+  "thumb-drag-capture.e2e.ts",
   "epub-reader-regressions.e2e.ts",
 ];
 
@@ -90,6 +93,7 @@ export default defineConfig({
     { name: "seeded", ...project(["*.e2e.ts"], SEEDED_EXCLUDE) },
     { name: "regressions", ...project(["epub-reader-regressions.e2e.ts"]) },
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
+    { name: "capture", ...project(["thumb-drag-capture.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts"]) },
   ],
 });
