@@ -163,7 +163,13 @@ else depends on its types and the seam's handle:
   before the fraction) and `navigator.go`s it — the same rule the restore
   path uses, so click-jumps, restore, and persistence share one landing
   granularity (`timelineIndexFor` exposes that same list as the 1-based
-  "Location N of M" the footer's hover label reads).
+  "Location N of M" the footer's hover label reads). A cross-section jump
+  reaches the engine in two relocates: the target section's frame fires
+  one at its top while it loads, and the navigator reports the deep
+  locator right after. Commanded jumps therefore hold their relocates and
+  dispatch only the last once the stream goes quiet; without the hold the
+  footer swings through the section start on every seek. Page turns never
+  hold.
 
 Components: `EpubReader.tsx` owns lifecycle (DOCUMENT_READY →
 POSITION_RESTORED → INTERACTIVE) and the shared
