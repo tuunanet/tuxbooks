@@ -168,6 +168,8 @@ interface WheelGesture extends WheelPreview {
  */
 const REGION_OVERSCAN_PX = 768;
 const REGION_STEP_PX = 256;
+/** How many recent scroll-reported pages the re-anchor loop guard remembers. */
+const SCROLL_REPORT_MEMORY = 64;
 
 /** Per-page visible regions for the current viewport, with an overscan margin. */
 function visiblePageRegions(
@@ -965,7 +967,23 @@ export function PdfReader({
       fraction: anchorInfoRef.current?.fraction ?? 0,
     });
   }, [currentPage]);
-  const scrollReportedPageRef = useRef<number | null>(null);
+  // The loop guard's memory: pages the scroll tracker has reported lately.
+  // A page change that originated from scrolling must never scroll back.
+  // Comparing against only the LAST report (the pre-2026-10-25 guard) broke
+  // under a fast scrollbar drag: the tracker reports at frame rate and
+  // stamps synchronously, while React commits `currentPage` a frame or two
+  // behind, so a stale commit missed the equality and fell into the
+  // scrollIntoView fallback, which yanked the view back toward the stale
+  // page while the held thumb kept dragging forward — the view oscillated
+  // between the two at frame rate (the flying thumb in the 2026-10-25 UAT
+  // zoom log: alternating +-20k..85k px frame deltas at constant
+  // scrollHeight). Membership in the recent set covers stale commits too;
+  // bounded so navigation to a long-past page still re-anchors, and
+  // goToPage deletes its target so an in-range jump always lands.
+  const scrollReportedPagesRef = useRef<{ set: Set<number>; queue: number[] }>({
+    set: new Set(),
+    queue: [],
+  });
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
   const previousPresentationRef = useRef(presentationMode);
@@ -1200,14 +1218,16 @@ export function PdfReader({
   });
 
   // The loop guard: a page change that *originated from scrolling* must not
-  // scroll back. The scroll tracker stamps every page it reports; if the
-  // observed change matches the last scroll report, it is the user's own
-  // scroll and re-anchoring is skipped. A scale change alone (zoom, fit
-  // recalculation) re-anchors by fraction; a page change from navigation
-  // (toolbar, restore) lands on the new page's top edge. Presentation mode
-  // lays out one centred page, so there is nothing to scroll: the effect
-  // only keeps its page/scale bookkeeping current, and an exit from the mode
-  // resumes on the presented page (restorePresentedPage).
+  // scroll back. The scroll tracker stamps every page it reports; a page
+  // change whose target was scroll-reported recently is the user's own
+  // scroll and re-anchoring is skipped (see the memory's comment above for
+  // why this is a set, not just the last report). A scale change alone
+  // (zoom, fit recalculation) re-anchors by fraction; a page change from
+  // navigation (toolbar, restore) lands on the new page's top edge.
+  // Presentation mode lays out one centred page, so there is nothing to
+  // scroll: the effect only keeps its page/scale bookkeeping current, and
+  // an exit from the mode resumes on the presented page
+  // (restorePresentedPage).
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
@@ -1246,7 +1266,7 @@ export function PdfReader({
       reanchorRef.current(previousScale);
       return;
     }
-    if (pageChanged && scrollReportedPageRef.current === currentPage) {
+    if (pageChanged && scrollReportedPagesRef.current.set.has(currentPage)) {
       return;
     }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
@@ -1293,7 +1313,14 @@ export function PdfReader({
   // stepping, pages drawer) stays consistent with what the user sees.
   const handleScrollPageChange = useCallback(
     (page: number) => {
-      scrollReportedPageRef.current = page;
+      const memory = scrollReportedPagesRef.current;
+      if (!memory.set.has(page)) {
+        memory.set.add(page);
+        memory.queue.push(page);
+        if (memory.queue.length > SCROLL_REPORT_MEMORY) {
+          memory.set.delete(memory.queue.shift()!);
+        }
+      }
       setPosition(pageToPosition(page, effectivePageCount));
     },
     [effectivePageCount, setPosition],
@@ -1396,6 +1423,9 @@ export function PdfReader({
 
   const goToPage = (page: number) => {
     const clamped = clampPage(page, effectivePageCount);
+    // Navigation is not scrolling: drop the target from the loop guard's
+    // memory so a jump to a recently scrolled-past page still re-anchors.
+    scrollReportedPagesRef.current.set.delete(clamped);
     setPosition(pageToPosition(clamped, effectivePageCount));
   };
   // Keep the adapter's jump on the latest page count and position mapping.

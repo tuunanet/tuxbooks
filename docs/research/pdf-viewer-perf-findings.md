@@ -367,6 +367,36 @@ unfixed capture saw, now without a layout mechanism behind it
 User UAT is still the acceptance gate; the capture is evidence, not a
 regression gate (no thumb regression test, by decision).
 
+### Second mechanism from UAT (2026-10-25, scroll-write telemetry)
+
+The first UAT rerun on the fixed build still reported a held thumb
+flying around. The opt-in zoom telemetry (plus the scroll-write recording
+shipped for it) captured the session and acquitted the sweep: scrollHeight
+(553,126) and scale (2.2448) were constant through every drag, and the
+only app-driven scrollTop writes were the open restore and one window
+resize. What the log showed instead was oscillation: consecutive scroll
+frames jumping −49,599 / +85,670 / −69,138 / −82,665 px, the anchor page
+sawtooting tens of pages, starting once the drag passed a few pages per
+frame.
+
+The writer is the one path the e2e setter patch cannot see:
+`scrollIntoView` in the re-anchor effect's fallback. Its guard compared
+`currentPage` against the tracker's LAST reported page, but the tracker
+stamps synchronously at frame rate while React commits `currentPage` a
+frame or two behind. Past a few pages per frame of drag speed, a stale
+commit's page no longer equalled the last report, the guard missed, and
+the fallback scrolled the view back toward the stale page while the held
+thumb dragged forward — the two fought at frame rate. That is also the
+likely driver of the session's `Maximum update depth exceeded` (an
+effect→scroll→setState storm), though the component stack is still
+unconfirmed.
+
+Fix: the guard now skips any page change whose target is in a bounded set
+of recently scroll-reported pages (64), so stale commits stay still;
+`goToPage` deletes its target first, so navigation to a recently scrolled
+page still re-anchors. Unit tests pin the stale-write silence (it fails
+against the old guard) and the navigation landing.
+
 ## Tooling gaps
 
 - The bench's synthetic drag writes `container.scrollTop` on a 16 ms

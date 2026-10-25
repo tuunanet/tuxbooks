@@ -35,6 +35,7 @@ import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { useReader, type ReaderPreferences } from "@/state/readerState";
 import { makeAnnotation, makeBook } from "./factories";
+import { pageToPosition } from "@/components/reader/pdf/pdfPages";
 import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
@@ -83,6 +84,8 @@ interface PdfReaderProps {
   presentationMode?: boolean;
   onExitPresentation?: () => void;
   onTogglePresentation?: () => void;
+  /** Renders a raw-position probe (page in a 3-page document) as a sibling. */
+  probePage?: number;
 }
 
 function renderPdfReader(props: PdfReaderProps = {}) {
@@ -116,6 +119,7 @@ function readerTree(props: PdfReaderProps) {
           onExitPresentation={props.onExitPresentation}
           onTogglePresentation={props.onTogglePresentation}
         />
+        {props.probePage !== undefined ? <PositionProbe page={props.probePage} /> : null}
       </ReaderProvider>
     </ShortcutProvider>
   );
@@ -144,6 +148,20 @@ function PreferenceProbe({ label, patch }: { label: string; patch: Partial<Reade
   return (
     <button type="button" onClick={() => setPreferences(patch)}>
       {label}
+    </button>
+  );
+}
+
+/** Button that writes a raw reading position through the real provider state. */
+function PositionProbe({ page }: { page: number }) {
+  const { setPosition } = useReader();
+  return (
+    <button
+      type="button"
+      data-testid={`probe-position-${page}`}
+      onClick={() => setPosition(pageToPosition(page, 3))}
+    >
+      probe-position-{page}
     </button>
   );
 }
@@ -1028,14 +1046,14 @@ describe("PdfReader virtualization", () => {
 
 describe("PdfReader scroll tracking", () => {
   /** Loaded reader with a fake scroll container (720px viewport). */
-  async function renderScrollableReader() {
+  async function renderScrollableReader(props: { probePage?: number } = {}) {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
     mockInvoke({
       get_reading_progress: null,
       save_reading_progress: null,
     });
     const container = document.createElement("div");
-    const view = renderPdfReader({ scrollContainerRef: { current: container } });
+    const view = renderPdfReader({ scrollContainerRef: { current: container }, ...props });
     await screen.findByTestId("pdf-canvas");
     stubScrollGeometry(container, screen.getByTestId("pdf-document"));
     return { view, container };
@@ -1092,6 +1110,70 @@ describe("PdfReader scroll tracking", () => {
       );
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
       expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(3));
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  it("does not scroll back on a stale write for a scroll-reported page", async () => {
+    // The fast-drag race (2026-10-25 UAT zoom log): the tracker reports
+    // pages at frame rate and stamps synchronously, while React commits
+    // `currentPage` a frame or two behind. A commit for the earlier page
+    // then lands with the last report pointing further ahead — the commit's
+    // page is scroll-reported, just not LAST. The reader must treat it as
+    // the user's own scroll and keep still, or the scrollIntoView fallback
+    // fights the held thumb for the whole drag.
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const { container } = await renderScrollableReader({ probePage: 2 });
+      await screen.findByTestId("pdf-page-indicator");
+      scrollTo(container, 810);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+      );
+      scrollTo(container, 1620);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
+      );
+      scrollIntoViewSpy.mockClear();
+
+      // The stale write: page 2, already scroll-reported, arrives after
+      // page 3 is current. The indicator follows it; the view must not move.
+      await userEvent.click(screen.getByTestId("probe-position-2"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+      );
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  it("re-anchors on navigation to a recently scroll-reported page", async () => {
+    // The guard's memory is bounded on purpose, but a jump to a page the
+    // user recently scrolled past must still land: navigation deletes its
+    // target from the memory before writing the position.
+    const scrollIntoViewSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      const { container } = await renderScrollableReader();
+      await screen.findByTestId("pdf-page-indicator");
+      scrollTo(container, 810);
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
+      );
+      scrollIntoViewSpy.mockClear();
+
+      // Toolbar prev lands on page 1, which the tracker reported on mount.
+      await userEvent.click(screen.getByTestId("pdf-prev"));
+      await waitFor(() =>
+        expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
+      );
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
+      expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(1));
     } finally {
       scrollIntoViewSpy.mockRestore();
     }
