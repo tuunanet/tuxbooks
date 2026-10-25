@@ -338,6 +338,73 @@ runs on 2026-10-24, same shape both times:
 Fix ticket: tuxbooks-x27.5 (fix only if the user's UAT reproduction
 agrees; the capture covers the mixed-size half of the owed evidence).
 
+### Fix (2026-10-25, branch perf/pdf-thumb-reference)
+
+The fix ports the reference behavior of thorium-reader's PDF viewer
+(edrlab/pdf.js 87c6007, PDF.js v6.3.289): its viewer fetches every page's
+real size right after the first page renders (`web/pdf_viewer.js`,
+"Fetch all the pages" — `PagesCountLimit.FORCE_LAZY_PAGE_INIT` 5000,
+`PAUSE_EAGER_PAGE_INIT` 250), so slot heights settle before a thumb drag
+can start. `usePdfGeometry` now runs the same sweep after first paint
+(waves of 250, one commit per wave, the lazy on-approach path kept for
+documents above 5000 pages), replacing the measure-on-approach-only
+policy that produced the mid-drag `scrollHeight` corrections.
+
+Capture rerun on the fixed build (`just test-e2e-capture`, same fixture
+and procedure): `heightEventsDuringDrag` 20-23 → **0**, final error
+−153,201/−159,906 px (−58.4/−62.6%) → **+3,951 px (+0.875% of 451,343 px
+traveled, ≈ 5 pages)**, end-of-drag cursor 73.0% vs thumb 73.9% of the
+track (8 px apart, thumb under cursor) against the unfixed 73.6% vs
+46.9% (248 px apart). With zero in-drag height events the trace question
+resolves for this document: thumb re-derivation is out (there is no
+`scrollHeight` change to re-derive against), and the small overshoot is
+input-side — per-step quantization aliasing, the same redistribution the
+unfixed capture saw, now without a layout mechanism behind it
+(`deadSteps` 23/59 → 4/59). Report:
+`artifacts/e2e/capture-2026-10-25T02-42-15-906Z-1s5hz/thumb-drag-capture.json`
+(a first run on the same build,
+`capture-2026-10-25T02-26-26-327Z-1r41z`, landed the same numbers).
+User UAT is still the acceptance gate; the capture is evidence, not a
+regression gate (no thumb regression test, by decision).
+
+### Second mechanism from UAT (2026-10-25, scroll-write telemetry)
+
+The first UAT rerun on the fixed build still reported a held thumb
+flying around. The opt-in zoom telemetry (plus the scroll-write recording
+shipped for it) captured the session and acquitted the sweep: scrollHeight
+(553,126) and scale (2.2448) were constant through every drag, and the
+only app-driven scrollTop writes were the open restore and one window
+resize. What the log showed instead was oscillation: consecutive scroll
+frames jumping −49,599 / +85,670 / −69,138 / −82,665 px, the anchor page
+sawtooting tens of pages, starting once the drag passed a few pages per
+frame.
+
+The writer is the one path the e2e setter patch cannot see:
+`scrollIntoView` in the re-anchor effect's fallback. Its guard compared
+`currentPage` against the tracker's LAST reported page, but the tracker
+stamps synchronously at frame rate while React commits `currentPage` a
+frame or two behind. Past a few pages per frame of drag speed, a stale
+commit's page no longer equalled the last report, the guard missed, and
+the fallback scrolled the view back toward the stale page while the held
+thumb dragged forward — the two fought at frame rate. That is also the
+likely driver of the session's `Maximum update depth exceeded` (an
+effect→scroll→setState storm), though the component stack is still
+unconfirmed.
+
+Fix: the guard now skips any page change whose target is in a bounded set
+of recently scroll-reported pages (64), so stale commits stay still;
+`goToPage` deletes its target first, so navigation to a recently scrolled
+page still re-anchors. Unit tests pin the stale-write silence (it fails
+against the old guard) and the navigation landing.
+
+UAT after the guard fix passed (2026-10-25, user session, zoom-log JSON):
+34.6 s of dragging including fast flicks at fit-width scale 4.82 on the
+1.18M px layout, with exactly three geometry events — open/restore, a
+window resize refit, and a zoom change — each paired with its legitimate
+re-anchor write, flat geometry between them, no oscillation signatures,
+and no update-depth errors. The ticket's thumb half is verified by UAT;
+the bench rerun rides the next scheduled bench run.
+
 ## Tooling gaps
 
 - The bench's synthetic drag writes `container.scrollTop` on a 16 ms

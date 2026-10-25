@@ -11,6 +11,16 @@
  *
  * Or launch with `VITE_PDF_ZOOM_LOG=1`, or persist across reloads with
  * localStorage.setItem("tuxbooks.pdfZoomLog", "1").
+ *
+ * While enabled, the reader's imperative scroll helpers
+ * (`setScrollTop`/`setScrollLeft`) also record every app-driven scroll
+ * write, and any frame where scrollHeight, clientHeight, or the layout
+ * scale changes prints a live `[pdf-thumb]` console line. A native
+ * scrollbar thumb drag never writes scrollTop and never moves those
+ * geometry values on a stable document, so during a held-drag report those
+ * lines name the mechanism: growing scrollHeight is a layout correction
+ * landing mid-drag, a scroll write is app re-anchoring, a scale flip is a
+ * fit recalculation, and silence points at the input side instead.
  */
 
 export type PdfZoomSampleType = "initial" | "scroll" | "zoom" | "resize";
@@ -77,6 +87,19 @@ export interface PdfZoomNote {
 const STORAGE_KEY = "tuxbooks.pdfZoomLog";
 const MAX_SAMPLES = 6000;
 const MAX_NOTES = 200;
+const MAX_WRITES = 2000;
+
+/** An app-driven imperative scroll write (the `setScrollTop`/`setScrollLeft`
+ * helpers). A native scrollbar drag never writes the property, so every
+ * recorded write is app-driven re-anchoring — exactly what to rule out when
+ * a held thumb leaves the cursor. */
+export interface PdfScrollWrite {
+  t: number;
+  iso: string;
+  helper: "setScrollTop" | "setScrollLeft";
+  from: number;
+  to: number;
+}
 
 function readInitialFlag(): boolean {
   try {
@@ -91,7 +114,10 @@ function readInitialFlag(): boolean {
 let enabled = readInitialFlag();
 const samples: PdfZoomSample[] = [];
 const notes: PdfZoomNote[] = [];
+const writes: PdfScrollWrite[] = [];
 let seq = 0;
+/** Previous sample for the geometry-change live line (see record below). */
+let previousSample: PdfZoomSample | null = null;
 
 export function isPdfZoomTelemetryEnabled(): boolean {
   return enabled;
@@ -130,6 +156,46 @@ export function recordPdfZoomSample(sample: Omit<PdfZoomSample, "seq" | "t" | "i
         `center=${entry.centerLocalX.toFixed(0)},${entry.centerLocalY.toFixed(0)} canvas=${entry.canvasQuality ?? "none"}`,
     );
   }
+  // The thumb-killer signature, live: the document extent or the layout
+  // scale moving between frames is what pushes a held native thumb off the
+  // cursor. One console line per change, so a terminal log names the
+  // mechanism without downloading anything.
+  if (
+    previousSample !== null &&
+    (previousSample.scrollHeight !== entry.scrollHeight ||
+      previousSample.scale !== entry.scale ||
+      previousSample.clientHeight !== entry.clientHeight)
+  ) {
+    console.warn(
+      `[pdf-thumb] #${entry.seq} ${entry.type}: scrollHeight ` +
+        `${previousSample.scrollHeight}->${entry.scrollHeight} ` +
+        `(${entry.scrollHeight - previousSample.scrollHeight >= 0 ? "+" : ""}${
+          entry.scrollHeight - previousSample.scrollHeight
+        }) clientHeight ${previousSample.clientHeight}->${entry.clientHeight} ` +
+        `scale ${previousSample.scale.toFixed(4)}->${entry.scale.toFixed(4)} ` +
+        `scrollTop=${entry.scrollTop.toFixed(0)} policy=${entry.policy}`,
+    );
+  }
+  previousSample = entry;
+}
+
+/** Record one app-driven imperative scroll write (opt-in). */
+export function recordPdfScrollWrite(
+  helper: "setScrollTop" | "setScrollLeft",
+  from: number,
+  to: number,
+): void {
+  if (!enabled) return;
+  const entry: PdfScrollWrite = {
+    t: performance.now(),
+    iso: new Date().toISOString(),
+    helper,
+    from,
+    to,
+  };
+  writes.push(entry);
+  if (writes.length > MAX_WRITES) writes.splice(0, writes.length - MAX_WRITES);
+  console.warn(`[pdf-thumb] scroll write ${helper}: ${from.toFixed(0)} -> ${to.toFixed(0)}`);
 }
 
 export function addPdfZoomNote(text: string): void {
@@ -141,12 +207,14 @@ export function addPdfZoomNote(text: string): void {
 export function clearPdfZoomLog(): void {
   samples.length = 0;
   notes.length = 0;
+  writes.length = 0;
   seq = 0;
+  previousSample = null;
 }
 
 export function dumpPdfZoomLog(): string {
   return JSON.stringify(
-    { version: 1, generatedAt: new Date().toISOString(), notes, samples },
+    { version: 1, generatedAt: new Date().toISOString(), notes, writes, samples },
     null,
     2,
   );

@@ -44,6 +44,12 @@ import { repoRoot } from "../setup/fixtures.js";
  * measures them. Page 200 (700x1100) is wider than every sampled page,
  * so measuring it grows the fit-width reference — the path that can
  * reach reanchorByFraction.
+ *
+ * On the FIXED build (tuxbooks-x27.5: all pages measured in a background
+ * sweep right after first paint) the
+ * fixture's height corrections land before the drag instead, so the
+ * expected report is zero in-drag height events, zero re-anchor writes,
+ * and thumb-versus-cursor error within tight tolerance.
  */
 
 /** Fixed window geometry: the capture defines its own reference conditions. */
@@ -494,10 +500,20 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     // -- Harness sanity only (never thumb behavior) --------------------------
     expect(traveledPx).toBeGreaterThan(50_000);
     expect(collected.samples.length).toBeGreaterThan(60);
-    expect(endGeometry.scrollHeight).toBeGreaterThan(startGeometry.scrollHeight);
+    // scrollHeight growth during the drag was the unfixed build's harness
+    // sanity (the fixture guaranteed T1 fired). Since tuxbooks-x27.5 the
+    // geometry sweep measures every page right after first paint, so the
+    // fixed build must show NO in-drag height events — that outcome is
+    // report data below (heightEventsDuringDrag / scrollHeightChangePx),
+    // asserted by neither this suite nor any regression test, per the
+    // ticket's no-thumb-regression-test decision.
 
     const report = {
-      issue: "tuxbooks-x27.4",
+      issue: "tuxbooks-x27.5",
+      // The capture instrument was built as the evidence capture for
+      // tuxbooks-x27.4; on the fixed build it is the rerun instrument the
+      // fix ticket's acceptance criteria call for.
+      captureIssue: "tuxbooks-x27.4",
       fixture: {
         path: "tests/fixtures/books/thumb-capture-mixed.pdf",
         sha256: sha256OfFixture(
