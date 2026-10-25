@@ -185,6 +185,12 @@ export function ReaderShell() {
   // The progress footer's seek bar; its pointer release hands focus back to
   // the reading surface (see the bar's onPointerUp).
   const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const releaseBarFocus = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && progressBarRef.current?.contains(active)) {
+      active.blur();
+    }
+  };
   // Keep a wheel gesture on the axis it began on: releasing Shift while a
   // free-spinning wheel is still going must not flip horizontal scrolling to
   // vertical (see useAxisLockedWheel).
@@ -884,12 +890,11 @@ export function ReaderShell() {
               // pages instead of nudging the thumb by 0.1% per keypress
               // (the same focus policy as the navigation drawer). Keyboard
               // steering from a Tab-focused thumb keeps its steps.
-              onPointerUp={() => {
-                const active = document.activeElement;
-                if (active instanceof HTMLElement && progressBarRef.current?.contains(active)) {
-                  active.blur();
-                }
-              }}
+              // pointercancel counts too: a gesture cut short by an alt-tab
+              // or a touch handoff must not leave the thumb holding the
+              // reading keys.
+              onPointerUp={releaseBarFocus}
+              onPointerCancel={releaseBarFocus}
             >
               {barPositioningLabel !== null && (
                 <span
