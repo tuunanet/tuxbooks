@@ -290,6 +290,38 @@ describe("Reader progress footer", () => {
     expect(handle.prev).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the positioning label live under a resting pointer", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    const bar = screen.getByTestId("reader-progress");
+    stubProgressBar(bar);
+
+    // Click at 25.5%: the tooltip names that location.
+    fireEvent.pointerDown(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerUp(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
+    expect(screen.getByTestId("reader-progress-tooltip")).toHaveTextContent(
+      /Location 1508 of 5913 • 26%/,
+    );
+
+    // The pointer never leaves the bar, but reading moves on (arrow page
+    // turns relocate the engine): the label must follow, not sit frozen at
+    // the clicked location.
+    lastFakeHandle().emitRelocate({ fraction: 0.76, totalProgression: 0.76 });
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-progress-tooltip")).toHaveTextContent(
+        /Location 4494 of 5913 • 76%/,
+      ),
+    );
+
+    // Leaving the bar still clears it.
+    fireEvent.pointerLeave(bar);
+    await waitFor(() => expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull());
+  });
+
   it("shows a Kindle-style location tooltip while positioning", async () => {
     renderReader();
     await screen.findByTestId("reader-view");

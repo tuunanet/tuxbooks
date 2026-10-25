@@ -202,10 +202,18 @@ export function ReaderShell() {
   // query runs inside the pointer handlers — refs stay out of render — and
   // a null open adapter degrades the label to percent-only.
   const [barPositioningLabel, setBarPositioningLabel] = useState<string | null>(null);
-  const readPositioningLabel = (percent: number) => {
+  const readPositioningLabel = useCallback((percent: number) => {
     const location = adapterRef.current?.progressionIndexFor?.(percent / 100) ?? null;
     setBarPositioningLabel(locationLabel(location, percent));
-  };
+  }, []);
+  // The label is live while it shows: page turns move the value under a
+  // resting pointer, and a label read only at pointer entry would sit
+  // frozen at the location where the seek began.
+  const barValue = progressPreview ?? position;
+  useEffect(() => {
+    if (barPositioningLabel === null) return;
+    readPositioningLabel(barValue);
+  }, [barPositioningLabel, barValue, readPositioningLabel]);
   // Persistent annotations of the open book: bookmarks, highlights, notes.
   const {
     annotations,
