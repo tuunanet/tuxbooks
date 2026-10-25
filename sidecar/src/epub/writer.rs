@@ -62,7 +62,7 @@ pub fn rewrite_epub_bytes<R: Read + Seek>(
         let mut writer = ZipWriter::new(std::io::Cursor::new(&mut buffer));
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index)?;
-            let name = entry.name().to_string();
+            let name = entry.name()?.into_owned();
             // Keep `mimetype` stored as EPUB requires; everything else stays
             // deflated (the only methods this build supports).
             let method = match entry.compression() {

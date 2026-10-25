@@ -224,7 +224,7 @@ fn read_mimetype<R: Read + Seek>(
         return Err(EpubError::MissingMimetype);
     }
     let first = zip.by_index(0)?;
-    if first.name() != "mimetype" {
+    if !first.name().is_ok_and(|name| name == "mimetype") {
         return Err(EpubError::MissingMimetype);
     }
     limits.check_member(first.compressed_size(), first.size())?;
@@ -1144,6 +1144,11 @@ mod tests {
         };
         match build_session(&path, &tight) {
             Err(EpubError::Limit(err)) => assert_eq!(err.limit, "max_total_uncompressed_bytes"),
+            // zip 9 rejects a read that outruns the entry's declared
+            // uncompressed size before the cumulative budget trips; the
+            // budget contract itself is pinned by
+            // parse_epub_rejects_oversized_total_uncompressed.
+            Err(EpubError::Io(err)) if err.to_string().contains("declared uncompressed size") => {}
             Ok(_) => panic!("build_session accepted lying headers past the byte budget"),
             Err(other) => panic!("expected limit error, got: {other:?}"),
         }

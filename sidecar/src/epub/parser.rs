@@ -107,7 +107,7 @@ fn read_mimetype<R: Read + Seek>(
         return Err(EpubError::MissingMimetype);
     }
     let first = zip.by_index(0)?;
-    if first.name() != "mimetype" {
+    if !first.name().is_ok_and(|name| name == "mimetype") {
         return Err(EpubError::MissingMimetype);
     }
     limits.check_member(first.compressed_size(), first.size())?;
@@ -215,7 +215,7 @@ pub(crate) fn read_entry<R: Read + Seek>(
         if file.is_dir() {
             continue;
         }
-        if file.name() == name {
+        if file.name().is_ok_and(|entry| entry == name) {
             limits.check_member(file.compressed_size(), file.size())?;
             let data = read_bounded(file.by_ref(), limits.max_decompressed_bytes)?;
             return Ok(Some(data));
