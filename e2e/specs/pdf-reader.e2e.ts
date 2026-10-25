@@ -400,16 +400,24 @@ test.describe("tuxbooks continuous PDF reader", () => {
     // Wait for the region raster to land: until the atomic blit, the canvas
     // still carries the previous (fit-width) geometry. Assert consistency
     // against the element's own current region attribute, since the attribute
-    // updates a render before the slower blit.
+    // updates a render before the slower blit. Both dimensions must match:
+    // a vertical move through the page keeps the region width and changes
+    // only its y and height, so a width-only poll can accept a canvas whose
+    // height is still the previous region's.
     await expect
       .poll(
         () =>
           region.evaluate((el) => {
             const canvas = el as HTMLCanvasElement;
-            const w = Number(
-              (canvas.getAttribute("data-pdf-render-region") ?? "0,0,0,0").split(",")[2],
+            const [w, h] = (canvas.getAttribute("data-pdf-render-region") ?? "0,0,0,0")
+              .split(",")
+              .slice(2)
+              .map(Number);
+            return (
+              canvas.style.width === `${w}px` &&
+              canvas.style.height === `${h}px` &&
+              canvas.width >= 1
             );
-            return canvas.style.width === `${w}px` && canvas.width >= 1;
           }),
         { timeout: 30000 },
       )
