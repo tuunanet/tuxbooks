@@ -332,13 +332,20 @@ export function EpubReader({
   // loop guard. Only actual position changes map back — the interactive
   // flip itself must not re-jump an engine that init has already positioned
   // (restored locator or start).
+  //
+  // The echo is exact by construction: a relocate's echo arrives as
+  // `reported * 100`, the same float the guard compares against, so the
+  // epsilon only needs to ride out float noise. It must stay far below the
+  // progress bar's 0.1% keyboard step. The old 0.5 window read genuine
+  // thumb steps as echoes and dropped them, leaving the pages unmoved
+  // while the slider ran ahead.
   const previousPositionRef = useRef(0);
   useEffect(() => {
     if (!interactive || !handle) return;
     if (previousPositionRef.current === position) return;
     previousPositionRef.current = position;
     const reported = reportedFractionRef.current;
-    if (reported !== null && Math.abs(position - reported * 100) < 0.5) return;
+    if (reported !== null && Math.abs(position - reported * 100) < 1e-6) return;
     handle.goToTotalProgression(position / 100).catch(() => {});
   }, [interactive, handle, position]);
 

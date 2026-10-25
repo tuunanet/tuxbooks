@@ -110,6 +110,27 @@ async function openNavigation() {
   return screen.findByTestId("reader-nav");
 }
 
+/**
+ * Pin the progress bar's jsdom geometry (a 1000px span, so clientX 510
+ * reads as 51%) and give it a working pointer-capture pair: the test setup
+ * stubs capture out globally, and Radix commits on release only through it.
+ */
+function stubProgressBar(bar: HTMLElement) {
+  vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+    ...makeDomRect(400),
+    height: 4,
+    bottom: 404,
+  });
+  let capturedPointerId: number | null = null;
+  vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
+  vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
+    capturedPointerId = id;
+  });
+  vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
+    if (capturedPointerId === id) capturedPointerId = null;
+  });
+}
+
 describe("Reader progress footer", () => {
   it("shows no progress footer for PDF", async () => {
     renderReader("pdf");
@@ -137,26 +158,10 @@ describe("Reader progress footer", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // jsdom performs no layout: pin the slider's geometry to a 1000px span
-    // so a click at clientX 510 reads as 51%. Radix computes the value from
-    // the slider root's rect.
+    // jsdom performs no layout: stub the bar's geometry so a click at
+    // clientX 510 reads as 51% (Radix computes the value from the rect).
     const bar = screen.getByTestId("reader-progress");
-    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
-      ...makeDomRect(400),
-      height: 4,
-      bottom: 404,
-    });
-    // Radix commits on release only through the pointer-capture pair; the
-    // test setup stubs capture out globally, so give this slider a working
-    // one (record the id like the real API would).
-    let capturedPointerId: number | null = null;
-    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
-    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
-      capturedPointerId = id;
-    });
-    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
-      if (capturedPointerId === id) capturedPointerId = null;
-    });
+    stubProgressBar(bar);
     fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
 
@@ -171,19 +176,7 @@ describe("Reader progress footer", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
     const bar = screen.getByTestId("reader-progress");
-    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
-      ...makeDomRect(400),
-      height: 4,
-      bottom: 404,
-    });
-    let capturedPointerId: number | null = null;
-    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
-    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
-      capturedPointerId = id;
-    });
-    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
-      if (capturedPointerId === id) capturedPointerId = null;
-    });
+    stubProgressBar(bar);
 
     // Drag 10% → 30% → 70%: the preview follows the pointer, but the engine
     // must not be re-rendered per move; only the release commits a jump.
@@ -222,6 +215,50 @@ describe("Reader progress footer", () => {
     await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(0));
   });
 
+  it("turns pages for thumb arrow steps after a bar click jump", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    // Click the bar to 51%: one engine jump (same setup as the teleport test).
+    const bar = screen.getByTestId("reader-progress");
+    stubProgressBar(bar);
+    fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+    fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+    await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenCalledWith(0.51));
+
+    // The real engine answers the jump with a relocate, and the shell learns
+    // the reported position. Without this emit the regression below cannot
+    // reproduce: the sibling keyboard test skips it and passes either way.
+    lastFakeHandle().emitRelocate({ fraction: 0.51, totalProgression: 0.51 });
+    await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("51%"));
+
+    // A real bar click leaves focus on the thumb, so arrows step the bar.
+    // Each step is 0.1% of the book and must reach the engine: the old echo
+    // guard dropped every step as if it were the jump's own echo, so the
+    // slider ran ahead while the pages stayed put.
+    const thumb = screen.getByRole("slider", { name: "Reading position" });
+    thumb.focus();
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(
+        expect.closeTo(0.511, 3),
+      ),
+    );
+
+    // Same for stepping back: the engine reports the right-step landing,
+    // then the left step must reach it too.
+    lastFakeHandle().emitRelocate({ fraction: 0.511, totalProgression: 0.511 });
+    fireEvent.keyDown(thumb, { key: "ArrowLeft" });
+    await waitFor(() =>
+      expect(lastFakeHandle().goToTotalProgression).toHaveBeenLastCalledWith(
+        expect.closeTo(0.51, 3),
+      ),
+    );
+  });
+
   it("shows a Kindle-style location tooltip while positioning", async () => {
     renderReader();
     await screen.findByTestId("reader-view");
@@ -230,19 +267,7 @@ describe("Reader progress footer", () => {
     );
 
     const bar = screen.getByTestId("reader-progress");
-    vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
-      ...makeDomRect(400),
-      height: 4,
-      bottom: 404,
-    });
-    let capturedPointerId: number | null = null;
-    vi.spyOn(bar, "hasPointerCapture").mockImplementation((id) => capturedPointerId === id);
-    vi.spyOn(bar, "setPointerCapture").mockImplementation((id) => {
-      capturedPointerId = id;
-    });
-    vi.spyOn(bar, "releasePointerCapture").mockImplementation((id) => {
-      if (capturedPointerId === id) capturedPointerId = null;
-    });
+    stubProgressBar(bar);
 
     // No tooltip while you are not positioning the bar.
     expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull();
