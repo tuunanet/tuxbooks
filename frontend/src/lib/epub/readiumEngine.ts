@@ -210,6 +210,15 @@ const SEARCH_MAX_MATCHES = 500;
  */
 const EPUB_LOAD_TIMEOUT_MS = 8_000;
 
+/**
+ * Silence that ends a commanded jump's relocate hold (see `jumpHold`). The
+ * toolkit reports a cross-section jump in two relocates well under 100ms
+ * apart on healthy hardware; the hold must outlive the pair. Only a
+ * pathologically slow frame load spreads them wider, and the reset-on-
+ * each-event timer simply waits for the true landing.
+ */
+const JUMP_HOLD_QUIET_MS = 150;
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : String(value ?? "");
 }
@@ -238,6 +247,17 @@ export class ReadiumEpubHandle {
   private readonly host: HTMLDivElement;
   private readonly container: HTMLDivElement;
   private relocateHandlers = new Set<(detail: EpubRelocateDetail) => void>();
+  /**
+   * Hold for relocates while a commanded jump (the goTo family) is in
+   * flight. A cross-section jump reaches the shell in two relocates: the
+   * target section's frame fires one at its top the moment it loads, and
+   * the navigator reports the deep locator right after. Dispatching the
+   * anchor swings every consumer (footer slider, location tooltip, section
+   * indicator, progress persistence) through a position nobody asked for;
+   * the seek's own target value is already on screen. Held relocates
+   * dispatch once the stream goes quiet; the last one is the landing.
+   */
+  private jumpHold: { events: EpubRelocateDetail[]; timer: number } | null = null;
   private loadHandlers = new Set<(detail: EpubLoadDetail) => void>();
   private externalLinkHandlers = new Set<(href: string) => void>();
   private selectionHandlers = new Set<(selection: { text: string }) => void>();
@@ -621,7 +641,41 @@ export class ReadiumEpubHandle {
       totalProgression: this.totalProgressionOf(locator),
       tocItem: this.nearestTocLabel(locator.href),
     };
+    // A jump in flight holds the event: see jumpHold.
+    const hold = this.jumpHold;
+    if (hold !== null) {
+      hold.events.push(detail);
+      // Quiet-period semantics: the flush waits for the LAST relocate plus
+      // the quiet window, however slowly the frame load stretches the pair.
+      window.clearTimeout(hold.timer);
+      hold.timer = window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_QUIET_MS);
+      return;
+    }
+    this.dispatchRelocate(detail);
+  }
+
+  private dispatchRelocate(detail: EpubRelocateDetail): void {
     for (const handler of this.relocateHandlers) handler(detail);
+  }
+
+  /** Start holding relocates for a commanded jump (see jumpHold). */
+  private armJumpHold(): void {
+    // A newer jump supersedes an unsettled hold: its held events describe a
+    // position the new jump is about to replace, so drop rather than flush.
+    if (this.jumpHold !== null) window.clearTimeout(this.jumpHold.timer);
+    this.jumpHold = {
+      events: [],
+      timer: window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_QUIET_MS),
+    };
+  }
+
+  private flushJumpHold(): void {
+    const hold = this.jumpHold;
+    if (hold === null) return;
+    this.jumpHold = null;
+    window.clearTimeout(hold.timer);
+    const last = hold.events.at(-1);
+    if (last !== undefined) this.dispatchRelocate(last);
   }
 
   /**
@@ -759,12 +813,18 @@ export class ReadiumEpubHandle {
       if (!navigator) return;
       if (typeof target === "number") {
         const link = this.publication.readingOrder.items[target];
-        if (link) navigator.goLink(link, false, () => {});
+        if (link) {
+          this.armJumpHold();
+          navigator.goLink(link, false, () => {});
+        }
         return;
       }
       if (this.reportNonLocalTarget(target)) return;
       const locator = await this.toLocator(target);
-      if (locator) navigator.go(locator, false, () => {});
+      if (locator) {
+        this.armJumpHold();
+        navigator.go(locator, false, () => {});
+      }
     });
   }
 
@@ -1184,7 +1244,10 @@ export class ReadiumEpubHandle {
     await this.settled(() => {
       const navigator = this.navigator;
       const locator = this.locatorForTotalProgression(clamp01(totalProgression));
-      if (navigator && locator) navigator.go(locator, false, () => {});
+      if (navigator && locator) {
+        this.armJumpHold();
+        navigator.go(locator, false, () => {});
+      }
     });
   }
 
@@ -1208,6 +1271,10 @@ export class ReadiumEpubHandle {
   /** Destroys the navigator and frees the publication. */
   async close(): Promise<void> {
     this.searchGeneration += 1;
+    if (this.jumpHold !== null) {
+      window.clearTimeout(this.jumpHold.timer);
+      this.jumpHold = null;
+    }
     this.relocateHandlers.clear();
     this.loadHandlers.clear();
     this.externalLinkHandlers.clear();

@@ -144,6 +144,22 @@ export function prepareEnvironment(seeded: boolean): void {
       for (const fixture of readerRegressionFixtures) {
         copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
       }
+      // The seek-flash regression needs a book dense enough that a
+      // cross-section jump lands far from its section anchor (a twelve-
+      // chapter miniature; generated like the scale corpus so the phase
+      // stays self-contained). A failed generation skips the spec rather
+      // than failing the phase.
+      try {
+        execFileSync("python3", [
+          path.join(repoRoot, "scripts", "make-dense-epub.py"),
+          path.join(libraryDir, "reader-dense-sections.epub"),
+        ]);
+      } catch (err) {
+        console.warn(
+          "[e2e] dense fixture generation failed; the seek-flash spec will skip:",
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
     copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
     copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));

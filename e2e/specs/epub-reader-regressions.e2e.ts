@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { ensureLibrary, openInReader, returnToLibrary } from "./helpers.js";
@@ -152,5 +155,75 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
     await expect.poll(() => frameThemeBackground(page), { timeout: 30000 }).toBe("#101013");
     await returnToLibrary(page);
+  });
+
+  test("keeps the seek's anchor relocate out of the progress bar", async ({ page }) => {
+    const denseFixture = path.join(
+      process.env.TEST_LIBRARY_PATH ?? "",
+      "reader-dense-sections.epub",
+    );
+    test.skip(!fs.existsSync(denseFixture), "dense fixture not generated on this run");
+    await openInReader(page, "Reader Dense Sections (EPUB)");
+    const host = page.locator("div[data-epub-host]");
+    await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
+
+    // Record every value the thumb paints. A cross-section jump reaches the
+    // engine as two relocates: the target section's frame anchors at its
+    // top the moment it loads, then the navigator reports the deep locator.
+    // Painting both swung the slider through the section start on every
+    // seek (the UAT flash).
+    await page.evaluate(() => {
+      const w = window as typeof window & { __thumbValues?: string[] };
+      w.__thumbValues = [];
+      const thumb = document.querySelector(
+        "[data-testid=reader-progress] [data-slot=slider-thumb]",
+      );
+      w.__thumbValues.push(thumb?.getAttribute("aria-valuenow") ?? "");
+      new MutationObserver(() => {
+        const value = thumb?.getAttribute("aria-valuenow") ?? "";
+        const values = (window as typeof window & { __thumbValues?: string[] }).__thumbValues!;
+        if (values.at(-1) !== value) values.push(value);
+      }).observe(thumb!, { attributes: true, attributeFilter: ["aria-valuenow"] });
+    });
+
+    const bar = page.getByTestId("reader-progress");
+    const box = (await bar.boundingBox())!;
+
+    // Seek across sections and inspect each seek's painted values. The
+    // engine's jump hold dispatches only the landing, so every value a
+    // seek paints must sit within a step of the clicked fraction, of the
+    // landing, or of the previous seek's landing (a landing slow enough to
+    // bleed past the settle wait still belongs to its own seek). The
+    // section anchor sits well outside all three on this dense fixture
+    // (observed swings of ~3-5 points), and its appearance fails here.
+    let previousLanding: number | null = null;
+    for (const fraction of [0.1, 0.8, 0.3, 0.95]) {
+      const before = await page.evaluate(
+        () => (window as typeof window & { __thumbValues?: string[] }).__thumbValues!.length,
+      );
+      await bar.click({
+        position: { x: Math.round(box.width * fraction), y: Math.round(box.height / 2) },
+      });
+      // The settle wait must cover the hold's quiet window plus a slow
+      // frame load; segment boundaries assume the landing has painted.
+      await page.waitForTimeout(2000);
+      const segment = (
+        await page.evaluate(
+          () => (window as typeof window & { __thumbValues?: string[] }).__thumbValues!,
+        )
+      )
+        .slice(before)
+        .map(Number);
+      const clicked = fraction * 100;
+      const landing = segment.at(-1) ?? clicked;
+      for (const painted of segment) {
+        const legal =
+          Math.abs(painted - clicked) <= 1 ||
+          Math.abs(painted - landing) <= 1 ||
+          (previousLanding !== null && Math.abs(painted - previousLanding) <= 1);
+        expect(legal, `seek ${clicked}% painted a foreign intermediate ${painted}%`).toBe(true);
+      }
+      previousLanding = landing;
+    }
   });
 });
