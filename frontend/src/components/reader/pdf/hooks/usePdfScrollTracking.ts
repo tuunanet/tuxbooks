@@ -1,4 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
+import { recordPdfScrollWrite } from "@/lib/pdf/pdfZoomTelemetry";
+
 import { anchorAtOffset, type LayoutSlot } from "../pdfLayout";
 
 /**
@@ -12,14 +14,18 @@ export const READING_ANCHOR_RATIO = 0.25;
 /**
  * Imperative scroll write used by re-anchoring. Kept in one helper because
  * the element arrives via a prop-ref and direct assignment from component
- * scope trips the react-hooks immutability rule.
+ * scope trips the react-hooks immutability rule. Opt-in telemetry records
+ * the write: a native scrollbar drag never writes scrollTop, so a recorded
+ * write during a held drag names the app, not the user's hand.
  */
 export function setScrollTop(container: HTMLElement, value: number): void {
+  recordPdfScrollWrite("setScrollTop", container.scrollTop, value);
   container.scrollTop = value;
 }
 
 /** Horizontal counterpart of {@link setScrollTop} (wheel-zoom commit fixup). */
 export function setScrollLeft(container: HTMLElement, value: number): void {
+  recordPdfScrollWrite("setScrollLeft", container.scrollLeft, value);
   container.scrollLeft = value;
 }
 
