@@ -397,6 +397,14 @@ of recently scroll-reported pages (64), so stale commits stay still;
 page still re-anchors. Unit tests pin the stale-write silence (it fails
 against the old guard) and the navigation landing.
 
+UAT after the guard fix passed (2026-10-25, user session, zoom-log JSON):
+34.6 s of dragging including fast flicks at fit-width scale 4.82 on the
+1.18M px layout, with exactly three geometry events — open/restore, a
+window resize refit, and a zoom change — each paired with its legitimate
+re-anchor write, flat geometry between them, no oscillation signatures,
+and no update-depth errors. The ticket's thumb half is verified by UAT;
+the bench rerun rides the next scheduled bench run.
+
 ## Tooling gaps
 
 - The bench's synthetic drag writes `container.scrollTop` on a 16 ms
