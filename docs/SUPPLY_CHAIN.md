@@ -36,19 +36,19 @@ Locked versions of the high-risk set at the time of the last review
 (2026-10-12, this task; the electron, navigator, and shared rows moved
 with the Dependabot train merged as #205):
 
-| Dependency         | Locked        | Latest stable | Status                                                                                        |
-| ------------------ | ------------- | ------------- | --------------------------------------------------------------------------------------------- |
-| electron           | 44.3.0        | 44.7.0        | Latest major, in-support line; deltas ride Dependabot                                         |
-| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                                                 |
-| @readium/navigator | 2.10.0        | 2.12.1        | No advisories; minors tracked via Dependabot                                                  |
-| @readium/shared    | 2.5.0         | 2.8.0         | No advisories; minors tracked via Dependabot                                                  |
-| @readium/css       | 2.0.5         | 2.0.5         | Current                                                                                       |
-| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                                                            |
-| zip                | 2.4.2         | 9.0.2         | RUSTSEC-2026-0367/0368/0369 triaged: extraction APIs unused; upgrade tracked (`tuxbooks-zjy`) |
-| quick-xml          | 0.41.0        | 0.42.0        | Upgraded from 0.37.5 on 2026-09-16 (RUSTSEC-2026-0194/0195, high)                             |
-| image              | 0.25.10       | 0.25.10       | Current                                                                                       |
-| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                                                            |
-| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)                                          |
+| Dependency         | Locked        | Latest stable | Status                                                                                                                     |
+| ------------------ | ------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| electron           | 44.3.0        | 44.7.0        | Latest major, in-support line; deltas ride Dependabot                                                                      |
+| @embedpdf/pdfium   | 2.15.0        | 2.15.1        | MIT; PDF engine, minor delta rides Dependabot                                                                              |
+| @readium/navigator | 2.10.0        | 2.12.1        | No advisories; minors tracked via Dependabot                                                                               |
+| @readium/shared    | 2.5.0         | 2.8.0         | No advisories; minors tracked via Dependabot                                                                               |
+| @readium/css       | 2.0.5         | 2.0.5         | Current                                                                                                                    |
+| lopdf              | 0.44.0        | 0.45.0        | No advisories; minor delta tracked                                                                                         |
+| zip                | 9.1.0         | 9.1.0         | Upgraded from 2.4.2 on 2026-10-25 (RUSTSEC-2026-0367/0368/0369); extraction APIs unused, 9.x read enforcement noted in S-2 |
+| quick-xml          | 0.41.0        | 0.42.0        | Upgraded from 0.37.5 on 2026-09-16 (RUSTSEC-2026-0194/0195, high)                                                          |
+| image              | 0.25.10       | 0.25.10       | Current                                                                                                                    |
+| pdfium-render      | 0.9.3         | 0.9.4         | No advisories; patch delta tracked                                                                                         |
+| PDFium binaries    | chromium/7881 | —             | Pinned in `scripts/fetch-pdfium.sh` (`PDFIUM_BUILD`)                                                                       |
 
 Upgrade policy: take security fixes as the smallest viable upgrade that
 clears the advisory, run the full test suite, and never batch unrelated
@@ -76,7 +76,7 @@ Current triage:
 | RUSTSEC-2026-0194/0195 (quick-xml quadratic runtime and unbounded namespace allocation, both in the hostile EPUB/XML parse path) | high     | yes      | Fixed by upgrading quick-xml 0.37.5 -> 0.41.0 (2026-09-16, this task)                                                                                                                                                                                                                                    |
 | RUSTSEC-2023-0071 (rsa, Marvin key-recovery side channel)                                                                        | medium   | no       | Ignored in `sidecar/.cargo/audit.toml`: `rsa` enters the lockfile only as an optional dependency of sqlx-mysql, which is never compiled (sqlite-only build), and no fixed release exists. Revisit when the tree changes.                                                                                 |
 | GHSA-vfj7-8cjw-p6xm (braces stack exhaustion via deeply nested glob patterns)                                                    | high     | no       | Triaged 2026-10-12 in `scripts/npm-audit-gate.mjs`: no upstream fix (3.0.3 is the latest release, micromatch/braces#70 open), dev-only via micromatch <- fast-glob, and the patterns it compiles come from first-party config, not untrusted input. Revisit 2026-11-12.                                  |
-| RUSTSEC-2026-0367/0368/0369 (zip symlink targets and SUID preservation in `extract()`)                                           | critical | no       | Triaged 2026-10-19 in `sidecar/.cargo/audit.toml`: the sidecar reads entries with `by_index`/`by_name` and writes with `ZipWriter`; it never calls `ZipArchive::extract` or `ZipStreamReader::extract`, so no attacker-controlled extraction path exists. Upgrade to zip 9.x tracked as `tuxbooks-zjy`.  |
+| RUSTSEC-2026-0367/0368/0369 (zip symlink targets and SUID preservation in `extract()`)                                           | critical | yes      | Fixed by upgrading zip 2.4.2 -> 9.1.0 (2026-10-25, `tuxbooks-zjy`). The extraction APIs were never called; the ignore entries are gone, and 9.x additionally enforces declared uncompressed sizes on the `by_index` read path the sidecar does use.                                                      |
 | GHSA-27r3-jxmh-p828 (body-parser DoS via trailing bytes after a compressed request body)                                         | high     | yes      | Triaged 2026-10-24 in `scripts/npm-audit-gate.mjs`: no viable upgrade — express@5.2.1 (latest) pins body-parser 2.3.0 exactly, and 2.4.0 cannot enter until express ships. Dev-only via shadcn's MCP CLI, which serves no untrusted compressed requests. Revisit 2026-11-24 or the next express release. |
 | GHSA-xjj6-f33q-929c (undici DoS via unhandled error on excessive content-encodings)                                              | high     | yes      | Triaged 2026-10-24 in `scripts/npm-audit-gate.mjs`, 8.x instance only: the fix (8.12.2) is younger than the 30-day floor (S-5). The electron bump to 44.9.1 already moved the 6.x/7.x instances past the advisory. Dev-only via vitest's jsdom and graft's CLI. Revisit 2026-11-14, when 8.12.2 matures. |
 | GHSA-mrhx-c7xc-m3w5 (zod memory exhaustion validating oversized constrained collections)                                         | high     | yes      | Triaged 2026-10-24 in `scripts/npm-audit-gate.mjs`: the fix (>=4.6.6) is younger than the 30-day floor (S-5), and fresh resolution keeps mature 3.25.76 since every parent range admits both lines. Dev-only via graft's CLI clients and shadcn's MCP sdk. Revisit 2026-11-11, when 4.6.7 matures.       |
