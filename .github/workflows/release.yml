@@ -1,11 +1,14 @@
 name: Release
 
 # Tags are immutable release points. Cut a release by: bumping the version
-# in all manifests on main, letting CI go green, then tagging that commit
-# (e.g. `git tag -a v0.1.1 && git push origin v0.1.1`). The workflow refuses
-# to publish unless the tag exactly matches the version bundled below, so a
-# stale or reused version can never produce a release. See docs/RELEASE.md
-# and the versioning policy under Milestone 11 in ROADMAP.md.
+# in all manifests on main, drafting the release notes for that version
+# (scripts/release-notes.sh) and committing them with the bump, letting CI
+# go green, then tagging that commit (e.g. `git tag -a v0.1.1 && git
+# push origin v0.1.1`). The workflow refuses to publish unless the tag
+# exactly matches the version bundled below and the committed notes file
+# exists, so a stale or reused version — or a forgotten New/Changed/Fixed
+# note — can never produce a release. See docs/RELEASE.md and the
+# versioning policy under Milestone 11 in ROADMAP.md.
 
 on:
   push:
@@ -169,37 +172,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          notes_file="$(mktemp)"
-          # Release notes are curated per release; rewrite them when the next
-          # version is cut.
-          cat > "$notes_file" <<EOF
-          TuxBooks 0.1.0 is the first minor release: the basic functionality is in place, and the app is usable end to end for a real library of EPUB and PDF books.
-
-          What changed since 0.0.24:
-
-          - Bookmarks now have a home in book details. The Bookmarks tab sits next to Highlights, lists every bookmark with its chapter or page and when it was saved, and jumps the reader to that spot.
-          - Bookmarking is quicker and less forgettable. Toggling a bookmark drops a small label box out of the toolbar button, so you can name the spot right away instead of hunting for it later. It shows where the bookmark sits (chapter and in-chapter progress for EPUB, page for PDF), and you can edit labels later from the drawer or the details tab.
-          - The reader navigation moved to the right side, the Contents tab was renamed, and the toolbar order was tidied. Ctrl+F opens in-book search.
-          - The PDF and EPUB readers, the library, and the release pipeline carry the fixes from the 0.0.21 to 0.0.24 cycle: a Spotlight-style in-book search, theme-aware highlights, more reliable watched-folder sync, and faster PDF scrolling.
-
-          The next milestones are syncing your data across machines, improving the architecture, and optimizing performance. See the roadmap for what follows: https://github.com/tuunanet/tuxbooks/blob/main/ROADMAP.md
-
-          Install on Ubuntu/Debian:
-
-          \`\`\`
-          sudo apt install ./tuxbooks_${version}_amd64.deb
-          \`\`\`
-
-          Or run the portable AppImage (no installation):
-
-          \`\`\`
-          chmod +x tuxbooks_${version}.AppImage
-          ./tuxbooks_${version}.AppImage
-          \`\`\`
-
-          SHA256SUMS.txt verifies the downloads. Build from source or read the
-          plan: https://github.com/tuunanet/tuxbooks
-          EOF
+          # The notes are drafted from the commits since the previous tag
+          # (scripts/release-notes.sh), polished, and committed with the
+          # version bump, so the file exists at this tag. Refusing to
+          # publish without it keeps the New / Changed / Fixed sections
+          # from being forgotten (docs/RELEASE.md "Cutting a release").
+          notes_file="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes_file" ]; then
+            echo "::error::missing $notes_file"
+            echo "::error::run 'just release-notes $version', polish the draft, and commit it with the version bump"
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --title "TuxBooks $GITHUB_REF_NAME" \
             --notes-file "$notes_file" \
