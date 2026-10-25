@@ -213,11 +213,18 @@ const EPUB_LOAD_TIMEOUT_MS = 8_000;
 /**
  * Silence that ends a commanded jump's relocate hold (see `jumpHold`). The
  * toolkit reports a cross-section jump in two relocates well under 100ms
- * apart on healthy hardware; the hold must outlive the pair. Only a
- * pathologically slow frame load spreads them wider, and the reset-on-
- * each-event timer simply waits for the true landing.
+ * apart on healthy hardware; the hold must outlive the pair.
  */
 const JUMP_HOLD_QUIET_MS = 150;
+
+/**
+ * Bound on how long a jump hold survives without seeing any relocate (see
+ * `jumpHold`). The anchor relocate of a cross-section jump trails the go()
+ * by the target frame's load, which on a real book can outrun the quiet
+ * window: the hold must stay armed until the first event shows up, and
+ * only a wedged navigator that never reports should let it lapse.
+ */
+const JUMP_HOLD_MAX_MS = 2_000;
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : String(value ?? "");
@@ -663,9 +670,11 @@ export class ReadiumEpubHandle {
     // A newer jump supersedes an unsettled hold: its held events describe a
     // position the new jump is about to replace, so drop rather than flush.
     if (this.jumpHold !== null) window.clearTimeout(this.jumpHold.timer);
+    // The bail-out timer covers only the wait for the first relocate; each
+    // held event then re-arms the shorter quiet window (handlePositionChanged).
     this.jumpHold = {
       events: [],
-      timer: window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_QUIET_MS),
+      timer: window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_MAX_MS),
     };
   }
 
