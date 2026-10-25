@@ -6,10 +6,10 @@ import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 
 /**
  * Page geometry for the continuous layout, focused on the eager
- * full-document sweep (the scrollbar fix, tuxbooks-x27.5, pdf.js/thorium
- * reference): waves, the over-limit lazy fallback, document-switch
- * cancellation, and the failed-wave abort. Reader-level integration lives
- * in PdfReader.test.tsx.
+ * full-document sweep (the scrollbar fix, tuxbooks-x27.5): waves, the
+ * over-limit lazy fallback, document-switch
+ * cancellation, and carrying on past failed waves. Reader-level
+ * integration lives in PdfReader.test.tsx.
  */
 
 /** Distinct per-page real size, so estimates and corrections never agree. */

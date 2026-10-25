@@ -144,7 +144,7 @@ function ScaleSliderRow(props: {
  * controls only exist for reflowable content. For PDF (fixed layout) the
  * reflow sections would do nothing, so only the theme is offered, applied as
  * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
- * Thorium ships no PDF theming at all). The host owns the state: the reader
+ * mainstream readers ship no PDF theming at all). The host owns the state: the reader
  * passes its context preferences, Settings passes the persisted defaults.
  */
 export function ReaderAppearanceControls({

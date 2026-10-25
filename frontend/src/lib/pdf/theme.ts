@@ -21,7 +21,7 @@
  *
  * Blue and Mint have no faithful treatment (they rely on text/background
  * recoloring), so they are not offered for PDFs and map to no-ops.
- * Thorium ships no PDF theming at all; this keeps the useful half.
+ * Mainstream readers ship no PDF theming at all; this keeps the useful half.
  */
 import { EPUB_THEME_COLORS, type ReaderTheme } from "@/lib/epub/appearance";
 import { hexToRgb01, type SmartPalette } from "./smartColors";

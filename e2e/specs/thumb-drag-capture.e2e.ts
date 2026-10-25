@@ -45,8 +45,8 @@ import { repoRoot } from "../setup/fixtures.js";
  * so measuring it grows the fit-width reference — the path that can
  * reach reanchorByFraction.
  *
- * On the FIXED build (tuxbooks-x27.5, the pdf.js/thorium reference: all
- * pages measured in a background sweep right after first paint) the
+ * On the FIXED build (tuxbooks-x27.5: all pages measured in a background
+ * sweep right after first paint) the
  * fixture's height corrections land before the drag instead, so the
  * expected report is zero in-drag height events, zero re-anchor writes,
  * and thumb-versus-cursor error within tight tolerance.

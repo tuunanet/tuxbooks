@@ -296,9 +296,9 @@ describe("PdfReader loading", () => {
     expect(slot(12)).toHaveStyle({ width: "504px", height: "720px" });
   });
 
-  it("measures the whole document eagerly after first paint (pdf.js parity)", async () => {
-    // The scrollbar fix (tuxbooks-x27.5, thorium-reader/pdf.js reference):
-    // a body page outside the opening sample no longer waits for an
+  it("measures the whole document eagerly after first paint", async () => {
+    // The scrollbar fix (tuxbooks-x27.5): a body page outside the opening
+    // sample no longer waits for an
     // approach — every page is measured in one background sweep that starts
     // after the first page renders, so slot heights (scrollHeight) settle
     // long before the user can grab the native scrollbar thumb and never

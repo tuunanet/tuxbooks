@@ -3,18 +3,16 @@ import type { PdfDocument } from "@/lib/pdf/pdfEngine";
 import { estimatePageSizes, medianPageSize, type PageSize } from "../pdfLayout";
 
 /**
- * Eager full-document measurement, pdf.js parity (the thorium-reader
- * scrollbar reference, web/pdf_viewer.js): documents up to
+ * Eager full-document measurement: documents up to
  * EAGER_MEASURE_PAGE_LIMIT pages get every page's real size fetched in
- * EAGER_MEASURE_WAVE_SIZE waves right after the first page renders,
- * matching pdf.js's PAUSE_EAGER_PAGE_INIT (250) and FORCE_LAZY_PAGE_INIT
- * (5000). Slot heights therefore stop correcting long before a user can
- * move to the scrollbar, so the native thumb's mapping never sees
- * scrollHeight move mid-drag — the confirmed jump mechanism (T1, ticket
- * tuxbooks-x27.5, capture evidence in
- * docs/research/pdf-viewer-perf-findings.md, Symptom 2). Documents above
- * the limit stay on the lazy on-approach correction, exactly as pdf.js
- * stays lazy above its own limit.
+ * EAGER_MEASURE_WAVE_SIZE waves right after the first page renders — the
+ * policy mainstream PDF viewers converge on, with the wave size (250) and
+ * the lazy-page limit (5000) mirroring common viewer practice. Slot
+ * heights therefore stop correcting long before a user can move to the
+ * scrollbar, so the native thumb's mapping never sees scrollHeight move
+ * mid-drag — the confirmed jump mechanism (T1, ticket tuxbooks-x27.5,
+ * capture evidence in docs/research/pdf-viewer-perf-findings.md, Symptom
+ * 2). Documents above the limit stay on the lazy on-approach correction.
  */
 const EAGER_MEASURE_PAGE_LIMIT = 5000;
 const EAGER_MEASURE_WAVE_SIZE = 250;
@@ -80,8 +78,8 @@ function applyCorrections(
  * area) so the whole document reserves its space immediately; real
  * dimensions replace estimates as pages are measured. Below
  * EAGER_MEASURE_PAGE_LIMIT the measurement is a full-document sweep that
- * starts once the first page has rendered (pdf.js's viewer fetches all
- * pages at the same point); above it, pages are corrected lazily as they
+ * starts once the first page has rendered (the point mainstream viewers
+ * pick); above it, pages are corrected lazily as they
  * approach visibility. Estimating from page 1 alone made a document with
  * an odd first page (a wide cover) reserve every page at the cover's box,
  * so each ordinary page visibly snapped narrower as it was measured: a
@@ -133,8 +131,8 @@ export function usePdfGeometry(
     };
   }, [document, pageCount]);
 
-  // Eager full-document measurement (pdf.js parity, see the constants
-  // above). Gated on first paint so the sweep never queues ahead of page 1
+  // Eager full-document measurement (see the constants above). Gated on
+  // first paint so the sweep never queues ahead of page 1
   // on the worker — the same ordering rule as the outline request
   // (docs/PDF.md, § first-page priority). One geometry commit per wave, so
   // the layout converges in a handful of beats right after open instead of
