@@ -182,6 +182,15 @@ export function ReaderShell() {
   const readerViewRef = useRef<HTMLDivElement | null>(null);
   // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
+  // The progress footer's seek bar; its pointer release hands focus back to
+  // the reading surface (see the bar's onPointerUp).
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
+  const releaseBarFocus = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && progressBarRef.current?.contains(active)) {
+      active.blur();
+    }
+  };
   // Keep a wheel gesture on the axis it began on: releasing Shift while a
   // free-spinning wheel is still going must not flip horizontal scrolling to
   // vertical (see useAxisLockedWheel).
@@ -199,10 +208,18 @@ export function ReaderShell() {
   // query runs inside the pointer handlers — refs stay out of render — and
   // a null open adapter degrades the label to percent-only.
   const [barPositioningLabel, setBarPositioningLabel] = useState<string | null>(null);
-  const readPositioningLabel = (percent: number) => {
+  const readPositioningLabel = useCallback((percent: number) => {
     const location = adapterRef.current?.progressionIndexFor?.(percent / 100) ?? null;
     setBarPositioningLabel(locationLabel(location, percent));
-  };
+  }, []);
+  // The label is live while it shows: page turns move the value under a
+  // resting pointer, and a label read only at pointer entry would sit
+  // frozen at the location where the seek began.
+  const barValue = progressPreview ?? position;
+  useEffect(() => {
+    if (barPositioningLabel === null) return;
+    readPositioningLabel(barValue);
+  }, [barPositioningLabel, barValue, readPositioningLabel]);
   // Persistent annotations of the open book: bookmarks, highlights, notes.
   const {
     annotations,
@@ -847,6 +864,7 @@ export function ReaderShell() {
         >
           <div className="mx-auto flex max-w-3xl items-center gap-3">
             <SliderPrimitive.Root
+              ref={progressBarRef}
               data-testid="reader-progress"
               className="relative flex w-full touch-none select-none items-center"
               value={[progressPreview ?? position]}
@@ -867,6 +885,16 @@ export function ReaderShell() {
               onPointerEnter={() => readPositioningLabel(progressPreview ?? position)}
               onPointerDown={() => readPositioningLabel(progressPreview ?? position)}
               onPointerLeave={() => setBarPositioningLabel(null)}
+              // A pointer seek is over: hand focus back to the reading
+              // surface, so arrows and space go straight back to turning
+              // pages instead of nudging the thumb by 0.1% per keypress
+              // (the same focus policy as the navigation drawer). Keyboard
+              // steering from a Tab-focused thumb keeps its steps.
+              // pointercancel counts too: a gesture cut short by an alt-tab
+              // or a touch handoff must not leave the thumb holding the
+              // reading keys.
+              onPointerUp={releaseBarFocus}
+              onPointerCancel={releaseBarFocus}
             >
               {barPositioningLabel !== null && (
                 <span
