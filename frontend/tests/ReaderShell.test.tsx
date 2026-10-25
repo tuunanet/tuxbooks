@@ -259,6 +259,37 @@ describe("Reader progress footer", () => {
     );
   });
 
+  it("hands keyboard reading back to the surface after a bar click seek", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    const bar = screen.getByTestId("reader-progress");
+    stubProgressBar(bar);
+    fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+    // The browser's slider focuses the thumb on press; model that before
+    // the release.
+    const thumb = screen.getByRole("slider", { name: "Reading position" });
+    thumb.focus();
+    fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
+
+    // The release must hand focus back to the reading surface. A thumb that
+    // keeps focus turns arrows into 0.1% slider nudges, so reading one page
+    // per keypress takes many.
+    expect(thumb).not.toHaveFocus();
+
+    // With focus back on the surface, the reading keys flip pages again.
+    const handle = lastFakeHandle();
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: " " });
+    expect(handle.next).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(handle.prev).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a Kindle-style location tooltip while positioning", async () => {
     renderReader();
     await screen.findByTestId("reader-view");
