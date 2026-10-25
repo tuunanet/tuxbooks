@@ -127,8 +127,13 @@ environment, and a failed prewarm only means the next open starts cold.
   that lands after its book was superseded is destroyed, never mounted.
   Records the open-timeline anchor + `open=` segment for the telemetry
   attributes below.
-- `hooks/usePdfGeometry` — reserves the whole document from a page-1
-  estimate, then corrects pages lazily as they approach visibility
+- `hooks/usePdfGeometry` — reserves the whole document from an opening
+  sample (pages 1, 2, and the last page, median by area), then measures.
+  Documents up to 5000 pages are measured in full by a background sweep
+  that starts once the first page renders (pdf.js's viewer fetches all
+  pages at the same point; the sweep is what keeps slot heights — and the
+  native scrollbar thumb's mapping — stable during drags,
+  tuxbooks-x27.5). Larger documents fall back to on-approach correction
   (`measurePages`; corrections are idempotent per document).
 - `hooks/usePdfVirtualization` — an IntersectionObserver pair over the slot
   elements (visible: no margin; preload: a fixed ±1200 px ≈ one 1080p
@@ -376,8 +381,9 @@ so it can never occupy the PDFium worker ahead of page 1.
 
 The same virtualization policy at low resolution. The sidebar reuses the
 slot/observer pattern: one cell per page reserves space up front (aspect
-from the shared page sizes, corrected lazily via the same `measurePages`
-path), and an observer pair feeds a render set capped at
+from the shared page sizes, corrected by the same geometry policy as the
+document — the eager full-document sweep, or `measurePages` above the
+sweep's page limit), and an observer pair feeds a render set capped at
 `MAX_THUMBNAIL_CANVASES` (12) with exactly one render in flight — unbounded
 thumbnail requests would starve the page the user is looking at. Canvases
 render at the cell width (`THUMBNAIL_WIDTH_PX`, 112), mount only inside the

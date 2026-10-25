@@ -411,7 +411,13 @@ export function PdfReader({
     openMs,
     openStartedAt,
   } = usePdfDocument(book.id, onDocumentLoad);
-  const { sizes, measurePages, isMeasured } = usePdfGeometry(pdfDocument, pageCount);
+  // First-paint gate for below-first-paint engine work (the geometry sweep
+  // here, the outline request below): it flips once the first canvas blits,
+  // so background measurement can never queue ahead of page 1 on the worker
+  // (§ first-page priority). The open-timeline telemetry keeps its own
+  // timestamps further down.
+  const [firstPainted, setFirstPainted] = useState(false);
+  const { sizes, measurePages, isMeasured } = usePdfGeometry(pdfDocument, pageCount, firstPainted);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
   // The initial destination is captured when the reader mounts: the shell
   // clears the app-state target as soon as the annotation list resolves.
@@ -1327,6 +1333,7 @@ export function PdfReader({
   // onRestored callback above.
   const handlePageRenderedTelemetried = useCallback(
     (pageNumber: number) => {
+      setFirstPainted(true);
       setFirstPaintedPage((current) => current ?? pageNumber);
       setFirstPaintMs((current) => {
         if (current !== null) return current;

@@ -338,6 +338,35 @@ runs on 2026-10-24, same shape both times:
 Fix ticket: tuxbooks-x27.5 (fix only if the user's UAT reproduction
 agrees; the capture covers the mixed-size half of the owed evidence).
 
+### Fix (2026-10-25, branch perf/pdf-thumb-reference)
+
+The fix ports the reference behavior of thorium-reader's PDF viewer
+(edrlab/pdf.js 87c6007, PDF.js v6.3.289): its viewer fetches every page's
+real size right after the first page renders (`web/pdf_viewer.js`,
+"Fetch all the pages" — `PagesCountLimit.FORCE_LAZY_PAGE_INIT` 5000,
+`PAUSE_EAGER_PAGE_INIT` 250), so slot heights settle before a thumb drag
+can start. `usePdfGeometry` now runs the same sweep after first paint
+(waves of 250, one commit per wave, the lazy on-approach path kept for
+documents above 5000 pages), replacing the measure-on-approach-only
+policy that produced the mid-drag `scrollHeight` corrections.
+
+Capture rerun on the fixed build (`just test-e2e-capture`, same fixture
+and procedure): `heightEventsDuringDrag` 20-23 → **0**, final error
+−153,201/−159,906 px (−58.4/−62.6%) → **+3,951 px (+0.875% of 451,343 px
+traveled, ≈ 5 pages)**, end-of-drag cursor 73.0% vs thumb 73.9% of the
+track (8 px apart, thumb under cursor) against the unfixed 73.6% vs
+46.9% (248 px apart). With zero in-drag height events the trace question
+resolves for this document: thumb re-derivation is out (there is no
+`scrollHeight` change to re-derive against), and the small overshoot is
+input-side — per-step quantization aliasing, the same redistribution the
+unfixed capture saw, now without a layout mechanism behind it
+(`deadSteps` 23/59 → 4/59). Report:
+`artifacts/e2e/capture-2026-10-25T02-42-15-906Z-1s5hz/thumb-drag-capture.json`
+(a first run on the same build,
+`capture-2026-10-25T02-26-26-327Z-1r41z`, landed the same numbers).
+User UAT is still the acceptance gate; the capture is evidence, not a
+regression gate (no thumb regression test, by decision).
+
 ## Tooling gaps
 
 - The bench's synthetic drag writes `container.scrollTop` on a 16 ms

@@ -278,14 +278,26 @@ describe("PdfReader loading", () => {
     expect(slot(12)).toHaveStyle({ width: "504px", height: "720px" });
   });
 
-  it("corrects a differing page's box when it is measured on approach", async () => {
-    // The mirror case: the odd page sits in the document's body, outside
-    // the opening sample, so it starts at the median estimate and snaps to
-    // its real (wider) box exactly once, when measured. That snap is the
-    // only one left for the incident book's shape.
+  it("measures the whole document eagerly after first paint (pdf.js parity)", async () => {
+    // The scrollbar fix (tuxbooks-x27.5, thorium-reader/pdf.js reference):
+    // a body page outside the opening sample no longer waits for an
+    // approach — every page is measured in one background sweep that starts
+    // after the first page renders, so slot heights (scrollHeight) settle
+    // long before the user can grab the native scrollbar thumb and never
+    // move mid-drag. The sweep's getPage calls are held below so the
+    // estimate/fit assertions stay deterministic.
     const doc = makeFakePdfDocument(20, (pageNumber) =>
       pageNumber === 10 ? { width: 827, height: 1180 } : { width: 504, height: 720 },
     );
+    const heldWaves: Array<() => void> = [];
+    const underlyingGetPage = doc.getPage.getMockImplementation()! as (page: number) => Promise<{
+      getViewport: (options: { scale: number }) => { width: number; height: number };
+    }>;
+    doc.getPage.mockImplementation(async (page: number) => {
+      // Hold the sweep's pages, never the opening sample (1, 2, 20).
+      if (page >= 3 && page < 20) await new Promise<void>((resolve) => heldWaves.push(resolve));
+      return underlyingGetPage(page);
+    });
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
       get_reading_progress: null,
@@ -293,6 +305,7 @@ describe("PdfReader loading", () => {
     });
 
     await renderLoadedReader();
+    // The body page starts at the median estimate: the sweep has not landed.
     expect(slot(10)).toHaveStyle({ width: "504px", height: "720px" });
 
     // With a measured area the fit starts against the sampled max (504pt):
@@ -302,15 +315,26 @@ describe("PdfReader loading", () => {
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("242.9"));
 
-    // The late measurement raises the fit reference to the page's real
-    // width (pps_document_get_max_page_size): the scale drops to
+    // Release the sweep: the body page corrects without any approach, the
+    // fit reference rises to its real width
+    // (pps_document_get_max_page_size), the scale drops to
     // (1248 - 24) / 827 = 148%, and the slot swaps to the real box in the
-    // same correction. Neighbours keep their boxes.
-    fireVisible(slot(10) as Element, true);
-    await waitFor(() => expect(slot(10)).toHaveStyle({ width: "1224px", height: "1746px" }));
+    // same correction. Neighbours keep their boxes. The zoom readback and
+    // the slots land in the same commit, so the scale is asserted first.
+    // The sweep starts on the first canvas blit, which can land a beat
+    // after the canvas mounts, so hold the release until its pages are
+    // actually parked.
+    await waitFor(() => expect(heldWaves.length).toBeGreaterThan(0));
+    for (const resolve of heldWaves.splice(0)) resolve();
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("148"));
+    expect(slot(10)).toHaveStyle({ width: "1224px", height: "1746px" });
     expect(slot(9)).toHaveStyle({ width: "746px", height: "1066px" });
     expect(slot(11)).toHaveStyle({ width: "746px", height: "1066px" });
+    // Every page was measured: the engine saw a getPage for each page
+    // (rendered pages can appear more than once — the canvases go through
+    // the same seam).
+    const measuredPages = new Set(doc.getPage.mock.calls.map(([page]) => page));
+    expect(measuredPages).toEqual(new Set(Array.from({ length: 20 }, (_, i) => i + 1)));
   });
 
   it("reports the loaded page count to the shell", async () => {
