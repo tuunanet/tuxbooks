@@ -163,6 +163,16 @@ package TARGETS="deb rpm AppImage": build
 check-deb:
     bash scripts/check-deb.sh
 
+# Draft the next release's GitHub notes into docs/release-notes/vX.Y.Z.md
+# (docs/RELEASE.md "Cutting a release"): groups the user-facing commits
+# since the last tag into New / Changed / Fixed, plus the install and
+# full-changelog blocks. Polish the draft and commit it with the version
+# bump — the release workflow publishes exactly that file and refuses to
+# release without it. Extra arguments pass through to the script, e.g.
+# `just release-notes 0.1.1 --force` discards a polished draft.
+release-notes VERSION *FLAGS:
+    bash scripts/release-notes.sh {{VERSION}} {{FLAGS}}
+
 # Dependency audits (issue #89, S-2): the npm gate (untriaged high/critical
 # advisories fail) plus RustSec cargo-audit over the sidecar and fuzz
 # lockfiles. Networked. CI runs the same gates (.github/workflows/audit.yml,

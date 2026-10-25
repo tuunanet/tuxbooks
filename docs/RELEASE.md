@@ -88,18 +88,29 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
    (the electron-builder source of truth), the Rust crate's
    `Cargo.toml`/`Cargo.lock`, `frontend/package.json`, and the homepage
    version badge in `site/index.html` when the headline version changes.
-2. Let CI go green on that commit.
-3. Tag it: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. Never move or
+2. Draft the release notes with `just release-notes X.Y.Z`: the script
+   writes `docs/release-notes/vX.Y.Z.md`, grouping the user-facing
+   commits since the previous tag into **New** (`feat`), **Changed**
+   (`refactor`, `perf`), and **Fixed** (`fix`) sections, plus the install
+   instructions and the full-changelog link. Write the one-sentence
+   summary, polish the bullets, add anything the draft missed (a security
+   dependency bump, docs worth pointing at), and commit the file with the
+   version bump. The release workflow publishes exactly this file and
+   fails the release when it is missing, so the section shape never
+   depends on memory.
+3. Let CI go green on that commit.
+4. Tag it: `git tag -a vX.Y.Z && git push origin vX.Y.Z`. Never move or
    reuse a tag — a bad build is fixed in the next version.
-4. The release workflow then runs two jobs:
+5. The release workflow then runs two jobs:
    - **verify** — the headless real-binary E2E suites (`just test-e2e`), the
      part a commit's CI run does not cover; its unit and integration suites
      were already green there, so a tag never publishes what has not been
      proven;
    - **publish** — refuses to run unless the tag exactly matches the
-     version in the packaging manifest, builds deb + AppImage, generates
-     the SBOM (`just sbom`), writes `SHA256SUMS.txt` over the installers
-     and the SBOM, and publishes the release with install instructions.
+     version in the packaging manifest and the committed notes file
+     exists, builds deb + AppImage, generates the SBOM (`just sbom`),
+     writes `SHA256SUMS.txt` over the installers and the SBOM, and
+     publishes the release with those notes and install instructions.
 
 Before tagging, run `just audit`: release builds must be free of
 untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
