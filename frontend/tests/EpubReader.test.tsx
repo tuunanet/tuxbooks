@@ -327,6 +327,32 @@ describe("EpubReader appearance and navigation", () => {
     expect((surface as HTMLElement).style.marginInline).toBe("auto");
   });
 
+  it("derives a paginated two-column flow from book mode over the stored layout", async () => {
+    mockHappyPath(null);
+
+    renderReaderWithProbe("probe-book-mode", {
+      layout: "scrolling",
+      columnCount: 1,
+      bookMode: true,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    const handle = lastFakeHandle();
+    await clickProbe("probe-book-mode");
+
+    // The stored preferences (scrolling, one column) stay intact; book
+    // mode derives the spread on top: paginated flow at two columns.
+    expect(handle.setFlow).not.toHaveBeenCalledWith("scrolled");
+    expect(handle.setFlow).toHaveBeenLastCalledWith("paginated");
+    await waitFor(() =>
+      expect(handle.setAppearance).toHaveBeenLastCalledWith(
+        expect.objectContaining({ columnCount: 2 }),
+      ),
+    );
+    expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated");
+  });
+
   it("bridges the engine theme background on the reader root", async () => {
     mockHappyPath(null);
 

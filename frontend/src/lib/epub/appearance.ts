@@ -555,6 +555,12 @@ export type EpubColumnCount = (typeof EPUB_COLUMN_COUNTS)[number];
  */
 export const EPUB_DEFAULT_COLUMN_COUNT: EpubColumnCount = 2;
 
+/**
+ * The column count book mode implies: the two-page spread the mode is named
+ * for, regardless of the stored column preference.
+ */
+export const EPUB_BOOK_MODE_COLUMN_COUNT: EpubColumnCount = 2;
+
 /** True when `value` is exactly a supported column count. */
 export function isEpubColumnCount(value: number): value is EpubColumnCount {
   return (EPUB_COLUMN_COUNTS as readonly number[]).includes(value);

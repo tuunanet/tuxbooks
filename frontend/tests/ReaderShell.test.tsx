@@ -1566,6 +1566,34 @@ describe("ReaderAppearance", () => {
     );
   });
 
+  it("exposes the book mode toggle for EPUB, reflecting and persisting the choice", async () => {
+    // The persisted choice greets the reader: the control reflects the
+    // current persisted value.
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
+        themePinned: false,
+      }),
+    );
+    renderReader("epub");
+
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+
+    const toggle = screen.getByTestId("pref-book-mode");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    // Toggling writes through the provider's persistence effect.
+    await userEvent.click(toggle);
+    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
+      expect(stored.preferences.bookMode).toBe(false);
+    });
+  });
+
   it("exposes font size and line spacing sliders", async () => {
     renderReader();
 
@@ -2007,6 +2035,9 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
 
+    // Book mode is the one shared control both readers carry.
+    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+
     // Exactly the PDF theme choices are offered (issue #67: Smart dark
     // recolors in the worker, Invert is the explicit negative), and a
     // filter choice lands on the rendered pages as a CSS filter.
@@ -2039,6 +2070,32 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pdf-reader")).not.toContainElement(
       screen.getByTestId("pdf-toolbar"),
     );
+  });
+
+  it("reflects a persisted book mode choice and toggles it for PDFs", async () => {
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
+        themePinned: false,
+      }),
+    );
+    renderReader("pdf");
+
+    await screen.findByTestId("pdf-canvas");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+
+    const toggle = screen.getByTestId("pref-book-mode");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    // Toggling writes through the provider's persistence effect.
+    await userEvent.click(toggle);
+    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
+      expect(stored.preferences.bookMode).toBe(false);
+    });
   });
 });
 

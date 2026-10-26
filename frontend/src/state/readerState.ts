@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import {
+  EPUB_BOOK_MODE_COLUMN_COUNT,
   EPUB_DEFAULT_COLUMN_COUNT,
   EPUB_DEFAULT_FONT_SIZE_PERCENT,
   EPUB_DEFAULT_LINE_HEIGHT,
@@ -70,6 +71,14 @@ export type ReaderFontFamily = EpubFontFamily;
   highlightOverrides: HighlightOverrides;
   theme: ReaderTheme;
   layout: ReaderLayout;
+  /**
+   * Book mode (spec tuxbooks-9pr): two facing pages instead of one. One
+   * shared flag for whichever reader is open; for the EPUB the surface
+   * derives a paginated two-column flow from it (`epubBookModeLayout`,
+   * `epubBookModeColumnCount`) without mutating the stored layout and
+   * column count, so leaving book mode restores them.
+   */
+  bookMode: boolean;
 }
 
 export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
@@ -86,7 +95,21 @@ export const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
   highlightOverrides: EMPTY_HIGHLIGHT_OVERRIDES,
   theme: EPUB_DEFAULT_THEME,
   layout: "paginated",
+  bookMode: false,
 };
+
+/**
+ * The EPUB layout the surface applies: book mode implies paginated flow,
+ * otherwise the stored layout preference stands.
+ */
+export function epubBookModeLayout(preferences: ReaderPreferences): ReaderLayout {
+  return preferences.bookMode ? "paginated" : preferences.layout;
+}
+
+/** The EPUB column count the surface applies: book mode implies two columns. */
+export function epubBookModeColumnCount(preferences: ReaderPreferences): number {
+  return preferences.bookMode ? EPUB_BOOK_MODE_COLUMN_COUNT : preferences.columnCount;
+}
 
 /**
  * Reader surface theme while it follows the global app theme (the state

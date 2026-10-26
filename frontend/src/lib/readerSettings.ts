@@ -117,6 +117,10 @@ export function sanitizeReaderPreferences(raw: unknown): ReaderPreferences {
     highlightOverrides: sanitizeHighlightOverrides(source.highlightOverrides),
     theme,
     layout,
+    // Booleans are never trusted verbatim: only a stored literal true
+    // sticks, anything malformed sanitizes back to the off default
+    // (the themePinned precedent in readReaderSettings).
+    bookMode: source.bookMode === true,
   };
 }
 
