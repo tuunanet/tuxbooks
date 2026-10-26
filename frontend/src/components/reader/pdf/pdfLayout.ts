@@ -395,6 +395,58 @@ export function layoutSlots(sizes: PageSize[], gapPx: number = PAGE_GAP_PX): Lay
   });
 }
 
+/** One page's rectangle inside a spread, in spread-container coordinates. */
+export interface SpreadPage extends Rect {
+  pageNumber: number;
+}
+
+/**
+ * The visible spread: its pages in reading order, plus the spread's own
+ * bounds from the first page's left edge to the last page's right edge.
+ */
+export interface SpreadLayout {
+  pages: SpreadPage[];
+  bounds: Rect;
+}
+
+/**
+ * The spread containing `pageIndex` under book mode's grouping: page 1
+ * alone as the cover, then facing pairs, a trailing odd page alone (never
+ * padded with a blank). This is the single place that rule lives; book mode
+ * asks for it instead of computing page rectangles inline. Pages lay out
+ * left to right, top-aligned, `gapPx` apart, from already-displayed sizes —
+ * the same contract as {@link layoutSlots}. Returns null when `sizes` is
+ * empty or `pageIndex` is outside the document, so the caller never renders
+ * an empty spread.
+ */
+export function layoutSpread(
+  sizes: PageSize[],
+  pageIndex: number,
+  gapPx: number = PAGE_GAP_PX,
+): SpreadLayout | null {
+  if (sizes.length === 0 || pageIndex < 0 || pageIndex >= sizes.length) return null;
+  const start = pageIndex <= 0 ? 0 : 1 + 2 * Math.floor((pageIndex - 1) / 2);
+  const members = sizes.slice(start, start === 0 ? 1 : start + 2);
+  let left = 0;
+  let height = 0;
+  const pages = members.map((size) => {
+    const page: SpreadPage = {
+      pageNumber: size.pageNumber,
+      left,
+      top: 0,
+      width: size.width,
+      height: size.height,
+    };
+    left += size.width + gapPx;
+    height = Math.max(height, size.height);
+    return page;
+  });
+  return {
+    pages,
+    bounds: { left: 0, top: 0, width: Math.max(0, left - gapPx), height },
+  };
+}
+
 /** Total height of the laid-out document (last slot bottom). */
 export function documentHeight(slots: LayoutSlot[]): number {
   const last = slots.at(-1);

@@ -17,6 +17,7 @@ import {
   fitWidthScale,
   formatZoomPercent,
   layoutSlots,
+  layoutSpread,
   MAX_ZOOM,
   MIN_ZOOM,
   offsetForPage,
@@ -547,6 +548,80 @@ describe("layoutSlots", () => {
   it("supports an empty document", () => {
     expect(layoutSlots([])).toEqual([]);
     expect(documentHeight([])).toBe(0);
+  });
+});
+
+describe("layoutSpread", () => {
+  const letterDoc = (pageCount: number): PageSize[] =>
+    Array.from({ length: pageCount }, (_, index) => ({
+      pageNumber: index + 1,
+      ...LETTER,
+    }));
+  const pageNumbersOf = (doc: PageSize[], pageIndex: number): number[] | null =>
+    layoutSpread(doc, pageIndex)?.pages.map((page) => page.pageNumber) ?? null;
+
+  it.each([
+    [1, 0, [1]],
+    [2, 0, [1]],
+    [2, 1, [2]],
+    [3, 0, [1]],
+    [3, 1, [2, 3]],
+    [3, 2, [2, 3]],
+    [4, 0, [1]],
+    [4, 1, [2, 3]],
+    [4, 2, [2, 3]],
+    [4, 3, [4]],
+    [5, 0, [1]],
+    [5, 1, [2, 3]],
+    [5, 2, [2, 3]],
+    [5, 3, [4, 5]],
+    [5, 4, [4, 5]],
+    [6, 0, [1]],
+    [6, 1, [2, 3]],
+    [6, 2, [2, 3]],
+    [6, 3, [4, 5]],
+    [6, 4, [4, 5]],
+    [6, 5, [6]],
+  ])("%s-page document, index %s resolves to pages %s", (pageCount, pageIndex, expected) => {
+    expect(pageNumbersOf(letterDoc(pageCount), pageIndex)).toEqual(expected);
+  });
+
+  it("lays a facing pair out side by side with the default gap between the pages", () => {
+    const spread = layoutSpread(letterDoc(3), 1);
+    expect(spread?.pages).toEqual([
+      { pageNumber: 2, left: 0, top: 0, width: 612, height: 792 },
+      { pageNumber: 3, left: 612 + PAGE_GAP_PX, top: 0, width: 612, height: 792 },
+    ]);
+    expect(spread?.bounds).toEqual({ left: 0, top: 0, width: 2 * 612 + PAGE_GAP_PX, height: 792 });
+  });
+
+  it("gives a lone cover a bounds equal to its own page", () => {
+    const spread = layoutSpread(letterDoc(1), 0);
+    expect(spread?.bounds).toEqual({ left: 0, top: 0, width: 612, height: 792 });
+  });
+
+  it("keeps mixed page sizes independent; pair bounds take the taller page", () => {
+    const spread = layoutSpread(
+      sizes([
+        [1, LETTER.width, LETTER.height],
+        [2, 792, 612],
+        [3, 420, 595],
+      ]),
+      1,
+      12,
+    );
+    expect(spread?.pages).toEqual([
+      { pageNumber: 2, left: 0, top: 0, width: 792, height: 612 },
+      { pageNumber: 3, left: 804, top: 0, width: 420, height: 595 },
+    ]);
+    expect(spread?.bounds).toEqual({ left: 0, top: 0, width: 1224, height: 612 });
+  });
+
+  it("returns null outside the document", () => {
+    const doc = letterDoc(3);
+    expect(layoutSpread([], 0)).toBeNull();
+    expect(layoutSpread(doc, -1)).toBeNull();
+    expect(layoutSpread(doc, 3)).toBeNull();
   });
 });
 
