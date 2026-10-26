@@ -7,6 +7,8 @@ import {
   EPUB_DEFAULT_PAGE_GUTTER_PX,
   EPUB_DEFAULT_TEXT_ALIGNMENT,
   EPUB_DEFAULT_THEME,
+  clampEpubColumnCount,
+  type EpubColumnCount,
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
@@ -107,8 +109,10 @@ export function epubBookModeLayout(preferences: ReaderPreferences): ReaderLayout
 }
 
 /** The EPUB column count the surface applies: book mode implies two columns. */
-export function epubBookModeColumnCount(preferences: ReaderPreferences): number {
-  return preferences.bookMode ? EPUB_BOOK_MODE_COLUMN_COUNT : preferences.columnCount;
+export function epubBookModeColumnCount(preferences: ReaderPreferences): EpubColumnCount {
+  return preferences.bookMode
+    ? EPUB_BOOK_MODE_COLUMN_COUNT
+    : clampEpubColumnCount(preferences.columnCount);
 }
 
 /**
