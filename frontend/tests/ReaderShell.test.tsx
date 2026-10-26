@@ -112,8 +112,10 @@ async function openNavigation() {
 
 /**
  * Book mode's round trip (spec tuxbooks-9pr), identical in both readers:
- * seeded from storage, the shared toggle reflects the persisted choice,
- * and toggling writes through the provider's persistence effect.
+ * seeded from storage, the shared viewer/book segment group reflects the
+ * persisted choice, and picking the other segment writes through the
+ * provider's persistence effect. It is a mode, so exactly one segment is
+ * active at all times.
  */
 async function expectBookModeToReflectAndPersist(format: "epub" | "pdf", readyTestId: string) {
   window.localStorage.setItem(
@@ -123,21 +125,41 @@ async function expectBookModeToReflectAndPersist(format: "epub" | "pdf", readyTe
       themePinned: false,
     }),
   );
-  renderReader(format);
+  const view = renderReader(format);
 
   await screen.findByTestId(readyTestId);
   fireEvent.click(screen.getByTestId("appearance-trigger"));
   await screen.findByTestId("appearance-content");
 
-  const toggle = screen.getByTestId("pref-book-mode");
-  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  const group = screen.getByTestId("pref-book-mode");
+  expect(within(group).getByRole("radio", { name: "Book mode" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 
-  await userEvent.click(toggle);
-  expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(within(group).getByRole("radio", { name: "Viewer mode" }));
+  expect(within(group).getByRole("radio", { name: "Viewer mode" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(within(group).getByRole("radio", { name: "Book mode" })).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
   await waitFor(() => {
     const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
     expect(stored.preferences.bookMode).toBe(false);
   });
+
+  // The choice survives a reload: a fresh mount reads the stored flag back.
+  view.unmount();
+  renderReader(format);
+  await screen.findByTestId("reader-view");
+  fireEvent.click(screen.getByTestId("appearance-trigger"));
+  await screen.findByTestId("appearance-content");
+  expect(
+    within(screen.getByTestId("pref-book-mode")).getByRole("radio", { name: "Viewer mode" }),
+  ).toHaveAttribute("aria-checked", "true");
 }
 
 /**
@@ -1195,11 +1217,12 @@ describe("ReaderNavigation", () => {
     // presentation mode.
     expect(order.indexOf("reader-sidebar-toggle")).toBe(order.indexOf("pdf-header-controls") + 1);
 
-    // The trailing group starts with Contents, then search, appearance, and
-    // bookmark.
+    // The trailing group starts with Contents, then search, the book mode
+    // toggle, appearance, and bookmark.
     expect(order.slice(order.indexOf("reader-title") + 1)).toEqual([
       "reader-nav-trigger",
       "reader-search",
+      "reader-book-mode",
       "appearance-trigger",
       "reader-bookmark",
     ]);
@@ -1596,7 +1619,7 @@ describe("ReaderAppearance", () => {
     );
   });
 
-  it("exposes the book mode toggle for EPUB, reflecting and persisting the choice", async () => {
+  it("exposes the book mode segments for EPUB, reflecting and persisting the choice", async () => {
     await expectBookModeToReflectAndPersist("epub", "reader-view");
   });
 
@@ -2041,8 +2064,13 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
 
-    // Book mode is the one shared control both readers carry.
-    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+    // Book mode is the one shared control both readers carry; the viewer
+    // segment is active until the reader picks the spread.
+    const modeGroup = screen.getByTestId("pref-book-mode");
+    expect(within(modeGroup).getByRole("radio", { name: "Viewer mode" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
 
     // Exactly the PDF theme choices are offered (issue #67: Smart dark
     // recolors in the worker, Invert is the explicit negative), and a
@@ -2082,6 +2110,63 @@ describe("PDF appearance menu", () => {
     // The persisted choice drives the real surface: book mode on shows the
     // spread (tuxbooks-9pr.4), so the PDF ready-surface is the book canvas.
     await expectBookModeToReflectAndPersist("pdf", "pdf-book-canvas");
+  });
+});
+
+describe("Reader book mode toolbar control", () => {
+  /**
+   * Story 25/26: the header toggle next to the appearance popover is the
+   * same shared flag, so both readers carry one control with one behavior.
+   */
+  async function expectToolbarToReflectAndPersist(format: "epub" | "pdf", readyTestId: string) {
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
+        themePinned: false,
+      }),
+    );
+    renderReader(format);
+
+    await screen.findByTestId(readyTestId);
+    const toggle = screen.getByTestId("reader-book-mode");
+    expect(toggle).toHaveAccessibleName("Book mode");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(toggle);
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
+      expect(stored.preferences.bookMode).toBe(false);
+    });
+  }
+
+  it("reflects the persisted choice and writes toggles for EPUB", async () => {
+    await expectToolbarToReflectAndPersist("epub", "reader-view");
+  });
+
+  it("reflects the persisted choice and writes toggles for PDF", async () => {
+    await expectToolbarToReflectAndPersist("pdf", "pdf-book-canvas");
+  });
+
+  it("stays in sync with the appearance popover within a session", async () => {
+    renderReader("epub");
+    await screen.findByTestId("reader-view");
+
+    // One flag, one component tree: flipping the toolbar toggle flips the
+    // popover segment the moment the popover opens.
+    await userEvent.click(screen.getByTestId("reader-book-mode"));
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+    const group = screen.getByTestId("pref-book-mode");
+    expect(within(group).getByRole("radio", { name: "Book mode" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    // ...and the popover segment drives the toolbar toggle back.
+    await userEvent.click(within(group).getByRole("radio", { name: "Viewer mode" }));
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
   });
 });
 

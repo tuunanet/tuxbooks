@@ -2,7 +2,6 @@ import { RotateCcw, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
-import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -146,7 +145,7 @@ function ScaleSliderRow(props: {
  * reflow sections would do nothing, so only the theme is offered, applied as
  * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
  * mainstream readers ship no PDF theming at all). The one exception is the
- * book mode toggle: the flag is shared, so both readers expose it. The host
+ * book mode group: the flag is shared, so both readers expose it. The host
  * owns the state: the reader passes its context preferences, Settings
  * passes the persisted defaults.
  */
@@ -221,22 +220,33 @@ export function ReaderAppearanceControls({
     </div>
   );
 
-  // Book mode (spec tuxbooks-9pr): one shared toggle for whichever reader
-  // is open. For the EPUB the surface derives a paginated two-column flow
+  // Book mode (spec tuxbooks-9pr, presentation decision 2026-10-26): a
+  // two-segment mode group for whichever reader is open — a mode, so
+  // exactly one segment stays active, mirrored from the Theme group's
+  // switching logic. The segments' visible labels are their accessible
+  // names. For the EPUB the surface derives a paginated two-column flow
   // from it (epubBookModeLayout / epubBookModeColumnCount); the stored
   // layout and column preferences stay untouched underneath.
   const bookModeSection = (
     <div>
       <p className="mb-2 text-sm">Book mode</p>
-      <Toggle
+      <ToggleGroup
         data-testid="pref-book-mode"
-        variant="outline"
+        type="single"
         size="sm"
-        pressed={preferences.bookMode}
-        onPressedChange={(pressed) => setPreferences({ bookMode: pressed })}
+        variant="outline"
+        spacing={0}
+        value={preferences.bookMode ? "book" : "viewer"}
+        onValueChange={(value) => value && setPreferences({ bookMode: value === "book" })}
+        aria-label="Book mode"
       >
-        Two facing pages
-      </Toggle>
+        <ToggleGroupItem value="viewer" data-testid="pref-book-mode-viewer">
+          Viewer mode
+        </ToggleGroupItem>
+        <ToggleGroupItem value="book" data-testid="pref-book-mode-book">
+          Book mode
+        </ToggleGroupItem>
+      </ToggleGroup>
     </div>
   );
 
