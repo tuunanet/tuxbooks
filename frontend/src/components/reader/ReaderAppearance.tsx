@@ -144,10 +144,9 @@ function ScaleSliderRow(props: {
  * controls only exist for reflowable content. For PDF (fixed layout) the
  * reflow sections would do nothing, so only the theme is offered, applied as
  * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
- * mainstream readers ship no PDF theming at all). The one exception is the
- * book mode group: the flag is shared, so both readers expose it. The host
- * owns the state: the reader passes its context preferences, Settings
- * passes the persisted defaults.
+ * mainstream readers ship no PDF theming at all). The host owns the state:
+ * the reader passes its context preferences, Settings passes the persisted
+ * defaults.
  */
 export function ReaderAppearanceControls({
   preferences,
@@ -220,36 +219,6 @@ export function ReaderAppearanceControls({
     </div>
   );
 
-  // Book mode (spec tuxbooks-9pr, presentation decision 2026-10-26): a
-  // two-segment mode group for whichever reader is open. It is a mode, so
-  // exactly one segment stays active, mirrored from the Theme group's
-  // switching logic. The segments' visible labels are their accessible
-  // names. For the EPUB the surface derives a paginated two-column flow
-  // from it (epubBookModeLayout / epubBookModeColumnCount); the stored
-  // layout and column preferences stay untouched underneath.
-  const bookModeSection = (
-    <div>
-      <p className="mb-2 text-sm">Book mode</p>
-      <ToggleGroup
-        data-testid="pref-book-mode"
-        type="single"
-        size="sm"
-        variant="outline"
-        spacing={0}
-        value={preferences.bookMode ? "book" : "viewer"}
-        onValueChange={(value) => value && setPreferences({ bookMode: value === "book" })}
-        aria-label="Book mode"
-      >
-        <ToggleGroupItem value="viewer" data-testid="pref-book-mode-viewer">
-          Viewer mode
-        </ToggleGroupItem>
-        <ToggleGroupItem value="book" data-testid="pref-book-mode-book">
-          Book mode
-        </ToggleGroupItem>
-      </ToggleGroup>
-    </div>
-  );
-
   return (
     <>
       {/* PDFs expose only the theme; EPUB gets the full reflow set.
@@ -258,10 +227,7 @@ export function ReaderAppearanceControls({
           for very short ones. Sliders live on the left, choice groups on
           the right. */}
       {isPdf ? (
-        <div className="flex flex-col gap-4">
-          {bookModeSection}
-          {themeSection}
-        </div>
+        themeSection
       ) : (
         <div className="grid grid-cols-2 gap-x-5">
           <div className="flex flex-col gap-4">
@@ -530,8 +496,6 @@ export function ReaderAppearanceControls({
                 </div>
               )}
             </div>
-
-            {bookModeSection}
           </div>
         </div>
       )}
