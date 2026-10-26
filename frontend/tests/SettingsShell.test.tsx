@@ -211,6 +211,10 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
     expect(screen.getByRole("radio", { name: "Paginated" })).toBeInTheDocument();
 
+    // Book mode is a toolbar control only; the defaults editor never offers
+    // it (tuxbooks-9pr.10).
+    expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}") as {
       preferences?: { layout?: string };
