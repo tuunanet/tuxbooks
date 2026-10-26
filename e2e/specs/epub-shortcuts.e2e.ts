@@ -13,7 +13,7 @@
  * flaky part on a loaded runner and exercised the same forwarding path.
  */
 import { expect, test, type Page } from "../fixtures/electron-app.js";
-import { openInReader } from "./helpers.js";
+import { ensureLibrary, openInReader } from "./helpers.js";
 
 const FRAME = "iframe.readium-navigator-iframe";
 
@@ -33,13 +33,20 @@ async function focusContentFrame(page: Page): Promise<void> {
 
 test("panel shortcuts work with focus inside the EPUB content frame", async ({ page }) => {
   await openInReader(page, "A Minimal Book (EPUB)");
-  await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
+  try {
+    await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
 
-  await focusContentFrame(page);
+    await focusContentFrame(page);
 
-  // Ctrl+Shift+H must toggle the nav drawer from inside the frame.
-  await page.keyboard.press("Control+Shift+H");
-  await expect(page.getByTestId("reader-nav")).toBeVisible({ timeout: 10_000 });
-  await page.keyboard.press("Control+Shift+H");
-  await expect(page.getByTestId("reader-nav")).toBeHidden({ timeout: 10_000 });
+    // Ctrl+Shift+H must toggle the nav drawer from inside the frame.
+    await page.keyboard.press("Control+Shift+H");
+    await expect(page.getByTestId("reader-nav")).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press("Control+Shift+H");
+    await expect(page.getByTestId("reader-nav")).toBeHidden({ timeout: 10_000 });
+  } finally {
+    // The seeded phase shares one app per worker: even a failed run must
+    // end in the library so the next spec's waitForLibraryView finds it
+    // (issue tuxbooks-k5m).
+    await ensureLibrary(page);
+  }
 });

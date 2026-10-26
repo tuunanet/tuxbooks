@@ -7,6 +7,7 @@ import {
   openReaderTab,
   openInReader,
   openReaderNavigation,
+  pinProgressToFirstPage,
   returnToLibrary,
   scrollToSlot,
   slotStates,
@@ -494,14 +495,11 @@ test.describe("reading annotations", () => {
           rects: [{ x: 0.1, y: 0.1, width: 0.3, height: 0.02 }],
         },
       })) as { id: number };
-      // Pin the stored position to page 1 so a passing jump can only come
-      // from the clicked highlight, not from restored progress.
-      await window.tuxbooks!.invoke("save_reading_progress", {
-        bookId: pdf.id,
-        progress: { pageNumber: 1, progressPercent: 0 },
-      });
       return { id: created.id, bookId: pdf.id };
     });
+    // Pin the stored position to page 1 so a passing jump can only come
+    // from the clicked highlight, not from restored progress.
+    await pinProgressToFirstPage(page, seeded.bookId);
 
     await expect
       .poll(
@@ -542,6 +540,14 @@ test.describe("reading annotations", () => {
       await page.evaluate(async (id) => {
         await window.tuxbooks!.invoke("delete_annotation", { id });
       }, seeded.id);
+      // The seeded phase shares one app per worker, so even a failed run
+      // must leave the library in order: ensureLibrary closes whichever
+      // view the jump left open, and the pin undoes the persisted jump
+      // position — closing at page 2 saves it by design, and the specs
+      // after this file open the book expecting page 1 (issue
+      // tuxbooks-k5m).
+      await ensureLibrary(page);
+      await pinProgressToFirstPage(page, seeded.bookId);
     }
   });
 });
