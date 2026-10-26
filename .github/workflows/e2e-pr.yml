@@ -33,6 +33,10 @@ jobs:
         name: Resolve the target commit
         env:
           GH_TOKEN: ${{ github.token }}
+          # This step runs before actions/checkout, so the workspace has no
+          # .git yet and gh cannot discover the repository from git. GH_REPO
+          # tells gh which repository `gh pr view` means.
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SHA: ${{ github.event.pull_request.head.sha }}
