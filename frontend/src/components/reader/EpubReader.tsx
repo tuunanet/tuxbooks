@@ -10,7 +10,7 @@ import {
 } from "@/lib/epub/readiumEngine";
 import { epubSurfaceTheme, epubThemeColorScheme } from "@/lib/epub/appearance";
 import { useShortcut } from "@/lib/shortcuts";
-import { useReader } from "@/state/readerState";
+import { epubBookModeColumnCount, epubBookModeLayout, useReader } from "@/state/readerState";
 import { highlightCss, isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
 import type { ReaderSelection } from "./annotationModel";
 import {
@@ -285,13 +285,19 @@ export function EpubReader({
     };
   }, [handle]);
 
+  // Book mode (spec tuxbooks-9pr) derives over the stored preferences: it
+  // implies a paginated two-column flow while the stored layout and column
+  // count stay intact for when the mode turns off again.
+  const layout = epubBookModeLayout(preferences);
+  const columnCount = epubBookModeColumnCount(preferences);
+
   // Reflow layout (flow preference) — applied as soon as the renderer exists
   // and on every layout preference change.
   useEffect(() => {
     if (!handle) return;
-    const flow: EpubFlow = preferences.layout === "scrolling" ? "scrolled" : "paginated";
+    const flow: EpubFlow = layout === "scrolling" ? "scrolled" : "paginated";
     handle.setFlow(flow).catch(() => {});
-  }, [handle, preferences.layout, interactive]);
+  }, [handle, layout, interactive]);
 
   // User appearance (font size, family override, line spacing, columns,
   // text layout, theme colors) through the engine's Preferences API.
@@ -301,7 +307,7 @@ export function EpubReader({
       fontSize: preferences.epubFontSize,
       lineHeight: preferences.lineHeight,
       fontFamily: preferences.fontFamily,
-      columnCount: preferences.columnCount,
+      columnCount,
       wordSpacing: preferences.wordSpacing,
       letterSpacing: preferences.letterSpacing,
       paragraphSpacing: preferences.paragraphSpacing,
@@ -315,7 +321,7 @@ export function EpubReader({
     preferences.epubFontSize,
     preferences.lineHeight,
     preferences.fontFamily,
-    preferences.columnCount,
+    columnCount,
     preferences.wordSpacing,
     preferences.letterSpacing,
     preferences.paragraphSpacing,
@@ -493,12 +499,12 @@ export function EpubReader({
   // grid cap and no app-side cap. The root bridges the engine's theme
   // background so the area beside the capped column is seamless with the
   // reading surface in every theme.
-  const scrolled = preferences.layout === "scrolling";
+  const scrolled = layout === "scrolling";
   return (
     <div
       data-testid="epub-reader"
       data-epub-state={interactive ? "ready" : "loading"}
-      data-layout={preferences.layout}
+      data-layout={layout}
       data-epub-presentation={presentationMode}
       className="h-full"
       style={{

@@ -28,6 +28,7 @@ describe("readerSettings persistence", () => {
         ...DEFAULT_READER_PREFERENCES,
         layout: "scrolling" as const,
         theme: "paper" as const,
+        bookMode: true,
       },
       themePinned: true,
     };
@@ -36,7 +37,19 @@ describe("readerSettings persistence", () => {
     const read = readReaderSettings();
     expect(read.preferences.layout).toBe("scrolling");
     expect(read.preferences.theme).toBe("paper");
+    expect(read.preferences.bookMode).toBe(true);
     expect(read.themePinned).toBe(true);
+  });
+
+  it("keeps book mode off by default and coerces a malformed value to a boolean", () => {
+    // A new reader has never set the flag.
+    expect(readReaderSettings().preferences.bookMode).toBe(false);
+    expect(sanitizeReaderPreferences({}).bookMode).toBe(false);
+    // A hand-edited stored value is never trusted verbatim: only the
+    // literal true sticks, anything malformed sanitizes back to false.
+    expect(sanitizeReaderPreferences({ bookMode: "yes" }).bookMode).toBe(false);
+    expect(sanitizeReaderPreferences({ bookMode: 1 }).bookMode).toBe(false);
+    expect(sanitizeReaderPreferences({ bookMode: true }).bookMode).toBe(true);
   });
 
   it("clears back to defaults", () => {

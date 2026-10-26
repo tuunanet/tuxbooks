@@ -2,6 +2,7 @@ import { RotateCcw, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -144,7 +145,8 @@ function ScaleSliderRow(props: {
  * controls only exist for reflowable content. For PDF (fixed layout) the
  * reflow sections would do nothing, so only the theme is offered, applied as
  * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
- * mainstream readers ship no PDF theming at all). The host owns the state: the reader
+ * mainstream readers ship no PDF theming at all). The one exception is the
+ * book mode toggle: the flag is shared, so both readers expose it. The host owns the state: the reader
  * passes its context preferences, Settings passes the persisted defaults.
  */
 export function ReaderAppearanceControls({
@@ -218,6 +220,26 @@ export function ReaderAppearanceControls({
     </div>
   );
 
+  // Book mode (spec tuxbooks-9pr): one shared toggle for whichever reader
+  // is open. For the EPUB the surface derives a paginated two-column flow
+  // from it (epubBookModeLayout / epubBookModeColumnCount); the stored
+  // layout and column preferences stay untouched underneath.
+  const bookModeSection = (
+    <div>
+      <p className="mb-2 text-sm">Book mode</p>
+      <Toggle
+        data-testid="pref-book-mode"
+        variant="outline"
+        size="sm"
+        pressed={preferences.bookMode}
+        onPressedChange={(pressed) => setPreferences({ bookMode: pressed })}
+        aria-label="Book mode"
+      >
+        Two facing pages
+      </Toggle>
+    </div>
+  );
+
   return (
     <>
       {/* PDFs expose only the theme; EPUB gets the full reflow set.
@@ -226,7 +248,10 @@ export function ReaderAppearanceControls({
           for very short ones. Sliders live on the left, choice groups on
           the right. */}
       {isPdf ? (
-        themeSection
+        <div className="flex flex-col gap-4">
+          {bookModeSection}
+          {themeSection}
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-x-5">
           <div className="flex flex-col gap-4">
@@ -495,6 +520,8 @@ export function ReaderAppearanceControls({
                 </div>
               )}
             </div>
+
+            {bookModeSection}
           </div>
         </div>
       )}
