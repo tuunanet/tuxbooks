@@ -2084,24 +2084,25 @@ describe("Reader book mode toolbar control", () => {
     await expectToolbarToReflectAndPersist("pdf", "pdf-book-canvas");
   });
 
-  it("keeps book mode out of the appearance popover for EPUB", async () => {
-    // UAT kept the header toggle as the only control (tuxbooks-9pr.10): the
-    // popover carries theme and reflow controls only.
-    renderReader("epub");
-    await screen.findByTestId("reader-view");
+  /**
+   * UAT kept the header toggle as the only control (tuxbooks-9pr.10): the
+   * popover carries theme and reflow controls only, in both readers.
+   */
+  async function expectNoBookModeInPopover(format: "epub" | "pdf", readyTestId: string) {
+    renderReader(format);
+    await screen.findByTestId(readyTestId);
     fireEvent.click(screen.getByTestId("appearance-trigger"));
     await screen.findByTestId("appearance-content");
     expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: "Book mode" })).not.toBeInTheDocument();
+  }
+
+  it("keeps book mode out of the appearance popover for EPUB", async () => {
+    await expectNoBookModeInPopover("epub", "reader-view");
   });
 
   it("keeps book mode out of the appearance popover for PDF", async () => {
-    renderReader("pdf");
-    await screen.findByTestId("pdf-canvas");
-    fireEvent.click(screen.getByTestId("appearance-trigger"));
-    await screen.findByTestId("appearance-content");
-    expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: "Book mode" })).not.toBeInTheDocument();
+    await expectNoBookModeInPopover("pdf", "pdf-canvas");
   });
 });
 

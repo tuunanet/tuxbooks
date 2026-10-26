@@ -211,10 +211,6 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
     expect(screen.getByRole("radio", { name: "Paginated" })).toBeInTheDocument();
 
-    // Book mode is a toolbar control only; the defaults editor never offers
-    // it (tuxbooks-9pr.10).
-    expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
-
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}") as {
       preferences?: { layout?: string };
@@ -223,6 +219,19 @@ describe("SettingsShell", () => {
 
     await userEvent.click(screen.getByTestId("reader-settings-reset"));
     expect(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY)).toBeNull();
+  });
+
+  it("offers no book mode control in either defaults editor", async () => {
+    // Book mode is a toolbar control only (tuxbooks-9pr.10): the shared
+    // appearance controls carry no book mode section for either reader.
+    renderSettings();
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
+    expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+    expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
   });
 
   it("persists and resets highlight color overrides from the Reading section", async () => {
