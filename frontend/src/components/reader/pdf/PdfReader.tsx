@@ -1661,16 +1661,12 @@ export function PdfReader({
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
-  // Book mode (tuxbooks-9pr): a separate spread surface (PdfBookView)
-  // mounted in place of the continuous document while the preference is on.
-  // It shares the open document handle — and with it the render worker —
-  // the bitmap cache, and the theme render identity with the scroll view,
-  // so toggling the mode swaps only the view layer and never re-loads or
-  // re-rasters the document. Presentation mode wins while active: its
-  // one-page surface and code path stay exactly as they are. The sizes
-  // guard is the type-level form of the `interactive` gate below — the
-  // surface only mounts once layout is ready.
-  const bookMode = preferences.bookMode && !presentationMode && sizes !== null;
+  // Book mode (tuxbooks-9pr): the mount decision only — the separate
+  // spread surface (PdfBookView) takes the continuous document's place
+  // while the preference is on, and presentation mode wins while active.
+  // The sizes check at the mount site keeps it to layout-ready, and
+  // swapping views never re-loads or re-rasters the document.
+  const bookMode = preferences.bookMode && !presentationMode;
 
   if (status === "error") {
     return (

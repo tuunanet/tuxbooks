@@ -120,7 +120,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("PdfReader book mode (tuxbooks-9pr.4)", () => {
+describe("PdfReader book mode", () => {
   it("renders the cover page alone at fit-the-pair, without the scroll view", async () => {
     openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
 
