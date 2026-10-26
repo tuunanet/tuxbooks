@@ -1623,6 +1623,28 @@ describe("ReaderAppearance", () => {
     await expectBookModeToReflectAndPersist("epub", "reader-view");
   });
 
+  it("keeps the active book mode segment when that segment is clicked again", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    await screen.findByTestId("appearance-content");
+
+    // Radix reports "" when the active item of a single-select group is
+    // re-clicked; the guard keeps the segment active and skips the write.
+    const group = screen.getByTestId("pref-book-mode");
+    await userEvent.click(within(group).getByRole("radio", { name: "Viewer mode" }));
+    expect(within(group).getByRole("radio", { name: "Viewer mode" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(group).getByRole("radio", { name: "Book mode" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
+    expect(stored.preferences.bookMode).toBe(false);
+  });
+
   it("exposes font size and line spacing sliders", async () => {
     renderReader();
 
@@ -2132,9 +2154,14 @@ describe("Reader book mode toolbar control", () => {
     const toggle = screen.getByTestId("reader-book-mode");
     expect(toggle).toHaveAccessibleName("Book mode");
     expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // The pressed state is visible, not just an attribute: the icon fills
+    // while the mode is on (the bookmark button's precedent).
+    expect(toggle.querySelector("svg")).toHaveClass("fill-current");
 
     await userEvent.click(toggle);
-    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+    const released = screen.getByTestId("reader-book-mode");
+    expect(released).toHaveAttribute("aria-pressed", "false");
+    expect(released.querySelector("svg")).not.toHaveClass("fill-current");
     await waitFor(() => {
       const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
       expect(stored.preferences.bookMode).toBe(false);

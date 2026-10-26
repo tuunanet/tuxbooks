@@ -709,9 +709,10 @@ export function ReaderShell() {
           </Tooltip>
 
           {/* Book mode (spec tuxbooks-9pr, stories 25/26): the header twin
-              of the appearance popover's viewer/book segment group — same
+              of the appearance popover's viewer/book segment group, same
               shared flag, so one control behaves identically in both
-              readers. Its pressed state mirrors the popover segment. */}
+              readers. Its pressed state mirrors the popover segment: the
+              icon fills while on, the bookmark button's precedent. */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -722,7 +723,7 @@ export function ReaderShell() {
                 aria-pressed={preferences.bookMode}
                 onClick={() => setPreferences({ bookMode: !preferences.bookMode })}
               >
-                <BookOpen />
+                <BookOpen className={preferences.bookMode ? "fill-current" : undefined} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Book mode</TooltipContent>

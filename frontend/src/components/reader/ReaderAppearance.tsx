@@ -221,7 +221,7 @@ export function ReaderAppearanceControls({
   );
 
   // Book mode (spec tuxbooks-9pr, presentation decision 2026-10-26): a
-  // two-segment mode group for whichever reader is open — a mode, so
+  // two-segment mode group for whichever reader is open. It is a mode, so
   // exactly one segment stays active, mirrored from the Theme group's
   // switching logic. The segments' visible labels are their accessible
   // names. For the EPUB the surface derives a paginated two-column flow
