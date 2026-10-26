@@ -111,6 +111,36 @@ async function openNavigation() {
 }
 
 /**
+ * Book mode's round trip (spec tuxbooks-9pr), identical in both readers:
+ * seeded from storage, the shared toggle reflects the persisted choice,
+ * and toggling writes through the provider's persistence effect.
+ */
+async function expectBookModeToReflectAndPersist(format: "epub" | "pdf", readyTestId: string) {
+  window.localStorage.setItem(
+    READER_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
+      themePinned: false,
+    }),
+  );
+  renderReader(format);
+
+  await screen.findByTestId(readyTestId);
+  fireEvent.click(screen.getByTestId("appearance-trigger"));
+  await screen.findByTestId("appearance-content");
+
+  const toggle = screen.getByTestId("pref-book-mode");
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+  await userEvent.click(toggle);
+  expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
+  await waitFor(() => {
+    const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
+    expect(stored.preferences.bookMode).toBe(false);
+  });
+}
+
+/**
  * Pin the progress bar's jsdom geometry (a 1000px span, so clientX 510
  * reads as 51%) and give it a working pointer-capture pair: the test setup
  * stubs capture out globally, and Radix commits on release only through it.
@@ -1567,31 +1597,7 @@ describe("ReaderAppearance", () => {
   });
 
   it("exposes the book mode toggle for EPUB, reflecting and persisting the choice", async () => {
-    // The persisted choice greets the reader: the control reflects the
-    // current persisted value.
-    window.localStorage.setItem(
-      READER_SETTINGS_STORAGE_KEY,
-      JSON.stringify({
-        preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
-        themePinned: false,
-      }),
-    );
-    renderReader("epub");
-
-    await screen.findByTestId("reader-view");
-    fireEvent.click(screen.getByTestId("appearance-trigger"));
-    await screen.findByTestId("appearance-content");
-
-    const toggle = screen.getByTestId("pref-book-mode");
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-    // Toggling writes through the provider's persistence effect.
-    await userEvent.click(toggle);
-    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
-    await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
-      expect(stored.preferences.bookMode).toBe(false);
-    });
+    await expectBookModeToReflectAndPersist("epub", "reader-view");
   });
 
   it("exposes font size and line spacing sliders", async () => {
@@ -2073,29 +2079,7 @@ describe("PDF appearance menu", () => {
   });
 
   it("reflects a persisted book mode choice and toggles it for PDFs", async () => {
-    window.localStorage.setItem(
-      READER_SETTINGS_STORAGE_KEY,
-      JSON.stringify({
-        preferences: { ...DEFAULT_READER_PREFERENCES, bookMode: true },
-        themePinned: false,
-      }),
-    );
-    renderReader("pdf");
-
-    await screen.findByTestId("pdf-canvas");
-    fireEvent.click(screen.getByTestId("appearance-trigger"));
-    await screen.findByTestId("appearance-content");
-
-    const toggle = screen.getByTestId("pref-book-mode");
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-    // Toggling writes through the provider's persistence effect.
-    await userEvent.click(toggle);
-    expect(screen.getByTestId("pref-book-mode")).toHaveAttribute("aria-pressed", "false");
-    await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem(READER_SETTINGS_STORAGE_KEY) ?? "{}");
-      expect(stored.preferences.bookMode).toBe(false);
-    });
+    await expectBookModeToReflectAndPersist("pdf", "pdf-canvas");
   });
 });
 

@@ -146,8 +146,9 @@ function ScaleSliderRow(props: {
  * reflow sections would do nothing, so only the theme is offered, applied as
  * a filter over the rendered pages (lib/pdf/theme.ts, the Foliate approach;
  * mainstream readers ship no PDF theming at all). The one exception is the
- * book mode toggle: the flag is shared, so both readers expose it. The host owns the state: the reader
- * passes its context preferences, Settings passes the persisted defaults.
+ * book mode toggle: the flag is shared, so both readers expose it. The host
+ * owns the state: the reader passes its context preferences, Settings
+ * passes the persisted defaults.
  */
 export function ReaderAppearanceControls({
   preferences,
@@ -233,7 +234,6 @@ export function ReaderAppearanceControls({
         size="sm"
         pressed={preferences.bookMode}
         onPressedChange={(pressed) => setPreferences({ bookMode: pressed })}
-        aria-label="Book mode"
       >
         Two facing pages
       </Toggle>

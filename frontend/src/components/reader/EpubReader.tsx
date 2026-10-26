@@ -504,6 +504,7 @@ export function EpubReader({
     <div
       data-testid="epub-reader"
       data-epub-state={interactive ? "ready" : "loading"}
+      // Effective layout (book mode derives paginated), not the stored preference.
       data-layout={layout}
       data-epub-presentation={presentationMode}
       className="h-full"
