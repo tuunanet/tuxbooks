@@ -159,6 +159,20 @@ export async function returnToLibrary(page: Page): Promise<void> {
   await waitForLibraryView(page);
 }
 
+/**
+ * Pin a book's stored reading position to its first page. The seeded phase
+ * shares one app per worker: a spec that leaves a fixture book mid-document
+ * would otherwise restore that position in every spec after it.
+ */
+export async function pinProgressToFirstPage(page: Page, bookId: number): Promise<void> {
+  await page.evaluate(async (id) => {
+    await window.tuxbooks!.invoke("save_reading_progress", {
+      bookId: id,
+      progress: { pageNumber: 1, progressPercent: 0 },
+    });
+  }, bookId);
+}
+
 /** DOM attributes of every PDF slot, in document order. */
 export async function slotStates(page: Page): Promise<{ page: string; state: string }[]> {
   return page.evaluate(() =>
