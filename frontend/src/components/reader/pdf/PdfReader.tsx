@@ -45,6 +45,7 @@ import {
 import { usePdfViewport, type PdfViewport } from "./hooks/usePdfViewport";
 import { usePdfZoomTelemetry } from "./hooks/usePdfZoomTelemetry";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
+import { PdfBookView } from "./PdfBookView";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
 import { PdfSidebar } from "./PdfSidebar";
@@ -1660,6 +1661,17 @@ export function PdfReader({
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
+  // Book mode (tuxbooks-9pr): a separate spread surface (PdfBookView)
+  // mounted in place of the continuous document while the preference is on.
+  // It shares the open document handle — and with it the render worker —
+  // the bitmap cache, and the theme render identity with the scroll view,
+  // so toggling the mode swaps only the view layer and never re-loads or
+  // re-rasters the document. Presentation mode wins while active: its
+  // one-page surface and code path stay exactly as they are. The sizes
+  // guard is the type-level form of the `interactive` gate below — the
+  // surface only mounts once layout is ready.
+  const bookMode = preferences.bookMode && !presentationMode && sizes !== null;
+
   if (status === "error") {
     return (
       <div
@@ -1739,6 +1751,7 @@ export function PdfReader({
       data-testid="pdf-reader"
       data-pdf-engine-state="interactive"
       data-pdf-presentation={presentationMode}
+      data-pdf-book-mode={bookMode}
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
       data-pdf-preload-count={preloadCount}
@@ -1763,44 +1776,59 @@ export function PdfReader({
         controlsHost && createPortal(controls, controlsHost)
       )}
       {!presentationMode && !controlsHost && controls}
-      <PdfDocumentView
-        document={pdfDocument}
-        slots={documentSlots}
-        renderPages={canvasPages}
-        renderPermittedPages={renderPermittedPages}
-        anchorPage={currentPage}
-        scale={scale}
-        previewTransform={
-          wheelPreview
-            ? {
-                ratio: wheelPreview.scale / scale,
-                originX: wheelPreview.originX,
-                originY: wheelPreview.originY,
-              }
-            : undefined
-        }
-        pageRegions={pageRegions}
-        renderedPages={renderedPages}
-        failedPages={failedPages}
-        bitmapCache={bitmapCache}
-        previewAnchorRender={renderedPages.size === 0 && stalePages.size === 0}
-        onPageRendered={handlePageRenderedTelemetried}
-        onPageError={handlePageError}
-        registerSlot={registerSlot}
-        registerAnchorSlot={registerActiveSlot}
-        documentRef={documentRef}
-        contentAreaRef={contentAreaRef}
-        onRetryPage={retryPage}
-        highlightsByPage={highlightsByPage}
-        highlightFamily={readerThemeFamily(preferences.theme)}
-        highlightOverrides={preferences.highlightOverrides}
-        themeFilter={treatment.filter}
-        themeTint={treatment.tint}
-        smartColors={treatment.smart}
-        renderVariant={renderVariant}
-        presentation={presentationMode}
-        pageBackground={treatment.pageBackground}
-      />
+      {bookMode && sizes ? (
+        <PdfBookView
+          document={pdfDocument}
+          sizes={sizes}
+          currentPage={currentPage}
+          bitmapCache={bitmapCache}
+          areaWidth={areaWidth}
+          viewportHeight={viewportHeight}
+          contentAreaRef={contentAreaRef}
+          smartColors={treatment.smart}
+          renderVariant={renderVariant}
+          pageBackground={treatment.pageBackground}
+        />
+      ) : (
+        <PdfDocumentView
+          document={pdfDocument}
+          slots={documentSlots}
+          renderPages={canvasPages}
+          renderPermittedPages={renderPermittedPages}
+          anchorPage={currentPage}
+          scale={scale}
+          previewTransform={
+            wheelPreview
+              ? {
+                  ratio: wheelPreview.scale / scale,
+                  originX: wheelPreview.originX,
+                  originY: wheelPreview.originY,
+                }
+              : undefined
+          }
+          pageRegions={pageRegions}
+          renderedPages={renderedPages}
+          failedPages={failedPages}
+          bitmapCache={bitmapCache}
+          previewAnchorRender={renderedPages.size === 0 && stalePages.size === 0}
+          onPageRendered={handlePageRenderedTelemetried}
+          onPageError={handlePageError}
+          registerSlot={registerSlot}
+          registerAnchorSlot={registerActiveSlot}
+          documentRef={documentRef}
+          contentAreaRef={contentAreaRef}
+          onRetryPage={retryPage}
+          highlightsByPage={highlightsByPage}
+          highlightFamily={readerThemeFamily(preferences.theme)}
+          highlightOverrides={preferences.highlightOverrides}
+          themeFilter={treatment.filter}
+          themeTint={treatment.tint}
+          smartColors={treatment.smart}
+          renderVariant={renderVariant}
+          presentation={presentationMode}
+          pageBackground={treatment.pageBackground}
+        />
+      )}
       {sidebarHost &&
         !presentationMode &&
         createPortal(

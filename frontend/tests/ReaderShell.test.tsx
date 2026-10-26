@@ -2079,7 +2079,9 @@ describe("PDF appearance menu", () => {
   });
 
   it("reflects a persisted book mode choice and toggles it for PDFs", async () => {
-    await expectBookModeToReflectAndPersist("pdf", "pdf-canvas");
+    // The persisted choice drives the real surface: book mode on shows the
+    // spread (tuxbooks-9pr.4), so the PDF ready-surface is the book canvas.
+    await expectBookModeToReflectAndPersist("pdf", "pdf-book-canvas");
   });
 });
 
