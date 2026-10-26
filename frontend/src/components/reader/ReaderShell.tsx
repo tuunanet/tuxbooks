@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  BookOpen,
   Bookmark,
   BookmarkCheck,
   PanelLeft,
@@ -98,7 +99,7 @@ export function ReaderShell() {
   const { selectedBookId, readerTargetAnnotationId } = useAppState();
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
-  const { preferences, position, setPosition } = useReader();
+  const { preferences, position, setPosition, setPreferences } = useReader();
   // Highlight swatches and painted washes resolve through the palette so a
   // theme-family flip or a Settings override restyles without touching the
   // annotations themselves (they persist slot keys).
@@ -705,6 +706,27 @@ export function ReaderShell() {
             <TooltipContent>
               Search in book ({formatShortcutDisplay(READER_SEARCH_SHORTCUTS.primary)})
             </TooltipContent>
+          </Tooltip>
+
+          {/* Book mode (spec tuxbooks-9pr, stories 25/26): the header twin
+              of the appearance popover's viewer/book segment group, same
+              shared flag, so one control behaves identically in both
+              readers. Its pressed state mirrors the popover segment: the
+              icon fills while on, the bookmark button's precedent. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                data-testid="reader-book-mode"
+                aria-label="Book mode"
+                aria-pressed={preferences.bookMode}
+                onClick={() => setPreferences({ bookMode: !preferences.bookMode })}
+              >
+                <BookOpen className={preferences.bookMode ? "fill-current" : undefined} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Book mode</TooltipContent>
           </Tooltip>
 
           <ReaderAppearance
