@@ -17,7 +17,6 @@ export interface MetadataFieldGridProps {
   onChange: MetadataFormChange;
 }
 
-/** The editable bibliographic fields of the metadata form. */
 export function MetadataFieldGrid({ form, metadata, onChange }: MetadataFieldGridProps) {
   return (
     <>

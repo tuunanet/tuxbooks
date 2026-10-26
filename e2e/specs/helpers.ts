@@ -145,14 +145,12 @@ export async function closeReaderNavigation(page: Page): Promise<void> {
   throw new Error("reader navigation drawer never closed");
 }
 
-/** Open a book's detail view and continue into the reader. */
 export async function openInReader(page: Page, ariaLabel: string): Promise<void> {
   await openBookDetail(page, ariaLabel);
   await page.getByTestId("detail-continue").click();
   await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
 }
 
-/** Close the reader and wait for the library. */
 export async function returnToLibrary(page: Page): Promise<void> {
   await page.getByTestId("reader-back").click();
   await expect(page.getByTestId("app-shell")).toBeVisible();
@@ -306,7 +304,6 @@ export async function thumbnailIsActive(page: Page, pageNumber: number): Promise
   );
 }
 
-/** Scrolls the thumbnails sidebar list so deep pages approach the viewport. */
 export async function scrollThumbnailsToBottom(page: Page): Promise<void> {
   await page.evaluate(() => {
     const list = document.querySelector<HTMLElement>('[data-testid="pdf-thumbnails-scroll"]');
@@ -409,7 +406,6 @@ export async function pdfEngineState(page: Page): Promise<string | null> {
   );
 }
 
-/** Waits until the PDF engine reaches the given lifecycle stage. */
 export async function waitForPdfEngineState(
   page: Page,
   stage: string,

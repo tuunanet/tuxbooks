@@ -19,7 +19,10 @@ Write code that matches the surrounding code. If a local convention conflicts wi
 
 ## Comments
 
-Comments explain a constraint, trap, root cause, or decision that code cannot express on its own. Do not narrate the next line of code.
+Do not write comments unless the code needs them to work or they carry a
+licensing notice. A comment that explains a constraint, trap, root cause,
+or decision that code cannot express on its own is the one other exception.
+Never narrate the next line of code.
 
 ## Writing and agent behavior
 

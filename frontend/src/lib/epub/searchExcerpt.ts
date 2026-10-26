@@ -1,4 +1,3 @@
-/** Surrounding text around one EPUB search match. */
 export interface EpubSearchExcerpt {
   pre: string;
   match: string;

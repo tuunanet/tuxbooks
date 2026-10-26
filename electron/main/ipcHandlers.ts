@@ -66,7 +66,6 @@ function requireAppSender(event: SenderEvent): void {
   }
 }
 
-/** Register the invoke, dialog, reveal, and storage handlers on `register`. */
 export function registerIpcHandlers(
   register: (channel: string, handler: IpcHandler) => void,
   deps: IpcHandlerDeps,

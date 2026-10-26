@@ -90,7 +90,6 @@ test.describe("metadata curation (milestone 7)", () => {
     // With no remaining overrides the reset affordance retires itself.
     await expect(page.getByTestId("metadata-panel-reset")).toBeDisabled();
 
-    // The library grid shows the new title on the same card.
     await page.getByTestId("detail-back").click();
     await waitForLibraryView(page);
     await expect.poll(() => cardTexts(page), { timeout: 30000 }).toContain("The Curated Book");
@@ -126,7 +125,6 @@ test.describe("metadata curation (milestone 7)", () => {
     await expect(item).toBeVisible({ timeout: 30000 });
     await item.click();
 
-    // The action now lands on the detail view's Metadata panel.
     await expect(page.getByTestId("metadata-panel")).toBeVisible({ timeout: 30000 });
     await expect(page.getByTestId("metadata-title")).not.toHaveValue("", { timeout: 30000 });
   });

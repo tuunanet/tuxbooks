@@ -16,7 +16,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
   }) => {
     await ensureLibrary(page);
 
-    // Create the collection from the sidebar; creation lands in its section.
     await page.getByTestId("new-collection-button").click();
     const dialog = page.getByTestId("collection-dialog");
     await expect(dialog).toBeVisible({ timeout: 30000 });
@@ -26,10 +25,8 @@ test.describe("collections and reading sections (milestone 10)", () => {
     await expect(page.getByRole("heading", { name: "Reading Queue" })).toBeVisible({
       timeout: 30000,
     });
-    // The fresh collection is empty.
     await expect(page.getByTestId("empty-collection")).toBeVisible({ timeout: 30000 });
 
-    // Add the seeded EPUB through the card's context menu.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const card = page.locator(`[aria-label^="${seededBookTitles.epub}"]`);
@@ -41,12 +38,10 @@ test.describe("collections and reading sections (milestone 10)", () => {
     const addEntry = page.locator("[data-testid^=context-add-to-collection-]");
     await expect(addEntry).toBeVisible({ timeout: 30000 });
     await addEntry.click();
-    // The menu closes after the selection.
     await page
       .getByTestId("context-add-to-collection")
       .waitFor({ state: "detached", timeout: 30000 });
 
-    // The collection section lists exactly the member book.
     // The name matches both the sidebar nav item and the section header
     // control — the sidebar nav item is the first match (WDIO semantics).
     await page.getByRole("button", { name: "Reading Queue" }).first().click();
@@ -59,7 +54,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
     );
     expect(memberText).toContain(seededBookTitles.epub);
 
-    // Remove the membership again from the same context menu.
     const memberCard = page.getByTestId("book-card");
     await memberCard.click();
     await memberCard.click({ button: "right" });
@@ -70,10 +64,8 @@ test.describe("collections and reading sections (milestone 10)", () => {
     const removeEntry = page.locator("[data-testid^=context-remove-from-collection-]");
     await expect(removeEntry).toBeVisible({ timeout: 30000 });
     await removeEntry.click();
-    // The section empties out live.
     await expect(page.getByTestId("empty-collection")).toBeVisible({ timeout: 30000 });
 
-    // Mark the seeded PDF as finished from its context menu.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const pdfCard = page.locator(`[aria-label^="${seededBookTitles.pdf}"]`);
@@ -84,7 +76,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
     await page.getByTestId("context-mark-finished").click();
     await page.getByTestId("context-mark-finished").waitFor({ state: "detached", timeout: 30000 });
 
-    // The Finished section lists the PDF; the In Progress section does not.
     await page.getByRole("button", { name: "Finished" }).click();
     await waitForLibraryView(page);
     await expect(page.getByTestId("book-card").first()).toBeVisible({ timeout: 30000 });
@@ -109,7 +100,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
       )
       .not.toContain(seededBookTitles.pdf);
 
-    // Reopening the context menu shows the finished confirmation, disabled.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const finishedCard = page.locator(`[aria-label^="${seededBookTitles.pdf}"]`);

@@ -29,7 +29,6 @@ export class PdfRenderCancelledError extends Error {
   }
 }
 
-/** True when a failure is a cancellation rather than a real error. */
 export function isRenderingCancelled(error: unknown): boolean {
   return error instanceof PdfRenderCancelledError;
 }

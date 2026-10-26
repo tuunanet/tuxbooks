@@ -90,7 +90,6 @@ test.describe("bench report persistence", () => {
       expect(merged?.environment).toEqual(environment);
       expect(merged?.scenarios["pdf-scroll-drag"]).toEqual({ idle: null, drag: null });
       expect(merged?.scenarios["pdf-rapid-scroll"]).toEqual(rapidScroll);
-      // The file parses as written, both scenarios present.
       expect(Object.keys(JSON.parse(readFileSync(file, "utf8")).scenarios).sort()).toEqual([
         "pdf-rapid-scroll",
         "pdf-scroll-drag",

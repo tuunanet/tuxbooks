@@ -76,7 +76,6 @@ test.describe("TuxBooks GPU-crash fallback", () => {
     page,
   }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    // The startup decision is in effect for this process.
     expect(await gpuDisabled(electronApp)).toBe(true);
     // Diagnostic record of the degraded environment (values are
     // environment-dependent; the activation above is not).

@@ -34,7 +34,6 @@ export interface Book {
   seriesName: string | null;
   /** Coarse reading position (0..=100); null = never opened. */
   progressPercent: number | null;
-  /** When the reading position was last saved. */
   progressUpdatedAt: string | null;
 }
 
@@ -190,7 +189,6 @@ export interface PdfReadingProgress {
 
 export type ReadingProgress = EpubReadingProgress | PdfReadingProgress;
 
-/** Kind of a persistent reading annotation. */
 export type AnnotationKind = "bookmark" | "highlight";
 
 /** One highlight rect normalized to page space (0..1 on both axes). */
@@ -226,7 +224,6 @@ export interface Annotation {
   modifiedAt: string;
 }
 
-/** Payload for creating a bookmark or highlight. */
 export interface AnnotationInput {
   kind: AnnotationKind;
   cfi?: string | null;

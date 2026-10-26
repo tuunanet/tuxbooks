@@ -28,7 +28,6 @@ test.describe("tuxbooks engine smoke (EPUB)", () => {
     // view that names the title and format.
     await openInReader(page, "A Minimal Book (EPUB)");
 
-    // Engine initialized: the host mounts and the engine reports ready.
     const host = page.locator("div[data-epub-host]");
     await host.waitFor({ state: "attached", timeout: 30000 });
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
@@ -92,13 +91,11 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
     }, workerSrc);
     expect(workerReachable).toBe(true);
 
-    // First page rendered: geometry reported and pixels on the canvas.
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
     expect(await canvasIsNonBlank(page, 1)).toBe(true);
 
-    // Page navigation works in both directions.
     await page.getByTestId("pdf-next").click();
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,

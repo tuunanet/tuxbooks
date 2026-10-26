@@ -113,7 +113,6 @@ function expectDefaultSize(snap: WindowSnapshot): void {
 }
 
 test.describe("TuxBooks desktop shell", () => {
-  // Test A — branding: the native title bar and the sidebar identity.
   test("brands the native window title and sidebar heading as TuxBooks", async ({
     electronApp,
     page,
@@ -126,8 +125,6 @@ test.describe("TuxBooks desktop shell", () => {
     await expect(page.locator('[data-testid="sidebar"] h1')).toHaveText("TuxBooks");
   });
 
-  // Test B — deterministic startup geometry: centered, unmaximized, default
-  // size — on every launch, with no persisted state in the loop.
   test("launches centered, unmaximized, at the default size", async ({ electronApp }) => {
     expectDefaultSize(await snapshot(electronApp));
     expectCenteredHorizontally(await snapshot(electronApp));

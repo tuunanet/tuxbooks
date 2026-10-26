@@ -36,7 +36,6 @@ interface TestFixtures {
 }
 
 interface WorkerFixtures {
-  /** Main-process handle of the launched Electron app. */
   electronApp: ElectronApplication;
 }
 

@@ -141,7 +141,6 @@ test.describe("reading annotations", () => {
       .first()
       .waitFor({ state: "attached", timeout: 10000 });
 
-    // Attach a note through the drawer's Highlights tab.
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
     await page.getByTestId("nav-highlight-note-0").click();
@@ -160,7 +159,6 @@ test.describe("reading annotations", () => {
     });
     await returnToLibrary(page);
 
-    // Reopen: highlight, note, and bookmark all come back from the database.
     await openInReader(page, "A Minimal Manual (PDF)");
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
@@ -168,7 +166,6 @@ test.describe("reading annotations", () => {
       timeout: 10000,
     });
 
-    // Revisit: jumping to the highlight lands on page 1 with the overlay drawn.
     await page.getByTestId("nav-highlight-jump-0").click();
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
@@ -217,7 +214,6 @@ test.describe("reading annotations", () => {
       timeout: 30000,
     });
 
-    // Select the fixture's deterministic passage and pick yellow.
     await selectEpubSectionText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
@@ -242,7 +238,6 @@ test.describe("reading annotations", () => {
     await expect(host).toHaveAttribute("data-epub-highlights", "1", { timeout: 30000 });
     await expect.poll(() => epubHighlightPainted(page), { timeout: 30000 }).toBe(true);
 
-    // Jump from the drawer: the row's destination is the painted highlight.
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
     await page.getByTestId("nav-highlight-jump-0").click();
@@ -296,7 +291,6 @@ test.describe("reading annotations", () => {
     });
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
-    // The label and the in-chapter progress both come back from the store.
     await expect(page.getByTestId("nav-bookmark-0")).toContainText("Opening scene");
     await expect(page.getByTestId("nav-bookmark-0")).toContainText(/% through chapter/);
     await closeReaderNavigation(page);
@@ -427,7 +421,6 @@ test.describe("reading annotations", () => {
       .toBe(true);
     await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0);
 
-    // Create a yellow highlight from a real text-layer selection.
     await selectPageOneText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
@@ -446,13 +439,11 @@ test.describe("reading annotations", () => {
     await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0, { timeout: 10000 });
     await expect(page.getByTestId("selection-toolbar")).toBeHidden({ timeout: 10000 });
 
-    // The same text is selectable again and nothing is targeted.
     await selectPageOneText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("highlight-remove")).toHaveCount(0);
     await page.getByRole("button", { name: "Dismiss selection" }).click();
 
-    // Reopen: the removal was persisted — no highlight comes back.
     await returnToLibrary(page);
     await openInReader(page, "A Minimal Manual (PDF)");
     await expect

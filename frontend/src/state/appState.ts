@@ -3,7 +3,6 @@ import { createContext, useContext, type Dispatch } from "react";
 /** The three major application states. Everything else is subordinate. */
 export type AppView = "library" | "detail" | "reader";
 
-/** Sections inside the book detail view. */
 export type DetailTab = "overview" | "metadata" | "highlights" | "bookmarks";
 
 export type SmartSectionId =

@@ -141,7 +141,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await input.press("Enter");
     await expect(input).toHaveValue("250");
 
-    // The dropdown's fit entries switch the mode back.
     await page.getByTestId("pdf-zoom-menu").click();
     await page.getByTestId("pdf-zoom-fit-width").click();
     await expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-width");
@@ -171,7 +170,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     const widthBefore = Number(await canvas.getAttribute("width"));
     const percentBefore = await input.inputValue();
 
-    // Gesture over the page surface: one notch in.
     const box = await page.getByTestId("reader-content").boundingBox();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await page.keyboard.down("Control");
@@ -217,7 +215,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     });
     expect(Math.abs(centers.title - centers.header)).toBeLessThanOrEqual(2);
 
-    // Presentation mode: the bar is transparent until the pointer is over it.
     await page.keyboard.press("Control+l");
     const bar = page.getByTestId("pdf-presentation-bar");
     await expect(bar).toBeVisible({ timeout: 10000 });
@@ -759,7 +756,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await page.waitForTimeout(1500);
     await returnToLibrary(page);
 
-    // Reopen: page 2 is restored (indicator, canvas, geometry).
     await openInReader(page, "A Minimal Manual (PDF)");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,
@@ -947,15 +943,12 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect.poll(() => thumbnailState(page, 70), { timeout: 30000 }).toBe("rendered");
     expect(await canvasIsNonBlank(page, 70, "pdf-thumbnail")).toBe(true);
 
-    // Closing the sidebar unmounts the thumbnails with it.
     await page.getByTestId("reader-sidebar-toggle").click();
     await page.getByTestId("pdf-thumbnails").waitFor({ state: "detached", timeout: 30000 });
 
     await returnToLibrary(page);
   });
 
-  // Milestone 5 — in-book search: page text comes from the engine through
-  // the seam; picking a match navigates to its page.
   test("finds page text and navigates to the matching page", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     // Earlier specs leave the book's saved position past page 1, and the
@@ -985,7 +978,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     );
     expect(resultsText).toContain("Page 2");
 
-    // Clicking the match navigates to page 2 and closes the overlay.
     await page.getByTestId("reader-search-match").click();
     await expect.poll(() => currentPageNumber(page), { timeout: 30000 }).toBe(2);
     await expect(page.getByTestId("reader-search-overlay")).toBeHidden({ timeout: 30000 });

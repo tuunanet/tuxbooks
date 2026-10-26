@@ -127,7 +127,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await page.getByRole("button", { name: "All Books" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
 
-    // A sibling dropped on disk afterwards appears without a second import.
     copyFileSync(epubFixture, path.join(shelf, "single-second.epub"));
     await expect
       .poll(() => cardCount(page), {
@@ -175,8 +174,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount + 1);
 
-    // Unwatch it the way a user does: Settings > Watched folders > select >
-    // Unwatch.
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
@@ -197,10 +194,8 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(dialog).toContainText("Your files on disk stay untouched.");
     await page.getByTestId("unwatch-confirm").click();
 
-    // The shelf leaves the watch list...
     await expect(row).toHaveCount(0);
 
-    // ...its book leaves the library view...
     await page.getByRole("button", { name: "All Books" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
     await expect
@@ -210,7 +205,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount);
 
-    // ...and the file on disk is byte-for-byte what it was.
     expect(readFileSync(shelfBook).equals(before)).toBe(true);
     rmSync(shelf, { recursive: true, force: true });
   });
@@ -249,7 +243,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     expect(covered.watched).toEqual([]);
     expect(covered.covered).toEqual([child]);
 
-    // The list carries one row, not two.
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();

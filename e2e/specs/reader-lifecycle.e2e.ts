@@ -43,7 +43,6 @@ async function openLargePdf(page: Page): Promise<void> {
   });
 }
 
-/** Opens the EPUB and waits for the engine host to report ready. */
 async function openReadyEpub(page: Page): Promise<void> {
   await openInReader(page, "A Minimal Book (EPUB)");
   const host = page.locator("div[data-epub-host]");

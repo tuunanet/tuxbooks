@@ -17,7 +17,6 @@ interface ReaderProgressOptions<Saved> {
   parseRestored: (record: ReadingProgressRecord | null) => Saved | null;
   /** Called once restoration settled; failure degrades to `null`. */
   onRestored: (restored: Saved | null) => void;
-  /** Builds the wire payload for a save. */
   savePayload: (current: Saved, position: number) => ReadingProgressInput;
 }
 

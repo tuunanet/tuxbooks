@@ -112,7 +112,6 @@ export interface EpubLoadDetail {
 
 export type { EpubSearchExcerpt } from "./searchExcerpt";
 
-/** One content match: the locator to jump to plus its excerpt. */
 export interface EpubSearchMatch {
   locator: string;
   excerpt: EpubSearchExcerpt;
@@ -631,8 +630,6 @@ export class ReadiumEpubHandle {
     return best ?? this.positions[0] ?? undefined;
   }
 
-  // Engine events ----------------------------------------------------------------
-
   private handlePositionChanged(locator: Locator): void {
     this.currentLocator = locator;
     this.relocateCount += 1;
@@ -797,8 +794,6 @@ export class ReadiumEpubHandle {
     this.selectionHandlers.add(handler);
     return () => this.selectionHandlers.delete(handler);
   }
-
-  // Navigation -------------------------------------------------------------------
 
   /**
    * Run a navigation once the restore's frame update has settled (see the
@@ -1060,8 +1055,6 @@ export class ReadiumEpubHandle {
     );
   }
 
-  // Search -----------------------------------------------------------------------
-
   /**
    * Whole-book search over actual EPUB content: walks the spine, matches
    * inside each section document, and streams results per section through
@@ -1143,8 +1136,6 @@ export class ReadiumEpubHandle {
     this.searchGeneration += 1;
     this.navigator?.applyDecorations([], "search");
   }
-
-  // Highlights -------------------------------------------------------------------
 
   /**
    * Draws a highlight at the locator and keeps it for section remounts
@@ -1315,8 +1306,6 @@ export class ReadiumEpubHandle {
     await navigator.destroy();
   }
 
-  // TOC --------------------------------------------------------------------------
-
   private collectTocLabels(items: EpubTocItem[]): void {
     for (const item of items) {
       if (item.label !== "") this.tocLabels.push({ label: item.label, href: item.href });
@@ -1355,8 +1344,6 @@ export class ReadiumEpubHandle {
     return this.publication.readingOrder.items.length;
   }
 }
-
-// Locator helpers ----------------------------------------------------------------
 
 /** Serialize a real `Locator` to the app's canonical locator JSON. */
 export function serializeLocator(locator: Locator): string {
@@ -1400,7 +1387,6 @@ function buildPositions(publication: Publication, positionsJson: unknown): Locat
   return locators;
 }
 
-/** Map the manifest's toc tree to the app's TOC node shape. */
 function mapToc(items: Link[]): EpubTocItem[] {
   return items.map((item) => ({
     label: item.title ?? "",
@@ -1408,8 +1394,6 @@ function mapToc(items: Link[]): EpubTocItem[] {
     subitems: mapToc(item.children?.items ?? []),
   }));
 }
-
-// Search text matching -----------------------------------------------------------
 
 /**
  * Case-insensitive whole-document text matching with excerpts. The built

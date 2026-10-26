@@ -50,7 +50,6 @@ export function intersectionObservers(): MockIntersectionObserver[] {
   return MockIntersectionObserver.instances;
 }
 
-/** Deliver a synthetic entry for `element` to one observer. */
 export function fireIntersection(
   observer: MockIntersectionObserver,
   element: Element,
@@ -67,7 +66,6 @@ export function fireIntersection(
   observer.callback([entry], observer as unknown as IntersectionObserver);
 }
 
-/** Install the fake as the global constructor. */
 export function installMockIntersectionObserver(): void {
   vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 }

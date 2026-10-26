@@ -46,7 +46,6 @@ export interface PdfZoomSample {
   /** Document element origin in scroll-content coordinates. */
   documentTop: number;
   documentLeft: number;
-  /** Document element size. */
   documentWidth: number;
   documentHeight: number;
   /** Viewport centre in scroll-content coordinates. */

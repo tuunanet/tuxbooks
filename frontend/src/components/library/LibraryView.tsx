@@ -62,7 +62,6 @@ const BULK_MESSAGE_MS = 4000;
  */
 const scrollPositions = new Map<string, number>();
 
-/** Skeleton grid shown while the shared library payload is loading. */
 function LibrarySkeleton() {
   return (
     <div

@@ -115,7 +115,6 @@ function sha256OfFixture(fixturePath: string): string {
   return createHash("sha256").update(readFileSync(fixturePath)).digest("hex");
 }
 
-/** Geometry of the PDF scroll container. */
 async function readContainer(page: Page): Promise<Geometry> {
   return page.evaluate(() => {
     const container = document.querySelector<HTMLElement>("[data-testid=reader-content]");
@@ -133,7 +132,6 @@ async function readContainer(page: Page): Promise<Geometry> {
   });
 }
 
-/** Apply a window size through the renderer and wait until it sticks. */
 async function fixWindowSize(page: Page): Promise<void> {
   await page.evaluate(([w, h]) => window.resizeTo(w!, h!), [WINDOW_WIDTH, WINDOW_HEIGHT]);
   await expect
@@ -253,7 +251,6 @@ function thumbModel(geometry: Geometry): ThumbModel {
   };
 }
 
-/** Predicted thumb center y for a scrollTop, under the given model. */
 function predictedThumbCenterY(model: ThumbModel, geometry: Geometry, scrollTop: number): number {
   const maxScroll = geometry.scrollHeight - geometry.clientHeight;
   const fraction = Math.min(1, Math.max(0, scrollTop / maxScroll));
@@ -372,8 +369,6 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     const endModel = thumbModel(endGeometry);
     const endCursorY = cursorY;
 
-    // -- Analysis -----------------------------------------------------------
-
     // Sample timestamps are relative to the in-page install time; the
     // step timestamps are raw performance.now(). Rebase via the offset.
     const toSampleT = (pageT: number) => pageT - collected.t0;
@@ -452,8 +447,6 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     const thumbCursorGapTrackPx = Math.abs(cursorTrackFrac - thumbTrackFrac) * endModel.usable;
     const endThumbCenterY = predictedThumbCenterY(endModel, endGeometry, actualEndScrollTop);
     const thumbUnderCursorAtEnd = Math.abs(endCursorY - endThumbCenterY) <= endModel.thumbLen / 2;
-
-    // -- Verdict ------------------------------------------------------------
 
     const t1HeightEvents = heightEventsDuringDrag.length;
     const heightDeltaPx = heightEventsDuringDrag.reduce((sum, event) => sum + event.delta, 0);

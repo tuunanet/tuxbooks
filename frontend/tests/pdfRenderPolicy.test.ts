@@ -135,7 +135,6 @@ describe("render window byte budget (PERF-4)", () => {
     const order = Array.from({ length: 8 }, (_, index) => index);
     const kept = capByBytes(order, () => bytes, MAX_ACTIVE_CANVAS_BYTES);
     expect(kept.length).toBeGreaterThanOrEqual(3);
-    // And the budget itself is respected by the kept set.
     expect(kept.length * bytes).toBeLessThanOrEqual(MAX_ACTIVE_CANVAS_BYTES);
   });
 

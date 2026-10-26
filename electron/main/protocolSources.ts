@@ -27,7 +27,6 @@ function isMissingEntry(error: unknown): boolean {
   return code === "ENOENT" || code === "EISDIR";
 }
 
-/** Map one source rejection to the protocol error the handler understands. */
 export function translateSourceError(error: unknown): Error {
   if (error instanceof NotFoundError) return error;
   if (isMissingEntry(error)) return new NotFoundError("not found");
@@ -66,7 +65,6 @@ export async function readCoverFile(root: string, name: string): Promise<Uint8Ar
   return fsp.readFile(realFile);
 }
 
-/** Build the protocol's byte sources: sidecar calls plus contained covers. */
 export function makeProtocolSources(
   sidecar: Pick<Sidecar, "call">,
   coversRoot: string,

@@ -9,7 +9,6 @@
  * #78 M group) so both sides classify links identically.
  */
 
-/** Upper bound for one external URL string. */
 export const MAX_EXTERNAL_URL_LENGTH = 2048;
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);

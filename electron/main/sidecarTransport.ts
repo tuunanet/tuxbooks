@@ -10,7 +10,6 @@ import { MAX_SIDECAR_REQUEST_BYTES } from "../shared/pathSchema";
  * memory without bound.
  */
 
-/** Serialize one JSON-RPC request line, rejecting oversized payloads. */
 export function serializeRequest(
   id: number,
   method: string,

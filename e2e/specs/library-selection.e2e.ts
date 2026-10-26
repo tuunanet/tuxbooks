@@ -36,7 +36,6 @@ interface RingProbe {
 /** Grid scroll container in grid view (list view exposes book-list). */
 const GRID_SELECTOR = '[data-testid="book-grid"]';
 
-/** Card wrapper index to card button selector. */
 function cardSelector(cardIndex: number): string {
   return `[data-card-index="${cardIndex}"] [data-book-card]`;
 }
@@ -131,7 +130,6 @@ async function probeRing(page: Page, cardIndex: number): Promise<RingProbe> {
   );
 }
 
-/** Open the library sort select and pick an option by its visible label. */
 async function setSort(page: Page, label: string): Promise<void> {
   await page.getByTestId("library-sort").click();
   await page.getByRole("option", { name: label }).click();

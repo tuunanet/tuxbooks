@@ -27,7 +27,6 @@ interface PdfDocumentViewProps {
   renderPermittedPages?: ReadonlySet<number>;
   /** The page the reading position names; its slot is the scroll target. */
   anchorPage: number;
-  /** Render scale for the canvases. */
   scale: number;
   /**
    * Live wheel-zoom gesture preview: the document element carries a CSS
@@ -61,7 +60,6 @@ interface PdfDocumentViewProps {
   documentRef?: Ref<HTMLDivElement>;
   /** Receives the content area element that defines the fit width. */
   contentAreaRef?: Ref<HTMLDivElement>;
-  /** Called when the user asks a failed page to render again. */
   onRetryPage?: (pageNumber: number) => void;
   /** Persisted highlights by page number; drawn over rendered pages. */
   highlightsByPage?: Map<number, Annotation[]>;

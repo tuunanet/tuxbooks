@@ -72,7 +72,6 @@ const DARK_PALETTE = {
 };
 const DARK_SCHEME = colorSchemeFromPalette(DARK_PALETTE);
 
-/** Copies a sub-rectangle out of a packed RGBA buffer. */
 function cropRgba(
   rgba: Uint8ClampedArray<ArrayBuffer>,
   bufferWidth: number,

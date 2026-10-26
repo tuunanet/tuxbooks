@@ -36,9 +36,7 @@ interface ReaderNavigationProps {
   pdfOutline: PdfOutlineItem[] | null;
   /** Persistent annotations of the open book (bookmarks + highlights). */
   annotations: Annotation[];
-  /** Navigates the reader to an annotation's position. */
   onAnnotationJump: (annotation: Annotation) => void;
-  /** Deletes a persistent annotation. */
   onDeleteAnnotation: (id: number) => void;
   /** Updates an annotation's color and/or note. */
   onUpdateAnnotation: (id: number, patch: AnnotationPatch) => void;
@@ -51,7 +49,6 @@ interface ReaderNavigationProps {
   theme: ReaderTheme;
 }
 
-/** Trigger metadata for one drawer tab: label, testid, and hint copy. */
 interface ReaderNavTabHint {
   label: string;
   testId: string;
@@ -121,7 +118,6 @@ function navTabTrigger(value: ReaderNavTab, selected: boolean) {
   );
 }
 
-/** Flattens a TOC tree into rows with their nesting depth. */
 interface TocRow {
   item: EpubTocItem;
   depth: number;
@@ -131,7 +127,6 @@ function flattenToc(items: EpubTocItem[], depth = 0): TocRow[] {
   return items.flatMap((item) => [{ item, depth }, ...flattenToc(item.subitems, depth + 1)]);
 }
 
-/** Flattens an outline tree into rows with their nesting depth. */
 interface OutlineRow {
   item: PdfOutlineItem;
   depth: number;

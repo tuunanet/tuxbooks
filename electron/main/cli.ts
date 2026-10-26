@@ -132,7 +132,6 @@ function scanArgv(argv: readonly string[]): CliScan {
   };
   for (const [index, token] of argv.entries()) {
     if (token === "--") {
-      // Everything after the separator is handed to Chromium verbatim.
       scan.forwarded = [...argv.slice(index + 1)];
       break;
     }

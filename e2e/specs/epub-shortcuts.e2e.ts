@@ -17,7 +17,6 @@ import { ensureLibrary, openInReader } from "./helpers.js";
 
 const FRAME = "iframe.readium-navigator-iframe";
 
-/** Click a paragraph inside the content frame so focus enters it. */
 async function focusContentFrame(page: Page): Promise<void> {
   // `force`: Readium mounts a second frame during section swaps and it can
   // cover the first, so Playwright's actionability check rejects the click as

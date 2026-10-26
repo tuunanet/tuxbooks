@@ -2,7 +2,6 @@ import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { epubLocator, openInReader, returnToLibrary, textOf } from "./helpers.js";
 
-/** Waits until the EPUB engine reports the given spine section. */
 async function waitForSection(page: Page, section: number): Promise<void> {
   await expect
     .poll(
@@ -51,7 +50,6 @@ async function engineMovedPast(page: Page, section: number, fraction: string): P
   return currentFraction > Number(fraction);
 }
 
-/** Opens the minimal EPUB and waits for the engine to report ready. */
 async function openReadyEpub(page: Page): Promise<void> {
   await openInReader(page, "A Minimal Book (EPUB)");
   const host = page.locator("div[data-epub-host]");
@@ -59,7 +57,6 @@ async function openReadyEpub(page: Page): Promise<void> {
   await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
 }
 
-/** Opens the contents drawer and jumps to the given TOC entry. */
 async function jumpToTocItem(page: Page, index: number): Promise<void> {
   await page.getByTestId("reader-nav-trigger").click();
   const item = page.getByTestId(`toc-item-${index}`);
@@ -499,7 +496,6 @@ test.describe("tuxbooks EPUB reader", () => {
   test("restores the exact locator across close and reopen", async ({ page }) => {
     await openReadyEpub(page);
 
-    // Land on a known in-chapter position via the contents drawer.
     await jumpToTocItem(page, 1);
     await waitForSection(page, 1);
     await expect.poll(() => epubLocator(page), { timeout: 30000 }).not.toBeNull();

@@ -63,7 +63,6 @@ const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
   ],
 };
 
-/** The serialized CSP for one variant. */
 export function appUiCsp(variant: AppUiCspVariant = "production"): string {
   const [base, overrides] =
     variant === "production"

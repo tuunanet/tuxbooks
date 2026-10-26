@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { appStateReducer, initialAppState, sameSection, type AppState } from "@/state/appState";
 
-/** A library state with a multi-selection in place. */
 function withSelection(selectedBookIds: number[], selectionAnchorId: number | null): AppState {
   return { ...initialAppState, selectedBookIds, selectionAnchorId };
 }

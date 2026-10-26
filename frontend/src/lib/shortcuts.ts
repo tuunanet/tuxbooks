@@ -9,7 +9,6 @@ import { createContext, useContext, useEffect, useRef } from "react";
 export type ShortcutHandler = (event: KeyboardEvent) => void;
 
 export interface ShortcutRegistry {
-  /** Registers a handler; returns an unregister function. */
   register(combo: string, handler: ShortcutHandler): () => void;
 }
 

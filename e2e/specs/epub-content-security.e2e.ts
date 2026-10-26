@@ -150,7 +150,6 @@ interface FrameProbe {
   hasText: boolean;
 }
 
-/** Probes the mounted section frame for active content and the fence. */
 async function frameProbe(page: Page, textMarker: string): Promise<FrameProbe | null> {
   return page.evaluate((marker) => {
     const frame = document.querySelector("[data-epub-host] iframe") as HTMLIFrameElement | null;

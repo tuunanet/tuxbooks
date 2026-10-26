@@ -101,7 +101,6 @@ describe("PdfPageCanvas scale-and-swap", () => {
     const view = renderPage(doc);
     const canvas = screen.getByTestId("pdf-canvas");
 
-    // Complete the first render at scale 1.
     await waitFor(() => expect(doc.renderOptions.length).toBe(1));
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));

@@ -7,8 +7,6 @@ import { expect, test } from "../fixtures/electron-app.js";
  * launch + BrowserWindow + React query proves the fixture end to end.
  */
 test.describe("tuxbooks app shell", () => {
-  // Test A — the real desktop window launches headlessly and shows the
-  // application shell.
   test("launches the native window and shows the application shell", async ({ page }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
 

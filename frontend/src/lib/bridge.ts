@@ -208,7 +208,6 @@ export function getEpubSession(bookId: number): Promise<{ manifest: unknown; pos
   return invoke("get_epub_session", { bookId });
 }
 
-/** Load the stored reading position for a book, if any. */
 export function getReadingProgress(bookId: number): Promise<ReadingProgressRecord | null> {
   return invoke("get_reading_progress", { bookId });
 }

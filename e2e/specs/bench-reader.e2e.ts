@@ -661,7 +661,6 @@ test.describe("reader performance benchmark", () => {
         return ok;
       })
       .toBe(true);
-    // The applied size from the renderer.
     const applied = await page.evaluate(() => ({
       width: window.innerWidth,
       height: window.outerHeight,

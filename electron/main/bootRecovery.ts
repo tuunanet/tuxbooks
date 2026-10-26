@@ -16,13 +16,11 @@ export const STARTUP_ERROR_LOG = "startup-error.log";
 /** The copy-paste recovery command printed to stderr and the log. */
 export const RESET_DATA_COMMAND = "tuxbooks --reset-data";
 
-/** The fs surface the recovery uses; injected from the main process. */
 export interface StartupFsSurface {
   mkdirSync(dir: string, options: { recursive: boolean }): unknown;
   appendFileSync(file: string, data: string): void;
 }
 
-/** The native dialog surface the recovery uses; injected from main. */
 export interface StartupDialogSurface {
   showMessageBox(options: {
     type: "error" | "warning";
@@ -33,7 +31,6 @@ export interface StartupDialogSurface {
   }): Promise<{ response: number }>;
 }
 
-/** The native shell surface the recovery uses; injected from main. */
 export interface StartupShellSurface {
   openPath(fullPath: string): Promise<string>;
 }

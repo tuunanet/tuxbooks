@@ -153,6 +153,11 @@ hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
 plain ones and passive voice for active. Apply it to text you wrote or changed,
 not to prose you did not touch.
 
+Do not write comments in the code unless it is for licensing or it is required
+for tuxbooks to work. A comment that explains a constraint, trap, root cause,
+or decision counts as required; narration does not
+(`docs/STANDARDS.md`).
+
 ## External knowledge
 
 Only for library, API, or dependency questions, not routine repo work: Context7

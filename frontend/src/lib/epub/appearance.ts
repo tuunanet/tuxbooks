@@ -36,7 +36,6 @@ export function epubFontSizeRatio(percent: number): number {
   return percent / 100;
 }
 
-/** True when `value` is exactly a supported scale step. */
 export function isEpubFontSizeStep(value: number): value is EpubFontSizeStep {
   return (EPUB_FONT_SIZE_SCALE_PERCENT as readonly number[]).includes(value);
 }
@@ -147,7 +146,6 @@ export const EPUB_WORD_SPACING_SCALE = [
   0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1, 1.125, 1.25, 1.375, 1.5, 1.625, 1.75, 1.875, 2,
 ] as const;
 
-/** Nearest supported word-spacing step. */
 export function nearestEpubWordSpacing(value: number): number {
   return nearestEpubScaleStep(EPUB_WORD_SPACING_SCALE, value);
 }
@@ -160,7 +158,6 @@ export const EPUB_LETTER_SPACING_SCALE = [
   0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1,
 ] as const;
 
-/** Nearest supported letter-spacing step. */
 export function nearestEpubLetterSpacing(value: number): number {
   return nearestEpubScaleStep(EPUB_LETTER_SPACING_SCALE, value);
 }
@@ -174,7 +171,6 @@ export const EPUB_PARAGRAPH_SPACING_SCALE = [
   0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
 ] as const;
 
-/** Nearest supported paragraph-spacing step. */
 export function nearestEpubParagraphSpacing(value: number): number {
   return nearestEpubScaleStep(EPUB_PARAGRAPH_SPACING_SCALE, value);
 }
@@ -194,7 +190,6 @@ export const EPUB_PAGE_GUTTER_SCALE_PX = [0, 10, 20, 30, 40, 60] as const;
  */
 export const EPUB_DEFAULT_PAGE_GUTTER_PX = 10;
 
-/** Nearest supported page-margin step. */
 export function nearestEpubPageGutter(value: number): number {
   return nearestEpubScaleStep(EPUB_PAGE_GUTTER_SCALE_PX, value);
 }
@@ -434,7 +429,6 @@ export const EPUB_FOREGROUND_SWATCHES: { color: string; label: string }[] = [
   { color: "#e6c98a", label: "Amber" },
 ];
 
-/** True when `value` is a normalizable #rrggbb color. */
 export function isEpubHexColor(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
 }
@@ -555,7 +549,6 @@ export type EpubColumnCount = (typeof EPUB_COLUMN_COUNTS)[number];
  */
 export const EPUB_DEFAULT_COLUMN_COUNT: EpubColumnCount = 2;
 
-/** True when `value` is exactly a supported column count. */
 export function isEpubColumnCount(value: number): value is EpubColumnCount {
   return (EPUB_COLUMN_COUNTS as readonly number[]).includes(value);
 }

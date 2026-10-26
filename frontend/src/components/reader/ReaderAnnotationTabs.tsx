@@ -17,7 +17,6 @@ interface ReaderAnnotationListProps {
   label: (annotation: Annotation) => string;
   /** Optional second line, e.g. a bookmark's location when it has a label. */
   subLabel?: (annotation: Annotation) => string | null;
-  /** Navigates the reader to the annotation's position. */
   onJump: (annotation: Annotation) => void;
   onDelete: (id: number) => void;
   onUpdate: (id: number, patch: AnnotationPatch) => void;

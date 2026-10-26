@@ -29,7 +29,6 @@ const BENIGN_RENDERER_MESSAGES: readonly string[] = [
   "ResizeObserver loop completed with undelivered notifications",
 ];
 
-/** True when a renderer console line is known browser noise, not a fault. */
 export function isBenignRendererMessage(message: string): boolean {
   return BENIGN_RENDERER_MESSAGES.some((benign) => message.includes(benign));
 }
@@ -55,7 +54,6 @@ export interface RendererConsoleDetails {
   sourceId: string;
 }
 
-/** Mirror one renderer console line into the crash-survival buffer. */
 export function recordRendererConsole(details: RendererConsoleDetails): void {
   const line = `[renderer:${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})`;
   rendererConsole.push(line);

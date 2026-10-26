@@ -10,7 +10,6 @@ import { renderPdfPageBitmap } from "../pdfPageBitmap";
 import type { PdfBitmapCache } from "../pdfBitmapCache";
 import { isRenderingCancelled, type PdfDocument, type SmartPalette } from "@/lib/pdf/pdfEngine";
 
-/** The zoom request without the per-page presentation override. */
 export type PdfPreloadRequest = Omit<PdfScaleRequest, "presentationPage">;
 
 interface PdfPresentationPreloadParams {

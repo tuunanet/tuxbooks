@@ -395,7 +395,6 @@ export function layoutSlots(sizes: PageSize[], gapPx: number = PAGE_GAP_PX): Lay
   });
 }
 
-/** Total height of the laid-out document (last slot bottom). */
 export function documentHeight(slots: LayoutSlot[]): number {
   const last = slots.at(-1);
   return last ? last.top + last.height : 0;
@@ -430,7 +429,6 @@ export function offsetForPage(pageNumber: number, slots: LayoutSlot[]): number |
   return slot ? slot.top : null;
 }
 
-/** Clamp a scroll offset to the document, given the visible viewport height. */
 export function clampOffset(offset: number, viewportHeight: number, docHeight: number): number {
   const max = Math.max(0, docHeight - viewportHeight);
   return Math.max(0, Math.min(max, offset));

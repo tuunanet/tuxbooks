@@ -36,12 +36,10 @@ export function isHighlightColor(value: string | null | undefined): value is Hig
 
 export type HighlightThemeFamily = "light" | "dark";
 
-/** Which side of the theme split a reader theme renders as. */
 export function readerThemeFamily(theme: ReaderTheme): HighlightThemeFamily {
   return epubThemeColorScheme(epubSurfaceTheme(theme));
 }
 
-/** One ink: the hue plus the wash alpha for its family. */
 export interface HighlightInk {
   hex: string;
   alpha: number;

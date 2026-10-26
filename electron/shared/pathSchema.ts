@@ -98,7 +98,6 @@ export function isValidLibraryPath(candidate: string): boolean {
   return path.normalize(candidate) === candidate;
 }
 
-/** Result of parsing a `Range` header. */
 export type RangeParse =
   | { kind: "none" }
   | { kind: "invalid" }
@@ -147,7 +146,6 @@ function mimeTypeForExtension(
 
 const OCTET_STREAM = "application/octet-stream";
 
-/** Type guard for the fixed set of book source formats. */
 export function isValidBookFormat(value: unknown): value is "epub" | "pdf" {
   return value === "epub" || value === "pdf";
 }
@@ -253,7 +251,6 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "delete_annotation",
 ]);
 
-/** Stable ids for the two app-owned storage roots. */
 export type StorageRootId = "app-data" | "app-config";
 
 /** Type guard for renderer-supplied storage root ids. */
@@ -314,7 +311,6 @@ export const PRIVILEGED_SCHEMES = [
   },
 ] as const;
 
-/** Origin of the built renderer page, served over the app scheme. */
 export const APP_ORIGIN = "app://bundle";
 
 /**
