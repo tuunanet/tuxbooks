@@ -3,15 +3,13 @@ import {
   PAPERS_VIEW_SPACING,
   fitPageScale,
   layoutSpread,
-  nextSpreadPageIndex,
-  previousSpreadPageIndex,
-  spreadStartIndex,
+  spreadNeighbourPageIndexes,
   type PageSize,
 } from "../pdfLayout";
 import { presentationPagePlan } from "../pdfRenderPolicy";
-import { renderPdfPageBitmap } from "../pdfPageBitmap";
+import { startPdfPreloadQueue, type PdfPreloadTarget } from "../pdfPreloadQueue";
 import type { PdfBitmapCache } from "../pdfBitmapCache";
-import { isRenderingCancelled, type PdfDocument, type SmartPalette } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 
 interface PdfBookPreloadParams {
   document: PdfDocument | null;
@@ -72,17 +70,11 @@ export function usePdfBookPreload(params: PdfBookPreloadParams): void {
     if (areaWidth <= 0 || viewportHeight <= 0) return;
 
     const pageIndex = Math.max(0, currentPage - 1);
-    const currentStart = spreadStartIndex(pageIndex);
-    const targets: { pageNumber: number; scale: number; ratio: number }[] = [];
+    const targets: PdfPreloadTarget[] = [];
     // Next spread is the reading direction, previous is the safety net —
     // same priority order as the presentation preload, one raster at a
-    // time. A turn clamped at the document end names a page of the
-    // current spread itself; that is no neighbour and is skipped.
-    for (const neighbourIndex of [
-      nextSpreadPageIndex(pageIndex, pageCount),
-      previousSpreadPageIndex(pageIndex),
-    ]) {
-      if (spreadStartIndex(neighbourIndex) === currentStart) continue;
+    // time (the shared queue below).
+    for (const neighbourIndex of spreadNeighbourPageIndexes(pageIndex, pageCount)) {
       const spread = layoutSpread(sizes, neighbourIndex);
       if (!spread) continue;
       // The neighbour spread's own fit-the-pair scale — the one its
@@ -105,45 +97,14 @@ export function usePdfBookPreload(params: PdfBookPreloadParams): void {
     }
     if (targets.length === 0) return;
 
-    let cancelled = false;
-    let active: { cancel(): void } | null = null;
-
-    void (async () => {
-      for (const target of targets) {
-        if (cancelled) return;
-        const render = renderPdfPageBitmap({
-          document,
-          pageNumber: target.pageNumber,
-          scale: target.scale,
-          ratio: target.ratio,
-          smartColors,
-        });
-        active = render;
-        try {
-          const buffer = await render.promise;
-          if (cancelled) return;
-          bitmapCache.put({
-            pageNumber: target.pageNumber,
-            scale: target.scale,
-            ratio: target.ratio,
-            variant: renderVariant,
-            regionKey: "full",
-            buffer,
-          });
-          onPreloaded?.(target.pageNumber);
-        } catch (error) {
-          if (isRenderingCancelled(error)) return;
-          // Swallow: the turn still renders live if the preload missed.
-        } finally {
-          active = null;
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      active?.cancel();
-    };
+    return startPdfPreloadQueue({
+      document,
+      targets,
+      bitmapCache,
+      renderVariant,
+      smartColors,
+      onPreloaded,
+    });
   }, [
     enabled,
     document,

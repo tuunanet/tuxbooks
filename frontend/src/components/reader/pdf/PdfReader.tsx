@@ -74,10 +74,8 @@ import {
   keepPositionValue,
   layoutSlots,
   layoutSpread,
-  nextSpreadPageIndex,
   PAGE_GAP_PX,
-  previousSpreadPageIndex,
-  spreadStartIndex,
+  spreadNeighbourPageIndexes,
   stepZoomLevel,
   visiblePageRegion,
   wheelZoomScale,
@@ -980,17 +978,13 @@ export function PdfReader({
   // are: the preload keys each neighbour bitmap under the spread's own
   // fit-the-pair scale, and a key computed from a stale size estimate
   // would miss on arrival. The members come from the same layoutSpread
-  // grouping the view paints with, so a spread's second page is measured
-  // along with its first.
+  // grouping the view paints with (spreadNeighbourPageIndexes, shared
+  // with the preload hook), so a spread's second page is measured along
+  // with its first.
   useEffect(() => {
     if (!bookMode || !layoutReady || !sizes) return;
     const pageIndex = Math.max(0, currentPage - 1);
-    const currentStart = spreadStartIndex(pageIndex);
-    const neighbours = [
-      nextSpreadPageIndex(pageIndex, effectivePageCount),
-      previousSpreadPageIndex(pageIndex),
-    ].filter((index) => spreadStartIndex(index) !== currentStart);
-    const pages = neighbours.flatMap(
+    const pages = spreadNeighbourPageIndexes(pageIndex, effectivePageCount).flatMap(
       (index) => layoutSpread(sizes, index)?.pages.map((page) => page.pageNumber) ?? [],
     );
     if (pages.length > 0) measurePages(pages);
