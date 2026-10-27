@@ -2,6 +2,6 @@
 	path = vendor/papers
 	url = https://github.com/tuxbooks/papers
 	branch = tuxbooks
-[submodule "vendor/pageflip-wasm"]
-	path = vendor/pageflip-wasm
-	url = https://github.com/tuunanet/pageflip-wasm.git
+[submodule "vendor/pagecurl-gl"]
+	path = vendor/pagecurl-gl
+	url = https://github.com/tuunanet/pagecurl-gl.git
