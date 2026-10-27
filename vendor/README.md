@@ -1,6 +1,7 @@
 # vendor
 
-Reference-only sources pinned for reading, never for building.
+Sources pinned as git submodules. `vendor/papers` is reference-only, kept for
+reading; `vendor/pagecurl-gl` is a first-party build input (see below).
 
 ## vendor/papers
 
@@ -17,3 +18,17 @@ or Electron packaging config reads this tree, and no file from it ships in the
 product. The fidelity oracle under `oracle/` reads the pinned commit as the
 provenance for the geometry it extracts, but it does not link, compile, or
 bundle the submodule into the app.
+
+## vendor/pagecurl-gl
+
+The pagecurl-gl page-curl library, a first-party MIT library developed for the
+book-mode page turn (Stage 2 of the book-mode spec, behind the turn adapter
+seam). Unlike `vendor/papers`, this submodule is a build input: the reader will
+consume it through a source alias in development and a built distribution
+before release.
+
+- Upstream: <https://github.com/tuunanet/pagecurl-gl>.
+- Pinned commit: `8b72c2607c47f8f54cbfb34b346f21dd50baa714`, branch `main`.
+- Clone it with `git submodule update --init vendor/pagecurl-gl`.
+- The engine, texture, and shader decisions it must honor are recorded in its
+  `docs/research/tuxbooks-integration-findings.md`.
