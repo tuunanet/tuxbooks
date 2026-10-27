@@ -961,6 +961,16 @@ export function PdfReader({
     onPreloaded: handlePreloaded,
   });
 
+  // Book mode (tuxbooks-9pr): the spread surface (PdfBookView) takes the
+  // continuous document's place while the preference is on, and
+  // presentation mode wins while active. The decision gates everything
+  // scroll-view-only below — the zoom entry points and the toolbar ‹/›
+  // step as well as the mount choice — so a control hidden behind the
+  // mode can never mutate the state the mode restores on exit. It also
+  // gates the scroll tracker (tuxbooks-9pr.11) and the re-anchor effect
+  // below, both of which must see the transition as it happens.
+  const bookMode = preferences.bookMode && !presentationMode;
+
   // Re-anchor after layout-scale changes (zoom, fit recalculation,
   // window resize, presentation rescale): the anchor's page + in-page
   // fraction — kept current by the scroll tracker — is mapped onto the
@@ -1005,6 +1015,7 @@ export function PdfReader({
   const previousPageRef = useRef(currentPage);
   const previousScaleRef = useRef(scale);
   const previousPresentationRef = useRef(presentationMode);
+  const previousBookRef = useRef(bookMode);
   const previousSlotsRef = useRef(slots);
   const mountedRef = useRef(false);
 
@@ -1196,43 +1207,70 @@ export function PdfReader({
     [scrollContainerRef, slots, scale],
   );
 
+  // Mode-exit landing geometry, shared by the two exits below: the current
+  // page's slot top edge at the viewport top — the landing a navigation page
+  // change takes — stamped with the policy that named it. The layout in
+  // effect now is the one a later re-anchor compares against, so the
+  // bookkeeping stays current through this path too.
+  const restorePageAtTop = useCallback(
+    (policy: "presentation-exit" | "book-exit") => {
+      const laidOut = slotsRef.current;
+      const container = scrollContainerRef?.current ?? null;
+      const documentEl = documentRef.current;
+      const slot = laidOut[currentPage - 1] ?? null;
+      previousSlotsRef.current = laidOut;
+      if (!container || !documentEl || slot === null) {
+        activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
+        return;
+      }
+      const documentTop =
+        documentEl.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      setScrollTop(container, documentTop + slot.top);
+      // The landing is the page's top edge, so the anchor names that page;
+      // the scroll tracker's first sample refreshes the in-page fraction
+      // from the restored offset.
+      anchorInfoRef.current = { page: currentPage, fraction: 0 };
+      rootRef.current?.setAttribute("data-pdf-scroll-policy", policy);
+    },
+    [currentPage, scrollContainerRef],
+  );
+
   // Presentation exit (docs/PDF.md, Presentation mode): the mode's single
   // centred page leaves the scroll container at the top of a surface that no
   // longer exists, so the fractional re-anchor would map "top" to "top" and
   // drop the reader at page 1 (the scroll tracker then confirms that page
-  // into position). Resume on the page that was being presented instead: its
-  // slot's top edge at the viewport top, the landing a navigation page change
-  // takes. The re-anchor effect calls this before the scroll tracker
-  // re-enables, so the tracker's first sample reads the restored offset and
-  // reports the presented page, not page 1.
-  const restorePresentedPage = useCallback(() => {
-    const laidOut = slotsRef.current;
-    const container = scrollContainerRef?.current ?? null;
-    const documentEl = documentRef.current;
-    const slot = laidOut[currentPage - 1] ?? null;
-    // The layout in effect now is the one a later re-anchor compares
-    // against, so the bookkeeping stays current through this path too.
-    previousSlotsRef.current = laidOut;
-    if (!container || !documentEl || slot === null) {
-      activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
-      return;
-    }
-    const documentTop =
-      documentEl.getBoundingClientRect().top -
-      container.getBoundingClientRect().top +
-      container.scrollTop;
-    setScrollTop(container, documentTop + slot.top);
-    rootRef.current?.setAttribute("data-pdf-scroll-policy", "presentation-exit");
-  }, [currentPage, scrollContainerRef]);
+  // into position). Resume on the page that was being presented instead.
+  // The re-anchor effect calls this before the scroll tracker re-enables, so
+  // the tracker's first sample reads the restored offset and reports the
+  // presented page, not page 1.
+  const restorePresentedPage = useCallback(
+    () => restorePageAtTop("presentation-exit"),
+    [restorePageAtTop],
+  );
 
-  // Keep the latest re-anchoring and presentation-exit logic reachable from
+  // Book-mode exit (tuxbooks-9pr.11): while the spread owns the view the
+  // scroll container's content shrinks to fit the pair, the browser clamps
+  // scrollTop to 0, and the remounted document view restarts at the top. The
+  // keep-position re-anchor cannot recover from that (a kept fraction of the
+  // zeroed offset is page 1) and activeSlotRef was nulled by the unmount, so
+  // the landing is explicit: the slot of the page the spread settled on (turns
+  // settle on the spread's anchor page). It runs before the scroll tracker's
+  // enabled gate re-opens with the remount, so the tracker's first sample
+  // reads the restored offset instead of confirming page 1.
+  const restoreBookPage = useCallback(() => restorePageAtTop("book-exit"), [restorePageAtTop]);
+
+  // Keep the latest re-anchoring and mode-exit logic reachable from
   // the effect below without re-running it on every slots or render change
   // (geometry corrections must never yank the viewport).
   const reanchorRef = useRef<(oldScale: number) => void>(() => {});
   const restoreRef = useRef<() => void>(() => {});
+  const restoreBookRef = useRef<() => void>(() => {});
   useEffect(() => {
     reanchorRef.current = reanchorByFraction;
     restoreRef.current = restorePresentedPage;
+    restoreBookRef.current = restoreBookPage;
   });
 
   // The loop guard: a page change that *originated from scrolling* must not
@@ -1245,15 +1283,20 @@ export function PdfReader({
   // Presentation mode lays out one centred page, so there is nothing to
   // scroll: the effect only keeps its page/scale bookkeeping current, and
   // an exit from the mode resumes on the presented page
-  // (restorePresentedPage).
+  // (restorePresentedPage). Book mode carries no scroll surface either: its
+  // branch keeps the re-anchor anchor on the spread's page, and an exit
+  // resumes on that page's slot (restoreBookPage) — before the scroll
+  // tracker re-enables with the remount.
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
     const previousScale = previousScaleRef.current;
     const presentationExited = previousPresentationRef.current && !presentationMode;
+    const bookExited = previousBookRef.current && !bookMode;
     previousPageRef.current = currentPage;
     previousScaleRef.current = scale;
     previousPresentationRef.current = presentationMode;
+    previousBookRef.current = bookMode;
 
     // A wheel-gesture commit pins the cursor point through its own scroll
     // fixup, which supersedes the reading-spot anchor for exactly the
@@ -1280,6 +1323,21 @@ export function PdfReader({
       restoreRef.current();
       return;
     }
+    if (bookMode) {
+      // Scroll tracking is off here too, and the document surface is not
+      // mounted: keep the re-anchor anchor on the spread's page (a turn
+      // settles through position) so the exit restores the right slot, and
+      // never scrollIntoView an element that is not there.
+      if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
+      return;
+    }
+    if (bookExited) {
+      // The geometry lives outside this effect: see restoreBookPage. It
+      // supersedes the keep-position re-anchor below — from a zeroed
+      // offset that math would keep page 1.
+      restoreBookRef.current();
+      return;
+    }
     if (scaleChanged && !pageChanged) {
       reanchorRef.current(previousScale);
       return;
@@ -1288,7 +1346,7 @@ export function PdfReader({
       return;
     }
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
-  }, [currentPage, scale, presentationMode]);
+  }, [currentPage, scale, presentationMode, bookMode]);
 
   // Viewport clipping (high zoom): sample the scroll frame and derive each
   // laid-out page's visible region. Only canvases whose whole-page ratio
@@ -1349,7 +1407,15 @@ export function PdfReader({
     slots,
     // Presentation lays out a single centred page, so scroll position does
     // not name the current page there; flips come from navigation only.
-    enabled: layoutReady && !presentationMode,
+    // Book mode is the same contract for the spread: it reads its page from
+    // position, so while it owns the view no scroll sample may write
+    // position back from a container whose document surface is unmounted —
+    // the browser's clamp to the fitted pair is exactly such a sample
+    // (tuxbooks-9pr.11). Dropping the gate with the mode also cancels any
+    // sample pending from before the toggle; re-opening it on exit runs the
+    // tracker's first sample in the same effect flush, after the re-anchor
+    // effect above has restored the settled page's slot.
+    enabled: layoutReady && !presentationMode && !bookMode,
     onPageChange: handleScrollPageChange,
     anchorInfoRef,
   });
@@ -1450,14 +1516,6 @@ export function PdfReader({
   useEffect(() => {
     goToPageRef.current = goToPage;
   });
-
-  // Book mode (tuxbooks-9pr): the spread surface (PdfBookView) takes the
-  // continuous document's place while the preference is on, and
-  // presentation mode wins while active. The decision gates everything
-  // scroll-view-only below — the zoom entry points and the toolbar ‹/›
-  // step as well as the mount choice — so a control hidden behind the
-  // mode can never mutate the state the mode restores on exit.
-  const bookMode = preferences.bookMode && !presentationMode;
 
   // Manual zoom (preset stepping): the effective scale snaps onto the
   // nearest preset first, so zooming out of a fit mode continues from where
