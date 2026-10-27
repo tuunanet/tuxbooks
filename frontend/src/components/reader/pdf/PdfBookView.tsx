@@ -1,8 +1,13 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState, type Ref } from "react";
+import type { Annotation } from "@/types/domain";
+import type { HighlightOverrides, HighlightThemeFamily } from "@/lib/highlightPalette";
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "../bookModeLabels";
+import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
+import { PdfPageTextLayer } from "./PdfPageTextLayer";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 import { createInstantPdfBookTurn, type PdfBookTurnAdapter } from "./pdfBookTurn";
 import {
@@ -13,6 +18,32 @@ import {
   type PageSize,
 } from "./pdfLayout";
 import { pageToPosition } from "./pdfPages";
+
+/**
+ * Persisted-highlight drawing inputs for the spread (tuxbooks-9pr
+ * review): the page map and the palette identity travel together — a
+ * spread page without its family would draw the wrong wash, so the one
+ * prop keeps them from drifting apart.
+ */
+export interface PdfBookHighlights {
+  /** Persisted highlights by page number; drawn over the spread pages. */
+  byPage?: Map<number, Annotation[]>;
+  /** Theme family of the active reader theme; picks highlight washes + blend. */
+  family: HighlightThemeFamily;
+  /** Per-family highlight hue overrides (lib/highlightPalette). */
+  overrides: HighlightOverrides;
+}
+
+/**
+ * The reader theme's paint over the spread (tuxbooks-9pr review): the
+ * filter and the paper tint are one theme decision; see lib/pdf/theme.ts.
+ */
+export interface PdfBookThemePaint {
+  /** CSS filter implementing the reader theme (undefined = pages as-is). */
+  filter?: string;
+  /** Multiply-tint color for paper-style themes (undefined = no overlay). */
+  tint?: string;
+}
 
 interface PdfBookViewProps {
   /** The open document handle — shared with the scroll view (one worker). */
@@ -43,6 +74,10 @@ interface PdfBookViewProps {
    * Smart Dark page does not flash white before its bitmap blits.
    */
   pageBackground?: string;
+  /** Persisted highlights over the spread pages (family + overrides + map). */
+  highlights: PdfBookHighlights;
+  /** The reader theme's filter/tint over the spread (undefined = as-is). */
+  themePaint?: PdfBookThemePaint;
   /**
    * Injected turn adapter (the component-test seam; tuxbooks-9pr.5). When
    * provided it replaces the Stage 1 instant adapter this view would
@@ -64,12 +99,10 @@ const TURN_EDGE_WIDTH_PX = 32;
 /** Leg length of the triangular bottom-corner turn zones. */
 const TURN_CORNER_SIZE_PX = 72;
 
-const TURN_LABELS = {
-  prev: "Turn to the previous spread",
-  next: "Turn to the next spread",
-} as const;
-
-type TurnDirection = keyof typeof TURN_LABELS;
+// The turn labels and the spread region's accessible name are shared with
+// the EPUB book surface (bookModeLabels), so the mode reads the same in
+// both readers and E2E asserts one set of strings.
+type TurnDirection = keyof typeof BOOK_TURN_LABELS;
 
 /**
  * The book-mode reading surface (tuxbooks-9pr): the spread containing the
@@ -102,6 +135,8 @@ export function PdfBookView({
   smartColors,
   renderVariant = "original",
   pageBackground,
+  highlights,
+  themePaint,
   turnAdapter = null,
   bookTurnRef,
 }: PdfBookViewProps) {
@@ -144,22 +179,21 @@ export function PdfBookView({
     setPaintState({ key: spreadKey, pages: new Set() });
   }
   const painted = paintState.key === spreadKey ? paintState.pages : NO_PAGES;
-  // The canvas reports through a ref it refreshes per render, so a report
-  // can land through a callback from the previous commit — read the live
-  // key from a ref (refreshed in a layout effect, before any raster of
-  // that commit can report) instead of closing over it.
-  const spreadKeyRef = useRef(spreadKey);
-  useLayoutEffect(() => {
-    spreadKeyRef.current = spreadKey;
-  }, [spreadKey]);
-  const handlePageRendered = useCallback((pageNumber: number) => {
-    const key = spreadKeyRef.current;
-    setPaintState((current) =>
-      current.key !== key || current.pages.has(pageNumber)
-        ? current
-        : { key: current.key, pages: new Set(current.pages).add(pageNumber) },
-    );
-  }, []);
+  // The callback closes over this render's spread key rather than reading a
+  // live ref: PdfPageCanvas refreshes its callback ref in the layout phase
+  // (before its commitment effect reports), so a blit on a turned-to spread
+  // always reports through the callback of the commit that mounted it, and
+  // a late report from a superseded spread is dropped by the key check.
+  const handlePageRendered = useCallback(
+    (pageNumber: number) => {
+      setPaintState((current) =>
+        current.key !== spreadKey || current.pages.has(pageNumber)
+          ? current
+          : { key: current.key, pages: new Set(current.pages).add(pageNumber) },
+      );
+    },
+    [spreadKey],
+  );
 
   // Turn adapter (tuxbooks-9pr.5): the book view reads the reduced-motion
   // media query itself (the adapter must not) and passes the flag into the
@@ -200,7 +234,7 @@ export function PdfBookView({
     <button
       type="button"
       data-pdf-book-turn-edge={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`absolute inset-y-0 cursor-pointer hover:bg-foreground/10 ${side === "left" ? "left-0" : "right-0"}`}
       style={{ width: `${TURN_EDGE_WIDTH_PX}px` }}
       onClick={direction === "prev" ? turn.retreat : turn.advance}
@@ -210,7 +244,7 @@ export function PdfBookView({
     <button
       type="button"
       data-pdf-book-turn-corner={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`absolute bottom-0 cursor-pointer hover:bg-foreground/10 ${
         direction === "prev" ? "left-0" : "right-0"
       }`}
@@ -230,17 +264,40 @@ export function PdfBookView({
     <div ref={contentAreaRef} data-testid="pdf-content-area" className="flex min-h-0 w-full">
       <div
         data-testid="pdf-book-view"
+        // Assistive tech (tuxbooks-9pr.8): the spread surface is a named
+        // region, announced when the reading area takes focus.
+        role="region"
+        aria-label={BOOK_SPREAD_LABEL}
         data-pdf-book-rendered={[...painted].sort((a, b) => a - b).join(",")}
         data-pdf-book-reduced-motion={reducedMotion}
         className="relative mx-auto"
-        style={{ width: `${spread.bounds.width}px`, height: `${spread.bounds.height}px` }}
+        style={{
+          width: `${spread.bounds.width}px`,
+          height: `${spread.bounds.height}px`,
+          filter: themePaint?.filter,
+        }}
       >
+        {/* Paper-style themes multiply-tint the opaque white pages down
+            to the theme color (white × tint = tint, black stays black).
+            The overlay covers the whole spread and ignores the pointer. */}
+        {themePaint?.tint && (
+          <div
+            aria-hidden
+            data-testid="pdf-theme-tint"
+            className="pointer-events-none absolute inset-0 z-10"
+            style={{ backgroundColor: themePaint.tint, mixBlendMode: "multiply" }}
+          />
+        )}
         {spread.pages.map((page, index) => (
           // Page chrome on the cheap wrapper, never on the canvas layer
-          // (PERF-6) — same split as the scroll view's page slots.
+          // (PERF-6) — same split as the scroll view's page slots. The
+          // scroll view's slot attribute rides along so the reader's
+          // settled-selection pipeline resolves book pages exactly like
+          // scroll slots (selection/highlight parity, tuxbooks-9pr.6).
           <div
             key={page.pageNumber}
             data-pdf-book-page={page.pageNumber}
+            data-pdf-slot={page.pageNumber}
             className="absolute overflow-hidden rounded-sm border bg-white"
             style={{
               left: `${page.left}px`,
@@ -261,6 +318,20 @@ export function PdfBookView({
               bitmapCache={bitmapCache}
               testId="pdf-book-canvas"
               onPageRendered={handlePageRendered}
+            />
+            {/* The selectable text surface, at the spread's fit scale —
+                same gate as the scroll view: a text layer only on pages
+                whose canvas has painted. */}
+            {painted.has(page.pageNumber) && (
+              <PdfPageTextLayer document={document} pageNumber={page.pageNumber} scale={scale} />
+            )}
+            {/* Persisted highlights, one overlay per spread page — the
+                same normalized page space the scroll view draws in, so
+                they track the canvas at the spread scale. */}
+            <PdfHighlightOverlay
+              highlights={highlights.byPage?.get(page.pageNumber) ?? []}
+              family={highlights.family}
+              overrides={highlights.overrides}
             />
             {/* The spread's outer edges turn; the gutter-side edge of a
                 paired page does not. The lone cover is both edges. */}

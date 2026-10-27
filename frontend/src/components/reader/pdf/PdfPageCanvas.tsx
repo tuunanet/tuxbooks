@@ -634,12 +634,18 @@ export function PdfPageCanvas({
     canvas.setAttribute("data-pdf-render-ms", samples.map((value) => value.toFixed(1)).join(";"));
   };
 
+  // Layout phase, not passive: a cache blit reports synchronously from the
+  // commitment layout effect below, so the latest callback must land before
+  // that effect runs (tuxbooks-9pr review). A passive refresh would leave
+  // the previous commit's callback in place through the layout phase, which
+  // breaks a parent that keys its report state on render-time values —
+  // PdfBookView's spread key — without reading a ref during render.
   const renderedRef = useRef(onPageRendered);
-  useEffect(() => {
+  useLayoutEffect(() => {
     renderedRef.current = onPageRendered;
   });
   const errorRef = useRef(onPageError);
-  useEffect(() => {
+  useLayoutEffect(() => {
     errorRef.current = onPageError;
   });
 

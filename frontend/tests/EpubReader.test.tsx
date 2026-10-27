@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Mock } from "vite-plus/test";
@@ -9,6 +9,8 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 });
 
 import { EpubReader } from "@/components/reader/EpubReader";
+import { type EpubBookTurnAdapter } from "@/components/reader/epub/epubBookTurn";
+import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "@/components/reader/bookModeLabels";
 import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
 import { epubHrefJump, type ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
@@ -795,5 +797,219 @@ describe("EpubReader highlights and selection", () => {
     // The selection is cleared on creation (engine + shell state).
     expect(handle.clearSelection).toHaveBeenCalledTimes(1);
     expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe("EpubReader book mode turn", () => {
+  beforeEach(() => {
+    fakeEpubHandles.length = 0;
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Renders the reader with book mode ready to switch on and, optionally,
+   * an injected turn adapter — the component-test seam, mirroring how
+   * PdfBookView takes a scripted adapter.
+   */
+  function renderBookModeReader(turnAdapter?: EpubBookTurnAdapter) {
+    render(
+      <ShortcutProvider>
+        <ReaderProvider>
+          <PreferenceProbe label="probe-book" patch={{ bookMode: true }} />
+          <EpubReader book={makeBookShim()} turnAdapter={turnAdapter} />
+        </ReaderProvider>
+      </ShortcutProvider>,
+    );
+  }
+
+  async function enableBookMode(): Promise<void> {
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+    await clickProbe("probe-book");
+    // Space belongs to a focused button (native activation); the probe is
+    // harness chrome, so drop its focus before pressing keys.
+    screen.getByRole("button", { name: "probe-book" }).blur();
+  }
+
+  function turnZone(kind: "edge" | "corner", direction: "prev" | "next"): HTMLElement {
+    const element = document.querySelector<HTMLElement>(
+      `[data-epub-book-turn-${kind}="${direction}"]`,
+    );
+    if (!element) throw new Error(`no ${kind} ${direction} turn zone`);
+    return element;
+  }
+
+  /** The surface the engine's host is mounted into. */
+  function turnSurface(): HTMLElement {
+    return screen.getByTestId("epub-reader").querySelector("[data-epub-measure]")!;
+  }
+
+  /**
+   * Stubs the reduced-motion media query for one render (mirrors the PDF
+   * book view tests) and returns the spy for early restore.
+   */
+  function stubReducedMotion(matches: boolean) {
+    return vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes("prefers-reduced-motion") && matches,
+          media: query,
+          onchange: null,
+          addListener: () => {},
+          removeListener: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+  }
+
+  it("turns by spread from the edge and corner zones through the turn adapter", async () => {
+    mockHappyPath(null);
+    const advance = vi.fn();
+    const retreat = vi.fn();
+    renderBookModeReader({ reducedMotion: false, advance, retreat });
+    await enableBookMode();
+
+    // One strip per side plus a bottom-corner triangle per direction: real
+    // buttons carrying the turn labels and the subtle hover shade. The
+    // hover utility is the shipped affordance itself — jsdom applies no
+    // stylesheets, so the className is the only honest observable here.
+    for (const kind of ["edge", "corner"] as const) {
+      for (const direction of ["prev", "next"] as const) {
+        const zone = turnZone(kind, direction);
+        expect(zone.tagName).toBe("BUTTON");
+        expect(zone).toHaveAttribute("aria-label", BOOK_TURN_LABELS[direction]);
+        expect(zone.className).toContain("hover:bg-foreground/10");
+      }
+    }
+
+    fireEvent.click(turnZone("edge", "next"));
+    expect(advance).toHaveBeenCalledTimes(1);
+    fireEvent.click(turnZone("corner", "next"));
+    expect(advance).toHaveBeenCalledTimes(2);
+    fireEvent.click(turnZone("edge", "prev"));
+    expect(retreat).toHaveBeenCalledTimes(1);
+    fireEvent.click(turnZone("corner", "prev"));
+    expect(retreat).toHaveBeenCalledTimes(2);
+    // The zones drive the seam only; the engine never moves around it.
+    expect(lastFakeHandle().next).not.toHaveBeenCalled();
+    expect(lastFakeHandle().prev).not.toHaveBeenCalled();
+  });
+
+  it("keeps the turn zones out of the surface while book mode is off", async () => {
+    mockHappyPath(null);
+    renderReader();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    expect(document.querySelector("[data-epub-book-turn-edge]")).toBeNull();
+    expect(document.querySelector("[data-epub-book-turn-corner]")).toBeNull();
+  });
+
+  it("steps by spread from the arrow and space keys through the turn adapter", async () => {
+    mockHappyPath(null);
+    const advance = vi.fn();
+    const retreat = vi.fn();
+    renderBookModeReader({ reducedMotion: false, advance, retreat });
+    await enableBookMode();
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(advance).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard(" ");
+    expect(advance).toHaveBeenCalledTimes(2);
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(retreat).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{PageDown}");
+    expect(advance).toHaveBeenCalledTimes(3);
+    await userEvent.keyboard("{PageUp}");
+    expect(retreat).toHaveBeenCalledTimes(2);
+    // The keys step the seam by spread; the engine never moves around it.
+    expect(lastFakeHandle().next).not.toHaveBeenCalled();
+    expect(lastFakeHandle().prev).not.toHaveBeenCalled();
+  });
+
+  it("turns the spread instantly on advance, with no animation observable", async () => {
+    mockHappyPath(null);
+    renderBookModeReader(); // no injected adapter: the reader's own instant turn
+    await enableBookMode();
+    const handle = lastFakeHandle();
+
+    // One press, one engine move: the spread changes with no turn phase
+    // ever published on the surface (tuxbooks-9pr UAT, ADR 0011).
+    fireEvent.click(turnZone("edge", "next"));
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    expect(turnSurface()).not.toHaveAttribute("data-epub-turn-phase");
+    expect(turnSurface()).not.toHaveAttribute("data-epub-turn-direction");
+    // Nothing appears later either: no phase lands after a settle window.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
+    expect(document.querySelector("[data-epub-turn-direction]")).toBeNull();
+  });
+
+  it("lands the same instant spread change under reduced motion", async () => {
+    mockHappyPath(null);
+    const matchMedia = stubReducedMotion(true);
+    renderBookModeReader();
+    await enableBookMode();
+    const handle = lastFakeHandle();
+
+    await userEvent.keyboard("{ArrowRight}");
+    // The view reads the media query and passes the flag into its adapter
+    // (the seam contract Stage 2's renderer needs)…
+    expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    // …and the turn itself is the same: one move, no phase in between.
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(handle.next).toHaveBeenCalledTimes(1); // no queued repeat
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
+  });
+
+  // tuxbooks-9pr.8: the EPUB book surface must match the PDF book view —
+  // a named region announcing the book, with the labelled spread actions
+  // exposed in the accessibility tree.
+  it("names and roles the reading surface as the book container while book mode is on", async () => {
+    mockHappyPath(null);
+    renderBookModeReader();
+    await enableBookMode();
+
+    const region = screen.getByRole("region", { name: BOOK_SPREAD_LABEL });
+    expect(region).toBe(turnSurface());
+  });
+
+  it("keeps the book container role off the plain reading surface", async () => {
+    mockHappyPath(null);
+    renderReader();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    expect(screen.queryByRole("region", { name: BOOK_SPREAD_LABEL })).toBeNull();
+  });
+
+  it("exposes the labelled next/previous-spread actions to assistive tech", async () => {
+    mockHappyPath(null);
+    const advance = vi.fn();
+    const retreat = vi.fn();
+    renderBookModeReader({ reducedMotion: false, advance, retreat });
+    await enableBookMode();
+
+    // Edge strip and corner triangle per direction are all real buttons in
+    // the accessibility tree, each carrying its turn label.
+    const nextActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.next });
+    const previousActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.prev });
+    expect(nextActions).toHaveLength(2);
+    expect(previousActions).toHaveLength(2);
+
+    // The named actions drive the turn seam, not just the zones' chrome.
+    fireEvent.click(nextActions[0]!);
+    fireEvent.click(previousActions[0]!);
+    expect(advance).toHaveBeenCalledTimes(1);
+    expect(retreat).toHaveBeenCalledTimes(1);
   });
 });
