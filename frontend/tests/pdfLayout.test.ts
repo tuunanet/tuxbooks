@@ -12,6 +12,7 @@ import {
   displayedSizes,
   estimatePageSizes,
   medianPageSize,
+  nextSpreadPageIndex,
   fitHeightScale,
   fitPageScale,
   fitWidthScale,
@@ -24,6 +25,7 @@ import {
   pageAtOffset,
   PAGE_GAP_PX,
   parseZoomPercent,
+  previousSpreadPageIndex,
   regionCovers,
   scaledPixels,
   stepZoomLevel,
@@ -622,6 +624,80 @@ describe("layoutSpread", () => {
     expect(layoutSpread([], 0)).toBeNull();
     expect(layoutSpread(doc, -1)).toBeNull();
     expect(layoutSpread(doc, 3)).toBeNull();
+  });
+});
+
+describe("spread stepping", () => {
+  const letterDoc = (pageCount: number): PageSize[] =>
+    Array.from({ length: pageCount }, (_, index) => ({
+      pageNumber: index + 1,
+      ...LETTER,
+    }));
+
+  // The T5 edge-case table: one press per spread change, forward lands on
+  // the next spread's anchor page, backward on the previous spread's last
+  // page, and both ends stay put instead of wrapping.
+  it.each([
+    [1, 0, 0, 0],
+    [2, 0, 1, 0],
+    [2, 1, 1, 0],
+    [3, 0, 1, 0],
+    [3, 1, 2, 0],
+    [3, 2, 2, 0],
+    [4, 0, 1, 0],
+    [4, 1, 3, 0],
+    [4, 2, 3, 0],
+    [4, 3, 3, 2],
+    [5, 0, 1, 0],
+    [5, 1, 3, 0],
+    [5, 2, 3, 0],
+    [5, 3, 4, 2],
+    [5, 4, 4, 2],
+    [6, 0, 1, 0],
+    [6, 1, 3, 0],
+    [6, 2, 3, 0],
+    [6, 3, 5, 2],
+    [6, 4, 5, 2],
+    [6, 5, 5, 4],
+  ])(
+    "%s-page document, index %s steps to %s forward and %s back",
+    (pageCount, pageIndex, forward, backward) => {
+      expect(nextSpreadPageIndex(pageIndex, pageCount)).toBe(forward);
+      expect(previousSpreadPageIndex(pageIndex)).toBe(backward);
+    },
+  );
+
+  // The independent cross-check: the spread sequence comes from
+  // layoutSpread itself (the grouping rule), and every step must agree
+  // with it — the stepping math never re-derives the pairing.
+  it("steps across the spread sequence layoutSpread defines", () => {
+    for (let pageCount = 1; pageCount <= 8; pageCount++) {
+      const doc = letterDoc(pageCount);
+      // The distinct spreads in reading order, collected from the rule.
+      const spreads: number[][] = [];
+      for (let index = 0; index < pageCount; index++) {
+        const members = layoutSpread(doc, index)?.pages.map((page) => page.pageNumber - 1) ?? [];
+        if (spreads.at(-1)?.[0] !== members[0]) spreads.push(members);
+      }
+      for (let index = 0; index < pageCount; index++) {
+        const position = spreads.findIndex((spread) => spread.includes(index));
+        const forward = nextSpreadPageIndex(index, pageCount);
+        if (position < spreads.length - 1) {
+          // One press reaches the next spread's anchor page.
+          expect(forward).toBe(spreads[position + 1]![0]);
+        } else {
+          // The last spread: the press stays inside it, never wraps.
+          expect(spreads[position]).toContain(forward);
+        }
+        const backward = previousSpreadPageIndex(index);
+        if (position > 0) {
+          // One press back lands on the previous spread's last page.
+          expect(backward).toBe(spreads[position - 1]!.at(-1));
+        } else {
+          expect(backward).toBe(0);
+        }
+      }
+    }
   });
 });
 
