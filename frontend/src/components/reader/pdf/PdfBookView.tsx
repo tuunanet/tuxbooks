@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState, type Ref } from "react";
 import type { Annotation } from "@/types/domain";
 import type { HighlightOverrides, HighlightThemeFamily } from "@/lib/highlightPalette";
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
@@ -165,17 +165,6 @@ export function PdfBookView({
   // by the spread so a turn starts from an honest empty set — diagnostics
   // and tests only, never render-critical.
   const spreadKey = spread ? `${pageIndex}@${scale}` : "none";
-  // The canvas reports through a ref, so a report can land through a
-  // callback from a previous commit — read the live key from the ref
-  // instead of closing over it. The ref refreshes during render, next to
-  // the state reset: a cache blit reports synchronously from the canvas's
-  // own layout effect, which runs before this component's layout effects,
-  // so a layout-effect refresh would drop the first report of every
-  // turned-to spread (the blit would never register as painted).
-  const spreadKeyRef = useRef(spreadKey);
-  if (spreadKeyRef.current !== spreadKey) {
-    spreadKeyRef.current = spreadKey;
-  }
   const [paintState, setPaintState] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
     key: spreadKey,
     pages: new Set(),
@@ -184,14 +173,21 @@ export function PdfBookView({
     setPaintState({ key: spreadKey, pages: new Set() });
   }
   const painted = paintState.key === spreadKey ? paintState.pages : NO_PAGES;
-  const handlePageRendered = useCallback((pageNumber: number) => {
-    const key = spreadKeyRef.current;
-    setPaintState((current) =>
-      current.key !== key || current.pages.has(pageNumber)
-        ? current
-        : { key: current.key, pages: new Set(current.pages).add(pageNumber) },
-    );
-  }, []);
+  // The callback closes over this render's spread key rather than reading a
+  // live ref: PdfPageCanvas refreshes its callback ref in the layout phase
+  // (before its commitment effect reports), so a blit on a turned-to spread
+  // always reports through the callback of the commit that mounted it, and
+  // a late report from a superseded spread is dropped by the key check.
+  const handlePageRendered = useCallback(
+    (pageNumber: number) => {
+      setPaintState((current) =>
+        current.key !== spreadKey || current.pages.has(pageNumber)
+          ? current
+          : { key: current.key, pages: new Set(current.pages).add(pageNumber) },
+      );
+    },
+    [spreadKey],
+  );
 
   // Turn adapter (tuxbooks-9pr.5): the book view reads the reduced-motion
   // media query itself (the adapter must not) and passes the flag into the
