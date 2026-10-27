@@ -28,6 +28,7 @@ import {
 } from "../readerModel";
 import { useReaderProgress } from "../useReaderProgress";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "../placeholderDocument";
+import { usePdfBookPreload } from "./hooks/usePdfBookPreload";
 import { usePdfDocument } from "./hooks/usePdfDocument";
 import { usePdfGeometry } from "./hooks/usePdfGeometry";
 import {
@@ -72,7 +73,11 @@ import {
   documentMaxPageSize,
   keepPositionValue,
   layoutSlots,
+  layoutSpread,
+  nextSpreadPageIndex,
   PAGE_GAP_PX,
+  previousSpreadPageIndex,
+  spreadStartIndex,
   stepZoomLevel,
   visiblePageRegion,
   wheelZoomScale,
@@ -311,7 +316,7 @@ function resolveSettledSelection(
   return { kind: "select", page: found.page, text, rects, highlightId: targeted?.id ?? null };
 }
 
-interface PdfReaderProps {
+export interface PdfReaderProps {
   book: Book;
   /** Reports the real page count once the document has loaded. */
   onDocumentLoad?: (pageCount: number) => void;
@@ -970,6 +975,46 @@ export function PdfReader({
   // gates the scroll tracker (tuxbooks-9pr.11) and the re-anchor effect
   // below, both of which must see the transition as it happens.
   const bookMode = preferences.bookMode && !presentationMode;
+
+  // Book-mode neighbours are measured for the same reason presentation's
+  // are: the preload keys each neighbour bitmap under the spread's own
+  // fit-the-pair scale, and a key computed from a stale size estimate
+  // would miss on arrival. The members come from the same layoutSpread
+  // grouping the view paints with, so a spread's second page is measured
+  // along with its first.
+  useEffect(() => {
+    if (!bookMode || !layoutReady || !sizes) return;
+    const pageIndex = Math.max(0, currentPage - 1);
+    const currentStart = spreadStartIndex(pageIndex);
+    const neighbours = [
+      nextSpreadPageIndex(pageIndex, effectivePageCount),
+      previousSpreadPageIndex(pageIndex),
+    ].filter((index) => spreadStartIndex(index) !== currentStart);
+    const pages = neighbours.flatMap(
+      (index) => layoutSpread(sizes, index)?.pages.map((page) => page.pageNumber) ?? [],
+    );
+    if (pages.length > 0) measurePages(pages);
+  }, [bookMode, layoutReady, sizes, currentPage, effectivePageCount, measurePages]);
+
+  // Ready the next and previous spreads for book-mode turns (tuxbooks-
+  // 9pr.6): the current spread is the only mounted canvas pair, so
+  // without this the first turn pays fresh rasters behind blank
+  // placeholders.
+  usePdfBookPreload({
+    document: pdfDocument,
+    sizes,
+    currentPage,
+    pageCount: effectivePageCount,
+    enabled: bookMode,
+    areaWidth,
+    viewportHeight,
+    isMeasured,
+    bitmapCache,
+    smartColors: treatment.smart,
+    renderVariant,
+    dpr,
+    onPreloaded: handlePreloaded,
+  });
 
   // Re-anchor after layout-scale changes (zoom, fit recalculation,
   // window resize, presentation rescale): the anchor's page + in-page
@@ -1898,6 +1943,11 @@ export function PdfReader({
           smartColors={treatment.smart}
           renderVariant={renderVariant}
           pageBackground={treatment.pageBackground}
+          highlightsByPage={highlightsByPage}
+          highlightFamily={readerThemeFamily(preferences.theme)}
+          highlightOverrides={preferences.highlightOverrides}
+          themeFilter={treatment.filter}
+          themeTint={treatment.tint}
           bookTurnRef={bookTurnRef}
         />
       ) : (

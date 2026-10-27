@@ -1,8 +1,12 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import type { Annotation } from "@/types/domain";
+import type { HighlightOverrides, HighlightThemeFamily } from "@/lib/highlightPalette";
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
+import { PdfPageTextLayer } from "./PdfPageTextLayer";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
 import { createInstantPdfBookTurn, type PdfBookTurnAdapter } from "./pdfBookTurn";
 import {
@@ -43,6 +47,18 @@ interface PdfBookViewProps {
    * Smart Dark page does not flash white before its bitmap blits.
    */
   pageBackground?: string;
+  /** Persisted highlights by page number; drawn over the spread pages. */
+  highlightsByPage?: Map<number, Annotation[]>;
+  /** Theme family of the active reader theme; picks highlight washes + blend. */
+  highlightFamily: HighlightThemeFamily;
+  /** Per-family highlight hue overrides (lib/highlightPalette). */
+  highlightOverrides: HighlightOverrides;
+  /** CSS filter implementing the reader theme over the spread
+   *  (undefined = pages as-is); see lib/pdf/theme.ts. */
+  themeFilter?: string;
+  /** Multiply-tint color for paper-style themes (white pages take on the
+   *  tint); undefined = no overlay. See lib/pdf/theme.ts. */
+  themeTint?: string;
   /**
    * Injected turn adapter (the component-test seam; tuxbooks-9pr.5). When
    * provided it replaces the Stage 1 instant adapter this view would
@@ -102,6 +118,11 @@ export function PdfBookView({
   smartColors,
   renderVariant = "original",
   pageBackground,
+  highlightsByPage,
+  highlightFamily,
+  highlightOverrides,
+  themeFilter,
+  themeTint,
   turnAdapter = null,
   bookTurnRef,
 }: PdfBookViewProps) {
@@ -136,6 +157,17 @@ export function PdfBookView({
   // by the spread so a turn starts from an honest empty set — diagnostics
   // and tests only, never render-critical.
   const spreadKey = spread ? `${pageIndex}@${scale}` : "none";
+  // The canvas reports through a ref, so a report can land through a
+  // callback from a previous commit — read the live key from the ref
+  // instead of closing over it. The ref refreshes during render, next to
+  // the state reset: a cache blit reports synchronously from the canvas's
+  // own layout effect, which runs before this component's layout effects,
+  // so a layout-effect refresh would drop the first report of every
+  // turned-to spread (the blit would never register as painted).
+  const spreadKeyRef = useRef(spreadKey);
+  if (spreadKeyRef.current !== spreadKey) {
+    spreadKeyRef.current = spreadKey;
+  }
   const [paintState, setPaintState] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
     key: spreadKey,
     pages: new Set(),
@@ -144,14 +176,6 @@ export function PdfBookView({
     setPaintState({ key: spreadKey, pages: new Set() });
   }
   const painted = paintState.key === spreadKey ? paintState.pages : NO_PAGES;
-  // The canvas reports through a ref it refreshes per render, so a report
-  // can land through a callback from the previous commit — read the live
-  // key from a ref (refreshed in a layout effect, before any raster of
-  // that commit can report) instead of closing over it.
-  const spreadKeyRef = useRef(spreadKey);
-  useLayoutEffect(() => {
-    spreadKeyRef.current = spreadKey;
-  }, [spreadKey]);
   const handlePageRendered = useCallback((pageNumber: number) => {
     const key = spreadKeyRef.current;
     setPaintState((current) =>
@@ -233,14 +257,33 @@ export function PdfBookView({
         data-pdf-book-rendered={[...painted].sort((a, b) => a - b).join(",")}
         data-pdf-book-reduced-motion={reducedMotion}
         className="relative mx-auto"
-        style={{ width: `${spread.bounds.width}px`, height: `${spread.bounds.height}px` }}
+        style={{
+          width: `${spread.bounds.width}px`,
+          height: `${spread.bounds.height}px`,
+          filter: themeFilter,
+        }}
       >
+        {/* Paper-style themes multiply-tint the opaque white pages down
+            to the theme color (white × tint = tint, black stays black).
+            The overlay covers the whole spread and ignores the pointer. */}
+        {themeTint && (
+          <div
+            aria-hidden
+            data-testid="pdf-theme-tint"
+            className="pointer-events-none absolute inset-0 z-10"
+            style={{ backgroundColor: themeTint, mixBlendMode: "multiply" }}
+          />
+        )}
         {spread.pages.map((page, index) => (
           // Page chrome on the cheap wrapper, never on the canvas layer
-          // (PERF-6) — same split as the scroll view's page slots.
+          // (PERF-6) — same split as the scroll view's page slots. The
+          // scroll view's slot attribute rides along so the reader's
+          // settled-selection pipeline resolves book pages exactly like
+          // scroll slots (selection/highlight parity, tuxbooks-9pr.6).
           <div
             key={page.pageNumber}
             data-pdf-book-page={page.pageNumber}
+            data-pdf-slot={page.pageNumber}
             className="absolute overflow-hidden rounded-sm border bg-white"
             style={{
               left: `${page.left}px`,
@@ -261,6 +304,20 @@ export function PdfBookView({
               bitmapCache={bitmapCache}
               testId="pdf-book-canvas"
               onPageRendered={handlePageRendered}
+            />
+            {/* The selectable text surface, at the spread's fit scale —
+                same gate as the scroll view: a text layer only on pages
+                whose canvas has painted. */}
+            {painted.has(page.pageNumber) && (
+              <PdfPageTextLayer document={document} pageNumber={page.pageNumber} scale={scale} />
+            )}
+            {/* Persisted highlights, one overlay per spread page — the
+                same normalized page space the scroll view draws in, so
+                they track the canvas at the spread scale. */}
+            <PdfHighlightOverlay
+              highlights={highlightsByPage?.get(page.pageNumber) ?? []}
+              family={highlightFamily}
+              overrides={highlightOverrides}
             />
             {/* The spread's outer edges turn; the gutter-side edge of a
                 paired page does not. The lone cover is both edges. */}
