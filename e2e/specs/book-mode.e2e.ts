@@ -2,10 +2,11 @@
  * Book-mode journeys (tuxbooks-9pr.8, spec tuxbooks-9pr → E2E): the full
  * PDF reader journey over the minimal fixture — cover alone, facing
  * spread, keyboard turn, restore across reopen, and the scroll view
- * unchanged off — plus the EPUB rotation turn with its reduced-motion
- * path. Both also assert the assistive-technology contract: the book
- * container is a named region and the next/previous-spread actions are
- * labelled buttons in the accessibility tree.
+ * unchanged off — plus the EPUB spread change, instant with no turn
+ * phase at all, reduced motion or not (ADR 0011). Both also assert the
+ * assistive-technology contract: the book container is a named region
+ * and the next/previous-spread actions are labelled buttons in the
+ * accessibility tree.
  */
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 import {
@@ -60,12 +61,13 @@ async function engineMovedPast(page: Page, section: number, fraction: string): P
 }
 
 /**
- * Turn phases the reading surface published since the test installed its
- * observer (`data-epub-turn-phase`, the documented external turn contract).
+ * Turn-phase attributes anywhere on the page. The instant turn publishes
+ * none, at any point — this counts them so a lingering or mid-turn
+ * phase fails the journey (ADR 0011).
  */
-async function turnPhases(page: Page): Promise<string[]> {
+async function turnPhaseAttributes(page: Page): Promise<number> {
   return page.evaluate(
-    () => (window as unknown as { __epubTurnPhases?: string[] }).__epubTurnPhases ?? [],
+    () => document.querySelectorAll("[data-epub-turn-phase], [data-epub-turn-direction]").length,
   );
 }
 
@@ -155,9 +157,7 @@ test.describe("tuxbooks book mode", () => {
     await returnToLibrary(page);
   });
 
-  test("turns an EPUB book by spread, animated, and instantly under reduced motion", async ({
-    page,
-  }) => {
+  test("turns an EPUB book by spread, instantly, reduced motion or not", async ({ page }) => {
     await openInReader(page, "A Minimal Book (EPUB)");
     const host = page.locator("div[data-epub-host]");
     await host.waitFor({ state: "attached", timeout: 30000 });
@@ -192,35 +192,21 @@ test.describe("tuxbooks book mode", () => {
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.next }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.prev }).first()).toBeVisible();
 
-    // Record the turn phases the surface publishes, so each turn's
-    // external contract can be asserted after it runs.
-    await page.evaluate(() => {
-      const surface = document.querySelector("[data-testid=epub-reader] [data-epub-measure]");
-      if (!surface) throw new Error("no epub turn surface");
-      const phases: string[] = [];
-      (window as unknown as { __epubTurnPhases: string[] }).__epubTurnPhases = phases;
-      new MutationObserver(() =>
-        phases.push(surface.getAttribute("data-epub-turn-phase") ?? ""),
-      ).observe(surface, { attributes: true, attributeFilter: ["data-epub-turn-phase"] });
-    });
     const startSection = Number((await currentSection(page)) ?? "0");
     const startFraction = (await engineFraction(page)) ?? "0";
 
-    // Advancing a spread through the labelled next action runs the
-    // rotation turn — out, in, idle — while the engine swaps the spread,
-    // and the reported position moves past where the book was open.
+    // Advancing a spread through the labelled next action is instant:
+    // the reported position moves past where the book was open, and no
+    // turn phase exists at any point — not mid-turn, not after.
     await page.locator('[data-epub-book-turn-edge="next"]').click();
-    await expect.poll(() => turnPhases(page), { timeout: 30000 }).toContain("idle");
+    expect(await turnPhaseAttributes(page)).toBe(0);
     await expect
       .poll(() => engineMovedPast(page, startSection, startFraction), { timeout: 30000 })
       .toBe(true);
-    const animated = await turnPhases(page);
-    expect(animated.indexOf("out")).toBeGreaterThanOrEqual(0);
-    expect(animated.indexOf("in")).toBeGreaterThan(animated.indexOf("out"));
-    expect(animated.at(-1)).toBe("idle");
+    expect(await turnPhaseAttributes(page)).toBe(0);
 
-    // Reduced motion: the same action collapses to the instant spread
-    // change — the position moves back with no rotation phase published.
+    // Reduced motion: the same instant spread change — the position
+    // moves back, still with no turn phase published.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect
       .poll(
@@ -231,12 +217,11 @@ test.describe("tuxbooks book mode", () => {
       )
       .toBe(true);
     await page.waitForTimeout(500); // the app applies the live media query to its turn adapter
-    const phasesBefore = (await turnPhases(page)).length;
     await page.locator('[data-epub-book-turn-edge="prev"]').click();
     await expect
       .poll(() => engineMovedPast(page, startSection, startFraction), { timeout: 30000 })
       .toBe(false);
-    expect((await turnPhases(page)).length).toBe(phasesBefore);
+    expect(await turnPhaseAttributes(page)).toBe(0);
 
     // The window is shared per worker: hand the media emulation back.
     await page.emulateMedia({ reducedMotion: null });

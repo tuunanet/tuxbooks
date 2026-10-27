@@ -9,8 +9,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 });
 
 import { EpubReader } from "@/components/reader/EpubReader";
-import { EPUB_TURN_PHASE_MS } from "@/components/reader/epub/epubBookTurn";
-import type { EpubBookTurnAdapter } from "@/components/reader/epub/epubBookTurn";
+import { type EpubBookTurnAdapter } from "@/components/reader/epub/epubBookTurn";
 import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "@/components/reader/bookModeLabels";
 import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
 import { epubHrefJump, type ReaderAdapter } from "@/components/reader/readerModel";
@@ -934,40 +933,41 @@ describe("EpubReader book mode turn", () => {
     expect(lastFakeHandle().prev).not.toHaveBeenCalled();
   });
 
-  it("requests the two-phase rotation turn on advance", async () => {
+  it("turns the spread instantly on advance, with no animation observable", async () => {
     mockHappyPath(null);
-    renderBookModeReader(); // no injected adapter: the reader's own rotation turn
+    renderBookModeReader(); // no injected adapter: the reader's own instant turn
     await enableBookMode();
     const handle = lastFakeHandle();
 
-    // One press runs rotate-out → swap → rotate-in: the surface
-    // publishes each phase, and the engine swap lands while it is
-    // edge-on (between out and in).
+    // One press, one engine move: the spread changes with no turn phase
+    // ever published on the surface (tuxbooks-9pr UAT, ADR 0011).
     fireEvent.click(turnZone("edge", "next"));
-    expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "out");
-    expect(turnSurface()).toHaveAttribute("data-epub-turn-direction", "next");
-    expect(handle.next).not.toHaveBeenCalled();
-
-    await waitFor(() => expect(handle.next).toHaveBeenCalledTimes(1));
-    expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "in");
-    await waitFor(() => expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "idle"));
+    expect(handle.next).toHaveBeenCalledTimes(1);
+    expect(turnSurface()).not.toHaveAttribute("data-epub-turn-phase");
+    expect(turnSurface()).not.toHaveAttribute("data-epub-turn-direction");
+    // Nothing appears later either: no phase lands after a settle window.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
+    expect(document.querySelector("[data-epub-turn-direction]")).toBeNull();
   });
 
-  it("suppresses the rotation under reduced motion and swaps the spread instantly", async () => {
+  it("lands the same instant spread change under reduced motion", async () => {
     mockHappyPath(null);
-    stubReducedMotion(true);
+    const matchMedia = stubReducedMotion(true);
     renderBookModeReader();
     await enableBookMode();
     const handle = lastFakeHandle();
 
     await userEvent.keyboard("{ArrowRight}");
-    // The engine move lands with no rotation phase in between…
+    // The view reads the media query and passes the flag into its adapter
+    // (the seam contract Stage 2's renderer needs)…
+    expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    // …and the turn itself is the same: one move, no phase in between.
     expect(handle.next).toHaveBeenCalledTimes(1);
-    expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "idle");
-    // …and stays settled: no phase ever appears.
-    await new Promise((resolve) => setTimeout(resolve, EPUB_TURN_PHASE_MS + 60));
-    expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "idle");
-    expect(handle.next).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(handle.next).toHaveBeenCalledTimes(1); // no queued repeat
+    expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
   });
 
   // tuxbooks-9pr.8: the EPUB book surface must match the PDF book view —
