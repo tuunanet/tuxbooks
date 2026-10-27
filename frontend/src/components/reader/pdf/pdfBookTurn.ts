@@ -61,6 +61,6 @@ export function createInstantPdfBookTurn(host: PdfBookTurnHost): PdfBookTurnAdap
   return {
     reducedMotion: host.reducedMotion,
     advance: () => turn(nextSpreadPageIndex),
-    retreat: () => turn((pageIndex) => previousSpreadPageIndex(pageIndex)),
+    retreat: () => turn(previousSpreadPageIndex),
   };
 }

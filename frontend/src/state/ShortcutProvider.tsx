@@ -22,10 +22,24 @@ function isSliderTarget(target: EventTarget | null): boolean {
 }
 
 /**
+ * True when the keydown names a key the focused button activates
+ * natively (Space on keyup, Enter on keydown): the button owns that
+ * activation, so an unmodified shortcut firing on keydown as well would
+ * double-fire with it — a focused book-mode turn zone plus Space turned
+ * two spreads per press. Only the activation pair belongs to the button;
+ * other combos (arrows, Home/End, modifiers) still dispatch as before.
+ */
+function ownsNativeActivation(target: EventTarget | null, combo: string): boolean {
+  if (combo !== "space" && combo !== "enter") return false;
+  return target instanceof Element && target.closest("button") !== null;
+}
+
+/**
  * Owns the single global keydown listener and dispatches matches to the most
  * recently registered handler for a combo. While the user is typing in a form
  * field or steering a slider, only modifier combos (e.g. Ctrl/Cmd+K) are
- * dispatched.
+ * dispatched; a focused button additionally keeps its own activation keys
+ * (Space/Enter) away from the registry.
  */
 export function ShortcutProvider({ children }: { children: ReactNode }) {
   const stacks = useRef(new Map<string, ShortcutHandler[]>());
@@ -53,7 +67,9 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
       const combo = comboFromEvent(event);
       if (!combo) return;
       if (
-        (isEditableTarget(event.target) || isSliderTarget(event.target)) &&
+        (isEditableTarget(event.target) ||
+          isSliderTarget(event.target) ||
+          ownsNativeActivation(event.target, combo)) &&
         !combo.startsWith("mod+")
       ) {
         return;

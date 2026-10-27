@@ -546,6 +546,36 @@ describe("Reader keyboard navigation in PDF book mode", () => {
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 5 of 6"));
   });
 
+  it("steps by spread with the toolbar page buttons", async () => {
+    await enterBookMode(6);
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
+
+    // The visible ‹/› turn by SPREAD through the same adapter the keys
+    // use — never the one-page step that landed inside the same spread
+    // and needed a second press to leave it.
+    fireEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    fireEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 4 of 6"));
+    fireEvent.click(screen.getByTestId("pdf-prev"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 3 of 6"));
+  });
+
+  it("turns one spread per Space press with a turn zone focused", async () => {
+    await enterBookMode(6);
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
+
+    const nextZone = document.querySelector<HTMLElement>('[data-pdf-book-turn-edge="next"]');
+    if (!nextZone) throw new Error("no next turn zone");
+    nextZone.focus();
+    // The zone's own activation (Space on keyup) is the one turn; the
+    // global Space shortcut must not fire a second spread on keydown.
+    await userEvent.keyboard(" ");
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(indicator()).toHaveTextContent("Page 2 of 6");
+  });
+
   it("keeps presentation mode's one-page turns over book mode", async () => {
     await enterBookMode(6);
 

@@ -18,15 +18,18 @@ function Harness({
   onFire,
   editableTarget,
   sliderTarget,
+  buttonTarget,
 }: {
   combo: string | null;
   onFire: () => void;
   editableTarget?: boolean;
   sliderTarget?: boolean;
+  buttonTarget?: boolean;
 }) {
   useShortcut(combo, onFire);
   if (editableTarget) return <input aria-label="field" data-focused />;
   if (sliderTarget) return <div role="slider" aria-label="sizer" tabIndex={0} data-focused />;
+  if (buttonTarget) return <button type="button">Turn</button>;
   return <p>ready</p>;
 }
 
@@ -150,6 +153,35 @@ describe("ShortcutProvider", () => {
     );
     expect(fireKey({ key: "k", ctrlKey: true }, slider)).toBe(true);
     expect(onModFire).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Space and Enter to a focused button's own activation", () => {
+    const onFire = vi.fn();
+    const { rerender } = render(
+      <ShortcutProvider>
+        <Harness combo="space" onFire={onFire} buttonTarget />
+      </ShortcutProvider>,
+    );
+
+    // The button activates Space on keyup and Enter on keydown natively;
+    // the shortcut firing on keydown as well would double-fire — a
+    // focused book-mode turn zone turned two spreads per Space press.
+    const button = screen.getByRole("button");
+    expect(fireKey({ key: " " }, button)).toBe(false);
+    expect(fireKey({ key: "Enter" }, button)).toBe(false);
+    expect(onFire).not.toHaveBeenCalled();
+
+    // Only the activation pair belongs to the button: other combos still
+    // dispatch over it, so focus left on a toolbar button keeps its
+    // navigation shortcuts.
+    const onArrowFire = vi.fn();
+    rerender(
+      <ShortcutProvider>
+        <Harness combo="arrowright" onFire={onArrowFire} buttonTarget />
+      </ShortcutProvider>,
+    );
+    expect(fireKey({ key: "ArrowRight" }, button)).toBe(true);
+    expect(onArrowFire).toHaveBeenCalledTimes(1);
   });
 
   it("unregisters when the calling component unmounts", () => {

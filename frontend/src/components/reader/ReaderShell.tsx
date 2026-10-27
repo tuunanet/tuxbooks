@@ -288,54 +288,59 @@ export function ReaderShell() {
     },
     [flipPdfPage],
   );
+  // The one PDF mode decision every stepping key shares (tuxbooks-9pr.5):
+  // presentation wins with one-page flips, book mode turns by spread
+  // through the registered adapter, and the scroll view falls through to
+  // the caller's own step — arrows/space flip a page, the page keys
+  // scroll the viewport. Returns whether a mode consumed the step.
+  const pdfModeStep = useCallback(
+    (delta: 1 | -1): boolean => {
+      if (!isPdf) return false;
+      if (presentation) {
+        flipPdfPage(delta);
+        return true;
+      }
+      if (preferences.bookMode) {
+        bookTurn(delta);
+        return true;
+      }
+      return false;
+    },
+    [bookTurn, flipPdfPage, isPdf, presentation, preferences.bookMode],
+  );
   const pdfPageStep = useCallback(
     (delta: 1 | -1) => {
+      if (pdfModeStep(delta)) return;
       if (!isPdf) {
         setPosition(position + delta * step);
         return;
       }
-      if (preferences.bookMode && !presentation) bookTurn(delta);
-      else flipPdfPage(delta);
+      flipPdfPage(delta);
     },
-    [bookTurn, flipPdfPage, isPdf, position, preferences.bookMode, presentation, setPosition, step],
+    [flipPdfPage, isPdf, pdfModeStep, position, setPosition, step],
   );
   useShortcut(isEpub ? null : "arrowright", () => pdfPageStep(1));
   useShortcut(isEpub ? null : "space", () => pdfPageStep(1));
   useShortcut(isEpub ? null : "arrowleft", () => pdfPageStep(-1));
   useShortcut(isEpub ? null : "pagedown", () => {
-    // Presentation mode turns the scroll-steppers into full page flips
-    // (§ issue #65): one page fills the viewport, so partial-viewport
-    // scrolling would land mid-page. Book mode has no scroll container
-    // (it fits the pair), so its page keys step by spread through the
-    // turn adapter instead of scrolling.
-    if (isPdf && presentation) {
-      flipPdfPage(1);
-      return;
-    }
-    if (isPdf && preferences.bookMode) {
-      bookTurn(1);
-      return;
-    }
+    // Outside the mode surfaces the scroll view scrolls a viewport-height
+    // (§ issue #65); the shared decision above routes presenting and book
+    // mode instead — the page keys turn pages there, never scroll a
+    // container the modes do not have.
+    if (pdfModeStep(1)) return;
     const container = readerContentRef.current;
     if (container) container.scrollTop += container.clientHeight * 0.9;
   });
   useShortcut(isEpub ? null : "pageup", () => {
-    if (isPdf && presentation) {
-      flipPdfPage(-1);
-      return;
-    }
-    if (isPdf && preferences.bookMode) {
-      bookTurn(-1);
-      return;
-    }
+    if (pdfModeStep(-1)) return;
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
   // Shift+Space is the backward turn in book mode too (it used to be
-  // registered only while presenting).
+  // registered only while presenting); the shared decision picks the
+  // surface.
   useShortcut(isPdf && (presentation || preferences.bookMode) ? "shift+space" : null, () => {
-    if (presentation) flipPdfPage(-1);
-    else bookTurn(-1);
+    pdfModeStep(-1);
   });
   // Ctrl/Cmd+F toggles the overlay, so a second press closes it without
   // reaching for the mouse.

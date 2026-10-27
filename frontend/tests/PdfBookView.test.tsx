@@ -304,6 +304,35 @@ describe("PdfReader book mode", () => {
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-in")).toBeInTheDocument());
     expect(screen.getByTestId("pdf-zoom-input")).toBeInTheDocument();
   });
+
+  it("holds every zoom entry point inert while on and restores the held zoom off", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+
+    const { container } = renderBookReader(null);
+    await screen.findByTestId("pdf-toolbar");
+    // Off: the keyboard steps the zoom — the same keys the gate below covers.
+    fireEvent.keyDown(window, { key: "+" });
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+
+    fireEvent.click(screen.getByText("book-mode-on"));
+    await screen.findByTestId("pdf-book-view");
+    // On: the zoom combo is hidden AND every entry point is inert — the
+    // plain and Ctrl steps, the fit modes, the reset, and the Ctrl+wheel
+    // gesture — so nothing mutates the scroll-view zoom the reader holds
+    // for its return.
+    fireEvent.keyDown(window, { key: "-" });
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "0", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "1", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "2", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "3", ctrlKey: true });
+    fireEvent.wheel(container, { ctrlKey: true, deltaY: -100 });
+
+    fireEvent.click(screen.getByText("book-mode-off"));
+    await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toBeInTheDocument());
+    expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
+    expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
+  });
 });
 
 describe("PdfBookView turn zones", () => {
