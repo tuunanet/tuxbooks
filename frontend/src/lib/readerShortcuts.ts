@@ -45,6 +45,13 @@ export const READER_SEARCH_SHORTCUTS = {
   primary: "mod+f",
 } as const;
 
+/**
+ * Book mode. A plain letter is new to the registry (mod+shift+b is the
+ * bookmarks panel); the shortcut engine's editable-target suppression
+ * keeps it out of typing, same as the nav keys.
+ */
+export const READER_BOOK_MODE_SHORTCUT = "b";
+
 export const READER_SHORTCUTS: ReaderShortcut[] = [
   { id: "global.focus-search", group: "global", label: "Focus search", combos: ["mod+k"] },
   {
@@ -97,6 +104,12 @@ export const READER_SHORTCUTS: ReaderShortcut[] = [
     group: "reader",
     label: "Leave presentation",
     combos: ["escape"],
+  },
+  {
+    id: "reader.book-mode",
+    group: "reader",
+    label: "Toggle book mode",
+    combos: [READER_BOOK_MODE_SHORTCUT],
   },
   {
     id: "reader.appearance",

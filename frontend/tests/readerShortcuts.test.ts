@@ -46,6 +46,8 @@ describe("READER_SHORTCUTS", () => {
     expect(shortcut("reader.bookmark").combos).toEqual(["mod+b"]);
     expect(shortcut("reader.presentation").combos).toEqual(["mod+l"]);
     expect(shortcut("reader.leave-presentation").combos).toEqual(["escape"]);
+    expect(shortcut("reader.book-mode").label).toBe("Toggle book mode");
+    expect(shortcut("reader.book-mode").combos).toEqual(["b"]);
   });
 
   it("scopes each panel entry to the formats where it works", () => {

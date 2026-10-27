@@ -2197,6 +2197,106 @@ describe("Reader book mode toolbar control", () => {
   });
 });
 
+describe("Reader book mode shortcut", () => {
+  /**
+   * Story 25/26: the `b` chord flips the same shared flag as the header
+   * toggle, so one keyboard path behaves identically in both readers.
+   */
+  it("mounts and unmounts the PDF spread view with b", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "b" });
+    await screen.findByTestId("pdf-book-canvas");
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "true"),
+    );
+
+    fireEvent.keyDown(window, { key: "b" });
+    await waitFor(() => expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument());
+    await screen.findByTestId("pdf-canvas");
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("derives the EPUB paginated two-column flow with b", async () => {
+    // A stored scrolling layout proves the chord flips the shared flag's
+    // derivation, not the stored preference: book mode implies paginated.
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, layout: "scrolling" },
+        themePinned: false,
+      }),
+    );
+    renderReader("epub");
+    const surface = await screen.findByTestId("epub-reader");
+    expect(surface).toHaveAttribute("data-layout", "scrolling");
+
+    fireEvent.keyDown(window, { key: "b" });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated"),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "true"),
+    );
+
+    fireEvent.keyDown(window, { key: "b" });
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling"),
+    );
+  });
+
+  it("keeps b out of the search overlay's input", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByTestId("reader-search-input");
+    await userEvent.click(input);
+    // The letter belongs to the field: the engine's editable-target
+    // suppression must keep the chord away from the registry.
+    await userEvent.keyboard("b");
+    expect(input).toHaveValue("b");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps b out of the page number field", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const input = await screen.findByTestId("pdf-page-input");
+    await waitFor(() => expect(input).toBeEnabled());
+    await userEvent.click(input);
+    // The letter belongs to the field: editable-target suppression must
+    // keep the chord away from the registry.
+    await userEvent.keyboard("b");
+    expect(input).toHaveValue("b");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("stays inert while presenting and resumes after leaving", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
+
+    // An invisible flip would surprise the reader on exit: the chord is not
+    // registered while presenting.
+    fireEvent.keyDown(window, { key: "b" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "b" });
+    await screen.findByTestId("pdf-book-canvas");
+  });
+});
+
 describe("Reader book switching", () => {
   it("gives a switched book a fresh reader and its own navigation data", async () => {
     const epub = makeBook();

@@ -165,6 +165,7 @@ describe("SettingsShell", () => {
       .getByRole("heading", { name: "Reader" })
       .closest("section") as HTMLElement;
     expect(readerSection).toHaveTextContent("Toggle appearance");
+    expect(readerSection).toHaveTextContent("Toggle book mode");
 
     const pdfSection = within(rows)
       .getByRole("heading", { name: "PDF reader" })
