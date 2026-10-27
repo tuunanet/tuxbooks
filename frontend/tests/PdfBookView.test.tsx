@@ -27,7 +27,7 @@ import { EMPTY_HIGHLIGHT_OVERRIDES } from "@/lib/highlightPalette";
 import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
 import { PAGE_GAP_PX, type PageSize } from "@/components/reader/pdf/pdfLayout";
 import { pageToPosition, positionToPage } from "@/components/reader/pdf/pdfPages";
-import { closePdfDocument, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
+import { closePdfDocument, getPdfPageText, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { DEFAULT_READER_PREFERENCES, useReader, type ReaderPreferences } from "@/state/readerState";
@@ -217,9 +217,15 @@ describe("PdfReader book mode", () => {
     expect(styleNumber(book, "width")).toBeLessThanOrEqual(1248);
     expect(styleNumber(book, "height")).toBeLessThanOrEqual(720);
 
-    // Render budget: only the spread's two pages rasterize — never the
-    // whole document — through the existing canvas pipeline.
-    expect([...doc.renderPages].sort()).toEqual([2, 3]);
+    // Render budget: the spread's two pages rasterize through the existing
+    // canvas pipeline — and the neighbour preload (tuxbooks-9pr.6)
+    // pre-rasters the previous spread's cover into the same cache, so all
+    // three pages of this small document have engine rasters by now, never
+    // more than current spread + neighbours.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-preload-count", "1"),
+    );
+    expect([...doc.renderPages].sort()).toEqual([1, 2, 3]);
   });
 
   it("fits a wide pair to the viewport width with both pages fully visible", async () => {
@@ -256,7 +262,12 @@ describe("PdfReader book mode", () => {
     const book = await screen.findByTestId("pdf-book-view");
     stubContentWidth();
     await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
-    expect(bookRasters()).toHaveLength(2);
+    // Two spread rasters plus the previous spread's cover, preloaded into
+    // the same cache at the same fit scale (tuxbooks-9pr.6).
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-preload-count", "1"),
+    );
+    expect(bookRasters()).toHaveLength(3);
 
     // Off: the continuous scroll view returns unchanged — its document
     // surface with the whole slot set — and nothing closes the document.
@@ -283,9 +294,10 @@ describe("PdfReader book mode", () => {
     expect(slot(2)).not.toBeNull();
     expect(slot(3)).not.toBeNull();
     await screen.findByTestId("pdf-canvas");
-    // The spread's two bitmaps are still the reader's cache contents —
-    // the book view stored into the same instance the scroll view reads.
-    expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(/^2:/);
+    // The spread's bitmaps — the two pages plus the preloaded neighbour —
+    // are still the reader's cache contents: the book view stored into the
+    // same instance the scroll view reads.
+    expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(/^3:/);
     // The scroll view re-anchors from its own geometry: with the container
     // scrolled to the page the book was showing (what the shell's restore
     // scroll does), the position stays on page 2 through the visit.
@@ -296,14 +308,15 @@ describe("PdfReader book mode", () => {
     );
 
     // On again: both spread pages blit from that cache — no new engine
-    // raster at the book scale — and the document was neither re-opened
-    // nor closed across the whole journey (the render worker lives with
-    // the document handle).
+    // raster at the book scale (still the two spread pages plus the
+    // preloaded cover) — and the document was neither re-opened nor
+    // closed across the whole journey (the render worker lives with the
+    // document handle).
     fireEvent.click(screen.getByText("book-mode-on"));
     const bookAgain = await screen.findByTestId("pdf-book-view");
     stubContentWidth();
     await waitFor(() => expect(bookAgain).toHaveAttribute("data-pdf-book-rendered", "2,3"));
-    expect(bookRasters()).toHaveLength(2);
+    expect(bookRasters()).toHaveLength(3);
     expect(openDocumentMock).toHaveBeenCalledTimes(1);
     expect(closeDocumentMock).not.toHaveBeenCalled();
   });
@@ -1044,11 +1057,106 @@ describe("PdfReader book mode parity", () => {
     await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
 
     // Both spread pages rasterized with the worker-side palette — the
-    // smart render identity, shared with the scroll view's cache — and
-    // the page placeholders carry the dark preset, so neither page
-    // flashes white before its bitmap blits.
-    expect(doc.renderOptions.filter((options) => options.smartColors)).toHaveLength(2);
+    // smart render identity, shared with the scroll view's cache — as did
+    // the preloaded neighbour; and the page placeholders carry the dark
+    // preset, so neither page flashes white before its bitmap blits.
+    const smartRasters = doc.renderPages.filter(
+      (_pageNumber, index) => doc.renderOptions[index]?.smartColors,
+    );
+    expect(smartRasters).toEqual(expect.arrayContaining([2, 3]));
+    expect(smartRasters).toHaveLength(doc.renderPages.length);
     expect(bookPage(2).style.backgroundColor).toBe("rgb(16, 16, 19)");
     expect(bookPage(3).style.backgroundColor).toBe("rgb(16, 16, 19)");
+  });
+
+  it("preloads the next and previous spreads into the shared bitmap cache", async () => {
+    const doc = makeFakePdfDocument(5);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    renderBookReader(3);
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    // The neighbours of spread [2,3] are the next spread [4,5] (reading
+    // direction first) and the previous one, the cover [1]; each preloaded
+    // raster lands in the cache the spread canvases read from.
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-preload-count", "3"),
+    );
+    const rastersOf = (pageNumber: number) => doc.renderPages.filter((page) => page === pageNumber);
+    expect(rastersOf(4)).toHaveLength(1);
+    expect(rastersOf(5)).toHaveLength(1);
+    expect(rastersOf(1)).toHaveLength(1);
+    // Next spread first, its second page after, then the previous spread —
+    // the reading direction is the priority (the presentation pattern).
+    expect(doc.renderPages.indexOf(4)).toBeLessThan(doc.renderPages.indexOf(5));
+    expect(doc.renderPages.indexOf(5)).toBeLessThan(doc.renderPages.indexOf(1));
+  });
+
+  it("turns onto the preloaded spread without a fresh raster", async () => {
+    const doc = makeFakePdfDocument(5);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    renderBookReader(3);
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-preload-count", "3"),
+    );
+
+    // The next-spread edge zone turns; the arrived spread must blit the
+    // preloaded bitmaps — a single engine raster would mean the preload
+    // keyed them under a scale the canvases never look up.
+    const rastersBefore = doc.renderPages.length;
+    fireEvent.click(book.querySelector("[data-pdf-book-turn-edge='next']") as HTMLElement);
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "4,5"));
+    expect(doc.renderPages.slice(rastersBefore)).toEqual([]);
+  });
+
+  it("lands a search result jump on the spread containing the match", async () => {
+    const doc = makeFakePdfDocument(5);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    vi.mocked(getPdfPageText).mockImplementation(async (_document, page) =>
+      page === 4 ? "the needle paragraph" : "filler text",
+    );
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    const groups: Array<{ matches: Array<{ page: number }> }> = [];
+    renderBookReader(1, {
+      adapterRef,
+      onSearchGroup: (_bookId, group) => groups.push(group as never),
+    });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "1"));
+
+    // The shell's search streams match groups, then picks one and jumps
+    // through the shared position model — exactly what the adapter's jump
+    // does here.
+    adapterRef.current!.search.run("needle");
+    await waitFor(() =>
+      expect(groups.flatMap((group) => group.matches).some((match) => match.page === 4)).toBe(true),
+    );
+    adapterRef.current!.jump({ format: "pdf", page: 4 });
+
+    // The jump lands on the spread containing the match, never a lone page.
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "4,5"));
+    expect(document.querySelectorAll("[data-pdf-book-page]")).toHaveLength(2);
+    expect(document.querySelector("[data-pdf-book-page='1']")).toBeNull();
+  });
+
+  it("restores the spread the reader left when the book reopens with book mode on", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(5) as unknown as EngineDocument);
+    // Reopen: the persisted preference has book mode on and the saved
+    // position names page 2 — the second page of a pair — so the reader
+    // must land on the whole spread [2,3], not a lone page.
+    renderBookReader(2, {}, { bookMode: true });
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+    expect(document.querySelectorAll("[data-pdf-book-page]")).toHaveLength(2);
+    expect(document.querySelector("[data-pdf-book-page='1']")).toBeNull();
   });
 });

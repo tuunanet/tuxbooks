@@ -157,6 +157,17 @@ export function PdfBookView({
   // by the spread so a turn starts from an honest empty set — diagnostics
   // and tests only, never render-critical.
   const spreadKey = spread ? `${pageIndex}@${scale}` : "none";
+  // The canvas reports through a ref, so a report can land through a
+  // callback from a previous commit — read the live key from the ref
+  // instead of closing over it. The ref refreshes during render, next to
+  // the state reset: a cache blit reports synchronously from the canvas's
+  // own layout effect, which runs before this component's layout effects,
+  // so a layout-effect refresh would drop the first report of every
+  // turned-to spread (the blit would never register as painted).
+  const spreadKeyRef = useRef(spreadKey);
+  if (spreadKeyRef.current !== spreadKey) {
+    spreadKeyRef.current = spreadKey;
+  }
   const [paintState, setPaintState] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
     key: spreadKey,
     pages: new Set(),
@@ -165,14 +176,6 @@ export function PdfBookView({
     setPaintState({ key: spreadKey, pages: new Set() });
   }
   const painted = paintState.key === spreadKey ? paintState.pages : NO_PAGES;
-  // The canvas reports through a ref it refreshes per render, so a report
-  // can land through a callback from the previous commit — read the live
-  // key from a ref (refreshed in a layout effect, before any raster of
-  // that commit can report) instead of closing over it.
-  const spreadKeyRef = useRef(spreadKey);
-  useLayoutEffect(() => {
-    spreadKeyRef.current = spreadKey;
-  }, [spreadKey]);
   const handlePageRendered = useCallback((pageNumber: number) => {
     const key = spreadKeyRef.current;
     setPaintState((current) =>
