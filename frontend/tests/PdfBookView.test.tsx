@@ -921,6 +921,58 @@ describe("PdfReader book mode position fidelity", () => {
   });
 });
 
+// tuxbooks-9pr.8: the book surface must be addressable for assistive
+// technology — a named region announcing the book, with the labelled
+// next/previous-spread actions exposed in the accessibility tree.
+describe("PdfReader book mode accessibility", () => {
+  it("names and roles the book container while book mode is on", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+
+    renderBookReader(null);
+    // Off book mode the scroll view has no book region.
+    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    const region = screen.getByRole("region", { name: "Book spread" });
+    expect(region).toBe(book);
+  });
+
+  it("keeps the book container role off the scroll view when book mode turns off again", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+
+    renderBookReader(null);
+    fireEvent.click(screen.getByText("book-mode-on"));
+    await screen.findByTestId("pdf-book-view");
+
+    fireEvent.click(screen.getByText("book-mode-off"));
+    await waitFor(() => expect(screen.queryByTestId("pdf-book-view")).toBeNull());
+    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+  });
+
+  it("exposes the labelled next/previous-spread actions to assistive tech", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+
+    renderBookReader(null);
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+
+    // Edge strip and corner triangle per direction are all real buttons in
+    // the accessibility tree, each carrying its turn label.
+    const nextActions = screen.getAllByRole("button", { name: "Turn to the next spread" });
+    const previousActions = screen.getAllByRole("button", { name: "Turn to the previous spread" });
+    expect(nextActions).toHaveLength(2);
+    expect(previousActions).toHaveLength(2);
+
+    // The named actions drive the spread, not just its chrome. The zones
+    // re-mount with the spread, so re-query after the first turn.
+    fireEvent.click(nextActions[0]!);
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Turn to the previous spread" })[0]!);
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "1"));
+  });
+});
+
 // tuxbooks-9pr.6: the spread must behave like one reading surface —
 // selection, highlights, search, color, preload, and restore reach book
 // mode through the shared position model and the shared render pipeline.

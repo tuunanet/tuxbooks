@@ -92,6 +92,14 @@ interface EpubReaderProps {
 const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown", "pageup"]);
 
 /**
+ * Accessible name of the book surface (tuxbooks-9pr.8): while book mode is
+ * on the reading surface is a named region so a screen reader announces
+ * that a book is present — the same label the PDF book view carries, so
+ * the mode reads the same in both readers.
+ */
+const BOOK_SPREAD_LABEL = "Book spread";
+
+/**
  * Upper bound on the engine's restore-to-saved-locator step (a stale saved
  * locator can leave the engine's load unsettled). Generous against the
  * healthy path (sub-second); tight enough that a wedged restore degrades to
@@ -600,6 +608,10 @@ export function EpubReader({
         // external contract. Idle and unset are the same rest state.
         data-epub-turn-phase={bookTurnActive ? turnSurface.phase : undefined}
         data-epub-turn-direction={bookTurnActive ? turnSurface.direction : undefined}
+        // Assistive tech (tuxbooks-9pr.8): in book mode this surface is
+        // the book — a named region, matching the PDF book view. The
+        // plain reading surface stays an unlabelled container.
+        {...(bookTurnActive ? { role: "region", "aria-label": BOOK_SPREAD_LABEL } : null)}
         style={{
           ...(scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : null),
           ...(bookTurnActive ? { "--epub-turn-phase-ms": `${EPUB_TURN_PHASE_MS}ms` } : null),
