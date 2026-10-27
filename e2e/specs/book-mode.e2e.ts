@@ -98,6 +98,13 @@ test.describe("tuxbooks book mode", () => {
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.next }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.prev }).first()).toBeVisible();
 
+    // Stage 1 is fit-the-pair only: the toolbar's zoom controls act on
+    // scroll-view-only state, so they are gone while book mode is on —
+    // and back after the toggle-off below.
+    await expect(page.getByTestId("pdf-zoom-in")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-zoom-out")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-zoom-input")).toHaveCount(0);
+
     // Advancing through the labelled next action turns one spread: the
     // facing pair replaces the cover.
     await page.locator('[data-pdf-book-turn-edge="next"]').click();

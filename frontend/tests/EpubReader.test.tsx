@@ -876,7 +876,9 @@ describe("EpubReader book mode turn", () => {
     await enableBookMode();
 
     // One strip per side plus a bottom-corner triangle per direction: real
-    // buttons carrying the turn labels and the subtle hover shade.
+    // buttons carrying the turn labels and the subtle hover shade. The
+    // hover utility is the shipped affordance itself — jsdom applies no
+    // stylesheets, so the className is the only honest observable here.
     for (const kind of ["edge", "corner"] as const) {
       for (const direction of ["prev", "next"] as const) {
         const zone = turnZone(kind, direction);

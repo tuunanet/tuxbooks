@@ -1139,10 +1139,10 @@ describe("PdfReader book mode parity", () => {
     expect(rastersOf(4)).toHaveLength(1);
     expect(rastersOf(5)).toHaveLength(1);
     expect(rastersOf(1)).toHaveLength(1);
-    // Next spread first, its second page after, then the previous spread —
-    // the reading direction is the priority (the presentation pattern).
-    expect(doc.renderPages.indexOf(4)).toBeLessThan(doc.renderPages.indexOf(5));
-    expect(doc.renderPages.indexOf(5)).toBeLessThan(doc.renderPages.indexOf(1));
+    // The reading-direction priority of the queue is an implementation
+    // choice (docs/TESTING.md: no mock call-order pins); the user-visible
+    // outcome is the next test — turning onto the next spread blits these
+    // preloaded bitmaps without a fresh raster.
   });
 
   it("turns onto the preloaded spread without a fresh raster", async () => {
