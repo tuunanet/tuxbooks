@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useMemo, useState, type RefObject } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/lib/pdf/pdfEngine", async () => {
   const { findPageMatches } = await import("@/lib/pdf/pdfSearch");
@@ -20,15 +20,18 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 });
 
 import { PdfBookView } from "@/components/reader/pdf/PdfBookView";
-import { PdfReader } from "@/components/reader/pdf/PdfReader";
+import { PdfReader, type PdfReaderProps } from "@/components/reader/pdf/PdfReader";
 import type { PdfBookTurnAdapter } from "@/components/reader/pdf/pdfBookTurn";
+import type { ReaderAdapter } from "@/components/reader/readerModel";
+import { EMPTY_HIGHLIGHT_OVERRIDES } from "@/lib/highlightPalette";
+import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
 import { PAGE_GAP_PX, type PageSize } from "@/components/reader/pdf/pdfLayout";
 import { pageToPosition, positionToPage } from "@/components/reader/pdf/pdfPages";
 import { closePdfDocument, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
-import { useReader, type ReaderPreferences } from "@/state/readerState";
-import { makeBook } from "./factories";
+import { DEFAULT_READER_PREFERENCES, useReader, type ReaderPreferences } from "@/state/readerState";
+import { makeAnnotation, makeBook } from "./factories";
 import { invokeMock, mockInvoke } from "./mocks/bridge";
 import { makeDomRect, scrollTo, stubScrollGeometry } from "./mocks/dom";
 import { makeFakePdfDocument } from "./mocks/pdfEngine";
@@ -74,7 +77,20 @@ function PositionProbe({ page, pageCount }: { page: number; pageCount: number })
  * fake as PdfReader.test.tsx) with a scroll container of the reference
  * viewport height (720) and no saved position unless one is named.
  */
-function renderBookReader(savedPage: number | null = null) {
+function renderBookReader(
+  savedPage: number | null = null,
+  readerProps: Partial<PdfReaderProps> = {},
+  storedPreferences: Partial<ReaderPreferences> = {},
+) {
+  if (Object.keys(storedPreferences).length > 0) {
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, ...storedPreferences },
+        themePinned: true,
+      }),
+    );
+  }
   mockInvoke({
     get_reading_progress:
       savedPage === null
@@ -96,7 +112,7 @@ function renderBookReader(savedPage: number | null = null) {
   const view = render(
     <ShortcutProvider>
       <ReaderProvider>
-        <PdfReader book={pdfBook} scrollContainerRef={scrollContainerRef} />
+        <PdfReader book={pdfBook} scrollContainerRef={scrollContainerRef} {...readerProps} />
         <PreferenceProbe label="book-mode-on" patch={{ bookMode: true }} />
         <PreferenceProbe label="book-mode-off" patch={{ bookMode: false }} />
       </ReaderProvider>
@@ -399,6 +415,8 @@ describe("PdfBookView turn zones", () => {
           currentPage={page}
           areaWidth={1248}
           viewportHeight={720}
+          highlightFamily="light"
+          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
           turnAdapter={adapter}
         />
       );
@@ -431,6 +449,8 @@ describe("PdfBookView turn zones", () => {
           currentPage={positionToPage(position, pageCount)}
           areaWidth={1248}
           viewportHeight={720}
+          highlightFamily="light"
+          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
           bookTurnRef={bookTurnRef}
         />
       );
@@ -885,5 +905,150 @@ describe("PdfReader book mode position fidelity", () => {
     fireEvent.scroll(container);
     await settleScrollSamples();
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 6");
+  });
+});
+
+// tuxbooks-9pr.6: the spread must behave like one reading surface —
+// selection, highlights, search, color, preload, and restore reach book
+// mode through the shared position model and the shared render pipeline.
+describe("PdfReader book mode parity", () => {
+  /** Fakes a settled text selection anchored inside a spread page. */
+  async function selectWordsIn(pageElement: HTMLElement, text: string): Promise<void> {
+    const anchor = document.createElement("span");
+    pageElement.appendChild(anchor);
+    // A 512px page box: the client rects below normalize to exact binary
+    // fractions (the scroll-view selection tests use the same box).
+    pageElement.getBoundingClientRect = () => new DOMRect(0, 0, 512, 512);
+    const fakeSelection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: anchor,
+      toString: () => text,
+      getRangeAt: () => ({
+        // One real rect plus one zero-sized rect, which must be dropped.
+        getClientRects: () => [new DOMRect(64, 64, 128, 32), new DOMRect(0, 0, 0, 0)],
+      }),
+      removeAllRanges: vi.fn(),
+    };
+    vi.spyOn(window, "getSelection").mockReturnValue(fakeSelection as unknown as Selection);
+    fireEvent.pointerUp(document);
+    // The reader settles the selection one tick after pointerup.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  it("selects text on either page of the spread and creates the highlight on that page", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    const onCreateHighlight = vi.fn();
+    const onSelectionChange = vi.fn();
+    const adapterRef: { current: ReaderAdapter | null } = { current: null };
+    renderBookReader(2, { onCreateHighlight, onSelectionChange, adapterRef });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    // Every painted spread page carries a selectable text layer over its
+    // canvas — the surface a real drag-selection grabs.
+    await waitFor(() => {
+      expect(document.querySelector('[data-pdf-text-layer="2"]')).not.toBeNull();
+      expect(document.querySelector('[data-pdf-text-layer="3"]')).not.toBeNull();
+    });
+
+    // Right page of the spread: the settled selection resolves the book
+    // page and its rects normalize to that page's box, so the toolbar's
+    // create lands the highlight on page 3.
+    await selectWordsIn(bookPage(3), "right words");
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "right words", highlightId: null });
+    adapterRef.current!.annotations.createHighlight("green");
+    expect(onCreateHighlight).toHaveBeenCalledWith({
+      kind: "highlight",
+      pageNumber: 3,
+      rects: [{ x: 0.125, y: 0.125, width: 0.25, height: 0.0625 }],
+      text: "right words",
+      color: "green",
+    });
+
+    // The left page of the same spread behaves identically.
+    await selectWordsIn(bookPage(2), "left words");
+    adapterRef.current!.annotations.createHighlight("yellow");
+    expect(onCreateHighlight).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageNumber: 2, text: "left words", color: "yellow" }),
+    );
+  });
+
+  it("draws persisted highlight overlays on both pages of the spread", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    renderBookReader(2, {
+      highlights: [
+        makeAnnotation({
+          id: 11,
+          pageNumber: 2,
+          color: "blue",
+          rects: [{ x: 0.1, y: 0.2, width: 0.5, height: 0.02 }],
+        }),
+        makeAnnotation({
+          id: 12,
+          pageNumber: 3,
+          color: "yellow",
+          rects: [{ x: 0.2, y: 0.3, width: 0.4, height: 0.02 }],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    // Each spread page draws its own persisted highlights over its canvas,
+    // in its own page box.
+    expect(bookPage(2).querySelectorAll('[data-pdf-highlight="11"]')).toHaveLength(1);
+    expect(bookPage(3).querySelectorAll('[data-pdf-highlight="12"]')).toHaveLength(1);
+    expect(bookPage(3).querySelectorAll('[data-pdf-highlight="11"]')).toHaveLength(0);
+  });
+
+  it("applies the invert color mode across the whole spread", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    renderBookReader(2, {}, { theme: "invert" });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    // The invert filter rides the book container, so it covers both pages
+    // of the spread — and never the canvas layers themselves (PERF-6).
+    expect(book.style.filter).toBe("invert(1) hue-rotate(180deg)");
+    expect(book.contains(bookPage(2))).toBe(true);
+    expect(book.contains(bookPage(3))).toBe(true);
+  });
+
+  it("multiplies the paper tint over the whole spread", async () => {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(3) as unknown as EngineDocument);
+    renderBookReader(2, {}, { theme: "paper" });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    const tint = within(book).getByTestId("pdf-theme-tint");
+    expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
+    expect(tint.style.mixBlendMode).toBe("multiply");
+  });
+
+  it("rasterizes both spread pages with the Smart dark palette", async () => {
+    const doc = makeFakePdfDocument(3);
+    openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
+    renderBookReader(2, {}, { theme: "dark" });
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    stubContentWidth();
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
+
+    // Both spread pages rasterized with the worker-side palette — the
+    // smart render identity, shared with the scroll view's cache — and
+    // the page placeholders carry the dark preset, so neither page
+    // flashes white before its bitmap blits.
+    expect(doc.renderOptions.filter((options) => options.smartColors)).toHaveLength(2);
+    expect(bookPage(2).style.backgroundColor).toBe("rgb(16, 16, 19)");
+    expect(bookPage(3).style.backgroundColor).toBe("rgb(16, 16, 19)");
   });
 });

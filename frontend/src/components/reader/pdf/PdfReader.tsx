@@ -311,7 +311,7 @@ function resolveSettledSelection(
   return { kind: "select", page: found.page, text, rects, highlightId: targeted?.id ?? null };
 }
 
-interface PdfReaderProps {
+export interface PdfReaderProps {
   book: Book;
   /** Reports the real page count once the document has loaded. */
   onDocumentLoad?: (pageCount: number) => void;
@@ -1898,6 +1898,11 @@ export function PdfReader({
           smartColors={treatment.smart}
           renderVariant={renderVariant}
           pageBackground={treatment.pageBackground}
+          highlightsByPage={highlightsByPage}
+          highlightFamily={readerThemeFamily(preferences.theme)}
+          highlightOverrides={preferences.highlightOverrides}
+          themeFilter={treatment.filter}
+          themeTint={treatment.tint}
           bookTurnRef={bookTurnRef}
         />
       ) : (
