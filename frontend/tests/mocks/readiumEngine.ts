@@ -32,6 +32,8 @@ export interface FakeEpubHandle {
   timelineIndexFor: (fraction: number) => { index: number; total: number } | null;
   next: ReturnType<typeof vi.fn>;
   prev: ReturnType<typeof vi.fn>;
+  /** Serialized locator of the current position (turn settlement report). */
+  getCurrentLocator: ReturnType<typeof vi.fn>;
   setFlow: ReturnType<typeof vi.fn>;
   setAppearance: ReturnType<typeof vi.fn>;
   getToc: ReturnType<typeof vi.fn>;
@@ -79,6 +81,7 @@ function makeFakeHandle(toc: EpubTocItem[]): FakeEpubHandle {
     },
     next: vi.fn(async () => {}),
     prev: vi.fn(async () => {}),
+    getCurrentLocator: vi.fn(() => FAKE_LOCATOR.section1),
     setFlow: vi.fn(async () => {}),
     setAppearance: vi.fn(async () => {}),
     getToc: vi.fn(() => toc),

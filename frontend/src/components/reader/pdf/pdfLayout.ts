@@ -485,6 +485,23 @@ export function previousSpreadPageIndex(pageIndex: number): number {
   return start === 0 ? 0 : start - 1;
 }
 
+/**
+ * The page indexes of the spreads neighbouring the one containing
+ * `pageIndex`: the next spread first (the reading direction), then the
+ * previous (the safety net), each named by any of its member pages. A
+ * turn clamped at a document end names the current spread itself — that
+ * is no neighbour and is excluded. The single home of the derivation:
+ * the book preload rasterizes these spreads and the reader measures
+ * their pages, so the two can never disagree on a spread's membership
+ * (tuxbooks-9pr review).
+ */
+export function spreadNeighbourPageIndexes(pageIndex: number, pageCount: number): number[] {
+  const currentStart = spreadStartIndex(pageIndex);
+  return [nextSpreadPageIndex(pageIndex, pageCount), previousSpreadPageIndex(pageIndex)].filter(
+    (index) => spreadStartIndex(index) !== currentStart,
+  );
+}
+
 /** Total height of the laid-out document (last slot bottom). */
 export function documentHeight(slots: LayoutSlot[]): number {
   const last = slots.at(-1);

@@ -6,9 +6,9 @@ import {
   type PdfScaleRequest,
 } from "../pdfLayout";
 import { presentationPagePlan } from "../pdfRenderPolicy";
-import { renderPdfPageBitmap } from "../pdfPageBitmap";
+import { startPdfPreloadQueue, type PdfPreloadTarget } from "../pdfPreloadQueue";
 import type { PdfBitmapCache } from "../pdfBitmapCache";
-import { isRenderingCancelled, type PdfDocument, type SmartPalette } from "@/lib/pdf/pdfEngine";
+import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 
 /** The zoom request without the per-page presentation override. */
 export type PdfPreloadRequest = Omit<PdfScaleRequest, "presentationPage">;
@@ -73,7 +73,7 @@ export function usePdfPresentationPreload(params: PdfPresentationPreloadParams):
     if (!enabled || !document || !sizes || !currentPageReady) return;
     if (areaWidth <= 0 || viewportHeight <= 0) return;
 
-    const targets: { pageNumber: number; scale: number; ratio: number }[] = [];
+    const targets: PdfPreloadTarget[] = [];
     // Next is the reading direction, previous is the safety net: Papers gives
     // the forward neighbour HIGH priority and the backward one LOW, and only
     // one of them is ever mid-raster.
@@ -94,45 +94,14 @@ export function usePdfPresentationPreload(params: PdfPresentationPreloadParams):
     }
     if (targets.length === 0) return;
 
-    let cancelled = false;
-    let active: { cancel(): void } | null = null;
-
-    void (async () => {
-      for (const target of targets) {
-        if (cancelled) return;
-        const render = renderPdfPageBitmap({
-          document,
-          pageNumber: target.pageNumber,
-          scale: target.scale,
-          ratio: target.ratio,
-          smartColors,
-        });
-        active = render;
-        try {
-          const buffer = await render.promise;
-          if (cancelled) return;
-          bitmapCache.put({
-            pageNumber: target.pageNumber,
-            scale: target.scale,
-            ratio: target.ratio,
-            variant: renderVariant,
-            regionKey: "full",
-            buffer,
-          });
-          onPreloaded?.(target.pageNumber);
-        } catch (error) {
-          if (isRenderingCancelled(error)) return;
-          // Swallow: navigation still renders live if the preload missed.
-        } finally {
-          active = null;
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      active?.cancel();
-    };
+    return startPdfPreloadQueue({
+      document,
+      targets,
+      bitmapCache,
+      renderVariant,
+      smartColors,
+      onPreloaded,
+    });
   }, [
     enabled,
     document,
