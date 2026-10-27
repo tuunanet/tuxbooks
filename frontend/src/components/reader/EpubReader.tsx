@@ -14,6 +14,7 @@ import { epubBookModeColumnCount, epubBookModeLayout, useReader } from "@/state/
 import { highlightCss, isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import type { ReaderSelection } from "./annotationModel";
+import { BOOK_SPREAD_LABEL } from "./bookModeLabels";
 import {
   createRotationEpubBookTurn,
   EPUB_TURN_PHASE_MS,
@@ -90,14 +91,6 @@ interface EpubReaderProps {
 
 /** Keys forwarded from section documents to the engine's page navigation. */
 const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown", "pageup"]);
-
-/**
- * Accessible name of the book surface (tuxbooks-9pr.8): while book mode is
- * on the reading surface is a named region so a screen reader announces
- * that a book is present — the same label the PDF book view carries, so
- * the mode reads the same in both readers.
- */
-const BOOK_SPREAD_LABEL = "Book spread";
 
 /**
  * Upper bound on the engine's restore-to-saved-locator step (a stale saved

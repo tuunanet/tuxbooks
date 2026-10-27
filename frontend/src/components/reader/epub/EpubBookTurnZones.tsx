@@ -6,12 +6,9 @@
  * PDF book view's zones; which turn they trigger is the caller's adapter.
  */
 
-const TURN_LABELS = {
-  prev: "Turn to the previous spread",
-  next: "Turn to the next spread",
-} as const;
+import { BOOK_TURN_LABELS } from "../bookModeLabels";
 
-type TurnDirection = keyof typeof TURN_LABELS;
+type TurnDirection = keyof typeof BOOK_TURN_LABELS;
 
 export function EpubBookTurnZones({
   advance,
@@ -27,7 +24,7 @@ export function EpubBookTurnZones({
     <button
       type="button"
       data-epub-book-turn-edge={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`pointer-events-auto absolute inset-y-0 w-8 cursor-pointer hover:bg-foreground/10 ${
         direction === "next" ? "right-0" : "left-0"
       }`}
@@ -38,7 +35,7 @@ export function EpubBookTurnZones({
     <button
       type="button"
       data-epub-book-turn-corner={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`pointer-events-auto absolute bottom-0 h-[72px] w-[72px] cursor-pointer hover:bg-foreground/10 ${
         direction === "next" ? "right-0" : "left-0"
       }`}

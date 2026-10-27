@@ -10,6 +10,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 
 import { EpubReader } from "@/components/reader/EpubReader";
 import { EPUB_TURN_PHASE_MS } from "@/components/reader/epub/epubBookTurn";
+import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "@/components/reader/bookModeLabels";
 import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
 import { epubHrefJump, type ReaderAdapter } from "@/components/reader/readerModel";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
@@ -883,10 +884,7 @@ describe("EpubReader book mode turn", () => {
       for (const direction of ["prev", "next"] as const) {
         const zone = turnZone(kind, direction);
         expect(zone.tagName).toBe("BUTTON");
-        expect(zone).toHaveAttribute(
-          "aria-label",
-          `Turn to the ${direction === "next" ? "next" : "previous"} spread`,
-        );
+        expect(zone).toHaveAttribute("aria-label", BOOK_TURN_LABELS[direction]);
         expect(zone.className).toContain("hover:bg-foreground/10");
       }
     }
@@ -981,7 +979,7 @@ describe("EpubReader book mode turn", () => {
     renderBookModeReader();
     await enableBookMode();
 
-    const region = screen.getByRole("region", { name: "Book spread" });
+    const region = screen.getByRole("region", { name: BOOK_SPREAD_LABEL });
     expect(region).toBe(turnSurface());
   });
 
@@ -992,7 +990,7 @@ describe("EpubReader book mode turn", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+    expect(screen.queryByRole("region", { name: BOOK_SPREAD_LABEL })).toBeNull();
   });
 
   it("exposes the labelled next/previous-spread actions to assistive tech", async () => {
@@ -1004,8 +1002,8 @@ describe("EpubReader book mode turn", () => {
 
     // Edge strip and corner triangle per direction are all real buttons in
     // the accessibility tree, each carrying its turn label.
-    const nextActions = screen.getAllByRole("button", { name: "Turn to the next spread" });
-    const previousActions = screen.getAllByRole("button", { name: "Turn to the previous spread" });
+    const nextActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.next });
+    const previousActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.prev });
     expect(nextActions).toHaveLength(2);
     expect(previousActions).toHaveLength(2);
 

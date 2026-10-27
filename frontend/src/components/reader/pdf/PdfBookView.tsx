@@ -4,6 +4,7 @@ import type { HighlightOverrides, HighlightThemeFamily } from "@/lib/highlightPa
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
 import { useReader } from "@/state/readerState";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "../bookModeLabels";
 import { PdfHighlightOverlay } from "./PdfHighlightOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfPageTextLayer } from "./PdfPageTextLayer";
@@ -80,20 +81,10 @@ const TURN_EDGE_WIDTH_PX = 32;
 /** Leg length of the triangular bottom-corner turn zones. */
 const TURN_CORNER_SIZE_PX = 72;
 
-const TURN_LABELS = {
-  prev: "Turn to the previous spread",
-  next: "Turn to the next spread",
-} as const;
-
-/**
- * Accessible name of the spread surface (tuxbooks-9pr.8): the book view is
- * a named region so a screen reader announces that a book is present, and
- * the EPUB book surface uses the same label so the mode reads the same in
- * both readers.
- */
-const BOOK_SPREAD_LABEL = "Book spread";
-
-type TurnDirection = keyof typeof TURN_LABELS;
+// The turn labels and the spread region's accessible name are shared with
+// the EPUB book surface (bookModeLabels), so the mode reads the same in
+// both readers and E2E asserts one set of strings.
+type TurnDirection = keyof typeof BOOK_TURN_LABELS;
 
 /**
  * The book-mode reading surface (tuxbooks-9pr): the spread containing the
@@ -228,7 +219,7 @@ export function PdfBookView({
     <button
       type="button"
       data-pdf-book-turn-edge={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`absolute inset-y-0 cursor-pointer hover:bg-foreground/10 ${side === "left" ? "left-0" : "right-0"}`}
       style={{ width: `${TURN_EDGE_WIDTH_PX}px` }}
       onClick={direction === "prev" ? turn.retreat : turn.advance}
@@ -238,7 +229,7 @@ export function PdfBookView({
     <button
       type="button"
       data-pdf-book-turn-corner={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`absolute bottom-0 cursor-pointer hover:bg-foreground/10 ${
         direction === "prev" ? "left-0" : "right-0"
       }`}
