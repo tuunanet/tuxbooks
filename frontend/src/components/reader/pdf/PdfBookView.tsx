@@ -19,6 +19,32 @@ import {
 } from "./pdfLayout";
 import { pageToPosition } from "./pdfPages";
 
+/**
+ * Persisted-highlight drawing inputs for the spread (tuxbooks-9pr
+ * review): the page map and the palette identity travel together — a
+ * spread page without its family would draw the wrong wash, so the one
+ * prop keeps them from drifting apart.
+ */
+export interface PdfBookHighlights {
+  /** Persisted highlights by page number; drawn over the spread pages. */
+  byPage?: Map<number, Annotation[]>;
+  /** Theme family of the active reader theme; picks highlight washes + blend. */
+  family: HighlightThemeFamily;
+  /** Per-family highlight hue overrides (lib/highlightPalette). */
+  overrides: HighlightOverrides;
+}
+
+/**
+ * The reader theme's paint over the spread (tuxbooks-9pr review): the
+ * filter and the paper tint are one theme decision; see lib/pdf/theme.ts.
+ */
+export interface PdfBookThemePaint {
+  /** CSS filter implementing the reader theme (undefined = pages as-is). */
+  filter?: string;
+  /** Multiply-tint color for paper-style themes (undefined = no overlay). */
+  tint?: string;
+}
+
 interface PdfBookViewProps {
   /** The open document handle — shared with the scroll view (one worker). */
   document: PdfDocument;
@@ -48,18 +74,10 @@ interface PdfBookViewProps {
    * Smart Dark page does not flash white before its bitmap blits.
    */
   pageBackground?: string;
-  /** Persisted highlights by page number; drawn over the spread pages. */
-  highlightsByPage?: Map<number, Annotation[]>;
-  /** Theme family of the active reader theme; picks highlight washes + blend. */
-  highlightFamily: HighlightThemeFamily;
-  /** Per-family highlight hue overrides (lib/highlightPalette). */
-  highlightOverrides: HighlightOverrides;
-  /** CSS filter implementing the reader theme over the spread
-   *  (undefined = pages as-is); see lib/pdf/theme.ts. */
-  themeFilter?: string;
-  /** Multiply-tint color for paper-style themes (white pages take on the
-   *  tint); undefined = no overlay. See lib/pdf/theme.ts. */
-  themeTint?: string;
+  /** Persisted highlights over the spread pages (family + overrides + map). */
+  highlights: PdfBookHighlights;
+  /** The reader theme's filter/tint over the spread (undefined = as-is). */
+  themePaint?: PdfBookThemePaint;
   /**
    * Injected turn adapter (the component-test seam; tuxbooks-9pr.5). When
    * provided it replaces the Stage 1 instant adapter this view would
@@ -117,11 +135,8 @@ export function PdfBookView({
   smartColors,
   renderVariant = "original",
   pageBackground,
-  highlightsByPage,
-  highlightFamily,
-  highlightOverrides,
-  themeFilter,
-  themeTint,
+  highlights,
+  themePaint,
   turnAdapter = null,
   bookTurnRef,
 }: PdfBookViewProps) {
@@ -259,18 +274,18 @@ export function PdfBookView({
         style={{
           width: `${spread.bounds.width}px`,
           height: `${spread.bounds.height}px`,
-          filter: themeFilter,
+          filter: themePaint?.filter,
         }}
       >
         {/* Paper-style themes multiply-tint the opaque white pages down
             to the theme color (white × tint = tint, black stays black).
             The overlay covers the whole spread and ignores the pointer. */}
-        {themeTint && (
+        {themePaint?.tint && (
           <div
             aria-hidden
             data-testid="pdf-theme-tint"
             className="pointer-events-none absolute inset-0 z-10"
-            style={{ backgroundColor: themeTint, mixBlendMode: "multiply" }}
+            style={{ backgroundColor: themePaint.tint, mixBlendMode: "multiply" }}
           />
         )}
         {spread.pages.map((page, index) => (
@@ -314,9 +329,9 @@ export function PdfBookView({
                 same normalized page space the scroll view draws in, so
                 they track the canvas at the spread scale. */}
             <PdfHighlightOverlay
-              highlights={highlightsByPage?.get(page.pageNumber) ?? []}
-              family={highlightFamily}
-              overrides={highlightOverrides}
+              highlights={highlights.byPage?.get(page.pageNumber) ?? []}
+              family={highlights.family}
+              overrides={highlights.overrides}
             />
             {/* The spread's outer edges turn; the gutter-side edge of a
                 paired page does not. The lone cover is both edges. */}

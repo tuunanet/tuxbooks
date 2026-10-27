@@ -1937,11 +1937,12 @@ export function PdfReader({
           smartColors={treatment.smart}
           renderVariant={renderVariant}
           pageBackground={treatment.pageBackground}
-          highlightsByPage={highlightsByPage}
-          highlightFamily={readerThemeFamily(preferences.theme)}
-          highlightOverrides={preferences.highlightOverrides}
-          themeFilter={treatment.filter}
-          themeTint={treatment.tint}
+          highlights={{
+            byPage: highlightsByPage,
+            family: readerThemeFamily(preferences.theme),
+            overrides: preferences.highlightOverrides,
+          }}
+          themePaint={{ filter: treatment.filter, tint: treatment.tint }}
           bookTurnRef={bookTurnRef}
         />
       ) : (

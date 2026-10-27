@@ -429,8 +429,7 @@ describe("PdfBookView turn zones", () => {
           currentPage={page}
           areaWidth={1248}
           viewportHeight={720}
-          highlightFamily="light"
-          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
+          highlights={{ family: "light", overrides: EMPTY_HIGHLIGHT_OVERRIDES }}
           turnAdapter={adapter}
         />
       );
@@ -463,8 +462,7 @@ describe("PdfBookView turn zones", () => {
           currentPage={positionToPage(position, pageCount)}
           areaWidth={1248}
           viewportHeight={720}
-          highlightFamily="light"
-          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
+          highlights={{ family: "light", overrides: EMPTY_HIGHLIGHT_OVERRIDES }}
           bookTurnRef={bookTurnRef}
         />
       );
