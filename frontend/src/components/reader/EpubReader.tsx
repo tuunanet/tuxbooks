@@ -16,11 +16,9 @@ import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import type { ReaderSelection } from "./annotationModel";
 import { BOOK_SPREAD_LABEL } from "./bookModeLabels";
 import {
-  createRotationEpubBookTurn,
-  EPUB_TURN_PHASE_MS,
+  createInstantEpubBookTurn,
   type EpubBookTurnAdapter,
   type EpubTurnDirection,
-  type EpubTurnPhase,
 } from "./epub/epubBookTurn";
 import {
   epubProgressPayload,
@@ -84,7 +82,7 @@ interface EpubReaderProps {
   /**
    * Injected turn adapter (the component-test seam, mirroring
    * PdfBookView's): when present it drives every book-mode turn — zones
-   * and keyboard alike — instead of the reader's own rotation adapter.
+   * and keyboard alike — instead of the reader's own turn adapter.
    */
   turnAdapter?: EpubBookTurnAdapter | null;
 }
@@ -205,7 +203,7 @@ export function EpubReader({
 
   // Section documents: forward navigation keys — iframe key events never
   // reach the window registry. Routed through the turn ref so book mode
-  // animates frame-originated turns exactly like window ones. One
+  // routes frame-originated turns exactly like window ones. One
   // direction vocabulary across the turn path: "next"/"prev".
   const turnSpreadRef = useRef<(direction: EpubTurnDirection) => void>(() => {});
   useEffect(() => {
@@ -313,21 +311,17 @@ export function EpubReader({
 
   // Turn routing (tuxbooks-9pr.7): while book mode is on, every turn —
   // zones, window keys, and section-frame keys alike — goes through one
-  // turn adapter, so the rotation animation has a single path. The view
-  // reads the reduced-motion media query and passes the flag into the
-  // adapter; the adapter itself never reads it (spec → Reduced motion).
-  // Presentation mode keeps its own direct page stepping. Directions are
-  // "next"/"prev" everywhere in this path; the adapter's advance/retreat
-  // verbs are translated here, at the seam.
+  // turn adapter, so the spread change has a single path (instant since
+  // ADR 0011). The view reads the reduced-motion media query and passes
+  // the flag into the adapter; the adapter itself never reads it (spec →
+  // Reduced motion). Presentation mode keeps its own direct page
+  // stepping. Directions are "next"/"prev" everywhere in this path; the
+  // adapter's advance/retreat verbs are translated here, at the seam.
   const reducedMotion = usePrefersReducedMotion();
-  const [turnSurface, setTurnSurface] = useState<{
-    phase: EpubTurnPhase;
-    direction: EpubTurnDirection;
-  }>({ phase: "idle", direction: "next" });
-  const createdRotationTurn = useMemo(
+  const createdInstantTurn = useMemo(
     () =>
       handle
-        ? createRotationEpubBookTurn({
+        ? createInstantEpubBookTurn({
             reducedMotion,
             move: async (direction) => {
               await (direction === "next" ? handle.next() : handle.prev());
@@ -337,13 +331,12 @@ export function EpubReader({
               // relocate events.
               return handle.getCurrentLocator();
             },
-            setPhase: (phase, direction) => setTurnSurface({ phase, direction }),
           })
         : null,
     [handle, reducedMotion],
   );
   const bookTurnActive = preferences.bookMode && !presentationMode;
-  const turn = bookTurnActive ? (turnAdapter ?? createdRotationTurn) : null;
+  const turn = bookTurnActive ? (turnAdapter ?? createdInstantTurn) : null;
   const turnSpread = (direction: EpubTurnDirection): void => {
     if (turn) {
       if (direction === "next") turn.advance();
@@ -604,20 +597,14 @@ export function EpubReader({
       )}
       <div
         ref={containerRef}
-        className={`h-full${bookTurnActive ? " epub-turn-surface" : ""}`}
+        className="h-full"
         data-epub-measure={scrolled ? "capped" : "full"}
-        // Published turn phase: the surface's CSS keys the rotation
-        // keyframes off these, and tests/E2E read them as the turn's
-        // external contract. Idle and unset are the same rest state.
-        data-epub-turn-phase={bookTurnActive ? turnSurface.phase : undefined}
-        data-epub-turn-direction={bookTurnActive ? turnSurface.direction : undefined}
         // Assistive tech (tuxbooks-9pr.8): in book mode this surface is
         // the book — a named region, matching the PDF book view. The
         // plain reading surface stays an unlabelled container.
         {...(bookTurnActive ? { role: "region", "aria-label": BOOK_SPREAD_LABEL } : null)}
         style={{
           ...(scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : null),
-          ...(bookTurnActive ? { "--epub-turn-phase-ms": `${EPUB_TURN_PHASE_MS}ms` } : null),
         }}
       />
       {bookTurnActive && interactive && <EpubBookTurnZones turn={turnSpread} />}

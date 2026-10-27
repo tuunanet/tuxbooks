@@ -1,127 +1,87 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
-  createRotationEpubBookTurn,
-  EPUB_TURN_PHASE_MS,
+  createInstantEpubBookTurn,
   type EpubBookTurnHost,
 } from "@/components/reader/epub/epubBookTurn";
 
-describe("createRotationEpubBookTurn", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
+/**
+ * The instant turn adapter (tuxbooks-9pr.7, ADR 0011): advance/retreat
+ * move the engine one spread and resolve with its settled locator, the
+ * reduced-motion flag rides along, and the adapter never reads the media
+ * query itself.
+ */
+describe("createInstantEpubBookTurn", () => {
   /** Stand-in for the engine's serialized locator of the settled spread. */
   const SETTLED_LOCATOR = '{"href":"chapter2.xhtml","locations":{"progression":0.4}}';
 
   function makeHost(overrides: Partial<EpubBookTurnHost> = {}) {
-    const phases: Array<[string, string]> = [];
     const host: EpubBookTurnHost = {
       reducedMotion: false,
       move: vi.fn(async () => SETTLED_LOCATOR),
-      setPhase: (phase, direction) => {
-        phases.push([phase, direction]);
-      },
       ...overrides,
     };
-    return { host, phases };
+    return { host, move: host.move };
   }
 
-  it("rotates the current spread out, swaps, then rotates the new spread in", async () => {
-    const { host, phases } = makeHost();
-    const turn = createRotationEpubBookTurn(host);
-
-    const settled = turn.advance();
-    // Phase one starts immediately: the current spread rotates out.
-    expect(phases).toEqual([["out", "next"]]);
-    expect(host.move).not.toHaveBeenCalled();
-
-    // The engine swap lands while the surface is edge-on…
-    await vi.advanceTimersByTimeAsync(EPUB_TURN_PHASE_MS);
-    expect(host.move).toHaveBeenCalledWith("next");
-    // …and the new spread rotates in.
-    expect(phases).toEqual([
-      ["out", "next"],
-      ["in", "next"],
-    ]);
-
-    await vi.advanceTimersByTimeAsync(EPUB_TURN_PHASE_MS);
-    expect(phases).toEqual([
-      ["out", "next"],
-      ["in", "next"],
-      ["idle", "next"],
-    ]);
-    // The turn resolves with the settled spread's locator (the seam's
-    // report-back, tuxbooks-9pr review).
-    await expect(settled).resolves.toBe(SETTLED_LOCATOR);
-  });
-
-  it("retreats backward through the mirrored phases", async () => {
-    const { host, phases } = makeHost();
-    const turn = createRotationEpubBookTurn(host);
-
-    const settled = turn.retreat();
-    await vi.advanceTimersByTimeAsync(EPUB_TURN_PHASE_MS * 2);
-    expect(host.move).toHaveBeenCalledWith("prev");
-    expect(phases).toEqual([
-      ["out", "prev"],
-      ["in", "prev"],
-      ["idle", "prev"],
-    ]);
-    await expect(settled).resolves.toBe(SETTLED_LOCATOR);
-  });
-
-  it("swaps the spread instantly under reduced motion, with no phases", async () => {
-    const { host, phases } = makeHost({ reducedMotion: true });
-    const turn = createRotationEpubBookTurn(host);
-    expect(turn.reducedMotion).toBe(true);
+  it("advances by one spread and resolves with the settled locator", async () => {
+    const { host, move } = makeHost();
+    const turn = createInstantEpubBookTurn(host);
 
     await expect(turn.advance()).resolves.toBe(SETTLED_LOCATOR);
-    expect(host.move).toHaveBeenCalledWith("next");
-    expect(phases).toEqual([]);
-    // No timer pending: nothing to advance.
-    expect(vi.getTimerCount()).toBe(0);
+    expect(move).toHaveBeenCalledTimes(1);
+    expect(move).toHaveBeenCalledWith("next");
   });
 
-  // The reduced-motion contract is observable, not the media query: the
-  // adapter swaps instantly under the flag (the test above) and the view
-  // passes the flag in — EpubReader.test.tsx stubs the query and asserts
-  // no phase is published. An implementation that read the query itself
-  // would trip neither; the seam stays driveable by flag alone.
+  it("retreats by one spread and resolves with the settled locator", async () => {
+    const { host, move } = makeHost();
+    const turn = createInstantEpubBookTurn(host);
 
-  it("ignores presses while an animated turn is in flight", async () => {
-    const { host } = makeHost();
-    const turn = createRotationEpubBookTurn(host);
+    await expect(turn.retreat()).resolves.toBe(SETTLED_LOCATOR);
+    expect(move).toHaveBeenCalledTimes(1);
+    expect(move).toHaveBeenCalledWith("prev");
+  });
+
+  it("moves once per press, with no turn in flight to drop it against", async () => {
+    const { host, move } = makeHost();
+    const turn = createInstantEpubBookTurn(host);
 
     turn.advance();
     turn.advance();
     turn.retreat();
-    await vi.advanceTimersByTimeAsync(EPUB_TURN_PHASE_MS * 2);
-    expect(host.move).toHaveBeenCalledTimes(1);
+    await expect(turn.retreat()).resolves.toBe(SETTLED_LOCATOR);
+    expect(move).toHaveBeenCalledTimes(4);
   });
 
-  it("returns the surface to idle even when the engine move fails", async () => {
-    const { host, phases } = makeHost({
+  it("resolves null when the engine move fails", async () => {
+    const { host } = makeHost({
       move: vi.fn(async () => {
         throw new Error("engine wedged");
       }),
     });
-    const settled = createRotationEpubBookTurn(host).advance();
 
-    await vi.advanceTimersByTimeAsync(EPUB_TURN_PHASE_MS * 2);
-    expect(phases).toEqual([
-      ["out", "next"],
-      ["in", "next"],
-      ["idle", "next"],
-    ]);
-    // A failed move settles nothing: the turn resolves null.
+    const settled = createInstantEpubBookTurn(host).advance();
     await expect(settled).resolves.toBeNull();
   });
 
-  it("reports a false reduced-motion flag when the view read it as off", () => {
-    const { host } = makeHost();
-    expect(createRotationEpubBookTurn(host).reducedMotion).toBe(false);
+  it("carries the reduced-motion flag without ever reading the media query", () => {
+    // A media query the adapter would trip over if it read one itself.
+    const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation(() => {
+      throw new Error("the turn adapter must not read the media query");
+    });
+    try {
+      const { host } = makeHost({ reducedMotion: true });
+      const turn = createInstantEpubBookTurn(host);
+      expect(turn.reducedMotion).toBe(true);
+      // Stage 1 is instant either way; the flag is plumbing for the
+      // Stage 2 renderer (tuxbooks-2ir).
+      return expect(turn.advance()).resolves.toBe(SETTLED_LOCATOR);
+    } finally {
+      matchMedia.mockRestore();
+    }
+  });
+
+  it("exposes the flag as false when the view reports no preference", () => {
+    const { host } = makeHost({ reducedMotion: false });
+    expect(createInstantEpubBookTurn(host).reducedMotion).toBe(false);
   });
 });
