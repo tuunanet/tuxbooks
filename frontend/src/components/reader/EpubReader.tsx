@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import {
   EPUB_SCROLLED_SURFACE_MAX_PX,
   epubThemeBackground,
@@ -12,7 +12,15 @@ import { epubSurfaceTheme, epubThemeColorScheme } from "@/lib/epub/appearance";
 import { useShortcut } from "@/lib/shortcuts";
 import { epubBookModeColumnCount, epubBookModeLayout, useReader } from "@/state/readerState";
 import { highlightCss, isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import type { ReaderSelection } from "./annotationModel";
+import {
+  createRotationEpubBookTurn,
+  EPUB_TURN_PHASE_MS,
+  type EpubBookTurnAdapter,
+  type EpubTurnDirection,
+  type EpubTurnPhase,
+} from "./epub/epubBookTurn";
 import {
   epubProgressPayload,
   type EpubLocator,
@@ -22,6 +30,7 @@ import {
 } from "./readerModel";
 import { useReaderProgress } from "./useReaderProgress";
 import { EpubPresentationBar } from "./epub/EpubPresentationBar";
+import { EpubBookTurnZones } from "./epub/EpubBookTurnZones";
 import { useEpubDocument } from "./epub/hooks/useEpubDocument";
 import type { Annotation, AnnotationInput } from "@/types/domain";
 import type { Book } from "@/types/domain";
@@ -71,6 +80,12 @@ interface EpubReaderProps {
   presentationMode?: boolean;
   /** Exits presentation mode (the in-mode exit control). */
   onExitPresentation?: () => void;
+  /**
+   * Injected turn adapter (the component-test seam, mirroring
+   * PdfBookView's): when present it drives every book-mode turn — zones
+   * and keyboard alike — instead of the reader's own rotation adapter.
+   */
+  turnAdapter?: EpubBookTurnAdapter | null;
 }
 
 /** Keys forwarded from section documents to the engine's page navigation. */
@@ -109,6 +124,7 @@ export function EpubReader({
   onSelectionChange,
   presentationMode = false,
   onExitPresentation,
+  turnAdapter = null,
 }: EpubReaderProps) {
   const { preferences, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -187,16 +203,18 @@ export function EpubReader({
   }, [handle]);
 
   // Section documents: forward navigation keys — iframe key events never
-  // reach the window registry.
+  // reach the window registry. Routed through the turn ref so book mode
+  // animates frame-originated turns exactly like window ones.
+  const turnSpreadRef = useRef<(direction: "forward" | "backward") => void>(() => {});
   useEffect(() => {
     if (!handle) return;
     return handle.onLoad(({ doc }) => {
       forwardSectionKeys(doc, (key) => {
-        const turn = (move: Promise<void>): void => {
-          move.catch(() => {});
-        };
-        if (key === "arrowright" || key === "space" || key === "pagedown") turn(handle.next());
-        else if (key === "arrowleft" || key === "pageup") turn(handle.prev());
+        if (key === "arrowright" || key === "space" || key === "pagedown") {
+          turnSpreadRef.current("forward");
+        } else if (key === "arrowleft" || key === "pageup") {
+          turnSpreadRef.current("backward");
+        }
       });
     });
   }, [handle]);
@@ -291,6 +309,46 @@ export function EpubReader({
   const layout = epubBookModeLayout(preferences);
   const columnCount = epubBookModeColumnCount(preferences);
 
+  // Turn routing (tuxbooks-9pr.7): while book mode is on, every turn —
+  // zones, window keys, and section-frame keys alike — goes through one
+  // turn adapter, so the rotation animation has a single path. The view
+  // reads the reduced-motion media query and passes the flag into the
+  // adapter; the adapter itself never reads it (spec → Reduced motion).
+  // Presentation mode keeps its own direct page stepping.
+  const reducedMotion = usePrefersReducedMotion();
+  const [turnSurface, setTurnSurface] = useState<{
+    phase: EpubTurnPhase;
+    direction: EpubTurnDirection;
+  }>({ phase: "idle", direction: "next" });
+  const createdTurn = useMemo(
+    () =>
+      handle
+        ? createRotationEpubBookTurn({
+            reducedMotion,
+            move: (direction) => (direction === "next" ? handle.next() : handle.prev()),
+            setPhase: (phase, direction) => setTurnSurface({ phase, direction }),
+          })
+        : null,
+    [handle, reducedMotion],
+  );
+  const bookTurnActive = preferences.bookMode && !presentationMode;
+  const turn = bookTurnActive ? (turnAdapter ?? createdTurn) : null;
+  const turnSpread = (direction: "forward" | "backward"): void => {
+    if (turn) {
+      if (direction === "forward") turn.advance();
+      else turn.retreat();
+      return;
+    }
+    const move = direction === "forward" ? handle?.next() : handle?.prev();
+    move?.catch(() => {});
+  };
+  // Section-frame keys reach navigation through this ref (their effect
+  // registers before the adapter exists); refreshed every render so a
+  // frame press always sees the live turn.
+  useEffect(() => {
+    turnSpreadRef.current = turnSpread;
+  });
+
   // Reflow layout (flow preference) — applied as soon as the renderer exists
   // and on every layout preference change.
   useEffect(() => {
@@ -357,14 +415,15 @@ export function EpubReader({
 
   // Window-level page navigation; registered after the shell's handlers, so
   // while an EPUB is open these combos drive the engine, not percentage steps.
+  // In book mode they step by spread through the turn adapter.
   const turnPages = (move: Promise<void> | undefined): void => {
     move?.catch(() => {});
   };
-  useShortcut("arrowright", () => turnPages(handle?.next()));
-  useShortcut("space", () => turnPages(handle?.next()));
-  useShortcut("arrowleft", () => turnPages(handle?.prev()));
-  useShortcut("pagedown", () => turnPages(handle?.next()));
-  useShortcut("pageup", () => turnPages(handle?.prev()));
+  useShortcut("arrowright", () => turnSpread("forward"));
+  useShortcut("space", () => turnSpread("forward"));
+  useShortcut("arrowleft", () => turnSpread("backward"));
+  useShortcut("pagedown", () => turnSpread("forward"));
+  useShortcut("pageup", () => turnSpread("backward"));
 
   // In-book search runs on the engine and streams matches up to the shell;
   // callbacks reach the shell through refs so re-renders never re-register
@@ -507,7 +566,7 @@ export function EpubReader({
       // Effective layout (book mode derives paginated), not the stored preference.
       data-layout={layout}
       data-epub-presentation={presentationMode}
-      className="h-full"
+      className="relative h-full"
       style={{
         backgroundColor: epubThemeBackground(epubSurfaceTheme(preferences.theme)),
         // Pin the section documents' UA-default colors to the theme family
@@ -534,12 +593,24 @@ export function EpubReader({
       )}
       <div
         ref={containerRef}
-        className="h-full"
+        className={`h-full${bookTurnActive ? " epub-turn-surface" : ""}`}
         data-epub-measure={scrolled ? "capped" : "full"}
-        style={
-          scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : undefined
-        }
+        // Published turn phase: the surface's CSS keys the rotation
+        // keyframes off these, and tests/E2E read them as the turn's
+        // external contract. Idle and unset are the same rest state.
+        data-epub-turn-phase={bookTurnActive ? turnSurface.phase : undefined}
+        data-epub-turn-direction={bookTurnActive ? turnSurface.direction : undefined}
+        style={{
+          ...(scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : null),
+          ...(bookTurnActive ? { "--epub-turn-phase-ms": `${EPUB_TURN_PHASE_MS}ms` } : null),
+        }}
       />
+      {bookTurnActive && interactive && (
+        <EpubBookTurnZones
+          advance={() => turnSpread("forward")}
+          retreat={() => turnSpread("backward")}
+        />
+      )}
     </div>
   );
 }
