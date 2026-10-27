@@ -36,6 +36,12 @@ interface PdfToolbarProps {
   /** Toggles presentation mode (Ctrl+L); omitted when unsupported. */
   onTogglePresentation?: () => void;
   presentationActive?: boolean;
+  /**
+   * Hides the zoom combo (tuxbooks-9pr.5): book mode is fit-the-pair
+   * only, so its zoom controls would act on scroll-view-only state. The
+   * page navigation stays.
+   */
+  zoomHidden?: boolean;
 }
 
 /** The three fit modes offered at the top of the zoom dropdown, Okular-style. */
@@ -255,6 +261,7 @@ export function PdfToolbar({
   onSetZoom,
   onTogglePresentation,
   presentationActive = false,
+  zoomHidden = false,
 }: PdfToolbarProps) {
   return (
     <div
@@ -294,21 +301,25 @@ export function PdfToolbar({
         <span aria-hidden="true">›</span>
       </Button>
 
-      <span
-        className="mx-2 h-4 w-px bg-[var(--reader-chrome-border,var(--border))]"
-        aria-hidden="true"
-      />
+      {!zoomHidden && (
+        <>
+          <span
+            className="mx-2 h-4 w-px bg-[var(--reader-chrome-border,var(--border))]"
+            aria-hidden="true"
+          />
 
-      <PdfZoomControl
-        zoomMode={zoomMode}
-        zoomScale={zoomScale}
-        canZoomIn={canZoomIn}
-        canZoomOut={canZoomOut}
-        onZoomIn={onZoomIn}
-        onZoomOut={onZoomOut}
-        onSelectFit={onSelectFit}
-        onSetZoom={onSetZoom}
-      />
+          <PdfZoomControl
+            zoomMode={zoomMode}
+            zoomScale={zoomScale}
+            canZoomIn={canZoomIn}
+            canZoomOut={canZoomOut}
+            onZoomIn={onZoomIn}
+            onZoomOut={onZoomOut}
+            onSelectFit={onSelectFit}
+            onSetZoom={onSetZoom}
+          />
+        </>
+      )}
 
       {onTogglePresentation && (
         <Button

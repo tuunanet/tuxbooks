@@ -47,6 +47,7 @@ import {
 } from "./readerModel";
 import { PDF_PLACEHOLDER_PAGE_COUNT } from "./placeholderDocument";
 import { pageToPosition, positionToPage } from "./pdf/pdfPages";
+import type { PdfBookTurnAdapter } from "./pdf/pdfBookTurn";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationInput } from "@/types/domain";
@@ -143,6 +144,11 @@ export function ReaderShell() {
   // highlights without knowing which engine is underneath. Registered while
   // the reader's document is open, nulled on unmount/book switch.
   const adapterRef = useRef<ReaderAdapter | null>(null);
+  // The open book view's turn adapter (tuxbooks-9pr.5): the keyboard's
+  // book-mode keys call the same instance the view's edge/corner zones
+  // call, so every spread turn settles through one path. Registered by
+  // the view once its spread mounts, nulled when it unmounts.
+  const bookTurnRef = useRef<PdfBookTurnAdapter | null>(null);
   // The open reader's latest position (EPUB CFI / PDF page), tagged with
   // its book id for the same staleness guard. Written through the unified
   // onPositionChange callback; relocates already re-render the shell, so
@@ -264,12 +270,34 @@ export function ReaderShell() {
     },
     [pdfPageCount, position, setPosition, step],
   );
+  // Book mode steps by SPREAD through the registered turn adapter: a
+  // one-page step inside a two-page spread is an invisible move, the
+  // two-press feel the mode exists to fix. A book view that has not
+  // mounted yet (layout still measuring, so no adapter is registered)
+  // falls back to page stepping, keeping the position tracking; the
+  // mounted spread then renders whatever page the position names.
+  const bookTurn = useCallback(
+    (delta: 1 | -1) => {
+      const turn = bookTurnRef.current;
+      if (turn) {
+        if (delta === 1) turn.advance();
+        else turn.retreat();
+        return;
+      }
+      flipPdfPage(delta);
+    },
+    [flipPdfPage],
+  );
   const pdfPageStep = useCallback(
     (delta: 1 | -1) => {
-      if (isPdf) flipPdfPage(delta);
-      else setPosition(position + delta * step);
+      if (!isPdf) {
+        setPosition(position + delta * step);
+        return;
+      }
+      if (preferences.bookMode && !presentation) bookTurn(delta);
+      else flipPdfPage(delta);
     },
-    [flipPdfPage, isPdf, position, setPosition, step],
+    [bookTurn, flipPdfPage, isPdf, position, preferences.bookMode, presentation, setPosition, step],
   );
   useShortcut(isEpub ? null : "arrowright", () => pdfPageStep(1));
   useShortcut(isEpub ? null : "space", () => pdfPageStep(1));
@@ -277,9 +305,15 @@ export function ReaderShell() {
   useShortcut(isEpub ? null : "pagedown", () => {
     // Presentation mode turns the scroll-steppers into full page flips
     // (§ issue #65): one page fills the viewport, so partial-viewport
-    // scrolling would land mid-page.
+    // scrolling would land mid-page. Book mode has no scroll container
+    // (it fits the pair), so its page keys step by spread through the
+    // turn adapter instead of scrolling.
     if (isPdf && presentation) {
       flipPdfPage(1);
+      return;
+    }
+    if (isPdf && preferences.bookMode) {
+      bookTurn(1);
       return;
     }
     const container = readerContentRef.current;
@@ -290,10 +324,19 @@ export function ReaderShell() {
       flipPdfPage(-1);
       return;
     }
+    if (isPdf && preferences.bookMode) {
+      bookTurn(-1);
+      return;
+    }
     const container = readerContentRef.current;
     if (container) container.scrollTop -= container.clientHeight * 0.9;
   });
-  useShortcut(isPdf && presentation ? "shift+space" : null, () => flipPdfPage(-1));
+  // Shift+Space is the backward turn in book mode too (it used to be
+  // registered only while presenting).
+  useShortcut(isPdf && (presentation || preferences.bookMode) ? "shift+space" : null, () => {
+    if (presentation) flipPdfPage(-1);
+    else bookTurn(-1);
+  });
   // Ctrl/Cmd+F toggles the overlay, so a second press closes it without
   // reaching for the mouse.
   const toggleSearch = useCallback(() => setSearchOpen((open) => !open), []);
@@ -865,6 +908,7 @@ export function ReaderShell() {
               onTogglePresentation={togglePresentation}
               onCreateHighlight={handleCreateHighlight}
               onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
+              bookTurnRef={bookTurnRef}
             />
           )}
         </main>

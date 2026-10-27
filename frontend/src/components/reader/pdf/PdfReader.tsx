@@ -46,6 +46,7 @@ import { usePdfViewport, type PdfViewport } from "./hooks/usePdfViewport";
 import { usePdfZoomTelemetry } from "./hooks/usePdfZoomTelemetry";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfBookView } from "./PdfBookView";
+import type { PdfBookTurnAdapter } from "./pdfBookTurn";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
 import { PdfSidebar } from "./PdfSidebar";
@@ -334,6 +335,12 @@ interface PdfReaderProps {
    */
   adapterRef?: { current: ReaderAdapter | null };
   /**
+   * Filled with the open book view's turn adapter (tuxbooks-9pr.5) so the
+   * shell's keyboard steps spreads through the same instance the view's
+   * edge/corner zones call; nulled when the book view unmounts.
+   */
+  bookTurnRef?: { current: PdfBookTurnAdapter | null };
+  /**
    * Initial destination for a reader opened from a highlight. Applied as
    * part of the restore so the saved position cannot overwrite it.
    */
@@ -394,6 +401,7 @@ export function PdfReader({
   controlsHost,
   scrollContainerRef,
   adapterRef,
+  bookTurnRef,
   initialJump,
   onPositionChange,
   onSearchGroup,
@@ -1738,6 +1746,9 @@ export function PdfReader({
       onSetZoom={setCustomZoom}
       onTogglePresentation={onTogglePresentation}
       presentationActive={presentationMode}
+      // Book mode is fit-the-pair only (spec → Zoom): its zoom controls
+      // would act on scroll-view-only state, so they hide while on.
+      zoomHidden={bookMode}
     />
   );
 
@@ -1784,6 +1795,7 @@ export function PdfReader({
           smartColors={treatment.smart}
           renderVariant={renderVariant}
           pageBackground={treatment.pageBackground}
+          bookTurnRef={bookTurnRef}
         />
       ) : (
         <PdfDocumentView
