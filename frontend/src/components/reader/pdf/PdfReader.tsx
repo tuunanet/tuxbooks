@@ -46,6 +46,7 @@ import { usePdfViewport, type PdfViewport } from "./hooks/usePdfViewport";
 import { usePdfZoomTelemetry } from "./hooks/usePdfZoomTelemetry";
 import { usePdfVirtualization } from "./hooks/usePdfVirtualization";
 import { PdfBookView } from "./PdfBookView";
+import type { PdfBookTurnAdapter } from "./pdfBookTurn";
 import { PdfDocumentView } from "./PdfDocumentView";
 import { PdfPresentationBar } from "./PdfPresentationBar";
 import { PdfSidebar } from "./PdfSidebar";
@@ -125,6 +126,15 @@ const MAX_CONCURRENT_RENDERS = 2;
  * under a CSS-transform preview, so nothing re-renders mid-gesture.
  */
 const WHEEL_SETTLE_MS = 250;
+
+/**
+ * Inert stand-in for the zoom handlers while book mode is on (spec →
+ * Zoom): the spread is fit-the-pair only, so every keyboard zoom entry
+ * point no-ops instead of mutating scroll-view zoom invisibly — a stray
+ * Ctrl+- would change the zoom the reader restores when the mode turns
+ * off.
+ */
+function inertZoom(): void {}
 
 /**
  * The transient wheel-gesture preview: an absolute scale (like a custom
@@ -334,6 +344,12 @@ interface PdfReaderProps {
    */
   adapterRef?: { current: ReaderAdapter | null };
   /**
+   * Filled with the open book view's turn adapter (tuxbooks-9pr.5) so the
+   * shell's keyboard steps spreads through the same instance the view's
+   * edge/corner zones call; nulled when the book view unmounts.
+   */
+  bookTurnRef?: { current: PdfBookTurnAdapter | null };
+  /**
    * Initial destination for a reader opened from a highlight. Applied as
    * part of the restore so the saved position cannot overwrite it.
    */
@@ -394,6 +410,7 @@ export function PdfReader({
   controlsHost,
   scrollContainerRef,
   adapterRef,
+  bookTurnRef,
   initialJump,
   onPositionChange,
   onSearchGroup,
@@ -1434,6 +1451,14 @@ export function PdfReader({
     goToPageRef.current = goToPage;
   });
 
+  // Book mode (tuxbooks-9pr): the spread surface (PdfBookView) takes the
+  // continuous document's place while the preference is on, and
+  // presentation mode wins while active. The decision gates everything
+  // scroll-view-only below — the zoom entry points and the toolbar ‹/›
+  // step as well as the mount choice — so a control hidden behind the
+  // mode can never mutate the state the mode restores on exit.
+  const bookMode = preferences.bookMode && !presentationMode;
+
   // Manual zoom (preset stepping): the effective scale snaps onto the
   // nearest preset first, so zooming out of a fit mode continues from where
   // the page actually is (issue #65). A live wheel gesture flushes into the
@@ -1479,18 +1504,29 @@ export function PdfReader({
   );
 
   // Latest handlers for the keyboard/wheel registrations below (the
-  // registrations are stable; the closures track the live scale).
+  // registrations are stable; the closures track the live scale). These
+  // refs are also the one gate the zoom shortcuts pass through: while
+  // book mode holds the view they stay inert (spec → Zoom), so the
+  // shortcuts cannot mutate the scroll-view zoom invisibly under the
+  // spread. The toolbar's hidden zoom buttons route through the same
+  // refs.
   const zoomByStepsRef = useRef<(steps: 1 | -1) => void>(() => {});
   useEffect(() => {
-    zoomByStepsRef.current = zoomBySteps;
+    zoomByStepsRef.current = bookMode ? inertZoom : zoomBySteps;
   });
   const resetZoomRef = useRef<() => void>(() => {});
   useEffect(() => {
-    resetZoomRef.current = resetZoom;
+    resetZoomRef.current = bookMode ? inertZoom : resetZoom;
   });
   const setZoomModeRef = useRef<(mode: FitZoomMode) => void>(() => {});
   useEffect(() => {
-    setZoomModeRef.current = setZoomMode;
+    setZoomModeRef.current = bookMode ? inertZoom : setZoomMode;
+  });
+  // The wheel listener registers once per container, so it reads the
+  // live book-mode decision through a ref instead of re-registering.
+  const bookModeRef = useRef(bookMode);
+  useEffect(() => {
+    bookModeRef.current = bookMode;
   });
   // Keyboard zoom (§ reader keyboard, issue #65): Ctrl + +/-/0 and the fit
   // modes on Ctrl+1/2/3, plus the historical bare +/=/- steps. The shell
@@ -1518,6 +1554,14 @@ export function PdfReader({
     if (!container) return;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
+      // Book mode is fit-the-pair only (spec → Zoom): the gesture would
+      // preview and commit a scroll-view zoom invisibly under the
+      // spread, so it stays suppressed (the default would zoom the whole
+      // window) and inert while the mode is on.
+      if (bookModeRef.current) {
+        event.preventDefault();
+        return;
+      }
       const documentEl = documentRef.current;
       if (!documentEl) return;
       event.preventDefault();
@@ -1661,13 +1705,6 @@ export function PdfReader({
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
-  // Book mode (tuxbooks-9pr): the mount decision only — the separate
-  // spread surface (PdfBookView) takes the continuous document's place
-  // while the preference is on, and presentation mode wins while active.
-  // The sizes check at the mount site keeps it to layout-ready, and
-  // swapping views never re-loads or re-rasters the document.
-  const bookMode = preferences.bookMode && !presentationMode;
-
   if (status === "error") {
     return (
       <div
@@ -1719,6 +1756,22 @@ export function PdfReader({
   // pointer-accessible without leaving the mode (§ issue #65).
   // The toolbar reports the effective scale live: during a wheel gesture
   // that is the previewed zoom, before any canvas has re-rendered.
+  // The toolbar's ‹/› step by SPREAD in book mode through the same
+  // registered adapter the keyboard uses (tuxbooks-9pr.5): a one-page
+  // step inside a two-page spread is the invisible two-press move the
+  // mode exists to fix. Until the spread surface mounts (layout still
+  // measuring, so no adapter is registered) they keep the page step the
+  // shell keyboard falls back to; scroll view and presentation behavior
+  // never change.
+  const stepPageOrSpread = (delta: 1 | -1) => {
+    const turn = bookMode ? (bookTurnRef?.current ?? null) : null;
+    if (turn) {
+      if (delta === 1) turn.advance();
+      else turn.retreat();
+      return;
+    }
+    goToPage(currentPage + delta);
+  };
   const displayScale = wheelPreview?.scale ?? scale;
   const controls = (
     <PdfToolbar
@@ -1728,8 +1781,8 @@ export function PdfReader({
       zoomScale={displayScale}
       canZoomIn={displayScale < MAX_ZOOM - 1e-9}
       canZoomOut={displayScale > MIN_ZOOM + 1e-9}
-      onPrev={() => goToPage(currentPage - 1)}
-      onNext={() => goToPage(currentPage + 1)}
+      onPrev={() => stepPageOrSpread(-1)}
+      onNext={() => stepPageOrSpread(1)}
       onSetPage={goToPage}
       pageEntryDisabled={!layoutReady}
       onZoomIn={() => zoomByStepsRef.current(1)}
@@ -1738,6 +1791,9 @@ export function PdfReader({
       onSetZoom={setCustomZoom}
       onTogglePresentation={onTogglePresentation}
       presentationActive={presentationMode}
+      // Book mode is fit-the-pair only (spec → Zoom): its zoom controls
+      // would act on scroll-view-only state, so they hide while on.
+      zoomHidden={bookMode}
     />
   );
 
@@ -1784,6 +1840,7 @@ export function PdfReader({
           smartColors={treatment.smart}
           renderVariant={renderVariant}
           pageBackground={treatment.pageBackground}
+          bookTurnRef={bookTurnRef}
         />
       ) : (
         <PdfDocumentView

@@ -36,6 +36,11 @@ import { ReaderProvider } from "@/state/ReaderProvider";
 import { useReader, type ReaderPreferences } from "@/state/readerState";
 import { makeAnnotation, makeBook } from "./factories";
 import { pageToPosition } from "@/components/reader/pdf/pdfPages";
+import {
+  clearPdfZoomLog,
+  dumpPdfZoomLog,
+  setPdfZoomTelemetryEnabled,
+} from "@/lib/pdf/pdfZoomTelemetry";
 import type { Annotation } from "@/types/domain";
 import type { Book } from "@/types/domain";
 import { scrollTo, stubScrollGeometry } from "./mocks/dom";
@@ -84,6 +89,8 @@ interface PdfReaderProps {
   presentationMode?: boolean;
   onExitPresentation?: () => void;
   onTogglePresentation?: () => void;
+  /** Renders a preference probe (real provider state) as a sibling. */
+  preferencesPatch?: Partial<ReaderPreferences>;
   /** Renders a raw-position probe (page in a 3-page document) as a sibling. */
   probePage?: number;
 }
@@ -119,6 +126,9 @@ function readerTree(props: PdfReaderProps) {
           onExitPresentation={props.onExitPresentation}
           onTogglePresentation={props.onTogglePresentation}
         />
+        {props.preferencesPatch ? (
+          <PreferenceProbe label="probe-preferences" patch={props.preferencesPatch} />
+        ) : null}
         {props.probePage !== undefined ? <PositionProbe page={props.probePage} /> : null}
       </ReaderProvider>
     </ShortcutProvider>
@@ -2620,6 +2630,29 @@ describe("PdfReader presentation mode (issue #65)", () => {
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
     // The pre-presentation zoom state is restored exactly.
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
+  });
+
+  it("keeps the zoom shortcuts live while presenting, even with the book preference on", async () => {
+    await renderPresentingReader({ preferencesPatch: { bookMode: true } });
+    fireEvent.click(screen.getByText("probe-preferences"));
+
+    // The presented layout always fits the page, so the observable is the
+    // zoom state the shortcuts step underneath it (the telemetry log
+    // samples it per commit). Book preference on, but presentation wins —
+    // so the gate stays open: Ctrl+- leaves fit-page for the 75% preset
+    // and Ctrl++ steps back up to 100% (each step re-derives from the
+    // presentation fit scale, the pre-existing behavior).
+    setPdfZoomTelemetryEnabled(true);
+    clearPdfZoomLog();
+    fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    const lastZoomSample = () =>
+      (
+        JSON.parse(dumpPdfZoomLog()) as { samples: { zoomMode: string; zoomLevel: number }[] }
+      ).samples.at(-1);
+    expect(lastZoomSample()).toMatchObject({ zoomMode: "custom", zoomLevel: 0.75 });
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    expect(lastZoomSample()).toMatchObject({ zoomMode: "custom", zoomLevel: 1 });
+    setPdfZoomTelemetryEnabled(false);
   });
 
   it("stays on the page reached in presentation after exiting", async () => {

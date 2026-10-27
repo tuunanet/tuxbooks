@@ -1,7 +1,10 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { PdfDocument, SmartPalette } from "@/lib/pdf/pdfEngine";
+import { useReader } from "@/state/readerState";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import type { PdfBitmapCache } from "./pdfBitmapCache";
+import { createInstantPdfBookTurn, type PdfBookTurnAdapter } from "./pdfBookTurn";
 import {
   PAPERS_VIEW_SPACING,
   displayedSizes,
@@ -9,6 +12,7 @@ import {
   layoutSpread,
   type PageSize,
 } from "./pdfLayout";
+import { pageToPosition } from "./pdfPages";
 
 interface PdfBookViewProps {
   /** The open document handle — shared with the scroll view (one worker). */
@@ -39,9 +43,33 @@ interface PdfBookViewProps {
    * Smart Dark page does not flash white before its bitmap blits.
    */
   pageBackground?: string;
+  /**
+   * Injected turn adapter (the component-test seam; tuxbooks-9pr.5). When
+   * provided it replaces the Stage 1 instant adapter this view would
+   * otherwise create from the reading position.
+   */
+  turnAdapter?: PdfBookTurnAdapter | null;
+  /**
+   * Filled with the active turn adapter (injected or created here) so the
+   * shell's keyboard routes through the same instance the edge/corner
+   * zones call; nulled on unmount.
+   */
+  bookTurnRef?: { current: PdfBookTurnAdapter | null };
 }
 
 const NO_PAGES: ReadonlySet<number> = new Set();
+
+/** How far the edge turn strips reach in from each page's outer edge. */
+const TURN_EDGE_WIDTH_PX = 32;
+/** Leg length of the triangular bottom-corner turn zones. */
+const TURN_CORNER_SIZE_PX = 72;
+
+const TURN_LABELS = {
+  prev: "Turn to the previous spread",
+  next: "Turn to the next spread",
+} as const;
+
+type TurnDirection = keyof typeof TURN_LABELS;
 
 /**
  * The book-mode reading surface (tuxbooks-9pr): the spread containing the
@@ -74,6 +102,8 @@ export function PdfBookView({
   smartColors,
   renderVariant = "original",
   pageBackground,
+  turnAdapter = null,
+  bookTurnRef,
 }: PdfBookViewProps) {
   const pageIndex = Math.max(0, currentPage - 1);
   // The spread in page units — only its bounds feed the fit. The inter-page
@@ -131,17 +161,81 @@ export function PdfBookView({
     );
   }, []);
 
+  // Turn adapter (tuxbooks-9pr.5): the book view reads the reduced-motion
+  // media query itself (the adapter must not) and passes the flag into the
+  // Stage 1 instant adapter, whose settle moves the reading position — the
+  // spread the position names is what renders, so the position model stays
+  // the single source of truth. An injected adapter (the test seam) wins
+  // over the created one; either way the active instance registers into
+  // bookTurnRef so the shell's keyboard steps through this same path.
+  const { setPosition } = useReader();
+  const reducedMotion = usePrefersReducedMotion();
+  const onSettle = useCallback(
+    (pageNumber: number) => setPosition(pageToPosition(pageNumber, sizes.length)),
+    [setPosition, sizes.length],
+  );
+  const createdTurn = useMemo(
+    () =>
+      createInstantPdfBookTurn({ currentPage, pageCount: sizes.length, reducedMotion, onSettle }),
+    [currentPage, sizes.length, reducedMotion, onSettle],
+  );
+  const turn = turnAdapter ?? createdTurn;
+  useLayoutEffect(() => {
+    if (!bookTurnRef) return;
+    bookTurnRef.current = turn;
+    return () => {
+      bookTurnRef.current = null;
+    };
+  }, [bookTurnRef, turn]);
+
   if (!spread) return null;
+
+  // Turn affordances (spec → Turn interaction): an edge strip along each
+  // spread-edge page's outer edge plus a triangular bottom-corner zone per
+  // direction. They are chrome buttons layered over the page wrappers —
+  // never over the canvas layer (PERF-6) — and cover only the edges, so
+  // interior clicks stay untouched. The hover shade rides the foreground
+  // token, subtle on light or Smart Dark pages alike.
+  const turnStrip = (direction: TurnDirection, side: "left" | "right") => (
+    <button
+      type="button"
+      data-pdf-book-turn-edge={direction}
+      aria-label={TURN_LABELS[direction]}
+      className={`absolute inset-y-0 cursor-pointer hover:bg-foreground/10 ${side === "left" ? "left-0" : "right-0"}`}
+      style={{ width: `${TURN_EDGE_WIDTH_PX}px` }}
+      onClick={direction === "prev" ? turn.retreat : turn.advance}
+    />
+  );
+  const turnCorner = (direction: TurnDirection) => (
+    <button
+      type="button"
+      data-pdf-book-turn-corner={direction}
+      aria-label={TURN_LABELS[direction]}
+      className={`absolute bottom-0 cursor-pointer hover:bg-foreground/10 ${
+        direction === "prev" ? "left-0" : "right-0"
+      }`}
+      style={{
+        width: `${TURN_CORNER_SIZE_PX}px`,
+        height: `${TURN_CORNER_SIZE_PX}px`,
+        clipPath:
+          direction === "prev"
+            ? "polygon(0 0, 0 100%, 100% 100%)"
+            : "polygon(100% 0, 100% 100%, 0 100%)",
+      }}
+      onClick={direction === "prev" ? turn.retreat : turn.advance}
+    />
+  );
 
   return (
     <div ref={contentAreaRef} data-testid="pdf-content-area" className="flex min-h-0 w-full">
       <div
         data-testid="pdf-book-view"
         data-pdf-book-rendered={[...painted].sort((a, b) => a - b).join(",")}
+        data-pdf-book-reduced-motion={reducedMotion}
         className="relative mx-auto"
         style={{ width: `${spread.bounds.width}px`, height: `${spread.bounds.height}px` }}
       >
-        {spread.pages.map((page) => (
+        {spread.pages.map((page, index) => (
           // Page chrome on the cheap wrapper, never on the canvas layer
           // (PERF-6) — same split as the scroll view's page slots.
           <div
@@ -168,8 +262,14 @@ export function PdfBookView({
               testId="pdf-book-canvas"
               onPageRendered={handlePageRendered}
             />
+            {/* The spread's outer edges turn; the gutter-side edge of a
+                paired page does not. The lone cover is both edges. */}
+            {index === 0 && turnStrip("prev", "left")}
+            {index === spread.pages.length - 1 && turnStrip("next", "right")}
           </div>
         ))}
+        {turnCorner("prev")}
+        {turnCorner("next")}
       </div>
     </div>
   );

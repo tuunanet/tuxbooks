@@ -410,6 +410,17 @@ export interface SpreadLayout {
 }
 
 /**
+ * The 0-based index of the first page of the spread containing
+ * `pageIndex` under book mode's grouping: page 1 alone as the cover,
+ * then facing pairs. This is the single home of that rule; layoutSpread
+ * builds the geometry from it and the keyboard stepping functions step
+ * between the starts it names — neither re-derives the pairing.
+ */
+export function spreadStartIndex(pageIndex: number): number {
+  return pageIndex <= 0 ? 0 : 1 + 2 * Math.floor((pageIndex - 1) / 2);
+}
+
+/**
  * The spread containing `pageIndex` under book mode's grouping: page 1
  * alone as the cover, then facing pairs, a trailing odd page alone (never
  * padded with a blank). This is the single place that rule lives; book mode
@@ -425,7 +436,7 @@ export function layoutSpread(
   gapPx: number = PAGE_GAP_PX,
 ): SpreadLayout | null {
   if (sizes.length === 0 || pageIndex < 0 || pageIndex >= sizes.length) return null;
-  const start = pageIndex <= 0 ? 0 : 1 + 2 * Math.floor((pageIndex - 1) / 2);
+  const start = spreadStartIndex(pageIndex);
   const members = sizes.slice(start, start === 0 ? 1 : start + 2);
   let left = 0;
   let height = 0;
@@ -445,6 +456,33 @@ export function layoutSpread(
     pages,
     bounds: { left: 0, top: 0, width: Math.max(0, left - gapPx), height },
   };
+}
+
+/**
+ * The 0-based page one forward turn from `pageIndex` lands on: the next
+ * spread's first page, one spread per press — never the two-press
+ * "step onto the pair's second page, step again to leave it" of a
+ * one-page step. The cover turns to the first facing spread; the last
+ * spread stays put (no wrap); an out-of-range index clamps into the
+ * document. Sibling of {@link layoutSpread} over the same grouping rule.
+ */
+export function nextSpreadPageIndex(pageIndex: number, pageCount: number): number {
+  if (pageCount <= 0) return 0;
+  const index = Math.min(Math.max(0, Math.floor(pageIndex)), pageCount - 1);
+  if (index === 0) return Math.min(1, pageCount - 1);
+  return Math.min(spreadStartIndex(index) + 2, pageCount - 1);
+}
+
+/**
+ * The 0-based page one backward turn from `pageIndex` lands on: the
+ * previous spread's LAST page (the reading position rests at the end of
+ * the spread just read). The first spread stays put; an out-of-range
+ * index is treated as its own spread start. Sibling of
+ * {@link layoutSpread} over the same grouping rule.
+ */
+export function previousSpreadPageIndex(pageIndex: number): number {
+  const start = spreadStartIndex(pageIndex);
+  return start === 0 ? 0 : start - 1;
 }
 
 /** Total height of the laid-out document (last slot bottom). */

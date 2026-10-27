@@ -46,9 +46,11 @@ function renderReader(
   {
     annotations = [],
     state = {},
+    pdfPageCount = 3,
   }: {
     annotations?: Annotation[];
     state?: Partial<AppState>;
+    pdfPageCount?: number;
   } = {},
 ) {
   const book =
@@ -62,7 +64,9 @@ function renderReader(
         });
   if (bookFormat === "pdf") {
     vi.mocked(openPdfDocumentFromBook).mockResolvedValue(
-      makeFakePdfDocument(3) as unknown as Awaited<ReturnType<typeof openPdfDocumentFromBook>>,
+      makeFakePdfDocument(pdfPageCount) as unknown as Awaited<
+        ReturnType<typeof openPdfDocumentFromBook>
+      >,
     );
   }
   invokeMock.mockClear();
@@ -497,6 +501,93 @@ describe("Reader keyboard navigation", () => {
     await waitFor(() => expect(handle.goToTotalProgression).toHaveBeenCalledWith(0));
     handle.emitRelocate({ fraction: 0, section: { current: 0, total: 2 }, totalProgression: 0 });
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("0%"));
+  });
+});
+
+describe("Reader keyboard navigation in PDF book mode", () => {
+  /** Waits until the book view has mounted and registered its adapter. */
+  async function enterBookMode(pageCount: number) {
+    renderReader("pdf", { pdfPageCount: pageCount });
+    await screen.findByTestId("pdf-canvas");
+    fireEvent.click(screen.getByTestId("reader-book-mode"));
+    await screen.findByTestId("pdf-book-view");
+  }
+
+  const indicator = () => screen.getByTestId("pdf-page-indicator");
+
+  it("steps by spread with arrows, space, and the page keys", async () => {
+    await enterBookMode(6);
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
+
+    // Cover → the first facing spread: one press.
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    // First page of a pair → the NEXT spread in one press. The old
+    // one-page step landed on page 3 inside the same spread: a dead
+    // press the user had to repeat.
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 4 of 6"));
+    // Space steps a spread too (it used to step one page).
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 6 of 6"));
+    // The last spread stays put: no wrap.
+    fireEvent.keyDown(window, { key: " " });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(indicator()).toHaveTextContent("Page 6 of 6");
+    // Shift+Space turns back one spread, to the previous spread's last
+    // page (it used to be dead outside presentation mode).
+    fireEvent.keyDown(window, { key: " ", shiftKey: true });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 5 of 6"));
+    // PageDown/PageUp step by spread instead of scrolling the container
+    // 90% (book mode has no scroll container: it fits the pair).
+    fireEvent.keyDown(window, { key: "PageDown" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 6 of 6"));
+    fireEvent.keyDown(window, { key: "PageUp" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 5 of 6"));
+  });
+
+  it("steps by spread with the toolbar page buttons", async () => {
+    await enterBookMode(6);
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
+
+    // The visible ‹/› turn by SPREAD through the same adapter the keys
+    // use — never the one-page step that landed inside the same spread
+    // and needed a second press to leave it.
+    fireEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    fireEvent.click(screen.getByTestId("pdf-next"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 4 of 6"));
+    fireEvent.click(screen.getByTestId("pdf-prev"));
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 3 of 6"));
+  });
+
+  it("turns one spread per Space press with a turn zone focused", async () => {
+    await enterBookMode(6);
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
+
+    const nextZone = document.querySelector<HTMLElement>('[data-pdf-book-turn-edge="next"]');
+    if (!nextZone) throw new Error("no next turn zone");
+    nextZone.focus();
+    // The zone's own activation (Space on keyup) is the one turn; the
+    // global Space shortcut must not fire a second spread on keydown.
+    await userEvent.keyboard(" ");
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(indicator()).toHaveTextContent("Page 2 of 6");
+  });
+
+  it("keeps presentation mode's one-page turns over book mode", async () => {
+    await enterBookMode(6);
+
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
+    // Presentation wins: one page per press, not one spread.
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 3 of 6"));
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
   });
 });
 
