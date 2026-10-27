@@ -208,6 +208,33 @@ export async function waitForRendered(
 }
 
 /**
+ * The book-mode render signal (tuxbooks-9pr.6): while the book is up the
+ * book view replaces the scroll view's slot attributes and publishes the
+ * painted spread pages as a comma-joined list on its container, so this
+ * is `waitForRendered`'s book-mode sibling — same poll shape, the spread's
+ * pages instead of one slot.
+ */
+export async function waitForPdfBookRendered(
+  page: Page,
+  pages: number[],
+  timeoutMs = 30000,
+): Promise<void> {
+  const expected = pages.join(",");
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            document
+              .querySelector("[data-testid=pdf-book-view]")
+              ?.getAttribute("data-pdf-book-rendered") ?? "",
+        ),
+      { timeout: timeoutMs, message: `book spread [${expected}] never rendered` },
+    )
+    .toBe(expected);
+}
+
+/**
  * Scroll the reader's scroll container so slot `pageNumber` sits near the
  * top of the viewport. Offsets are derived from live element geometry, not
  * hard-coded pixels.
