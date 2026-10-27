@@ -205,16 +205,17 @@ export function EpubReader({
 
   // Section documents: forward navigation keys — iframe key events never
   // reach the window registry. Routed through the turn ref so book mode
-  // animates frame-originated turns exactly like window ones.
-  const turnSpreadRef = useRef<(direction: "forward" | "backward") => void>(() => {});
+  // animates frame-originated turns exactly like window ones. One
+  // direction vocabulary across the turn path: "next"/"prev".
+  const turnSpreadRef = useRef<(direction: EpubTurnDirection) => void>(() => {});
   useEffect(() => {
     if (!handle) return;
     return handle.onLoad(({ doc }) => {
       forwardSectionKeys(doc, (key) => {
         if (key === "arrowright" || key === "space" || key === "pagedown") {
-          turnSpreadRef.current("forward");
+          turnSpreadRef.current("next");
         } else if (key === "arrowleft" || key === "pageup") {
-          turnSpreadRef.current("backward");
+          turnSpreadRef.current("prev");
         }
       });
     });
@@ -315,13 +316,15 @@ export function EpubReader({
   // turn adapter, so the rotation animation has a single path. The view
   // reads the reduced-motion media query and passes the flag into the
   // adapter; the adapter itself never reads it (spec → Reduced motion).
-  // Presentation mode keeps its own direct page stepping.
+  // Presentation mode keeps its own direct page stepping. Directions are
+  // "next"/"prev" everywhere in this path; the adapter's advance/retreat
+  // verbs are translated here, at the seam.
   const reducedMotion = usePrefersReducedMotion();
   const [turnSurface, setTurnSurface] = useState<{
     phase: EpubTurnPhase;
     direction: EpubTurnDirection;
   }>({ phase: "idle", direction: "next" });
-  const createdTurn = useMemo(
+  const createdRotationTurn = useMemo(
     () =>
       handle
         ? createRotationEpubBookTurn({
@@ -333,14 +336,14 @@ export function EpubReader({
     [handle, reducedMotion],
   );
   const bookTurnActive = preferences.bookMode && !presentationMode;
-  const turn = bookTurnActive ? (turnAdapter ?? createdTurn) : null;
-  const turnSpread = (direction: "forward" | "backward"): void => {
+  const turn = bookTurnActive ? (turnAdapter ?? createdRotationTurn) : null;
+  const turnSpread = (direction: EpubTurnDirection): void => {
     if (turn) {
-      if (direction === "forward") turn.advance();
+      if (direction === "next") turn.advance();
       else turn.retreat();
       return;
     }
-    const move = direction === "forward" ? handle?.next() : handle?.prev();
+    const move = direction === "next" ? handle?.next() : handle?.prev();
     move?.catch(() => {});
   };
   // Section-frame keys reach navigation through this ref (their effect
@@ -420,11 +423,11 @@ export function EpubReader({
   const turnPages = (move: Promise<void> | undefined): void => {
     move?.catch(() => {});
   };
-  useShortcut("arrowright", () => turnSpread("forward"));
-  useShortcut("space", () => turnSpread("forward"));
-  useShortcut("arrowleft", () => turnSpread("backward"));
-  useShortcut("pagedown", () => turnSpread("forward"));
-  useShortcut("pageup", () => turnSpread("backward"));
+  useShortcut("arrowright", () => turnSpread("next"));
+  useShortcut("space", () => turnSpread("next"));
+  useShortcut("arrowleft", () => turnSpread("prev"));
+  useShortcut("pagedown", () => turnSpread("next"));
+  useShortcut("pageup", () => turnSpread("prev"));
 
   // In-book search runs on the engine and streams matches up to the shell;
   // callbacks reach the shell through refs so re-renders never re-register
@@ -610,12 +613,7 @@ export function EpubReader({
           ...(bookTurnActive ? { "--epub-turn-phase-ms": `${EPUB_TURN_PHASE_MS}ms` } : null),
         }}
       />
-      {bookTurnActive && interactive && (
-        <EpubBookTurnZones
-          advance={() => turnSpread("forward")}
-          retreat={() => turnSpread("backward")}
-        />
-      )}
+      {bookTurnActive && interactive && <EpubBookTurnZones turn={turnSpread} />}
     </div>
   );
 }
