@@ -14,6 +14,7 @@ import { epubBookModeColumnCount, epubBookModeLayout, useReader } from "@/state/
 import { highlightCss, isHighlightColor, readerThemeFamily } from "@/lib/highlightPalette";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import type { ReaderSelection } from "./annotationModel";
+import { BOOK_SPREAD_LABEL } from "./bookModeLabels";
 import {
   createRotationEpubBookTurn,
   EPUB_TURN_PHASE_MS,
@@ -90,14 +91,6 @@ interface EpubReaderProps {
 
 /** Keys forwarded from section documents to the engine's page navigation. */
 const NAVIGATION_KEYS = new Set(["arrowright", "arrowleft", "space", "pagedown", "pageup"]);
-
-/**
- * Accessible name of the book surface (tuxbooks-9pr.8): while book mode is
- * on the reading surface is a named region so a screen reader announces
- * that a book is present — the same label the PDF book view carries, so
- * the mode reads the same in both readers.
- */
-const BOOK_SPREAD_LABEL = "Book spread";
 
 /**
  * Upper bound on the engine's restore-to-saved-locator step (a stale saved
@@ -212,16 +205,17 @@ export function EpubReader({
 
   // Section documents: forward navigation keys — iframe key events never
   // reach the window registry. Routed through the turn ref so book mode
-  // animates frame-originated turns exactly like window ones.
-  const turnSpreadRef = useRef<(direction: "forward" | "backward") => void>(() => {});
+  // animates frame-originated turns exactly like window ones. One
+  // direction vocabulary across the turn path: "next"/"prev".
+  const turnSpreadRef = useRef<(direction: EpubTurnDirection) => void>(() => {});
   useEffect(() => {
     if (!handle) return;
     return handle.onLoad(({ doc }) => {
       forwardSectionKeys(doc, (key) => {
         if (key === "arrowright" || key === "space" || key === "pagedown") {
-          turnSpreadRef.current("forward");
+          turnSpreadRef.current("next");
         } else if (key === "arrowleft" || key === "pageup") {
-          turnSpreadRef.current("backward");
+          turnSpreadRef.current("prev");
         }
       });
     });
@@ -322,32 +316,41 @@ export function EpubReader({
   // turn adapter, so the rotation animation has a single path. The view
   // reads the reduced-motion media query and passes the flag into the
   // adapter; the adapter itself never reads it (spec → Reduced motion).
-  // Presentation mode keeps its own direct page stepping.
+  // Presentation mode keeps its own direct page stepping. Directions are
+  // "next"/"prev" everywhere in this path; the adapter's advance/retreat
+  // verbs are translated here, at the seam.
   const reducedMotion = usePrefersReducedMotion();
   const [turnSurface, setTurnSurface] = useState<{
     phase: EpubTurnPhase;
     direction: EpubTurnDirection;
   }>({ phase: "idle", direction: "next" });
-  const createdTurn = useMemo(
+  const createdRotationTurn = useMemo(
     () =>
       handle
         ? createRotationEpubBookTurn({
             reducedMotion,
-            move: (direction) => (direction === "next" ? handle.next() : handle.prev()),
+            move: async (direction) => {
+              await (direction === "next" ? handle.next() : handle.prev());
+              // The settled locator, read after the move lands — the
+              // adapter's settlement report (tuxbooks-9pr review). The
+              // app position itself keeps flowing through the engine's
+              // relocate events.
+              return handle.getCurrentLocator();
+            },
             setPhase: (phase, direction) => setTurnSurface({ phase, direction }),
           })
         : null,
     [handle, reducedMotion],
   );
   const bookTurnActive = preferences.bookMode && !presentationMode;
-  const turn = bookTurnActive ? (turnAdapter ?? createdTurn) : null;
-  const turnSpread = (direction: "forward" | "backward"): void => {
+  const turn = bookTurnActive ? (turnAdapter ?? createdRotationTurn) : null;
+  const turnSpread = (direction: EpubTurnDirection): void => {
     if (turn) {
-      if (direction === "forward") turn.advance();
+      if (direction === "next") turn.advance();
       else turn.retreat();
       return;
     }
-    const move = direction === "forward" ? handle?.next() : handle?.prev();
+    const move = direction === "next" ? handle?.next() : handle?.prev();
     move?.catch(() => {});
   };
   // Section-frame keys reach navigation through this ref (their effect
@@ -427,11 +430,11 @@ export function EpubReader({
   const turnPages = (move: Promise<void> | undefined): void => {
     move?.catch(() => {});
   };
-  useShortcut("arrowright", () => turnSpread("forward"));
-  useShortcut("space", () => turnSpread("forward"));
-  useShortcut("arrowleft", () => turnSpread("backward"));
-  useShortcut("pagedown", () => turnSpread("forward"));
-  useShortcut("pageup", () => turnSpread("backward"));
+  useShortcut("arrowright", () => turnSpread("next"));
+  useShortcut("space", () => turnSpread("next"));
+  useShortcut("arrowleft", () => turnSpread("prev"));
+  useShortcut("pagedown", () => turnSpread("next"));
+  useShortcut("pageup", () => turnSpread("prev"));
 
   // In-book search runs on the engine and streams matches up to the shell;
   // callbacks reach the shell through refs so re-renders never re-register
@@ -617,12 +620,7 @@ export function EpubReader({
           ...(bookTurnActive ? { "--epub-turn-phase-ms": `${EPUB_TURN_PHASE_MS}ms` } : null),
         }}
       />
-      {bookTurnActive && interactive && (
-        <EpubBookTurnZones
-          advance={() => turnSpread("forward")}
-          retreat={() => turnSpread("backward")}
-        />
-      )}
+      {bookTurnActive && interactive && <EpubBookTurnZones turn={turnSpread} />}
     </div>
   );
 }

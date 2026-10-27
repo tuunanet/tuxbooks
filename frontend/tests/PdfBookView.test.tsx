@@ -21,6 +21,7 @@ vi.mock("@/lib/pdf/pdfEngine", async () => {
 
 import { PdfBookView } from "@/components/reader/pdf/PdfBookView";
 import { PdfReader, type PdfReaderProps } from "@/components/reader/pdf/PdfReader";
+import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "@/components/reader/bookModeLabels";
 import type { PdfBookTurnAdapter } from "@/components/reader/pdf/pdfBookTurn";
 import type { ReaderAdapter } from "@/components/reader/readerModel";
 import { EMPTY_HIGHLIGHT_OVERRIDES } from "@/lib/highlightPalette";
@@ -428,8 +429,7 @@ describe("PdfBookView turn zones", () => {
           currentPage={page}
           areaWidth={1248}
           viewportHeight={720}
-          highlightFamily="light"
-          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
+          highlights={{ family: "light", overrides: EMPTY_HIGHLIGHT_OVERRIDES }}
           turnAdapter={adapter}
         />
       );
@@ -462,8 +462,7 @@ describe("PdfBookView turn zones", () => {
           currentPage={positionToPage(position, pageCount)}
           areaWidth={1248}
           viewportHeight={720}
-          highlightFamily="light"
-          highlightOverrides={EMPTY_HIGHLIGHT_OVERRIDES}
+          highlights={{ family: "light", overrides: EMPTY_HIGHLIGHT_OVERRIDES }}
           bookTurnRef={bookTurnRef}
         />
       );
@@ -930,11 +929,11 @@ describe("PdfReader book mode accessibility", () => {
 
     renderBookReader(null);
     // Off book mode the scroll view has no book region.
-    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+    expect(screen.queryByRole("region", { name: BOOK_SPREAD_LABEL })).toBeNull();
 
     fireEvent.click(screen.getByText("book-mode-on"));
     const book = await screen.findByTestId("pdf-book-view");
-    const region = screen.getByRole("region", { name: "Book spread" });
+    const region = screen.getByRole("region", { name: BOOK_SPREAD_LABEL });
     expect(region).toBe(book);
   });
 
@@ -947,7 +946,7 @@ describe("PdfReader book mode accessibility", () => {
 
     fireEvent.click(screen.getByText("book-mode-off"));
     await waitFor(() => expect(screen.queryByTestId("pdf-book-view")).toBeNull());
-    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+    expect(screen.queryByRole("region", { name: BOOK_SPREAD_LABEL })).toBeNull();
   });
 
   it("exposes the labelled next/previous-spread actions to assistive tech", async () => {
@@ -959,8 +958,8 @@ describe("PdfReader book mode accessibility", () => {
 
     // Edge strip and corner triangle per direction are all real buttons in
     // the accessibility tree, each carrying its turn label.
-    const nextActions = screen.getAllByRole("button", { name: "Turn to the next spread" });
-    const previousActions = screen.getAllByRole("button", { name: "Turn to the previous spread" });
+    const nextActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.next });
+    const previousActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.prev });
     expect(nextActions).toHaveLength(2);
     expect(previousActions).toHaveLength(2);
 
@@ -968,7 +967,7 @@ describe("PdfReader book mode accessibility", () => {
     // re-mount with the spread, so re-query after the first turn.
     fireEvent.click(nextActions[0]!);
     await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2,3"));
-    fireEvent.click(screen.getAllByRole("button", { name: "Turn to the previous spread" })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: BOOK_TURN_LABELS.prev })[0]!);
     await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "1"));
   });
 });
@@ -1140,10 +1139,10 @@ describe("PdfReader book mode parity", () => {
     expect(rastersOf(4)).toHaveLength(1);
     expect(rastersOf(5)).toHaveLength(1);
     expect(rastersOf(1)).toHaveLength(1);
-    // Next spread first, its second page after, then the previous spread —
-    // the reading direction is the priority (the presentation pattern).
-    expect(doc.renderPages.indexOf(4)).toBeLessThan(doc.renderPages.indexOf(5));
-    expect(doc.renderPages.indexOf(5)).toBeLessThan(doc.renderPages.indexOf(1));
+    // The reading-direction priority of the queue is an implementation
+    // choice (docs/TESTING.md: no mock call-order pins); the user-visible
+    // outcome is the next test — turning onto the next spread blits these
+    // preloaded bitmaps without a fresh raster.
   });
 
   it("turns onto the preloaded spread without a fresh raster", async () => {

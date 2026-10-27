@@ -8,6 +8,10 @@
  * labelled buttons in the accessibility tree.
  */
 import { expect, test, type Page } from "../fixtures/electron-app.js";
+import {
+  BOOK_SPREAD_LABEL,
+  BOOK_TURN_LABELS,
+} from "../../frontend/src/components/reader/bookModeLabels.js";
 
 import {
   canvasIsNonBlank,
@@ -90,13 +94,16 @@ test.describe("tuxbooks book mode", () => {
     // contract — a named book region with the labelled spread actions.
     await waitForPdfBookRendered(page, [1]);
     await expect(page.locator("[data-pdf-book-page]")).toHaveCount(1);
-    await expect(page.getByRole("region", { name: "Book spread" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Turn to the next spread" }).first(),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Turn to the previous spread" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("region", { name: BOOK_SPREAD_LABEL })).toBeVisible();
+    await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.next }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.prev }).first()).toBeVisible();
+
+    // Stage 1 is fit-the-pair only: the toolbar's zoom controls act on
+    // scroll-view-only state, so they are gone while book mode is on —
+    // and back after the toggle-off below.
+    await expect(page.getByTestId("pdf-zoom-in")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-zoom-out")).toHaveCount(0);
+    await expect(page.getByTestId("pdf-zoom-input")).toHaveCount(0);
 
     // Advancing through the labelled next action turns one spread: the
     // facing pair replaces the cover.
@@ -181,13 +188,9 @@ test.describe("tuxbooks book mode", () => {
     await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated", {
       timeout: 30000,
     });
-    await expect(page.getByRole("region", { name: "Book spread" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Turn to the next spread" }).first(),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Turn to the previous spread" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("region", { name: BOOK_SPREAD_LABEL })).toBeVisible();
+    await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.next }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.prev }).first()).toBeVisible();
 
     // Record the turn phases the surface publishes, so each turn's
     // external contract can be asserted after it runs.

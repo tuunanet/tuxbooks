@@ -3,7 +3,9 @@ import "./epubBookTurn.css";
 /**
  * The EPUB turn adapter seam (tuxbooks-9pr.7, spec tuxbooks-9pr → Turn
  * adapter): book mode asks it to advance or retreat by one spread, and
- * whatever renders the turn does the rest. The spread itself is the
+ * whatever renders the turn does the rest — each call resolves with the
+ * settled spread's locator, the report-back the PDF adapter does through
+ * its onSettle host. The spread itself is the
  * engine's — in paginated flow at two columns one `goForward`/`goBackward`
  * is exactly one spread, so unlike the PDF side there is no grouping rule
  * to compute here (layoutSpread stays the single home of that rule, in
@@ -23,10 +25,14 @@ export interface EpubBookTurnAdapter {
    * owns that preference.
    */
   readonly reducedMotion: boolean;
-  /** Turns forward one spread. */
-  advance(): void;
-  /** Turns back one spread. */
-  retreat(): void;
+  /**
+   * Turns forward one spread; resolves with the settled spread's locator
+   * (null when the engine cannot name one or the press was dropped while
+   * a turn was in flight).
+   */
+  advance(): Promise<string | null>;
+  /** Turns back one spread; resolves with the settled spread's locator. */
+  retreat(): Promise<string | null>;
 }
 
 /** Which way a turn goes; mirrors the zone direction attributes. */
@@ -42,8 +48,13 @@ export type EpubTurnPhase = "idle" | "out" | "in";
 
 /** What the rotation adapter needs from its host to turn a spread. */
 export interface EpubBookTurnHost {
-  /** Moves the engine one spread; resolves when the new spread is in place. */
-  move: (direction: EpubTurnDirection) => Promise<void>;
+  /**
+   * Moves the engine one spread; resolves with the settled locator (the
+   * position the move landed on, or null when the engine cannot name
+   * one). This is the adapter's settlement report — the EPUB twin of the
+   * PDF adapter's onSettle (spec → Turn adapter).
+   */
+  move: (direction: EpubTurnDirection) => Promise<string | null>;
   /** Drives the surface's rotation phase (see `EpubTurnPhase`). */
   setPhase: (phase: EpubTurnPhase, direction: EpubTurnDirection) => void;
   /**
@@ -65,26 +76,29 @@ export const EPUB_TURN_PHASE_MS = 240;
  */
 export function createRotationEpubBookTurn(host: EpubBookTurnHost): EpubBookTurnAdapter {
   let turning = false;
-  const turn = (direction: EpubTurnDirection): void => {
+  const turn = (direction: EpubTurnDirection): Promise<string | null> => {
     if (host.reducedMotion) {
-      host.move(direction).catch(() => {});
-      return;
+      return host.move(direction).catch(() => null);
     }
-    if (turning) return;
+    // A press during an animated turn is dropped, not queued: it settles
+    // nothing, so it resolves null.
+    if (turning) return Promise.resolve(null);
     turning = true;
-    void (async () => {
+    return (async () => {
+      let settled: string | null = null;
       try {
         host.setPhase("out", direction);
         await wait(EPUB_TURN_PHASE_MS);
         // The engine swap lands while the surface is edge-on; a failed
         // move still rotates back in, so the reader never sticks mid-turn.
-        await host.move(direction).catch(() => {});
+        settled = await host.move(direction).catch(() => null);
         host.setPhase("in", direction);
         await wait(EPUB_TURN_PHASE_MS);
       } finally {
         host.setPhase("idle", direction);
         turning = false;
       }
+      return settled;
     })();
   };
   return {

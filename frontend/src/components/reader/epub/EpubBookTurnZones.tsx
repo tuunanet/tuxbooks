@@ -3,42 +3,35 @@
  * edge strip per side plus a triangular bottom-corner zone per direction,
  * overlaid pointer-transparent except on the zones themselves so interior
  * clicks and text selection stay untouched. Chrome buttons, mirroring the
- * PDF book view's zones; which turn they trigger is the caller's adapter.
+ * PDF book view's zones; the caller routes each direction through its
+ * turn path (the reader's adapter in book mode).
  */
 
-const TURN_LABELS = {
-  prev: "Turn to the previous spread",
-  next: "Turn to the next spread",
-} as const;
-
-type TurnDirection = keyof typeof TURN_LABELS;
+import { BOOK_TURN_LABELS } from "../bookModeLabels";
+import type { EpubTurnDirection } from "./epubBookTurn";
 
 export function EpubBookTurnZones({
-  advance,
-  retreat,
+  turn,
 }: {
-  /** Turns one spread forward (the reading direction's next spread). */
-  advance: () => void;
-  /** Turns one spread back. */
-  retreat: () => void;
+  /** Turns one spread in the given direction ("next" is the reading direction). */
+  turn: (direction: EpubTurnDirection) => void;
 }) {
-  const onClick = (direction: TurnDirection) => (direction === "next" ? advance : retreat);
-  const edgeStrip = (direction: TurnDirection) => (
+  const edgeStrip = (direction: EpubTurnDirection) => (
     <button
       type="button"
       data-epub-book-turn-edge={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`pointer-events-auto absolute inset-y-0 w-8 cursor-pointer hover:bg-foreground/10 ${
         direction === "next" ? "right-0" : "left-0"
       }`}
-      onClick={onClick(direction)}
+      onClick={() => turn(direction)}
     />
   );
-  const turnCorner = (direction: TurnDirection) => (
+  const turnCorner = (direction: EpubTurnDirection) => (
     <button
       type="button"
       data-epub-book-turn-corner={direction}
-      aria-label={TURN_LABELS[direction]}
+      aria-label={BOOK_TURN_LABELS[direction]}
       className={`pointer-events-auto absolute bottom-0 h-[72px] w-[72px] cursor-pointer hover:bg-foreground/10 ${
         direction === "next" ? "right-0" : "left-0"
       }`}
@@ -48,7 +41,7 @@ export function EpubBookTurnZones({
             ? "polygon(100% 0, 100% 100%, 0 100%)"
             : "polygon(0 0, 0 100%, 100% 100%)",
       }}
-      onClick={onClick(direction)}
+      onClick={() => turn(direction)}
     />
   );
   return (
