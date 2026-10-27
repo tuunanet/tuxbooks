@@ -85,6 +85,14 @@ const TURN_LABELS = {
   next: "Turn to the next spread",
 } as const;
 
+/**
+ * Accessible name of the spread surface (tuxbooks-9pr.8): the book view is
+ * a named region so a screen reader announces that a book is present, and
+ * the EPUB book surface uses the same label so the mode reads the same in
+ * both readers.
+ */
+const BOOK_SPREAD_LABEL = "Book spread";
+
 type TurnDirection = keyof typeof TURN_LABELS;
 
 /**
@@ -254,6 +262,10 @@ export function PdfBookView({
     <div ref={contentAreaRef} data-testid="pdf-content-area" className="flex min-h-0 w-full">
       <div
         data-testid="pdf-book-view"
+        // Assistive tech (tuxbooks-9pr.8): the spread surface is a named
+        // region, announced when the reading area takes focus.
+        role="region"
+        aria-label={BOOK_SPREAD_LABEL}
         data-pdf-book-rendered={[...painted].sort((a, b) => a - b).join(",")}
         data-pdf-book-reduced-motion={reducedMotion}
         className="relative mx-auto"

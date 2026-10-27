@@ -972,4 +972,47 @@ describe("EpubReader book mode turn", () => {
     expect(turnSurface()).toHaveAttribute("data-epub-turn-phase", "idle");
     expect(handle.next).toHaveBeenCalledTimes(1);
   });
+
+  // tuxbooks-9pr.8: the EPUB book surface must match the PDF book view —
+  // a named region announcing the book, with the labelled spread actions
+  // exposed in the accessibility tree.
+  it("names and roles the reading surface as the book container while book mode is on", async () => {
+    mockHappyPath(null);
+    renderBookModeReader();
+    await enableBookMode();
+
+    const region = screen.getByRole("region", { name: "Book spread" });
+    expect(region).toBe(turnSurface());
+  });
+
+  it("keeps the book container role off the plain reading surface", async () => {
+    mockHappyPath(null);
+    renderReader();
+    await waitFor(() =>
+      expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
+    );
+
+    expect(screen.queryByRole("region", { name: "Book spread" })).toBeNull();
+  });
+
+  it("exposes the labelled next/previous-spread actions to assistive tech", async () => {
+    mockHappyPath(null);
+    const advance = vi.fn();
+    const retreat = vi.fn();
+    renderBookModeReader({ reducedMotion: false, advance, retreat });
+    await enableBookMode();
+
+    // Edge strip and corner triangle per direction are all real buttons in
+    // the accessibility tree, each carrying its turn label.
+    const nextActions = screen.getAllByRole("button", { name: "Turn to the next spread" });
+    const previousActions = screen.getAllByRole("button", { name: "Turn to the previous spread" });
+    expect(nextActions).toHaveLength(2);
+    expect(previousActions).toHaveLength(2);
+
+    // The named actions drive the turn seam, not just the zones' chrome.
+    fireEvent.click(nextActions[0]!);
+    fireEvent.click(previousActions[0]!);
+    expect(advance).toHaveBeenCalledTimes(1);
+    expect(retreat).toHaveBeenCalledTimes(1);
+  });
 });
