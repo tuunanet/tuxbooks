@@ -601,16 +601,17 @@ describe("PdfReader book mode position fidelity", () => {
   });
 
   /**
-   * Mounts the reader over a 6-page document with a 720px scroll container
-   * and the book-mode probes. The measured content-area width rides a
-   * prototype getter because the content area remounts across a book-mode
+   * Mounts the reader over a `pageCount`-page document with a 720px scroll
+   * container and the book-mode probes. The measured content-area width rides
+   * a prototype getter because the content area remounts across a book-mode
    * toggle: in a live browser the width is still there after the remount,
    * and an instance-level stub would silently rescale the document on exit.
    */
   async function renderFidelityReader({
     presentationMode = false,
-  }: { presentationMode?: boolean } = {}) {
-    openDocumentMock.mockResolvedValue(makeFakePdfDocument(6) as unknown as EngineDocument);
+    pageCount = 6,
+  }: { presentationMode?: boolean; pageCount?: number } = {}) {
+    openDocumentMock.mockResolvedValue(makeFakePdfDocument(pageCount) as unknown as EngineDocument);
     mockInvoke({ get_reading_progress: null, save_reading_progress: null });
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
@@ -631,15 +632,15 @@ describe("PdfReader book mode position fidelity", () => {
           />
           <PreferenceProbe label="book-mode-on" patch={{ bookMode: true }} />
           <PreferenceProbe label="book-mode-off" patch={{ bookMode: false }} />
-          <PositionProbe page={1} pageCount={6} />
-          <PositionProbe page={6} pageCount={6} />
+          <PositionProbe page={1} pageCount={pageCount} />
+          <PositionProbe page={pageCount} pageCount={pageCount} />
         </ReaderProvider>
       </ShortcutProvider>
     );
     const view = render(tree(presentationMode));
     await screen.findByTestId("pdf-canvas");
     await waitFor(() =>
-      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 6"),
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent(`Page 1 of ${pageCount}`),
     );
     stubScrollInvariantGeometry(container);
     return {
@@ -723,6 +724,34 @@ describe("PdfReader book mode position fidelity", () => {
     fireEvent.scroll(container);
     await settleScrollSamples();
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 4 of 6");
+  });
+
+  it("round-trips a two-page document through book mode and back onto its slot", async () => {
+    const { container } = await renderFidelityReader({ pageCount: 2 });
+
+    // Scroll into page 2: the reading anchor (viewport top + 25%) sits in
+    // the trailing page.
+    scrollTo(container, slotTop(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 2"),
+    );
+
+    // Entry shows the spread that contains the anchor page. A two-page
+    // document groups as cover alone then the back page alone (the
+    // pagination rule), so the anchor's page is its whole spread.
+    fireEvent.click(screen.getByText("book-mode-on"));
+    const book = await screen.findByTestId("pdf-book-view");
+    await waitFor(() => expect(book).toHaveAttribute("data-pdf-book-rendered", "2"));
+
+    // Exit lands on page 2's slot top before any scroll event, and the
+    // first scroll confirms it rather than page 1.
+    fireEvent.click(screen.getByText("book-mode-off"));
+    await screen.findByTestId("pdf-document");
+    expect(container.scrollTop).toBe(slotTop(2));
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 2");
+    fireEvent.scroll(container);
+    await settleScrollSamples();
+    expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 2");
   });
 
   it("keeps the page a book turn settled on through the round trip", async () => {
