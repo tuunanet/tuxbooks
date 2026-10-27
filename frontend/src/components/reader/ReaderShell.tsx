@@ -413,14 +413,13 @@ export function ReaderShell() {
   }, [exitPresentation, presentation]);
   useShortcut(book !== null ? "mod+l" : null, togglePresentation);
   useShortcut(presentation ? "escape" : null, exitPresentation);
-  // Book mode keyboard path (spec tuxbooks-9pr, stories 25/26): `b` flips
-  // the same shared flag as the header toggle, so both readers get one
-  // chord. Gated like the toolbar control's parent chrome: no flip with no
-  // book open, and none while presenting — an invisible flip would surprise
-  // the reader on exit.
-  useShortcut(book !== null && !presentation ? READER_BOOK_MODE_SHORTCUT : null, () =>
-    setPreferences({ bookMode: !preferences.bookMode }),
+  const toggleBookMode = useCallback(
+    () => setPreferences({ bookMode: !preferences.bookMode }),
+    [preferences.bookMode, setPreferences],
   );
+  // Not registered while presenting: an invisible flip would surprise the
+  // reader on exit.
+  useShortcut(book !== null && !presentation ? READER_BOOK_MODE_SHORTCUT : null, toggleBookMode);
   useEffect(() => {
     if (!presentation) return;
     const onFullscreenChange = () => {
@@ -777,13 +776,16 @@ export function ReaderShell() {
                 size="icon-sm"
                 data-testid="reader-book-mode"
                 aria-label="Book mode"
+                aria-keyshortcuts={formatShortcutAria(READER_BOOK_MODE_SHORTCUT)}
                 aria-pressed={preferences.bookMode}
-                onClick={() => setPreferences({ bookMode: !preferences.bookMode })}
+                onClick={toggleBookMode}
               >
                 <BookOpen className={preferences.bookMode ? "fill-current" : undefined} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Book mode</TooltipContent>
+            <TooltipContent>
+              Book mode ({formatShortcutDisplay(READER_BOOK_MODE_SHORTCUT)})
+            </TooltipContent>
           </Tooltip>
 
           <ReaderAppearance

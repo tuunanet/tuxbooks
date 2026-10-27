@@ -2262,6 +2262,22 @@ describe("Reader book mode shortcut", () => {
     expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("keeps b out of the page number field", async () => {
+    renderReader("pdf");
+    await screen.findByTestId("pdf-canvas");
+
+    const input = await screen.findByTestId("pdf-page-input");
+    await waitFor(() => expect(input).toBeEnabled());
+    await userEvent.click(input);
+    // The letter belongs to the field: editable-target suppression must
+    // keep the chord away from the registry.
+    await userEvent.keyboard("b");
+    expect(input).toHaveValue("b");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reader-book-mode")).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("stays inert while presenting and resumes after leaving", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
