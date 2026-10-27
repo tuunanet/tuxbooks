@@ -10,6 +10,7 @@ vi.mock("@/lib/epub/readiumEngine", async () => {
 
 import { EpubReader } from "@/components/reader/EpubReader";
 import { EPUB_TURN_PHASE_MS } from "@/components/reader/epub/epubBookTurn";
+import type { EpubBookTurnAdapter } from "@/components/reader/epub/epubBookTurn";
 import { BOOK_SPREAD_LABEL, BOOK_TURN_LABELS } from "@/components/reader/bookModeLabels";
 import { ReadiumEpubHandle } from "@/lib/epub/readiumEngine";
 import { epubHrefJump, type ReaderAdapter } from "@/components/reader/readerModel";
@@ -813,11 +814,7 @@ describe("EpubReader book mode turn", () => {
    * an injected turn adapter — the component-test seam, mirroring how
    * PdfBookView takes a scripted adapter.
    */
-  function renderBookModeReader(turnAdapter?: {
-    reducedMotion: boolean;
-    advance: () => void;
-    retreat: () => void;
-  }) {
+  function renderBookModeReader(turnAdapter?: EpubBookTurnAdapter) {
     render(
       <ShortcutProvider>
         <ReaderProvider>

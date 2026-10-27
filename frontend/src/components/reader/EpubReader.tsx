@@ -329,7 +329,14 @@ export function EpubReader({
       handle
         ? createRotationEpubBookTurn({
             reducedMotion,
-            move: (direction) => (direction === "next" ? handle.next() : handle.prev()),
+            move: async (direction) => {
+              await (direction === "next" ? handle.next() : handle.prev());
+              // The settled locator, read after the move lands — the
+              // adapter's settlement report (tuxbooks-9pr review). The
+              // app position itself keeps flowing through the engine's
+              // relocate events.
+              return handle.getCurrentLocator();
+            },
             setPhase: (phase, direction) => setTurnSurface({ phase, direction }),
           })
         : null,
