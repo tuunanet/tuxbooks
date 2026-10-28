@@ -124,6 +124,20 @@ function pruneOldArtifacts(): void {
 }
 
 /**
+ * The opt-in library benchmark generates its corpus before the app launches.
+ * The fixture path and count live with the other test fixtures; the spec
+ * reads the same constants, so setup and assertions cannot drift.
+ */
+function generateLibraryBenchCorpus(): void {
+  mkdirSync(libraryBenchCorpusDir, { recursive: true });
+  execFileSync("python3", [
+    path.join(repoRoot, "scripts", "make-epub-corpus.py"),
+    libraryBenchCorpusDir,
+    String(LIBRARY_BENCH_BOOK_COUNT),
+  ]);
+}
+
+/**
  * Prepare the isolated scratch environment for one invocation. Playwright's
  * globalSetup calls this exactly once per run; workers inherit the
  * environment through process.env (re-set here and in the launch fixture).
@@ -137,17 +151,7 @@ export function prepareEnvironment(seeded: boolean): void {
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
   mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
 
-  // The opt-in library benchmark generates its corpus before the app
-  // launches. The fixture path and count live with the other test fixtures;
-  // the spec reads the same constants, so setup and assertions cannot drift.
-  if (process.env.E2E_PHASE === "bench-library") {
-    mkdirSync(libraryBenchCorpusDir, { recursive: true });
-    execFileSync("python3", [
-      path.join(repoRoot, "scripts", "make-epub-corpus.py"),
-      libraryBenchCorpusDir,
-      String(LIBRARY_BENCH_BOOK_COUNT),
-    ]);
-  }
+  if (process.env.E2E_PHASE === "bench-library") generateLibraryBenchCorpus();
 
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
