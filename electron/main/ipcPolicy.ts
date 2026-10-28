@@ -150,28 +150,51 @@ function validateIssuedPaths(
     return;
   }
   if (method === "sync_connect") {
-    requireLibraryPath(record.path, "path");
-    requireIssued(issued, "sync-folder", record.path, "path");
-    const deviceName = record.deviceName;
-    if (
-      deviceName !== undefined &&
-      (typeof deviceName !== "string" || deviceName.trim().length === 0 || deviceName.length > 80)
-    ) {
-      throw policyError("invalid deviceName");
-    }
-    const confirmLibraryId = record.confirmLibraryId;
-    if (
-      confirmLibraryId !== undefined &&
-      (typeof confirmLibraryId !== "string" || !/^[0-9a-f]{32}$/.test(confirmLibraryId))
-    ) {
-      throw policyError("invalid confirmLibraryId");
-    }
+    validateSyncConnect(record, issued);
     return;
   }
   if (method === "set_book_cover") {
     requireBookId(record);
   }
   requireIssued(issued, "cover-image", record.imagePath, "imagePath");
+}
+
+function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPaths): void {
+  requireLibraryPath(record.path, "path");
+  requireIssued(issued, "sync-folder", record.path, "path");
+  const deviceName = record.deviceName;
+  if (
+    deviceName !== undefined &&
+    (typeof deviceName !== "string" || deviceName.trim().length === 0 || deviceName.length > 80)
+  ) {
+    throw policyError("invalid deviceName");
+  }
+  const confirmLibraryId = record.confirmLibraryId;
+  if (
+    confirmLibraryId !== undefined &&
+    (typeof confirmLibraryId !== "string" || !/^[0-9a-f]{32}$/.test(confirmLibraryId))
+  ) {
+    throw policyError("invalid confirmLibraryId");
+  }
+}
+
+/** Sync methods with a small id or name payload; true when handled. */
+function validateSyncShape(method: string, record: Record<string, unknown>): boolean {
+  if (method === "sync_dismiss_issue" || method === "sync_restore") {
+    const id = record.id;
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
+      throw policyError("invalid sync id");
+    }
+    return true;
+  }
+  if (method === "sync_set_device_name") {
+    const name = record.name;
+    if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
+      throw policyError("invalid device name");
+    }
+    return true;
+  }
+  return false;
 }
 
 /** Per-method parameter shapes that do not carry issued paths. */
@@ -198,18 +221,7 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
   if (method === "create_collection" && typeof record.name !== "string") {
     throw policyError("invalid name");
   }
-  if (method === "sync_dismiss_issue" || method === "sync_restore") {
-    const id = record.id;
-    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
-      throw policyError("invalid sync id");
-    }
-    return;
-  }
-  if (method === "sync_set_device_name") {
-    const name = record.name;
-    if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
-      throw policyError("invalid device name");
-    }
+  if (validateSyncShape(method, record)) {
     return;
   }
   if (BOOK_ID_METHODS.has(method)) {
