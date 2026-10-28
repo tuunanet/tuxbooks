@@ -14,7 +14,8 @@
     "test:hidpi": "playwright test --project=hidpi",
     "test:capture": "playwright test --project=capture",
     "test:bench": "playwright test --project=bench",
-    "test:bench-library": "playwright test --project=bench-library"
+    "test:bench-library": "playwright test --project=bench-library",
+    "test:library-thumb": "playwright test --project=library-thumb"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
