@@ -20,11 +20,16 @@ import {
 import { artifactsDir } from "../setup/environment.js";
 import { benchBookTitles, benchPdfFixture } from "../setup/fixtures.js";
 import {
+  frameStats,
+  percentile,
+  prepareBenchEnvironment,
+  sampleIdleFrames,
+  summarize,
+} from "../setup/bench-helpers.js";
+import {
   recordScenario,
   readBenchReport,
-  type BenchEnvironment,
   type BenchReport,
-  type FrameStats,
   type PdfRapidScrollResult,
 } from "../setup/bench-report.js";
 
@@ -106,41 +111,6 @@ interface RapidHandle {
 }
 
 const reportFile = path.join(artifactsDir, "bench-results.json");
-
-/** p-value of a sample list (0.5 = median); -1 when empty. */
-function percentile(values: number[] | undefined, p: number): number {
-  if (!values || values.length === 0) return -1;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!;
-}
-
-function frameStats(frames: number[] | undefined): FrameStats {
-  const values = frames ?? [];
-  const over = (limit: number) =>
-    values.length === 0 ? 0 : (values.filter((f) => f > limit).length / values.length) * 100;
-  return {
-    n: values.length,
-    p50: percentile(values, 0.5),
-    p95: percentile(values, 0.95),
-    max: values.length ? Math.max(...values) : -1,
-    pctOver16: Number(over(16.7).toFixed(1)),
-    pctOver32: Number(over(32).toFixed(1)),
-    pctOver50: Number(over(50).toFixed(1)),
-  };
-}
-
-function summarize(label: string, stats?: FrameStats | null): string {
-  const s = stats ?? { n: 0, p50: -1, p95: -1, max: -1, pctOver16: 0, pctOver32: 0, pctOver50: 0 };
-  return (
-    `${label}: n=${s.n}` +
-    ` p50=${s.p50}` +
-    ` p95=${s.p95}` +
-    ` max=${s.max}` +
-    ` >16.7ms:${s.pctOver16}%` +
-    ` >32ms:${s.pctOver32}%` +
-    ` >50ms:${s.pctOver50}%`
-  );
-}
 
 /**
  * Interaction latency: automation-visible time from a reader interaction
@@ -413,39 +383,6 @@ const dragScroll = (
   );
 
 /**
- * Idle frame-cadence sample: records rAF intervals while nothing scrolls.
- * This is the environment's baseline cadence (compositor + display) — drag
- * deltas are only meaningful relative to it: if idle already runs at
- * ~40 ms, the ceiling is the rendering stack, not scroll jank.
- *
- * Registration cadence must be FASTER than the frame clock (8 ms): a 16 ms
- * interval beats against 16.7 ms frames and lands some ticks in the same
- * frame, biasing deltas to double intervals.
- */
-const sampleIdleFrames = (page: Page, maxFrames: number): Promise<number[]> =>
-  page.evaluate(async (max) => {
-    const stamps: number[] = [];
-    let last = performance.now();
-    let count = 0;
-    await new Promise<void>((resolve) => {
-      const timer = window.setInterval(() => {
-        requestAnimationFrame((now) => {
-          if (now > last) {
-            stamps.push(now - last);
-            last = now;
-          }
-        });
-        count += 1;
-        if (count >= max) {
-          window.clearInterval(timer);
-          resolve();
-        }
-      }, 8);
-    });
-    return stamps;
-  }, maxFrames);
-
-/**
  * Install the rapid-scroll sampler (issue tuxbooks-x27.1): every 25 ms it
  * records the `data-render-state` of the slot under the viewport's top edge
  * — the page the reader is looking at — plus wheel arrivals and scroll
@@ -605,74 +542,6 @@ const finishRapidScroll = (page: Page): Promise<RapidSampled> =>
   });
 
 test.describe("reader performance benchmark", () => {
-  /**
-   * Reference conditions are a maximized window (docs/PERFORMANCE.md); an
-   * explicit `just bench-reader WxH` argument overrides for targeted
-   * geometries. The applied size is what the report records. Sizing goes
-   * through the renderer's window.resizeTo — the real OS window is what
-   * the reader lays out against. Idempotent; called at each scenario start.
-   */
-  async function prepareBenchEnvironment(page: Page): Promise<BenchEnvironment> {
-    const environment: BenchEnvironment = {
-      userAgent: await page.evaluate(() => navigator.userAgent),
-      devicePixelRatio: await page.evaluate(() => window.devicePixelRatio),
-      window: { width: null, height: null },
-      pdfRenderInfo: null,
-    };
-    const requested = process.env.BENCH_WINDOW_SIZE ?? "";
-    const match = /^(\d+)x(\d+)$/.exec(requested);
-    if (match) {
-      await page.evaluate(
-        ([w, h]) => window.resizeTo(w!, h!),
-        [Number(match[1]), Number(match[2])],
-      );
-    } else {
-      await page.evaluate(() =>
-        window.resizeTo(window.screen.availWidth, window.screen.availHeight),
-      );
-    }
-    await expect
-      .poll(async () => {
-        const target = match
-          ? { width: Number(match[1]), height: Number(match[2]) }
-          : await page.evaluate(() => ({
-              width: window.screen.availWidth,
-              height: window.screen.availHeight,
-            }));
-        // Re-issue the resize each sample: the renderer-applied size can
-        // lag the request, and a window that drifted back to its default
-        // geometry must be re-driven, not just awaited.
-        await page.evaluate(([w, h]) => window.resizeTo(w!, h!), [target.width, target.height]);
-        await page.waitForTimeout(200);
-        const size = await page.evaluate(() => ({
-          width: window.innerWidth,
-          height: window.outerHeight,
-        }));
-        // Height tolerance is wider than width: outerHeight includes the WM
-        // title bar, and some desktops report an availHeight the granted
-        // outer size can never reach by exactly that decoration height
-        // (observed: a stable 28px shortfall). The bench needs a big,
-        // stable window — the last few title-bar pixels are immaterial.
-        const ok =
-          Math.abs(size.width - target.width) <= 8 && Math.abs(size.height - target.height) <= 40;
-        if (!ok) {
-          console.log(`[diag] size=${JSON.stringify(size)} target=${JSON.stringify(target)}`);
-        }
-        return ok;
-      })
-      .toBe(true);
-    // The applied size from the renderer.
-    const applied = await page.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.outerHeight,
-    }));
-    environment.window = { width: applied.width, height: applied.height };
-    console.log(
-      `[bench] window ${applied.width}x${applied.height} dpr ${environment.devicePixelRatio}`,
-    );
-    return environment;
-  }
-
   test("pdf: page-walk render→blit latency from mid-book with budget checks", async ({ page }) => {
     test.setTimeout(BENCH_TEST_TIMEOUT_MS);
     test.skip(!existsSync(benchPdfFixture), "gitignored real-book fixture absent on this machine");

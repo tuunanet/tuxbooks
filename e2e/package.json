@@ -13,7 +13,8 @@
     "test:regressions": "playwright test --project=regressions",
     "test:hidpi": "playwright test --project=hidpi",
     "test:capture": "playwright test --project=capture",
-    "test:bench": "playwright test --project=bench"
+    "test:bench": "playwright test --project=bench",
+    "test:bench-library": "playwright test --project=bench-library"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

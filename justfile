@@ -348,6 +348,14 @@ _bench_timeout := if os() == "linux" { "timeout --kill-after=15 900" } else { ""
 bench-reader WINDOW_SIZE="": build-debug
     {{_bench_timeout}} env E2E_PHASE=bench E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench
 
+# All Books Grid performance benchmark against 10,000 generated books. E2E
+# setup writes the corpus under the gitignored .build directory and the spec
+# imports it through the real bulk-import path. HEADED and opt-in: never part
+# of test-e2e or CI. Set BENCH_ENFORCE_P95_MS to turn the measured p95 into a
+# local pass/fail gate.
+bench-library WINDOW_SIZE="": build-debug
+    {{_bench_timeout}} env E2E_PHASE=bench-library E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench-library
+
 # Opt-in large fixture tiers (docs/TESTING.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.
 

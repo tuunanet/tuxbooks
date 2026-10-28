@@ -88,6 +88,16 @@ export interface EpubScrollDragResult {
   drag: (FrameStats & { wallMs: number; distancePx: number; sectionJumps: number }) | null;
 }
 
+export interface LibraryGridScrollResult {
+  bookCount: number;
+  idle: FrameStats;
+  scroll: FrameStats & {
+    wallMs: number;
+    distancePx: number;
+    maxObservedMountedCards: number;
+  };
+}
+
 /** One section per scenario; scenarios absent from a run stay undefined. */
 export interface BenchScenarios {
   "pdf-page-walk"?: PdfPageWalkResult;
@@ -96,6 +106,7 @@ export interface BenchScenarios {
   "pdf-rapid-scroll"?: PdfRapidScrollResult;
   "epub-chapter-change"?: EpubChapterChangeResult;
   "epub-scroll-drag"?: EpubScrollDragResult;
+  "library-grid-scroll"?: LibraryGridScrollResult;
 }
 
 export interface BenchReport {

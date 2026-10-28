@@ -26,6 +26,9 @@ core/
 sources/
   epub2/<name>/    human-readable source trees (generated, committed)
   epub3/<name>/
+covers/
+  library-bench-cover.png       grid-sized cover used by the library bench
+  library-bench-cover-source.png full-resolution source asset
 extended/         README only — Tier B datasets never live here
 conformance/      README only — Tier C datasets never live here
 fixtures.toml     generated manifest: checksums, versions, sizes, licenses
@@ -36,6 +39,13 @@ fixtures.toml     generated manifest: checksums, versions, sizes, licenses
 ```sh
 just make-epub-fixtures    # regenerate sources/, core/, fixtures.toml
 just check-epub-fixtures   # validate (also a `just check` stream + CI step)
+```
+
+The optional library-scale generator embeds `covers/library-bench-cover.png`
+when run with `--cover`, which the `just bench-library` setup uses:
+
+```sh
+python3 scripts/make-epub-corpus.py --cover <output-dir> <count>
 ```
 
 Everything is authored in `scripts/make-epub-fixtures.py` (original content,
