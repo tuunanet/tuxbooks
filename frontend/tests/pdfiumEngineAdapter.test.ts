@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 
 import { findPageMatches } from "@/lib/pdf/pdfSearch";
+import { PdfRenderCancelledError } from "@/lib/pdf/pdfEngineTypes";
 
 /**
  * The PDFium main-thread adapter (tuxbooks-koe.5, .7, .8) against a fake
@@ -29,6 +30,8 @@ class FakeWorker {
   terminated = false;
   posted: number[] = [];
   renders: RenderRequest[] = [];
+  holdRenders = false;
+  private heldRenders: { id: number; request: RenderRequest }[] = [];
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: ((event: { message: string }) => void) | null = null;
 
@@ -48,8 +51,13 @@ class FakeWorker {
       else if (method === "pageSize") {
         this.respond({ id, ok: true, result: { width: 200, height: 300 } });
       } else if (method === "render") {
-        this.renders.push(params as RenderRequest);
-        this.respond({ id, ok: true, result: { bitmap: { close: vi.fn() } } });
+        const request = params as RenderRequest;
+        this.renders.push(request);
+        if (this.holdRenders) {
+          this.heldRenders.push({ id, request });
+        } else {
+          this.respond({ id, ok: true, result: { bitmap: { close: vi.fn() } } });
+        }
       } else if (method === "text") {
         const page = (params as { page: number }).page;
         // Page 3 has no usable text: the reader must degrade to no layer.
@@ -89,6 +97,13 @@ class FakeWorker {
     this.terminated = true;
   }
 
+  releaseRenderResponses(): void {
+    const held = this.heldRenders.splice(0);
+    for (const { id } of held) {
+      this.respond({ id, ok: true, result: { bitmap: { close: vi.fn() } } });
+    }
+  }
+
   private respond(data: unknown): void {
     this.onmessage?.({ data });
   }
@@ -125,6 +140,83 @@ describe("PDFium adapter", () => {
 
     await pdf.destroy();
     expect(workers[0]!.terminated).toBe(true);
+  });
+
+  test("skips a cancelled queued render before it reaches the worker", async () => {
+    const pdf = await openPdfDocumentFromBook(1, "pdf");
+    const worker = workers[0]!;
+    worker.holdRenders = true;
+
+    const first = await pdf.getPage(1);
+    const stale = await pdf.getPage(2);
+    const target = await pdf.getPage(3);
+    const firstCanvas = document.createElement("canvas");
+    firstCanvas.width = 10;
+    firstCanvas.height = 10;
+    const staleCanvas = document.createElement("canvas");
+    staleCanvas.width = 10;
+    staleCanvas.height = 10;
+    const targetCanvas = document.createElement("canvas");
+    targetCanvas.width = 10;
+    targetCanvas.height = 10;
+
+    const firstTask = first.render({ canvas: firstCanvas, viewport: { width: 10, height: 10 } });
+    const staleTask = stale.render({ canvas: staleCanvas, viewport: { width: 10, height: 10 } });
+    const targetTask = target.render({ canvas: targetCanvas, viewport: { width: 10, height: 10 } });
+
+    // Only the first raster has reached the worker; the other two are held
+    // behind the document's render tail. Cancelling the middle one must drop
+    // it before dispatch, not leave it for the worker to execute later.
+    staleTask.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.renders.map((request) => request.page)).toEqual([1]);
+
+    worker.releaseRenderResponses();
+    await firstTask.promise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.renders.map((request) => request.page)).toEqual([1, 3]);
+
+    worker.releaseRenderResponses();
+    await targetTask.promise;
+    await expect(staleTask.promise).rejects.toBeInstanceOf(PdfRenderCancelledError);
+
+    await pdf.destroy();
+  });
+
+  test("keeps a cancelled dispatched render in the worker tail until its response", async () => {
+    const pdf = await openPdfDocumentFromBook(1, "pdf");
+    const worker = workers[0]!;
+    worker.holdRenders = true;
+
+    const first = await pdf.getPage(1);
+    const target = await pdf.getPage(2);
+    const firstCanvas = document.createElement("canvas");
+    firstCanvas.width = 10;
+    firstCanvas.height = 10;
+    const targetCanvas = document.createElement("canvas");
+    targetCanvas.width = 10;
+    targetCanvas.height = 10;
+
+    const firstTask = first.render({ canvas: firstCanvas, viewport: { width: 10, height: 10 } });
+    const targetTask = target.render({ canvas: targetCanvas, viewport: { width: 10, height: 10 } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.renders.map((request) => request.page)).toEqual([1]);
+
+    // Cancelling the already-posted first request must not release the tail:
+    // PDFium is still busy with it, and posting the target early would put a
+    // second stale request behind the worker's synchronous raster.
+    firstTask.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.renders.map((request) => request.page)).toEqual([1]);
+
+    worker.releaseRenderResponses();
+    await expect(firstTask.promise).rejects.toBeInstanceOf(PdfRenderCancelledError);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.renders.map((request) => request.page)).toEqual([1, 2]);
+
+    worker.releaseRenderResponses();
+    await targetTask.promise;
+    await pdf.destroy();
   });
 
   test("renders a clipped region in page units at the transform ratio", async () => {

@@ -41,6 +41,7 @@ const SEEDED_EXCLUDE = [
   "app-hardening.e2e.ts",
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
+  "far-drag-capture.e2e.ts",
   "thumb-drag-capture.e2e.ts",
   "epub-reader-regressions.e2e.ts",
 ];
@@ -94,6 +95,6 @@ export default defineConfig({
     { name: "regressions", ...project(["epub-reader-regressions.e2e.ts"]) },
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
     { name: "capture", ...project(["thumb-drag-capture.e2e.ts"]) },
-    { name: "bench", ...project(["bench-reader.e2e.ts"]) },
+    { name: "bench", ...project(["bench-reader.e2e.ts", "far-drag-capture.e2e.ts"]) },
   ],
 });

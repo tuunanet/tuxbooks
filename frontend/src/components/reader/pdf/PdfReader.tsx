@@ -1904,6 +1904,11 @@ export function PdfReader({
       data-pdf-worker-src={pdfWorkerSrc()}
       data-pdf-bitmap-cache={`${bitmapCache.size}:${bitmapCache.byteSize}`}
       data-pdf-preload-count={preloadCount}
+      data-pdf-current-page={currentPage}
+      data-pdf-visible-pages={[...visiblePages].sort((a, b) => a - b).join(",")}
+      data-pdf-preload-pages={[...preloadPages].sort((a, b) => a - b).join(",")}
+      data-pdf-render-order={renderOrder.join(",")}
+      data-pdf-render-permitted={[...renderPermittedPages].sort((a, b) => a - b).join(",")}
       {...openTelemetry}
       className={
         presentationMode
