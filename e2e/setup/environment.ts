@@ -137,6 +137,87 @@ function generateLibraryBenchCorpus(): void {
   ]);
 }
 
+function seedRegressionFixtures(): void {
+  if (process.env.E2E_PHASE !== "regressions") return;
+  for (const fixture of readerRegressionFixtures) {
+    copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
+  }
+  // The seek-flash regression needs a book dense enough that a cross-section
+  // jump lands far from its section anchor. A failed generation skips the
+  // spec rather than failing the phase.
+  try {
+    execFileSync("python3", [
+      path.join(repoRoot, "scripts", "make-dense-epub.py"),
+      path.join(libraryDir, "reader-dense-sections.epub"),
+    ]);
+  } catch (err) {
+    console.warn(
+      "[e2e] dense fixture generation failed; the seek-flash spec will skip:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+function seedScaleCorpus(): void {
+  // The scale spec imports this corpus through the real bulk path.
+  if (process.env.E2E_PHASE !== "seeded") return;
+  mkdirSync(scaleCorpusDir, { recursive: true });
+  const generator = path.join(repoRoot, "scripts", "make-epub-corpus.py");
+  try {
+    execFileSync("python3", [generator, scaleCorpusDir, String(SCALE_CORPUS_SIZE)]);
+  } catch (err) {
+    console.warn(
+      `[e2e] scale corpus generation failed; library-scale.e2e.ts will skip:`,
+      err instanceof Error ? err.message : err,
+    );
+    rmSync(scaleCorpusDir, { recursive: true, force: true });
+  }
+}
+
+function seedSeededFixtures(): void {
+  copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
+  seedRegressionFixtures();
+  copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
+  copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
+  copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
+  copyFileSync(smartPdfFixture, path.join(libraryDir, "smart.pdf"));
+  copyFileSync(densePdfFixture, path.join(libraryDir, "dense.pdf"));
+  // Real-world crash regression: seed GeoTopo only when the free corpus is present.
+  if (existsSync(benchPdfFixture)) {
+    copyFileSync(benchPdfFixture, path.join(libraryDir, "GeoTopo.pdf"));
+  }
+  seedScaleCorpus();
+}
+
+function seedBenchFixtures(): void {
+  if (process.env.E2E_PHASE !== "bench") return;
+  for (const [source, name] of [
+    [benchPdfFixture, "GeoTopo.pdf"],
+    [benchEpubFixture, "page-blanche.epub"],
+    ...(process.env.FAR_DRAG_BOOK_TITLE
+      ? [[thumbCapturePdfFixture, "thumb-capture-mixed.pdf"] as const]
+      : []),
+  ] as const) {
+    if (existsSync(source)) {
+      copyFileSync(source, path.join(libraryDir, name));
+    } else {
+      console.warn(`[e2e] bench fixture missing, skipping: ${source}`);
+    }
+  }
+}
+
+function seedCaptureFixture(): void {
+  if (process.env.E2E_PHASE === "capture") {
+    copyFileSync(thumbCapturePdfFixture, path.join(libraryDir, "thumb-capture-mixed.pdf"));
+  }
+}
+
+function seedPhaseFixtures(seeded: boolean): void {
+  if (seeded) seedSeededFixtures();
+  seedBenchFixtures();
+  seedCaptureFixture();
+}
+
 /**
  * Prepare the isolated scratch environment for one invocation. Playwright's
  * globalSetup calls this exactly once per run; workers inherit the
@@ -153,92 +234,7 @@ export function prepareEnvironment(seeded: boolean): void {
 
   if (process.env.E2E_PHASE === "bench-library") generateLibraryBenchCorpus();
 
-  if (seeded) {
-    copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
-    // The regression corpus gets its own phase: the seeded specs pin the
-    // five-book library, and the reader-regression spec needs these four
-    // real-world-shape miniatures alongside them.
-    if (process.env.E2E_PHASE === "regressions") {
-      for (const fixture of readerRegressionFixtures) {
-        copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
-      }
-      // The seek-flash regression needs a book dense enough that a
-      // cross-section jump lands far from its section anchor (a twelve-
-      // chapter miniature; generated like the scale corpus so the phase
-      // stays self-contained). A failed generation skips the spec rather
-      // than failing the phase.
-      try {
-        execFileSync("python3", [
-          path.join(repoRoot, "scripts", "make-dense-epub.py"),
-          path.join(libraryDir, "reader-dense-sections.epub"),
-        ]);
-      } catch (err) {
-        console.warn(
-          "[e2e] dense fixture generation failed; the seek-flash spec will skip:",
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-    copyFileSync(pdfFixture, path.join(libraryDir, "minimal.pdf"));
-    copyFileSync(largePdfFixture, path.join(libraryDir, "large.pdf"));
-    copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
-    copyFileSync(smartPdfFixture, path.join(libraryDir, "smart.pdf"));
-    copyFileSync(densePdfFixture, path.join(libraryDir, "dense.pdf"));
-    // Real-world crash regression (2026-09-20): Smart Dark + the mesh
-    // shadings on GeoTopo page 35 corrupt a worker's wasm heap. The churn
-    // spec drives the exact book when the corpus has been fetched
-    // (just fetch-ebooks); machines without it simply don't seed it.
-    if (existsSync(benchPdfFixture)) {
-      copyFileSync(benchPdfFixture, path.join(libraryDir, "GeoTopo.pdf"));
-    }
-
-    // The library-scale corpus only matters to the seeded phase (the scale
-    // spec imports it through the real bulk path). Generated at setup so
-    // `just test-e2e` stays self-contained; a failed generation skips the
-    // spec rather than failing the phase.
-    if (process.env.E2E_PHASE === "seeded") {
-      mkdirSync(scaleCorpusDir, { recursive: true });
-      const generator = path.join(repoRoot, "scripts", "make-epub-corpus.py");
-      try {
-        execFileSync("python3", [generator, scaleCorpusDir, String(SCALE_CORPUS_SIZE)]);
-      } catch (err) {
-        console.warn(
-          `[e2e] scale corpus generation failed; library-scale.e2e.ts will skip:`,
-          err instanceof Error ? err.message : err,
-        );
-        rmSync(scaleCorpusDir, { recursive: true, force: true });
-      }
-    }
-  }
-
-  // The benchmark phase (just bench-reader) seeds the free-corpus fixtures
-  // (just fetch-ebooks): the suite measures render/turn latency, and the
-  // synthetic fixtures would dilute it. A machine missing one benches the
-  // formats it has (the bench suite skips its missing-fixture scenarios with
-  // a notice). The committed mixed-size PDF is added only when the far-drag
-  // capture explicitly selects it, so the default bench library is unchanged.
-  if (process.env.E2E_PHASE === "bench") {
-    for (const [source, name] of [
-      [benchPdfFixture, "GeoTopo.pdf"],
-      [benchEpubFixture, "page-blanche.epub"],
-      ...(process.env.FAR_DRAG_BOOK_TITLE
-        ? [[thumbCapturePdfFixture, "thumb-capture-mixed.pdf"] as const]
-        : []),
-    ] as const) {
-      if (existsSync(source)) {
-        copyFileSync(source, path.join(libraryDir, name));
-      } else {
-        console.warn(`[e2e] bench fixture missing, skipping: ${source}`);
-      }
-    }
-  }
-
-  // The thumb-drag capture phase (just test-e2e-capture, issue
-  // tuxbooks-x27.4) seeds only the mixed-size fixture the capture drives:
-  // a one-book scratch library keeps the open step unambiguous.
-  if (process.env.E2E_PHASE === "capture") {
-    copyFileSync(thumbCapturePdfFixture, path.join(libraryDir, "thumb-capture-mixed.pdf"));
-  }
+  seedPhaseFixtures(seeded);
 
   // The app (spawned by the Playwright Electron launcher) inherits these;
   // production paths are unaffected. Set before the fixture launches the
