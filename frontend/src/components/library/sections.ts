@@ -1,5 +1,5 @@
 import type { LibrarySection, SmartSectionId } from "@/state/appState";
-import type { Book, BookFormat } from "@/types/domain";
+import type { Book, BookFormat, CollectionSummary } from "@/types/domain";
 
 export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
   "all-books": "All Books",
@@ -18,6 +18,51 @@ export function sectionTitle(section: LibrarySection): string {
     case "settings":
       return "Settings";
   }
+}
+
+/** The header title: a collection's own name, otherwise the section title. */
+export function libraryTitle(section: LibrarySection, collections: CollectionSummary[]): string {
+  if (section.kind !== "collection") return sectionTitle(section);
+  return collections.find((collection) => collection.id === section.id)?.name ?? "Collection";
+}
+
+/** True when the selected collection exists but holds no books. */
+export function isCollectionEmpty(
+  section: LibrarySection,
+  collections: CollectionSummary[],
+): boolean {
+  if (section.kind !== "collection") return false;
+  const collection = collections.find((entry) => entry.id === section.id);
+  return (collection?.bookIds.length ?? 0) === 0;
+}
+
+interface SelectVisibleBooksInput {
+  books: Book[];
+  collections: CollectionSummary[];
+  section: LibrarySection;
+  formatFilter: readonly BookFormat[];
+  sort: BookSortId;
+  query: string;
+}
+
+/** Section or collection scope, then the format filter, sort, and search. */
+export function selectVisibleBooks({
+  books,
+  collections,
+  section,
+  formatFilter,
+  sort,
+  query,
+}: SelectVisibleBooksInput): Book[] {
+  const scoped =
+    section.kind === "collection"
+      ? filterBooksByCollection(
+          books,
+          collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
+        )
+      : filterBooksBySection(books, section);
+  const filtered = filterBooksByFormat(scoped, formatFilter);
+  return filterBooksByQuery(sortBooks(filtered, sort), query);
 }
 
 /**
