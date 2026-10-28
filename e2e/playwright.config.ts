@@ -18,6 +18,9 @@
  *             for issue tuxbooks-x27.4, not an assertion suite)
  *   bench   — the opt-in, headed reader performance benchmark (never CI)
  *   bench-library — the opt-in, headed 10,000-book Grid scroll benchmark
+ *   library-thumb — the opt-in, headed 10,000-book scrollbar thumb-drag
+ *             regression loop (tuxbooks-y9s; own cover-less corpus via
+ *             E2E_PHASE)
  *
  * The environment is phase-global (E2E_PHASE / E2E_SEED_LIBRARY /
  * E2E_DEVICE_SCALE_FACTOR, set by the justfile recipes): globalSetup
@@ -43,6 +46,7 @@ const SEEDED_EXCLUDE = [
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
   "bench-library.e2e.ts",
+  "library-thumb-drag.e2e.ts",
   "far-drag-capture.e2e.ts",
   "thumb-drag-capture.e2e.ts",
   "epub-reader-regressions.e2e.ts",
@@ -99,5 +103,6 @@ export default defineConfig({
     { name: "capture", ...project(["thumb-drag-capture.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts", "far-drag-capture.e2e.ts"]) },
     { name: "bench-library", ...project(["bench-library.e2e.ts"]) },
+    { name: "library-thumb", ...project(["library-thumb-drag.e2e.ts"]) },
   ],
 });

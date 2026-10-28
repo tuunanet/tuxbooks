@@ -356,6 +356,19 @@ bench-reader WINDOW_SIZE="": build-debug
 bench-library WINDOW_SIZE="": build-debug
     {{_bench_timeout}} env E2E_PHASE=bench-library E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" pnpm --filter e2e test:bench-library
 
+# Scrollbar thumb-drag regression loop on a 10,000-book library
+# (tuxbooks-y9s): grabs the Grid's real native thumb through trusted input
+# and asserts it stays under the held cursor through a full-track drag.
+# Opt-in under Xvfb — never part of test-e2e or CI. E2E_PHASE=library-thumb
+# generates the loop's cover-less corpus (same card geometry, import cheap
+# enough for the sidecar RPC's 60 s runaway guard per batch); WINDOW_SIZE
+# pins the track geometry, default 1600x1000. The RELEASE sidecar keeps the
+# import inside that guard (the fix under test is renderer code, so the
+# release sidecar stays valid across loop iterations).
+test-e2e-library-thumb WINDOW_SIZE="1600x1000": build-debug
+    cargo build --manifest-path sidecar/Cargo.toml --release
+    {{_shell_headless}} {{_bench_timeout}} env E2E_PHASE=library-thumb E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:library-thumb
+
 # Opt-in large fixture tiers (docs/TESTING.md). Never invoked by `just test`,
 # `just check`, or normal CI: the default suite is fully self-contained.
 
