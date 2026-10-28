@@ -25,6 +25,7 @@ touching a Rust module's behavior or tests.
 | PDF parser          | `sidecar/src/pdf/`                            | 80%      | n/a         |
 | Services            | `sidecar/src/services/`                       | 80%      | n/a         |
 | Repository          | `sidecar/src/repository/`                     | 80%      | n/a         |
+| Cloud sync          | `sidecar/src/sync/`                           | 80%      | n/a         |
 | Database            | `sidecar/src/db/`                             | 80%      | n/a         |
 | Domain models       | `sidecar/src/domain/`                         | 80%      | n/a         |
 | Library view        | `frontend/src/components/library/`            | 80%      | 91.05%      |

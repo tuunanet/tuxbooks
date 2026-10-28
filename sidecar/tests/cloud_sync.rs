@@ -12,6 +12,7 @@ use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::{
     AnnotationKind, AnnotationPatch, NewAnnotation, NewBook, ProgressUpdate,
 };
+use tuxbooks_lib::error::AppError;
 use tuxbooks_lib::repository::{
     annotations, books, collections, metadata as metadata_repo, reading_progress,
 };
@@ -19,6 +20,7 @@ use tuxbooks_lib::rpc::EventEmitter;
 use tuxbooks_lib::services::metadata;
 use tuxbooks_lib::sync::clock;
 use tuxbooks_lib::sync::engine::SyncService;
+use tuxbooks_lib::sync::model::{EntityKind, Hlc, Op, OP_SCHEMA};
 
 struct Device {
     _dir: TempDir,
@@ -27,7 +29,7 @@ struct Device {
     db_path: PathBuf,
 }
 
-async fn device(name: &str) -> Device {
+async fn device() -> Device {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tuxbooks.db");
     let pool = init_pool(&db_path).await.unwrap();
@@ -35,7 +37,6 @@ async fn device(name: &str) -> Device {
     let service = SyncService::new(pool.clone(), &db_path, events)
         .await
         .unwrap();
-    let _ = name;
     Device {
         _dir: dir,
         pool,
@@ -170,8 +171,8 @@ async fn progress_percent(device: &Device, book_id: i64) -> Option<f64> {
 #[tokio::test(flavor = "multi_thread")]
 async fn annotation_written_on_one_machine_appears_on_the_other() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"the exact same book bytes").await;
     add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
 
@@ -196,8 +197,8 @@ async fn annotation_written_on_one_machine_appears_on_the_other() {
 #[tokio::test(flavor = "multi_thread")]
 async fn two_machines_that_import_the_same_book_before_meeting_converge() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let bytes = b"an independently imported but identical file";
     let a_book = add_book(&a, "same.epub", bytes).await;
     let b_book = add_book(&b, "same.epub", bytes).await;
@@ -228,8 +229,8 @@ async fn two_machines_that_import_the_same_book_before_meeting_converge() {
 #[tokio::test(flavor = "multi_thread")]
 async fn progress_moves_as_one_locator_and_the_later_write_wins() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"progress book").await;
 
     reading_progress::upsert_progress(
@@ -278,8 +279,8 @@ async fn progress_moves_as_one_locator_and_the_later_write_wins() {
 #[tokio::test(flavor = "multi_thread")]
 async fn collection_and_membership_survive_the_trip() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"collection book").await;
     let collection = collections::create_collection(&a.pool, "Favorites")
         .await
@@ -306,8 +307,8 @@ async fn collection_and_membership_survive_the_trip() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unwatch_on_one_machine_does_not_delete_the_other_machines_state() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let bytes = b"book that will be unwatched";
     let a_book = add_book(&a, "same.epub", bytes).await;
     add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
@@ -342,8 +343,8 @@ async fn an_unwatch_on_one_machine_does_not_delete_the_other_machines_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn duplicate_and_corrupt_operation_files_are_tolerated() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"duplicate ops").await;
     add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
     connect(&a, sync_dir.path()).await;
@@ -366,6 +367,9 @@ async fn duplicate_and_corrupt_operation_files_are_tolerated() {
     let corrupt_dir = op_dir.join("b".repeat(32));
     std::fs::create_dir_all(&corrupt_dir).unwrap();
     std::fs::write(corrupt_dir.join("broken.json"), b"{not json").unwrap();
+    std::fs::write(corrupt_dir.join("oversized.json"), vec![b' '; 1_100_000]).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&first, corrupt_dir.join("linked.json")).unwrap();
 
     connect(&b, sync_dir.path()).await;
     let b_book = add_book(&b, "same.epub", b"duplicate ops").await;
@@ -387,7 +391,7 @@ async fn duplicate_and_corrupt_operation_files_are_tolerated() {
 #[tokio::test(flavor = "multi_thread")]
 async fn restored_bookmark_is_available_for_thirty_days() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
+    let a = device().await;
     let a_book = add_book(&a, "same.epub", b"trash book").await;
     let annotation_id = add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
     connect(&a, sync_dir.path()).await;
@@ -409,8 +413,8 @@ async fn restored_bookmark_is_available_for_thirty_days() {
 #[tokio::test(flavor = "multi_thread")]
 async fn metadata_override_authors_and_cover_travel_together() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"metadata book").await;
 
     let covers = a.db_path.parent().unwrap().join("covers");
@@ -461,8 +465,8 @@ async fn metadata_override_authors_and_cover_travel_together() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rewritten_file_keeps_its_book_identity() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"version one").await;
     add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
     connect(&a, sync_dir.path()).await;
@@ -503,8 +507,8 @@ async fn a_rewritten_file_keeps_its_book_identity() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_library_mismatch_requires_confirmation_then_merges() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     connect(&a, sync_dir.path()).await;
     let remote_id = a.service.status().await.unwrap().library_id.unwrap();
     clock::set_meta(
@@ -543,8 +547,8 @@ async fn a_library_mismatch_requires_confirmation_then_merges() {
 #[tokio::test(flavor = "multi_thread")]
 async fn same_named_collections_merge_instead_of_duplicating() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"same shelf").await;
     let b_book = add_book(&b, "same.epub", b"same shelf").await;
     let a_collection = collections::create_collection(&a.pool, "Favorites")
@@ -580,8 +584,8 @@ async fn same_named_collections_merge_instead_of_duplicating() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
     let sync_dir = tempfile::tempdir().unwrap();
-    let a = device("A").await;
-    let b = device("B").await;
+    let a = device().await;
+    let b = device().await;
     let a_book = add_book(&a, "same.epub", b"conflict book").await;
     let annotation = add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
     connect(&a, sync_dir.path()).await;
@@ -640,4 +644,108 @@ async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
         .await
         .unwrap();
     assert!(conflicts >= 1, "the losing note is kept as a conflict");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_that_is_not_a_directory_is_rejected() {
+    let a = device().await;
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let err = a
+        .service
+        .connect(file.path().to_str().unwrap(), None, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::InvalidInput(_)), "got {err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn operations_are_ordered_by_clock_not_by_file_name() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let a_book = add_book(&a, "same.epub", b"out of order").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    let book_uid: String =
+        sqlx::query_scalar("SELECT book_uid FROM sync_book_bindings WHERE book_id = ?1")
+            .bind(a_book)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+
+    let manual_device = "c".repeat(32);
+    let manual_dir = sync_dir
+        .path()
+        .join("TuxBooks")
+        .join("ops")
+        .join(&manual_device);
+    std::fs::create_dir_all(&manual_dir).unwrap();
+    let entity_uid = "a".repeat(32);
+    let make = |op_id: &str, wall: i64, note: &str| Op {
+        schema: OP_SCHEMA,
+        op_id: op_id.to_string(),
+        device_id: manual_device.clone(),
+        hlc: Hlc {
+            wall,
+            counter: 0,
+            device: manual_device.clone(),
+        },
+        kind: EntityKind::Annotation,
+        entity_uid: entity_uid.clone(),
+        book_uid: Some(book_uid.clone()),
+        deleted: false,
+        restore: false,
+        fields: serde_json::json!({
+            "kind": "bookmark",
+            "cfi": "epubcfi(/6/4)",
+            "note": note,
+        })
+        .as_object()
+        .cloned()
+        .unwrap(),
+        prior: None,
+        created_at: "2026-10-28T00:00:00.000Z".into(),
+    };
+    // The newer clock deliberately sorts first: the merge, not the directory
+    // listing, must decide the winner.
+    std::fs::write(
+        manual_dir.join("00000000000000000001.json"),
+        serde_json::to_vec(&make("1".repeat(32).as_str(), 200, "newer")).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        manual_dir.join("99999999999999999999.json"),
+        serde_json::to_vec(&make("2".repeat(32).as_str(), 100, "older")).unwrap(),
+    )
+    .unwrap();
+
+    run(&a).await;
+    run(&a).await;
+    let listed = annotations::list_annotations(&a.pool, a_book)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].note.as_deref(), Some("newer"));
+    let conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
+        .fetch_one(&a.pool)
+        .await
+        .unwrap();
+    assert!(conflicts >= 1, "the older value is preserved");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disappearing_folder_becomes_a_sync_issue() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    drop(sync_dir);
+    let err = a.service.run_pass().await.unwrap_err();
+    assert!(matches!(err, AppError::InvalidInput(_)), "got {err:?}");
+    let issues = a.service.issues().await.unwrap();
+    assert!(
+        issues.iter().any(|issue| issue.kind == "sync_failed"),
+        "a folder failure must surface in Sync issues: {issues:?}"
+    );
 }

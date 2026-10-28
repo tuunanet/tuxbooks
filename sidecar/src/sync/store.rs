@@ -96,7 +96,7 @@ pub fn connect(
     } else {
         let library = LibraryFile {
             schema: OP_SCHEMA,
-            library_id: random_hex(16)?,
+            library_id: random_library_id(),
             created_at: now.to_string(),
         };
         write_json_atomic(&library_path, &library)?;
@@ -377,10 +377,10 @@ pub fn apply_cover_blob(root: &Path, covers_dir: &Path, file_name: &str) -> Resu
     Ok(true)
 }
 
-/// A 128-bit non-security identifier (library ids). Database-backed ids
-/// (device, book, op) use SQLite's `randomblob`; this one is needed before the
-/// pool is involved, when a new sync folder is created.
-pub fn random_hex(_bytes: usize) -> Result<String, AppError> {
+/// A 128-bit non-security identifier for a new sync folder. Database-backed
+/// ids (device, book, op) use SQLite's `randomblob`; this one is needed before
+/// a database row exists.
+fn random_library_id() -> String {
     use std::hash::{Hash, Hasher};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -400,7 +400,7 @@ pub fn random_hex(_bytes: usize) -> Result<String, AppError> {
         "tuxbooks",
     )
         .hash(&mut second);
-    Ok(format!("{:016x}{:016x}", first.finish(), second.finish()))
+    format!("{:016x}{:016x}", first.finish(), second.finish())
 }
 
 pub fn validate_op(op: &Op) -> Result<(), String> {

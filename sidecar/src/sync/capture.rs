@@ -141,11 +141,7 @@ async fn capture_annotation(
     root: &std::path::Path,
     row: &DirtyRow,
 ) -> Result<Captured, AppError> {
-    let snapshot = match row.op.as_str() {
-        "delete" => parse_snapshot(row.old_json.as_deref()),
-        _ => parse_snapshot(row.new_json.as_deref()),
-    };
-    let Some(snapshot) = snapshot else {
+    let Some(snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
@@ -193,11 +189,7 @@ async fn capture_collection(
     root: &std::path::Path,
     row: &DirtyRow,
 ) -> Result<Captured, AppError> {
-    let snapshot = match row.op.as_str() {
-        "delete" => parse_snapshot(row.old_json.as_deref()),
-        _ => parse_snapshot(row.new_json.as_deref()),
-    };
-    let Some(snapshot) = snapshot else {
+    let Some(snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
@@ -252,11 +244,7 @@ async fn capture_book_state(
     let Some(book_uid) = binding_for_book(pool, local_id).await? else {
         return Ok(Captured::PendingIdentity);
     };
-    let snapshot = match row.op.as_str() {
-        "delete" => parse_snapshot(row.old_json.as_deref()),
-        _ => parse_snapshot(row.new_json.as_deref()),
-    };
-    let Some(mut snapshot) = snapshot else {
+    let Some(mut snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
@@ -303,11 +291,7 @@ async fn capture_membership(
     root: &std::path::Path,
     row: &DirtyRow,
 ) -> Result<Captured, AppError> {
-    let snapshot = match row.op.as_str() {
-        "delete" => parse_snapshot(row.old_json.as_deref()),
-        _ => parse_snapshot(row.new_json.as_deref()),
-    };
-    let Some(snapshot) = snapshot else {
+    let Some(snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
@@ -395,7 +379,9 @@ async fn emit_state(
         return Ok(());
     }
     if was_deleted && !restore {
-        // The mirror has a tombstone; a local edit does not resurrect it.
+        // The mirror has a tombstone; a local edit does not resurrect it,
+        // but the text is preserved as an inspectable conflict.
+        merge::record_tombstone_conflict(pool, kind, entity_uid, &state).await?;
         return Ok(());
     }
     let changed = changed_fields(&previous, &state);
@@ -590,6 +576,13 @@ fn parse_snapshot(value: Option<&str>) -> Option<Map<String, Value>> {
     serde_json::from_str::<Value>(text)
         .ok()
         .and_then(|value| value.as_object().cloned())
+}
+
+fn snapshot_for(row: &DirtyRow) -> Option<Map<String, Value>> {
+    match row.op.as_str() {
+        "delete" => parse_snapshot(row.old_json.as_deref()),
+        _ => parse_snapshot(row.new_json.as_deref()),
+    }
 }
 
 #[cfg(test)]

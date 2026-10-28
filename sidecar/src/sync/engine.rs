@@ -29,10 +29,20 @@ use super::model::{canonical_from_snapshot, state_display, EntityKind};
 use super::store;
 
 const PASS_INTERVAL: Duration = Duration::from_secs(10);
+const DIRTY_POLL: Duration = Duration::from_secs(2);
 const CAPTURE_BATCH: i64 = 250;
 const REMOTE_BATCH: usize = 500;
 const IDENTITY_BUDGET: Duration = Duration::from_secs(3);
 const FILE_RETRY_LIMIT: i64 = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncState {
+    Disabled,
+    Idle,
+    Syncing,
+    Error,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +52,7 @@ pub struct SyncStatus {
     pub library_id: Option<String>,
     pub device_id: Option<String>,
     pub device_name: Option<String>,
-    pub state: String,
+    pub state: SyncState,
     pub last_sync_at: Option<String>,
     pub last_error: Option<String>,
     pub pending_local: i64,
@@ -124,7 +134,11 @@ impl SyncService {
             library_id: get_meta(&pool, META_LIBRARY_ID).await?,
             device_id: get_meta(&pool, super::clock::META_DEVICE_ID).await?,
             device_name: get_meta(&pool, META_DEVICE_NAME).await?,
-            state: if enabled { "idle" } else { "disabled" }.into(),
+            state: if enabled {
+                SyncState::Idle
+            } else {
+                SyncState::Disabled
+            },
             last_sync_at: get_meta(&pool, META_LAST_SYNC).await?,
             last_error: non_empty(get_meta(&pool, META_LAST_ERROR).await?),
             pending_local: 0,
@@ -153,17 +167,26 @@ impl SyncService {
         let mut shutdown = self.inner.shutdown.subscribe();
         let task = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
+            let mut last_pass = Instant::now() - PASS_INTERVAL;
             loop {
-                let should_pass = tokio::select! {
+                let woken = tokio::select! {
                     changed = shutdown.changed() => {
                         let _ = changed;
                         break;
                     }
                     _ = service.inner.wake.notified() => true,
-                    _ = tokio::time::sleep(PASS_INTERVAL) => true,
+                    _ = tokio::time::sleep(DIRTY_POLL) => false,
                 };
-                if should_pass {
+                if !service.status_snapshot().enabled {
+                    continue;
+                }
+                let dirty: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
+                    .fetch_one(&service.inner.pool)
+                    .await
+                    .unwrap_or(0);
+                if woken || dirty > 0 || last_pass.elapsed() >= PASS_INTERVAL {
                     let _ = service.run_pass().await;
+                    last_pass = Instant::now();
                 }
             }
         });
@@ -214,13 +237,13 @@ impl SyncService {
             .clone()
     }
 
-    fn set_state(&self, state: &str) {
+    fn set_state(&self, state: SyncState) {
         let mut status = self
             .inner
             .status
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        status.state = state.to_string();
+        status.state = state;
     }
 
     async fn refresh_status(&self) -> Result<(), AppError> {
@@ -277,24 +300,31 @@ impl SyncService {
         status.trash = trash;
         status.conflicts = conflicts;
         status.state = if !enabled {
-            "disabled".into()
-        } else if status.state == "syncing" {
-            "syncing".into()
+            SyncState::Disabled
+        } else if status.state == SyncState::Syncing {
+            SyncState::Syncing
         } else if last_error.is_some() {
-            "error".into()
+            SyncState::Error
         } else {
-            "idle".into()
+            SyncState::Idle
         };
         Ok(())
     }
 
     async fn remember_error(&self, detail: &str) {
         let _ = set_meta(&self.inner.pool, META_LAST_ERROR, detail).await;
-        self.set_state("error");
+        self.set_state(SyncState::Error);
     }
 
     async fn clear_error(&self) {
         let _ = delete_meta(&self.inner.pool, META_LAST_ERROR).await;
+        let _ = sqlx::query(
+            "UPDATE sync_issues SET resolved_at = ?1
+             WHERE issue_key = 'sync-pass' AND resolved_at IS NULL",
+        )
+        .bind(now_rfc3339())
+        .execute(&self.inner.pool)
+        .await;
     }
 
     pub async fn run_pass(&self) -> Result<(), AppError> {
@@ -306,17 +336,25 @@ impl SyncService {
                 self.clear_error().await;
                 let _ = self.refresh_status().await;
                 self.set_state(if self.status_snapshot().enabled {
-                    "idle"
+                    SyncState::Idle
                 } else {
-                    "disabled"
+                    SyncState::Disabled
                 });
                 self.emit_status();
                 Ok(())
             }
             Err(err) => {
                 self.remember_error(&err.to_string()).await;
+                let _ = record_issue(
+                    &self.inner.pool,
+                    "sync-pass",
+                    "sync_failed",
+                    &err.to_string(),
+                    None,
+                )
+                .await;
                 let _ = self.refresh_status().await;
-                self.set_state("error");
+                self.set_state(SyncState::Error);
                 self.emit_status();
                 Err(err)
             }
@@ -332,7 +370,7 @@ impl SyncService {
         let Some(folder) = status.folder else {
             return Ok(());
         };
-        self.set_state("syncing");
+        self.set_state(SyncState::Syncing);
         self.emit_status();
 
         let root = store::resolve_root(Path::new(&folder))?;
@@ -358,28 +396,18 @@ impl SyncService {
         self.baseline_if_needed().await?;
         self.identity_sweep(&root).await?;
 
-        for _ in 0..8 {
-            let report = capture::drain(
-                &self.inner.pool,
-                &root,
-                &self.inner.covers_dir,
-                CAPTURE_BATCH,
-            )
-            .await?;
-            if report.pending_identity > 0 {
-                self.identity_sweep(&root).await?;
-            }
-            if report.written == 0 && report.pending_identity == 0 {
-                break;
-            }
+        let report = capture::drain(
+            &self.inner.pool,
+            &root,
+            &self.inner.covers_dir,
+            CAPTURE_BATCH,
+        )
+        .await?;
+        if report.pending_identity > 0 {
+            self.identity_sweep(&root).await?;
         }
 
-        for _ in 0..8 {
-            let more = self.sync_remote(&root).await?;
-            if !more {
-                break;
-            }
-        }
+        self.sync_remote(&root).await?;
 
         // Projection writes local rows, which fire the same triggers; drain
         // the echo markers so the next pass starts clean.
@@ -529,13 +557,12 @@ impl SyncService {
         Ok(bound)
     }
 
-    async fn sync_remote(&self, root: &Path) -> Result<bool, AppError> {
+    async fn sync_remote(&self, root: &Path) -> Result<(), AppError> {
         let files = store::scan_ops(root)?;
         let mut affected: Vec<Affected> = Vec::new();
         let mut identity_books: Vec<String> = Vec::new();
         let mut mark_processed: Vec<(String, i64, i64)> = Vec::new();
         let mut processed = 0usize;
-        let mut hit_limit = false;
 
         for file in files {
             let cached: Option<(i64, i64, Option<String>, i64)> = sqlx::query_as(
@@ -551,7 +578,6 @@ impl SyncService {
                 }
             }
             if processed >= REMOTE_BATCH {
-                hit_limit = true;
                 break;
             }
 
@@ -653,7 +679,7 @@ impl SyncService {
             .execute(&self.inner.pool)
             .await?;
         }
-        Ok(hit_limit)
+        Ok(())
     }
 
     async fn record_file_failure(
@@ -829,7 +855,7 @@ impl SyncService {
         set_meta(&self.inner.pool, META_ENABLED, "0").await?;
         self.clear_error().await;
         self.refresh_status().await?;
-        self.set_state("disabled");
+        self.set_state(SyncState::Disabled);
         self.emit_status();
         Ok(self.status_snapshot())
     }

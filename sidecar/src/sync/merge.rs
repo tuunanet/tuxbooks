@@ -156,7 +156,7 @@ async fn apply_state_op(
     if op.deleted {
         apply_delete(tx, op, &entity_uid, &book_uid).await?;
     } else {
-        apply_upsert(tx, op, &entity_uid, &book_uid).await?;
+        apply_upsert(tx, op, &entity_uid).await?;
     }
 
     Ok(vec![Affected {
@@ -170,7 +170,6 @@ async fn apply_upsert(
     tx: &mut Transaction<'_, Sqlite>,
     op: &Op,
     entity_uid: &str,
-    book_uid: &Option<String>,
 ) -> Result<(), AppError> {
     let entity = load_entity(tx, op.kind, entity_uid).await?;
     let deleted = entity.as_ref().is_some_and(|entity| entity.deleted);
@@ -231,7 +230,7 @@ async fn apply_upsert(
 
     match op.kind.merge_mode() {
         MergeMode::Field => apply_fields(tx, op, entity_uid).await?,
-        MergeMode::Entity => apply_entity(tx, op, entity_uid, book_uid, &entity_hlc).await?,
+        MergeMode::Entity => apply_entity(tx, op, entity_uid, &entity_hlc).await?,
     }
     Ok(())
 }
@@ -307,7 +306,6 @@ async fn apply_entity(
     tx: &mut Transaction<'_, Sqlite>,
     op: &Op,
     entity_uid: &str,
-    _book_uid: &Option<String>,
     entity_hlc: &Hlc,
 ) -> Result<(), AppError> {
     if &op.hlc <= entity_hlc {
@@ -544,6 +542,47 @@ async fn load_state_tx(
     Ok(state)
 }
 
+/// Preserve a local edit that arrived after the entity was already deleted on
+/// another machine. The tombstone still wins, but the text is not lost.
+pub async fn record_tombstone_conflict(
+    pool: &SqlitePool,
+    kind: EntityKind,
+    entity_uid: &str,
+    loser: &State,
+) -> Result<(), AppError> {
+    let mut tx = pool.begin().await?;
+    let delete_hlc: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT deleted_wall, deleted_count, deleted_dev FROM sync_state_entities
+         WHERE kind = ?1 AND entity_uid = ?2 AND deleted = 1",
+    )
+    .bind(kind.as_str())
+    .bind(entity_uid)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((wall, counter, device)) = delete_hlc else {
+        tx.commit().await?;
+        return Ok(());
+    };
+    let loser = Value::Object(loser.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    record_conflict(
+        &mut tx,
+        kind,
+        entity_uid,
+        "__deleted__",
+        &Value::String("deleted".into()),
+        &loser,
+        &Hlc {
+            wall,
+            counter: counter as u32,
+            device,
+        },
+        &Hlc::zero(),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn record_conflict(
     tx: &mut Transaction<'_, Sqlite>,
@@ -558,6 +597,39 @@ async fn record_conflict(
     // Do not record a conflict when both sides say the same thing.
     if winner == loser {
         return Ok(());
+    }
+    let winner_text = serde_json::to_string(winner).unwrap_or_else(|_| "null".into());
+    let loser_text = serde_json::to_string(loser).unwrap_or_else(|_| "null".into());
+    let issue_key = format!("conflict:{}:{entity_uid}:{field}", kind.as_str());
+    let detail = format!(
+        "{} field {field}: kept {}, discarded {}",
+        kind.as_str(),
+        truncate(&winner_text, 1800),
+        truncate(&loser_text, 1800)
+    );
+    let existing: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
+    )
+    .bind(&issue_key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(id) = existing {
+        sqlx::query(
+            "UPDATE sync_issues SET detail = ?2,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+        )
+        .bind(id)
+        .bind(&detail)
+        .execute(&mut **tx)
+        .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO sync_issues (issue_key, kind, detail) VALUES (?1, 'conflict', ?2)",
+        )
+        .bind(&issue_key)
+        .bind(&detail)
+        .execute(&mut **tx)
+        .await?;
     }
     sqlx::query(
         r#"
@@ -1028,6 +1100,14 @@ async fn local_collection_id(
         .fetch_optional(pool)
         .await?;
     Ok(id)
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut text: String = value.chars().take(max_chars).collect();
+    if text.len() < value.len() {
+        text.push('…');
+    }
+    text
 }
 
 fn string_or_none(state: &State, field: &str) -> Option<String> {

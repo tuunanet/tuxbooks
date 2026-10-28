@@ -299,7 +299,7 @@ export function SyncSettings() {
             <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
               <Stat label="Pending" value={status.pendingLocal} />
               <Stat label="Waiting for books" value={status.waitingBooks} />
-              <Stat label="Issues" value={status.issues + status.conflicts} />
+              <Stat label="Issues" value={status.issues} />
               <Stat label="Recently deleted" value={status.trash} />
               <Stat label="Conflicts" value={status.conflicts} />
             </div>

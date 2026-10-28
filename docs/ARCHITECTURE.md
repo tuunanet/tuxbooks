@@ -172,8 +172,14 @@ Each has bitten before (or is a known trap of the Electron stack):
 | `db/`                     | sqlx, migrations                                                                                      | tauri, electron               |
 | `repository/`             | sqlx, domain                                                                                          | tauri, epub, pdf              |
 | `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points) | tauri, electron               |
-| `sync/`                   | domain, repository, db, services (metadata projection only), store                                    | tauri, electron, network      |
+| `sync/`                   | domain, repository, db, services (metadata projection + `LibraryChange`), store, `rpc::EventEmitter`  | tauri, electron, network      |
 | method table              | services, sync, domain                                                                                | sqlx details                  |
+
+The sync subsystem is the one storage engine outside `repository/`: its SQL,
+operation format, and on-disk folder contract change together, so splitting
+them would leave the merge rules and the queries that enforce them in
+different modules. Command and service code still never embed SQL; the
+exception is `sync/` only.
 
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /

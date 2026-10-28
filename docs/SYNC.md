@@ -136,8 +136,9 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   different copy of the book does not fight over source-derived authors or
   subjects.
 
-Losing field values are written to `sync_conflicts`. The current state always
-has a winner, but the loser is inspectable.
+Losing field values are written to `sync_conflicts` and surfaced as a Sync
+issue with both the kept and discarded values. The current state always has a
+winner, but the loser is inspectable and can be dismissed once read.
 
 ## Local capture and projection
 
@@ -197,7 +198,9 @@ Failures become rows in `sync_issues`:
 - a hash failure;
 - a missing cover blob (the metadata edit is applied without the cover and the
   issue records it);
-- a book that could not be projected.
+- a book that could not be projected;
+- a conflict where one side had to be discarded (both values are in the
+  detail).
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
@@ -237,8 +240,8 @@ state unrecoverable, so it is not bolted on silently.
 The operation log is the backup. If a local database is lost, install TuxBooks,
 connect the same folder, and import the books. Identity aliases and shared state
 reattach by content hash. Local state that never reached the folder is lost with
-the database, as with any local-first app; the 10-second loop and the shutdown
-flush bound that window.
+the database, as with any local-first app; the 2-second dirty poll, the
+10-second full pass, and the shutdown flush bound that window.
 
 If the folder itself is lost, every device still has its local catalog and its
 own state. A new folder can be started from any device; the others merge into it

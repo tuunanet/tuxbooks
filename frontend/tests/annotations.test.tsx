@@ -12,7 +12,7 @@ import {
   normalizeRect,
 } from "@/components/reader/annotationModel";
 import { makeAnnotation } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/bridge";
+import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 
 describe("annotationModel", () => {
   it("filters annotations by kind and bookmark locators", () => {
@@ -126,6 +126,21 @@ describe("useAnnotations", () => {
     await act(() => result.current.remove(4));
     expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 4 });
     expect(result.current.annotations).toEqual([]);
+  });
+
+  it("refetches when sync-applied names the open book", async () => {
+    mockInvoke({ list_annotations: [makeAnnotation({ id: 1 })] });
+    const { result } = renderHook(() => useAnnotations(1));
+    await waitFor(() => expect(result.current.annotations).toHaveLength(1));
+
+    mockInvoke({
+      list_annotations: [makeAnnotation({ id: 1 }), makeAnnotation({ id: 9 })],
+    });
+    act(() => emitBridgeEvent("sync-applied", { bookIds: [2] }));
+    expect(result.current.annotations).toHaveLength(1);
+
+    act(() => emitBridgeEvent("sync-applied", { bookIds: [1] }));
+    await waitFor(() => expect(result.current.annotations).toHaveLength(2));
   });
 
   it("survives backend failures without losing the current list", async () => {
