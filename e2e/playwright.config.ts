@@ -16,7 +16,8 @@
  *   hidpi   — seeded reader scenarios at devicePixelRatio 2
  *   capture — the opt-in thumb-drag geometry capture (never CI; evidence
  *             for issue tuxbooks-x27.4, not an assertion suite)
- *   bench   — the opt-in, headed performance benchmark (never CI)
+ *   bench   — the opt-in, headed reader performance benchmark (never CI)
+ *   bench-library — the opt-in, headed 10,000-book Grid scroll benchmark
  *
  * The environment is phase-global (E2E_PHASE / E2E_SEED_LIBRARY /
  * E2E_DEVICE_SCALE_FACTOR, set by the justfile recipes): globalSetup
@@ -41,6 +42,7 @@ const SEEDED_EXCLUDE = [
   "app-hardening.e2e.ts",
   "hidpi.e2e.ts",
   "bench-reader.e2e.ts",
+  "bench-library.e2e.ts",
   "far-drag-capture.e2e.ts",
   "thumb-drag-capture.e2e.ts",
   "epub-reader-regressions.e2e.ts",
@@ -96,5 +98,6 @@ export default defineConfig({
     { name: "hidpi", ...project(["hidpi.e2e.ts"]) },
     { name: "capture", ...project(["thumb-drag-capture.e2e.ts"]) },
     { name: "bench", ...project(["bench-reader.e2e.ts", "far-drag-capture.e2e.ts"]) },
+    { name: "bench-library", ...project(["bench-library.e2e.ts"]) },
   ],
 });

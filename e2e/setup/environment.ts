@@ -19,7 +19,9 @@ import {
   densePdfFixture,
   epubFixture,
   readerRegressionFixtures,
+  libraryBenchCorpusDir,
   largePdfFixture,
+  LIBRARY_BENCH_BOOK_COUNT,
   mixedPdfFixture,
   pdfFixture,
   repoRoot,
@@ -134,6 +136,18 @@ export function prepareEnvironment(seeded: boolean): void {
   mkdirSync(libraryDir, { recursive: true, mode: 0o700 });
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
   mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
+
+  // The opt-in library benchmark generates its corpus before the app
+  // launches. The fixture path and count live with the other test fixtures;
+  // the spec reads the same constants, so setup and assertions cannot drift.
+  if (process.env.E2E_PHASE === "bench-library") {
+    mkdirSync(libraryBenchCorpusDir, { recursive: true });
+    execFileSync("python3", [
+      path.join(repoRoot, "scripts", "make-epub-corpus.py"),
+      libraryBenchCorpusDir,
+      String(LIBRARY_BENCH_BOOK_COUNT),
+    ]);
+  }
 
   if (seeded) {
     copyFileSync(epubFixture, path.join(libraryDir, "minimal.epub"));
