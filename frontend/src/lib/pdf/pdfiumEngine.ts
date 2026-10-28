@@ -1,7 +1,13 @@
 import workerUrl from "./pdfiumWorker?worker&url";
 import wasmUrlRaw from "virtual:pdfium-wasm-url";
 import type { PageClip } from "./pdfiumCore";
-import type { EngineTextLine, PdfDocument, PdfPage, PdfRenderTask } from "./pdfEngineTypes";
+import {
+  PdfRenderCancelledError,
+  type EngineTextLine,
+  type PdfDocument,
+  type PdfPage,
+  type PdfRenderTask,
+} from "./pdfEngineTypes";
 import type { RawPdfOutline } from "./pdfOutline";
 import { WorkerClient } from "./pdfWorkerClient";
 import { colorSchemeFromPalette, type SmartPalette } from "./smartColors";
@@ -46,6 +52,14 @@ class PdfiumDocument implements PdfDocument {
   private readonly client: WorkerClient;
   private readonly pageSizes = new Map<number, { width: number; height: number }>();
   private readonly textLines = new Map<number, Promise<EngineTextLine[]>>();
+  /**
+   * One render dispatch at a time. PDFium's raster is synchronous inside the
+   * worker, so posting every canvas request immediately lets a fast scrollbar
+   * drag build a long queue of pages that have already left the window. The
+   * queue keeps at most the work that has not been cancelled; a queued page
+   * whose canvas unmounted is skipped before it reaches the worker.
+   */
+  private renderTail: Promise<void> = Promise.resolve();
   private destroyed = false;
 
   constructor(client: WorkerClient, numPages: number) {
@@ -112,15 +126,27 @@ class PdfiumDocument implements PdfDocument {
     const colorScheme = options.smartColors
       ? colorSchemeFromPalette(options.smartColors)
       : undefined;
-    const handle = this.client.requestCancellable("render", {
+    const request = {
       page: pageNumber,
       width,
       height,
       clip,
       colorScheme,
-    });
-    const promise = handle.result.then((raw) => {
+    };
+    const queued = { cancelled: false };
+    const run = async (): Promise<void> => {
+      if (queued.cancelled) throw new PdfRenderCancelledError();
+      const handle = this.client.requestCancellable("render", request);
+      // A dispatched request stays pending until the worker answers, even if
+      // its canvas unmounts meanwhile. Rejecting it early would let the tail
+      // post the next page while PDFium is still rasterizing the stale one,
+      // recreating the backlog this queue exists to prevent.
+      const raw = await handle.result;
       const { bitmap } = raw as { bitmap: ImageBitmap };
+      if (queued.cancelled) {
+        bitmap.close();
+        throw new PdfRenderCancelledError();
+      }
       const context = options.canvas.getContext("2d");
       if (!context) throw new Error("Canvas 2D context is unavailable");
       try {
@@ -128,8 +154,20 @@ class PdfiumDocument implements PdfDocument {
       } finally {
         bitmap.close();
       }
-    });
-    return { promise, cancel: handle.cancel };
+    };
+    // The tail is always resolved after each attempt, so one failed raster
+    // cannot wedge every later page behind it.
+    const promise = this.renderTail.then(run, run);
+    this.renderTail = promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    return {
+      promise,
+      cancel: () => {
+        queued.cancelled = true;
+      },
+    };
   }
 
   /**

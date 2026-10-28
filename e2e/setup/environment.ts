@@ -193,15 +193,19 @@ export function prepareEnvironment(seeded: boolean): void {
     }
   }
 
-  // The benchmark phase (just bench-reader) seeds only the free-corpus
-  // fixtures (just fetch-ebooks): the suite measures render/turn latency,
-  // and the synthetic fixtures would dilute it. A machine missing one
-  // benches the formats it has (the bench suite skips its missing-fixture
-  // scenarios with a notice).
+  // The benchmark phase (just bench-reader) seeds the free-corpus fixtures
+  // (just fetch-ebooks): the suite measures render/turn latency, and the
+  // synthetic fixtures would dilute it. A machine missing one benches the
+  // formats it has (the bench suite skips its missing-fixture scenarios with
+  // a notice). The committed mixed-size PDF is added only when the far-drag
+  // capture explicitly selects it, so the default bench library is unchanged.
   if (process.env.E2E_PHASE === "bench") {
     for (const [source, name] of [
       [benchPdfFixture, "GeoTopo.pdf"],
       [benchEpubFixture, "page-blanche.epub"],
+      ...(process.env.FAR_DRAG_BOOK_TITLE
+        ? [[thumbCapturePdfFixture, "thumb-capture-mixed.pdf"] as const]
+        : []),
     ] as const) {
       if (existsSync(source)) {
         copyFileSync(source, path.join(libraryDir, name));

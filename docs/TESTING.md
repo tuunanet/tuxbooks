@@ -347,6 +347,13 @@ reader:
   scroll-position change → every visible slot rendered); the
   distribution samples the slot under the viewport's top edge — the page
   the reader is looking at, matching the recorded baseline capture;
+- native far-thumb drag (`far-drag-capture.e2e.ts`): a trusted
+  scrollbar grab to 90% of the document, then the same motion state
+  share, white-streak, and stop-to-sharp measures plus the final
+  visible-slot states and render-window diagnostics. GeoTopo is the
+  default; set `FAR_DRAG_BOOK_TITLE="Thumb Capture Mixed (PDF)"` to
+  run the committed mixed-size fixture (the bench phase seeds it when
+  that variable is present);
 - interaction latency (automation-visible click → observable effect):
   rapid page turns, zoom in/out steps, large-document scroll jumps, and
   EPUB chapter changes through the contents drawer;
