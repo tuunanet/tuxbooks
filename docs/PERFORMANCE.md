@@ -77,7 +77,8 @@ Re-run the relevant verifications when editing:
   PERF-16.
 - Scale corpus + spec (`scripts/make-epub-corpus.py`,
   `e2e/specs/z-library-scale.e2e.ts`: window cap, sort liveness, skip
-  pass) — PERF-15, PERF-16.
+  pass) and the opt-in 10,000-book Grid scroll benchmark
+  (`just bench-library`, `e2e/specs/bench-library.e2e.ts`): PERF-15, PERF-16.
 
 ## How to measure
 
@@ -124,6 +125,12 @@ Re-run the relevant verifications when editing:
   own deterministic configuration: `just test-e2e-hidpi` forces
   `devicePixelRatio` 2 and asserts the buffer caps (PERF-1) at that dpr
   (timing stays out of it).
+- **Library bench (headed, explicit):** `just bench-library` generates the
+  gitignored 10,000-book corpus with cover images, imports it through the real
+  bulk path, and records idle and full-Grid-scroll frame cadence in
+  `bench-results.json`. Use it for before/after comparisons while changing All
+  Books rendering; `BENCH_ENFORCE_P95_MS` is the optional local pass/fail
+  threshold. It never runs in CI.
 - **Manual (timings):** log `performance.now()` around render → blit per
   page at reference conditions; record p95 before/after engine, scale, or
   virtualization changes. Chromium DevTools performance panel and

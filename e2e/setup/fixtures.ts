@@ -143,6 +143,10 @@ export const benchEpubFixture = path.join(
   "page-blanche.epub",
 );
 
+/** Opt-in 10,000-book corpus for the headed All Books scroll benchmark. */
+export const libraryBenchCorpusDir = path.join(repoRoot, ".build", "fixtures", "library-bench");
+export const LIBRARY_BENCH_BOOK_COUNT = 10000;
+
 /** Cards expose `aria-label="{title} ({FORMAT})"`; titles come from file metadata. */
 export const benchBookTitles = {
   pdf: "Geometrie und Topologie (PDF)",
