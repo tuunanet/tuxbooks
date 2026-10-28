@@ -13,8 +13,26 @@ _Avoid_: Evince (the earlier name)
 
 **Engine**:
 The component that turns document bytes into page rasters, page sizes, text
-geometry, outline, and search results. PDF and EPUB each have one.
-_Avoid_: backend, viewer
+geometry, outline, and search results. EPUB-family formats share one and PDF has
+its own; the format registry decides which one a book uses. The type is
+`RenderEngine` in `frontend/src/lib/formats.ts`.
+_Avoid_: backend, viewer, renderer
+
+**Book format**:
+What a book file is, decided from its extension at import: EPUB or PDF today.
+Distinct from the engine that draws it (ADR 0012).
+_Avoid_: file type, extension
+
+**Format registry**:
+The frontend table mapping each supported book format to its engine and display
+label (`frontend/src/lib/formats.ts`). The library's format filter and the
+reader's engine choice both read from it.
+_Avoid_: format list, MIME table
+
+**Format filter**:
+The library header's multi-select filter over book formats. An empty selection
+means every format, not no books.
+_Avoid_: format tabs, file-type filter
 
 **Engine seam**:
 The boundary between the reader and its document engine. Reader code must not

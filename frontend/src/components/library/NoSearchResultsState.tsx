@@ -4,9 +4,15 @@ import { Button } from "@/components/ui/button";
 interface NoSearchResultsStateProps {
   query: string;
   onClearSearch: () => void;
+  /** Present when a format filter also hides books, so both can be cleared. */
+  onClearFormatFilter?: () => void;
 }
 
-export function NoSearchResultsState({ query, onClearSearch }: NoSearchResultsStateProps) {
+export function NoSearchResultsState({
+  query,
+  onClearSearch,
+  onClearFormatFilter,
+}: NoSearchResultsStateProps) {
   return (
     <div
       data-testid="no-search-results"
@@ -20,6 +26,11 @@ export function NoSearchResultsState({ query, onClearSearch }: NoSearchResultsSt
       <Button variant="outline" size="sm" onClick={onClearSearch}>
         Clear search
       </Button>
+      {onClearFormatFilter ? (
+        <Button variant="outline" size="sm" onClick={onClearFormatFilter}>
+          Clear format filter
+        </Button>
+      ) : null}
     </div>
   );
 }

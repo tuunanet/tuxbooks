@@ -33,8 +33,6 @@ describe("Sidebar", () => {
     expect(screen.getByText("Collections")).toBeInTheDocument();
     for (const label of [
       "All Books",
-      "EPUBs",
-      "PDFs",
       "Recently Added",
       "Recently Read",
       "In Progress",
@@ -42,6 +40,9 @@ describe("Sidebar", () => {
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+    // Format filters live in the library header now, not the sidebar.
+    expect(screen.queryByRole("button", { name: "EPUBs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "PDFs" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Loose Books" })).not.toBeInTheDocument();
   });

@@ -1,4 +1,5 @@
 import { createContext, useContext, type Dispatch } from "react";
+import type { BookFormat } from "@/types/domain";
 
 /** The three major application states. Everything else is subordinate. */
 export type AppView = "library" | "detail" | "reader";
@@ -8,8 +9,6 @@ export type DetailTab = "overview" | "metadata" | "highlights" | "bookmarks";
 
 export type SmartSectionId =
   | "all-books"
-  | "epubs"
-  | "pdfs"
   | "recently-added"
   | "recently-read"
   | "in-progress"
@@ -64,6 +63,12 @@ export interface AppState {
    * instead of in view-local state.
    */
   libraryQuery: string;
+  /**
+   * Formats the library shows; empty means no restriction. Unlike the query,
+   * it survives section changes because it composes with every section and
+   * collection instead of scoping one.
+   */
+  formatFilter: BookFormat[];
 }
 
 export type AppAction =
@@ -80,7 +85,8 @@ export type AppAction =
   | { type: "reader-target-consumed" }
   | { type: "return-to-library" }
   | { type: "select-detail-tab"; tab: DetailTab }
-  | { type: "set-library-query"; query: string };
+  | { type: "set-library-query"; query: string }
+  | { type: "set-format-filter"; formats: BookFormat[] };
 
 export const initialAppState: AppState = {
   view: "library",
@@ -91,14 +97,15 @@ export const initialAppState: AppState = {
   detailTab: "overview",
   readerTargetAnnotationId: null,
   libraryQuery: "",
+  formatFilter: [],
 };
 
 export function appStateReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "select-section":
       // Choosing a sidebar section always returns to the library view and
-      // starts with an unfiltered list; a selection from the old slice
-      // would point at books the new one may not show.
+      // clears the section-scoped search; the format filter is orthogonal, so
+      // it stays.
       return {
         ...state,
         view: "library",
@@ -166,6 +173,13 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       return state.detailTab === action.tab ? state : { ...state, detailTab: action.tab };
     case "set-library-query":
       return state.libraryQuery === action.query ? state : { ...state, libraryQuery: action.query };
+    case "set-format-filter": {
+      const current = state.formatFilter;
+      const next = action.formats;
+      const unchanged =
+        current.length === next.length && current.every((format, index) => format === next[index]);
+      return unchanged ? state : { ...state, formatFilter: next };
+    }
   }
 }
 

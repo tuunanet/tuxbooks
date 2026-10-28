@@ -16,16 +16,19 @@ describe("appStateReducer", () => {
         selectedBookIds: [1, 3],
         selectionAnchorId: 1,
         libraryQuery: "meridian",
+        formatFilter: ["pdf"],
       },
-      { type: "select-section", section: { kind: "smart", id: "pdfs" } },
+      { type: "select-section", section: { kind: "smart", id: "recently-added" } },
     );
     expect(state).toEqual({
       view: "library",
-      section: { kind: "smart", id: "pdfs" },
+      section: { kind: "smart", id: "recently-added" },
       selectedBookId: 7,
       selectedBookIds: [],
       selectionAnchorId: null,
       libraryQuery: "",
+      // The format filter composes with every section, so it is not cleared.
+      formatFilter: ["pdf"],
     });
   });
 
@@ -49,6 +52,7 @@ describe("appStateReducer", () => {
       detailTab: "overview",
       readerTargetAnnotationId: null,
       libraryQuery: "",
+      formatFilter: [],
     });
   });
 
@@ -99,6 +103,7 @@ describe("appStateReducer", () => {
         selectedBookIds: [9],
         selectionAnchorId: 9,
         libraryQuery: "",
+        formatFilter: [],
       },
       { type: "return-to-library" },
     );
@@ -109,6 +114,7 @@ describe("appStateReducer", () => {
       selectedBookIds: [9],
       selectionAnchorId: 9,
       libraryQuery: "",
+      formatFilter: [],
     });
   });
 
@@ -225,16 +231,41 @@ describe("appStateReducer library selection", () => {
       initialAppState,
     );
   });
+
+  it("sets the format filter and returns the same object when it did not change", () => {
+    const filtered = appStateReducer(initialAppState, {
+      type: "set-format-filter",
+      formats: ["pdf"],
+    });
+    expect(filtered.formatFilter).toEqual(["pdf"]);
+    expect(appStateReducer(filtered, { type: "set-format-filter", formats: ["pdf"] })).toBe(
+      filtered,
+    );
+  });
+
+  it("an empty format set means no restriction, not no books", () => {
+    const filtered = appStateReducer(initialAppState, {
+      type: "set-format-filter",
+      formats: ["epub"],
+    });
+    expect(
+      appStateReducer(filtered, { type: "set-format-filter", formats: [] }).formatFilter,
+    ).toEqual([]);
+  });
 });
 
 describe("sameSection", () => {
   it("matches smart sections by id", () => {
-    expect(sameSection({ kind: "smart", id: "epubs" }, { kind: "smart", id: "epubs" })).toBe(true);
-    expect(sameSection({ kind: "smart", id: "epubs" }, { kind: "smart", id: "pdfs" })).toBe(false);
+    expect(
+      sameSection({ kind: "smart", id: "all-books" }, { kind: "smart", id: "all-books" }),
+    ).toBe(true);
+    expect(
+      sameSection({ kind: "smart", id: "all-books" }, { kind: "smart", id: "recently-added" }),
+    ).toBe(false);
   });
 
   it("never matches across kinds", () => {
-    expect(sameSection({ kind: "smart", id: "epubs" }, { kind: "settings" })).toBe(false);
+    expect(sameSection({ kind: "smart", id: "all-books" }, { kind: "settings" })).toBe(false);
     expect(sameSection({ kind: "collection", id: 1 }, { kind: "settings" })).toBe(false);
   });
 });

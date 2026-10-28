@@ -63,7 +63,7 @@ async fn epub_book(pool: &SqlitePool, book_id: i64) -> Result<crate::domain::Boo
     let book = books::get_book(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    if BookFormat::from_path(&book.path) != BookFormat::Epub {
+    if BookFormat::from_path(&book.path) != Some(BookFormat::Epub) {
         return Err(AppError::InvalidInput(format!(
             "book {book_id} is not an EPUB"
         )));

@@ -1,10 +1,8 @@
 import type { LibrarySection, SmartSectionId } from "@/state/appState";
-import type { Book } from "@/types/domain";
+import type { Book, BookFormat } from "@/types/domain";
 
 export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
   "all-books": "All Books",
-  epubs: "EPUBs",
-  pdfs: "PDFs",
   "recently-added": "Recently Added",
   "recently-read": "Recently Read",
   "in-progress": "In Progress",
@@ -30,10 +28,6 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
   switch (section.id) {
     case "all-books":
       return books;
-    case "epubs":
-      return books.filter((book) => book.format === "epub");
-    case "pdfs":
-      return books.filter((book) => book.format === "pdf");
     case "recently-added":
       return [...books].sort((a, b) => b.addedAt.localeCompare(a.addedAt));
     case "recently-read":
@@ -51,6 +45,16 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
         .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
         .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
   }
+}
+
+/**
+ * Keeps the formats the header filter has ticked. An empty selection is not
+ * "nothing" — it is no restriction, which is why the trigger reads
+ * "All formats".
+ */
+export function filterBooksByFormat(books: Book[], formats: readonly BookFormat[]): Book[] {
+  if (formats.length === 0) return books;
+  return books.filter((book) => formats.includes(book.format));
 }
 
 /**

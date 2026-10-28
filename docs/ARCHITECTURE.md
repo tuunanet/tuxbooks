@@ -208,6 +208,18 @@ rendering belongs to **PDFium-WASM** in the renderer behind the
 the render queue, and persistence. Byte access flows through
 `tuxbooks://`. See [PDF.md](PDF.md).
 
+## Format registry
+
+A book's format (what the file is) and its engine (which reader draws it) are
+separate. The sidecar keeps format truth in `domain::BookFormat`, derived from
+the extension at import. The renderer keeps the mapping in
+`frontend/src/lib/formats.ts`; the library's format filter and
+`ReaderShell`'s engine choice both read it. The Readium engine is meant to
+absorb EPUB-family formats through an import-time normalization step that
+does not exist yet; the PDFium engine is PDF-only by decision. Adding a format
+is an import path plus a registry entry: see [FORMATS.md](FORMATS.md) and
+[ADR 0012](adr/0012-formats-map-to-render-engines.md).
+
 ## Services
 
 - `library_scanner`: pure filesystem read; recursive, typed per-file errors;
@@ -270,6 +282,8 @@ frontend/src/
     lib/bridge.ts         the only window.tuxbooks consumer (typed wrappers)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/theme.ts          global light/dark theme logic (parse/resolve/apply)
+    lib/formats.ts        format -> engine registry (filter options + reader
+                          dispatch)
     lib/readerSettings.ts persisted reader-appearance defaults (validated
                           localStorage store shared by Settings and the reader)
     lib/fixtures.ts       realistic sample books for tests/previews

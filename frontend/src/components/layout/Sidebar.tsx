@@ -14,8 +14,6 @@ interface SidebarProps {
 
 const LIBRARY_ITEMS: { id: SmartSectionId; label: string }[] = [
   { id: "all-books", label: "All Books" },
-  { id: "epubs", label: "EPUBs" },
-  { id: "pdfs", label: "PDFs" },
   { id: "recently-added", label: "Recently Added" },
   { id: "recently-read", label: "Recently Read" },
   { id: "in-progress", label: "In Progress" },
