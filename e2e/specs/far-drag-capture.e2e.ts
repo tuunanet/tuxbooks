@@ -101,9 +101,114 @@ type FarResult = {
 type FarGlobals = typeof globalThis & {
   __tuxbooksFarDrag?: {
     stop(): void;
-    done: Promise<FarResult>;
+    done: Promise<FarRawResult>;
   };
 };
+
+type RenderStateCounts = {
+  rendering: number;
+  unloaded: number;
+  rendered: number;
+  error: number;
+};
+
+interface FarRawResult {
+  ticks: FarSample[];
+  motionStartAt: number;
+  motionEndAt: number;
+  startTop: number;
+  stopToSharpMs: number | null;
+  timedOut: boolean;
+  diagnostics: FarDiagnostic[];
+}
+
+function filterMotionTicks(
+  ticks: FarSample[],
+  motionStartAt: number,
+  motionEndAt: number,
+): FarSample[] {
+  if (motionStartAt < 0 || motionEndAt < 0) return [];
+  return ticks.filter((tick) => tick.t >= motionStartAt && tick.t <= motionEndAt);
+}
+
+function countRenderStates(ticks: FarSample[]): {
+  counts: RenderStateCounts;
+  total: number;
+} {
+  const counts: RenderStateCounts = { rendering: 0, unloaded: 0, rendered: 0, error: 0 };
+  let total = 0;
+  for (const tick of ticks) {
+    for (const state of tick.states) {
+      if (state in counts) {
+        counts[state as keyof RenderStateCounts] += 1;
+        total += 1;
+      }
+    }
+  }
+  return { counts, total };
+}
+
+function countTopmostRenderStates(ticks: FarSample[]): RenderStateCounts {
+  const counts: RenderStateCounts = { rendering: 0, unloaded: 0, rendered: 0, error: 0 };
+  for (const tick of ticks) {
+    const state = tick.states[0] ?? "";
+    if (state in counts) {
+      counts[state as keyof RenderStateCounts] += 1;
+    }
+  }
+  return counts;
+}
+
+function stateShares(counts: RenderStateCounts, total: number): RenderStateCounts {
+  const share = (value: number): number =>
+    total === 0 ? 0 : Number(((value / total) * 100).toFixed(1));
+  return {
+    rendering: share(counts.rendering),
+    unloaded: share(counts.unloaded),
+    rendered: share(counts.rendered),
+    error: share(counts.error),
+  };
+}
+
+function longestWhiteStreakMs(ticks: FarSample[], sampleMs: number): number {
+  let longest = 0;
+  let whiteSince = -1;
+  const lastT = ticks.at(-1)?.t ?? 0;
+  for (const tick of [...ticks, { t: lastT, states: ["closed"] } as FarSample]) {
+    const state = tick.states[0] ?? "";
+    const white = state === "rendering" || state === "unloaded";
+    if (white && whiteSince < 0) whiteSince = tick.t;
+    if (!white && whiteSince >= 0) {
+      longest = Math.max(longest, tick.t - whiteSince + sampleMs);
+      whiteSince = -1;
+    }
+  }
+  return longest;
+}
+
+function summarizeFarResult(raw: FarRawResult): FarResult {
+  const motionTicks = filterMotionTicks(raw.ticks, raw.motionStartAt, raw.motionEndAt);
+  const visible = countRenderStates(motionTicks);
+  const topmost = countTopmostRenderStates(motionTicks);
+  const endTop = raw.ticks.at(-1)?.scrollTop ?? raw.startTop;
+  const hasMotion = raw.motionStartAt >= 0 && raw.motionEndAt >= 0;
+  return {
+    startTop: raw.startTop,
+    endTop,
+    distancePx: endTop - raw.startTop,
+    motionMs: hasMotion ? raw.motionEndAt - raw.motionStartAt : 0,
+    samples: motionTicks.length,
+    totalSamples: raw.ticks.length,
+    renderStates: visible.counts,
+    renderStateSharePct: stateShares(visible.counts, visible.total),
+    topmostRenderStates: topmost,
+    topmostRenderStateSharePct: stateShares(topmost, motionTicks.length),
+    longestWhiteStreakMs: longestWhiteStreakMs(motionTicks, SAMPLE_MS),
+    stopToSharpMs: raw.stopToSharpMs,
+    timedOut: raw.timedOut,
+    diagnostics: raw.diagnostics,
+  };
+}
 
 async function readContainer(page: Page): Promise<Geometry> {
   return page.evaluate(() => {
@@ -261,8 +366,8 @@ async function startSampler(page: Page): Promise<void> {
       let stopped = false;
       let stopRequestedAt = 0;
       let finished = false;
-      let resolveDone!: (value: FarResult) => void;
-      const done = new Promise<FarResult>((resolve) => {
+      let resolveDone!: (value: FarRawResult) => void;
+      const done = new Promise<FarRawResult>((resolve) => {
         resolveDone = resolve;
       });
 
@@ -270,68 +375,13 @@ async function startSampler(page: Page): Promise<void> {
         if (finished) return;
         finished = true;
         window.clearInterval(interval);
-        const motionTicks = ticks.filter(
-          (tick) => tick.t >= motionStartAt && tick.t <= motionEndAt,
-        );
-        const renderStates = { rendering: 0, unloaded: 0, rendered: 0, error: 0 };
-        for (const tick of motionTicks) {
-          for (const state of tick.states) {
-            if (state in renderStates) {
-              renderStates[state as keyof typeof renderStates] += 1;
-            }
-          }
-        }
-        const count = motionTicks.reduce((sum, tick) => sum + tick.states.length, 0);
-        const share = (value: number): number =>
-          count === 0 ? 0 : Number(((value / count) * 100).toFixed(1));
-        const topmostRenderStates = { rendering: 0, unloaded: 0, rendered: 0, error: 0 };
-        for (const tick of motionTicks) {
-          const state = tick.states[0] ?? "";
-          if (state in topmostRenderStates) {
-            topmostRenderStates[state as keyof typeof topmostRenderStates] += 1;
-          }
-        }
-        const topmostShare = (value: number): number =>
-          motionTicks.length === 0 ? 0 : Number(((value / motionTicks.length) * 100).toFixed(1));
-
-        let longestWhiteStreakMs = 0;
-        let whiteSince = -1;
-        const lastT = motionTicks[motionTicks.length - 1]?.t ?? 0;
-        for (const tick of [...motionTicks, { t: lastT, states: ["closed"] } as FarSample]) {
-          const state = tick.states[0] ?? "";
-          const white = state === "rendering" || state === "unloaded";
-          if (white && whiteSince < 0) whiteSince = tick.t;
-          if (!white && whiteSince >= 0) {
-            longestWhiteStreakMs = Math.max(longestWhiteStreakMs, tick.t - whiteSince + sampleMs);
-            whiteSince = -1;
-          }
-        }
-
-        const endTop = ticks[ticks.length - 1]?.scrollTop ?? startTop;
+        const hasMotion = motionStartAt >= 0 && motionEndAt >= 0;
         resolveDone({
+          ticks,
+          motionStartAt,
+          motionEndAt,
           startTop,
-          endTop,
-          distancePx: endTop - startTop,
-          motionMs: motionStartAt >= 0 && motionEndAt >= 0 ? motionEndAt - motionStartAt : 0,
-          samples: motionTicks.length,
-          totalSamples: ticks.length,
-          renderStates,
-          renderStateSharePct: {
-            rendering: share(renderStates.rendering),
-            unloaded: share(renderStates.unloaded),
-            rendered: share(renderStates.rendered),
-            error: share(renderStates.error),
-          },
-          topmostRenderStates,
-          topmostRenderStateSharePct: {
-            rendering: topmostShare(topmostRenderStates.rendering),
-            unloaded: topmostShare(topmostRenderStates.unloaded),
-            rendered: topmostShare(topmostRenderStates.rendered),
-            error: topmostShare(topmostRenderStates.error),
-          },
-          longestWhiteStreakMs,
-          stopToSharpMs:
-            motionStartAt >= 0 && motionEndAt >= 0 && !timedOut ? sharpAt - motionEndAt : null,
+          stopToSharpMs: hasMotion && !timedOut ? sharpAt - motionEndAt : null,
           timedOut,
           diagnostics,
         });
@@ -368,18 +418,22 @@ async function startSampler(page: Page): Promise<void> {
         done,
       };
     },
-    { sampleMs: SAMPLE_MS, stopTimeoutMs: STOP_TIMEOUT_MS },
+    {
+      sampleMs: SAMPLE_MS,
+      stopTimeoutMs: STOP_TIMEOUT_MS,
+    },
   );
 }
 
 async function stopSampler(page: Page): Promise<FarResult> {
-  return page.evaluate(() => {
+  const raw = await page.evaluate(() => {
     const globals = globalThis as FarGlobals;
     const handle = globals.__tuxbooksFarDrag;
     if (!handle) throw new Error("far-drag sampler was never started");
     handle.stop();
     return handle.done;
   });
+  return summarizeFarResult(raw);
 }
 
 test.describe("far native scrollbar capture", () => {
@@ -438,14 +492,14 @@ test.describe("far native scrollbar capture", () => {
       await page.waitForTimeout(DRAG_STEP_DELAY_MS);
     }
 
-    // Chromium can coalesce a long run of rapid trusted moves. Nudge once
+    // Chromium can coalesce a long run of rapid trusted moves. Nudge well
     // past the modeled target and back so the held thumb lands at the same
     // 90% position on every run, regardless of input coalescing.
     const targetCursorY = predictedThumbCenterY(model, grabGeometry, targetScrollTop);
-    await page.mouse.move(model.trackX, targetCursorY + direction * 2);
-    await page.waitForTimeout(30);
+    await page.mouse.move(model.trackX, targetCursorY + direction * 40);
+    await page.waitForTimeout(100);
     await page.mouse.move(model.trackX, targetCursorY);
-    await page.waitForTimeout(30);
+    await page.waitForTimeout(100);
 
     // Chromium may coalesce the trusted moves. Wait for the scrollbar's own
     // scroll updates to catch up before releasing, so every run measures a
