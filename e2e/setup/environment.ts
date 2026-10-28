@@ -4,7 +4,15 @@
  * the failure-artifact directory. Nothing here ever touches a real user
  * library — the app only sees `TEST_DATABASE_PATH` / `TEST_LIBRARY_PATH`.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -20,8 +28,11 @@ import {
   epubFixture,
   readerRegressionFixtures,
   libraryBenchCorpusDir,
+  LIBRARY_THUMB_PART_COUNT,
+  libraryThumbCorpusDir,
+  libraryThumbPartDir,
   largePdfFixture,
-  LIBRARY_BENCH_BOOK_COUNT,
+  LIBRARY_CORPUS_BOOK_COUNT,
   mixedPdfFixture,
   pdfFixture,
   repoRoot,
@@ -123,19 +134,51 @@ function pruneOldArtifacts(): void {
   }
 }
 
+/** Run the deterministic EPUB corpus generator into `dir`. */
+function runEpubCorpusGenerator(dir: string, count: number, withCovers: boolean): void {
+  mkdirSync(dir, { recursive: true });
+  execFileSync("python3", [
+    path.join(repoRoot, "scripts", "make-epub-corpus.py"),
+    ...(withCovers ? ["--cover"] : []),
+    dir,
+    String(count),
+  ]);
+}
+
 /**
  * The opt-in library benchmark generates its corpus before the app launches.
  * The fixture path and count live with the other test fixtures; the spec
  * reads the same constants, so setup and assertions cannot drift.
  */
 function generateLibraryBenchCorpus(): void {
-  mkdirSync(libraryBenchCorpusDir, { recursive: true });
-  execFileSync("python3", [
-    path.join(repoRoot, "scripts", "make-epub-corpus.py"),
-    "--cover",
-    libraryBenchCorpusDir,
-    String(LIBRARY_BENCH_BOOK_COUNT),
-  ]);
+  runEpubCorpusGenerator(libraryBenchCorpusDir, LIBRARY_CORPUS_BOOK_COUNT, true);
+}
+
+/**
+ * Same corpus shape for the thumb-drag regression loop (tuxbooks-y9s), but
+ * without covers: card geometry is CSS-fixed, and the cheaper import keeps
+ * every batched import_paths call inside the sidecar RPC's 60 s guard.
+ *
+ * The books are partitioned into subdirectories afterwards: importing a
+ * plain file makes its parent take the folder treatment (scan + watch,
+ * ADR 0009), so N flat files in one directory cost N full directory
+ * scans — quadratic. One directory import per part is the shape the app's
+ * own folder flow uses, and each part lands well inside the RPC guard.
+ */
+function generateLibraryThumbCorpus(): void {
+  runEpubCorpusGenerator(libraryThumbCorpusDir, LIBRARY_CORPUS_BOOK_COUNT, false);
+  const partCount = LIBRARY_THUMB_PART_COUNT;
+  for (let part = 0; part < partCount; part += 1) {
+    rmSync(libraryThumbPartDir(part), { recursive: true, force: true });
+    mkdirSync(libraryThumbPartDir(part), { recursive: true });
+  }
+  const books = readdirSync(libraryThumbCorpusDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".epub"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  books.forEach((entry, index) => {
+    const target = libraryThumbPartDir(index % partCount);
+    renameSync(path.join(libraryThumbCorpusDir, entry.name), path.join(target, entry.name));
+  });
 }
 
 function seedRegressionFixtures(): void {
@@ -234,6 +277,7 @@ export function prepareEnvironment(seeded: boolean): void {
   mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
 
   if (process.env.E2E_PHASE === "bench-library") generateLibraryBenchCorpus();
+  if (process.env.E2E_PHASE === "library-thumb") generateLibraryThumbCorpus();
 
   seedPhaseFixtures(seeded);
 

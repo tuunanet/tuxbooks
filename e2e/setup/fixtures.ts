@@ -143,9 +143,31 @@ export const benchEpubFixture = path.join(
   "page-blanche.epub",
 );
 
-/** Opt-in 10,000-book corpus for the headed All Books scroll benchmark. */
+/**
+ * Opt-in 10,000-book corpus for the All Books scroll benchmark (covered).
+ */
 export const libraryBenchCorpusDir = path.join(repoRoot, ".build", "fixtures", "library-bench");
-export const LIBRARY_BENCH_BOOK_COUNT = 10000;
+export const LIBRARY_CORPUS_BOOK_COUNT = 10000;
+
+/**
+ * Cover-less variant for the scrollbar thumb-drag regression loop
+ * (tuxbooks-y9s): identical card geometry (BookCover reserves the 2:3 box
+ * in CSS either way), a third of the sidecar import cost, which keeps each
+ * import batch inside the sidecar RPC's 60 s runaway guard.
+ */
+export const libraryThumbCorpusDir = path.join(repoRoot, ".build", "fixtures", "library-thumb");
+
+/**
+ * The corpus is partitioned into this many part directories so the loop
+ * imports directories (one RPC each) instead of files — importing a file
+ * makes its parent take the folder treatment, which for N flat files in
+ * one directory costs N directory scans.
+ */
+export const LIBRARY_THUMB_PART_COUNT = 10;
+
+export function libraryThumbPartDir(part: number): string {
+  return path.join(libraryThumbCorpusDir, `part-${String(part).padStart(2, "0")}`);
+}
 
 /** Cards expose `aria-label="{title} ({FORMAT})"`; titles come from file metadata. */
 export const benchBookTitles = {

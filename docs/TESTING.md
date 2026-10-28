@@ -338,6 +338,21 @@ The suite records timings without a machine-independent assertion. Set
 `BENCH_ENFORCE_P95_MS` to enforce one locally during development, for example
 `BENCH_ENFORCE_P95_MS=32 just bench-library`.
 
+### Scrollbar thumb-drag regression (opt-in)
+
+`just test-e2e-library-thumb` is the regression loop for the 10,000-book
+scrollbar thumb fix (tuxbooks-y9s). It grabs the Grid's real native scrollbar
+thumb through trusted input and drags it the length of the track, downward
+from the top and upward from the bottom (on a freshly remounted view), and
+asserts the thumb stays under the held cursor — the unfixed build diverged
+hundreds of track px and the drag died mid-way. A static-overlay control drag
+in the same window guards the harness: if the grid fails while the control
+tracks, the divergence is app-caused. It runs under Xvfb on the explicit
+target only, generates a cover-less variant of the corpus in
+`.build/fixtures/library-thumb/` (same card geometry, cheap enough to import
+inside the sidecar RPC's 60 s guard), and uses the release sidecar because the
+renderer is what's under test.
+
 ### Benchmark suite (headed, opt-in)
 
 `just bench-reader [WxH]` runs `bench-reader.e2e.ts` — the suite that

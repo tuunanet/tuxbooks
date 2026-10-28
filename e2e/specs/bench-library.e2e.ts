@@ -9,7 +9,7 @@ import {
 } from "../setup/bench-helpers.js";
 import { recordScenario } from "../setup/bench-report.js";
 import { artifactsDir } from "../setup/environment.js";
-import { LIBRARY_BENCH_BOOK_COUNT, libraryBenchCorpusDir } from "../setup/fixtures.js";
+import { LIBRARY_CORPUS_BOOK_COUNT, libraryBenchCorpusDir } from "../setup/fixtures.js";
 
 /**
  * Headed, opt-in measurement for the 10,000-book All Books Grid report
@@ -115,14 +115,14 @@ test.describe("10,000-book All Books performance", () => {
       (dir) => window.tuxbooks!.invoke("import_paths", { paths: [dir] }),
       libraryBenchCorpusDir,
     )) as Record<string, number>;
-    expect(report).toMatchObject({ imported: LIBRARY_BENCH_BOOK_COUNT, skipped: 0 });
+    expect(report).toMatchObject({ imported: LIBRARY_CORPUS_BOOK_COUNT, skipped: 0 });
 
     // An empty library renders the empty state rather than LibraryView, so
     // select All Books only once the imported books have landed.
     await page.getByRole("button", { name: "All Books", exact: true }).click();
     await expect(page.getByTestId("library-view")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("library-stats")).toHaveText(
-      `${LIBRARY_BENCH_BOOK_COUNT} books`,
+      `${LIBRARY_CORPUS_BOOK_COUNT} books`,
       { timeout: 30_000 },
     );
     await expect(page.getByTestId("book-grid")).toBeVisible();
@@ -134,7 +134,7 @@ test.describe("10,000-book All Books performance", () => {
       reportFile,
       "library-grid-scroll",
       {
-        bookCount: LIBRARY_BENCH_BOOK_COUNT,
+        bookCount: LIBRARY_CORPUS_BOOK_COUNT,
         idle,
         scroll: {
           n: scroll.n,
