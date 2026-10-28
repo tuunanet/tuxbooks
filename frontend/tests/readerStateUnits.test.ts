@@ -75,7 +75,7 @@ describe("sameSection", () => {
   const collection = (id: number): LibrarySection => ({ kind: "collection", id });
   it("distinguishes kinds and smart/collection identities", () => {
     expect(sameSection(smart("all-books"), smart("all-books"))).toBe(true);
-    expect(sameSection(smart("all-books"), smart("epubs"))).toBe(false);
+    expect(sameSection(smart("all-books"), smart("finished"))).toBe(false);
     expect(sameSection(collection(1), collection(1))).toBe(true);
     expect(sameSection(collection(1), collection(2))).toBe(false);
     expect(sameSection(smart("all-books"), collection(1))).toBe(false);

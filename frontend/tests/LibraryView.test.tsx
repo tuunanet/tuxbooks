@@ -79,6 +79,65 @@ describe("LibraryView header", () => {
     expect(await screen.findByTestId("book-grid")).toBeInTheDocument();
     expect(screen.queryByTestId("book-list")).not.toBeInTheDocument();
   });
+
+  it("keeps the format menu open while several formats are ticked", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [
+        alpha(),
+        makeBook({ id: 3, path: "/tmp/library/paper.pdf", format: "pdf", title: "Paper" }),
+      ],
+    });
+
+    renderLibrary();
+
+    const trigger = await screen.findByTestId("library-format-filter");
+    expect(trigger).toHaveTextContent("All formats");
+
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByTestId("format-filter-epub"));
+
+    expect(screen.getByTestId("library-format-filter")).toHaveTextContent("EPUB");
+    // The menu is still open because a checkbox item does not dismiss it.
+    expect(screen.getByTestId("format-filter-pdf")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    expect(screen.getByTestId("library-format-filter")).toHaveTextContent("2 formats");
+
+    await userEvent.click(screen.getByTestId("format-filter-all"));
+    expect(screen.getByTestId("library-format-filter")).toHaveTextContent("All formats");
+  });
+
+  it("composes the format filter with the section", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [
+        makeBook({
+          id: 1,
+          title: "Reading EPUB",
+          progressPercent: 40,
+          progressUpdatedAt: "2026-03-01T00:00:00.000Z",
+        }),
+        makeBook({
+          id: 2,
+          path: "/tmp/library/reading.pdf",
+          format: "pdf",
+          title: "Reading PDF",
+          progressPercent: 40,
+          progressUpdatedAt: "2026-03-02T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    renderLibrary({ kind: "smart", id: "in-progress" });
+    expect(await screen.findAllByTestId("book-card")).toHaveLength(2);
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+
+    expect(await screen.findAllByTestId("book-card")).toHaveLength(1);
+    expect(screen.getByText("Reading PDF")).toBeInTheDocument();
+  });
 });
 
 describe("LibraryView selection and opening", () => {
@@ -1190,16 +1249,85 @@ describe("LibraryView reading progress synchronization", () => {
 });
 
 describe("LibraryView empty states", () => {
-  it("shows the empty-section state for a filtered section without books", async () => {
+  it("offers to clear the format filter when it matches nothing", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [alpha()],
     });
 
-    renderLibrary({ kind: "smart", id: "pdfs" });
+    renderLibrary();
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    await userEvent.keyboard("{Escape}");
+
+    expect(await screen.findByTestId("empty-format-filter")).toBeInTheDocument();
+    expect(screen.getByTestId("library-stats")).toHaveTextContent("0 books");
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear format filter" }));
+    expect(await screen.findByTestId("book-card")).toBeInTheDocument();
+  });
+
+  it("shows the empty-section state for a section without books", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [alpha()],
+    });
+
+    renderLibrary({ kind: "smart", id: "in-progress" });
 
     expect(await screen.findByTestId("empty-section")).toBeInTheDocument();
     expect(screen.getByTestId("library-stats")).toHaveTextContent("0 books");
+  });
+
+  it("does not blame the filter when every format is ticked", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [alpha()],
+    });
+
+    renderLibrary({ kind: "smart", id: "in-progress" });
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-epub"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    await userEvent.keyboard("{Escape}");
+
+    expect(await screen.findByTestId("empty-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("empty-format-filter")).not.toBeInTheDocument();
+  });
+
+  it("offers both ways out when a search and a format filter hide everything", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+    });
+
+    renderLibrary();
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(screen.getByTestId("library-search"), "zzz");
+
+    expect(await screen.findByTestId("no-search-results")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear format filter" })).toBeInTheDocument();
+  });
+
+  it("keeps the collection explanation when the collection itself is empty", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 1 },
+      list_books: [],
+    });
+
+    renderLibrary({ kind: "collection", id: 1 });
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    await userEvent.keyboard("{Escape}");
+
+    expect(await screen.findByTestId("empty-collection")).toBeInTheDocument();
+    expect(screen.queryByTestId("empty-format-filter")).not.toBeInTheDocument();
   });
 
   it("shows the empty-collection state for a collection section", async () => {

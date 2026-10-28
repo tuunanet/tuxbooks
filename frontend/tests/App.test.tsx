@@ -106,7 +106,7 @@ describe("App", () => {
     expect(await screen.findByTestId("book-card")).toBeInTheDocument();
   });
 
-  it("switches library sections from the sidebar", async () => {
+  it("filters by format through the header dropdown", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
       list_books: [
@@ -118,12 +118,17 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findAllByTestId("book-card")).toHaveLength(2);
-    await userEvent.click(screen.getByRole("button", { name: "PDFs" }));
+
+    const trigger = screen.getByTestId("library-format-filter");
+    expect(trigger).toHaveTextContent("All formats");
+
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
 
     const cards = await screen.findAllByTestId("book-card");
     expect(cards).toHaveLength(1);
     expect(screen.getByText("PDF Book")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "PDFs" })).toHaveAttribute("aria-current");
+    expect(screen.getByTestId("library-format-filter")).toHaveTextContent("PDF");
   });
 
   it("shows the progress-backed Finished section driven by the shared payload", async () => {
