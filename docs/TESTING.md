@@ -334,6 +334,15 @@ cadence, then drives a full-library programmatic scroll and records frame
 p50/p95/max, dropped-frame shares, scroll distance, wall time, and the peak
 observed mounted-card count in `bench-results.json`.
 
+Import timing is the sharp edge: `import_paths` is one RPC behind a flat 60 s
+guard with no progress reset (`electron/main/sidecar.ts`), and one folder call
+over 10,000 covered books measures 130 s on the release sidecar (the debug
+sidecar the recipe uses is slower), so a single bulk call cannot clear the
+guard. Import big corpora one partitioned subdirectory per call, the pattern in
+`generateLibraryThumbCorpus` (e2e/setup/environment.ts); per-file calls are
+quadratic because each file's parent takes the folder treatment. The bench
+spec's own single-call import exceeds the guard as written (tuxbooks-grk).
+
 The suite records timings without a machine-independent assertion. Set
 `BENCH_ENFORCE_P95_MS` to enforce one locally during development, for example
 `BENCH_ENFORCE_P95_MS=32 just bench-library`.

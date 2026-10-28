@@ -31,7 +31,8 @@ canonical roles as bd labels (`docs/agents/triage-labels.md`).
 6. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
    `--force-with-lease`). Open the PR with the `pr` skill's body template
    (summary, evidence, merge danger) and run the title and body through
-   `unslop` before posting.
+   `unslop` before posting. E2E in CI is opt-in: add the `run-e2e` label
+   when the diff touches app behavior (docs/TESTING.md).
 7. Tracker data rides Dolt, not git: `bd dolt pull` before tracker work in a
    session, `bd dolt push` after it. Beads never adds files to a task PR
    (`.beads/*.jsonl` are local-only). Full rules live in
@@ -81,7 +82,7 @@ The CLI is a devDependency, so `vp install` provides it; like vp, bare `graft`
 uses a global install when one exists, and without a global prefix `pnpm exec`.
 
 ```sh
-graft ask "<question>" --source   # locate + understand; inlines the code crux
+graft ask "<question>" --source   # one question per call; inlines the code crux
 graft skeleton <file>             # a file's API in ~200 tokens
 graft grep "<pattern>"            # exhaustive, ranked by coupling
 graft callers <symbol> --depth 2  # blast radius before a rename or refactor

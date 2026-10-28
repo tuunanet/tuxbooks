@@ -12,4 +12,6 @@ just test-e2e               # all projects
 
 The `just` recipes wrap the Linux headless Xvfb environment, so run them instead
 of calling Playwright directly. Failure artifacts land in `artifacts/`.
+In-page timers may only observe (frame samplers); drive anything that writes
+scroll or app state from Node, where the lifecycle is explicit.
 See `docs/TESTING.md` for fixture seeding and project details.
