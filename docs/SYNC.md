@@ -49,8 +49,11 @@ an alias:
 - on import, the identity sweep hashes the file and looks up the alias;
 - if the alias exists, the book binds to its uuid;
 - if not, a uuid is created and an identity operation publishes the alias;
-- when a metadata embed rewrites the file, the uuid stays and the new hash is
-  added as another alias;
+- when a metadata embed rewrites the file, the embed path refreshes the stored
+  size/mtime snapshot so the next identity sweep rehashes it; the uuid stays
+  and the new hash is added as another alias. The old alias is never removed,
+  so a machine that has not received the rewritten file yet still resolves to
+  the same book;
 - if two machines independently imported the same bytes before meeting, both
   publish an alias for the same hash. Every device resolves the aliases to the
   lexicographically smallest uuid and re-keys the losing state. The resolution

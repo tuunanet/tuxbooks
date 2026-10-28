@@ -690,3 +690,84 @@ pub async fn record_issue(
 pub async fn touch_last_sync(pool: &SqlitePool) -> Result<(), AppError> {
     super::clock::set_meta(pool, super::clock::META_LAST_SYNC, &now_rfc3339()).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::NewBook;
+    use crate::repository::books;
+
+    fn snapshot(path: &std::path::Path) -> (i64, i64) {
+        let metadata = std::fs::metadata(path).unwrap();
+        let mtime = metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        (metadata.len() as i64, mtime)
+    }
+
+    async fn book_with_file(pool: &SqlitePool, path: &std::path::Path) -> i64 {
+        let (file_size, file_mtime) = snapshot(path);
+        books::upsert_book(
+            pool,
+            &NewBook {
+                path: path.to_string_lossy().into_owned(),
+                title: "Identity test".into(),
+                subtitle: None,
+                author: None,
+                authors: Vec::new(),
+                subjects: Vec::new(),
+                publisher: None,
+                language: None,
+                isbn: None,
+                description: None,
+                publication_date: None,
+                series: None,
+                series_index: None,
+                cover_path: None,
+                file_size,
+                file_mtime,
+            },
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    #[tokio::test]
+    async fn a_rewrite_keeps_the_uuid_and_adds_a_hash_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"version one").unwrap();
+        let book_id = book_with_file(&pool, &path).await;
+
+        let first = ensure_book_identity(&pool, book_id).await.unwrap().unwrap();
+        std::fs::write(&path, b"version two is longer").unwrap();
+        let (file_size, file_mtime) = snapshot(&path);
+        books::update_file_snapshot(&pool, book_id, file_size, file_mtime)
+            .await
+            .unwrap();
+        let second = ensure_book_identity(&pool, book_id).await.unwrap().unwrap();
+
+        assert_eq!(first.book_uid, second.book_uid);
+        assert_ne!(first.content_hash, second.content_hash);
+        let aliases: Vec<(String, String)> =
+            sqlx::query_as("SELECT content_hash, book_uid FROM sync_book_aliases")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(aliases.len(), 2);
+        assert!(aliases.iter().all(|(_, uid)| uid == &first.book_uid));
+        let pending: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty WHERE kind = 'book_identity'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(pending >= 1, "the new alias is published");
+    }
+}

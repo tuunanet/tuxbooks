@@ -269,6 +269,11 @@ pub async fn embed_book_metadata(
     let source =
         crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
     repo::upsert_source_metadata(pool, book_id, &source).await?;
+    // The rewrite changed the bytes, so the stored file snapshot is stale.
+    // Sync uses this snapshot to decide when to rehash and publish the new
+    // content-hash alias; leaving it stale would strand other machines on the
+    // old identity.
+    books::update_file_snapshot(pool, book_id, source.file_size, source.file_mtime).await?;
 
     apply_form(pool, book_id, &desired).await?;
 
@@ -1165,6 +1170,24 @@ mod tests {
             crate::backup_path(&epub_path).exists(),
             "the pre-embed original is backed up"
         );
+
+        // The rewrite changed the bytes; the stored snapshot must move too,
+        // or the sync identity sweep never notices the new hash.
+        let metadata = std::fs::metadata(&epub_path).unwrap();
+        let expected_mtime = metadata
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let (size, mtime): (i64, i64) =
+            sqlx::query_as("SELECT file_size, file_mtime FROM books WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(size, metadata.len() as i64);
+        assert_eq!(mtime, expected_mtime);
     }
 
     #[tokio::test]
