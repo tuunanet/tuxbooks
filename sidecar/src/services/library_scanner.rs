@@ -30,6 +30,8 @@ pub enum BookParseError {
     Pdf(#[from] PdfError),
     #[error("{0}")]
     Worker(#[from] crate::worker::client::WorkerError),
+    #[error("unsupported book format: {0}")]
+    Unsupported(String),
 }
 
 /// Errors that make the whole scan meaningless (as opposed to a single bad file).
@@ -47,30 +49,30 @@ pub enum ScanError {
     },
 }
 
-fn has_book_extension(path: &Path) -> bool {
+pub(crate) fn has_book_extension(path: &Path) -> bool {
     path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("pdf"))
+        .is_some_and(|ext| crate::domain::BookFormat::from_extension(ext).is_some())
 }
 
-/// Parse a single book file, dispatching on its extension. Shared by the
+/// Parse a single book file, dispatching on its format. Shared by the
 /// directory scan and the watcher reconciliation so both paths stay in sync.
 /// Every parse runs in the sandboxed document worker (W-1, P-1); there is
 /// no in-process fallback (ADR 0001 D5).
 pub fn parse_book(path: &Path) -> Result<ScannedBook, BookParseError> {
-    let client = crate::worker::WorkerClient::locate().map_err(BookParseError::Worker)?;
-    if path
+    let format = path
         .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
-    {
-        client
+        .and_then(crate::domain::BookFormat::from_extension)
+        .ok_or_else(|| BookParseError::Unsupported(path.display().to_string()))?;
+    let client = crate::worker::WorkerClient::locate().map_err(BookParseError::Worker)?;
+    match format {
+        crate::domain::BookFormat::Pdf => client
             .pdf_parse(path, &crate::limits::ResourceLimits::DEFAULTS)
             .map(ScannedBook::Pdf)
-            .map_err(Into::into)
-    } else {
-        client
+            .map_err(Into::into),
+        crate::domain::BookFormat::Epub => client
             .epub_parse(path, &crate::limits::ResourceLimits::DEFAULTS)
             .map(|book| ScannedBook::Epub(Box::new(book)))
-            .map_err(Into::into)
+            .map_err(Into::into),
     }
 }
 

@@ -288,7 +288,7 @@ impl Reconciler {
             return;
         };
 
-        if !is_book_extension(to) {
+        if !is_book_path(to) {
             // The file is no longer a book (renamed away or replaced by
             // another format): mark it missing, preserving the row.
             self.mark_removed(from).await;
@@ -505,14 +505,9 @@ impl Reconciler {
     }
 }
 
-/// True for paths the scanner would treat as books (`.epub`/`.pdf`).
+/// True for paths the scanner would treat as books.
 pub(crate) fn is_book_path(path: &Path) -> bool {
-    is_book_extension(path)
-}
-
-pub(crate) fn is_book_extension(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("epub") || ext.eq_ignore_ascii_case("pdf"))
+    crate::services::library_scanner::has_book_extension(path)
 }
 
 /// Explicitly reconnect an unavailable book to a new file: the row keeps its
