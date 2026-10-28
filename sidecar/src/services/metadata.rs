@@ -212,7 +212,7 @@ pub async fn embed_book_metadata(
     // sidecar keeps the only write authority: backup + atomic replace.
     let client = crate::worker::WorkerClient::locate()?;
     match crate::domain::BookFormat::from_path(&book.path) {
-        crate::domain::BookFormat::Epub => {
+        Some(crate::domain::BookFormat::Epub) => {
             let epub_metadata = crate::epub::EpubMetadata {
                 title: desired.title.clone(),
                 subtitle: desired.subtitle.clone(),
@@ -235,7 +235,7 @@ pub async fn embed_book_metadata(
             crate::backup_file_once(&path)?;
             crate::atomic_replace(&path, &bytes)?;
         }
-        crate::domain::BookFormat::Pdf => {
+        Some(crate::domain::BookFormat::Pdf) => {
             let author = if desired.authors.is_empty() {
                 None
             } else {
@@ -252,6 +252,12 @@ pub async fn embed_book_metadata(
             )?;
             crate::backup_file_once(&path)?;
             crate::atomic_replace(&path, &bytes)?;
+        }
+        None => {
+            return Err(AppError::InvalidInput(format!(
+                "cannot write metadata for an unsupported format: {}",
+                book.path
+            )));
         }
     }
 

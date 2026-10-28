@@ -3,6 +3,7 @@ import {
   BOOK_SORT_OPTIONS,
   SMART_SECTION_TITLES,
   filterBooksByCollection,
+  filterBooksByFormat,
   filterBooksByQuery,
   filterBooksBySection,
   sectionTitle,
@@ -29,6 +30,22 @@ const pdf = () =>
 const neverOpened = () =>
   makeBook({ id: 3, addedAt: "2026-08-15T00:00:00.000Z", lastOpenedAt: null });
 
+describe("filterBooksByFormat", () => {
+  const books = [epub(), pdf(), neverOpened()];
+
+  it("treats an empty selection as no restriction", () => {
+    expect(filterBooksByFormat(books, [])).toHaveLength(3);
+  });
+
+  it("keeps one format", () => {
+    expect(filterBooksByFormat(books, ["pdf"]).map((b) => b.id)).toEqual([2]);
+  });
+
+  it("keeps the union of several formats", () => {
+    expect(filterBooksByFormat(books, ["epub", "pdf"]).map((b) => b.id)).toEqual([1, 2, 3]);
+  });
+});
+
 describe("sectionTitle", () => {
   it("names smart sections, collections, and settings", () => {
     expect(sectionTitle({ kind: "smart", id: "recently-added" })).toBe("Recently Added");
@@ -50,13 +67,9 @@ describe("filterBooksBySection", () => {
     expect(filterBooksBySection(books, all)).toHaveLength(3);
   });
 
-  it("filters by format for EPUBs and PDFs", () => {
-    expect(filterBooksBySection(books, { kind: "smart", id: "epubs" }).map((b) => b.id)).toEqual([
-      1, 3,
-    ]);
-    expect(filterBooksBySection(books, { kind: "smart", id: "pdfs" }).map((b) => b.id)).toEqual([
-      2,
-    ]);
+  it("has no format sections; formats are a header filter", () => {
+    expect(Object.keys(SMART_SECTION_TITLES)).not.toContain("epubs");
+    expect(Object.keys(SMART_SECTION_TITLES)).not.toContain("pdfs");
   });
 
   it("sorts Recently Added newest first", () => {

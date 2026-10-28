@@ -18,15 +18,18 @@ import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
+import { FORMAT_FILTER_OPTIONS } from "@/lib/formats";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { BulkRemoveDialog } from "./BulkRemoveDialog";
 import { EmptyCollectionState } from "./EmptyCollectionState";
+import { EmptyFormatFilterState } from "./EmptyFormatFilterState";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { LibraryHeader } from "./LibraryHeader";
 import { NoSearchResultsState } from "./NoSearchResultsState";
 import { SelectionBar } from "./SelectionBar";
 import {
   filterBooksByCollection,
+  filterBooksByFormat,
   filterBooksByQuery,
   filterBooksBySection,
   sectionTitle,
@@ -34,7 +37,7 @@ import {
   type BookSortId,
   type BookViewMode,
 } from "./sections";
-import type { Book, CollectionSummary } from "@/types/domain";
+import type { Book, BookFormat, CollectionSummary } from "@/types/domain";
 
 interface LibraryViewProps {
   section: LibrarySection;
@@ -132,6 +135,43 @@ export function LibraryView({ section }: LibraryViewProps) {
     void revealBook(bookId);
   }, []);
 
+  const formatFilter = app.formatFilter;
+  const setFormatFilter = useCallback(
+    (formats: BookFormat[]) => dispatch({ type: "set-format-filter", formats }),
+    [dispatch],
+  );
+  const activeCollection =
+    section.kind === "collection"
+      ? collections.find((collection) => collection.id === section.id)
+      : undefined;
+  const collectionIsEmpty =
+    section.kind === "collection" && (activeCollection?.bookIds.length ?? 0) === 0;
+  // Ticking every format excludes nothing, so it cannot be the reason a view
+  // is empty and should not be blamed for it.
+  const formatFilterNarrows =
+    formatFilter.length > 0 && formatFilter.length < FORMAT_FILTER_OPTIONS.length;
+
+  const renderEmptyState = () => {
+    if (query.trim() !== "") {
+      return (
+        <NoSearchResultsState
+          query={query}
+          onClearSearch={() => setQuery("")}
+          onClearFormatFilter={formatFilterNarrows ? () => setFormatFilter([]) : undefined}
+        />
+      );
+    }
+    if (collectionIsEmpty) return <EmptyCollectionState />;
+    if (formatFilterNarrows) {
+      return <EmptyFormatFilterState formats={formatFilter} onClear={() => setFormatFilter([])} />;
+    }
+    return (
+      <p data-testid="empty-section" className="text-sm text-muted-foreground">
+        No books in this view yet.
+      </p>
+    );
+  };
+
   const visible = useMemo(() => {
     let scoped =
       section.kind === "collection"
@@ -140,9 +180,10 @@ export function LibraryView({ section }: LibraryViewProps) {
             collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
           )
         : filterBooksBySection(books, section);
+    scoped = filterBooksByFormat(scoped, formatFilter);
     scoped = sortBooks(scoped, sort);
     return filterBooksByQuery(scoped, query);
-  }, [books, collections, section, sort, query]);
+  }, [books, collections, section, sort, query, formatFilter]);
 
   // The rendered selection, and the on-screen order Shift-click ranges are
   // measured over. Selected ids outlive the filter, so a book a search
@@ -667,6 +708,8 @@ export function LibraryView({ section }: LibraryViewProps) {
         count={visible.length}
         query={query}
         onQueryChange={setQuery}
+        formats={formatFilter}
+        onFormatsChange={setFormatFilter}
         sort={sort}
         onSortChange={setSort}
         view={view}
@@ -680,15 +723,7 @@ export function LibraryView({ section }: LibraryViewProps) {
         onCancel={() => setBulkRemoveOpen(false)}
       />
       {visible.length === 0 ? (
-        query.trim() !== "" ? (
-          <NoSearchResultsState query={query} onClearSearch={() => setQuery("")} />
-        ) : section.kind === "collection" ? (
-          <EmptyCollectionState />
-        ) : (
-          <p data-testid="empty-section" className="text-sm text-muted-foreground">
-            No books in this view yet.
-          </p>
-        )
+        renderEmptyState()
       ) : (
         // The selection and focus rings paint outside the card (ring-2 and
         // ring-3 box-shadows) and this box is their clip, so the scrollport

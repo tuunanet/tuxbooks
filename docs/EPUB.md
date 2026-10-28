@@ -4,6 +4,11 @@ The EPUB subsystem has two halves: a small Rust parser used at import time
 (`sidecar/src/epub/`) and the rendering engine used by the reader
 (Readium TS Toolkit, in the renderer).
 
+The reader half is the generalizing engine ([ADR 0012](adr/0012-formats-map-to-render-engines.md)):
+another reflowable format is normalized to EPUB at import and then rendered
+here unchanged. Keep the viewer's input model EPUB; do not add a second
+source-format path to it.
+
 ## Rust import parser
 
 `sidecar/src/epub/` is a small, dependency-light EPUB reader: `zip` +

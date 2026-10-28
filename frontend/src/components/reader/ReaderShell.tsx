@@ -23,6 +23,7 @@ import {
 } from "@/lib/readerShortcuts";
 import { markBookOpened } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
+import { FORMATS } from "@/lib/formats";
 import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useAppDispatch, useAppState } from "@/state/appState";
@@ -207,6 +208,10 @@ export function ReaderShell() {
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
+  // Which reader draws this book. The mapping lives in the format registry
+  // (ADR 0012): a new format picks an existing engine instead of adding a
+  // branch here.
+  const engine = book ? FORMATS[book.format].engine : null;
   // While the pointer drags the footer's slider, the thumb and percent show
   // this preview; only the release commit navigates the engine — one jump
   // per gesture (the preview is presentation, not position).
@@ -888,7 +893,7 @@ export function ReaderShell() {
             } as React.CSSProperties
           }
         >
-          {isEpub ? (
+          {engine === "readium" ? (
             <EpubReader
               key={book.id}
               book={book}
@@ -904,7 +909,7 @@ export function ReaderShell() {
               presentationMode={presentation}
               onExitPresentation={exitPresentation}
             />
-          ) : (
+          ) : engine === "pdfium" ? (
             <PdfReader
               key={book.id}
               book={book}
@@ -926,7 +931,7 @@ export function ReaderShell() {
               onSelectionChange={(sel) => handleSelectionFrom(book.id, sel)}
               bookTurnRef={bookTurnRef}
             />
-          )}
+          ) : null}
         </main>
       </div>
 

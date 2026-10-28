@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
-use serde::ser::SerializeStruct;
+use serde::ser::{Error as _, SerializeStruct};
 use serde::{Serialize, Serializer};
 
-/// File format of a book, derived from the file extension. The scanner only
-/// imports `.epub` today; `.pdf` exists so the rest of the system can already
-/// be format-aware. Unrecognized extensions fall back to EPUB.
+/// File format of a book, derived from the file extension. Only formats the
+/// library can import appear here; an unknown extension has no format instead
+/// of being guessed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BookFormat {
@@ -13,15 +13,22 @@ pub enum BookFormat {
 }
 
 impl BookFormat {
-    pub fn from_path(path: &str) -> Self {
-        let extension = std::path::Path::new(path)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase());
-        match extension.as_deref() {
-            Some("pdf") => BookFormat::Pdf,
-            _ => BookFormat::Epub,
+    /// Extension → format. `None` means the library does not support the
+    /// file, so callers decide whether to skip it or reject it. This is the
+    /// single place that enumerates supported extensions.
+    pub fn from_extension(extension: &std::ffi::OsStr) -> Option<Self> {
+        match extension.to_str()?.to_ascii_lowercase().as_str() {
+            "epub" => Some(BookFormat::Epub),
+            "pdf" => Some(BookFormat::Pdf),
+            _ => None,
         }
+    }
+
+    /// Path → format. `None` for a missing or unsupported extension.
+    pub fn from_path(path: &str) -> Option<Self> {
+        std::path::Path::new(path)
+            .extension()
+            .and_then(Self::from_extension)
     }
 }
 
@@ -74,7 +81,12 @@ impl Serialize for Book {
         let mut state = serializer.serialize_struct("Book", 23)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("path", &self.path)?;
-        state.serialize_field("format", &BookFormat::from_path(&self.path))?;
+        // Stored rows carry a format the importer validated, so this never
+        // fails for library data. Erroring instead of guessing keeps a future
+        // format from being mislabeled as EPUB.
+        let format = BookFormat::from_path(&self.path)
+            .ok_or_else(|| S::Error::custom(format!("unrecognized book format: {}", self.path)))?;
+        state.serialize_field("format", &format)?;
         state.serialize_field("title", &self.title)?;
         state.serialize_field("subtitle", &self.subtitle)?;
         state.serialize_field("author", &self.author)?;
@@ -202,11 +214,17 @@ mod tests {
 
     #[test]
     fn format_is_derived_from_file_extension() {
-        assert_eq!(BookFormat::from_path("/tmp/a.epub"), BookFormat::Epub);
-        assert_eq!(BookFormat::from_path("/tmp/a.EPUB"), BookFormat::Epub);
-        assert_eq!(BookFormat::from_path("/tmp/b.pdf"), BookFormat::Pdf);
-        assert_eq!(BookFormat::from_path("/tmp/b.PDF"), BookFormat::Pdf);
-        assert_eq!(BookFormat::from_path("/tmp/no_extension"), BookFormat::Epub);
+        assert_eq!(BookFormat::from_path("/tmp/a.epub"), Some(BookFormat::Epub));
+        assert_eq!(BookFormat::from_path("/tmp/a.EPUB"), Some(BookFormat::Epub));
+        assert_eq!(BookFormat::from_path("/tmp/b.pdf"), Some(BookFormat::Pdf));
+        assert_eq!(BookFormat::from_path("/tmp/b.PDF"), Some(BookFormat::Pdf));
+    }
+
+    #[test]
+    fn unsupported_extensions_have_no_format() {
+        assert_eq!(BookFormat::from_path("/tmp/no_extension"), None);
+        assert_eq!(BookFormat::from_path("/tmp/book.mobi"), None);
+        assert_eq!(BookFormat::from_path("/tmp/archive.epub.zip"), None);
     }
 
     #[test]
@@ -215,5 +233,12 @@ mod tests {
         assert_eq!(epub["format"], "epub");
         let pdf = serde_json::to_value(sample("/tmp/b.pdf")).unwrap();
         assert_eq!(pdf["format"], "pdf");
+    }
+
+    #[test]
+    fn serialization_rejects_a_path_with_no_known_format() {
+        // Stored rows always carry a supported extension. If one ever does
+        // not, the payload fails instead of calling the book an EPUB.
+        assert!(serde_json::to_value(sample("/tmp/book.mobi")).is_err());
     }
 }

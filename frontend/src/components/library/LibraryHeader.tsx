@@ -1,9 +1,11 @@
-import { LayoutGrid, List, Plus, Search } from "lucide-react";
+import { ChevronDown, LayoutGrid, List, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -15,8 +17,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { FORMAT_FILTER_OPTIONS, formatFilterLabel, toggleFormatFilter } from "@/lib/formats";
 import { pickBookFiles, pickDirectory } from "@/lib/bridge";
 import { useImport } from "@/state/importState";
+import type { BookFormat } from "@/types/domain";
 import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./sections";
 
 interface LibraryHeaderProps {
@@ -24,6 +28,8 @@ interface LibraryHeaderProps {
   count: number;
   query: string;
   onQueryChange: (query: string) => void;
+  formats: readonly BookFormat[];
+  onFormatsChange: (formats: BookFormat[]) => void;
   sort: BookSortId;
   onSortChange: (sort: BookSortId) => void;
   view: BookViewMode;
@@ -35,6 +41,8 @@ export function LibraryHeader({
   count,
   query,
   onQueryChange,
+  formats,
+  onFormatsChange,
   sort,
   onSortChange,
   view,
@@ -50,6 +58,10 @@ export function LibraryHeader({
   const importFiles = async () => {
     const files = await pickBookFiles();
     if (files.length > 0) await importPaths(files);
+  };
+
+  const toggleFormat = (id: BookFormat, checked: boolean) => {
+    onFormatsChange(toggleFormatFilter(formats, id, checked));
   };
 
   return (
@@ -80,6 +92,42 @@ export function LibraryHeader({
             className="w-44 pl-8"
           />
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              data-testid="library-format-filter"
+              aria-label={`Format filter: ${formatFilterLabel(formats)}`}
+              variant="outline"
+              size="sm"
+            >
+              {formatFilterLabel(formats)}
+              <ChevronDown data-icon="inline-end" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem
+              data-testid="format-filter-all"
+              disabled={formats.length === 0}
+              onSelect={() => onFormatsChange([])}
+            >
+              All formats
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {FORMAT_FILTER_OPTIONS.map((option) => (
+              <DropdownMenuCheckboxItem
+                key={option.id}
+                data-testid={`format-filter-${option.id}`}
+                checked={formats.includes(option.id)}
+                // Ticking several formats is the point; keep the menu open.
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={(checked) => toggleFormat(option.id, checked)}
+              >
+                {option.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Select value={sort} onValueChange={(value) => onSortChange(value as BookSortId)}>
           <SelectTrigger

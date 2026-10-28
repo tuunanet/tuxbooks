@@ -7,6 +7,11 @@ dependency: the scanner must index real-world PDF libraries
 (title/author/subject) without pulling in a renderer — page rendering
 belongs to the frontend engine (see "Rendering" below).
 
+The frontend engine is PDF-only by decision
+([ADR 0012](adr/0012-formats-map-to-render-engines.md)). It is built around
+PDFium's page model and the view geometry in this document, so a new
+fixed-layout format gets its own engine rather than a branch inside this one.
+
 ## Public API
 
 ```rust
