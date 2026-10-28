@@ -320,6 +320,9 @@ describe("boundary configuration tables (T-5)", () => {
       "get_epub_session",
       "embed_book_metadata",
       "get_startup_recovery",
+      "sync_connect",
+      "sync_status",
+      "sync_restore",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }

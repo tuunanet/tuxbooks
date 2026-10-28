@@ -148,6 +148,7 @@ impl TestEnv {
             db_path: self.db_path.clone(),
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
+            sync: None,
         })
     }
 

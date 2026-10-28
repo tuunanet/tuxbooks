@@ -102,6 +102,16 @@ export function registerIpcHandlers(
       issued.issue("directory", picked);
       return picked;
     }
+    if (kind === "sync-folder") {
+      const result = await dialog.showOpenDialog({
+        properties: ["openDirectory"],
+        title: "Choose the folder your cloud client keeps in sync",
+      });
+      const picked = result.filePaths[0];
+      if (result.canceled || picked === undefined) return null;
+      issued.issue("sync-folder", picked);
+      return picked;
+    }
     if (kind === "book-file") {
       const result = await dialog.showOpenDialog({
         properties: ["openFile"],

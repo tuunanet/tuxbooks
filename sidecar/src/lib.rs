@@ -8,6 +8,7 @@ pub mod pdf;
 pub mod repository;
 pub mod rpc;
 pub mod services;
+pub mod sync;
 pub mod worker;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::domain::StartupRecovery;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
 use crate::services::library_watcher::LibraryWatcher;
+use crate::sync::engine::SyncService;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -31,6 +33,9 @@ pub struct AppState {
     /// Set once at startup when a broken database was quarantined; read by
     /// `get_startup_recovery` so main can name the file in the dialog.
     pub startup_recovery: Option<StartupRecovery>,
+    /// Background cloud-folder sync. `None` in unit tests that construct the
+    /// state by hand; production wires it in `init_state`.
+    pub sync: Option<Arc<SyncService>>,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -169,6 +174,7 @@ fn app_data_dir() -> PathBuf {
 /// callback receives every service-layer change (`library-changed`) — the
 /// JSON-RPC server forwards it to the Electron main process.
 pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error> {
+    let sync_events = events.clone();
     let db_path = resolve_db_path();
     let (pool, startup_recovery) = init_pool_recovering(&db_path)
         .await
@@ -270,11 +276,19 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         );
     });
 
+    let sync = Arc::new(
+        SyncService::new(pool.clone(), &db_path, sync_events)
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to initialize cloud sync: {err}"))?,
+    );
+    sync.start();
+
     Ok(AppState {
         db: pool,
         db_path,
         watcher: Arc::new(watcher),
         startup_recovery,
+        sync: Some(sync),
     })
 }
 

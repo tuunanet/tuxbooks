@@ -122,6 +122,34 @@ watched folder are ever listed, so every one of them can be unwatched on its
 own.
 _Avoid_: remove folder, stop tracking
 
+**Sync folder**:
+The user-chosen folder a cloud client already mirrors. TuxBooks writes only
+inside its `TuxBooks` child and never calls the provider's API. See
+[SYNC.md](docs/SYNC.md).
+_Avoid_: cloud drive, remote, backup folder
+
+**Shared state**:
+The user-authored state that travels between machines: reading progress,
+annotations, metadata overrides, collections and membership, last-opened, and
+cover-override blobs. The catalog, paths, and watched locations are not shared.
+_Avoid_: synced database, cloud library
+
+**Device**:
+One TuxBooks installation with a random id and a human name. Device streams are
+kept apart in the sync folder; the name is display only.
+_Avoid_: machine, client
+
+**Book identity**:
+The shared uuid for a logical book. It is linked to SHA-256 content-hash
+aliases, so a rewritten file keeps its identity and two independently imported
+copies converge.
+_Avoid_: content hash (that is only the discovery key), ISBN key
+
+**Tombstone**:
+A shared delete marker for an annotation or collection. It wins over a
+concurrent edit and stays restorable from the trash for 30 days.
+_Avoid_: deleted row, hard delete
+
 ## Search
 
 **In-book search**:

@@ -2,12 +2,12 @@
 
 Four layers, all runnable locally via `just`:
 
-| Layer             | Command              | What it covers                                                            |
-| ----------------- | -------------------- | ------------------------------------------------------------------------- |
-| Rust unit/prop    | `just test-rust`     | parsers, scanner, repos, search, db, watcher batching, progress migration |
-| Rust integration  | `just test-rust`     | fixture → scan → DB → search slice; filesystem sync scenarios             |
-| Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC bridge                                    |
-| E2E (Playwright)  | `just test-e2e`      | real Electron binary, real window, real SQLite                            |
+| Layer             | Command              | What it covers                                                               |
+| ----------------- | -------------------- | ---------------------------------------------------------------------------- |
+| Rust unit/prop    | `just test-rust`     | parsers, scanner, repos, search, db, watcher batching, progress migration    |
+| Rust integration  | `just test-rust`     | fixture → scan → DB → search slice; filesystem sync; multi-device cloud sync |
+| Frontend (Vitest) | `just test-frontend` | shell, library view, mocked IPC bridge                                       |
+| E2E (Playwright)  | `just test-e2e`      | real Electron binary, real window, real SQLite                               |
 
 ## What CI runs
 

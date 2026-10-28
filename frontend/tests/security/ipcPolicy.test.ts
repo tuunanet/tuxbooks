@@ -83,6 +83,59 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     });
   });
 
+  describe("sync_connect", () => {
+    it("accepts a dialog-issued sync folder", () => {
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          {
+            path: "/home/user/Dropbox",
+            deviceName: "Laptop",
+            confirmLibraryId: "0123456789abcdef0123456789abcdef",
+          },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).not.toThrow();
+    });
+
+    it("rejects an unissued folder, malformed ids, and oversized names", () => {
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          { path: "/home/user/Dropbox" },
+          issued({ directory: ["/home/user/Dropbox"] }),
+        ),
+      ).toThrow(/not issued/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          { path: "/home/user/Dropbox", confirmLibraryId: "../evil" },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).toThrow(/confirmLibraryId/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          { path: "/home/user/Dropbox", deviceName: "x".repeat(81) },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).toThrow(/deviceName/);
+    });
+
+    it("validates the sync id and device name methods", () => {
+      expect(() => validateInvokeParams("sync_restore", { id: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("sync_restore", { id: 0 }, issued())).toThrow(
+        /invalid sync id/,
+      );
+      expect(() =>
+        validateInvokeParams("sync_set_device_name", { name: "Laptop" }, issued()),
+      ).not.toThrow();
+      expect(() => validateInvokeParams("sync_set_device_name", { name: "  " }, issued())).toThrow(
+        /invalid device name/,
+      );
+    });
+  });
+
   describe("import_paths", () => {
     it("accepts dialog-issued and external (drag-drop) absolute paths", () => {
       const params = { paths: ["/home/user/Books", "/mnt/data/novel.epub"] };

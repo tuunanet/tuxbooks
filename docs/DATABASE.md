@@ -203,6 +203,35 @@ User queries never reach FTS5 raw: `services/search.rs`
 into quoted prefix phrases ANDed together (`wind river` →
 `"wind"* "river"*`), so input cannot inject MATCH syntax.
 
+## Cloud-folder sync (migration 0015)
+
+The sync engine keeps its bookkeeping in the same SQLite file. The catalog
+tables stay path-keyed; nothing here changes how imports, readers, or search
+work. The full contract is [SYNC.md](SYNC.md).
+
+- `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
+  flag, last sync, last error, and the hybrid logical clock.
+- `sync_dirty` — one row per entity with a pending local change. Triggers write
+  the canonical snapshot at change time (`old_json`/`new_json`); the capture
+  pass drains it. Cascades caused by a vanished book or collection are skipped
+  by the triggers.
+- `sync_state_entities` / `sync_state_fields` — the materialized shared state.
+  Entities carry tombstones and entity-level clocks; fields carry one value and
+  one clock each.
+- `sync_book_aliases` / `sync_book_bindings` — content hash to shared uuid, and
+  local book row to shared uuid with the hash snapshot used to detect rewrites.
+- `sync_book_merges` / `sync_entity_merges` — deterministic identity merges
+  (smallest uuid wins) so replay order cannot resurrect a losing id.
+- `sync_ops` / `sync_applied_ops` — locally emitted operations and every applied
+  operation id. `sync_remote_files` caches file size/mtime and retry counts so a
+  pass only reads new or changed files.
+- `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
+  losing field values, and the 30-day delete restore list.
+
+`annotations.sync_uid` and `collections.sync_uid` are the portable entity ids;
+existing rows are backfilled in the migration. The sync worker fills a null uid
+on first use, so a row created while sync is off is never a constraint error.
+
 ## Conventions
 
 - All SQL lives in `repository/`; commands and services never embed SQL.

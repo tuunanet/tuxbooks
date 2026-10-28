@@ -16,7 +16,7 @@ import {
  */
 
 /** Dialog kinds whose returned paths may be used in later IPC calls. */
-export type IssuedKind = "directory" | "book-file" | "book-files" | "cover-image";
+export type IssuedKind = "directory" | "book-file" | "book-files" | "cover-image" | "sync-folder";
 
 /**
  * Paths the main process itself handed to the renderer through a native
@@ -82,7 +82,12 @@ function requireResourcePath(params: Record<string, unknown>): void {
 }
 
 /** Methods that act on a dialog-issued filesystem path. */
-const ISSUED_PATH_METHODS = new Set(["scan_library", "reconnect_book", "set_book_cover"]);
+const ISSUED_PATH_METHODS = new Set([
+  "scan_library",
+  "reconnect_book",
+  "set_book_cover",
+  "sync_connect",
+]);
 
 const BOOK_ID_METHODS = new Set([
   "remove_book",
@@ -144,6 +149,25 @@ function validateIssuedPaths(
     requireIssued(issued, "book-file", record.path, "path");
     return;
   }
+  if (method === "sync_connect") {
+    requireLibraryPath(record.path, "path");
+    requireIssued(issued, "sync-folder", record.path, "path");
+    const deviceName = record.deviceName;
+    if (
+      deviceName !== undefined &&
+      (typeof deviceName !== "string" || deviceName.trim().length === 0 || deviceName.length > 80)
+    ) {
+      throw policyError("invalid deviceName");
+    }
+    const confirmLibraryId = record.confirmLibraryId;
+    if (
+      confirmLibraryId !== undefined &&
+      (typeof confirmLibraryId !== "string" || !/^[0-9a-f]{32}$/.test(confirmLibraryId))
+    ) {
+      throw policyError("invalid confirmLibraryId");
+    }
+    return;
+  }
   if (method === "set_book_cover") {
     requireBookId(record);
   }
@@ -173,6 +197,20 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
   }
   if (method === "create_collection" && typeof record.name !== "string") {
     throw policyError("invalid name");
+  }
+  if (method === "sync_dismiss_issue" || method === "sync_restore") {
+    const id = record.id;
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
+      throw policyError("invalid sync id");
+    }
+    return;
+  }
+  if (method === "sync_set_device_name") {
+    const name = record.name;
+    if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
+      throw policyError("invalid device name");
+    }
+    return;
   }
   if (BOOK_ID_METHODS.has(method)) {
     requireBookId(record);

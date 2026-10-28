@@ -277,6 +277,32 @@ pub async fn embed_book_metadata(
         .ok_or(AppError::NotFound)
 }
 
+/// Apply a metadata override that arrived from cloud-folder sync. This is the
+/// database-only path: unlike `embed_book_metadata`, the source EPUB/PDF is
+/// never rewritten. The lists travel beside the scalar overrides because the
+/// override table stores only the customization gates.
+pub async fn apply_synced_overrides(
+    pool: &SqlitePool,
+    book_id: i64,
+    overrides: &repo::OverrideRow,
+    authors: &[String],
+    subjects: &[String],
+) -> Result<(), AppError> {
+    if books::get_book(pool, book_id).await?.is_none() {
+        return Ok(());
+    }
+    repo::upsert_overrides(pool, book_id, overrides).await?;
+    if overrides.authors_customized {
+        repo::replace_book_authors(pool, book_id, authors).await?;
+    }
+    if overrides.subjects_customized {
+        repo::replace_book_subjects(pool, book_id, subjects).await?;
+    }
+    recompute_and_apply(pool, book_id).await?;
+    repo::sweep_orphans(pool).await?;
+    Ok(())
+}
+
 /// Drop every override: the book returns to exactly its source-file metadata
 /// (including the normalized lists and the extracted cover). The source file
 /// is never touched.

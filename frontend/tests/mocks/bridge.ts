@@ -18,6 +18,7 @@ const listeners = new Map<string, Set<EventListener>>();
 export const invokeMock = vi.fn();
 
 export const pickDirectoryMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
+export const pickSyncFolderMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const pickBookFileMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const pickBookFilesMock: Mock<() => Promise<string[]>> = vi.fn(async () => []);
 export const pickCoverImageMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
@@ -72,6 +73,7 @@ export function installTuxbooksMock(): void {
       };
     },
     pickDirectory: () => pickDirectoryMock(),
+    pickSyncFolder: () => pickSyncFolderMock(),
     pickBookFile: () => pickBookFileMock(),
     pickBookFiles: () => pickBookFilesMock(),
     pickCoverImage: () => pickCoverImageMock(),
