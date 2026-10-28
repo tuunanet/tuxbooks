@@ -132,6 +132,7 @@ function generateLibraryBenchCorpus(): void {
   mkdirSync(libraryBenchCorpusDir, { recursive: true });
   execFileSync("python3", [
     path.join(repoRoot, "scripts", "make-epub-corpus.py"),
+    "--cover",
     libraryBenchCorpusDir,
     String(LIBRARY_BENCH_BOOK_COUNT),
   ]);

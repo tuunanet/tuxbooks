@@ -328,10 +328,11 @@ with offsets derived from live slot geometry — never hard-coded pixels.
 books. It runs only on the explicit target, never in `just test-e2e` or CI.
 E2E setup writes the corpus to the gitignored `.build/fixtures/library-bench/`
 directory using the same deterministic generator as the 1,500-book structural
-suite. The spec imports it through the real `import_paths` bulk path, samples
-idle frame cadence, then drives a full-library programmatic scroll and records
-frame p50/p95/max, dropped-frame shares, scroll distance, wall time, and the
-peak observed mounted-card count in `bench-results.json`.
+suite, with the committed library-bench cover embedded in every EPUB. The spec
+imports it through the real `import_paths` bulk path, samples idle frame
+cadence, then drives a full-library programmatic scroll and records frame
+p50/p95/max, dropped-frame shares, scroll distance, wall time, and the peak
+observed mounted-card count in `bench-results.json`.
 
 The suite records timings without a machine-independent assertion. Set
 `BENCH_ENFORCE_P95_MS` to enforce one locally during development, for example

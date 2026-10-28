@@ -126,11 +126,11 @@ Re-run the relevant verifications when editing:
   `devicePixelRatio` 2 and asserts the buffer caps (PERF-1) at that dpr
   (timing stays out of it).
 - **Library bench (headed, explicit):** `just bench-library` generates the
-  gitignored 10,000-book corpus, imports it through the real bulk path, and
-  records idle and full-Grid-scroll frame cadence in `bench-results.json`.
-  Use it for before/after comparisons while changing All Books rendering;
-  `BENCH_ENFORCE_P95_MS` is the optional local pass/fail threshold. It never
-  runs in CI.
+  gitignored 10,000-book corpus with cover images, imports it through the real
+  bulk path, and records idle and full-Grid-scroll frame cadence in
+  `bench-results.json`. Use it for before/after comparisons while changing All
+  Books rendering; `BENCH_ENFORCE_P95_MS` is the optional local pass/fail
+  threshold. It never runs in CI.
 - **Manual (timings):** log `performance.now()` around render → blit per
   page at reference conditions; record p95 before/after engine, scale, or
   virtualization changes. Chromium DevTools performance panel and
