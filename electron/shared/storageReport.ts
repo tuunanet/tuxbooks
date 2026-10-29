@@ -24,6 +24,8 @@ export interface StorageRoot {
   entries: StorageEntry[];
 }
 
+export type LibraryLocationStatus = "idle" | "importing" | "refreshing";
+
 export interface LibraryLocationStat {
   /** The `library_locations.id`; the renderer opens a location by this id. */
   id: number;
@@ -33,6 +35,8 @@ export interface LibraryLocationStat {
   totalBytes: number;
   /** The sidecar checked the path on disk while serving the aggregate. */
   missingFromDisk: boolean;
+  /** The scan state from the in-flight import registry. */
+  status: LibraryLocationStatus;
 }
 
 export interface CatalogCounts {

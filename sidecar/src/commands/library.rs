@@ -247,51 +247,69 @@ async fn register_and_import_folder(
         .importing
         .start(&root_key)
         .map_err(AppError::InvalidInput)?;
-    // Finish and unregister on every exit path, panics included, or an
-    // unwatch could wait forever for a run that is gone.
-    let _guard = ImportGuard {
-        importing: state.importing.clone(),
-        root: root_key,
-        run: run.clone(),
+    let (registration, result) = {
+        // Finish and unregister on every exit path, panics included, or an
+        // unwatch could wait forever for a run that is gone. The guard drops
+        // at the end of this block, before the final status event below.
+        let _guard = ImportGuard {
+            importing: state.importing.clone(),
+            root: root_key,
+            run: run.clone(),
+        };
+
+        let registration = register_location(state, root, report).await?;
+        if !registration.newly_added {
+            run.mark_refreshing();
+        }
+        // The folder is registered before its scan, so Settings can show it
+        // while the import is still running instead of after it finishes.
+        if registration.watch {
+            events.emit("watched-folders-changed", &());
+        }
+
+        let outcome = import_directory_with_cancel(
+            &state.db,
+            root,
+            covers,
+            pdfium_dirs,
+            emit_progress,
+            Some(run.cancel_flag()),
+        )
+        .await;
+        // Start watching only after the scan, so the watcher cannot import
+        // the same files concurrently. A cancelled scan gets no watcher at
+        // all: its folder is about to be purged and starting one would let a
+        // late event write rows after the purge. A failed scan keeps its
+        // watch for a retry.
+        let cancelled = run.cancelled();
+        let result = match outcome {
+            Ok(mut folder_report) => {
+                if registration.watch && !cancelled {
+                    state.watcher.watch(root);
+                }
+                report.imported += folder_report.imported;
+                report.updated += folder_report.updated;
+                report.skipped += folder_report.skipped;
+                report.cancelled |= folder_report.cancelled;
+                report.failed.append(&mut folder_report.failed);
+                Ok(())
+            }
+            Err(err) => {
+                if registration.watch && !cancelled {
+                    state.watcher.watch(root);
+                }
+                Err(err)
+            }
+        };
+        (registration, result)
     };
 
-    let watch = register_location(state, events, root, report).await?;
-    let outcome = import_directory_with_cancel(
-        &state.db,
-        root,
-        covers,
-        pdfium_dirs,
-        emit_progress,
-        Some(run.cancel_flag()),
-    )
-    .await;
-    // Start watching only after the scan, so the watcher cannot import the
-    // same files concurrently. A cancelled scan gets no watcher at all: its
-    // folder is about to be purged and starting one would let a late event
-    // write rows after the purge. A failed scan keeps its watch for a retry.
-    let cancelled = run.cancelled();
-    let mut folder_report = match outcome {
-        Ok(report) => report,
-        Err(err) => {
-            if watch && !cancelled {
-                state.watcher.watch(root);
-            }
-            return Err(err);
-        }
-    };
-    if watch && !cancelled {
-        state.watcher.watch(root);
-    }
-    report.imported += folder_report.imported;
-    report.updated += folder_report.updated;
-    report.skipped += folder_report.skipped;
-    report.cancelled |= folder_report.cancelled;
-    report.failed.append(&mut folder_report.failed);
-    // The settings list opened during the import now has the final counts.
-    if watch && !cancelled {
+    // The run is gone now, so the reload sees the final idle state and the
+    // settled book count.
+    if registration.watch {
         events.emit("watched-folders-changed", &());
     }
-    Ok(())
+    result
 }
 
 /// Removes a folder's entry from the in-flight registry and wakes anything
@@ -322,24 +340,32 @@ impl Drop for UnwatchBlockGuard {
     }
 }
 
+struct LocationRegistration {
+    /// The caller should start a filesystem watch for this root.
+    watch: bool,
+    /// The row was added by this call, so this is a first import.
+    newly_added: bool,
+}
+
 /// Register `root` as a watched location without starting its filesystem
 /// watcher yet — the caller starts the watcher after the scan. The row must
 /// exist before any book lands so a quit leaves a watched folder that
-/// startup catch-up finishes. Returns true when `root` is now a watched
-/// location the caller should watch; false when a watched ancestor already
-/// covers it (ADR 0010), so no separate watch is needed.
+/// startup catch-up finishes. A watched ancestor already covering `root`
+/// returns `watch: false` (ADR 0010), so no separate watch is needed.
 async fn register_location(
     state: &AppState,
-    events: &EventEmitter,
     root: &Path,
     report: &mut ImportReport,
-) -> Result<bool, AppError> {
+) -> Result<LocationRegistration, AppError> {
     let root = root.to_string_lossy().into_owned();
     if covered_by_watched_ancestor(&state.db, &root).await? {
         if !report.covered.contains(&root) {
             report.covered.push(root);
         }
-        return Ok(false);
+        return Ok(LocationRegistration {
+            watch: false,
+            newly_added: false,
+        });
     }
     // Add the parent before dropping the nested rows it now covers. If the
     // process dies between the two, the list briefly holds a nested entry
@@ -355,12 +381,10 @@ async fn register_location(
     for gone in &collapsed {
         state.watcher.unwatch(Path::new(gone));
     }
-    // The folder is registered before its scan, so Settings can show it
-    // while the import is still running instead of after it finishes.
-    if added || !collapsed.is_empty() {
-        events.emit("watched-folders-changed", &());
-    }
-    Ok(true)
+    Ok(LocationRegistration {
+        watch: true,
+        newly_added: added,
+    })
 }
 
 /// True when `path` is already inside a watched folder, which watches the
@@ -558,7 +582,12 @@ pub async fn reconnect_book(
 /// watched location with its book count and total book bytes, the library's
 /// total book bytes, and the catalog row counts.
 pub async fn get_storage_stats(state: &AppState) -> Result<StorageStats, AppError> {
-    storage::storage_stats(&state.db).await
+    let mut stats = storage::storage_stats(&state.db).await?;
+    let statuses = state.importing.statuses();
+    for location in &mut stats.locations {
+        location.status = statuses.get(&location.path).copied().unwrap_or_default();
+    }
+    Ok(stats)
 }
 
 /// Where a broken database was moved at startup, or `null` when the database

@@ -777,6 +777,37 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn get_storage_stats_reports_in_flight_scan_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let busy = tmp.path().join("busy");
+        std::fs::create_dir(&busy).unwrap();
+        let busy = busy.to_string_lossy().into_owned();
+        crate::repository::library_locations::add_location(&state.db, &busy)
+            .await
+            .unwrap();
+
+        let run = state.importing.start(&busy).unwrap();
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("importing"));
+
+        run.mark_refreshing();
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("refreshing"));
+
+        run.finish();
+        state.importing.finish(&busy);
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("idle"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn embed_book_metadata_accepts_the_form_param() {
         // The bridge sends `{bookId, form}`; a bad shape would fail param
         // parsing (-32602). The seeded row has no file on disk, so the call

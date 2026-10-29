@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use sqlx::SqlitePool;
 
-use crate::domain::{CatalogCounts, LibraryLocationStat, StorageStats};
+use crate::domain::{CatalogCounts, LibraryLocationStat, LibraryLocationStatus, StorageStats};
 use crate::error::AppError;
 use crate::repository::library_locations::owning_location;
 
@@ -77,6 +77,7 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
                 book_count: counts[index],
                 total_bytes: bytes[index],
                 missing_from_disk,
+                status: LibraryLocationStatus::Idle,
             }
         })
         .collect();

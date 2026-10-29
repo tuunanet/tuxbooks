@@ -8,6 +8,18 @@ pub struct LibraryStats {
     pub collection_count: i64,
 }
 
+/// What a watched folder's row should say about its scan state. `Idle` is a
+/// folder with no scan running; the renderer turns it into "Up to date" (or
+/// "Missing" when the path is gone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryLocationStatus {
+    #[default]
+    Idle,
+    Importing,
+    Refreshing,
+}
+
 /// Book count and total file bytes under one watched library location.
 /// `missing_from_disk` is checked when the aggregate is served, so a watched
 /// folder that vanished keeps its row and stays cleanable.
@@ -20,6 +32,9 @@ pub struct LibraryLocationStat {
     pub book_count: i64,
     pub total_bytes: i64,
     pub missing_from_disk: bool,
+    /// Filled by `get_storage_stats` from the in-flight import registry.
+    #[sqlx(skip)]
+    pub status: LibraryLocationStatus,
 }
 
 /// Row counts for the catalog tables shown on the Application Data tab.

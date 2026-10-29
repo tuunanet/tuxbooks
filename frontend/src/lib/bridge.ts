@@ -36,6 +36,7 @@ export type {
 export type { StorageRootId } from "../../../electron/shared/pathSchema";
 export type {
   LibraryLocationStat,
+  LibraryLocationStatus,
   StorageEntry,
   StorageEntryKind,
   StorageReport,

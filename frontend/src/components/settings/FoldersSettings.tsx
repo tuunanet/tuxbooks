@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { UnwatchFoldersDialog } from "@/components/settings/UnwatchFoldersDialog";
 import {
@@ -15,13 +16,24 @@ import { formatMb } from "@/lib/format";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useImport } from "@/state/importState";
 
+/** The label and badge tone for one watched folder's scan state. */
+function statusFor(location: StorageReport["bookLocations"][number]): {
+  label: string;
+  variant: "secondary" | "outline" | "destructive";
+} {
+  if (location.missingFromDisk) return { label: "Missing", variant: "destructive" };
+  if (location.status === "importing") return { label: "Importing", variant: "secondary" };
+  if (location.status === "refreshing") return { label: "Refreshing", variant: "secondary" };
+  return { label: "Up to date", variant: "outline" };
+}
+
 /**
  * The Watched folders tab: every folder TuxBooks watches, with its book
- * count and total size, and a label on the rows whose path is gone from
- * disk so dead entries stay visible. Rows carry checkboxes and one toolbar
- * Unwatch acts on the whole selection. Add folder runs the same import flow
- * the header menu uses, so a folder added here is watched exactly like one
- * imported from there.
+ * count, total size, and scan status. Rows whose path is gone stay visible
+ * as Missing. Rows carry checkboxes and one toolbar Unwatch acts on the
+ * whole selection. Add folder runs the same import flow the header menu
+ * uses, so a folder added here is watched exactly like one imported from
+ * there.
  */
 export function FoldersSettings() {
   const { importPaths } = useImport();
@@ -210,43 +222,46 @@ export function FoldersSettings() {
                 onCheckedChange={() => toggleAll()}
               />
               <span className="text-xs text-muted-foreground">Select all</span>
+              <span className="ml-auto text-xs text-muted-foreground">Status</span>
             </label>
             <ul data-testid="folders-list" className="max-h-96 divide-y overflow-y-auto">
-              {locations.map((location) => (
-                <li key={location.id} data-testid={`folder-row-${location.id}`} className="py-2">
-                  <label className="flex items-start gap-2">
-                    <Checkbox
-                      data-testid={`folder-select-${location.id}`}
-                      aria-label={`Select ${location.path}`}
-                      checked={selected.has(location.id)}
-                      disabled={unwatching}
-                      onCheckedChange={() => toggle(location.id)}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <code
-                        title={location.path}
-                        className="block truncate text-xs text-muted-foreground"
-                      >
-                        {location.path}
-                      </code>
-                      <span className="mt-0.5 flex items-center gap-2">
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
-                          {formatMb(location.totalBytes)}
-                        </span>
-                        {location.missingFromDisk && (
-                          <span
-                            data-testid={`folder-missing-${location.id}`}
-                            className="text-xs font-medium text-destructive"
-                          >
-                            Missing from disk
+              {locations.map((location) => {
+                const status = statusFor(location);
+                return (
+                  <li key={location.id} data-testid={`folder-row-${location.id}`} className="py-2">
+                    <label className="flex items-start gap-2">
+                      <Checkbox
+                        data-testid={`folder-select-${location.id}`}
+                        aria-label={`Select ${location.path}`}
+                        checked={selected.has(location.id)}
+                        disabled={unwatching}
+                        onCheckedChange={() => toggle(location.id)}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <code
+                          title={location.path}
+                          className="block truncate text-xs text-muted-foreground"
+                        >
+                          {location.path}
+                        </code>
+                        <span className="mt-0.5 flex items-center gap-2">
+                          <span className="text-xs tabular-nums text-muted-foreground">
+                            {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
+                            {formatMb(location.totalBytes)}
                           </span>
-                        )}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
+                      <Badge
+                        data-testid={`folder-status-${location.id}`}
+                        variant={status.variant}
+                        className="mt-0.5"
+                      >
+                        {status.label}
+                      </Badge>
+                    </label>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}

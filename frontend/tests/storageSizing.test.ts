@@ -139,6 +139,7 @@ describe("buildStorageReport", () => {
           bookCount: 3,
           totalBytes: 9,
           missingFromDisk: false,
+          status: "idle",
         },
       ],
       bookTotalBytes: 9,

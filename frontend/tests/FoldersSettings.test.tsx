@@ -26,6 +26,7 @@ const REPORT: StorageReport = {
       bookCount: 12,
       totalBytes: 24 * 1024 * 1024,
       missingFromDisk: false,
+      status: "idle",
     },
     {
       id: 2,
@@ -34,6 +35,7 @@ const REPORT: StorageReport = {
       bookCount: 3,
       totalBytes: 1024 * 1024,
       missingFromDisk: true,
+      status: "idle",
     },
   ],
   bookTotalBytes: 25 * 1024 * 1024,
@@ -96,8 +98,24 @@ describe("FoldersSettings", () => {
     renderFolders();
 
     await screen.findByTestId("folders-list");
-    expect(screen.getByTestId("folder-missing-2")).toHaveTextContent("Missing from disk");
-    expect(screen.getByTestId("folder-row-1")).not.toHaveTextContent("Missing from disk");
+    expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Missing");
+    expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Up to date");
+  });
+
+  it("tags importing and refreshing folders in the status column", async () => {
+    const base = REPORT.bookLocations[0]!;
+    storageReportMock.mockResolvedValue({
+      ...REPORT,
+      bookLocations: [
+        { ...base, id: 1, status: "importing" },
+        { ...base, id: 2, status: "refreshing" },
+      ],
+    });
+    renderFolders();
+
+    await screen.findByTestId("folders-list");
+    expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Importing");
+    expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Refreshing");
   });
 
   it("explains that a watched folder can be a cloud-synced directory", async () => {
@@ -175,6 +193,7 @@ function manyFolders(count: number): StorageReport {
     bookCount: 2,
     totalBytes: 1024 * 1024,
     missingFromDisk: false,
+    status: "idle" as const,
   }));
   return { ...REPORT, bookLocations };
 }
@@ -395,6 +414,7 @@ describe("FoldersSettings unwatch", () => {
           bookCount: 0,
           totalBytes: 0,
           missingFromDisk: false,
+          status: "idle",
         },
       ],
     });
@@ -423,6 +443,7 @@ describe("FoldersSettings unwatch", () => {
           bookCount: 1,
           totalBytes: 1024,
           missingFromDisk: false,
+          status: "idle",
         },
       ],
     });

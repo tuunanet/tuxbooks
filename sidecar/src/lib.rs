@@ -13,7 +13,7 @@ pub mod worker;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ use sqlx::SqlitePool;
 use tokio::sync::watch;
 
 use crate::db::connection::init_pool_recovering;
-use crate::domain::StartupRecovery;
+use crate::domain::{LibraryLocationStatus, StartupRecovery};
 use crate::repository::library_locations::is_under;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
@@ -35,6 +35,8 @@ use crate::sync::engine::SyncService;
 pub struct ImportRun {
     cancel: Arc<AtomicBool>,
     finished: Arc<watch::Sender<bool>>,
+    /// 0 = a new folder's first scan, 1 = re-scanning a watched folder.
+    mode: Arc<AtomicU8>,
 }
 
 impl ImportRun {
@@ -43,6 +45,19 @@ impl ImportRun {
         Self {
             cancel: Arc::new(AtomicBool::new(false)),
             finished: Arc::new(finished),
+            mode: Arc::new(AtomicU8::new(0)),
+        }
+    }
+
+    pub fn mark_refreshing(&self) {
+        self.mode.store(1, Ordering::Relaxed);
+    }
+
+    pub fn scan_status(&self) -> LibraryLocationStatus {
+        if self.mode.load(Ordering::Relaxed) == 1 {
+            LibraryLocationStatus::Refreshing
+        } else {
+            LibraryLocationStatus::Importing
         }
     }
 
@@ -156,6 +171,17 @@ impl ImportRegistry {
         for root in roots {
             inner.blocking.remove(root);
         }
+    }
+
+    /// The scan state of every folder with an import in flight, keyed by
+    /// the same path the watch list stores.
+    pub fn statuses(&self) -> HashMap<String, LibraryLocationStatus> {
+        let inner = self.inner.lock().expect("importing mutex poisoned");
+        inner
+            .running
+            .iter()
+            .map(|(path, run)| (path.clone(), run.scan_status()))
+            .collect()
     }
 }
 

@@ -28,6 +28,7 @@ const LIBRARY_STATS = {
       bookCount: 2,
       totalBytes: 3_000_000,
       missingFromDisk: false,
+      status: "idle",
     },
   ],
   bookTotalBytes: 3_000_000,
