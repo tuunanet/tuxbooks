@@ -1576,6 +1576,69 @@ async fn importing_several_files_from_one_folder_scans_it_once() {
     assert_eq!(env.count().await, 2);
 }
 
+/// A quit during a folder import must not orphan the books it already
+/// persisted. Registration happens before the scan, so an interrupted run
+/// leaves a watched folder and startup catch-up finishes the import.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    for index in 0..30 {
+        write_epub(
+            &shelf.join(format!("book-{index}.epub")),
+            &format!("Shelf Book {index}"),
+        );
+    }
+
+    // Drive the real JSON-RPC command in a task and abort it as soon as the
+    // first progress batch lands, which is after at least one row committed.
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let emitter = EventEmitter::new(move |name, _| {
+        if name == "import-progress" {
+            let _ = progress_tx.send(());
+        }
+    });
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "import_paths",
+        "params": { "paths": [shelf.to_string_lossy()] },
+    })
+    .to_string();
+    let state = env.state();
+    let import = tokio::spawn(async move { handle_request_line(&state, &emitter, &request).await });
+    progress_rx
+        .recv()
+        .await
+        .expect("the import should report progress");
+    import.abort();
+    let _ = import.await;
+
+    let partial = env.count().await;
+    assert!(
+        partial > 0 && partial < 30,
+        "the abort must land mid-import, got {partial} rows"
+    );
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![
+            env.library.to_string_lossy().into_owned(),
+            shelf.to_string_lossy().into_owned()
+        ],
+        "an interrupted import must leave its folder watched"
+    );
+
+    // The next launch reconciles watched locations. That is what resumes the
+    // import the user never got to finish.
+    env.reconciler.reconcile_location(&shelf).await.unwrap();
+    assert_eq!(
+        env.count().await,
+        30,
+        "startup catch-up must import the books the quit left behind"
+    );
+}
+
 /// Importing a file from a folder that is already watched neither
 /// duplicates rows nor errors: the scan skips the unchanged files, the
 /// registration is a no-op, and no second watch is disclosed.

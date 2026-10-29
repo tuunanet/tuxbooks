@@ -12,7 +12,7 @@ use crate::repository::books;
 use crate::repository::library_locations;
 use crate::repository::storage;
 use crate::rpc::EventEmitter;
-use crate::services::book_importer::{import_directory, import_file, ImportReport};
+use crate::services::book_importer::{import_directory, ImportReport};
 use crate::services::library_reconciler::reconnect_book as reconnect;
 use crate::{covers_dir, pdfium_library_dirs, AppState};
 
@@ -85,8 +85,9 @@ impl<'a> ProgressBatcher<'a> {
 /// `import-progress` events so books and covers appear while the scan is
 /// still running.
 ///
-/// The directory is also registered as a watched library location, so after
-/// this scan the filesystem watcher keeps it synchronized (milestone 3).
+/// The directory is also registered as a watched library location before
+/// its books are imported, so an interrupted scan leaves the folder watched
+/// and startup catch-up finishes it (milestone 3).
 pub async fn scan_library(
     state: &AppState,
     events: &EventEmitter,
@@ -99,26 +100,32 @@ pub async fn scan_library(
     let covers = covers_dir(&state.db_path);
     let pdfium_dirs = pdfium_library_dirs();
     let batch = Mutex::new(ProgressBatcher::new(events));
-    let mut report = import_directory(&state.db, &root, &covers, &pdfium_dirs, &|book| {
-        batch.lock().unwrap().push(book.clone());
-    })
+    let mut report = ImportReport::default();
+    register_and_import_folder(
+        state,
+        &root,
+        &covers,
+        &pdfium_dirs,
+        &|book| {
+            batch.lock().unwrap().push(book.clone());
+        },
+        &mut report,
+    )
     .await?;
     batch.lock().unwrap().flush();
-
-    register_and_watch(state, &root, &mut report).await?;
     Ok(report)
 }
 
-/// Import a mixed batch of files and/or folders (milestone 10). Folders are
-/// scanned and registered as watched library locations exactly like
-/// `scan_library`; a plain file is imported in place and its parent
-/// directory gets the same folder treatment — scanned, registered, and
-/// watched (ADR 0009), so every catalog book comes from a watched folder.
-/// Registering an already-watched folder is idempotent: no duplicate rows,
-/// no error, and no second disclosure. Persisted books stream out as
-/// batched `import-progress` events; per-path failures come back in the
-/// report so the UI can surface them honestly, and every folder this run
-/// newly watched is listed in the report so the UI can disclose it.
+/// Import a mixed batch of files and/or folders (milestone 10). Every folder
+/// is registered and watched before its books land, so an interrupted import
+/// leaves a watched folder that startup catch-up finishes. A plain file's
+/// parent gets the same folder treatment and the scan imports the picked
+/// file with its siblings (ADR 0009), so every catalog book comes from a
+/// watched folder. Registering an already-watched folder is idempotent: no
+/// duplicate rows, no error, and no second disclosure. Persisted books
+/// stream out as batched `import-progress` events; per-path failures come
+/// back in the report so the UI can surface them honestly, and every folder
+/// this run newly watched is listed in the report so the UI can disclose it.
 pub async fn import_paths(
     state: &AppState,
     events: &EventEmitter,
@@ -150,35 +157,26 @@ pub async fn import_paths(
         if path.is_dir() {
             queue_folder(&mut folders, &mut seen_folders, path);
         } else if path.is_file() {
-            match import_file(&state.db, &path, &covers, &pdfium_dirs).await {
-                Ok(Some(outcome)) => {
-                    if outcome.inserted {
-                        report.imported += 1;
-                    } else {
-                        report.updated += 1;
-                    }
-                    emit_progress(&outcome.book);
-                    // A picked file adopts its folder (ADR 0009): the
-                    // parent gets the folder import's treatment, so the
-                    // mirror never holds a book no watched folder owns.
-                    if let Some(parent) = path.parent() {
-                        if !parent.as_os_str().is_empty() {
-                            queue_folder(&mut folders, &mut seen_folders, parent.to_path_buf());
-                        }
-                    }
-                }
-                Ok(None) => report
+            // A picked file is imported by its parent's scan. Reject a
+            // non-book now, so a stray file never watches its folder only
+            // to fail inside the scan.
+            if path
+                .extension()
+                .and_then(crate::domain::BookFormat::from_extension)
+                .is_none()
+            {
+                report
                     .failed
                     .push(crate::services::book_importer::FailedImport {
                         path: path.to_string_lossy().into_owned(),
                         error: "not a supported book file (.epub/.pdf)".into(),
-                    }),
-                Err(err) => report
-                    .failed
-                    .push(crate::services::book_importer::FailedImport {
-                        path: path.to_string_lossy().into_owned(),
-                        error: err.to_string(),
-                    }),
+                    });
+                continue;
+            }
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    queue_folder(&mut folders, &mut seen_folders, parent.to_path_buf());
+                }
             }
         } else {
             report
@@ -189,16 +187,24 @@ pub async fn import_paths(
                 });
         }
     }
-    for folder in &folders {
-        import_and_watch_folder(
+    for folder in folders {
+        if let Err(err) = register_and_import_folder(
             state,
-            folder,
+            &folder,
             &covers,
             &pdfium_dirs,
             &emit_progress,
             &mut report,
         )
-        .await;
+        .await
+        {
+            report
+                .failed
+                .push(crate::services::book_importer::FailedImport {
+                    path: folder.to_string_lossy().into_owned(),
+                    error: err.to_string(),
+                });
+        }
     }
     batch.lock().unwrap().flush();
     Ok(report)
@@ -212,48 +218,32 @@ fn queue_folder(folders: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, folder:
     }
 }
 
-/// Scan `root` for book files, register it as a watched library location,
-/// and start the filesystem watcher on it — the one folder treatment both
-/// folder imports and picked files' parents get (ADR 0009). Book counts
-/// and per-path failures merge into `report`; a folder this run newly
-/// registered is disclosed in `report.watched`. Registration is
-/// idempotent: an already-watched folder produces no disclosure and no
-/// duplicate row.
-async fn import_and_watch_folder(
+/// Register `root` as a watched location, then import its books — the one
+/// folder treatment both folder imports and picked files' parents get (ADR
+/// 0009). Registration comes first so a quit during the scan leaves a
+/// watched folder, not catalog rows no location owns; the next launch's
+/// catch-up finishes the import. A scan that fails keeps the watch for the
+/// same reason: it is visible and retryable, and removing it would strand
+/// whatever rows already landed. Book counts and per-path failures merge
+/// into `report`; a folder this run newly registered is disclosed in
+/// `report.watched`. Registration is idempotent: an already-watched folder
+/// produces no disclosure and no duplicate row.
+async fn register_and_import_folder(
     state: &AppState,
     root: &Path,
     covers: &Path,
     pdfium_dirs: &[PathBuf],
     emit_progress: &(dyn Fn(&crate::domain::Book) + Send + Sync),
     report: &mut ImportReport,
-) {
-    match import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await {
-        Ok(mut folder_report) => {
-            report.imported += folder_report.imported;
-            report.updated += folder_report.updated;
-            report.skipped += folder_report.skipped;
-            report.failed.append(&mut folder_report.failed);
-        }
-        Err(err) => {
-            report
-                .failed
-                .push(crate::services::book_importer::FailedImport {
-                    path: root.to_string_lossy().into_owned(),
-                    error: err.to_string(),
-                });
-            // The scan failed, so there is nothing trustworthy to
-            // register or watch; the failure line already said so.
-            return;
-        }
-    }
-    if let Err(err) = register_and_watch(state, root, report).await {
-        report
-            .failed
-            .push(crate::services::book_importer::FailedImport {
-                path: root.to_string_lossy().into_owned(),
-                error: err.to_string(),
-            });
-    }
+) -> Result<(), AppError> {
+    register_and_watch(state, root, report).await?;
+    let mut folder_report =
+        import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await?;
+    report.imported += folder_report.imported;
+    report.updated += folder_report.updated;
+    report.skipped += folder_report.skipped;
+    report.failed.append(&mut folder_report.failed);
+    Ok(())
 }
 
 /// Register `root` as a watched library location, start the filesystem
@@ -279,15 +269,17 @@ async fn register_and_watch(
         }
         return Ok(());
     }
-    // The reverse order gets the same treatment: folders this root now
-    // covers were registered before it did, and a watched folder inside
-    // another adds nothing (ADR 0010). Their rows go without a purge and
-    // their books stay, owned by this folder from here on.
-    for gone in library_locations::collapse_descendants(&state.db, &root).await? {
-        state.watcher.unwatch(Path::new(&gone));
-    }
+    // Add the parent before dropping the nested rows it now covers. If the
+    // process dies between the two, the list briefly holds a nested entry
+    // but every book still has a watched owner; the reverse order would
+    // orphan the descendants' books during the gap.
     if library_locations::add_location(&state.db, &root).await? {
         report.watched.push(root.clone());
+    }
+    // A watched folder inside another adds nothing (ADR 0010). Its row goes
+    // without a purge and its books stay, owned by this folder from here on.
+    for gone in library_locations::collapse_descendants(&state.db, &root).await? {
+        state.watcher.unwatch(Path::new(&gone));
     }
     state.watcher.watch(Path::new(&root));
     Ok(())
