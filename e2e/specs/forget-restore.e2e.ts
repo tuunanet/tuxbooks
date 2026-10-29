@@ -36,6 +36,9 @@ test.describe("forget and restore", () => {
     const books = await invoke<LibraryBook[]>(page, "list_books", {});
     const book = books.find((candidate) => candidate.title === seededBookTitles.epub);
     if (!book) throw new Error("the seeded EPUB is not in the library");
+    const annotationsBefore = (
+      await invoke<unknown[]>(page, "list_annotations", { bookId: book.id })
+    ).length;
 
     // Give the old identity state worth restoring.
     await page.evaluate(async (bookId) => {
@@ -122,7 +125,10 @@ test.describe("forget and restore", () => {
     );
     expect(progress?.progressPercent).toBe(71);
     const annotations = await invoke<unknown[]>(page, "list_annotations", { bookId: fresh.id });
-    expect(annotations).toHaveLength(2);
+    // The seeded library and earlier specs may already own annotations; Merge
+    // adds this journey's old bookmark and fresh highlight to whatever was
+    // there before the forget.
+    expect(annotations).toHaveLength(annotationsBefore + 2);
 
     // Merge consumed the trash entry, so the next spec starts clean.
     const trash = await invoke<BookTrashEntry[]>(page, "list_book_trash", {});

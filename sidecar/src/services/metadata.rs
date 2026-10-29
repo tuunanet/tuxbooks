@@ -197,7 +197,10 @@ pub async fn embed_book_metadata(
 
     // Persist the form first: embedding the current edits is the point of the
     // action, and it keeps the no-Save flow coherent.
-    apply_form(pool, file_id, form).await?;
+    // `apply_form` resolves the durable book; `file_id` is only the location
+    // used for the rehash and the embed below. They are not the same id after
+    // a Forget rebinds the file to a fresh identity.
+    apply_form(pool, book.id, form).await?;
     let desired = get_book_metadata(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?
