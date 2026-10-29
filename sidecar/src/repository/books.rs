@@ -11,7 +11,7 @@ use crate::repository::library_locations::{list_locations, location_index, ownin
 /// normalized `series` table so readers never need a second query, and the
 /// `reading_progress` join exposes the coarse reading position that backs
 /// the "In Progress" / "Finished" library sections (milestone 10).
-const BOOK_COLUMNS: &str = "b.id, b.path, b.title, b.subtitle, b.author, b.publisher, \
+const BOOK_COLUMNS: &str = "b.id, b.book_uid, b.path, b.title, b.subtitle, b.author, b.publisher, \
      b.language, b.isbn, b.description, b.cover_path, b.added_at, b.modified_at, \
      b.last_opened_at, b.available, b.file_size, b.file_mtime, b.publication_date, \
      b.series_id, b.series_index, s.name AS series_name, \
@@ -25,8 +25,8 @@ const BOOK_FROM: &str = " FROM books b \
 pub async fn insert_book(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppError> {
     let id: i64 = sqlx::query_scalar(
         r#"
-        INSERT INTO books (path, title, subtitle, author, publisher, language, isbn, description, cover_path, file_size, file_mtime)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        INSERT INTO books (book_uid, path, title, subtitle, author, publisher, language, isbn, description, cover_path, file_size, file_mtime)
+        VALUES (lower(hex(randomblob(16))), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         RETURNING id
         "#,
     )
@@ -54,6 +54,10 @@ pub async fn update_book_by_path(pool: &SqlitePool, book: &NewBook) -> Result<bo
         UPDATE books
         SET title = ?2, subtitle = ?3, author = ?4, publisher = ?5, language = ?6,
             isbn = ?7, description = ?8, cover_path = ?9,
+            hash_state = CASE
+                WHEN file_size != ?10 OR file_mtime != ?11 THEN 'pending'
+                ELSE hash_state
+            END,
             file_size = ?10, file_mtime = ?11, available = 1,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE path = ?1
@@ -201,6 +205,7 @@ pub async fn update_book_by_id(
         UPDATE books
         SET path = ?2, title = ?3, subtitle = ?4, author = ?5, publisher = ?6,
             language = ?7, isbn = ?8, description = ?9, cover_path = ?10,
+            hash_state = 'pending',
             file_size = ?11, file_mtime = ?12, available = 1,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
@@ -227,7 +232,7 @@ pub async fn update_book_by_id(
 /// The sync identity sweep treats this as a forced rehash, so a crash between
 /// a rewrite and the snapshot update cannot strand the book identity.
 pub async fn mark_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
-    sqlx::query("UPDATE books SET rehash_pending = 1 WHERE id = ?1")
+    sqlx::query("UPDATE books SET rehash_pending = 1, hash_state = 'pending' WHERE id = ?1")
         .bind(id)
         .execute(pool)
         .await?;
@@ -251,12 +256,14 @@ pub async fn update_file_snapshot(
     file_size: i64,
     file_mtime: i64,
 ) -> Result<(), AppError> {
-    sqlx::query("UPDATE books SET file_size = ?2, file_mtime = ?3 WHERE id = ?1")
-        .bind(id)
-        .bind(file_size)
-        .bind(file_mtime)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE books SET file_size = ?2, file_mtime = ?3, hash_state = 'pending' WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(file_size)
+    .bind(file_mtime)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -274,6 +281,7 @@ pub async fn relink_book(
         r#"
         UPDATE books
         SET path = ?2, file_size = ?3, file_mtime = ?4, available = 1,
+            hash_state = 'pending',
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
         "#,

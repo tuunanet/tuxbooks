@@ -12,9 +12,15 @@ import {
   clearCache,
   copyDataPath,
   copyLibraryLocationPath,
+  dismissMigrationIssue,
+  getIdentityBackfillStatus,
   getStorageReport,
+  listMigrationIssues,
+  onIdentityBackfill,
   openDataFolder,
   openLibraryLocation,
+  type HashBackfillStatus,
+  type MigrationIssue,
   type StorageEntryKind,
   type StorageReport,
   type StorageRootId,
@@ -48,6 +54,8 @@ const CATALOG_ROWS = [
  */
 export function DataSettings() {
   const [report, setReport] = useState<StorageReport | null>(null);
+  const [backfill, setBackfill] = useState<HashBackfillStatus | null>(null);
+  const [issues, setIssues] = useState<MigrationIssue[]>([]);
   const [failed, setFailed] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -73,8 +81,30 @@ export function DataSettings() {
         if (active) setFailed(true);
       },
     );
+    // Older test hosts and pre-upgrade services do not answer these; the
+    // storage page must still render without them.
+    getIdentityBackfillStatus().then(
+      (next) => {
+        if (active && next) setBackfill(next);
+      },
+      () => {},
+    );
+    listMigrationIssues().then(
+      (next) => {
+        if (active && Array.isArray(next)) setIssues(next);
+      },
+      () => {},
+    );
+    let unlisten: (() => void) | undefined;
+    void onIdentityBackfill((next) => {
+      if (active && next) setBackfill(next);
+    }).then((stop) => {
+      if (active) unlisten = stop;
+      else stop?.();
+    });
     return () => {
       active = false;
+      unlisten?.();
     };
   }, []);
 
@@ -147,6 +177,15 @@ export function DataSettings() {
     if (feedback === "error") return "Copy failed";
     return "Copy path";
   };
+
+  const dismissIssue = useCallback(async (id: number) => {
+    try {
+      await dismissMigrationIssue(id);
+      setIssues((current) => current.filter((issue) => issue.id !== id));
+    } catch {
+      // Leaving the row in place is the safe answer when the call fails.
+    }
+  }, []);
 
   if (failed) {
     return (
@@ -338,6 +377,40 @@ export function DataSettings() {
       <p data-testid="storage-reassurance" className="text-xs text-muted-foreground">
         Your books are read in place and never copied into the app.
       </p>
+
+      {(backfill !== null || issues.length > 0) && (
+        <div data-testid="identity-backfill" className="rounded-lg border p-4">
+          <p className="text-sm font-medium">Book identity index</p>
+          {backfill !== null && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {backfill.total === 0
+                ? "No books to index yet."
+                : `${backfill.hashed} of ${backfill.total} books indexed`}
+              {backfill.pending > 0 && ` · ${backfill.pending} to go`}
+              {backfill.waiting > 0 &&
+                ` · ${backfill.waiting} waiting for ${backfill.waiting === 1 ? "its file" : "their files"}`}
+              {backfill.failed > 0 && ` · ${backfill.failed} need a relink`}
+            </p>
+          )}
+          {issues.length > 0 && (
+            <ul data-testid="identity-issues" className="mt-3 flex flex-col gap-3">
+              {issues.map((issue) => (
+                <li key={issue.id} className="flex items-start justify-between gap-4">
+                  <p className="text-xs text-muted-foreground">{issue.detail}</p>
+                  <Button
+                    data-testid={`identity-dismiss-${issue.id}`}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void dismissIssue(issue.id)}
+                  >
+                    Dismiss
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent data-testid="clear-cache-dialog" className="sm:max-w-sm">
