@@ -12,7 +12,7 @@ test.describe("settings sync tab", () => {
 
     await expect(page.getByTestId("sync-settings")).toBeVisible();
     await expect(page.getByTestId("sync-connect")).toBeVisible();
-    await expect(page.getByText("Cloud folder")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cloud folder" })).toBeVisible();
     await expect(page.getByText("Syncs between machines")).toBeVisible();
     await expect(page.getByText("Book files (EPUB and PDF)")).toBeVisible();
   });
