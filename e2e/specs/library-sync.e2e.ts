@@ -15,11 +15,46 @@ import path from "node:path";
 
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
-import { epubFixture, seededLibraryBookCount } from "../setup/fixtures.js";
+import {
+  epubFixture,
+  readerRegressionFixtures,
+  seededLibraryBookCount,
+} from "../setup/fixtures.js";
 import { libraryDir, scratchDir } from "../setup/environment.js";
+
+/**
+ * Distinct EPUBs for files this spec creates. Copying the seeded
+ * `minimal.epub` would now attach a second file to the existing durable book
+ * by content hash (ADR 0014), so the library count would not grow. These
+ * reader-regression fixtures are not seeded in this phase and give each
+ * scenario genuinely new bytes.
+ */
+const [firstNewEpub, secondNewEpub, thirdNewEpub] = readerRegressionFixtures.map(
+  (fixture) => fixture.path,
+);
 
 async function cardCount(page: Page): Promise<number> {
   return page.getByTestId("book-card").count();
+}
+
+interface LibraryBook {
+  id: number;
+  bookUid: string;
+  path: string;
+}
+
+async function invoke<T>(page: Page, method: string, params: Record<string, unknown>): Promise<T> {
+  return (await page.evaluate(([name, args]) => window.tuxbooks!.invoke(name as string, args), [
+    method,
+    params,
+  ] as [string, Record<string, unknown>])) as T;
+}
+
+async function libraryBook(page: Page, file: string): Promise<LibraryBook> {
+  const books = await invoke<LibraryBook[]>(page, "list_books", {});
+  const book = books.find((candidate) => candidate.path === file);
+  if (!book) throw new Error(`${file} is not in the library`);
+  return book;
 }
 
 async function missingOverlays(page: Page): Promise<number> {
@@ -35,7 +70,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
   test("imports a book dropped into the watched library while the app runs", async ({ page }) => {
     expect(await cardCount(page)).toBe(seededLibraryBookCount);
 
-    copyFileSync(epubFixture, path.join(libraryDir, "sync-added.epub"));
+    copyFileSync(firstNewEpub, path.join(libraryDir, "sync-added.epub"));
 
     await expect
       .poll(() => cardCount(page), {
@@ -99,7 +134,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     const shelf = path.join(scratchDir, "single-file-shelf");
     mkdirSync(shelf, { recursive: true });
     const first = path.join(shelf, "single-first.epub");
-    copyFileSync(epubFixture, first);
+    copyFileSync(firstNewEpub, first);
 
     // The native file dialog cannot be driven from the automation surface,
     // so the file comes in through the same bridge command Import Files
@@ -128,7 +163,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(page.getByTestId("library-view")).toBeVisible();
 
     // A sibling dropped on disk afterwards appears without a second import.
-    copyFileSync(epubFixture, path.join(shelf, "single-second.epub"));
+    copyFileSync(secondNewEpub, path.join(shelf, "single-second.epub"));
     await expect
       .poll(() => cardCount(page), {
         timeout: 30000,
@@ -157,7 +192,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     const shelf = path.join(scratchDir, "unwatch-shelf");
     const shelfBook = path.join(shelf, "shelf-book.epub");
     mkdirSync(shelf, { recursive: true });
-    copyFileSync(epubFixture, shelfBook);
+    copyFileSync(thirdNewEpub, shelfBook);
     const before = readFileSync(shelfBook);
 
     // The native import dialog cannot be driven from the automation surface,
@@ -224,7 +259,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     const child = path.join(parent, "child");
     const childBook = path.join(child, "child-book.epub");
     mkdirSync(child, { recursive: true });
-    copyFileSync(epubFixture, childBook);
+    copyFileSync(firstNewEpub, childBook);
     const before = readFileSync(childBook);
 
     const importFolder = (dir: string) =>
@@ -288,6 +323,117 @@ test.describe("tuxbooks filesystem synchronization", () => {
 
     rmSync(parent, { recursive: true, force: true });
   });
+  test("keeps progress and annotations through unwatch and re-import", async ({ page }) => {
+    // A shelf outside the seeded library, so the state journey never disturbs
+    // the fixture books the other suites read.
+    const shelf = path.join(scratchDir, "durable-state-shelf");
+    const file = path.join(shelf, "state-book.epub");
+    mkdirSync(shelf, { recursive: true });
+    copyFileSync(firstNewEpub, file);
+
+    await invoke(page, "import_paths", { paths: [shelf] });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
+    const book = await libraryBook(page, file);
+    await invoke(page, "save_reading_progress", {
+      bookId: book.id,
+      progress: {
+        chapterHref: "chapter1.xhtml",
+        characterOffset: 120,
+        progressPercent: 44,
+      },
+    });
+    await invoke(page, "create_annotation", {
+      bookId: book.id,
+      annotation: {
+        kind: "bookmark",
+        cfi: "epubcfi(/6/4)",
+        chapterHref: "chapter1.xhtml",
+      },
+    });
+
+    // Unwatch ends the membership, not the reading data.
+    await invoke(page, "unwatch_locations", { paths: [shelf] });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount);
+    const keptProgress = await invoke<{ progressPercent: number } | null>(
+      page,
+      "get_reading_progress",
+      { bookId: book.id },
+    );
+    expect(keptProgress?.progressPercent).toBe(44);
+    const keptAnnotations = await invoke<unknown[]>(page, "list_annotations", {
+      bookId: book.id,
+    });
+    expect(keptAnnotations).toHaveLength(1);
+
+    // The same bytes return and reattach to the durable book.
+    await invoke(page, "import_paths", { paths: [shelf] });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
+    const again = await libraryBook(page, file);
+    expect(again.id).toBe(book.id);
+    expect(again.bookUid).toBe(book.bookUid);
+    const restored = await invoke<{ progressPercent: number; chapterHref: string } | null>(
+      page,
+      "get_reading_progress",
+      { bookId: again.id },
+    );
+    expect(restored?.progressPercent).toBe(44);
+    expect(restored?.chapterHref).toBe("chapter1.xhtml");
+    expect(await invoke<unknown[]>(page, "list_annotations", { bookId: again.id })).toHaveLength(1);
+
+    await invoke(page, "unwatch_locations", { paths: [shelf] });
+    rmSync(shelf, { recursive: true, force: true });
+  });
+
+  test("keeps progress and annotations through remove and re-import", async ({ page }) => {
+    const shelf = path.join(scratchDir, "durable-remove-shelf");
+    const file = path.join(shelf, "remove-book.epub");
+    mkdirSync(shelf, { recursive: true });
+    copyFileSync(secondNewEpub, file);
+
+    await invoke(page, "import_paths", { paths: [shelf] });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
+    const book = await libraryBook(page, file);
+    await invoke(page, "save_reading_progress", {
+      bookId: book.id,
+      progress: { chapterHref: "chapter2.xhtml", progressPercent: 71 },
+    });
+    await invoke(page, "create_annotation", {
+      bookId: book.id,
+      annotation: {
+        kind: "bookmark",
+        cfi: "epubcfi(/6/6)",
+        chapterHref: "chapter2.xhtml",
+      },
+    });
+
+    // Remove drops the library entry and keeps the durable state.
+    await invoke(page, "remove_book", { bookId: book.id });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount);
+    const keptProgress = await invoke<{ progressPercent: number } | null>(
+      page,
+      "get_reading_progress",
+      { bookId: book.id },
+    );
+    expect(keptProgress?.progressPercent).toBe(71);
+    expect(await invoke<unknown[]>(page, "list_annotations", { bookId: book.id })).toHaveLength(1);
+
+    // Importing the same bytes restores the same book.
+    await invoke(page, "import_paths", { paths: [shelf] });
+    await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
+    const again = await libraryBook(page, file);
+    expect(again.id).toBe(book.id);
+    expect(again.bookUid).toBe(book.bookUid);
+    const restored = await invoke<{ progressPercent: number } | null>(
+      page,
+      "get_reading_progress",
+      { bookId: again.id },
+    );
+    expect(restored?.progressPercent).toBe(71);
+
+    await invoke(page, "unwatch_locations", { paths: [shelf] });
+    rmSync(shelf, { recursive: true, force: true });
+  });
+
   test("leaves the seeded library intact for the other suites", async ({ page }) => {
     const allText = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-testid=book-card]"))

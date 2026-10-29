@@ -54,14 +54,14 @@ function scratchDatabase(): DatabaseSync {
  * Reading the DB immediately after that relaunch can beat the import, so wait
  * for the seeded rows instead of failing the whole suite.
  */
-async function bookIdByTitle(db: DatabaseSync, title: string): Promise<number> {
+async function bookUidByTitle(db: DatabaseSync, title: string): Promise<string> {
   const deadline = Date.now() + 60_000;
   for (;;) {
     try {
-      const row = db.prepare("SELECT id FROM books WHERE title = ?").get(title) as
-        | { id: number }
+      const row = db.prepare("SELECT book_uid FROM books WHERE title = ?").get(title) as
+        | { book_uid: string }
         | undefined;
-      if (row) return row.id;
+      if (row) return row.book_uid;
     } catch (error) {
       // The app may have created the SQLite file but not the schema yet.
       if (!(error instanceof Error) || !error.message.includes("no such table")) throw error;
@@ -76,7 +76,7 @@ async function bookIdByTitle(db: DatabaseSync, title: string): Promise<number> {
 /** Insert a progress row shaped like the previous app's writes. */
 function seedProgress(
   db: DatabaseSync,
-  bookId: number,
+  bookUid: string,
   row: {
     cfi: string | null;
     chapterHref: string | null;
@@ -86,10 +86,10 @@ function seedProgress(
 ): void {
   db.prepare(
     `INSERT INTO reading_progress
-       (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent,
+       (book_uid, chapter_href, cfi, character_offset, page_number, scroll_offset, progress_percent,
         locator, progression, locations, engine, schema_version)
      VALUES (?, ?, ?, NULL, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL)
-     ON CONFLICT(book_id) DO UPDATE SET
+     ON CONFLICT(book_uid) DO UPDATE SET
        chapter_href = excluded.chapter_href,
        cfi = excluded.cfi,
        page_number = excluded.page_number,
@@ -100,7 +100,7 @@ function seedProgress(
        engine = NULL,
        schema_version = NULL,
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-  ).run(bookId, row.chapterHref, row.cfi, row.pageNumber, row.percent);
+  ).run(bookUid, row.chapterHref, row.cfi, row.pageNumber, row.percent);
 }
 
 /** Waits until the EPUB engine reports ready and the given spine section. */
@@ -112,8 +112,8 @@ async function waitForEpubSection(page: Page, section: string): Promise<void> {
 
 test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   let db: DatabaseSync;
-  let epubId = 0;
-  let pdfId = 0;
+  let epubUid = "";
+  let pdfUid = "";
 
   test.beforeAll(() => {
     db = scratchDatabase();
@@ -123,12 +123,12 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   // library view to trigger the seeded import, then for the rows it writes.
   test.beforeEach(async ({ page }) => {
     await ensureLibrary(page);
-    epubId = await bookIdByTitle(db, EPUB_TITLE);
-    pdfId = await bookIdByTitle(db, PDF_TITLE);
+    epubUid = await bookUidByTitle(db, EPUB_TITLE);
+    pdfUid = await bookUidByTitle(db, PDF_TITLE);
   });
 
   test("restores the beginning of the book from an old foliate row", async ({ page }) => {
-    seedProgress(db, epubId, {
+    seedProgress(db, epubUid, {
       cfi: OLD_FOLIATE_CFI.beginning,
       chapterHref: "chapter1.xhtml",
       pageNumber: null,
@@ -141,7 +141,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test("restores a chapter boundary (section start) from an old foliate row", async ({ page }) => {
-    seedProgress(db, epubId, {
+    seedProgress(db, epubUid, {
       cfi: OLD_FOLIATE_CFI.chapterTwo,
       chapterHref: "chapter2.xhtml",
       pageNumber: null,
@@ -153,7 +153,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test("restores a late-book position from an old foliate row", async ({ page }) => {
-    seedProgress(db, epubId, {
+    seedProgress(db, epubUid, {
       cfi: OLD_FOLIATE_CFI.chapterThree,
       chapterHref: "chapter3.xhtml",
       pageNumber: null,
@@ -171,7 +171,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
     // EPUB. A locator-bearing row never falls back to its stale percentage
     // — that would silently jump into a different file — so the adapter
     // degrades to the beginning (section 0), and the reader stays usable.
-    seedProgress(db, epubId, {
+    seedProgress(db, epubUid, {
       cfi: "epubcfi(/6/999!/4/2/1:0)",
       chapterHref: "gone.xhtml",
       pageNumber: null,
@@ -187,9 +187,9 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
     await page.waitForTimeout(1500);
     const migrated = db
       .prepare(
-        "SELECT engine, schema_version, locator, cfi, chapter_href FROM reading_progress WHERE book_id = ?",
+        "SELECT engine, schema_version, locator, cfi, chapter_href FROM reading_progress WHERE book_uid = ?",
       )
-      .get(epubId) as {
+      .get(epubUid) as {
       engine: string | null;
       schema_version: number | null;
       locator: string | null;
@@ -206,7 +206,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test("restores the PDF page from an old page-number row", async ({ page }) => {
-    seedProgress(db, pdfId, {
+    seedProgress(db, pdfUid, {
       cfi: null,
       chapterHref: null,
       pageNumber: 3,
@@ -220,14 +220,14 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test.afterAll(() => {
-    if (db === undefined || epubId === 0 || pdfId === 0) return;
+    if (db === undefined || !epubUid || !pdfUid) return;
     // Clean up this suite's DB writes so later specs in the phase see the
     // state they expect (no spec may assume fresh state, but leaving seeded
     // rows behind would spread restore side effects across every reader).
     try {
-      db.prepare("DELETE FROM reading_progress WHERE book_id = ? OR book_id = ?").run(
-        epubId,
-        pdfId,
+      db.prepare("DELETE FROM reading_progress WHERE book_uid = ? OR book_uid = ?").run(
+        epubUid,
+        pdfUid,
       );
     } catch {
       // beforeAll failed before the scratch schema existed; nothing to clean.
