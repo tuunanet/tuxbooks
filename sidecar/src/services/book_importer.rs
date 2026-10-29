@@ -230,8 +230,12 @@ pub async fn import_directory_with_cancel(
                 // Record the fresh parse as source truth and re-merge the
                 // effective view, so user metadata overrides survive file
                 // changes (milestone 7).
-                crate::services::metadata::apply_source_metadata(pool, upserted.file_id, &new_book)
-                    .await?;
+                crate::repository::metadata::record_imported_source(
+                    pool,
+                    upserted.file_id,
+                    &new_book,
+                )
+                .await?;
                 let book = finalize_import(pool, upserted.file_id).await?;
                 on_book(&book);
                 bump(&mut report, upserted.inserted);
@@ -275,7 +279,7 @@ pub async fn import_file(
     let upserted = books::upsert_file(pool, &new_book).await?;
     // Record the fresh parse as source truth and re-merge the effective
     // view, so user metadata overrides survive file changes (milestone 7).
-    crate::services::metadata::apply_source_metadata(pool, upserted.file_id, &new_book).await?;
+    crate::repository::metadata::record_imported_source(pool, upserted.file_id, &new_book).await?;
     let book = finalize_import(pool, upserted.file_id).await?;
     Ok(Some(ImportOutcome {
         book,

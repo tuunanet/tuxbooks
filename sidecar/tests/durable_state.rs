@@ -11,10 +11,11 @@ use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::Book;
-use tuxbooks_lib::repository::{books, library_locations, migration};
+use tuxbooks_lib::repository::{books, library_locations, metadata as metadata_repo, migration};
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{PathChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
+use tuxbooks_lib::services::metadata;
 use tuxbooks_lib::{AppState, ImportRegistry};
 
 fn fixture_epub() -> PathBuf {
@@ -173,6 +174,77 @@ impl Env {
             .as_array()
             .map(Vec::len)
             .unwrap_or_default()
+    }
+
+    async fn create_collection(&self, name: &str) -> i64 {
+        let result = self.rpc("create_collection", json!({ "name": name })).await;
+        result["id"].as_i64().expect("collection id")
+    }
+
+    async fn add_to_collection(&self, book_id: i64, collection_id: i64) {
+        self.rpc(
+            "add_book_to_collection",
+            json!({ "bookId": book_id, "collectionId": collection_id }),
+        )
+        .await;
+    }
+
+    async fn collection_book_ids(&self, collection_id: i64) -> Vec<i64> {
+        self.rpc("list_collections", json!({}))
+            .await
+            .as_array()
+            .and_then(|collections| {
+                collections
+                    .iter()
+                    .find(|collection| collection["id"].as_i64() == Some(collection_id))
+            })
+            .and_then(|collection| collection["bookIds"].as_array())
+            .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default()
+    }
+
+    async fn set_title_override(&self, book_id: i64, title: &str) {
+        let overrides = metadata_repo::OverrideRow {
+            title: Some(title.into()),
+            ..metadata_repo::OverrideRow::default()
+        };
+        metadata::apply_synced_overrides(&self.pool, book_id, &overrides, &[], &[])
+            .await
+            .unwrap();
+    }
+
+    async fn metadata(&self, book_id: i64) -> Value {
+        self.rpc("get_book_metadata", json!({ "bookId": book_id }))
+            .await
+    }
+
+    async fn mark_opened(&self, book_id: i64) {
+        self.rpc("mark_book_opened", json!({ "bookId": book_id }))
+            .await;
+    }
+
+    async fn last_opened(&self, book_id: i64) -> Option<String> {
+        self.books()
+            .await
+            .into_iter()
+            .find(|book| book.id == book_id)
+            .and_then(|book| book.last_opened_at)
+            .map(|when| when.to_rfc3339())
+    }
+
+    async fn durable_last_opened(&self, book_uid: &str) -> Option<String> {
+        let value: Option<String> =
+            sqlx::query_scalar("SELECT last_opened_at FROM book_records WHERE uid = ?1")
+                .bind(book_uid)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap();
+        value.map(|when| {
+            chrono::DateTime::parse_from_rfc3339(&when)
+                .expect("stored timestamp")
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339()
+        })
     }
 }
 
@@ -350,4 +422,269 @@ async fn a_failed_hash_marks_a_relink_and_does_not_block_removal() {
             .any(|path| Path::new(path) == env.library),
         "remove leaves the watch list alone"
     );
+}
+
+/// Collection membership, a metadata override, and last-opened are durable
+/// book state: an unwatch ends the membership but not any of them, and a
+/// re-watch restores the same book with the state attached.
+#[tokio::test(flavor = "multi_thread")]
+async fn collection_metadata_and_last_opened_survive_unwatch_and_rewatch() {
+    let env = setup().await;
+    env.write_book("book.epub");
+    env.scan().await;
+
+    let book = env.book().await;
+    let book_uid = book.book_uid.clone().expect("durable uid");
+    let shelf = env.create_collection("Favorites").await;
+    env.add_to_collection(book.id, shelf).await;
+    env.set_title_override(book.id, "Curated Title").await;
+    env.mark_opened(book.id).await;
+    let opened = env
+        .last_opened(book.id)
+        .await
+        .expect("the session is recorded");
+
+    let view = env.metadata(book.id).await;
+    assert_eq!(view["effective"]["title"], json!("Curated Title"));
+    assert_eq!(view["overridden"]["title"], json!(true));
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(
+        env.rpc("unwatch_locations", json!({ "paths": [root.clone()] }))
+            .await,
+        json!(1)
+    );
+    assert!(env.books().await.is_empty(), "membership ends");
+
+    // No file is present, but the durable book still owns all three states.
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+    assert_eq!(
+        env.durable_last_opened(&book_uid).await.as_deref(),
+        Some(opened.as_str())
+    );
+    let overrides: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM book_metadata_overrides WHERE book_uid = ?1")
+            .bind(&book_uid)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(overrides, 1, "the override survives the last file row");
+
+    env.scan().await;
+    let again = env.book().await;
+    assert_eq!(again.id, book.id, "same durable book");
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+    assert_eq!(
+        env.last_opened(again.id).await.as_deref(),
+        Some(opened.as_str())
+    );
+    let view = env.metadata(again.id).await;
+    assert_eq!(view["effective"]["title"], json!("Curated Title"));
+}
+
+/// Remove ends the membership; a re-import reattaches to the durable book and
+/// refreshes only the per-file source layer. The override still wins.
+#[tokio::test(flavor = "multi_thread")]
+async fn metadata_override_and_last_opened_survive_remove_and_reimport() {
+    let env = setup().await;
+    let path = env.write_book("book.epub");
+    env.scan().await;
+
+    let book = env.book().await;
+    let shelf = env.create_collection("Keepers").await;
+    env.add_to_collection(book.id, shelf).await;
+    env.set_title_override(book.id, "Curated Title").await;
+    env.mark_opened(book.id).await;
+    let opened = env.last_opened(book.id).await.expect("opened");
+
+    assert_eq!(
+        env.rpc("remove_book", json!({ "bookId": book.id })).await,
+        json!(true)
+    );
+    assert!(env.books().await.is_empty());
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+
+    env.rpc("import_paths", json!({ "paths": [path.to_string_lossy()] }))
+        .await;
+    let again = env.book().await;
+    assert_eq!(again.id, book.id, "the bytes reattach");
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+    assert_eq!(
+        env.last_opened(again.id).await.as_deref(),
+        Some(opened.as_str())
+    );
+    let view = env.metadata(again.id).await;
+    assert_eq!(view["effective"]["title"], json!("Curated Title"));
+
+    // A real re-import refreshes the source layer. The curated title still
+    // wins, while an untouched field follows the new file.
+    let file_id = books::active_file_id(&env.pool, book.id)
+        .await
+        .unwrap()
+        .expect("file row");
+    let refreshed = tuxbooks_lib::domain::NewBook {
+        path: path.to_string_lossy().into_owned(),
+        title: "Fresh Source Title".into(),
+        subtitle: Some("Fresh Source Subtitle".into()),
+        author: Some("Fresh Author".into()),
+        authors: vec!["Fresh Author".into()],
+        subjects: vec!["Fresh Subject".into()],
+        publisher: Some("Fresh Press".into()),
+        language: Some("en".into()),
+        isbn: None,
+        description: None,
+        publication_date: None,
+        series: None,
+        series_index: None,
+        cover_path: None,
+        file_size: 42,
+        file_mtime: 1_900_000_000,
+    };
+    metadata_repo::record_imported_source(&env.pool, file_id, &refreshed)
+        .await
+        .unwrap();
+
+    let view = env.metadata(again.id).await;
+    assert_eq!(view["source"]["title"], json!("Fresh Source Title"));
+    assert_eq!(view["effective"]["title"], json!("Curated Title"));
+    assert_eq!(
+        view["effective"]["subtitle"],
+        json!("Fresh Source Subtitle"),
+        "an untouched field follows the refreshed file"
+    );
+}
+
+/// A move inside a watched folder keeps the book, its override, its shelf,
+/// and its last-opened timestamp.
+#[tokio::test(flavor = "multi_thread")]
+async fn collection_metadata_and_last_opened_survive_a_move() {
+    let env = setup().await;
+    let original = env.write_book("book.epub");
+    env.scan().await;
+
+    let book = env.book().await;
+    let shelf = env.create_collection("Moved").await;
+    env.add_to_collection(book.id, shelf).await;
+    env.set_title_override(book.id, "Moved Title").await;
+    env.mark_opened(book.id).await;
+    let opened = env.last_opened(book.id).await.expect("opened");
+
+    let moved_dir = env.library.join("moved");
+    std::fs::create_dir_all(&moved_dir).unwrap();
+    let moved = moved_dir.join("renamed.epub");
+    std::fs::rename(&original, &moved).unwrap();
+    env.reconciler
+        .apply(vec![PathChange::Renamed {
+            from: original,
+            to: moved.clone(),
+        }])
+        .await;
+
+    let again = env.book().await;
+    assert_eq!(again.id, book.id);
+    assert_eq!(again.path, moved.to_string_lossy());
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+    assert_eq!(
+        env.last_opened(again.id).await.as_deref(),
+        Some(opened.as_str())
+    );
+    assert_eq!(
+        env.metadata(again.id).await["effective"]["title"],
+        json!("Moved Title")
+    );
+}
+
+/// Two copies of the same bytes collapse into one library entry and share the
+/// durable state, including a membership added before the second copy arrived.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_duplicate_copy_joins_the_same_book_and_state() {
+    let env = setup().await;
+    env.write_book("first.epub");
+    env.scan().await;
+
+    let book = env.book().await;
+    let shelf = env.create_collection("Duplicates").await;
+    env.add_to_collection(book.id, shelf).await;
+    env.set_title_override(book.id, "Shared Title").await;
+    env.mark_opened(book.id).await;
+    let opened = env.last_opened(book.id).await.expect("opened");
+
+    // The same bytes under a second path attach to the same durable book.
+    std::fs::copy(
+        env.library.join("first.epub"),
+        env.library.join("second.epub"),
+    )
+    .unwrap();
+    env.scan().await;
+
+    let books = env.books().await;
+    assert_eq!(
+        books.len(),
+        1,
+        "one library entry per durable book: {books:?}"
+    );
+    assert_eq!(books[0].id, book.id);
+    assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
+    assert_eq!(
+        env.last_opened(book.id).await.as_deref(),
+        Some(opened.as_str())
+    );
+    assert_eq!(
+        env.metadata(book.id).await["effective"]["title"],
+        json!("Shared Title")
+    );
+}
+
+/// No user-state table cascades when a file row is deleted. This is the
+/// storage guarantee behind the whole durable-book model.
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_the_last_file_row_keeps_every_user_state_table() {
+    let env = setup().await;
+    env.write_book("book.epub");
+    env.scan().await;
+
+    let book = env.book().await;
+    let book_uid = book.book_uid.clone().expect("durable uid");
+    let shelf = env.create_collection("State").await;
+    env.add_to_collection(book.id, shelf).await;
+    env.set_title_override(book.id, "Kept Title").await;
+    env.mark_opened(book.id).await;
+    env.save_progress(book.id, 33.0, "chapter1.xhtml").await;
+    env.annotate(book.id, "epubcfi(/6/4!/4/2,/1:0,/1:8)").await;
+
+    // A customized list is user state too.
+    let overrides = metadata_repo::OverrideRow {
+        authors_customized: true,
+        subjects_customized: true,
+        ..metadata_repo::OverrideRow::default()
+    };
+    metadata::apply_synced_overrides(
+        &env.pool,
+        book.id,
+        &overrides,
+        &["Custom Author".into()],
+        &["Custom Subject".into()],
+    )
+    .await
+    .unwrap();
+
+    assert!(books::delete_book(&env.pool, book.id).await.unwrap());
+    assert!(env.books().await.is_empty());
+
+    for (table, key) in [
+        ("book_collections", "book_uid"),
+        ("book_metadata_overrides", "book_uid"),
+        ("book_authors", "book_uid"),
+        ("book_subjects", "book_uid"),
+        ("reading_progress", "book_uid"),
+        ("annotations", "book_uid"),
+    ] {
+        let count: i64 =
+            sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE {key} = ?1"))
+                .bind(&book_uid)
+                .fetch_one(&env.pool)
+                .await
+                .unwrap();
+        assert!(count > 0, "{table} lost its rows with the file row");
+    }
 }

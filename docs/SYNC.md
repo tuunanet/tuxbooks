@@ -79,9 +79,9 @@ an alias:
 - the embed sets `books.rehash_pending` before the bytes change and clears it
   after the snapshot update. If the process dies in between, the sweep sees the
   marker and rehashes anyway;
-- if two local files map to the same uuid, the lowest book id is the projection
-  target and Sync issues names the duplicate. Deleting the canonical row queues
-  the uuid, and the engine projects the shared state onto the next bound row;
+- if two local files map to the same uuid, both are locations on one durable
+  book. Sync issues names the duplicate copy. Deleting one file row only ends
+  that location; the book uuid keeps its state;
 - if two machines independently imported the same bytes before meeting, both
   publish an alias for the same hash. Every device resolves the aliases to the
   lexicographically smallest uuid and re-keys the losing state. The resolution
@@ -175,12 +175,14 @@ winner, but the loser is inspectable and can be dismissed once read.
 
 Triggers on `annotations`, `reading_progress`, `book_metadata_overrides`,
 `book_authors`, `book_subjects`, `collections`, `book_collections`, and
-`books.last_opened_at` write a canonical snapshot into `sync_dirty` at the
-moment of the change. Progress is keyed by the durable book uid; annotations
-carry the durable book id beside their portable uid. The capture pass uses
-that snapshot, not the current row, so a remote projection that lands between
-the edit and the sync pass cannot erase the edit. Capture waits until the
-book's content hash has been bound, so two devices publish the same bytes
+`book_records.last_opened_at` write a canonical snapshot into `sync_dirty` at
+the moment of the change. Progress, metadata, and last-opened key directly on
+the durable book uid; membership keys on collection uid + book uid;
+annotations carry the public book id beside their portable uid and resolve it
+to the uid. No capture path looks up a per-file sync binding. The capture pass
+uses that snapshot, not the current row, so a remote projection that lands
+between the edit and the sync pass cannot erase the edit. Capture waits until
+the book's content hash has been bound, so two devices publish the same bytes
 under one shared identity.
 
 Triggers check that the parent durable book or collection still exists.
@@ -190,9 +192,10 @@ and are skipped.
 Projection writes the merged state back into the local catalog: annotations
 and progress upsert by durable book uid (the reader resolves the active file
 from it), metadata calls the same recompute path as a local edit (without
-rewriting the source file), and memberships insert or delete join rows.
-Projection is idempotent. The local writes fire the same triggers; the next
-capture pass sees no field change and clears the echo markers.
+rewriting the source file), last-opened updates the durable record, and
+memberships insert or delete join rows keyed by book uid. Projection is
+idempotent. The local writes fire the same triggers; the next capture pass sees
+no field change and clears the echo markers.
 
 ## Bootstrap
 
@@ -201,7 +204,7 @@ When sync is first connected:
 1. The folder's `library.json` is read or created.
 2. The current database is marked for a baseline pass. The pass touches every
    user-state row, which fires the same triggers as an ordinary edit, and marks
-   existing memberships and `last_opened_at` values.
+   existing memberships and durable `last_opened_at` values.
 3. The engine exports the baseline, then reads every remote operation.
 4. Remote state for books that are not present is kept in the mirror. When the
    book is imported, the identity sweep binds it and projects that state.

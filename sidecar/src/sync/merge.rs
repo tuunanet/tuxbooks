@@ -732,13 +732,10 @@ pub async fn project(
             }
             EntityKind::Progress => project_progress(pool, book_id, &state, deleted).await?,
             EntityKind::Metadata | EntityKind::Opened => {
-                let Some(file_id) = local_file_id(pool, book_uid).await? else {
-                    continue;
-                };
                 if item.kind == EntityKind::Metadata {
-                    project_metadata(pool, file_id, folder_root, covers_dir, &state).await?
+                    project_metadata(pool, book_id, folder_root, covers_dir, &state).await?
                 } else {
-                    project_opened(pool, file_id, &state).await?
+                    project_opened(pool, book_id, &state).await?
                 }
             }
             EntityKind::Membership => project_membership(pool, item, &state).await?,
@@ -785,19 +782,6 @@ async fn durable_record_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i
         .bind(book_uid)
         .fetch_optional(pool)
         .await?;
-    Ok(id)
-}
-
-/// The local file row a book currently projects onto (metadata, last-opened,
-/// and collection membership still hang off the file until ticket .4).
-async fn local_file_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
-    let id: Option<i64> = sqlx::query_scalar(
-        "SELECT book_id FROM sync_book_bindings
-         WHERE book_uid = ?1 ORDER BY book_id LIMIT 1",
-    )
-    .bind(book_uid)
-    .fetch_optional(pool)
-    .await?;
     Ok(id)
 }
 
@@ -916,7 +900,7 @@ async fn project_progress(
 }
 
 async fn project_opened(pool: &SqlitePool, book_id: i64, state: &State) -> Result<(), AppError> {
-    sqlx::query("UPDATE books SET last_opened_at = ?2 WHERE id = ?1")
+    sqlx::query("UPDATE book_records SET last_opened_at = ?2 WHERE id = ?1")
         .bind(book_id)
         .bind(string_or_none(state, "last_opened_at"))
         .execute(pool)
@@ -984,23 +968,23 @@ async fn project_membership(
         .get("present")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let Some(book_id) = local_file_id(pool, book_uid).await? else {
+    if durable_record_id(pool, book_uid).await?.is_none() {
         return Ok(());
-    };
+    }
     let Some(collection_id) = local_collection_id(pool, collection_uid).await? else {
         return Ok(());
     };
     if present {
         sqlx::query(
-            "INSERT OR IGNORE INTO book_collections (book_id, collection_id) VALUES (?1, ?2)",
+            "INSERT OR IGNORE INTO book_collections (book_uid, collection_id) VALUES (?1, ?2)",
         )
-        .bind(book_id)
+        .bind(book_uid)
         .bind(collection_id)
         .execute(pool)
         .await?;
     } else {
-        sqlx::query("DELETE FROM book_collections WHERE book_id = ?1 AND collection_id = ?2")
-            .bind(book_id)
+        sqlx::query("DELETE FROM book_collections WHERE book_uid = ?1 AND collection_id = ?2")
+            .bind(book_uid)
             .bind(collection_id)
             .execute(pool)
             .await?;

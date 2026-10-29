@@ -471,7 +471,7 @@ async fn metadata_override_authors_and_cover_travel_together() {
     };
     metadata::apply_synced_overrides(
         &a.pool,
-        file_row_id(&a, "same.epub").await,
+        book_id(&a, "same.epub").await,
         &overrides,
         &["Alice".into(), "Bob".into()],
         &["Essays".into()],
@@ -490,7 +490,8 @@ async fn metadata_override_authors_and_cover_travel_together() {
     let book = books::get_book(&b.pool, b_book).await.unwrap().unwrap();
     assert_eq!(book.title, "Curated title");
     assert_eq!(book.author.as_deref(), Some("Alice, Bob"));
-    let authors = metadata_repo::list_book_authors(&b.pool, file_row_id(&b, "same.epub").await)
+    let book_uid = book.book_uid.clone().expect("book uid");
+    let authors = metadata_repo::list_book_authors(&b.pool, &book_uid)
         .await
         .unwrap();
     assert_eq!(authors, vec!["Alice".to_string(), "Bob".to_string()]);

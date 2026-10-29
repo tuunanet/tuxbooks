@@ -8,29 +8,30 @@ use crate::repository::library_locations::{list_locations, location_index, ownin
 
 /// Effective book columns for SELECT queries. The public `id` is the durable
 /// book record; `file_id` names the active file row internally (never
-/// serialized). The bibliographic fields come from that file row, because
-/// effective metadata still lives there until ticket .4; `series_name`
-/// resolves the normalized `series` table, and the `reading_progress` join
-/// exposes the coarse reading position that backs the "In Progress" /
-/// "Finished" library sections (milestone 10).
-const BOOK_COLUMNS: &str = "br.id, br.uid AS book_uid, bf.id AS file_id, bf.path, bf.title, \
-     bf.subtitle, bf.author, bf.publisher, bf.language, bf.isbn, bf.description, \
-     bf.cover_path, bf.added_at, bf.modified_at, br.last_opened_at, bf.available, \
-     bf.file_size, bf.file_mtime, bf.publication_date, bf.series_id, bf.series_index, \
+/// serialized). The bibliographic fields come from the durable record, while
+/// `path`, availability, and the file snapshot come from the active file.
+/// `series_name` resolves the normalized `series` table, and the
+/// `reading_progress` join exposes the coarse reading position that backs the
+/// "In Progress" / "Finished" library sections (milestone 10).
+const BOOK_COLUMNS: &str = "br.id, br.uid AS book_uid, bf.id AS file_id, bf.path, br.title, \
+     br.subtitle, br.author, br.publisher, br.language, br.isbn, br.description, \
+     br.cover_path, bf.added_at, bf.modified_at, br.last_opened_at, bf.available, \
+     bf.file_size, bf.file_mtime, br.publication_date, br.series_id, br.series_index, \
      s.name AS series_name, rp.progress_percent AS progress_percent, \
      rp.updated_at AS progress_updated_at";
 /// Per-file-row variant of [`BOOK_COLUMNS`] for callers that need every
 /// location (reconciliation, unwatch, move recovery), not the collapsed
-/// library entry. `id` is still the durable book.
-const FILE_ROW_COLUMNS: &str = "br.id, br.uid AS book_uid, b.id AS file_id, b.path, b.title, \
-     b.subtitle, b.author, b.publisher, b.language, b.isbn, b.description, \
-     b.cover_path, b.added_at, b.modified_at, br.last_opened_at, b.available, \
-     b.file_size, b.file_mtime, b.publication_date, b.series_id, b.series_index, \
+/// library entry. `id` is still the durable book and the bibliographic fields
+/// are still the book's effective metadata.
+const FILE_ROW_COLUMNS: &str = "br.id, br.uid AS book_uid, b.id AS file_id, b.path, br.title, \
+     br.subtitle, br.author, br.publisher, br.language, br.isbn, br.description, \
+     br.cover_path, b.added_at, b.modified_at, br.last_opened_at, b.available, \
+     b.file_size, b.file_mtime, br.publication_date, br.series_id, br.series_index, \
      s.name AS series_name, rp.progress_percent AS progress_percent, \
      rp.updated_at AS progress_updated_at";
 const FILE_ROW_FROM: &str = " FROM books b \
      JOIN book_records br ON br.uid = b.book_uid \
-     LEFT JOIN series s ON s.id = b.series_id \
+     LEFT JOIN series s ON s.id = br.series_id \
      LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
 /// The active file of a book is the available copy with the lowest row id, so
 /// a duplicate copy that disappeared never hides the one that is still there.
@@ -39,7 +40,7 @@ const BOOK_FROM: &str = " FROM book_records br \
          SELECT b2.id FROM books b2 WHERE b2.book_uid = br.uid \
          ORDER BY b2.available DESC, b2.id LIMIT 1 \
      ) \
-     LEFT JOIN series s ON s.id = bf.series_id \
+     LEFT JOIN series s ON s.id = br.series_id \
      LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
 
 /// A file row just persisted, with both its internal id and the durable book
@@ -63,7 +64,9 @@ pub async fn insert_book(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppEr
 }
 
 /// Insert a new file row and return its internal row id. The 0017 insert
-/// trigger creates the durable book record in the same statement.
+/// trigger creates the durable book record in the same statement; the
+/// per-file source snapshot and the effective metadata are recorded right
+/// after it.
 async fn insert_file_row(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppError> {
     let id: i64 = sqlx::query_scalar(
         r#"
@@ -85,6 +88,7 @@ async fn insert_file_row(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppEr
     .bind(book.file_mtime)
     .fetch_one(pool)
     .await?;
+    crate::repository::metadata::record_imported_source(pool, id, book).await?;
     Ok(id)
 }
 
@@ -134,6 +138,7 @@ pub async fn upsert_book(pool: &SqlitePool, book: &NewBook) -> Result<(i64, bool
 pub async fn upsert_file(pool: &SqlitePool, book: &NewBook) -> Result<UpsertedBook, AppError> {
     if let Some(file_id) = find_file_id_by_path(pool, &book.path).await? {
         update_book_by_path(pool, book).await?;
+        crate::repository::metadata::record_imported_source(pool, file_id, book).await?;
         let id = durable_id_for_file(pool, file_id)
             .await?
             .ok_or_else(|| AppError::InvalidInput("book row has no durable record".into()))?;
@@ -254,12 +259,15 @@ pub async fn file_snapshot_by_path(
     Ok(snapshot)
 }
 
-/// Every referenced cover path — the live set for artwork-cache sweeps.
+/// Every referenced cover path (effective override and per-file source) — the
+/// live set for artwork-cache sweeps.
 pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
-    let paths: Vec<String> =
-        sqlx::query_scalar("SELECT cover_path FROM books WHERE cover_path IS NOT NULL")
-            .fetch_all(pool)
-            .await?;
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT cover_path FROM book_records WHERE cover_path IS NOT NULL \
+         UNION SELECT cover_path FROM books WHERE cover_path IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(paths)
 }
 
@@ -321,9 +329,8 @@ pub async fn file_ids_for_book(pool: &SqlitePool, id: i64) -> Result<Vec<i64>, A
 
 pub async fn mark_opened(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
     sqlx::query(
-        "UPDATE books SET last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-         WHERE id = (SELECT b.id FROM books b JOIN book_records br ON br.uid = b.book_uid \
-                     WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1)",
+        "UPDATE book_records SET last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?1",
     )
     .bind(id)
     .execute(pool)
@@ -554,17 +561,21 @@ pub async fn find_books_with_size(
 }
 
 /// FTS5 MATCH search over `books_fts`, joined back to the durable book for
-/// identity. `match_query` must already be valid FTS5 MATCH syntax — the
+/// identity and to its active file so Reading-history books stay out of
+/// library search. `match_query` must already be valid FTS5 MATCH syntax — the
 /// search service sanitizes user input into it. Snippets come from whichever
 /// indexed column matched best (column index -1 = automatic).
 pub async fn search_fts(pool: &SqlitePool, match_query: &str) -> Result<Vec<SearchHit>, AppError> {
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"
-        SELECT br.id AS book_id, b.title, b.author,
+        SELECT br.id AS book_id, br.title, br.author,
                snippet(books_fts, -1, '<em>', '</em>', '…', 12) AS snippet
         FROM books_fts
-        JOIN books b ON b.id = books_fts.rowid
-        JOIN book_records br ON br.uid = b.book_uid
+        JOIN book_records br ON br.id = books_fts.rowid
+        JOIN books b ON b.id = (
+            SELECT b2.id FROM books b2 WHERE b2.book_uid = br.uid
+            ORDER BY b2.available DESC, b2.id LIMIT 1
+        )
         WHERE books_fts MATCH ?1
         ORDER BY rank
         LIMIT 50

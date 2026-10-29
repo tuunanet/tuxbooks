@@ -42,8 +42,7 @@ pub async fn list_collection_summaries(
     let membership: Vec<(i64, i64)> = sqlx::query_as(
         "SELECT bc.collection_id, br.id AS book_id \
          FROM book_collections bc \
-         JOIN books b ON b.id = bc.book_id \
-         JOIN book_records br ON br.uid = b.book_uid \
+         JOIN book_records br ON br.uid = bc.book_uid \
          ORDER BY bc.collection_id, br.id",
     )
     .fetch_all(pool)
@@ -96,9 +95,7 @@ pub async fn list_collection_ids_for_book(
 ) -> Result<Vec<i64>, AppError> {
     let ids: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT collection_id FROM book_collections \
-         WHERE book_id IN (SELECT b.id FROM books b \
-                           JOIN book_records br ON br.uid = b.book_uid \
-                           WHERE br.id = ?1)",
+         WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -111,14 +108,12 @@ pub async fn add_book_to_collection(
     book_id: i64,
     collection_id: i64,
 ) -> Result<(), AppError> {
-    // Idempotent: the PK (book_id, collection_id) makes a repeated add a
-    // no-op instead of a UNIQUE-constraint error. Membership still hangs off
-    // the active file row in this slice; ticket .4 moves it to the book.
+    // Idempotent: the PK (book_uid, collection_id) makes a repeated add a
+    // no-op instead of a UNIQUE-constraint error. Membership follows the
+    // durable book, so it survives every file row being removed.
     sqlx::query(
-        "INSERT OR IGNORE INTO book_collections (book_id, collection_id) \
-         SELECT b.id, ?2 FROM books b \
-         JOIN book_records br ON br.uid = b.book_uid \
-         WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1",
+        "INSERT OR IGNORE INTO book_collections (book_uid, collection_id) \
+         SELECT uid, ?2 FROM book_records WHERE id = ?1",
     )
     .bind(book_id)
     .bind(collection_id)
@@ -135,9 +130,7 @@ pub async fn remove_book_from_collection(
     let result = sqlx::query(
         "DELETE FROM book_collections \
          WHERE collection_id = ?2 \
-           AND book_id IN (SELECT b.id FROM books b \
-                           JOIN book_records br ON br.uid = b.book_uid \
-                           WHERE br.id = ?1)",
+           AND book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
     )
     .bind(book_id)
     .bind(collection_id)
@@ -225,12 +218,14 @@ mod tests {
             .await
             .unwrap());
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM book_collections WHERE book_id = ?1")
-                .bind(book_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM book_collections \
+                 WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+        )
+        .bind(book_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(remaining, 1);
     }
 
@@ -302,12 +297,14 @@ mod tests {
         assert!(!delete_collection(&pool, c).await.unwrap());
         assert!(list_collection_summaries(&pool).await.unwrap().is_empty());
         // Membership rows cascade; the book row itself survives.
-        let memberships: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM book_collections WHERE book_id = ?1")
-                .bind(book_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let memberships: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM book_collections \
+                 WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+        )
+        .bind(book_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(memberships, 0);
         assert!(crate::repository::books::get_book(&pool, book_id)
             .await

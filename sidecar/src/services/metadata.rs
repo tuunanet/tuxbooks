@@ -4,36 +4,18 @@ use crate::domain::{Book, BookMetadata, MetadataFields, MetadataOverridden, NewB
 use crate::error::AppError;
 use crate::repository::{books, metadata as repo};
 
-/// The source-file truth of a book (milestone 7): what the last import read
-/// from the file, kept verbatim so curation never loses the original values
-/// and so re-imports can re-merge without clobbering user overrides.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct SourceMetadata {
-    pub title: String,
-    pub subtitle: Option<String>,
-    pub publisher: Option<String>,
-    pub language: Option<String>,
-    pub isbn: Option<String>,
-    pub description: Option<String>,
-    pub publication_date: Option<String>,
-    pub series: Option<String>,
-    pub series_index: Option<f64>,
-    pub cover_path: Option<String>,
-    pub authors: Vec<String>,
-    pub subjects: Vec<String>,
-}
-
-/// Record a fresh parse as the book's source truth and re-merge the
-/// effective view. The importer calls this after every (re)import and the
-/// reconnect flow after relinking a row; overrides win over the new file
-/// values, so a user's curation survives a changed or replaced file.
+/// Record a fresh parse against a durable book's active file and re-merge its
+/// effective view. The importer path that already knows the exact file row
+/// calls [`crate::repository::metadata::record_imported_source`] directly.
 pub async fn apply_source_metadata(
     pool: &SqlitePool,
     book_id: i64,
     source: &NewBook,
 ) -> Result<(), AppError> {
-    repo::upsert_source_metadata(pool, book_id, source).await?;
-    recompute_and_apply(pool, book_id).await
+    let file_id = books::active_file_id(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    repo::record_imported_source(pool, file_id, source).await
 }
 
 /// The full curation view of a book: effective metadata, source metadata,
@@ -45,15 +27,18 @@ pub async fn get_book_metadata(
     let Some(book) = books::get_book(pool, book_id).await? else {
         return Ok(None);
     };
-    let Some(file_id) = book.file_id else {
+    let (Some(file_id), Some(book_uid)) = (book.file_id, book.book_uid.clone()) else {
         return Ok(None);
     };
-    let source = load_source(pool, file_id).await?;
-    let overrides = repo::get_overrides(pool, file_id)
+    let source_file_id = repo::primary_file_id(pool, &book_uid)
+        .await?
+        .unwrap_or(file_id);
+    let source = repo::load_source(pool, source_file_id).await?;
+    let overrides = repo::get_overrides(pool, &book_uid)
         .await?
         .unwrap_or_default();
-    let authors = effective_authors(pool, file_id, &source.authors, &overrides).await?;
-    let subjects = effective_subjects(pool, file_id, &source.subjects, &overrides).await?;
+    let authors = effective_authors(pool, &book_uid, &source.authors, &overrides).await?;
+    let subjects = effective_subjects(pool, &book_uid, &source.subjects, &overrides).await?;
 
     let source_authors = source.authors.clone();
     let source_subjects = source.subjects.clone();
@@ -116,12 +101,18 @@ async fn apply_form(
     book_id: i64,
     form: &MetadataFields,
 ) -> Result<(), AppError> {
-    let source = load_source(pool, book_id).await?;
-    let existing_overrides = repo::get_overrides(pool, book_id)
+    let book_uid = repo::book_uid_for_id(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let source_file_id = repo::primary_file_id(pool, &book_uid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let source = repo::load_source(pool, source_file_id).await?;
+    let existing_overrides = repo::get_overrides(pool, &book_uid)
         .await?
         .unwrap_or_default();
 
-    let title = clean_required(&form.title, "title")?;
+    let title = repo::clean_required(&form.title, "title")?;
     let subtitle = clean_optional(&form.subtitle);
     let publisher = clean_optional(&form.publisher);
     let language = clean_optional(&form.language);
@@ -170,13 +161,13 @@ async fn apply_form(
     };
 
     if overrides.authors_customized {
-        repo::replace_book_authors(pool, book_id, &authors).await?;
+        repo::replace_book_authors(pool, &book_uid, &authors).await?;
     }
     if overrides.subjects_customized {
-        repo::replace_book_subjects(pool, book_id, &subjects).await?;
+        repo::replace_book_subjects(pool, &book_uid, &subjects).await?;
     }
-    repo::upsert_overrides(pool, book_id, &overrides).await?;
-    recompute_and_apply(pool, book_id).await?;
+    repo::upsert_overrides(pool, &book_uid, &overrides).await?;
+    repo::recompute_effective(pool, &book_uid, source_file_id).await?;
     repo::sweep_orphans(pool).await?;
     Ok(())
 }
@@ -274,7 +265,7 @@ pub async fn embed_book_metadata(
     // existing extracted cover (covers stay cache-side).
     let parsed = crate::services::library_scanner::parse_book(&path)
         .map_err(|err| AppError::InvalidInput(format!("rewritten file is unreadable: {err}")))?;
-    let existing_cover = load_source(pool, file_id).await?.cover_path;
+    let existing_cover = repo::load_source(pool, file_id).await?.cover_path;
     let source =
         crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
     repo::upsert_source_metadata(pool, file_id, &source).await?;
@@ -285,7 +276,7 @@ pub async fn embed_book_metadata(
     books::update_file_snapshot(pool, file_id, source.file_size, source.file_mtime).await?;
     books::clear_rehash_pending(pool, file_id).await?;
 
-    apply_form(pool, file_id, &desired).await?;
+    apply_form(pool, book_id, &desired).await?;
 
     get_book_metadata(pool, book_id)
         .await?
@@ -303,21 +294,19 @@ pub async fn apply_synced_overrides(
     authors: &[String],
     subjects: &[String],
 ) -> Result<(), AppError> {
-    let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM books WHERE id = ?1")
-        .bind(book_id)
-        .fetch_optional(pool)
-        .await?;
-    if exists.is_none() {
+    let Some(book_uid) = repo::book_uid_for_id(pool, book_id).await? else {
         return Ok(());
-    }
-    repo::upsert_overrides(pool, book_id, overrides).await?;
+    };
+    repo::upsert_overrides(pool, &book_uid, overrides).await?;
     if overrides.authors_customized {
-        repo::replace_book_authors(pool, book_id, authors).await?;
+        repo::replace_book_authors(pool, &book_uid, authors).await?;
     }
     if overrides.subjects_customized {
-        repo::replace_book_subjects(pool, book_id, subjects).await?;
+        repo::replace_book_subjects(pool, &book_uid, subjects).await?;
     }
-    recompute_and_apply(pool, book_id).await?;
+    if let Some(source_file_id) = repo::primary_file_id(pool, &book_uid).await? {
+        repo::recompute_effective(pool, &book_uid, source_file_id).await?;
+    }
     repo::sweep_orphans(pool).await?;
     Ok(())
 }
@@ -329,12 +318,14 @@ pub async fn reset_book_metadata(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<BookMetadata, AppError> {
-    let file_id = books::get_book(pool, book_id)
+    let book_uid = repo::book_uid_for_id(pool, book_id)
         .await?
-        .and_then(|book| book.file_id)
         .ok_or(AppError::NotFound)?;
-    repo::clear_overrides(pool, file_id).await?;
-    recompute_and_apply(pool, file_id).await?;
+    let source_file_id = repo::primary_file_id(pool, &book_uid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    repo::clear_overrides(pool, &book_uid).await?;
+    repo::recompute_effective(pool, &book_uid, source_file_id).await?;
     repo::sweep_orphans(pool).await?;
 
     get_book_metadata(pool, book_id)
@@ -351,9 +342,11 @@ pub async fn set_book_cover(
     image_path: &str,
     covers_dir: &std::path::Path,
 ) -> Result<Book, AppError> {
-    let file_id = books::get_book(pool, book_id)
+    let book_uid = repo::book_uid_for_id(pool, book_id)
         .await?
-        .and_then(|book| book.file_id)
+        .ok_or(AppError::NotFound)?;
+    let source_file_id = repo::primary_file_id(pool, &book_uid)
+        .await?
         .ok_or(AppError::NotFound)?;
     let data = std::fs::read(image_path)?;
     let media_type = detect_image_media_type(&data).ok_or_else(|| {
@@ -362,12 +355,12 @@ pub async fn set_book_cover(
     let stored = crate::services::book_importer::write_cover_bytes(media_type, &data, covers_dir)?
         .ok_or_else(|| AppError::InvalidInput("cover image was empty".into()))?;
 
-    let mut overrides = repo::get_overrides(pool, file_id)
+    let mut overrides = repo::get_overrides(pool, &book_uid)
         .await?
         .unwrap_or_default();
     overrides.cover_path = Some(stored);
-    repo::upsert_overrides(pool, file_id, &overrides).await?;
-    recompute_and_apply(pool, file_id).await?;
+    repo::upsert_overrides(pool, &book_uid, &overrides).await?;
+    repo::recompute_effective(pool, &book_uid, source_file_id).await?;
 
     books::get_book(pool, book_id)
         .await?
@@ -376,165 +369,50 @@ pub async fn set_book_cover(
 
 /// Remove a cover override; the extracted (source) cover returns.
 pub async fn clear_book_cover_override(pool: &SqlitePool, book_id: i64) -> Result<Book, AppError> {
-    let file_id = books::get_book(pool, book_id)
+    let book_uid = repo::book_uid_for_id(pool, book_id)
         .await?
-        .and_then(|book| book.file_id)
         .ok_or(AppError::NotFound)?;
-    let mut overrides = repo::get_overrides(pool, file_id)
+    let source_file_id = repo::primary_file_id(pool, &book_uid)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let mut overrides = repo::get_overrides(pool, &book_uid)
         .await?
         .unwrap_or_default();
     overrides.cover_path = None;
-    repo::upsert_overrides(pool, file_id, &overrides).await?;
-    recompute_and_apply(pool, file_id).await?;
+    repo::upsert_overrides(pool, &book_uid, &overrides).await?;
+    repo::recompute_effective(pool, &book_uid, source_file_id).await?;
 
     books::get_book(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)
 }
 
-/// Recompute the effective view from (source, overrides) and write it into
-/// the `books` columns. One function for imports, edits, resets, and cover
-/// changes, so the merge rules exist exactly once.
-async fn recompute_and_apply(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
-    let source = load_source(pool, book_id).await?;
-    let overrides = repo::get_overrides(pool, book_id)
-        .await?
-        .unwrap_or_default();
-
-    // Normalized lists: user-owned once customized, else the file's
-    // (materialized into the join tables).
-    let authors = effective_authors(pool, book_id, &source.authors, &overrides).await?;
-    if !overrides.authors_customized {
-        repo::replace_book_authors(pool, book_id, &source.authors).await?;
-    }
-    if !overrides.subjects_customized {
-        repo::replace_book_subjects(pool, book_id, &source.subjects).await?;
-    }
-
-    // Scalar fields: override (empty string = explicitly cleared) else source.
-    let title = clean_required(
-        scalar_value(&overrides.title, Some(&source.title))
-            .as_deref()
-            .unwrap_or_default(),
-        "title",
-    )?;
-    let (series, series_index) = effective_series(&overrides, &source);
-    let series_id = match series.as_deref() {
-        Some(name) => Some(repo::ensure_series(pool, name).await?),
-        None => None,
-    };
-
-    repo::apply_effective(
-        pool,
-        book_id,
-        &repo::EffectiveValues {
-            title,
-            subtitle: scalar_value(&overrides.subtitle, source.subtitle.as_deref()),
-            author: display_authors(&authors),
-            publisher: scalar_value(&overrides.publisher, source.publisher.as_deref()),
-            language: scalar_value(&overrides.language, source.language.as_deref()),
-            isbn: scalar_value(&overrides.isbn, source.isbn.as_deref()),
-            description: scalar_value(&overrides.description, source.description.as_deref()),
-            publication_date: scalar_value(
-                &overrides.publication_date,
-                source.publication_date.as_deref(),
-            ),
-            series_id,
-            series_index,
-            cover_path: overrides.cover_path.or(source.cover_path.clone()),
-        },
-    )
-    .await
-    .map(|_| ())
-}
-
 /// The effective author list: a customized list is user-owned, otherwise the
 /// file's list applies.
 async fn effective_authors(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     source: &[String],
     overrides: &repo::OverrideRow,
 ) -> Result<Vec<String>, AppError> {
     if !overrides.authors_customized {
         Ok(source.to_vec())
     } else {
-        repo::list_book_authors(pool, book_id).await
+        repo::list_book_authors(pool, book_uid).await
     }
 }
 
 /// The effective subject list; same rules as [`effective_authors`].
 async fn effective_subjects(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     source: &[String],
     overrides: &repo::OverrideRow,
 ) -> Result<Vec<String>, AppError> {
     if !overrides.subjects_customized {
         Ok(source.to_vec())
     } else {
-        repo::list_book_subjects(pool, book_id).await
-    }
-}
-
-/// The effective series name/index (one unit): an overridden unit owns both,
-/// an empty name is an explicit clear, and `None` inherits both.
-fn effective_series(
-    overrides: &repo::OverrideRow,
-    source: &SourceMetadata,
-) -> (Option<String>, Option<f64>) {
-    match overrides.series.as_deref() {
-        None => (source.series.clone(), source.series_index),
-        Some("") => (None, None),
-        Some(name) => (Some(name.to_owned()), overrides.series_index),
-    }
-}
-
-/// The stored source snapshot; books imported before the snapshot existed
-/// fall back to their current row values (they *are* the last file truth).
-async fn load_source(pool: &SqlitePool, book_id: i64) -> Result<SourceMetadata, AppError> {
-    if let Some(row) = repo::get_source_metadata(pool, book_id).await? {
-        return Ok(SourceMetadata {
-            title: row.title,
-            subtitle: row.subtitle,
-            publisher: row.publisher,
-            language: row.language,
-            isbn: row.isbn,
-            description: row.description,
-            publication_date: row.publication_date,
-            series: row.series,
-            series_index: row.series_index,
-            cover_path: row.cover_path,
-            authors: parse_json_list(row.authors.as_deref()),
-            subjects: parse_json_list(row.subjects.as_deref()),
-        });
-    }
-    let book = books::get_book_by_file_id(pool, book_id)
-        .await?
-        .ok_or(AppError::NotFound)?;
-    Ok(SourceMetadata {
-        title: book.title.clone(),
-        subtitle: book.subtitle.clone(),
-        publisher: book.publisher.clone(),
-        language: book.language.clone(),
-        isbn: book.isbn.clone(),
-        description: book.description.clone(),
-        publication_date: book.publication_date.clone(),
-        series: book.series_name.clone(),
-        series_index: book.series_index,
-        cover_path: book.cover_path.clone(),
-        authors: book.author.iter().cloned().collect(),
-        subjects: Vec::new(),
-    })
-}
-
-/// Merge one scalar: `None` inherits the source, `Some("")` clears,
-/// `Some(value)` overrides.
-fn scalar_value(override_value: &Option<String>, source_value: Option<&str>) -> Option<String> {
-    match override_value {
-        None => source_value.filter(|v| !v.is_empty()).map(str::to_owned),
-        Some(value) if value.is_empty() => None,
-        Some(value) => Some(value.clone()),
+        repo::list_book_subjects(pool, book_uid).await
     }
 }
 
@@ -578,29 +456,6 @@ fn series_override(
                 .map(str::to_owned)
         }),
     }
-}
-
-/// The `books.author` display projection of the normalized list, which keeps
-/// FTS and every existing read path working unchanged.
-fn display_authors(authors: &[String]) -> Option<String> {
-    if authors.is_empty() {
-        None
-    } else {
-        Some(authors.join(", "))
-    }
-}
-
-fn parse_json_list(json: Option<&str>) -> Vec<String> {
-    json.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
-        .unwrap_or_default()
-}
-
-fn clean_required(value: &str, field: &str) -> Result<String, AppError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::InvalidInput(format!("{field} must not be empty")));
-    }
-    Ok(trimmed.to_string())
 }
 
 fn clean_optional(value: &Option<String>) -> Option<String> {
@@ -1045,10 +900,10 @@ mod tests {
             cover_path: Some(source_png.to_string_lossy().into_owned()),
             ..source_book("/lib/mess.epub", "File Garbled Title")
         };
-        repo::upsert_source_metadata(&pool, id, &with_cover)
+        let file_id = books::active_file_id(&pool, id).await.unwrap().unwrap();
+        repo::record_imported_source(&pool, file_id, &with_cover)
             .await
             .unwrap();
-        recompute_and_apply(&pool, id).await.unwrap();
         assert_eq!(
             effective(&pool, id).await.cover_path,
             Some(source_png.to_string_lossy().into_owned())

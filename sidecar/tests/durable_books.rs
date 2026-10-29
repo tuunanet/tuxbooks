@@ -12,7 +12,9 @@ use sqlx::SqlitePool;
 use tuxbooks_lib::db::connection::{init_pool, init_pool_recovering};
 use tuxbooks_lib::domain::NewBook;
 use tuxbooks_lib::error::AppError;
-use tuxbooks_lib::repository::{annotations, books, collections, migration, reading_progress};
+use tuxbooks_lib::repository::{
+    annotations, books, collections, metadata as metadata_repo, migration, reading_progress,
+};
 use tuxbooks_lib::services::hash_backfill;
 
 const SHARED_UID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -293,8 +295,8 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
     .await
     .unwrap();
     assert_eq!(
-        title, "Beta",
-        "most recently modified row supplies metadata"
+        title, "Alpha Override",
+        "the newest metadata override wins over the merged copies' source metadata"
     );
     assert_eq!(annotations, 1);
     assert_eq!(state, "available");
@@ -668,4 +670,172 @@ async fn an_unreadable_file_becomes_a_visible_hash_failure() {
         issues.iter().any(|issue| issue.kind == "hash_failed"),
         "a failed hash is visible: {issues:?}"
     );
+}
+
+/// The 0019 upgrade unions collection membership, keeps the newest metadata
+/// overrides and last-opened, and records the ambiguous override tie.
+#[tokio::test]
+async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 18)
+        .await
+        .run(&fixture)
+        .await
+        .unwrap();
+
+    // Two file rows already share one durable identity and each carries its
+    // own source metadata, last-opened, shelves, and overrides.
+    sqlx::query(
+        r#"
+        INSERT INTO books
+            (id, book_uid, path, title, author, last_opened_at, modified_at, file_size, file_mtime)
+        VALUES
+            (1, ?1, '/library/alpha.epub', 'Source Alpha', 'Ada',
+             '2026-01-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', 11, 101),
+            (2, ?1, '/library/beta.epub', 'Source Beta', 'Bob',
+             '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z', 22, 202)
+        "#,
+    )
+    .bind(SHARED_UID)
+    .execute(&fixture)
+    .await
+    .unwrap();
+    for (book_id, title, author) in [
+        (1, "Source Alpha", "[\"Ada\"]"),
+        (2, "Source Beta", "[\"Bob\"]"),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO book_source_metadata
+                (book_id, title, authors, subjects)
+            VALUES (?1, ?2, ?3, '[]')
+            "#,
+        )
+        .bind(book_id)
+        .bind(title)
+        .bind(author)
+        .execute(&fixture)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO collections (id, name) VALUES (1, 'Shelf'), (2, 'Other')")
+        .execute(&fixture)
+        .await
+        .unwrap();
+    // Both copies are on 'Shelf'; one is also on 'Other'. Membership unions.
+    sqlx::query(
+        "INSERT INTO book_collections (book_id, collection_id)
+         VALUES (1, 1), (2, 1), (1, 2)",
+    )
+    .execute(&fixture)
+    .await
+    .unwrap();
+    // Equal timestamps make the override merge ambiguous; the highest file id
+    // is the deterministic winner.
+    sqlx::query(
+        "INSERT INTO book_metadata_overrides (book_id, title)
+         VALUES (1, 'Older override'), (2, 'Newest override')",
+    )
+    .execute(&fixture)
+    .await
+    .unwrap();
+    fixture.close().await;
+
+    let (pool, recovery) = init_pool_recovering(&db_path).await.unwrap();
+    assert!(recovery.is_none());
+
+    let book = books::get_book_by_path(&pool, "/library/alpha.epub")
+        .await
+        .unwrap()
+        .expect("durable book");
+    assert_eq!(
+        book.id,
+        books::get_book_by_path(&pool, "/library/beta.epub")
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+    );
+    // The newest override wins; source Beta is the primary file by id tie.
+    assert_eq!(book.title, "Newest override");
+    assert_eq!(
+        book.author.as_deref(),
+        Some("Bob"),
+        "source follows the primary file"
+    );
+    // The newest last-opened survives.
+    assert_eq!(
+        book.last_opened_at.unwrap().to_rfc3339(),
+        "2026-03-01T00:00:00+00:00"
+    );
+
+    let shelves = collections::list_collection_summaries(&pool).await.unwrap();
+    let shelf = shelves.iter().find(|shelf| shelf.name == "Shelf").unwrap();
+    assert_eq!(
+        shelf.book_ids,
+        vec![book.id],
+        "membership unioned, not duplicated"
+    );
+    let other = shelves.iter().find(|shelf| shelf.name == "Other").unwrap();
+    assert_eq!(other.book_ids, vec![book.id]);
+
+    let issues = migration::list_open(&pool).await.unwrap();
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.kind == "duplicate_state_merged"
+                && issue.issue_key == format!("duplicate-collections:{SHARED_UID}")),
+        "collection union is visible: {issues:?}"
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.kind == "duplicate_state_merged"
+                && issue.issue_key == format!("duplicate-metadata:{SHARED_UID}")),
+        "metadata merge is visible: {issues:?}"
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.kind == "duplicate_state_merged"
+                && issue.issue_key == format!("duplicate-opened:{SHARED_UID}")),
+        "last-opened merge is visible: {issues:?}"
+    );
+    assert!(
+        issues.iter().any(
+            |issue| issue.issue_key == format!("duplicate-metadata:{SHARED_UID}")
+                && issue.detail.contains("ambiguous")
+        ),
+        "the override tie is labelled ambiguous: {issues:?}"
+    );
+
+    // Source metadata stays per file.
+    let alpha_file = books::find_file_id_by_path(&pool, "/library/alpha.epub")
+        .await
+        .unwrap()
+        .unwrap();
+    let beta_file = books::find_file_id_by_path(&pool, "/library/beta.epub")
+        .await
+        .unwrap()
+        .unwrap();
+    let alpha_source = metadata_repo::get_source_metadata(&pool, alpha_file)
+        .await
+        .unwrap()
+        .unwrap();
+    let beta_source = metadata_repo::get_source_metadata(&pool, beta_file)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(alpha_source.title, "Source Alpha");
+    assert_eq!(beta_source.title, "Source Beta");
 }

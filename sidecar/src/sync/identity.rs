@@ -261,14 +261,15 @@ async fn ensure_book_record(pool: &SqlitePool, book_id: i64) -> Result<(), AppEr
         r#"
         INSERT INTO book_records (
             uid, title, subtitle, author, publisher, language, isbn,
-            description, publication_date, cover_path, last_opened_at,
-            metadata_state
+            description, publication_date, series, series_index, series_id,
+            cover_path, metadata_state
         )
-        SELECT book_uid, title, subtitle, author, publisher, language, isbn,
-               description, publication_date, cover_path, last_opened_at,
-               'available'
-        FROM books
-        WHERE id = ?1 AND book_uid IS NOT NULL
+        SELECT b.book_uid, b.title, b.subtitle, b.author, b.publisher, b.language,
+               b.isbn, b.description, b.publication_date,
+               (SELECT name FROM series WHERE id = b.series_id), b.series_index,
+               b.series_id, b.cover_path, 'available'
+        FROM books b
+        WHERE b.id = ?1 AND b.book_uid IS NOT NULL
         ON CONFLICT(uid) DO NOTHING
         "#,
     )
@@ -550,6 +551,93 @@ pub async fn merge_book_identity(
     .execute(&mut *tx)
     .await?;
 
+    // Metadata overrides and collection membership now belong to the durable
+    // book too. The newest copy's overrides win; a tie keeps the winner and is
+    // recorded as ambiguous. Memberships from both copies are unioned.
+    let (winner_newest, loser_newest): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT
+             (SELECT MAX(modified_at) FROM books WHERE book_uid = ?2),
+             (SELECT MAX(modified_at) FROM books WHERE book_uid = ?1)",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .fetch_one(&mut *tx)
+    .await?;
+    let winner_has_overrides: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM book_metadata_overrides WHERE book_uid = ?1)",
+    )
+    .bind(&winner)
+    .fetch_one(&mut *tx)
+    .await?;
+    let loser_has_overrides: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM book_metadata_overrides WHERE book_uid = ?1)",
+    )
+    .bind(&loser)
+    .fetch_one(&mut *tx)
+    .await?;
+    let loser_is_newer = match (&loser_newest, &winner_newest) {
+        (Some(loser), Some(winner)) => loser > winner,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    if loser_has_overrides && (!winner_has_overrides || loser_is_newer) {
+        sqlx::query("DELETE FROM book_authors WHERE book_uid = ?1")
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM book_subjects WHERE book_uid = ?1")
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM book_metadata_overrides WHERE book_uid = ?1")
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE book_metadata_overrides SET book_uid = ?2 WHERE book_uid = ?1")
+            .bind(&loser)
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE book_authors SET book_uid = ?2 WHERE book_uid = ?1")
+            .bind(&loser)
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE book_subjects SET book_uid = ?2 WHERE book_uid = ?1")
+            .bind(&loser)
+            .bind(&winner)
+            .execute(&mut *tx)
+            .await?;
+    }
+    if loser_has_overrides && winner_has_overrides && loser_newest == winner_newest {
+        sqlx::query(
+            r#"
+            INSERT INTO migration_issues (issue_key, kind, detail, book_uid)
+            SELECT ?1, 'duplicate_state_merged', ?2, ?3
+            WHERE NOT EXISTS (
+                SELECT 1 FROM migration_issues
+                WHERE issue_key = ?1 AND resolved_at IS NULL
+            )
+            "#,
+        )
+        .bind(format!("duplicate-metadata:{winner}"))
+        .bind(
+            "Two copies of this book both had metadata overrides with the same \
+             timestamp; one was kept, but which copy is newest is ambiguous.",
+        )
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT OR IGNORE INTO book_collections (book_uid, collection_id, added_at)
+         SELECT ?2, collection_id, added_at FROM book_collections WHERE book_uid = ?1",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+
     sqlx::query("DELETE FROM book_records WHERE uid = ?1")
         .bind(&loser)
         .execute(&mut *tx)
@@ -558,7 +646,8 @@ pub async fn merge_book_identity(
         let detail = format!(
             "Two file rows turned out to be the same book and were merged into one book \
              (identity {winner}). Progress keeps the newest saved position; annotations \
-             from both copies are kept."
+             and collection membership from both copies are kept; the newest metadata \
+             overrides win."
         );
         sqlx::query(
             r#"
@@ -611,6 +700,13 @@ pub async fn merge_book_identity(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+
+    // The surviving book's effective metadata may now come from the newer
+    // copy's source and overrides, so recompute it once the durable rows have
+    // settled.
+    if let Some(file_id) = crate::repository::metadata::primary_file_id(pool, &winner).await? {
+        crate::repository::metadata::recompute_effective(pool, &winner, file_id).await?;
+    }
     Ok(())
 }
 
