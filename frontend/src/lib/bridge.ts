@@ -136,6 +136,17 @@ export interface SyncConnectOptions {
   startNew?: boolean;
 }
 
+/** Mirror state for a book whose file is not present on this machine. */
+export interface WaitingBook {
+  bookUid: string;
+  title: string | null;
+  author: string | null;
+  progressPercent: number | null;
+  annotationCount: number;
+  lastOpenedAt: string | null;
+  sampleAnnotation: string | null;
+}
+
 /** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */
 export interface TuxbooksApi {
   invoke(method: string, params?: Record<string, unknown>): Promise<unknown>;
@@ -523,6 +534,14 @@ export function disconnectSync(): Promise<SyncStatus> {
 
 export function syncNow(): Promise<SyncStatus> {
   return invoke("sync_now");
+}
+
+export function listWaitingBooks(): Promise<WaitingBook[]> {
+  return invoke("list_waiting_books");
+}
+
+export function forgetWaitingBook(bookUid: string): Promise<boolean> {
+  return invoke("forget_waiting_book", { bookUid });
 }
 
 export function listSyncIssues(): Promise<SyncIssue[]> {

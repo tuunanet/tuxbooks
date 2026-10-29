@@ -278,6 +278,21 @@ made the original Forget, and a restore elsewhere recreates the book without a
 provider link. The operation log still holds the tombstone and prior state
 after 30 days.
 
+## Waiting books
+
+A sync folder can carry state for a book this machine does not have. The
+mirror keeps it so the annotations and progress can appear when the same bytes
+are imported. Settings > Sync lists those books under **Waiting for books**,
+with whatever metadata the folder carries, the progress percentage, the
+annotation count, and a sample annotation when no metadata is available.
+
+**Forget on this device** hides the waiting book here and removes it from the
+count. The shared copy stays in the folder, so importing the exact bytes can
+still attach the state later, and other devices are not affected. There is no
+shared-delete action for a waiting book; starting a new library is the way to
+leave the old library's waiting state behind, and the app archives the old
+library instead of deleting it.
+
 ## Errors and status
 
 Sync never crashes the sidecar and never blocks app startup or the reader.

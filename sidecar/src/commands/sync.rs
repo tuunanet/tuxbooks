@@ -3,6 +3,7 @@
 
 use crate::error::AppError;
 use crate::sync::engine::{SyncConnectResult, SyncIssue, SyncService, SyncStatus, SyncTrashEntry};
+use crate::sync::waiting::WaitingBook;
 use crate::AppState;
 
 fn service(state: &AppState) -> Result<&SyncService, AppError> {
@@ -34,6 +35,14 @@ pub async fn disconnect(state: &AppState) -> Result<SyncStatus, AppError> {
 
 pub async fn sync_now(state: &AppState) -> Result<SyncStatus, AppError> {
     service(state)?.sync_now().await
+}
+
+pub async fn waiting_books(state: &AppState) -> Result<Vec<WaitingBook>, AppError> {
+    service(state)?.waiting_books().await
+}
+
+pub async fn forget_waiting_book(state: &AppState, book_uid: String) -> Result<bool, AppError> {
+    service(state)?.forget_waiting_book(&book_uid).await
 }
 
 pub async fn issues(state: &AppState) -> Result<Vec<SyncIssue>, AppError> {

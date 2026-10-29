@@ -397,6 +397,16 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       );
     });
 
+    it("validates waiting-book actions by durable book uid", () => {
+      expect(() => validateInvokeParams("list_waiting_books", {}, issued())).not.toThrow();
+      expect(() =>
+        validateInvokeParams("forget_waiting_book", { bookUid }, issued()),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams("forget_waiting_book", { bookUid: "nope" }, issued()),
+      ).toThrow(/invalid bookUid/);
+    });
+
     it("validates provider link parameters by durable book uid", () => {
       expect(() =>
         validateInvokeParams("list_provider_links", { bookUid }, issued()),

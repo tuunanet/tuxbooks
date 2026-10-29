@@ -102,7 +102,9 @@ export function mockInvoke(responses: Record<string, unknown | Promise<unknown>>
     const response =
       method in responses
         ? responses[method]
-        : method === "list_book_files" || method === "list_book_editions"
+        : method === "list_book_files" ||
+            method === "list_book_editions" ||
+            method === "list_waiting_books"
           ? []
           : undefined;
     if (response === undefined) {
