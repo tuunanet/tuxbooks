@@ -103,6 +103,13 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
           issued({ "sync-folder": ["/home/user/Dropbox"] }),
         ),
       ).not.toThrow();
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          { path: "/home/user/Dropbox", startNew: true },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).not.toThrow();
     });
 
     it("rejects an unissued folder, malformed ids, and oversized names", () => {
@@ -127,6 +134,24 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
           issued({ "sync-folder": ["/home/user/Dropbox"] }),
         ),
       ).toThrow(/deviceName/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          { path: "/home/user/Dropbox", startNew: "yes" },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).toThrow(/startNew/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_connect",
+          {
+            path: "/home/user/Dropbox",
+            startNew: true,
+            confirmLibraryId: "0123456789abcdef0123456789abcdef",
+          },
+          issued({ "sync-folder": ["/home/user/Dropbox"] }),
+        ),
+      ).toThrow(/join or start new/);
     });
 
     it("validates the sync id and device name methods", () => {

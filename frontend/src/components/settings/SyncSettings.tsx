@@ -70,6 +70,7 @@ export function SyncSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mismatch, setMismatch] = useState<MismatchPrompt | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [deviceName, setDeviceName] = useState("");
   const [editingDevice, setEditingDevice] = useState(false);
@@ -134,6 +135,7 @@ export function SyncSettings() {
 
   const connect = useCallback(async () => {
     setError(null);
+    setNotice(null);
     setBusy(true);
     try {
       const folder = await pickSyncFolder();
@@ -144,6 +146,9 @@ export function SyncSettings() {
         return;
       }
       applyStatus(result.status);
+      if (result.archivedLibraryPath) {
+        setNotice(`The previous library was kept at ${result.archivedLibraryPath}.`);
+      }
       await loadLists();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -156,12 +161,37 @@ export function SyncSettings() {
     if (!mismatch) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await connectSync(mismatch.path, {
         confirmLibraryId: mismatch.mismatch.remoteLibraryId,
       });
       applyStatus(result.status);
       setMismatch(null);
+      await loadLists();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyStatus, loadLists, mismatch]);
+
+  const startNewLibrary = useCallback(async () => {
+    if (!mismatch) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await connectSync(mismatch.path, { startNew: true });
+      if (result.mismatch) {
+        setMismatch({ path: mismatch.path, mismatch: result.mismatch });
+        return;
+      }
+      applyStatus(result.status);
+      setMismatch(null);
+      if (result.archivedLibraryPath) {
+        setNotice(`The previous library was kept at ${result.archivedLibraryPath}.`);
+      }
       await loadLists();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -376,6 +406,15 @@ export function SyncSettings() {
             {error}
           </p>
         ) : null}
+
+        {notice ? (
+          <p
+            data-testid="sync-notice"
+            className="mt-4 break-all rounded-md border p-3 text-sm text-muted-foreground"
+          >
+            {notice}
+          </p>
+        ) : null}
       </section>
 
       {enabled ? (
@@ -454,26 +493,35 @@ export function SyncSettings() {
       <Dialog open={mismatch !== null} onOpenChange={(open) => !open && setMismatch(null)}>
         <DialogContent data-testid="sync-mismatch">
           <DialogHeader>
-            <DialogTitle>This folder belongs to another library</DialogTitle>
+            <DialogTitle>This folder already has a TuxBooks library</DialogTitle>
             <DialogDescription>
-              The folder was created by a different TuxBooks library. Joining it will merge this
-              machine&apos;s reading state into that library and forget this machine&apos;s previous
-              sync history. The local books and files stay where they are.
+              TuxBooks found an existing sync library here. Use it to merge this device&apos;s
+              reading state into it, or start a new library here. Starting a new one keeps the old
+              library in a backup folder beside it. Your books and files are not moved. Other
+              devices using this folder will need to reconnect to the backup.
             </DialogDescription>
           </DialogHeader>
           <p className="break-all font-mono text-xs text-muted-foreground">
             {mismatch?.mismatch.remoteLibraryId}
           </p>
-          <DialogFooter>
+          <DialogFooter className="flex-wrap">
             <Button variant="outline" onClick={() => setMismatch(null)}>
               Cancel
+            </Button>
+            <Button
+              data-testid="sync-start-new"
+              variant="outline"
+              onClick={() => void startNewLibrary()}
+              disabled={busy}
+            >
+              Start a new library here
             </Button>
             <Button
               data-testid="sync-confirm-join"
               onClick={() => void confirmJoin()}
               disabled={busy}
             >
-              Join this library
+              Use this library
             </Button>
           </DialogFooter>
         </DialogContent>

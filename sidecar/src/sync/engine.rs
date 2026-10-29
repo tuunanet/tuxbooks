@@ -95,6 +95,9 @@ pub struct SyncMismatch {
 pub struct SyncConnectResult {
     pub status: SyncStatus,
     pub mismatch: Option<SyncMismatch>,
+    /// Set when the user asked to start a new library and the existing one
+    /// was moved aside. The old library is preserved at this path.
+    pub archived_library_path: Option<String>,
 }
 
 struct Inner {
@@ -825,6 +828,7 @@ impl SyncService {
         folder: &str,
         device_name: Option<String>,
         confirm_library_id: Option<String>,
+        start_new: bool,
     ) -> Result<SyncConnectResult, AppError> {
         let _guard = self.inner.pass_lock.lock().await;
         let path = Path::new(folder);
@@ -838,11 +842,22 @@ impl SyncService {
             .unwrap_or_else(default_device_name);
         let name = validate_device_name(&name)?;
         let id = device_id(&self.inner.pool).await?;
-        let info = store::connect(path, &id, &name, &now_rfc3339())?;
+        let now = now_rfc3339();
+        let archived = if start_new {
+            store::archive_existing_library(path, &now)?
+        } else {
+            None
+        };
+        let info = store::connect(path, &id, &name, &now)?;
         let local_library = get_meta(&self.inner.pool, META_LIBRARY_ID).await?;
+        let archived_library_path = archived.map(|path| path.to_string_lossy().into_owned());
         if let Some(local) = &local_library {
             if local != &info.library.library_id {
-                if confirm_library_id.as_deref() != Some(info.library.library_id.as_str()) {
+                // A library this connect just created is ours to adopt. Only a
+                // library that already existed can belong to another machine.
+                if info.existed
+                    && confirm_library_id.as_deref() != Some(info.library.library_id.as_str())
+                {
                     self.refresh_status().await?;
                     return Ok(SyncConnectResult {
                         status: self.status_snapshot(),
@@ -850,6 +865,7 @@ impl SyncService {
                             local_library_id: local.clone(),
                             remote_library_id: info.library.library_id.clone(),
                         }),
+                        archived_library_path: None,
                     });
                 }
                 self.reset_sync_state().await?;
@@ -879,6 +895,7 @@ impl SyncService {
         Ok(SyncConnectResult {
             status: self.status_snapshot(),
             mismatch: None,
+            archived_library_path,
         })
     }
 

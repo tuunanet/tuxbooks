@@ -182,6 +182,13 @@ function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPath
   ) {
     throw policyError("invalid confirmLibraryId");
   }
+  const startNew = record.startNew;
+  if (startNew !== undefined && typeof startNew !== "boolean") {
+    throw policyError("invalid startNew");
+  }
+  if (startNew === true && confirmLibraryId !== undefined) {
+    throw policyError("choose either join or start new");
+  }
 }
 
 /** Bulk Forget is a selection from loaded rows; bound it like a batch. */

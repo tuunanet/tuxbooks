@@ -46,6 +46,29 @@ syncs. The client then copies the book files and TuxBooks syncs reading state
 separately. Each machine adds the folder once, because watched locations and
 absolute paths stay local.
 
+## Choosing a sync folder
+
+A folder without a TuxBooks library is adopted directly. TuxBooks creates
+`TuxBooks/library.json`, binds this device to it, and re-baselines the local
+durable state. This covers the normal first connection and the normal
+"detach, then choose a new folder" path. It does not show a mismatch prompt.
+
+A folder that already contains `TuxBooks/library.json` with a different
+library id belongs to an existing library. Settings offers two explicit
+choices:
+
+- **Use this library** merges this device's durable state into it. The local
+  sync mirror, aliases, and operation bookkeeping are reset and re-baselined;
+  local books, files, progress, annotations, and metadata stay.
+- **Start a new library here** moves the existing `TuxBooks` directory to a
+  sibling `TuxBooks.before-<timestamp>` and creates a fresh library at the
+  chosen path. Nothing is deleted. Other devices using the old folder must
+  reconnect to the archived path.
+
+Detaching a device does not delete `TuxBooks/library.json`. Reconnecting to the
+same folder is a normal reconnect. A copied sync folder is a different library
+only when its `library.json` id differs.
+
 ## Book files and backups
 
 Sync never moves, copies, or deletes a book file. A metadata embed is a file

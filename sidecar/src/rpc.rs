@@ -275,6 +275,8 @@ struct SyncConnectArgs {
     path: String,
     device_name: Option<String>,
     confirm_library_id: Option<String>,
+    #[serde(default)]
+    start_new: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -579,7 +581,8 @@ async fn dispatch(
                 state,
                 p.path,
                 p.device_name,
-                p.confirm_library_id
+                p.confirm_library_id,
+                p.start_new
             )))
         }
         "sync_disconnect" => Ok(call!(commands::sync::disconnect(state))),

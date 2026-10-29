@@ -73,7 +73,7 @@ async fn device() -> Device {
 async fn connect(device: &Device, folder: &Path) {
     let result = device
         .service
-        .connect(folder.to_str().unwrap(), None, None)
+        .connect(folder.to_str().unwrap(), None, None, false)
         .await
         .unwrap();
     assert!(result.mismatch.is_none(), "unexpected mismatch");
@@ -607,7 +607,7 @@ async fn a_library_mismatch_requires_confirmation_then_merges() {
 
     let result = b
         .service
-        .connect(sync_dir.path().to_str().unwrap(), None, None)
+        .connect(sync_dir.path().to_str().unwrap(), None, None, false)
         .await
         .unwrap();
     let mismatch = result.mismatch.expect("mismatch surfaced");
@@ -619,6 +619,7 @@ async fn a_library_mismatch_requires_confirmation_then_merges() {
             sync_dir.path().to_str().unwrap(),
             None,
             Some(remote_id.clone()),
+            false,
         )
         .await
         .unwrap();
@@ -628,6 +629,72 @@ async fn a_library_mismatch_requires_confirmation_then_merges() {
         Some(remote_id.as_str())
     );
     assert!(confirmed.status.enabled);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fresh_folder_is_adopted_without_a_mismatch() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let b = device().await;
+    let old_id = "0123456789abcdef0123456789abcdef";
+    clock::set_meta(&b.pool, clock::META_LIBRARY_ID, old_id)
+        .await
+        .unwrap();
+
+    let result = b
+        .service
+        .connect(sync_dir.path().to_str().unwrap(), None, None, false)
+        .await
+        .unwrap();
+
+    assert!(
+        result.mismatch.is_none(),
+        "a freshly created library must be adopted, not treated as another one"
+    );
+    let library_id = result.status.library_id.clone().expect("library id");
+    assert_ne!(library_id, old_id);
+    assert!(result.status.enabled);
+    let library: Value = serde_json::from_str(
+        &std::fs::read_to_string(sync_dir.path().join("TuxBooks/library.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(library["library_id"], library_id);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn starting_a_new_library_archives_the_existing_one() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+    let old_id = a.service.status().await.unwrap().library_id.unwrap();
+
+    let b = device().await;
+    clock::set_meta(&b.pool, clock::META_LIBRARY_ID, &old_id)
+        .await
+        .unwrap();
+
+    let result = b
+        .service
+        .connect(sync_dir.path().to_str().unwrap(), None, None, true)
+        .await
+        .unwrap();
+
+    assert!(result.mismatch.is_none());
+    let new_id = result.status.library_id.clone().expect("new library id");
+    assert_ne!(new_id, old_id);
+    let archived = result
+        .archived_library_path
+        .expect("the old library path is reported");
+    let archived_library: Value = serde_json::from_str(
+        &std::fs::read_to_string(Path::new(&archived).join("library.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(archived_library["library_id"], old_id);
+    assert!(sync_dir.path().join("TuxBooks/library.json").exists());
+    let current: Value = serde_json::from_str(
+        &std::fs::read_to_string(sync_dir.path().join("TuxBooks/library.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(current["library_id"], new_id);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -739,7 +806,7 @@ async fn a_folder_that_is_not_a_directory_is_rejected() {
     let file = tempfile::NamedTempFile::new().unwrap();
     let err = a
         .service
-        .connect(file.path().to_str().unwrap(), None, None)
+        .connect(file.path().to_str().unwrap(), None, None, false)
         .await
         .unwrap_err();
     assert!(matches!(err, AppError::InvalidInput(_)), "got {err:?}");
