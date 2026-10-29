@@ -86,9 +86,6 @@ minimumReleaseAgeExclude:
   # proxy-addr GHSA-jqcg-44mw-7w3h (critical; express in shadcn's dev-only
   # MCP server). 2.0.8 fixes. Remove 2026-10-15.
   - "proxy-addr@2.0.8"
-  # ip-address GHSA-j6r3-76f7-8jcv + GHSA-h3mg-xc3c-68pw (medium; socks in
-  # shadcn's dev tooling). 10.7.1 fixes both. Remove 2026-10-15.
-  - "ip-address@10.7.1"
   # http-cache-semantics GHSA-ch52-4w7c-c8xp (high; got in @electron/get,
   # dev-only electron download). Affected <=4.2.0; 4.3.0 is outside the
   # range. Remove 2026-11-03.
@@ -115,7 +112,6 @@ minimumReleaseAgeExclude:
   - "web-tree-sitter@0.27.1"
   - "dotenv@18.0.9"
   - "@anthropic-ai/sdk@0.133.0"
-  - "undici@7.30.1"
   # 2026-10-24: electron GHSA-jr5w-w6x2-84p9 (high; compromised eMudhra
   # intermediate certificate mitigation). 44.9.1 (2026-10-20) is the oldest
   # patched release inside ^44.5.0; bumping it also re-resolves
@@ -128,6 +124,28 @@ minimumReleaseAgeExclude:
   # tree through shadcn's @dotenvx/dotenvx CLI and is not packaged. Remove
   # 2026-11-18.
   - "systeminformation@5.33.16"
+  # 2026-10-29: Dependabot alert sweep. Every fix below is younger than the
+  # 30-day floor, so the exact pins let it through. All paths are dev-only
+  # (shadcn's CLI/MCP server, jsdom under vitest, node-gyp under
+  # electron-builder); none ships in the packaged app. Remove each pin once
+  # its version ages out.
+  # GHSA-rmxm-3fg6-px4f (@hono/node-server serveStatic path decoding).
+  # Remove 2026-11-12.
+  - "@hono/node-server@2.1.5"
+  # GHSA-2m5v-pch6-74hx, GHSA-qrxm-fqhp-jwvm, GHSA-9fm3-97px-rjf6,
+  # GHSA-xjj6-f33q-929c (undici 6.x under node-gyp, 8.x under jsdom and
+  # graft's clients). Same-name entries do not stack, so the resolved lines
+  # share one pin; 7.30.1 was already past the advisory. Remove 2026-11-14.
+  - "undici@6.29.1 || 7.30.1 || 8.12.2"
+  # GHSA-6pq8-jhm2-2vcw (qs stringify DoS). Remove 2026-11-13.
+  - "qs@6.16.1"
+  # GHSA-27r3-jxmh-p828 (body-parser compressed-body DoS). Remove 2026-11-21.
+  - "body-parser@2.4.0"
+  # GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h, GHSA-wjr9-j795-jxcr,
+  # GHSA-333x-w4r6-6crp (fast-uri host/scheme confusion). Remove 2026-11-18.
+  - "fast-uri@3.1.9"
+  # GHSA-rxp7-6hxx-x8q5 (ip-address quadratic zone match). Remove 2026-11-10.
+  - "ip-address@10.7.4"
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:
   # esbuild's install script places its platform binary; the Vite build needs it.
@@ -146,6 +164,12 @@ overrides:
   # resolver does not fall back to the older mature 5.33.14. Dev-only via
   # shadcn's @dotenvx/dotenvx CLI; remove when 5.33.16 ages past the floor.
   systeminformation: "5.33.16"
+  # 2026-10-29: Dependabot alert sweep. These three pin the first patched
+  # release instead of the newer release the resolver would otherwise take;
+  # the matching minimumReleaseAgeExclude entries admit them.
+  "undici@>=8.0.0 <9": "8.12.2"
+  "qs@>=6.14.0 <7": "6.16.1"
+  "ip-address@>=10.0.0 <11": "10.7.4"
 peerDependencyRules:
   allowAny:
     - vite

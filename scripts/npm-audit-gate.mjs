@@ -27,28 +27,14 @@ const TRIAGE = [
     revisit: "2026-11-12",
   },
   {
-    id: "GHSA-27r3-jxmh-p828",
-    module: "body-parser",
+    id: "GHSA-gcqx-w48m-w2h4",
+    module: "deepmerge",
     reason:
-      "No viable upgrade: express@5.2.1 (the latest release, 2025-12-01) pins " +
-      "body-parser 2.3.0 exactly, and 2.4.0 (2026-10-22, the fix) cannot enter the tree " +
-      "until express ships a release carrying it. Dev-only: body-parser reaches the tree " +
-      "through express <- @modelcontextprotocol/sdk <- shadcn's CLI, which is run manually " +
-      "against first-party files; it serves no untrusted compressed requests.",
-    revisit: "2026-11-24",
-  },
-  {
-    id: "GHSA-xjj6-f33q-929c",
-    module: "undici",
-    reason:
-      "The 8.x instance (8.11.0, via jsdom <- vitest <- vite-plus) is fixed only by " +
-      "8.12.2 (2026-10-15), which is younger than the 30-day release-age floor (S-5) and " +
-      "so cannot be installed yet; the 6.x and 7.x instances are already moved past the " +
-      "advisory. Dev-only: undici 8.x runs behind vitest's jsdom and graft's CLI clients, " +
-      "never in the packaged app, and handles no attacker-controlled responses here. " +
-      "Upgrade lands with the regular train once 8.12.2 matures (Dependabot bypasses the " +
-      "cooldown for security updates).",
-    revisit: "2026-11-14",
+      "No upstream fix: 4.3.1 (2023-03-16) is the latest release and the advisory lists " +
+      "no patched version. Low severity and dev-only: deepmerge reaches the tree through " +
+      "shadcn's CLI, while the app imports only shadcn/tailwind.css, so mergeObject() is " +
+      "never called at build or runtime and nothing ships in the packaged app.",
+    revisit: "2026-11-29",
   },
   {
     id: "GHSA-mrhx-c7xc-m3w5",
