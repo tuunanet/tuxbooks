@@ -40,6 +40,11 @@ The catalog remains derived from the files each machine can see. A machine that
 has never imported a book can still hold that book's shared state; it applies
 the state when the content appears.
 
+A watched folder may itself be a mounted drive or a folder the cloud client
+syncs. The client then copies the book files and TuxBooks syncs reading state
+separately. Each machine adds the folder once, because watched locations and
+absolute paths stay local.
+
 ## Book identity
 
 Row ids and absolute paths are machine-specific. A book's shared identity is a

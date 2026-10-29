@@ -16,4 +16,13 @@ test.describe("settings sync tab", () => {
     await expect(page.getByText("Syncs between machines")).toBeVisible();
     await expect(page.getByText("Book files (EPUB and PDF)")).toBeVisible();
   });
+
+  test("explains that a watched folder can live in a cloud folder", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Watched folders" }).click();
+
+    const hint = page.getByTestId("folders-cloud-hint");
+    await expect(hint).toContainText("one your cloud client keeps in sync");
+    await expect(hint).toContainText("Settings > Sync");
+  });
 });
