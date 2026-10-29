@@ -3,7 +3,9 @@ import { RefreshCw, Unplug } from "lucide-react";
 import {
   connectSync,
   disconnectSync,
+  dismissAllSyncIssues,
   dismissSyncIssue,
+  forgetAllWaitingBooks,
   forgetWaitingBook,
   getSyncStatus,
   listSyncIssues,
@@ -34,6 +36,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { SyncIssuesSection, SyncTrashSection, WaitingBooksSection } from "./SyncLists";
+import { formatSyncTime as formatTime } from "./syncFormat";
 
 const STATUS_LABEL: Record<SyncState, string> = {
   disabled: "Off",
@@ -47,13 +51,6 @@ function statusVariant(state: SyncState): "default" | "secondary" | "destructive
   if (state === "syncing") return "secondary";
   if (state === "disabled") return "outline";
   return "default";
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
 }
 
 type MismatchPrompt = {
@@ -99,34 +96,40 @@ export function SyncSettings() {
     }
   }, []);
 
+  const clearLists = useCallback(() => {
+    setIssues([]);
+    setTrash([]);
+    setWaitingBooks([]);
+  }, []);
+
   useEffect(() => {
     let active = true;
-    const load = async () => {
+    (async () => {
       try {
         const next = await getSyncStatus();
         if (!active) return;
         applyStatus(next);
-        if (next.enabled) {
-          const [nextIssues, nextTrash, nextWaiting] = await Promise.all([
-            listSyncIssues(),
-            listSyncTrash(),
-            listWaitingBooks(),
-          ]);
-          if (!active) return;
-          setIssues(nextIssues);
-          setTrash(nextTrash);
-          setWaitingBooks(nextWaiting);
-        } else {
-          setIssues([]);
-          setTrash([]);
-          setWaitingBooks([]);
-        }
+        if (next.enabled) await loadLists();
+        else clearLists();
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
       }
+    })();
+    return () => {
+      active = false;
     };
-    void load();
-    const timer = setInterval(() => void load(), 3000);
+  }, [applyStatus, loadLists, clearLists]);
+
+  useEffect(() => {
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const next = await getSyncStatus();
+        if (active) applyStatus(next);
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }, 3000);
     return () => {
       active = false;
       clearInterval(timer);
@@ -137,7 +140,10 @@ export function SyncSettings() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     void onSyncStatus((next) => {
-      if (!cancelled) applyStatus(next);
+      if (cancelled) return;
+      applyStatus(next);
+      if (next.enabled) void loadLists();
+      else clearLists();
     }).then((stop) => {
       if (cancelled) stop();
       else unlisten = stop;
@@ -146,7 +152,7 @@ export function SyncSettings() {
       cancelled = true;
       unlisten?.();
     };
-  }, [applyStatus]);
+  }, [applyStatus, loadLists, clearLists]);
 
   const connect = useCallback(async () => {
     setError(null);
@@ -274,25 +280,61 @@ export function SyncSettings() {
     async (id: number) => {
       try {
         await dismissSyncIssue(id);
+        applyStatus(await getSyncStatus());
         await loadLists();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [loadLists],
+    [applyStatus, loadLists],
   );
+
+  const dismissAllIssues = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const count = await dismissAllSyncIssues();
+      applyStatus(await getSyncStatus());
+      await loadLists();
+      setNotice(count > 0 ? `Dismissed ${count} sync ${count === 1 ? "issue" : "issues"}.` : null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyStatus, loadLists]);
 
   const restore = useCallback(
     async (id: number) => {
       try {
         await restoreSyncTrash(id);
+        applyStatus(await getSyncStatus());
         await loadLists();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [loadLists],
+    [applyStatus, loadLists],
   );
+
+  const forgetAllWaiting = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const count = await forgetAllWaitingBooks();
+      applyStatus(await getSyncStatus());
+      await loadLists();
+      setNotice(
+        count > 0
+          ? `Forgot ${count} waiting ${count === 1 ? "book" : "books"} on this device.`
+          : null,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyStatus, loadLists]);
 
   const enabled = status?.enabled ?? false;
 
@@ -428,61 +470,13 @@ export function SyncSettings() {
               </Button>
             </div>
 
-            <div data-testid="waiting-books" className="rounded-md border p-3">
-              <h3 className="font-medium">Waiting for books</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Shared reading state for books whose file is not in this library. Import the exact
-                file to attach it. Forget on this device hides it here; the synced copy stays in the
-                folder and on other devices.
-              </p>
-              {waitingBooks.length === 0 ? (
-                <p data-testid="waiting-books-empty" className="mt-3 text-sm text-muted-foreground">
-                  No books are waiting for a file.
-                </p>
-              ) : (
-                <ul className="mt-3 flex flex-col gap-3">
-                  {waitingBooks.map((book) => (
-                    <li
-                      key={book.bookUid}
-                      data-testid={`waiting-book-${book.bookUid}`}
-                      className="flex flex-wrap items-start justify-between gap-3 border-t pt-3 first:border-t-0 first:pt-0"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{book.title ?? "Unknown book"}</p>
-                        {book.author ? (
-                          <p className="truncate text-xs text-muted-foreground">{book.author}</p>
-                        ) : null}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {book.progressPercent === null
-                            ? "No progress"
-                            : `${Math.round(book.progressPercent)}%`}
-                          {" · "}
-                          {book.annotationCount}{" "}
-                          {book.annotationCount === 1 ? "annotation" : "annotations"}
-                        </p>
-                        {book.sampleAnnotation ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Sample: {book.sampleAnnotation}
-                          </p>
-                        ) : null}
-                        <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
-                          {book.bookUid}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        data-testid={`forget-waiting-${book.bookUid}`}
-                        onClick={() => void forgetWaiting(book.bookUid)}
-                        disabled={busy}
-                      >
-                        Forget on this device
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <WaitingBooksSection
+              books={waitingBooks}
+              total={status.waitingBooks}
+              busy={busy}
+              onForget={(bookUid) => void forgetWaiting(bookUid)}
+              onForgetAll={() => void forgetAllWaiting()}
+            />
           </div>
         )}
 
@@ -507,76 +501,22 @@ export function SyncSettings() {
       </section>
 
       {enabled ? (
-        <section className="rounded-lg border p-4">
-          <h3 className="text-base font-medium">Sync issues</h3>
-          {issues.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No sync issues.</p>
-          ) : (
-            <ul data-testid="sync-issues" className="mt-3 flex flex-col gap-3">
-              {issues.map((issue) => (
-                <li key={issue.id} className="rounded-md border p-3 text-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium">{issue.kind.replaceAll("_", " ")}</p>
-                      <p className="mt-1 break-words text-muted-foreground">{issue.detail}</p>
-                      {issue.fileName ? (
-                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                          {issue.fileName}
-                        </p>
-                      ) : null}
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatTime(issue.updatedAt)}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void dismiss(issue.id)}
-                      data-testid={`sync-dismiss-${issue.id}`}
-                    >
-                      Dismiss
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <SyncIssuesSection
+          issues={issues}
+          total={status?.issues ?? 0}
+          busy={busy}
+          onDismiss={(id) => void dismiss(id)}
+          onDismissAll={() => void dismissAllIssues()}
+        />
       ) : null}
 
       {enabled ? (
-        <section className="rounded-lg border p-4">
-          <h3 className="text-base font-medium">Recently deleted</h3>
-          {trash.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">
-              Deleted annotations and collections stay restorable for 30 days.
-            </p>
-          ) : (
-            <ul data-testid="sync-trash" className="mt-3 flex flex-col gap-3">
-              {trash.map((entry) => (
-                <li key={entry.id} className="rounded-md border p-3 text-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium">{entry.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {entry.kind} · deleted {formatTime(entry.deletedAt)} · restorable until{" "}
-                        {formatTime(entry.expiresAt)}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void restore(entry.id)}
-                      data-testid={`sync-restore-${entry.id}`}
-                    >
-                      Restore
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <SyncTrashSection
+          entries={trash}
+          total={status?.trash ?? 0}
+          busy={busy}
+          onRestore={(id) => void restore(id)}
+        />
       ) : null}
 
       <Dialog open={mismatch !== null} onOpenChange={(open) => !open && setMismatch(null)}>

@@ -333,6 +333,8 @@ describe("boundary configuration tables (T-5)", () => {
       "sync_restore",
       "list_waiting_books",
       "forget_waiting_book",
+      "forget_all_waiting_books",
+      "dismiss_all_sync_issues",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }

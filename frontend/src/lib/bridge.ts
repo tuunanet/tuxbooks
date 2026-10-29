@@ -544,6 +544,14 @@ export function forgetWaitingBook(bookUid: string): Promise<boolean> {
   return invoke("forget_waiting_book", { bookUid });
 }
 
+export function forgetAllWaitingBooks(): Promise<number> {
+  return invoke("forget_all_waiting_books");
+}
+
+export function dismissAllSyncIssues(): Promise<number> {
+  return invoke("dismiss_all_sync_issues");
+}
+
 export function listSyncIssues(): Promise<SyncIssue[]> {
   return invoke("sync_issues");
 }

@@ -594,7 +594,9 @@ async fn dispatch(
                 state, p.book_uid
             )))
         }
+        "forget_all_waiting_books" => Ok(call!(commands::sync::forget_all_waiting_books(state))),
         "sync_issues" => Ok(call!(commands::sync::issues(state))),
+        "dismiss_all_sync_issues" => Ok(call!(commands::sync::dismiss_all_issues(state))),
         "sync_dismiss_issue" => {
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::sync::dismiss_issue(state, p.id)))

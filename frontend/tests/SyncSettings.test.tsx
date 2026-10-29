@@ -228,6 +228,46 @@ describe("SyncSettings", () => {
     expect(await screen.findByTestId("waiting-books-empty")).toBeInTheDocument();
   });
 
+  it("forgets all waiting books and dismisses all issues from their sections", async () => {
+    const waiting = {
+      bookUid: "b".repeat(32),
+      title: "Waiting",
+      author: null,
+      progressPercent: 12,
+      annotationCount: 2,
+      lastOpenedAt: null,
+      sampleAnnotation: null,
+    };
+    const issue = {
+      id: 7,
+      kind: "operation_rejected",
+      detail: "operation rejected",
+      fileName: null,
+      createdAt: "2026-10-28T10:00:00.000Z",
+      updatedAt: "2026-10-28T10:01:00.000Z",
+    };
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "sync_status") {
+        return Promise.resolve({ ...ENABLED, waitingBooks: 1, issues: 1 });
+      }
+      if (method === "sync_issues") return Promise.resolve([issue]);
+      if (method === "sync_trash") return Promise.resolve([]);
+      if (method === "list_waiting_books") return Promise.resolve([waiting]);
+      if (method === "forget_all_waiting_books") return Promise.resolve(1);
+      if (method === "dismiss_all_sync_issues") return Promise.resolve(1);
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("waiting-books-forget-all"));
+    fireEvent.click(await screen.findByTestId("waiting-books-forget-all-confirm"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("forget_all_waiting_books"));
+
+    fireEvent.click(await screen.findByTestId("sync-issues-dismiss-all"));
+    fireEvent.click(await screen.findByTestId("sync-issues-dismiss-all-confirm"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("dismiss_all_sync_issues"));
+  });
+
   it("disconnects only after confirmation", async () => {
     mockInvoke({
       sync_status: ENABLED,

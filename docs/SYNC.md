@@ -286,12 +286,14 @@ are imported. Settings > Sync lists those books under **Waiting for books**,
 with whatever metadata the folder carries, the progress percentage, the
 annotation count, and a sample annotation when no metadata is available.
 
-**Forget on this device** hides the waiting book here and removes it from the
-count. The shared copy stays in the folder, so importing the exact bytes can
-still attach the state later, and other devices are not affected. There is no
-shared-delete action for a waiting book; starting a new library is the way to
-leave the old library's waiting state behind, and the app archives the old
-library instead of deleting it.
+Settings shows the first five and a **View all** dialog with search by title or
+book uid. **Forget on this device** hides one waiting book here and removes it
+from the count; **Forget all on this device** hides every waiting book. The
+shared copies stay in the folder, so importing the exact bytes can still attach
+the state later, and other devices are not affected. There is no shared-delete
+action for a waiting book; starting a new library is the way to leave the old
+library's waiting state behind, and the app archives the old library instead of
+deleting it.
 
 ## Errors and status
 
