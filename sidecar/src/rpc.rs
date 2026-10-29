@@ -598,6 +598,7 @@ mod tests {
             watcher: Arc::new(watcher),
             startup_recovery: None,
             sync: None,
+            importing: Arc::new(Default::default()),
         })
     }
 

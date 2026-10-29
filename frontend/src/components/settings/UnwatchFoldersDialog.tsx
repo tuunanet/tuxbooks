@@ -23,6 +23,8 @@ interface UnwatchFoldersDialogProps {
   busy?: boolean;
   /** Removal counts while the purge runs; null before it starts. */
   progress?: UnwatchProgress | null;
+  /** Why the last attempt failed; stays on screen so the user can retry. */
+  error?: string | null;
 }
 
 function titleFor(folders: FolderRow[]): string {
@@ -56,6 +58,7 @@ export function UnwatchFoldersDialog({
   onCancel,
   busy = false,
   progress = null,
+  error = null,
 }: UnwatchFoldersDialogProps) {
   const several = folders.length > 1;
   const books = folders.reduce((total, folder) => total + folder.bookCount, 0);
@@ -103,6 +106,12 @@ export function UnwatchFoldersDialog({
               {`Removing ${progress.removed} of ${progress.total} books`}
             </p>
           </div>
+        )}
+
+        {error && (
+          <p data-testid="unwatch-error" role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
         )}
 
         <DialogFooter>

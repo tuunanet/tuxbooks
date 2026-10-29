@@ -346,6 +346,7 @@ describe("FoldersSettings unwatch", () => {
     // Nothing happened, so nothing may look like it did: the folder is still
     // selected, the choice is still on screen, and the list was not re-read.
     expect(screen.getByTestId("unwatch-dialog")).toBe(dialog);
+    expect(within(dialog).getByTestId("unwatch-error")).toHaveTextContent("database is locked");
     expect(screen.getByTestId("folder-select-1")).toBeChecked();
     expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
     expect(storageReportMock).toHaveBeenCalledTimes(1);

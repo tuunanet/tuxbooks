@@ -11,9 +11,10 @@ pub mod services;
 pub mod sync;
 pub mod worker;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::SqlitePool;
@@ -36,6 +37,10 @@ pub struct AppState {
     /// Background cloud-folder sync. `None` in unit tests that construct the
     /// state by hand; production wires it in `init_state`.
     pub sync: Option<Arc<SyncService>>,
+    /// Folders whose import scan is running. Unwatch refuses these so a
+    /// purge cannot race the scan and leave the rows it writes outside every
+    /// watched location.
+    pub importing: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -298,6 +303,7 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         watcher: Arc::new(watcher),
         startup_recovery,
         sync: Some(sync),
+        importing: Arc::new(Mutex::new(HashSet::new())),
     })
 }
 

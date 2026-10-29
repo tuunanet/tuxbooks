@@ -30,6 +30,7 @@ export function FoldersSettings() {
   const [confirming, setConfirming] = useState(false);
   const [unwatching, setUnwatching] = useState(false);
   const [unwatchProgress, setUnwatchProgress] = useState<UnwatchProgress | null>(null);
+  const [unwatchError, setUnwatchError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
@@ -85,6 +86,7 @@ export function FoldersSettings() {
   }, [importPaths, load]);
 
   const confirmUnwatch = useCallback(async () => {
+    setUnwatchError(null);
     setUnwatching(true);
     let unlisten: (() => void) | undefined;
     let unwatched = false;
@@ -94,6 +96,7 @@ export function FoldersSettings() {
       unwatched = true;
     } catch (error) {
       console.error("unwatch_locations failed:", error);
+      setUnwatchError(error instanceof Error ? error.message : String(error));
     } finally {
       unlisten?.();
       setUnwatching(false);
@@ -234,8 +237,12 @@ export function FoldersSettings() {
         folders={chosen}
         busy={unwatching}
         progress={unwatchProgress}
+        error={unwatchError}
         onConfirm={() => void confirmUnwatch()}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => {
+          setConfirming(false);
+          setUnwatchError(null);
+        }}
       />
     </div>
   );

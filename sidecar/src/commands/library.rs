@@ -14,6 +14,7 @@ use crate::repository::storage;
 use crate::rpc::EventEmitter;
 use crate::services::book_importer::{import_directory, ImportReport};
 use crate::services::library_reconciler::reconnect_book as reconnect;
+use crate::services::library_scanner::has_book_extension;
 use crate::{covers_dir, pdfium_library_dirs, AppState};
 
 /// Progress events are batched: the renderer coalesces its commits anyway,
@@ -97,6 +98,12 @@ pub async fn scan_library(
         return Err(AppError::InvalidInput("library path is empty".into()));
     }
     let root = PathBuf::from(path);
+    if !root.is_dir() {
+        return Err(AppError::InvalidInput(format!(
+            "library path is not a directory: {}",
+            root.display()
+        )));
+    }
     let covers = covers_dir(&state.db_path);
     let pdfium_dirs = pdfium_library_dirs();
     let batch = Mutex::new(ProgressBatcher::new(events));
@@ -160,11 +167,7 @@ pub async fn import_paths(
             // A picked file is imported by its parent's scan. Reject a
             // non-book now, so a stray file never watches its folder only
             // to fail inside the scan.
-            if path
-                .extension()
-                .and_then(crate::domain::BookFormat::from_extension)
-                .is_none()
-            {
+            if !has_book_extension(&path) {
                 report
                     .failed
                     .push(crate::services::book_importer::FailedImport {
@@ -236,14 +239,29 @@ async fn register_and_import_folder(
     emit_progress: &(dyn Fn(&crate::domain::Book) + Send + Sync),
     report: &mut ImportReport,
 ) -> Result<(), AppError> {
-    register_and_watch(state, root, report).await?;
-    let mut folder_report =
-        import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await?;
-    report.imported += folder_report.imported;
-    report.updated += folder_report.updated;
-    report.skipped += folder_report.skipped;
-    report.failed.append(&mut folder_report.failed);
-    Ok(())
+    let root_key = root.to_string_lossy().into_owned();
+    state
+        .importing
+        .lock()
+        .expect("importing mutex poisoned")
+        .insert(root_key.clone());
+    let outcome = async {
+        register_and_watch(state, root, report).await?;
+        let mut folder_report =
+            import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await?;
+        report.imported += folder_report.imported;
+        report.updated += folder_report.updated;
+        report.skipped += folder_report.skipped;
+        report.failed.append(&mut folder_report.failed);
+        Ok(())
+    }
+    .await;
+    state
+        .importing
+        .lock()
+        .expect("importing mutex poisoned")
+        .remove(&root_key);
+    outcome
 }
 
 /// Register `root` as a watched library location, start the filesystem
@@ -325,6 +343,25 @@ pub async fn unwatch_locations(
             return Err(AppError::InvalidInput("folder path is empty".into()));
         }
         roots.push(path.to_string());
+    }
+
+    // A scan registers its folder before importing, so the folder is visible
+    // in Settings while the purge would race the rows still being written.
+    // Refuse until the scan finishes; the normal unwatch then removes the
+    // whole set.
+    {
+        let importing = state.importing.lock().expect("importing mutex poisoned");
+        for root in &roots {
+            if let Some(busy) = importing.iter().find(|busy| {
+                busy.as_str() == root.as_str()
+                    || library_locations::is_under(busy, root)
+                    || library_locations::is_under(root, busy)
+            }) {
+                return Err(AppError::InvalidInput(format!(
+                    "cannot unwatch {root} while {busy} is still importing"
+                )));
+            }
+        }
     }
 
     // Read once, while every row still stands, so the refusal reasons about

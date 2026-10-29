@@ -8,6 +8,7 @@
 //! progress on worker threads while the test thread waits on the change
 //! channel.
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -43,6 +44,7 @@ struct TestEnv {
     emitter: EventEmitter,
     fired: Arc<Mutex<FiredEvents>>,
     changes: mpsc::Receiver<LibraryChange>,
+    importing: Arc<Mutex<HashSet<String>>>,
 }
 
 fn write_epub(path: &Path, title: &str) {
@@ -126,6 +128,7 @@ async fn setup() -> TestEnv {
         emitter,
         fired,
         changes: change_rx,
+        importing: Arc::new(Mutex::new(HashSet::new())),
     }
 }
 
@@ -149,6 +152,7 @@ impl TestEnv {
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
             sync: None,
+            importing: Arc::clone(&self.importing),
         })
     }
 
@@ -765,6 +769,30 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         std::fs::read(&kept).unwrap(),
         before,
         "unwatching must never touch files on disk"
+    );
+}
+
+/// A purge must not race a scan: the scan registers its folder before
+/// importing, so the folder is on the watch list while rows are still
+/// landing. Unwatch waits until the scan finishes.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_folder_that_is_still_importing_is_refused() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    let shelf_path = shelf.to_string_lossy().into_owned();
+    library_locations::add_location(&env.pool, &shelf_path)
+        .await
+        .unwrap();
+    env.importing.lock().unwrap().insert(shelf_path.clone());
+
+    let response = env.unwatch_error(&[shelf_path.as_str()]).await;
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("still importing"), "got: {message}");
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned(), shelf_path],
+        "the refused unwatch must leave the watch list alone"
     );
 }
 
@@ -1584,7 +1612,7 @@ async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() 
     let env = setup().await;
     let shelf = env.sibling("shelf");
     std::fs::create_dir_all(&shelf).unwrap();
-    for index in 0..30 {
+    for index in 0..60 {
         write_epub(
             &shelf.join(format!("book-{index}.epub")),
             &format!("Shelf Book {index}"),
@@ -1617,7 +1645,7 @@ async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() 
 
     let partial = env.count().await;
     assert!(
-        partial > 0 && partial < 30,
+        partial > 0 && partial < 60,
         "the abort must land mid-import, got {partial} rows"
     );
     assert_eq!(
@@ -1634,7 +1662,7 @@ async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() 
     env.reconciler.reconcile_location(&shelf).await.unwrap();
     assert_eq!(
         env.count().await,
-        30,
+        60,
         "startup catch-up must import the books the quit left behind"
     );
 }
