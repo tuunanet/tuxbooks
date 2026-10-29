@@ -722,7 +722,7 @@ pub async fn project(
         let Some(book_uid) = &item.book_uid else {
             continue;
         };
-        let Some(book_id) = local_book_id(pool, book_uid).await? else {
+        let Some(book_id) = durable_record_id(pool, book_uid).await? else {
             continue;
         };
         let (state, deleted) = load_state(pool, item.kind, &item.entity_uid).await?;
@@ -731,11 +731,17 @@ pub async fn project(
                 project_annotation(pool, book_id, item, &state, deleted).await?
             }
             EntityKind::Progress => project_progress(pool, book_id, &state, deleted).await?,
-            EntityKind::Metadata => {
-                project_metadata(pool, book_id, folder_root, covers_dir, &state).await?
+            EntityKind::Metadata | EntityKind::Opened => {
+                let Some(file_id) = local_file_id(pool, book_uid).await? else {
+                    continue;
+                };
+                if item.kind == EntityKind::Metadata {
+                    project_metadata(pool, file_id, folder_root, covers_dir, &state).await?
+                } else {
+                    project_opened(pool, file_id, &state).await?
+                }
             }
             EntityKind::Membership => project_membership(pool, item, &state).await?,
-            EntityKind::Opened => project_opened(pool, book_id, &state).await?,
             EntityKind::Collection | EntityKind::BookIdentity => {}
         }
         books.push(book_id);
@@ -773,7 +779,18 @@ pub async fn project_book(
     project(pool, folder_root, covers_dir, &affected).await
 }
 
-async fn local_book_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+/// The public numeric id of a durable book.
+async fn durable_record_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?;
+    Ok(id)
+}
+
+/// The local file row a book currently projects onto (metadata, last-opened,
+/// and collection membership still hang off the file until ticket .4).
+async fn local_file_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
     let id: Option<i64> = sqlx::query_scalar(
         "SELECT book_id FROM sync_book_bindings
          WHERE book_uid = ?1 ORDER BY book_id LIMIT 1",
@@ -805,13 +822,13 @@ async fn project_annotation(
     sqlx::query(
         r#"
         INSERT INTO annotations
-            (book_id, sync_uid, kind, cfi, chapter_href, page_number, page_fraction,
+            (book_uid, sync_uid, kind, cfi, chapter_href, page_number, page_fraction,
              text, color, geometry, note, label, created_at, modified_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+        VALUES ((SELECT uid FROM book_records WHERE id = ?1), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                 COALESCE(?13, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         ON CONFLICT(sync_uid) DO UPDATE SET
-            book_id = excluded.book_id,
+            book_uid = excluded.book_uid,
             kind = excluded.kind,
             cfi = excluded.cfi,
             chapter_href = excluded.chapter_href,
@@ -850,19 +867,23 @@ async fn project_progress(
     deleted: bool,
 ) -> Result<(), AppError> {
     if deleted {
-        sqlx::query("DELETE FROM reading_progress WHERE book_id = ?1")
-            .bind(book_id)
-            .execute(pool)
-            .await?;
+        sqlx::query(
+            "DELETE FROM reading_progress \
+             WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+        )
+        .bind(book_id)
+        .execute(pool)
+        .await?;
         return Ok(());
     }
     sqlx::query(
         r#"
         INSERT INTO reading_progress
-            (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset,
+            (book_uid, chapter_href, cfi, character_offset, page_number, scroll_offset,
              progress_percent, locator, progression, locations, engine, schema_version)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-        ON CONFLICT(book_id) DO UPDATE SET
+        VALUES ((SELECT uid FROM book_records WHERE id = ?1),
+                ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(book_uid) DO UPDATE SET
             chapter_href = excluded.chapter_href,
             cfi = excluded.cfi,
             character_offset = excluded.character_offset,
@@ -963,7 +984,7 @@ async fn project_membership(
         .get("present")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let Some(book_id) = local_book_id(pool, book_uid).await? else {
+    let Some(book_id) = local_file_id(pool, book_uid).await? else {
         return Ok(());
     };
     let Some(collection_id) = local_collection_id(pool, collection_uid).await? else {

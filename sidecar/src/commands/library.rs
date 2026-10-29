@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::commands::books::delete_book_and_notify;
+use crate::commands::books::delete_file_row_and_notify;
 use crate::commands::emit_changed_book;
 use crate::domain::{StartupRecovery, StorageStats};
 use crate::error::AppError;
@@ -398,25 +398,23 @@ async fn covered_by_watched_ancestor(pool: &SqlitePool, path: &str) -> Result<bo
         .any(|candidate| candidate != path && library_locations::is_under(path, candidate)))
 }
 
-/// Unwatch one or more folders: the rows leave the watch list, every book
-/// the folders own leaves the catalog, and the filesystem watcher stops
-/// observing those paths. The purge runs the same delete cascade as the
-/// library's own Remove, so progress, collections, and annotations go with
-/// the row, and every removal announces itself through the existing
-/// `library-changed` event so the library view updates without a restart.
-/// Batched `unwatch-progress` events report how many of the promised books
-/// are gone while the purge runs; the artwork cache is swept once at the
-/// end instead of once per book. Files on disk are never touched. A folder
+/// Unwatch one or more folders: the rows leave the watch list, every file row
+/// the folders own loses its library membership, and the filesystem watcher
+/// stops observing those paths. Reading progress and annotations belong to
+/// the durable book (ADR 0014), so they stay and return when the same bytes
+/// are imported again. Every membership change announces itself through the
+/// existing `library-changed` event so the library view updates without a
+/// restart. Batched `unwatch-progress` events report how many of the promised
+/// books are gone while the purge runs; the artwork cache is swept once at
+/// the end instead of once per book. Files on disk are never touched. A folder
 /// whose import is still running is cancelled first and the purge waits for
-/// the scan to stop, so no book can land after the unwatch. Returns how
-/// many folders were actually listed.
+/// the scan to stop, so no book can land after the unwatch. Returns how many
+/// folders were actually listed.
 ///
 /// A folder inside another watched folder is refused (ADR 0010). The folder
-/// above watches the whole subtree recursively, so the books this unwatch
-/// purges would come straight back on the next modify, now as a row of the
-/// folder above with a new id and the progress and annotations gone. The
-/// watch list is kept flat, so the settings view never offers such a path;
-/// this refuses the case for a caller that reaches the command directly.
+/// above watches the whole subtree recursively, and the watch list is kept
+/// flat, so the settings view never offers such a path; this refuses the case
+/// for a caller that reaches the command directly.
 pub async fn unwatch_locations(
     state: &AppState,
     events: &EventEmitter,
@@ -473,14 +471,17 @@ pub async fn unwatch_locations(
         run.wait_finished().await;
     }
 
-    // Which books these folders own has to be settled before any row goes:
-    // the dialog counts each folder with `storage_stats`, and that count is
-    // the promise "these N books are removed". Ownership flips the moment a
-    // row is deleted, so the removal set is read while the rows still stand.
+    // Which file rows these folders own has to be settled before any row
+    // goes: the dialog counts each folder with `storage_stats`, and that
+    // count is the promise "these N books are removed". Ownership flips the
+    // moment a row is deleted, so the removal set is read while the rows
+    // still stand.
     let mut doomed = Vec::new();
     for path in &roots {
         for book in books::books_owned_by(&state.db, path).await? {
-            doomed.push(book.id);
+            if let Some(file_id) = book.file_id {
+                doomed.push((book.id, file_id));
+            }
         }
     }
 
@@ -502,16 +503,17 @@ pub async fn unwatch_locations(
         events.emit("watched-folders-changed", &());
     }
 
-    // The same delete cascade the library's own Remove uses: progress,
-    // collections, and annotations go with the row. Files on disk do not.
-    // The cache scan runs once below, not once per row.
+    // The same membership-only delete the library's own Remove uses: file
+    // rows and memberships go, while the durable book and its progress and
+    // annotations stay. Files on disk do not. The cache scan runs once
+    // below, not once per row.
     let total = doomed.len();
     events.emit("unwatch-progress", &UnwatchProgress { removed: 0, total });
     let mut processed = 0usize;
     let mut last_reported = 0usize;
     let mut last_flush = Instant::now();
-    for book_id in doomed {
-        delete_book_and_notify(state, events, book_id).await?;
+    for (book_id, file_id) in doomed {
+        delete_file_row_and_notify(state, events, file_id, book_id).await?;
         processed += 1;
         if processed % EVENT_BATCH_BOOKS == 0
             || last_flush.elapsed().as_millis() >= EVENT_BATCH_WINDOW_MS

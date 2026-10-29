@@ -3,12 +3,13 @@ use sqlx::SqlitePool;
 use crate::domain::{Annotation, AnnotationKind, AnnotationPatch, NewAnnotation};
 use crate::error::AppError;
 
-const COLUMNS: &str = "id, book_id, kind, cfi, chapter_href, page_number, page_fraction, \
-                       text, color, geometry, label, note, created_at, modified_at";
+const COLUMNS: &str = "a.id, br.id AS book_id, a.kind, a.cfi, a.chapter_href, a.page_number, \
+                       a.page_fraction, a.text, a.color, a.geometry, a.label, a.note, \
+                       a.created_at, a.modified_at";
 
 /// Document order: PDF rows by page (all EPUB rows have `NULL` page numbers
 /// and therefore sort together by spine href, then CFI). `id` breaks ties.
-const ORDER: &str = "ORDER BY page_number, chapter_href, cfi, id";
+const ORDER: &str = "ORDER BY a.page_number, a.chapter_href, a.cfi, a.id";
 
 fn kind_column(kind: AnnotationKind) -> &'static str {
     match kind {
@@ -22,12 +23,11 @@ pub async fn insert_annotation(
     book_id: i64,
     new: &NewAnnotation,
 ) -> Result<Annotation, AppError> {
-    let annotation = sqlx::query_as::<_, Annotation>(
+    let id: i64 = sqlx::query_scalar(
         r#"
-        INSERT INTO annotations (book_id, kind, cfi, chapter_href, page_number, page_fraction, text, color, geometry)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-        RETURNING id, book_id, kind, cfi, chapter_href, page_number, page_fraction,
-                  text, color, geometry, label, note, created_at, modified_at
+        INSERT INTO annotations (book_uid, kind, cfi, chapter_href, page_number, page_fraction, text, color, geometry)
+        VALUES ((SELECT uid FROM book_records WHERE id = ?1), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        RETURNING id
         "#,
     )
     .bind(book_id)
@@ -41,7 +41,7 @@ pub async fn insert_annotation(
     .bind(&new.geometry)
     .fetch_one(pool)
     .await?;
-    Ok(annotation)
+    get_annotation(pool, id).await?.ok_or(AppError::NotFound)
 }
 
 pub async fn list_annotations(
@@ -49,7 +49,9 @@ pub async fn list_annotations(
     book_id: i64,
 ) -> Result<Vec<Annotation>, AppError> {
     let annotations = sqlx::query_as::<_, Annotation>(&format!(
-        "SELECT {COLUMNS} FROM annotations WHERE book_id = ?1 {ORDER}"
+        "SELECT {COLUMNS} FROM annotations a \
+         JOIN book_records br ON br.uid = a.book_uid \
+         WHERE br.id = ?1 {ORDER}"
     ))
     .bind(book_id)
     .fetch_all(pool)
@@ -59,7 +61,9 @@ pub async fn list_annotations(
 
 pub async fn get_annotation(pool: &SqlitePool, id: i64) -> Result<Option<Annotation>, AppError> {
     let annotation = sqlx::query_as::<_, Annotation>(&format!(
-        "SELECT {COLUMNS} FROM annotations WHERE id = ?1"
+        "SELECT {COLUMNS} FROM annotations a \
+         JOIN book_records br ON br.uid = a.book_uid \
+         WHERE a.id = ?1"
     ))
     .bind(id)
     .fetch_optional(pool)
@@ -75,7 +79,7 @@ pub async fn update_annotation(
     id: i64,
     patch: &AnnotationPatch,
 ) -> Result<Option<Annotation>, AppError> {
-    let annotation = sqlx::query_as::<_, Annotation>(
+    let updated: Option<i64> = sqlx::query_scalar(
         r#"
         UPDATE annotations SET
             color = COALESCE(?2, color),
@@ -83,8 +87,7 @@ pub async fn update_annotation(
             label = CASE WHEN ?4 IS NULL THEN label ELSE NULLIF(?4, '') END,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
-        RETURNING id, book_id, kind, cfi, chapter_href, page_number, page_fraction,
-                  text, color, geometry, label, note, created_at, modified_at
+        RETURNING id
         "#,
     )
     .bind(id)
@@ -93,7 +96,10 @@ pub async fn update_annotation(
     .bind(&patch.label)
     .fetch_optional(pool)
     .await?;
-    Ok(annotation)
+    match updated {
+        Some(id) => get_annotation(pool, id).await,
+        None => Ok(None),
+    }
 }
 
 pub async fn delete_annotation(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
@@ -297,7 +303,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn removing_book_cascades_to_annotations() {
+    async fn removing_the_last_file_keeps_annotations() {
         let (tmp, pool, book_id) = pool_with_book().await;
         insert_annotation(&pool, book_id, &epub_bookmark("epubcfi(/6/4)"))
             .await
@@ -306,7 +312,8 @@ mod tests {
         crate::repository::books::delete_book(&pool, book_id)
             .await
             .unwrap();
-        assert!(list_annotations(&pool, book_id).await.unwrap().is_empty());
+        let kept = list_annotations(&pool, book_id).await.unwrap();
+        assert_eq!(kept.len(), 1, "annotations belong to the durable book");
         drop(tmp);
     }
 }

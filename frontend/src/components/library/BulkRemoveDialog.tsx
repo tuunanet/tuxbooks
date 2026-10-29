@@ -17,8 +17,9 @@ interface BulkRemoveDialogProps {
 
 /**
  * The single confirmation in front of a bulk Remove: it names the count and
- * repeats the local-first promise — library entries go, the files on disk
- * stay where they are. Cancel (or Escape) closes it and does nothing else.
+ * repeats the local-first promise — library entries go, reading data is
+ * kept, and the files on disk stay where they are. Cancel (or Escape) closes
+ * it and does nothing else.
  */
 export function BulkRemoveDialog({ open, count, onConfirm, onCancel }: BulkRemoveDialogProps) {
   return (
@@ -32,7 +33,7 @@ export function BulkRemoveDialog({ open, count, onConfirm, onCancel }: BulkRemov
         <DialogHeader>
           <DialogTitle>{`Remove ${count} books from the library?`}</DialogTitle>
           <DialogDescription>
-            {`The ${count} selected books are removed from your library. Your files on disk stay untouched.`}
+            {`The ${count} selected books are removed from your library. Your reading progress and annotations are kept. Your files on disk stay untouched.`}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

@@ -192,7 +192,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("unwatch-remove-books")).toHaveCount(0);
     await expect(dialog).toContainText(
-      "The 1 book in this folder is removed from your library, along with its reading progress and annotations.",
+      "The 1 book in this folder leaves your library. Its reading progress and annotations are kept.",
     );
     await expect(dialog).toContainText("Your files on disk stay untouched.");
     await page.getByTestId("unwatch-confirm").click();

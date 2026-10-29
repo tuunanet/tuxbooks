@@ -94,6 +94,34 @@ async fn process_book(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
     }
 }
 
+/// Finish the hash pass for the file rows a destructive action is about to
+/// remove (ADR 0014 D8). A pending file is hashed now; a file that cannot be
+/// read is marked as needing a relink instead of blocking the action. Already
+/// hashed rows are untouched.
+pub async fn wait_for_books(pool: &SqlitePool, file_ids: &[i64]) -> Result<(), AppError> {
+    for file_id in file_ids {
+        let row: Option<(String, bool)> =
+            sqlx::query_as("SELECT hash_state, available FROM books WHERE id = ?1")
+                .bind(file_id)
+                .fetch_optional(pool)
+                .await?;
+        let Some((state, available)) = row else {
+            continue;
+        };
+        if state != "pending" {
+            continue;
+        }
+        if available {
+            process_book(pool, *file_id).await?;
+        } else {
+            // There are no bytes to hash. Say so instead of silently leaving an
+            // unknown hash behind a row that is about to disappear.
+            mark_failed(pool, *file_id).await?;
+        }
+    }
+    Ok(())
+}
+
 /// A failed hash is a visible issue, not a stuck queue entry: the book keeps
 /// its record and the destructive paths in the next slice may proceed.
 async fn mark_failed(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {

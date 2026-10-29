@@ -33,12 +33,12 @@ function titleFor(folders: FolderRow[]): string {
     : `Unwatch ${folders[0]?.path ?? ""}?`;
 }
 
-/** The loss statement: what this unwatch takes, which is the whole selection. */
+/** The statement of what this unwatch changes, which is the whole selection. */
 function bodyFor(folders: FolderRow[], books: number): string {
   const scope = folders.length > 1 ? "these folders" : "this folder";
   if (books === 0) return `No books live in ${scope}.`;
   const one = books === 1;
-  return `The ${books} ${one ? "book" : "books"} in ${scope} ${one ? "is" : "are"} removed from your library, along with ${one ? "its" : "their"} reading progress and annotations.`;
+  return `The ${books} ${one ? "book" : "books"} in ${scope} ${one ? "leaves" : "leave"} your library. ${one ? "Its" : "Their"} reading progress and annotations are kept.`;
 }
 
 function confirmLabelFor(folders: FolderRow[]): string {

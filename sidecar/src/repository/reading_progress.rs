@@ -31,10 +31,11 @@ pub async fn upsert_progress(
     sqlx::query(
         r#"
         INSERT INTO reading_progress
-            (book_id, chapter_href, cfi, character_offset, page_number, scroll_offset,
+            (book_uid, chapter_href, cfi, character_offset, page_number, scroll_offset,
              progress_percent, locator, progression, locations, engine, schema_version)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-        ON CONFLICT(book_id) DO UPDATE SET
+        VALUES ((SELECT uid FROM book_records WHERE id = ?1),
+                ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(book_uid) DO UPDATE SET
             chapter_href = coalesce(excluded.chapter_href, reading_progress.chapter_href),
             cfi = coalesce(excluded.cfi, reading_progress.cfi),
             character_offset = coalesce(excluded.character_offset, reading_progress.character_offset),
@@ -71,9 +72,12 @@ pub async fn get_progress(
     book_id: i64,
 ) -> Result<Option<ReadingProgress>, AppError> {
     let progress = sqlx::query_as::<_, ReadingProgress>(
-        "SELECT book_id, chapter_href, cfi, character_offset, page_number, scroll_offset, \
-                progress_percent, locator, progression, locations, engine, schema_version, updated_at \
-         FROM reading_progress WHERE book_id = ?1",
+        "SELECT br.id AS book_id, rp.chapter_href, rp.cfi, rp.character_offset, \
+                rp.page_number, rp.scroll_offset, rp.progress_percent, rp.locator, \
+                rp.progression, rp.locations, rp.engine, rp.schema_version, rp.updated_at \
+         FROM reading_progress rp \
+         JOIN book_records br ON br.uid = rp.book_uid \
+         WHERE br.id = ?1",
     )
     .bind(book_id)
     .fetch_optional(pool)
@@ -89,9 +93,9 @@ pub async fn get_progress(
 pub async fn mark_finished(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
     sqlx::query(
         r#"
-        INSERT INTO reading_progress (book_id, progress_percent)
-        VALUES (?1, 100)
-        ON CONFLICT(book_id) DO UPDATE SET
+        INSERT INTO reading_progress (book_uid, progress_percent)
+        VALUES ((SELECT uid FROM book_records WHERE id = ?1), 100)
+        ON CONFLICT(book_uid) DO UPDATE SET
             progress_percent = 100,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         "#,

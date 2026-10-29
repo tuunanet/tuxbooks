@@ -149,17 +149,24 @@ async fn capture_annotation(
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
-    if !book_exists(pool, book_id).await? {
+    let Some(book_uid) = durable_uid(pool, book_id).await? else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
-    }
-    let Some(book_uid) = binding_for_book(pool, book_id).await? else {
+    };
+    // Publish state only under a bound (content-derived) identity. The sync
+    // engine's identity sweep hashes the row first; capturing under a local
+    // uuid would make two devices disagree about the same bytes.
+    let Some(book_uid) = bound_uid(pool, &book_uid).await? else {
         return Ok(Captured::PendingIdentity);
     };
+    let annotation_id = row
+        .entity_key
+        .parse::<i64>()
+        .map_err(|_| AppError::InvalidInput("bad annotation dirty key".into()))?;
     let Some(uid) = resolve_local_uid(
         pool,
         "annotations",
-        book_id,
+        annotation_id,
         snapshot.get("sync_uid").and_then(Value::as_str),
         row.op == "delete",
     )
@@ -233,16 +240,35 @@ async fn capture_book_state(
     row: &DirtyRow,
     kind: EntityKind,
 ) -> Result<Captured, AppError> {
-    let local_id = row
-        .entity_key
-        .parse::<i64>()
-        .map_err(|_| AppError::InvalidInput("bad book-state dirty key".into()))?;
-    if !book_exists(pool, local_id).await? {
-        clear_row(pool, row).await?;
-        return Ok(Captured::Skipped);
-    }
-    let Some(book_uid) = binding_for_book(pool, local_id).await? else {
-        return Ok(Captured::PendingIdentity);
+    // Progress is keyed by the durable book uid; opened and metadata still
+    // hang off the file row until ticket .4.
+    let book_uid = if kind == EntityKind::Progress {
+        let uid = row.entity_key.clone();
+        let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM book_records WHERE uid = ?1")
+            .bind(&uid)
+            .fetch_optional(pool)
+            .await?;
+        if exists.is_none() {
+            clear_row(pool, row).await?;
+            return Ok(Captured::Skipped);
+        }
+        let Some(book_uid) = bound_uid(pool, &uid).await? else {
+            return Ok(Captured::PendingIdentity);
+        };
+        book_uid
+    } else {
+        let local_id = row
+            .entity_key
+            .parse::<i64>()
+            .map_err(|_| AppError::InvalidInput("bad book-state dirty key".into()))?;
+        if !book_exists(pool, local_id).await? {
+            clear_row(pool, row).await?;
+            return Ok(Captured::Skipped);
+        }
+        let Some(book_uid) = binding_for_book(pool, local_id).await? else {
+            return Ok(Captured::PendingIdentity);
+        };
+        book_uid
     };
     let Some(mut snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
@@ -515,6 +541,33 @@ async fn book_exists(pool: &SqlitePool, book_id: i64) -> Result<bool, AppError> 
     Ok(exists.is_some())
 }
 
+/// The canonical published identity behind a durable uid, once a content hash
+/// has bound it. `None` means the identity sweep still owes this book a hash.
+async fn bound_uid(pool: &SqlitePool, uid: &str) -> Result<Option<String>, AppError> {
+    let bound: Option<String> =
+        sqlx::query_scalar("SELECT book_uid FROM sync_book_bindings WHERE book_uid = ?1 LIMIT 1")
+            .bind(uid)
+            .fetch_optional(pool)
+            .await?;
+    match bound {
+        Some(uid) => Ok(Some(canonical_book_uid(pool, &uid).await?)),
+        None => Ok(None),
+    }
+}
+
+/// The canonical durable uid behind a public numeric book id, when the book
+/// still has a durable record.
+async fn durable_uid(pool: &SqlitePool, book_id: i64) -> Result<Option<String>, AppError> {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    match uid {
+        Some(uid) => Ok(Some(canonical_book_uid(pool, &uid).await?)),
+        None => Ok(None),
+    }
+}
+
 async fn collection_exists(pool: &SqlitePool, collection_id: i64) -> Result<bool, AppError> {
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM collections WHERE id = ?1")
         .bind(collection_id)
@@ -523,6 +576,7 @@ async fn collection_exists(pool: &SqlitePool, collection_id: i64) -> Result<bool
     Ok(exists.is_some())
 }
 
+/// The durable uid published for a file row through its content-hash binding.
 async fn binding_for_book(pool: &SqlitePool, book_id: i64) -> Result<Option<String>, AppError> {
     let uid: Option<String> =
         sqlx::query_scalar("SELECT book_uid FROM sync_book_bindings WHERE book_id = ?1")

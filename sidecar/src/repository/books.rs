@@ -6,23 +6,65 @@ use crate::domain::SearchHit;
 use crate::error::AppError;
 use crate::repository::library_locations::{list_locations, location_index, owning_location};
 
-/// Effective book columns for SELECT queries. The bibliographic fields are
-/// the effective (override-over-source) values; `series_name` resolves the
-/// normalized `series` table so readers never need a second query, and the
-/// `reading_progress` join exposes the coarse reading position that backs
-/// the "In Progress" / "Finished" library sections (milestone 10).
-const BOOK_COLUMNS: &str = "b.id, b.book_uid, b.path, b.title, b.subtitle, b.author, b.publisher, \
-     b.language, b.isbn, b.description, b.cover_path, b.added_at, b.modified_at, \
-     b.last_opened_at, b.available, b.file_size, b.file_mtime, b.publication_date, \
-     b.series_id, b.series_index, s.name AS series_name, \
-     rp.progress_percent AS progress_percent, rp.updated_at AS progress_updated_at";
-const BOOK_FROM: &str = " FROM books b \
+/// Effective book columns for SELECT queries. The public `id` is the durable
+/// book record; `file_id` names the active file row internally (never
+/// serialized). The bibliographic fields come from that file row, because
+/// effective metadata still lives there until ticket .4; `series_name`
+/// resolves the normalized `series` table, and the `reading_progress` join
+/// exposes the coarse reading position that backs the "In Progress" /
+/// "Finished" library sections (milestone 10).
+const BOOK_COLUMNS: &str = "br.id, br.uid AS book_uid, bf.id AS file_id, bf.path, bf.title, \
+     bf.subtitle, bf.author, bf.publisher, bf.language, bf.isbn, bf.description, \
+     bf.cover_path, bf.added_at, bf.modified_at, br.last_opened_at, bf.available, \
+     bf.file_size, bf.file_mtime, bf.publication_date, bf.series_id, bf.series_index, \
+     s.name AS series_name, rp.progress_percent AS progress_percent, \
+     rp.updated_at AS progress_updated_at";
+/// Per-file-row variant of [`BOOK_COLUMNS`] for callers that need every
+/// location (reconciliation, unwatch, move recovery), not the collapsed
+/// library entry. `id` is still the durable book.
+const FILE_ROW_COLUMNS: &str = "br.id, br.uid AS book_uid, b.id AS file_id, b.path, b.title, \
+     b.subtitle, b.author, b.publisher, b.language, b.isbn, b.description, \
+     b.cover_path, b.added_at, b.modified_at, br.last_opened_at, b.available, \
+     b.file_size, b.file_mtime, b.publication_date, b.series_id, b.series_index, \
+     s.name AS series_name, rp.progress_percent AS progress_percent, \
+     rp.updated_at AS progress_updated_at";
+const FILE_ROW_FROM: &str = " FROM books b \
+     JOIN book_records br ON br.uid = b.book_uid \
      LEFT JOIN series s ON s.id = b.series_id \
-     LEFT JOIN reading_progress rp ON rp.book_id = b.id";
+     LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
+/// The active file of a book is the available copy with the lowest row id, so
+/// a duplicate copy that disappeared never hides the one that is still there.
+const BOOK_FROM: &str = " FROM book_records br \
+     JOIN books bf ON bf.id = ( \
+         SELECT b2.id FROM books b2 WHERE b2.book_uid = br.uid \
+         ORDER BY b2.available DESC, b2.id LIMIT 1 \
+     ) \
+     LEFT JOIN series s ON s.id = bf.series_id \
+     LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
 
-/// Insert a new book. Errors if `path` already exists — use [`upsert_book`] for
-/// scan imports.
+/// A file row just persisted, with both its internal id and the durable book
+/// it belongs to.
+#[derive(Debug, Clone, Copy)]
+pub struct UpsertedBook {
+    /// Public numeric id (`book_records.id`).
+    pub id: i64,
+    /// Internal file row id (`books.id`).
+    pub file_id: i64,
+    pub inserted: bool,
+}
+
+/// Insert a new file row and return its durable book id. Errors if `path`
+/// already exists — use [`upsert_book`] for scan imports.
 pub async fn insert_book(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppError> {
+    let file_id = insert_file_row(pool, book).await?;
+    durable_id_for_file(pool, file_id)
+        .await?
+        .ok_or_else(|| AppError::InvalidInput("new book has no durable record".into()))
+}
+
+/// Insert a new file row and return its internal row id. The 0017 insert
+/// trigger creates the durable book record in the same statement.
+async fn insert_file_row(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppError> {
     let id: i64 = sqlx::query_scalar(
         r#"
         INSERT INTO books (book_uid, path, title, subtitle, author, publisher, language, isbn, description, cover_path, file_size, file_mtime)
@@ -46,8 +88,9 @@ pub async fn insert_book(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppEr
     Ok(id)
 }
 
-/// Update an existing book (matched by path). Returns false if no row matched.
-/// The file was just seen on disk, so the row also becomes available again.
+/// Update an existing file row (matched by path). Returns false if no row
+/// matched. The file was just seen on disk, so the row also becomes available
+/// again.
 pub async fn update_book_by_path(pool: &SqlitePool, book: &NewBook) -> Result<bool, AppError> {
     let result = sqlx::query(
         r#"
@@ -79,19 +122,40 @@ pub async fn update_book_by_path(pool: &SqlitePool, book: &NewBook) -> Result<bo
     Ok(result.rows_affected() > 0)
 }
 
-/// Insert the book or update it if `path` is already present.
-/// Returns the row id and whether it was newly inserted.
+/// Insert the file row or update it if `path` is already present. Returns the
+/// durable book id and whether it was newly inserted.
 pub async fn upsert_book(pool: &SqlitePool, book: &NewBook) -> Result<(i64, bool), AppError> {
-    if let Some(id) = find_id_by_path(pool, &book.path).await? {
+    let upserted = upsert_file(pool, book).await?;
+    Ok((upserted.id, upserted.inserted))
+}
+
+/// The importer's form of [`upsert_book`]: it also needs the file row id to
+/// record source metadata against the file that was just read.
+pub async fn upsert_file(pool: &SqlitePool, book: &NewBook) -> Result<UpsertedBook, AppError> {
+    if let Some(file_id) = find_file_id_by_path(pool, &book.path).await? {
         update_book_by_path(pool, book).await?;
-        Ok((id, false))
+        let id = durable_id_for_file(pool, file_id)
+            .await?
+            .ok_or_else(|| AppError::InvalidInput("book row has no durable record".into()))?;
+        Ok(UpsertedBook {
+            id,
+            file_id,
+            inserted: false,
+        })
     } else {
-        let id = insert_book(pool, book).await?;
-        Ok((id, true))
+        let file_id = insert_file_row(pool, book).await?;
+        let id = durable_id_for_file(pool, file_id)
+            .await?
+            .ok_or_else(|| AppError::InvalidInput("new book has no durable record".into()))?;
+        Ok(UpsertedBook {
+            id,
+            file_id,
+            inserted: true,
+        })
     }
 }
 
-pub async fn find_id_by_path(pool: &SqlitePool, path: &str) -> Result<Option<i64>, AppError> {
+pub async fn find_file_id_by_path(pool: &SqlitePool, path: &str) -> Result<Option<i64>, AppError> {
     let id: Option<i64> = sqlx::query_scalar("SELECT id FROM books WHERE path = ?1")
         .bind(path)
         .fetch_optional(pool)
@@ -99,18 +163,48 @@ pub async fn find_id_by_path(pool: &SqlitePool, path: &str) -> Result<Option<i64
     Ok(id)
 }
 
+/// The durable book id behind a file row.
+pub async fn durable_id_for_file(pool: &SqlitePool, file_id: i64) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar(
+        "SELECT br.id FROM books b JOIN book_records br ON br.uid = b.book_uid WHERE b.id = ?1",
+    )
+    .bind(file_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(id)
+}
+
+/// The file row the reader should use for a durable book: an available copy
+/// first, then the lowest id. `None` when the book currently has no file
+/// (Reading history, which this slice keeps for ticket .5).
+pub async fn active_file_id(pool: &SqlitePool, durable_id: i64) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar(
+        "SELECT b.id FROM books b \
+         JOIN book_records br ON br.uid = b.book_uid \
+         WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1",
+    )
+    .bind(durable_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(id)
+}
+
 pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Book>, AppError> {
-    let book = sqlx::query_as::<_, Book>(&format!(
-        "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.path = ?1"
-    ))
+    let id: Option<i64> = sqlx::query_scalar(
+        "SELECT br.id FROM books b JOIN book_records br ON br.uid = b.book_uid WHERE b.path = ?1",
+    )
     .bind(path)
     .fetch_optional(pool)
     .await?;
-    Ok(book)
+    match id {
+        Some(id) => get_book(pool, id).await,
+        None => Ok(None),
+    }
 }
 
+/// Library entries: one per durable book that currently has a file.
 pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT book_uid) FROM books")
         .fetch_one(pool)
         .await?;
     Ok(count)
@@ -118,7 +212,7 @@ pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
 
 pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
-        "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY b.title COLLATE NOCASE, b.id"
+        "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY bf.title COLLATE NOCASE, br.id"
     ))
     .fetch_all(pool)
     .await?;
@@ -146,6 +240,20 @@ pub async fn list_file_snapshots(pool: &SqlitePool) -> Result<Vec<BookFileSnapsh
     Ok(snapshots)
 }
 
+/// The file snapshot for one path, used by the watcher's change check.
+pub async fn file_snapshot_by_path(
+    pool: &SqlitePool,
+    path: &str,
+) -> Result<Option<BookFileSnapshot>, AppError> {
+    let snapshot = sqlx::query_as::<_, BookFileSnapshot>(
+        "SELECT path, available, file_size, file_mtime, cover_path FROM books WHERE path = ?1",
+    )
+    .bind(path)
+    .fetch_optional(pool)
+    .await?;
+    Ok(snapshot)
+}
+
 /// Every referenced cover path — the live set for artwork-cache sweeps.
 pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
     let paths: Vec<String> =
@@ -156,25 +264,66 @@ pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError
 }
 
 pub async fn get_book(pool: &SqlitePool, id: i64) -> Result<Option<Book>, AppError> {
-    let book =
-        sqlx::query_as::<_, Book>(&format!("SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.id = ?1"))
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
+    let book = sqlx::query_as::<_, Book>(&format!(
+        "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE br.id = ?1"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
     Ok(book)
 }
 
+/// Read a durable book through one of its file rows (internal callers that
+/// still hold a file-row id).
+pub async fn get_book_by_file_id(
+    pool: &SqlitePool,
+    file_id: i64,
+) -> Result<Option<Book>, AppError> {
+    match durable_id_for_file(pool, file_id).await? {
+        Some(id) => get_book(pool, id).await,
+        None => Ok(None),
+    }
+}
+
+/// End a book's library membership: delete every file row that points at it.
+/// The durable book record, its reading progress, and its annotations stay.
 pub async fn delete_book(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
+    let result = sqlx::query(
+        "DELETE FROM books WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Delete one file row (one copy inside a folder being unwatched).
+pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, AppError> {
     let result = sqlx::query("DELETE FROM books WHERE id = ?1")
-        .bind(id)
+        .bind(file_id)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
 }
 
+/// Every file row of a durable book, oldest first.
+pub async fn file_ids_for_book(pool: &SqlitePool, id: i64) -> Result<Vec<i64>, AppError> {
+    let ids = sqlx::query_scalar(
+        "SELECT b.id FROM books b \
+         JOIN book_records br ON br.uid = b.book_uid \
+         WHERE br.id = ?1 ORDER BY b.id",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    Ok(ids)
+}
+
 pub async fn mark_opened(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
     sqlx::query(
-        "UPDATE books SET last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+        "UPDATE books SET last_opened_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = (SELECT b.id FROM books b JOIN book_records br ON br.uid = b.book_uid \
+                     WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1)",
     )
     .bind(id)
     .execute(pool)
@@ -192,12 +341,12 @@ pub enum RelinkOutcome {
     PathConflict,
 }
 
-/// Replace a book's row content by id (used for explicit reconnection): new
-/// path, fresh parsed metadata, file snapshot, and availability. The row id
-/// is unchanged, so reading progress and collections survive.
+/// Replace one file row's content (used for explicit reconnection): new path,
+/// fresh parsed metadata, file snapshot, and availability. The durable book,
+/// and therefore reading progress and annotations, is unchanged.
 pub async fn update_book_by_id(
     pool: &SqlitePool,
-    id: i64,
+    file_id: i64,
     book: &NewBook,
 ) -> Result<bool, AppError> {
     let result = sqlx::query(
@@ -211,7 +360,7 @@ pub async fn update_book_by_id(
         WHERE id = ?1
         "#,
     )
-    .bind(id)
+    .bind(file_id)
     .bind(&book.path)
     .bind(&book.title)
     .bind(&book.subtitle)
@@ -231,17 +380,17 @@ pub async fn update_book_by_id(
 /// Mark that the stored file snapshot may not describe the bytes on disk.
 /// The sync identity sweep treats this as a forced rehash, so a crash between
 /// a rewrite and the snapshot update cannot strand the book identity.
-pub async fn mark_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
+pub async fn mark_rehash_pending(pool: &SqlitePool, file_id: i64) -> Result<(), AppError> {
     sqlx::query("UPDATE books SET rehash_pending = 1, hash_state = 'pending' WHERE id = ?1")
-        .bind(id)
+        .bind(file_id)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-pub async fn clear_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
+pub async fn clear_rehash_pending(pool: &SqlitePool, file_id: i64) -> Result<(), AppError> {
     sqlx::query("UPDATE books SET rehash_pending = 0 WHERE id = ?1")
-        .bind(id)
+        .bind(file_id)
         .execute(pool)
         .await?;
     Ok(())
@@ -252,14 +401,14 @@ pub async fn clear_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppE
 /// when to rehash the file.
 pub async fn update_file_snapshot(
     pool: &SqlitePool,
-    id: i64,
+    file_id: i64,
     file_size: i64,
     file_mtime: i64,
 ) -> Result<(), AppError> {
     sqlx::query(
         "UPDATE books SET file_size = ?2, file_mtime = ?3, hash_state = 'pending' WHERE id = ?1",
     )
-    .bind(id)
+    .bind(file_id)
     .bind(file_size)
     .bind(file_mtime)
     .execute(pool)
@@ -267,12 +416,12 @@ pub async fn update_file_snapshot(
     Ok(())
 }
 
-/// Point an existing book row at a new filesystem path (rename/move within a
+/// Point an existing file row at a new filesystem path (rename/move within a
 /// watched location, or explicit reconnection), updating its file snapshot.
-/// The row id is unchanged, so reading progress and collections survive.
+/// The durable book is unchanged, so reading progress and annotations survive.
 pub async fn relink_book(
     pool: &SqlitePool,
-    id: i64,
+    file_id: i64,
     new_path: &str,
     file_size: i64,
     file_mtime: i64,
@@ -286,7 +435,7 @@ pub async fn relink_book(
         WHERE id = ?1
         "#,
     )
-    .bind(id)
+    .bind(file_id)
     .bind(new_path)
     .bind(file_size)
     .bind(file_mtime)
@@ -309,22 +458,25 @@ pub async fn relink_book(
     Ok(RelinkOutcome::Relinked)
 }
 
-/// Mark books unavailable/available for an exact path or every book under a
-/// directory prefix (`path` itself or `path/...`). Returns the affected rows
-/// with their fresh availability so callers can notify the UI. Only rows whose
-/// availability actually changes are returned.
+/// Mark books unavailable/available for an exact path or every file row under
+/// a directory prefix (`path` itself or `path/...`). Returns the durable books
+/// whose active file changed, with their fresh availability so callers can
+/// notify the UI.
 pub async fn set_availability_prefix(
     pool: &SqlitePool,
     path_prefix: &str,
     available: bool,
 ) -> Result<Vec<Book>, AppError> {
-    let mut affected: Vec<Book> = sqlx::query_as::<_, Book>(&format!(
+    let mut affected: Vec<i64> = sqlx::query_scalar(
         r#"
-        SELECT {BOOK_COLUMNS}{BOOK_FROM}
+        SELECT br.id
+        FROM books b
+        JOIN book_records br ON br.uid = b.book_uid
         WHERE b.available != ?2
           AND (b.path = ?1 OR substr(b.path, 1, length(?1) + 1) = ?1 || '/')
-        "#
-    ))
+        GROUP BY br.id
+        "#,
+    )
     .bind(path_prefix)
     .bind(available)
     .fetch_all(pool)
@@ -343,19 +495,24 @@ pub async fn set_availability_prefix(
         .execute(pool)
         .await?;
     }
-    // Reflect the new state so callers can emit accurate change events.
-    for book in &mut affected {
-        book.available = available;
+    // Re-read through the active-file rule so a disappeared duplicate does not
+    // make the book look unavailable when another copy is still on disk.
+    let mut books = Vec::with_capacity(affected.len());
+    for id in affected.drain(..) {
+        if let Some(book) = get_book(pool, id).await? {
+            books.push(book);
+        }
     }
-    Ok(affected)
+    Ok(books)
 }
 
-/// All books whose path is `prefix` itself or lies under `prefix/`, used by
-/// startup reconciliation to diff one watched location against the database.
+/// File rows whose path is `prefix` itself or lies under `prefix/`. One row
+/// per file copy: startup reconciliation and unwatch need the locations, not
+/// the collapsed library entry. `file_id` names the row.
 pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
         r#"
-        SELECT {BOOK_COLUMNS}{BOOK_FROM}
+        SELECT {FILE_ROW_COLUMNS}{FILE_ROW_FROM}
         WHERE b.path = ?1 OR substr(b.path, 1, length(?1) + 1) = ?1 || '/'
         ORDER BY b.path
         "#
@@ -366,7 +523,7 @@ pub async fn list_books_in_prefix(pool: &SqlitePool, prefix: &str) -> Result<Vec
     Ok(books)
 }
 
-/// All books this location owns, under the one membership rule the library
+/// All file rows this location owns, under the one membership rule the library
 /// uses. Books a deeper watched folder claims are left out, which is exactly
 /// what `storage_stats` counts under this location, so a caller that showed
 /// a book count and then acts on it acts on the same set.
@@ -380,7 +537,7 @@ pub async fn books_owned_by(pool: &SqlitePool, location: &str) -> Result<Vec<Boo
     Ok(books)
 }
 
-/// All books with the given file size — move-recovery candidates for the
+/// All file rows with the given file size — move-recovery candidates for the
 /// watcher (a book whose file vanished plus a new file with the same name
 /// and size is almost certainly the same book that moved).
 pub async fn find_books_with_size(
@@ -388,7 +545,7 @@ pub async fn find_books_with_size(
     file_size: i64,
 ) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
-        "SELECT {BOOK_COLUMNS}{BOOK_FROM} WHERE b.file_size = ?1"
+        "SELECT {FILE_ROW_COLUMNS}{FILE_ROW_FROM} WHERE b.file_size = ?1"
     ))
     .bind(file_size)
     .fetch_all(pool)
@@ -396,17 +553,18 @@ pub async fn find_books_with_size(
     Ok(books)
 }
 
-/// FTS5 MATCH search over `books_fts`, joined back to `books` for identity.
-/// `match_query` must already be valid FTS5 MATCH syntax — the search
-/// service sanitizes user input into it. Snippets come from whichever
+/// FTS5 MATCH search over `books_fts`, joined back to the durable book for
+/// identity. `match_query` must already be valid FTS5 MATCH syntax — the
+/// search service sanitizes user input into it. Snippets come from whichever
 /// indexed column matched best (column index -1 = automatic).
 pub async fn search_fts(pool: &SqlitePool, match_query: &str) -> Result<Vec<SearchHit>, AppError> {
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"
-        SELECT b.id AS book_id, b.title, b.author,
+        SELECT br.id AS book_id, b.title, b.author,
                snippet(books_fts, -1, '<em>', '</em>', '…', 12) AS snippet
         FROM books_fts
         JOIN books b ON b.id = books_fts.rowid
+        JOIN book_records br ON br.uid = b.book_uid
         WHERE books_fts MATCH ?1
         ORDER BY rank
         LIMIT 50
@@ -457,6 +615,8 @@ mod tests {
         assert_eq!(book.title, "Alpha");
         assert_eq!(book.subtitle.as_deref(), Some("A Subtitle"));
         assert_eq!(book.path, "/a.epub");
+        assert_eq!(book.id, id);
+        assert!(book.file_id.is_some());
     }
 
     #[tokio::test]
@@ -512,7 +672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_cascades_to_reading_progress() {
+    async fn removing_the_last_file_keeps_reading_progress() {
         let tmp = tempfile::tempdir().unwrap();
         let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
             .await
@@ -542,10 +702,9 @@ mod tests {
         let progress = crate::repository::reading_progress::get_progress(&pool, id)
             .await
             .unwrap();
-        assert!(
-            progress.is_none(),
-            "reading_progress row must be cascaded away"
-        );
+        let progress = progress.expect("reading progress must survive the last file");
+        assert_eq!(progress.progress_percent, Some(12.5));
+        assert!(get_book(&pool, id).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -580,6 +739,10 @@ mod tests {
         assert!(
             json.get("loose").is_none(),
             "the loose flag must not appear in a book payload: {json}"
+        );
+        assert!(
+            json.get("fileId").is_none(),
+            "the internal file row must never cross the IPC boundary: {json}"
         );
     }
 
@@ -709,6 +872,7 @@ mod tests {
         let id = insert_book(&pool, &sample("/old/a.epub", "Alpha"))
             .await
             .unwrap();
+        let file_id = active_file_id(&pool, id).await.unwrap().unwrap();
         crate::repository::reading_progress::upsert_progress(
             &pool,
             id,
@@ -725,7 +889,7 @@ mod tests {
         .await
         .unwrap();
 
-        let outcome = relink_book(&pool, id, "/new/renamed.epub", 200, 1_800_000_000)
+        let outcome = relink_book(&pool, file_id, "/new/renamed.epub", 200, 1_800_000_000)
             .await
             .unwrap();
         assert_eq!(outcome, RelinkOutcome::Relinked);
@@ -752,11 +916,12 @@ mod tests {
         let id = insert_book(&pool, &sample("/a.epub", "Alpha"))
             .await
             .unwrap();
+        let file_id = active_file_id(&pool, id).await.unwrap().unwrap();
         insert_book(&pool, &sample("/b.epub", "Beta"))
             .await
             .unwrap();
 
-        let outcome = relink_book(&pool, id, "/b.epub", 200, 1_800_000_000)
+        let outcome = relink_book(&pool, file_id, "/b.epub", 200, 1_800_000_000)
             .await
             .unwrap();
         assert_eq!(outcome, RelinkOutcome::PathConflict);
