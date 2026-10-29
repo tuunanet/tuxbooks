@@ -377,32 +377,6 @@ pub async fn unwatch_locations(
         roots.push(path.to_string());
     }
 
-    // A scan registers its folder before importing, so the folder is visible
-    // in Settings while rows are still landing. Cancel any matching scan and
-    // wait for it to stop before collecting the purge set: a row written
-    // after the purge would be orphaned all over again.
-    let runs: Vec<crate::ImportRun> = {
-        let importing = state.importing.lock().expect("importing mutex poisoned");
-        importing
-            .iter()
-            .filter(|(busy, _)| {
-                let busy = busy.as_str();
-                roots.iter().any(|root| {
-                    busy == root.as_str()
-                        || library_locations::is_under(busy, root)
-                        || library_locations::is_under(root, busy)
-                })
-            })
-            .map(|(_, run)| run.clone())
-            .collect()
-    };
-    for run in &runs {
-        run.cancel();
-    }
-    for run in &runs {
-        run.wait_finished().await;
-    }
-
     // Read once, while every row still stands, so the refusal reasons about
     // the watch list the user is looking at.
     let registered = library_locations::list_locations(&state.db).await?;
@@ -425,6 +399,33 @@ pub async fn unwatch_locations(
                 )));
             }
         }
+    }
+
+    // A scan registers its folder before importing, so the folder is visible
+    // in Settings while rows are still landing. Cancel any matching scan and
+    // wait for it to stop before collecting the purge set: a row written
+    // after the purge would be orphaned all over again. This runs after the
+    // refusals above so a rejected request cannot cancel an unrelated scan.
+    let runs: Vec<crate::ImportRun> = {
+        let importing = state.importing.lock().expect("importing mutex poisoned");
+        importing
+            .iter()
+            .filter(|(busy, _)| {
+                let busy = busy.as_str();
+                roots.iter().any(|root| {
+                    busy == root.as_str()
+                        || library_locations::is_under(busy, root)
+                        || library_locations::is_under(root, busy)
+                })
+            })
+            .map(|(_, run)| run.clone())
+            .collect()
+    };
+    for run in &runs {
+        run.cancel();
+    }
+    for run in &runs {
+        run.wait_finished().await;
     }
 
     // Which books these folders own has to be settled before any row goes:
