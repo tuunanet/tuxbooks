@@ -7,6 +7,10 @@ pub enum AppError {
     Database(#[from] sqlx::Error),
     #[error("database migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
+    /// A startup step that must fail closed (a pre-migration backup or the
+    /// upgrade itself). The database is left in place; never quarantine it.
+    #[error("startup error: {0}")]
+    Startup(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("epub error: {0}")]

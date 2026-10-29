@@ -56,6 +56,14 @@ pub async fn ensure_book_identity(
     .await?;
     if let Some((uid, hash, size, mtime)) = &existing {
         if rehash_pending == 0 && *size == stored_size && *mtime == stored_mtime {
+            // The binding may predate the durable split (a sync fixture) or a
+            // migration row; make sure the file row points at its book.
+            sqlx::query("UPDATE books SET book_uid = ?2, hash_state = 'hashed' WHERE id = ?1")
+                .bind(book_id)
+                .bind(uid)
+                .execute(pool)
+                .await?;
+            ensure_book_record(pool, book_id).await?;
             return Ok(Some(BookIdentity {
                 book_id,
                 book_uid: uid.clone(),
@@ -126,6 +134,15 @@ pub async fn bind_hash(
             .bind(content_hash)
             .fetch_optional(pool)
             .await?;
+    // A row that has not been bound yet may already own a durable record (the
+    // migration assigned one). Reuse it instead of minting a second identity
+    // for the same file.
+    let current_uid: Option<String> =
+        sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+            .bind(book_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
 
     let existing_uid = match &existing {
         Some((uid, _)) => Some(canonical_book_uid(pool, uid).await?),
@@ -139,12 +156,25 @@ pub async fn bind_hash(
         (Some(existing), Some(alias)) => existing.min(alias).clone(),
         (Some(existing), None) => existing.clone(),
         (None, Some(alias)) => alias.clone(),
-        (None, None) => {
-            sqlx::query_scalar("SELECT lower(hex(randomblob(16)))")
-                .fetch_one(pool)
-                .await?
-        }
+        (None, None) => match current_uid.clone() {
+            Some(current) => canonical_book_uid(pool, &current).await?,
+            None => {
+                sqlx::query_scalar("SELECT lower(hex(randomblob(16)))")
+                    .fetch_one(pool)
+                    .await?
+            }
+        },
     };
+
+    // A migration-assigned uuid is local until this hash publishes it. When it
+    // meets an existing alias, fold the local record into the established
+    // identity so both file rows and any recovered state end up on one book.
+    if let Some(current) = &current_uid {
+        let current = canonical_book_uid(pool, current).await?;
+        if current != uid {
+            merge_book_identity(pool, &current, &uid).await?;
+        }
+    }
 
     if let (Some(existing), Some(alias)) = (&existing_uid, &alias_uid) {
         if existing != alias {
@@ -197,6 +227,13 @@ pub async fn bind_hash(
     .execute(pool)
     .await?;
 
+    sqlx::query("UPDATE books SET book_uid = ?2, hash_state = 'hashed' WHERE id = ?1")
+        .bind(book_id)
+        .bind(&uid)
+        .execute(pool)
+        .await?;
+    ensure_book_record(pool, book_id).await?;
+
     record_duplicate_bindings(pool, &uid).await?;
 
     let hash_is_new = existing
@@ -213,6 +250,32 @@ pub async fn bind_hash(
         size,
         mtime,
     }))
+}
+
+/// Make sure a bound file row has its durable-record snapshot. The migration
+/// and the insert trigger create it normally; this covers a row that was
+/// inserted before the split or whose uuid was just assigned by a sync
+/// fixture.
+async fn ensure_book_record(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        INSERT INTO book_records (
+            uid, title, subtitle, author, publisher, language, isbn,
+            description, publication_date, cover_path, last_opened_at,
+            metadata_state
+        )
+        SELECT book_uid, title, subtitle, author, publisher, language, isbn,
+               description, publication_date, cover_path, last_opened_at,
+               'available'
+        FROM books
+        WHERE id = ?1 AND book_uid IS NOT NULL
+        ON CONFLICT(uid) DO NOTHING
+        "#,
+    )
+    .bind(book_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// A uuid can be bound to more than one local row when the library holds two
@@ -335,6 +398,143 @@ pub async fn merge_book_identity(
         .bind(&winner)
         .execute(&mut *tx)
         .await?;
+
+    // Fold the losing durable record into the winner and point every local
+    // file row at it. Progress uses the winner's value (the deterministic
+    // canonical identity), annotation counts add up, and the latest opened
+    // timestamp wins.
+    sqlx::query(
+        r#"
+        INSERT INTO book_records (
+            uid, created_at, title, subtitle, author, publisher, language,
+            isbn, description, publication_date, series, series_index,
+            cover_path, last_opened_at, progress_percent, annotation_count,
+            metadata_state
+        )
+        SELECT
+            ?2,
+            COALESCE(
+                (SELECT created_at FROM book_records WHERE uid = ?2),
+                (SELECT created_at FROM book_records WHERE uid = ?1),
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            ),
+            COALESCE(
+                (SELECT title FROM book_records WHERE uid = ?2),
+                (SELECT title FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT subtitle FROM book_records WHERE uid = ?2),
+                (SELECT subtitle FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT author FROM book_records WHERE uid = ?2),
+                (SELECT author FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT publisher FROM book_records WHERE uid = ?2),
+                (SELECT publisher FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT language FROM book_records WHERE uid = ?2),
+                (SELECT language FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT isbn FROM book_records WHERE uid = ?2),
+                (SELECT isbn FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT description FROM book_records WHERE uid = ?2),
+                (SELECT description FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT publication_date FROM book_records WHERE uid = ?2),
+                (SELECT publication_date FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT series FROM book_records WHERE uid = ?2),
+                (SELECT series FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT series_index FROM book_records WHERE uid = ?2),
+                (SELECT series_index FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE(
+                (SELECT cover_path FROM book_records WHERE uid = ?2),
+                (SELECT cover_path FROM book_records WHERE uid = ?1)
+            ),
+            (SELECT MAX(last_opened_at) FROM book_records WHERE uid IN (?1, ?2)),
+            COALESCE(
+                (SELECT progress_percent FROM book_records WHERE uid = ?2),
+                (SELECT progress_percent FROM book_records WHERE uid = ?1)
+            ),
+            COALESCE((SELECT annotation_count FROM book_records WHERE uid = ?2), 0)
+                + COALESCE((SELECT annotation_count FROM book_records WHERE uid = ?1), 0),
+            CASE
+                WHEN COALESCE(
+                    (SELECT metadata_state FROM book_records WHERE uid = ?2), ''
+                ) = 'available'
+                OR COALESCE(
+                    (SELECT metadata_state FROM book_records WHERE uid = ?1), ''
+                ) = 'available'
+                THEN 'available'
+                ELSE 'waiting_for_file'
+            END
+        WHERE EXISTS (SELECT 1 FROM book_records WHERE uid IN (?1, ?2))
+        ON CONFLICT(uid) DO UPDATE SET
+            created_at = excluded.created_at,
+            title = excluded.title,
+            subtitle = excluded.subtitle,
+            author = excluded.author,
+            publisher = excluded.publisher,
+            language = excluded.language,
+            isbn = excluded.isbn,
+            description = excluded.description,
+            publication_date = excluded.publication_date,
+            series = excluded.series,
+            series_index = excluded.series_index,
+            cover_path = excluded.cover_path,
+            last_opened_at = excluded.last_opened_at,
+            progress_percent = excluded.progress_percent,
+            annotation_count = excluded.annotation_count,
+            metadata_state = excluded.metadata_state
+        "#,
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+    let rekeyed = sqlx::query("UPDATE books SET book_uid = ?2 WHERE book_uid = ?1")
+        .bind(&loser)
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    sqlx::query("DELETE FROM book_records WHERE uid = ?1")
+        .bind(&loser)
+        .execute(&mut *tx)
+        .await?;
+    if rekeyed > 0 {
+        let detail = format!(
+            "Two file rows turned out to be the same book and were merged into one book \
+             (identity {winner}). Progress keeps the canonical copy; annotations and \
+             collection membership from both copies are kept."
+        );
+        sqlx::query(
+            r#"
+            INSERT INTO migration_issues (issue_key, kind, detail, book_uid)
+            SELECT ?1, 'identity_merged', ?2, ?3
+            WHERE NOT EXISTS (
+                SELECT 1 FROM migration_issues
+                WHERE issue_key = ?1 AND resolved_at IS NULL
+            )
+            "#,
+        )
+        .bind(format!("identity-merged:{loser}:{winner}"))
+        .bind(detail)
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     for kind in [
         EntityKind::Progress,

@@ -43,6 +43,8 @@ impl BookFormat {
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub struct Book {
     pub id: i64,
+    /// Stable durable identity (ADR 0014). Several file rows can share it.
+    pub book_uid: Option<String>,
     pub path: String,
     pub title: String,
     pub subtitle: Option<String>,
@@ -78,8 +80,9 @@ pub struct Book {
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 23)?;
+        let mut state = serializer.serialize_struct("Book", 24)?;
         state.serialize_field("id", &self.id)?;
+        state.serialize_field("bookUid", &self.book_uid)?;
         state.serialize_field("path", &self.path)?;
         // Stored rows carry a format the importer validated, so this never
         // fails for library data. Erroring instead of guessing keeps a future
@@ -169,6 +172,7 @@ mod tests {
     fn sample(path: &str) -> Book {
         Book {
             id: 1,
+            book_uid: Some("0123456789abcdef0123456789abcdef".into()),
             path: path.into(),
             title: "T".into(),
             subtitle: None,
@@ -197,6 +201,7 @@ mod tests {
     fn book_serializes_with_camel_case_keys() {
         let json = serde_json::to_value(sample("/tmp/book.epub")).unwrap();
         assert!(json.get("addedAt").is_some());
+        assert!(json.get("bookUid").is_some());
         assert!(json.get("lastOpenedAt").is_some());
         assert!(json.get("available").is_some());
         assert!(json.get("fileSize").is_some());

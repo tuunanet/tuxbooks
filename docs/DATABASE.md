@@ -35,6 +35,8 @@ and `foreign_keys` is forced ON for every connection.
 | publication_date | TEXT                                    | effective (override over source)                     |
 | series_id        | INTEGER, FK `series` ON DELETE SET NULL | effective series membership                          |
 | series_index     | REAL                                    | position inside the series                           |
+| book_uid         | TEXT                                    | durable book identity (see below)                    |
+| hash_state       | TEXT NOT NULL DEFAULT 'pending'         | `pending`, `hashed`, or `failed`                     |
 
 The bibliographic columns hold the **effective** metadata — user overrides
 (milestone 7) merged over the source-file values. `series_name` is not a
@@ -45,6 +47,53 @@ column: book queries LEFT JOIN the `series` table.
 (metadata, collections, and reading progress are preserved for
 reconnection), and the size/mtime snapshot lets the watcher distinguish
 real modifications from duplicate events without re-parsing documents.
+
+`book_uid` names the durable book record this file belongs to (more than one
+file may share it). `hash_state` is the durable progress of the background
+content-hash pass: `pending`, `hashed`, or `failed`.
+
+## Durable book records (migration 0017)
+
+ADR 0014 separates the durable **book** from the **file** that happens to
+contain it. This slice adds the foundation without changing what the user
+sees: existing user-state tables are still keyed by `books.id`, and Remove
+and Unwatch still remove the book with its state until ticket `tuxbooks-ip6.2`
+flips them.
+
+- `book_records` — one row per durable book, keyed by a random 128-bit
+  `uid`. It carries an identity, a metadata snapshot, `last_opened_at`, a
+  progress snapshot, an annotation count, and `metadata_state`
+  (`available` / `waiting_for_file`). File rows that already shared a sync
+  uuid collapse into one record. The snapshot is authoritative only for a
+  book with no file; a book with a file reads its effective metadata from
+  the file row, and triggers keep the snapshot in step.
+- `books.book_uid` — the file's durable book. The migration reuses the uuid
+  from `sync_book_bindings` when one exists, otherwise it generates one.
+  `book_uid` is not UNIQUE: duplicate copies and moves are several files for
+  one book.
+- `books.hash_state` — the background hash pass writes `pending` before a
+  file is hashed, `hashed` after the content hash is bound, and `failed`
+  when the file cannot be read. It is the resume point after a restart, and
+  the durable state the next slice's destructive actions wait on.
+- `migration_issues` — visible merges and failures: two file rows that
+  shared a uuid, two hashes that turned out to be the same book, and a book
+  whose hash failed and now needs a relink. The Application Data settings
+  tab lists open issues and can dismiss them.
+
+The upgrade takes a **pre-migration backup** before applying pending
+migrations: `VACUUM INTO` writes `<db>.pre-migration-<timestamp>.bak` beside
+the database, so uncheckpointed WAL frames are included. The backup stays
+after a successful start. A migration or backup failure is fail-closed: the
+original database is left in place, the error is returned to startup, and
+the file is **not** quarantined or replaced with an empty library. A failed
+`PRAGMA quick_check` or an unreadable file is still treated as corruption and
+quarantined as before.
+
+The upgrade also recovers identity the sync mirror still holds for books
+that were unwatched before the upgrade: a `book_records` row is created for
+each mirrored uuid with no file, using the mirrored metadata, progress, and
+annotation count when present. A record with no metadata is labelled
+`waiting_for_file`; state that never reached the mirror is not recoverable.
 
 ### library_locations
 

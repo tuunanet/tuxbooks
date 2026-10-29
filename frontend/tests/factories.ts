@@ -3,6 +3,7 @@ import type { Annotation, Book, CollectionSummary } from "@/types/domain";
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {
     id: 1,
+    bookUid: "0123456789abcdef0123456789abcdef",
     path: "/tmp/library/minimal.epub",
     format: "epub",
     title: "A Minimal Book",

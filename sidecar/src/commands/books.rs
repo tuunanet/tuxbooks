@@ -20,6 +20,24 @@ pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
     books::list_books(&state.db).await
 }
 
+/// Durable progress of the background content-hash pass (ADR 0014 D8).
+pub async fn identity_backfill_status(
+    state: &AppState,
+) -> Result<crate::services::hash_backfill::HashBackfillStatus, AppError> {
+    crate::services::hash_backfill::status(&state.db).await
+}
+
+/// Open upgrade issues: identity merges and books that need a relink.
+pub async fn migration_issues(
+    state: &AppState,
+) -> Result<Vec<crate::repository::migration::MigrationIssue>, AppError> {
+    crate::repository::migration::list_open(&state.db).await
+}
+
+pub async fn dismiss_migration_issue(state: &AppState, id: i64) -> Result<bool, AppError> {
+    crate::repository::migration::dismiss(&state.db, id).await
+}
+
 /// Full-text library search behind the global search box (Ctrl/Cmd+K).
 /// Plain user text in; ranked hits with snippets out. Empty queries are
 /// rejected — the frontend never sends them.

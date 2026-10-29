@@ -8,6 +8,8 @@ export type BookFormat = "epub" | "pdf";
 /** Mirrors `domain::Book` including the derived `format` field. */
 export interface Book {
   id: number;
+  /** Stable durable identity (ADR 0014); several files can share it. */
+  bookUid?: string | null;
   path: string;
   format: BookFormat;
   title: string;

@@ -1,10 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 
 use crate::domain::StartupRecovery;
 use crate::error::AppError;
+
+/// The embedded migration set. After a new migration lands, opening an
+/// existing database takes a consistent backup before applying it.
+static MIGRATOR: Migrator = sqlx::migrate!();
 
 /// Open (creating if needed) the SQLite database at `db_path`, run all embedded
 /// migrations, and return a connection pool. Deterministic: calling it twice on
@@ -15,17 +20,23 @@ pub async fn init_pool(db_path: &Path) -> Result<SqlitePool, AppError> {
     Ok(pool)
 }
 
-/// Open the database, self-healing a broken file: when the open, the
-/// integrity check, or the migrations fail, move the database and its WAL and
-/// shared-memory sidecars aside under a timestamped `.corrupt-*` name in the
-/// same directory, then create a fresh database and migrate it. The broken
-/// files are never deleted. Returns the pool and, when a quarantine happened,
-/// the from/to pair so main can report it.
+/// Open the database, self-healing a broken file: when the open or the
+/// integrity check fails, move the database and its WAL and shared-memory
+/// sidecars aside under a timestamped `.corrupt-*` name in the same directory,
+/// then create a fresh database and migrate it. The broken files are never
+/// deleted.
+///
+/// A failed migration or a failed pre-migration backup is deliberately *not*
+/// treated as corruption (ADR 0014 D10): the original database is left in
+/// place and the error is returned, so startup stops with a clear message
+/// instead of starting an empty library. Returns the pool and, when a
+/// quarantine happened, the from/to pair so main can report it.
 pub async fn init_pool_recovering(
     db_path: &Path,
 ) -> Result<(SqlitePool, Option<StartupRecovery>), AppError> {
     match open_checked(db_path).await {
         Ok(pool) => Ok((pool, None)),
+        Err(err @ (AppError::Migration(_) | AppError::Startup(_))) => Err(err),
         Err(err) => {
             // A missing path means an environment problem (permissions, a
             // missing parent), not a broken database; there is nothing to
@@ -52,7 +63,9 @@ pub async fn init_pool_recovering(
 
 /// Open the pool and verify the file before use: `PRAGMA quick_check(1)` runs
 /// once right after connecting, and any result other than `ok` reads as
-/// corruption. Migrations run last, so a schema failure is caught too.
+/// corruption. When migrations are pending on an existing database, a
+/// consistent SQLite backup (WAL included) is written first. Migrations run
+/// last, so a schema failure is caught too.
 async fn open_checked(db_path: &Path) -> Result<SqlitePool, AppError> {
     if let Some(parent) = db_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -82,12 +95,87 @@ async fn open_checked(db_path: &Path) -> Result<SqlitePool, AppError> {
         )));
     }
 
+    if has_pending_upgrade(&pool).await? {
+        let backup = backup_database(&pool, db_path).await?;
+        eprintln!(
+            "wrote pre-migration backup before upgrading {}: {}",
+            db_path.display(),
+            backup.display()
+        );
+    }
+
     run_migrations(&pool).await?;
     Ok(pool)
 }
 
+/// Whether an existing database has at least one embedded migration still to
+/// apply. A database with no `_sqlx_migrations` table (fresh, or created before
+/// this app used sqlx) has nothing to preserve and needs no backup.
+async fn has_pending_upgrade(pool: &SqlitePool) -> Result<bool, AppError> {
+    let applied: Vec<i64> = match sqlx::query_scalar("SELECT version FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await
+    {
+        Ok(versions) => versions,
+        Err(sqlx::Error::Database(err)) if err.message().contains("no such table") => Vec::new(),
+        Err(err) => return Err(err.into()),
+    };
+    if applied.is_empty() {
+        return Ok(false);
+    }
+    Ok(MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .any(|version| !applied.contains(&version)))
+}
+
+/// Write a consistent copy of the catalog before a forward-only migration.
+/// `VACUUM INTO` reads through SQLite itself, so uncheckpointed WAL frames are
+/// included; a plain file copy would not be. The backup is never deleted: the
+/// upgrade path keeps it as the recovery point.
+async fn backup_database(pool: &SqlitePool, db_path: &Path) -> Result<PathBuf, AppError> {
+    let target = pre_migration_backup_target(db_path);
+    let escaped = target.to_string_lossy().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{escaped}'"))
+        .execute(pool)
+        .await
+        .map_err(|err| {
+            AppError::Startup(format!(
+                "could not write a pre-migration backup at {}: {err}",
+                target.display()
+            ))
+        })?;
+    Ok(target)
+}
+
+/// `<db filename>.pre-migration-<timestamp>.bak` beside the database, with a
+/// counter if two upgrades land in the same millisecond.
+fn pre_migration_backup_target(db_path: &Path) -> PathBuf {
+    let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = db_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tuxbooks.db".to_string());
+    let stamp = quarantine_stamp(chrono::Utc::now());
+    for attempt in 0..1_000u32 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("-{attempt}")
+        };
+        let candidate = parent.join(format!("{file_name}.pre-migration-{stamp}{suffix}.bak"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    parent.join(format!(
+        "{file_name}.pre-migration-{stamp}-{}.bak",
+        std::process::id()
+    ))
+}
+
 async fn run_migrations(pool: &SqlitePool) -> Result<(), AppError> {
-    sqlx::migrate!().run(pool).await?;
+    MIGRATOR.run(pool).await?;
     Ok(())
 }
 

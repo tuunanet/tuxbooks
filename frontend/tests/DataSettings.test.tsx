@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DataSettings } from "@/components/settings/DataSettings";
@@ -155,6 +155,41 @@ describe("DataSettings", () => {
     expect(await screen.findByTestId("storage-book-locations-empty")).toHaveTextContent(
       "No folders have been added yet",
     );
+  });
+
+  it("shows identity backfill progress and lets the user dismiss a merge issue", async () => {
+    const user = userEvent.setup();
+    mockInvoke({
+      identity_backfill_status: {
+        total: 12,
+        hashed: 8,
+        pending: 3,
+        failed: 1,
+        waiting: 0,
+      },
+      migration_issues: [
+        {
+          id: 7,
+          issueKey: "identity-merged:a:b",
+          kind: "identity_merged",
+          detail: "Two file rows turned out to be the same book.",
+          bookUid: "b",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          resolvedAt: null,
+        },
+      ],
+      migration_dismiss_issue: true,
+    });
+    renderDataSettings();
+
+    const card = await screen.findByTestId("identity-backfill");
+    expect(card).toHaveTextContent("8 of 12 books indexed");
+    expect(card).toHaveTextContent("3 to go");
+    expect(card).toHaveTextContent("1 need a relink");
+    expect(screen.getByTestId("identity-issues")).toHaveTextContent("same book");
+
+    await user.click(screen.getByTestId("identity-dismiss-7"));
+    await waitFor(() => expect(screen.queryByTestId("identity-issues")).not.toBeInTheDocument());
   });
 
   it("opens a root by id and copies its path through the bridge", async () => {
