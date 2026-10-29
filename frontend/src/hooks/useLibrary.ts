@@ -67,6 +67,10 @@ export function useLibraryData(): LibraryState {
   const indexRef = useRef<Map<number, number>>(new Map());
   const pendingRef = useRef<PendingChange[]>([]);
   const flushTimerRef = useRef<number | null>(null);
+  // A wholesale fetch is only applied while it is still the newest one. An
+  // unwatch refresh starts after the purge, so an older import refresh that
+  // resolves later must not put the purged books back on screen.
+  const fetchSeqRef = useRef(0);
 
   const cancelFlushTimer = useCallback(() => {
     if (flushTimerRef.current !== null) {
@@ -133,12 +137,22 @@ export function useLibraryData(): LibraryState {
       }
     }
     if (removedIds.size > 0) {
-      next = next.filter((book) => !removedIds.has(book.id));
-      setStats((prev) =>
-        prev === null
-          ? prev
-          : { ...prev, bookCount: Math.max(0, prev.bookCount - removedIds.size) },
-      );
+      let removedPresent = 0;
+      next = next.filter((book) => {
+        if (!removedIds.has(book.id)) return true;
+        removedPresent += 1;
+        return false;
+      });
+      // Only count removals that were actually in the list. A late removal
+      // after a refresh (an unwatch purge racing the import) must not lower
+      // the fresh count.
+      if (removedPresent > 0) {
+        setStats((prev) =>
+          prev === null
+            ? prev
+            : { ...prev, bookCount: Math.max(0, prev.bookCount - removedPresent) },
+        );
+      }
     }
 
     // Single ref write per flush: the fresh id→index map for the next
@@ -170,32 +184,35 @@ export function useLibraryData(): LibraryState {
   }, [fetchCollections]);
 
   const refresh = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
     try {
       const next = await fetchLibrary();
+      if (seq !== fetchSeqRef.current) return;
       setStats(next.stats);
       applyFetched(next.books);
     } catch (err) {
-      setError(toMessage(err));
+      if (seq === fetchSeqRef.current) setError(toMessage(err));
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, [applyFetched]);
 
   useEffect(() => {
     let cancelled = false;
+    const seq = ++fetchSeqRef.current;
     void (async () => {
       try {
         const next = await fetchLibrary();
-        if (cancelled) return;
+        if (cancelled || seq !== fetchSeqRef.current) return;
         setStats(next.stats);
         applyFetched(next.books);
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || seq !== fetchSeqRef.current) return;
         setError(toMessage(err));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && seq === fetchSeqRef.current) setLoading(false);
       }
     })();
     void fetchCollections();

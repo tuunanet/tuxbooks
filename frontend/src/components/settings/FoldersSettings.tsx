@@ -11,6 +11,7 @@ import {
   type UnwatchProgress,
 } from "@/lib/bridge";
 import { formatMb } from "@/lib/format";
+import { useLibrary } from "@/hooks/useLibrary";
 import { useImport } from "@/state/importState";
 
 /**
@@ -23,6 +24,7 @@ import { useImport } from "@/state/importState";
  */
 export function FoldersSettings() {
   const { importPaths } = useImport();
+  const { refresh } = useLibrary();
   const [report, setReport] = useState<StorageReport | null>(null);
   const [failed, setFailed] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -107,8 +109,8 @@ export function FoldersSettings() {
     if (!unwatched) return;
     setSelected(new Set());
     setConfirming(false);
-    await load();
-  }, [chosen, load]);
+    await Promise.all([load(), refresh()]);
+  }, [chosen, load, refresh]);
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">

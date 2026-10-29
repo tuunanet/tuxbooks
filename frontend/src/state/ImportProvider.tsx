@@ -36,7 +36,11 @@ export function ImportProvider({ children }: { children: ReactNode }) {
 
       try {
         const report = await importPathsCommand(targets);
-        await refresh();
+        // A cancelled scan is being purged by the unwatch that cancelled it.
+        // Refreshing here would race that purge and could restore the books
+        // from a snapshot taken before the deletes. The unwatch refreshes
+        // after it finishes instead.
+        if (!report.cancelled) await refresh();
         setSummary({
           imported: report.imported,
           updated: report.updated,

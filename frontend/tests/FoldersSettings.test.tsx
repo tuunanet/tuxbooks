@@ -281,6 +281,11 @@ describe("FoldersSettings unwatch", () => {
       const rows = within(screen.getByTestId("folders-list")).getAllByRole("listitem");
       expect(rows).toHaveLength(1);
     });
+    await waitFor(() =>
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "list_books").length,
+      ).toBeGreaterThanOrEqual(2),
+    );
     expect(screen.queryByTestId("unwatch-dialog")).toBeNull();
     expect(screen.getByTestId("folders-unwatch")).toBeDisabled();
   });

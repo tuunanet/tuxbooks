@@ -263,12 +263,22 @@ async fn register_and_import_folder(
     )
     .await;
     // Start watching only after the scan, so the watcher cannot import the
-    // same files concurrently. A failed or cancelled scan still gets its
-    // watch: the folder is registered and the next event or launch retries.
-    if watch {
+    // same files concurrently. A cancelled scan gets no watcher at all: its
+    // folder is about to be purged and starting one would let a late event
+    // write rows after the purge. A failed scan keeps its watch for a retry.
+    let cancelled = run.cancelled();
+    let mut folder_report = match outcome {
+        Ok(report) => report,
+        Err(err) => {
+            if watch && !cancelled {
+                state.watcher.watch(root);
+            }
+            return Err(err);
+        }
+    };
+    if watch && !cancelled {
         state.watcher.watch(root);
     }
-    let mut folder_report = outcome?;
     report.imported += folder_report.imported;
     report.updated += folder_report.updated;
     report.skipped += folder_report.skipped;

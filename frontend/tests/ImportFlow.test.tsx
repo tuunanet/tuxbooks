@@ -123,6 +123,9 @@ describe("Import via the header menu", () => {
       cancelled: true,
     });
     await screen.findByTestId("library-header");
+    const listCallsBefore = invokeMock.mock.calls.filter(
+      ([command]) => command === "list_books",
+    ).length;
 
     await userEvent.click(screen.getByTestId("import-menu"));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Import Folder…" }));
@@ -131,6 +134,9 @@ describe("Import via the header menu", () => {
     expect(status).toHaveTextContent("Import cancelled");
     expect(status).not.toHaveTextContent("Imported 704 new");
     expect(status).not.toHaveTextContent("Watching /big/library");
+    expect(invokeMock.mock.calls.filter(([command]) => command === "list_books").length).toBe(
+      listCallsBefore,
+    );
   });
 
   it("imports the picked folder through import_paths and reports the result", async () => {
