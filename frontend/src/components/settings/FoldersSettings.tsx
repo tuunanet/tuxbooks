@@ -16,15 +16,37 @@ import { formatMb } from "@/lib/format";
 import { useLibrary } from "@/hooks/useLibrary";
 import { useImport } from "@/state/importState";
 
-/** The label and badge tone for one watched folder's scan state. */
+/** The label and tinted style for one watched folder's scan state. */
 function statusFor(location: StorageReport["bookLocations"][number]): {
   label: string;
-  variant: "secondary" | "outline" | "destructive";
+  className: string;
 } {
-  if (location.missingFromDisk) return { label: "Missing", variant: "destructive" };
-  if (location.status === "importing") return { label: "Importing", variant: "secondary" };
-  if (location.status === "refreshing") return { label: "Refreshing", variant: "secondary" };
-  return { label: "Up to date", variant: "outline" };
+  if (location.missingFromDisk) {
+    return {
+      label: "Missing",
+      className:
+        "border-destructive/30 bg-destructive/10 text-destructive dark:border-destructive/30 dark:bg-destructive/20",
+    };
+  }
+  if (location.status === "importing") {
+    return {
+      label: "Importing",
+      className:
+        "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:border-blue-400/30 dark:bg-blue-400/20 dark:text-blue-300",
+    };
+  }
+  if (location.status === "refreshing") {
+    return {
+      label: "Refreshing",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/20 dark:text-amber-300",
+    };
+  }
+  return {
+    label: "Up to date",
+    className:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/20 dark:text-emerald-300",
+  };
 }
 
 /**
@@ -253,8 +275,8 @@ export function FoldersSettings() {
                       </span>
                       <Badge
                         data-testid={`folder-status-${location.id}`}
-                        variant={status.variant}
-                        className="mt-0.5"
+                        variant="outline"
+                        className={`mt-0.5 ${status.className}`}
                       >
                         {status.label}
                       </Badge>
