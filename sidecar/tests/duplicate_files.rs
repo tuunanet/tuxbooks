@@ -406,34 +406,47 @@ async fn removing_one_copy_keeps_the_book_and_its_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_available_copy_wins_the_active_file_over_a_missing_lower_id() {
     let env = setup().await;
-    let first = env.copy_book("first.epub");
-    let second = env.copy_book("second.epub");
+    env.copy_book("first.epub");
+    env.copy_book("second.epub");
     env.scan().await;
 
     let mut listed = env.library().await;
     assert_eq!(listed.len(), 1);
     let book = listed.remove(0);
     let files = env.files(book.id).await;
+    assert_eq!(files.len(), 2);
     let lowest_id = files
         .iter()
         .filter_map(|file| file["id"].as_i64())
         .min()
         .expect("file ids");
+    let missing = files
+        .iter()
+        .find(|file| file["id"].as_i64() == Some(lowest_id))
+        .and_then(|file| file["path"].as_str())
+        .expect("lowest-id copy");
+    let available = files
+        .iter()
+        .find(|file| file["id"].as_i64() != Some(lowest_id))
+        .and_then(|file| file["path"].as_str())
+        .expect("other copy")
+        .to_string();
 
-    // The first copy disappears from disk; its row stays but is unavailable.
-    books::set_availability_prefix(&env.pool, &first.to_string_lossy(), false)
+    // The lowest-id copy disappears from disk; its row stays but is
+    // unavailable. Import order is not stable, so pick it by id, not by path.
+    books::set_availability_prefix(&env.pool, missing, false)
         .await
         .unwrap();
 
     let listed = env.library().await;
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].path, second.to_string_lossy());
+    assert_eq!(listed[0].path, available);
     let files = env.files(book.id).await;
     let active = files
         .iter()
         .find(|file| file["active"] == true)
         .expect("active copy");
-    assert_eq!(active["path"], json!(second.to_string_lossy()));
+    assert_eq!(active["path"], json!(available));
     assert_eq!(active["available"], json!(true));
     assert_ne!(active["id"].as_i64(), Some(lowest_id));
     assert_eq!(
