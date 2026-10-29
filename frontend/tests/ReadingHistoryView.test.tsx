@@ -19,6 +19,7 @@ function renderHistory(
     list_books: library,
     list_collections: [],
     list_reading_history: history,
+    list_book_trash: [],
   });
   return render(
     <AppStateProvider>
@@ -90,6 +91,7 @@ describe("ReadingHistoryView", () => {
       list_books: [],
       list_collections: [],
       list_reading_history: [makeReadingHistoryBook({ id: 41 })],
+      list_book_trash: [],
       relink_book: makeBook({ id: 41, title: "A Fine History" }),
     });
     render(
@@ -124,6 +126,7 @@ describe("ReadingHistoryView", () => {
       list_books: [],
       list_collections: [],
       list_reading_history: [],
+      list_book_trash: [],
     });
     render(
       <AppShell

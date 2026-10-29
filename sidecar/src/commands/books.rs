@@ -1,6 +1,9 @@
-use crate::domain::{Book, LibraryStats, SearchHit};
+use crate::domain::{
+    Book, BookTrashEntry, BulkForgetOutcome, ForgetOutcome, LibraryStats, RestoreMode,
+    RestoreOutcome, RestoreStatus, SearchHit,
+};
 use crate::error::AppError;
-use crate::repository::{books, collections};
+use crate::repository::{books, collections, lifecycle};
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 use crate::AppState;
@@ -129,4 +132,126 @@ pub(crate) async fn delete_file_row_and_notify(
         None => events.emit("library-changed", &LibraryChange::Removed { book_id }),
     }
     Ok(true)
+}
+
+/// Reset reading data (ADR 0014 D5): clear progress, annotations, collection
+/// membership, metadata overrides, and provider links, but keep the durable
+/// identity and the file row. The book stays in the library as unread.
+pub async fn reset_book_reading_data(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<bool, AppError> {
+    lifecycle::reset(&state.db, book_id).await?;
+    match books::get_book(&state.db, book_id).await? {
+        Some(book) => crate::commands::emit_changed_book(events, book),
+        None => events.emit("library-changed", &LibraryChange::Removed { book_id }),
+    }
+    Ok(true)
+}
+
+/// Forget one book: rebind any current file to a fresh identity, move the old
+/// record and state to the 30-day trash, and unlink providers. A book with no
+/// file has no fresh identity and leaves Reading history.
+pub async fn forget_book(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<ForgetOutcome, AppError> {
+    let outcome = forget_book_inner(state, book_id).await?;
+    emit_forget(state, events, &outcome).await?;
+    Ok(outcome)
+}
+
+/// Bulk Forget for Reading history. Each book gets the same atomic treatment
+/// as the single command; the result counts what landed.
+pub async fn forget_books(
+    state: &AppState,
+    events: &EventEmitter,
+    book_ids: Vec<i64>,
+) -> Result<BulkForgetOutcome, AppError> {
+    let mut trash_ids = Vec::new();
+    for book_id in book_ids {
+        match forget_book_inner(state, book_id).await {
+            Ok(outcome) => {
+                emit_forget(state, events, &outcome).await?;
+                trash_ids.push(outcome.trash_id);
+            }
+            Err(AppError::NotFound) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(BulkForgetOutcome {
+        forgotten: trash_ids.len() as i64,
+        trash_ids,
+    })
+}
+
+async fn forget_book_inner(state: &AppState, book_id: i64) -> Result<ForgetOutcome, AppError> {
+    let file_ids = books::file_ids_for_book(&state.db, book_id).await?;
+    crate::services::hash_backfill::wait_for_books(&state.db, &file_ids).await?;
+    // A pending hash can merge this file into another identity. Follow the
+    // bytes the user is looking at before taking a snapshot.
+    let book_id = match file_ids.first() {
+        Some(file_id) => books::durable_id_for_file(&state.db, *file_id)
+            .await?
+            .unwrap_or(book_id),
+        None => book_id,
+    };
+    lifecycle::forget(&state.db, book_id).await
+}
+
+async fn emit_forget(
+    state: &AppState,
+    events: &EventEmitter,
+    outcome: &ForgetOutcome,
+) -> Result<(), AppError> {
+    match outcome.replacement_book_id {
+        Some(book_id) => {
+            if let Some(book) = books::get_book(&state.db, book_id).await? {
+                crate::commands::emit_changed_book(events, book);
+                return Ok(());
+            }
+            events.emit(
+                "library-changed",
+                &LibraryChange::Removed {
+                    book_id: outcome.forgotten_book_id,
+                },
+            );
+        }
+        None => events.emit(
+            "library-changed",
+            &LibraryChange::Removed {
+                book_id: outcome.forgotten_book_id,
+            },
+        ),
+    }
+    Ok(())
+}
+
+/// Open forgotten books still inside the 30-day window.
+pub async fn list_book_trash(state: &AppState) -> Result<Vec<BookTrashEntry>, AppError> {
+    lifecycle::list_trash(&state.db).await
+}
+
+/// Restore a forgotten book. Without a mode the backend restores silently when
+/// the fresh identity has no new progress or annotations and returns a
+/// conflict otherwise; Replace, Keep, and Merge resolve it explicitly.
+pub async fn restore_book(
+    state: &AppState,
+    events: &EventEmitter,
+    trash_id: i64,
+    mode: Option<RestoreMode>,
+) -> Result<RestoreOutcome, AppError> {
+    let outcome = lifecycle::restore(&state.db, trash_id, mode).await?;
+    if let (RestoreStatus::Restored | RestoreStatus::Kept, Some(book_id)) =
+        (&outcome.status, outcome.book_id)
+    {
+        if let Some(book) = books::get_book(&state.db, book_id).await? {
+            crate::commands::emit_changed_book(events, book);
+        } else {
+            events.emit("library-changed", &LibraryChange::Removed { book_id });
+        }
+    }
+    Ok(outcome)
 }

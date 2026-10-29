@@ -127,8 +127,8 @@ until the next import.
 Join table, PK `(book_uid, collection_id)`. `book_uid` is FK
 `book_records` and `collection_id` is FK `collections`, both with
 `ON DELETE CASCADE`. Membership belongs to the durable book, so Remove and
-Unwatch never remove a shelf entry; deleting the book record (Forget, later
-slice) or the collection does.
+Unwatch never remove a shelf entry; deleting the book record (Forget) or the
+collection does.
 
 ### reading_progress
 
@@ -197,6 +197,39 @@ leaving the library (ADR 0014 D11, [PROVIDERS.md](PROVIDERS.md)).
 The cached status is provider data, not a second TuxBooks reading status.
 Reading status remains `reading_progress`; a `finished` remote status maps to
 `progress_percent = 100`.
+
+## Reset, Forget, and the book trash (migration 0022)
+
+ADR 0014 D5 makes the two destructive actions explicit and different:
+
+- **Reset reading data** clears `reading_progress`, `annotations`,
+  `book_collections`, `book_metadata_overrides` (and the customized
+  author/subject lists), and `book_provider_links` for one durable book, then
+  recomputes effective metadata from the source file. The `book_records` row
+  and every file row stay, so the library entry keeps its identity and file
+  and becomes unread.
+- **Forget book** snapshots the whole durable record and its state into
+  `book_trash`, unlinks each provider through `unlink_provider_book`, deletes
+  every `sync_book_aliases` row for the old uid, and deletes the old
+  `book_records` row. When a file row exists, it is rebound (not deleted and
+  re-imported) to a fresh `book_records` row with the same effective source
+  metadata, so the library entry never disappears; the current content hash
+  alias moves to the fresh uid. With no file row there is no fresh identity,
+  the old record is simply deleted, and the book leaves Reading history.
+- `book_trash` — `book_id`, `book_uid`, `replacement_book_uid` (the fresh
+  identity, NULL when there was no file), `snapshot_json` (the old record,
+  progress, annotations, collection membership, overrides, lists, provider
+  links, and aliases), `deleted_at`, `expires_at`, `restored_at`. The 30-day
+  window matches annotation and collection deletes, but the table is
+  deliberately separate from `sync_trash`: one row here is a whole book, not
+  one sync entity.
+- Restore looks up `replacement_book_uid`. If that fresh book has no progress
+  and no annotations, the old record and state are restored and the fresh
+  record is deleted. If it has new progress or annotations, the command
+  returns a conflict instead of merging silently; Replace restores the old
+  record, Keep discards the snapshot, and Merge keeps the newer progress and
+  unions annotations on the current identity. A book forgotten without a file
+  restores directly into Reading history.
 
 ## Metadata curation (milestone 7)
 
@@ -273,7 +306,7 @@ through the normal effective-column triggers. `reset_book_metadata` drops
 every override, returning the book to its source-file metadata; with no
 overrides left, the reset affordance disables itself.
 
-Deleting a durable book (Forget, a later slice) cascades its overrides, lists,
+Deleting a durable book (Forget) cascades its overrides, lists,
 membership, progress, and annotations; deleting its file rows also removes the
 per-file source snapshots. Removing a file row (Remove, Unwatch) leaves the
 durable book, and therefore its progress, annotations, collection membership,

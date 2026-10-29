@@ -680,4 +680,42 @@ describe("BookDetail", () => {
     await userEvent.click(await screen.findByTestId("detail-bookmark-41"));
     expect(screen.getByTestId("state-probe")).toHaveTextContent("reader:41");
   });
+
+  it("opens Reset and Forget confirmations from the reading-data section", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      reset_book_reading_data: true,
+      forget_book: { forgottenBookId: 1, replacementBookId: 2, trashId: 9 },
+    });
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await screen.findByTestId("detail-title");
+    await userEvent.click(screen.getByTestId("detail-reset"));
+    expect(screen.getByTestId("reset-book-dialog")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("reset-book-confirm"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("reset_book_reading_data", { bookId: 1 });
+    });
+
+    await userEvent.click(screen.getByTestId("detail-forget"));
+    expect(screen.getByTestId("forget-book-dialog")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("forget-book-confirm"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("forget_book", { bookId: 1 });
+    });
+  });
 });

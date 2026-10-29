@@ -92,6 +92,8 @@ const ISSUED_PATH_METHODS = new Set([
 
 const BOOK_ID_METHODS = new Set([
   "remove_book",
+  "reset_book_reading_data",
+  "forget_book",
   "get_book_metadata",
   "reset_book_metadata",
   "clear_book_cover_override",
@@ -179,6 +181,35 @@ function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPath
   }
 }
 
+/** Bulk Forget is a selection from loaded rows; bound it like a batch. */
+const MAX_BULK_BOOK_IDS = 1000;
+
+function validateBookLifecycleShape(method: string, record: Record<string, unknown>): boolean {
+  if (method === "forget_books") {
+    const ids = record.bookIds;
+    if (
+      !Array.isArray(ids) ||
+      ids.length > MAX_BULK_BOOK_IDS ||
+      ids.some((id) => !isValidBookId(id))
+    ) {
+      throw policyError("invalid bookIds");
+    }
+    return true;
+  }
+  if (method === "restore_book") {
+    const trashId = record.trashId;
+    if (typeof trashId !== "number" || !Number.isSafeInteger(trashId) || trashId < 1) {
+      throw policyError("invalid trashId");
+    }
+    const mode = record.mode;
+    if (mode !== undefined && mode !== "replace" && mode !== "keep" && mode !== "merge") {
+      throw policyError("invalid restore mode");
+    }
+    return true;
+  }
+  return false;
+}
+
 /** Sync methods with a small id or name payload; true when handled. */
 function validateSyncShape(method: string, record: Record<string, unknown>): boolean {
   if (method === "sync_dismiss_issue" || method === "sync_restore") {
@@ -228,6 +259,9 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
   }
   if (method === "create_collection" && typeof record.name !== "string") {
     throw policyError("invalid name");
+  }
+  if (validateBookLifecycleShape(method, record)) {
+    return;
   }
   if (validateSyncShape(method, record)) {
     return;

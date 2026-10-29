@@ -141,6 +141,36 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
         /invalid device name/,
       );
     });
+
+    it("validates Reset, Forget, and restore parameters", () => {
+      expect(() =>
+        validateInvokeParams("reset_book_reading_data", { bookId: 1 }, issued()),
+      ).not.toThrow();
+      expect(() => validateInvokeParams("forget_book", { bookId: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("forget_book", { bookId: 0 }, issued())).toThrow(
+        /invalid bookId/,
+      );
+      expect(() =>
+        validateInvokeParams("forget_books", { bookIds: [1, 2] }, issued()),
+      ).not.toThrow();
+      expect(() => validateInvokeParams("forget_books", { bookIds: "1" }, issued())).toThrow(
+        /invalid bookIds/,
+      );
+      expect(() => validateInvokeParams("forget_books", { bookIds: [1, 0] }, issued())).toThrow(
+        /invalid bookIds/,
+      );
+      expect(() => validateInvokeParams("list_book_trash", {}, issued())).not.toThrow();
+      expect(() => validateInvokeParams("restore_book", { trashId: 1 }, issued())).not.toThrow();
+      expect(() =>
+        validateInvokeParams("restore_book", { trashId: 1, mode: "merge" }, issued()),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams("restore_book", { trashId: 1, mode: "sideways" }, issued()),
+      ).toThrow(/invalid restore mode/);
+      expect(() => validateInvokeParams("restore_book", { trashId: 0 }, issued())).toThrow(
+        /invalid trashId/,
+      );
+    });
   });
 
   describe("import_paths", () => {

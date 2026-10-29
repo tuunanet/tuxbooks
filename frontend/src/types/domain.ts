@@ -141,6 +141,56 @@ export interface ReadingHistoryBook {
   providerLinks?: ProviderLink[];
 }
 
+/** How to resolve a restore when the fresh identity already has new state. */
+export type RestoreMode = "replace" | "keep" | "merge";
+
+export type RestoreStatus = "restored" | "kept" | "conflict" | "not_found";
+
+/** The new progress/annotations that make a restore ambiguous. */
+export interface RestoreConflict {
+  progressPercent: number | null;
+  annotationCount: number;
+}
+
+/** Result of `restore_book` (mirrors `domain::RestoreOutcome`). */
+export interface RestoreOutcome {
+  status: RestoreStatus;
+  bookId: number | null;
+  bookUid: string | null;
+  conflict: RestoreConflict | null;
+}
+
+/** Result of forgetting one book (mirrors `domain::ForgetOutcome`). */
+export interface ForgetOutcome {
+  forgottenBookId: number;
+  /** Fresh identity when the file stayed in the library; null with no file. */
+  replacementBookId: number | null;
+  trashId: number;
+}
+
+/** Result of forgetting a selection (mirrors `domain::BulkForgetOutcome`). */
+export interface BulkForgetOutcome {
+  forgotten: number;
+  trashIds: number[];
+}
+
+/** One Forgotten book restorable inside the 30-day window. */
+export interface BookTrashEntry {
+  id: number;
+  bookId: number;
+  bookUid: string;
+  title: string | null;
+  author: string | null;
+  deletedAt: string;
+  expiresAt: string;
+  progressPercent: number | null;
+  annotationCount: number;
+  /** Fresh identity the file was rebound to, when it stayed in the library. */
+  replacementBookId: number | null;
+  /** True when the fresh identity has progress or annotations; Restore needs a choice. */
+  hasNewState: boolean;
+}
+
 /**
  * One full-text library search hit (mirrors `domain::SearchHit`). The
  * snippet comes from whichever indexed column matched best, with `<em>` /

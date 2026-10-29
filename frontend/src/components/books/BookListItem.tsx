@@ -24,6 +24,8 @@ export function BookListItem({
   onLocate,
   onEditMetadata,
   onRemove,
+  onReset,
+  onForget,
   onAddToCollection,
   onRemoveFromCollection,
   onMarkFinished,
@@ -46,6 +48,8 @@ export function BookListItem({
         onLocate={onLocate}
         onEditMetadata={onEditMetadata}
         onRemove={onRemove}
+        onReset={onReset}
+        onForget={onForget}
         onAddToCollection={onAddToCollection}
         onRemoveFromCollection={onRemoveFromCollection}
         onMarkFinished={onMarkFinished}
