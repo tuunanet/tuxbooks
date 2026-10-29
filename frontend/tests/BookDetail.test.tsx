@@ -9,7 +9,13 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
 import { useAppState } from "@/state/appState";
-import { makeAnnotation, makeBook, makeBookFile, makeProviderLink } from "./factories";
+import {
+  makeAnnotation,
+  makeBook,
+  makeBookFile,
+  makeProviderLink,
+  makeReadingHistoryBook,
+} from "./factories";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function renderDetail(
@@ -716,6 +722,100 @@ describe("BookDetail", () => {
 
     await userEvent.click(await screen.findByTestId("detail-bookmark-41"));
     expect(screen.getByTestId("state-probe")).toHaveTextContent("reader:41");
+  });
+
+  it("links an existing book as another edition and explains that annotations stay", async () => {
+    const historyBook = makeReadingHistoryBook({
+      id: 41,
+      title: "The Navigation Edition",
+      author: "Grace Hopper",
+      annotationCount: 2,
+    });
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_reading_history: [historyBook],
+      link_book_edition: {
+        sourceBookId: 41,
+        targetBookId: 1,
+        sourceBookUid: historyBook.bookUid,
+        targetBookUid: "0123456789abcdef0123456789abcdef",
+        copiedProgressPercent: 42,
+        movedProviders: ["hardcover"],
+      },
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await screen.findByTestId("detail-title");
+    await userEvent.click(screen.getByTestId("detail-link-edition"));
+
+    const dialog = await screen.findByTestId("link-edition-dialog");
+    expect(dialog).toHaveTextContent(/provider link and its reading status move/i);
+    expect(within(dialog).getByTestId("link-edition-annotation-note")).toHaveTextContent(
+      /annotations stay with the other edition; they do not move automatically/i,
+    );
+
+    await screen.findByRole("option", { name: /The Navigation Edition/ });
+    await userEvent.selectOptions(screen.getByTestId("link-edition-select"), "41");
+    await userEvent.click(screen.getByTestId("link-edition-confirm"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("link_book_edition", {
+        sourceBookId: 41,
+        targetBookId: 1,
+      });
+    });
+  });
+
+  it("lists linked editions with the surface each one belongs to", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook()],
+      list_book_editions: [
+        {
+          id: 41,
+          bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+          title: "The Navigation Edition",
+          author: "Grace Hopper",
+          inLibrary: false,
+        },
+      ],
+    });
+
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    const editions = await screen.findByTestId("detail-editions");
+    expect(editions).toHaveTextContent("The Navigation Edition");
+    expect(editions).toHaveTextContent("Grace Hopper");
+    expect(editions).toHaveTextContent("Reading history");
+    expect(screen.queryByTestId("detail-editions-empty")).not.toBeInTheDocument();
   });
 
   it("opens Reset and Forget confirmations from the reading-data section", async () => {

@@ -1,6 +1,7 @@
 pub mod annotations;
 pub mod books;
 pub mod collections;
+pub mod editions;
 pub mod identity_backfill;
 pub mod library_locations;
 pub mod lifecycle;

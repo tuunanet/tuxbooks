@@ -198,6 +198,34 @@ The cached status is provider data, not a second TuxBooks reading status.
 Reading status remains `reading_progress`; a `finished` remote status maps to
 `progress_percent = 100`.
 
+## Cross-edition links (migration 0024)
+
+A confirmed cross-edition relink records that two durable books are
+different editions of one work (ADR 0014 D9, ticket tuxbooks-ip6.8). It is a
+relation, never a merge: both books keep their own `book_records` row, file
+rows, progress rows, and annotations.
+
+- `book_edition_links` — `book_uid_a`, `book_uid_b`, and `linked_at`. The pair
+  is stored in deterministic order (`book_uid_a < book_uid_b`, enforced by a
+  CHECK), so one relation has one row whichever book is opened first. Both
+  columns cascade when a durable book is forgotten. The relation is local for
+  now; it has no sync capture or projection.
+- `link_book_edition` copies the source `progress_percent` into the target as
+  a percentage-only row, replacing any position or locator the target already
+  had. No CFI, chapter href, page, progression, locations JSON, engine marker,
+  or locator is copied. A PDF reader resolves the percentage to the nearest
+  page; the EPUB reader already restores a percentage-only row.
+- Provider links and their cached status move from the source to the target,
+  together with any queued page-turn. If the target already has a link for
+  the same provider, the command rejects the whole operation with an explicit
+  conflict instead of overwriting it. Annotations and collection membership
+  never move.
+- `list_book_editions` returns the other side of the relation, including
+  whether that edition is currently in the library or in Reading history.
+- This slice has no standalone unlink command: forgetting either book drops
+  the relation through the cascade. The link is informational only, so an
+  unlink can be added later without migrating data.
+
 ## Reset, Forget, and the book trash (migration 0022)
 
 ADR 0014 D5 makes the two destructive actions explicit and different:

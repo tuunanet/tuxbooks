@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { seededBookTitles } from "../setup/fixtures.js";
-import { ensureLibrary, waitForLibraryView } from "./helpers.js";
+import { ensureLibrary, openBookDetail, waitForLibraryView } from "./helpers.js";
 
 /**
  * Reading history (ADR 0014, ticket tuxbooks-ip6.5): a book with no file row
@@ -99,5 +99,97 @@ test.describe("reading history", () => {
     expect(progress?.progressPercent).toBe(37);
     const annotations = await invoke<unknown[]>(page, "list_annotations", { bookId: book.id });
     expect(annotations).toHaveLength(annotationsAfter);
+  });
+
+  test("a confirmed cross-edition link copies the percentage, not annotations", async ({
+    page,
+  }) => {
+    await ensureLibrary(page);
+    const books = await invoke<LibraryBook[]>(page, "list_books", {});
+    const source = books.find((candidate) => candidate.title === seededBookTitles.epub);
+    const target = books.find((candidate) => candidate.title === seededBookTitles.pdf);
+    if (!source || !target) throw new Error("the seeded EPUB and PDF must both be in the library");
+
+    // Keep the target unread so the copied percentage is unambiguous.
+    await invoke(page, "reset_book_reading_data", { bookId: target.id });
+    const annotationsBefore = (
+      await invoke<unknown[]>(page, "list_annotations", { bookId: source.id })
+    ).length;
+
+    // The original edition carries progress and annotations, then leaves the
+    // library for Reading history.
+    await page.evaluate(async (sourceId) => {
+      await window.tuxbooks!.invoke("save_reading_progress", {
+        bookId: sourceId,
+        progress: { chapterHref: "chapter1.xhtml", progressPercent: 37 },
+      });
+      await window.tuxbooks!.invoke("remove_book", { bookId: sourceId });
+    }, source.id);
+
+    await page.getByRole("button", { name: "Reading history" }).click();
+    const historyRow = page
+      .getByTestId("reading-history-book")
+      .filter({ hasText: seededBookTitles.epub });
+    await expect(historyRow).toHaveCount(1, { timeout: 30000 });
+    await expect(historyRow.getByTestId("reading-history-progress")).toHaveText("37% read");
+
+    // From the current edition's detail, confirm the other edition and see
+    // the one-way state transfer spelled out before committing.
+    await page.getByRole("button", { name: "All Books" }).click();
+    await waitForLibraryView(page);
+    await openBookDetail(page, `${seededBookTitles.pdf} (PDF)`);
+    await page.getByTestId("detail-link-edition").click();
+
+    const dialog = page.getByTestId("link-edition-dialog");
+    await expect(dialog).toBeVisible({ timeout: 30000 });
+    await expect(dialog.getByTestId("link-edition-annotation-note")).toContainText(
+      "do not move automatically",
+    );
+    const sourceOption = page
+      .getByTestId("link-edition-select")
+      .locator("option", { hasText: seededBookTitles.epub })
+      .first();
+    const sourceValue = await sourceOption.getAttribute("value");
+    if (!sourceValue) throw new Error("the Reading-history edition is not a link candidate");
+    await page.getByTestId("link-edition-select").selectOption(sourceValue);
+    await page.getByTestId("link-edition-confirm").click();
+
+    await expect(page.getByTestId("detail-editions")).toContainText(seededBookTitles.epub, {
+      timeout: 30000,
+    });
+
+    const targetProgress = await invoke<{
+      progressPercent: number | null;
+      pageNumber: number | null;
+      cfi: string | null;
+      locator: string | null;
+    } | null>(page, "get_reading_progress", { bookId: target.id });
+    expect(targetProgress?.progressPercent).toBe(37);
+    expect(targetProgress?.pageNumber).toBeNull();
+    expect(targetProgress?.cfi).toBeNull();
+    expect(targetProgress?.locator).toBeNull();
+
+    const sourceAnnotations = await invoke<unknown[]>(page, "list_annotations", {
+      bookId: source.id,
+    });
+    expect(sourceAnnotations).toHaveLength(annotationsBefore);
+    const targetAnnotations = await invoke<unknown[]>(page, "list_annotations", {
+      bookId: target.id,
+    });
+    expect(targetAnnotations).toHaveLength(0);
+
+    const editions = await invoke<Array<{ id: number; inLibrary: boolean }>>(
+      page,
+      "list_book_editions",
+      { bookId: target.id },
+    );
+    expect(editions).toHaveLength(1);
+    expect(editions[0]?.id).toBe(source.id);
+    expect(editions[0]?.inLibrary).toBe(false);
+
+    // Put the original back so later suites see the seeded library intact.
+    await page.evaluate(async (path) => {
+      await window.tuxbooks!.invoke("import_paths", { paths: [path] });
+    }, source.path);
   });
 });

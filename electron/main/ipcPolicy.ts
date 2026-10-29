@@ -94,6 +94,7 @@ const BOOK_ID_METHODS = new Set([
   "remove_book",
   "remove_book_file",
   "list_book_files",
+  "list_book_editions",
   "reset_book_reading_data",
   "forget_book",
   "get_book_metadata",
@@ -259,6 +260,14 @@ function validateBookFile(record: Record<string, unknown>): void {
   requirePositiveId(record.fileId, "fileId");
 }
 
+function validateEditionLink(record: Record<string, unknown>): void {
+  requirePositiveId(record.sourceBookId, "sourceBookId");
+  requirePositiveId(record.targetBookId, "targetBookId");
+  if (record.sourceBookId === record.targetBookId) {
+    throw policyError("an edition link needs two different books");
+  }
+}
+
 function validateBookResource(record: Record<string, unknown>): void {
   requireBookId(record);
   requireResourcePath(record);
@@ -282,6 +291,7 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["sync_restore", validateSyncId],
   ["sync_set_device_name", validateSyncDeviceName],
   ["remove_book_file", validateBookFile],
+  ["link_book_edition", validateEditionLink],
   ["get_book_resource", validateBookResource],
   ["get_book_bytes", validateBookBytes],
 ]);

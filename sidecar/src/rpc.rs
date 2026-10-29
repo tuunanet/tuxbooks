@@ -136,6 +136,13 @@ struct BookFileArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct EditionLinkArgs {
+    source_book_id: i64,
+    target_book_id: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BookUidArgs {
     book_uid: String,
 }
@@ -292,6 +299,19 @@ async fn dispatch(
         "list_book_files" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::books::list_book_files(state, p.book_id)))
+        }
+        "list_book_editions" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::list_book_editions(state, p.book_id)))
+        }
+        "link_book_edition" => {
+            let p: EditionLinkArgs = parse_params(params)?;
+            Ok(call!(commands::books::link_book_edition(
+                state,
+                events,
+                p.source_book_id,
+                p.target_book_id
+            )))
         }
         "remove_book_file" => {
             let p: BookFileArgs = parse_params(params)?;

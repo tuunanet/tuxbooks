@@ -53,6 +53,13 @@ confirming a different edition as the same work are both relinks; only the
 first keeps the same book identity automatically.
 _Avoid_: reconnect (for a different edition)
 
+**Edition link**:
+A user-confirmed relation between two durable books that are different
+editions of one work. The books stay separate identities: reading progress
+copies as a percentage, the provider link and status move to the current
+edition, and annotations stay with the original.
+_Avoid_: merge, duplicate (an edition link is neither)
+
 ## Documents and engines
 
 **Papers**:

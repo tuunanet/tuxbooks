@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { BookFileLocations } from "./BookFileLocations";
 import { BookReadingActions } from "./BookReadingActions";
 import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
+import { LinkEditionDialog } from "./LinkEditionDialog";
 import { MetadataPanel } from "./MetadataPanel";
 import { ResetBookDialog } from "./ResetBookDialog";
 import { useBookActions } from "@/hooks/useBookActions";
@@ -17,6 +18,8 @@ import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
+import { linkBookEdition, listBookEditions, listReadingHistory } from "@/lib/bridge";
+import type { EditionBook } from "@/lib/bridge";
 import { providerLinkLabel } from "@/lib/providers";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
@@ -40,7 +43,7 @@ function formatDate(iso: string | null): string {
  */
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
-  const { books, collections } = useLibrary();
+  const { books, collections, refresh } = useLibrary();
   const {
     locateBook,
     removeBookFromLibrary,
@@ -56,9 +59,34 @@ export function BookDetail() {
   // Metadata panel, so saves and resets refresh both.
   const curation = useBookMetadata(book ? book.id : null);
   const { files, refresh: refreshFiles } = useBookFiles(book ? book.id : null);
+  const bookId = book ? book.id : null;
+  const [loadedEditions, setLoadedEditions] = useState<{
+    bookId: number;
+    editions: EditionBook[];
+  } | null>(null);
+  const [editionsVersion, setEditionsVersion] = useState(0);
+  const [editionCandidates, setEditionCandidates] = useState<EditionBook[]>([]);
+  const [editionDialogOpen, setEditionDialogOpen] = useState(false);
+  const [editionBusy, setEditionBusy] = useState(false);
+  const [editionError, setEditionError] = useState<string | null>(null);
+  const editions =
+    loadedEditions !== null && loadedEditions.bookId === bookId ? loadedEditions.editions : [];
   const subjects = curation.metadata?.effective.subjects ?? [];
   const memberCollections =
     book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
+
+  useEffect(() => {
+    if (bookId === null) return;
+    let cancelled = false;
+    void listBookEditions(bookId)
+      .then((found) => {
+        if (!cancelled) setLoadedEditions({ bookId, editions: found });
+      })
+      .catch((err) => console.error("list_book_editions failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId, editionsVersion]);
 
   if (!book) {
     return (
@@ -82,6 +110,57 @@ export function BookDetail() {
 
   const removeFile = async (fileId: number) => {
     if (await removeCopy(book.id, fileId)) await refreshFiles();
+  };
+
+  const openEditionLink = async () => {
+    setEditionError(null);
+    setEditionCandidates([]);
+    setEditionDialogOpen(true);
+    setEditionBusy(true);
+    try {
+      const history = await listReadingHistory();
+      const alreadyLinked = new Set(editions.map((edition) => edition.id));
+      const candidates: EditionBook[] = [
+        ...books
+          .filter((candidate) => candidate.id !== book.id && !alreadyLinked.has(candidate.id))
+          .map((candidate) => ({
+            id: candidate.id,
+            bookUid: candidate.bookUid ?? "",
+            title: candidate.title,
+            author: candidate.author,
+            inLibrary: true,
+          })),
+        ...history
+          .filter((candidate) => candidate.id !== book.id && !alreadyLinked.has(candidate.id))
+          .map((candidate) => ({
+            id: candidate.id,
+            bookUid: candidate.bookUid,
+            title: candidate.title,
+            author: candidate.author,
+            inLibrary: false,
+          })),
+      ];
+      setEditionCandidates(candidates);
+    } catch (err) {
+      setEditionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEditionBusy(false);
+    }
+  };
+
+  const confirmEditionLink = async (source: EditionBook) => {
+    setEditionBusy(true);
+    setEditionError(null);
+    try {
+      await linkBookEdition(source.id, book.id);
+      setEditionDialogOpen(false);
+      setEditionsVersion((version) => version + 1);
+      await refresh();
+    } catch (err) {
+      setEditionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEditionBusy(false);
+    }
   };
 
   const facts: [string, string][] = [
@@ -226,6 +305,52 @@ export function BookDetail() {
             </div>
           </div>
 
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">Editions</h3>
+            {editions.length === 0 ? (
+              <p data-testid="detail-editions-empty" className="mt-2 text-sm text-muted-foreground">
+                No other editions linked. If this is a different edition of a book you already read,
+                link them so the progress percentage and provider link follow you.
+              </p>
+            ) : (
+              <ul data-testid="detail-editions" className="mt-2 flex flex-col gap-2 text-sm">
+                {editions.map((edition) => (
+                  <li
+                    key={edition.id}
+                    data-testid={`detail-edition-${edition.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">
+                        {edition.title?.trim() || "Unknown title"}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {edition.author?.trim() || "Unknown author"}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {edition.inLibrary ? "Library" : "Reading history"}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button
+              data-testid="detail-link-edition"
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              disabled={editionBusy}
+              onClick={() => void openEditionLink()}
+            >
+              Link another edition…
+            </Button>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Linked editions keep separate identities and annotations. A confirmed link copies
+              progress as a percentage and moves the provider link and status to this edition.
+            </p>
+          </div>
+
           <div className="mt-8 rounded-md border p-4">
             <h3 className="text-sm font-medium">Reading data</h3>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -267,6 +392,19 @@ export function BookDetail() {
         </TabsContent>
       </Tabs>
 
+      <LinkEditionDialog
+        key={editionDialogOpen ? "open" : "closed"}
+        open={editionDialogOpen}
+        currentTitle={book.title}
+        candidates={editionCandidates}
+        busy={editionBusy}
+        error={editionError}
+        onConfirm={(source) => void confirmEditionLink(source)}
+        onCancel={() => {
+          setEditionDialogOpen(false);
+          setEditionError(null);
+        }}
+      />
       <ResetBookDialog
         open={resetOpen}
         title={book.title}
