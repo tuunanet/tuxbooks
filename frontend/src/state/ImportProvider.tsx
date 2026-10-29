@@ -36,19 +36,31 @@ export function ImportProvider({ children }: { children: ReactNode }) {
 
       try {
         const report = await importPathsCommand(targets);
-        await refresh();
+        // A cancelled scan is being purged by the unwatch that cancelled it.
+        // Refreshing here would race that purge and could restore the books
+        // from a snapshot taken before the deletes. The unwatch refreshes
+        // after it finishes instead.
+        if (!report.cancelled) await refresh();
         setSummary({
           imported: report.imported,
           updated: report.updated,
           skipped: report.skipped,
           watched: report.watched,
           covered: report.covered,
+          cancelled: report.cancelled ?? false,
         });
         setFailures(report.failed);
         setPhase("done");
       } catch (err) {
         setFailures(targets.map((path) => ({ path, error: toMessage(err) })));
-        setSummary({ imported: 0, updated: 0, skipped: 0, watched: [], covered: [] });
+        setSummary({
+          imported: 0,
+          updated: 0,
+          skipped: 0,
+          watched: [],
+          covered: [],
+          cancelled: false,
+        });
         setPhase("done");
       }
     },

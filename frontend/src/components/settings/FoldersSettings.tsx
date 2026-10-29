@@ -1,32 +1,73 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { UnwatchFoldersDialog } from "@/components/settings/UnwatchFoldersDialog";
 import {
   getStorageReport,
+  onUnwatchProgress,
+  onWatchedFoldersChanged,
   pickDirectory,
   unwatchLocations,
   type StorageReport,
+  type UnwatchProgress,
 } from "@/lib/bridge";
 import { formatMb } from "@/lib/format";
+import { useLibrary } from "@/hooks/useLibrary";
 import { useImport } from "@/state/importState";
+
+/** The label and tinted style for one watched folder's scan state. */
+function statusFor(location: StorageReport["bookLocations"][number]): {
+  label: string;
+  className: string;
+} {
+  if (location.missingFromDisk) {
+    return {
+      label: "Missing",
+      className:
+        "border-destructive/30 bg-destructive/10 text-destructive dark:border-destructive/30 dark:bg-destructive/20",
+    };
+  }
+  if (location.status === "importing") {
+    return {
+      label: "Importing",
+      className:
+        "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:border-blue-400/30 dark:bg-blue-400/20 dark:text-blue-300",
+    };
+  }
+  if (location.status === "refreshing") {
+    return {
+      label: "Refreshing",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/20 dark:text-amber-300",
+    };
+  }
+  return {
+    label: "Up to date",
+    className:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/20 dark:text-emerald-300",
+  };
+}
 
 /**
  * The Watched folders tab: every folder TuxBooks watches, with its book
- * count and total size, and a label on the rows whose path is gone from
- * disk so dead entries stay visible. Rows carry checkboxes and one toolbar
- * Unwatch acts on the whole selection. Add folder runs the same import flow
- * the header menu uses, so a folder added here is watched exactly like one
- * imported from there.
+ * count, total size, and scan status. Rows whose path is gone stay visible
+ * as Missing. Rows carry checkboxes and one toolbar Unwatch acts on the
+ * whole selection. Add folder runs the same import flow the header menu
+ * uses, so a folder added here is watched exactly like one imported from
+ * there.
  */
 export function FoldersSettings() {
   const { importPaths } = useImport();
+  const { refresh } = useLibrary();
   const [report, setReport] = useState<StorageReport | null>(null);
   const [failed, setFailed] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [confirming, setConfirming] = useState(false);
   const [unwatching, setUnwatching] = useState(false);
+  const [unwatchProgress, setUnwatchProgress] = useState<UnwatchProgress | null>(null);
+  const [unwatchError, setUnwatchError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
@@ -44,6 +85,23 @@ export function FoldersSettings() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onWatchedFoldersChanged(() => {
+      if (!disposed) void load();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("watched-folders-changed subscription failed:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [load]);
 
   const locations = useMemo(() => report?.bookLocations ?? [], [report]);
@@ -82,23 +140,29 @@ export function FoldersSettings() {
   }, [importPaths, load]);
 
   const confirmUnwatch = useCallback(async () => {
+    setUnwatchError(null);
     setUnwatching(true);
+    let unlisten: (() => void) | undefined;
     let unwatched = false;
     try {
+      unlisten = await onUnwatchProgress(setUnwatchProgress);
       await unwatchLocations(chosen.map((location) => location.path));
       unwatched = true;
     } catch (error) {
       console.error("unwatch_locations failed:", error);
+      setUnwatchError(error instanceof Error ? error.message : String(error));
     } finally {
+      unlisten?.();
       setUnwatching(false);
+      setUnwatchProgress(null);
     }
     // A failed unwatch keeps the dialog open: the selection is still there
     // to retry or cancel instead of closing over nothing that happened.
     if (!unwatched) return;
     setSelected(new Set());
     setConfirming(false);
-    await load();
-  }, [chosen, load]);
+    await Promise.all([load(), refresh()]);
+  }, [chosen, load, refresh]);
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
@@ -180,43 +244,46 @@ export function FoldersSettings() {
                 onCheckedChange={() => toggleAll()}
               />
               <span className="text-xs text-muted-foreground">Select all</span>
+              <span className="ml-auto text-xs text-muted-foreground">Status</span>
             </label>
             <ul data-testid="folders-list" className="max-h-96 divide-y overflow-y-auto">
-              {locations.map((location) => (
-                <li key={location.id} data-testid={`folder-row-${location.id}`} className="py-2">
-                  <label className="flex items-start gap-2">
-                    <Checkbox
-                      data-testid={`folder-select-${location.id}`}
-                      aria-label={`Select ${location.path}`}
-                      checked={selected.has(location.id)}
-                      disabled={unwatching}
-                      onCheckedChange={() => toggle(location.id)}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <code
-                        title={location.path}
-                        className="block truncate text-xs text-muted-foreground"
-                      >
-                        {location.path}
-                      </code>
-                      <span className="mt-0.5 flex items-center gap-2">
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
-                          {formatMb(location.totalBytes)}
-                        </span>
-                        {location.missingFromDisk && (
-                          <span
-                            data-testid={`folder-missing-${location.id}`}
-                            className="text-xs font-medium text-destructive"
-                          >
-                            Missing from disk
+              {locations.map((location) => {
+                const status = statusFor(location);
+                return (
+                  <li key={location.id} data-testid={`folder-row-${location.id}`} className="py-2">
+                    <label className="flex items-start gap-2">
+                      <Checkbox
+                        data-testid={`folder-select-${location.id}`}
+                        aria-label={`Select ${location.path}`}
+                        checked={selected.has(location.id)}
+                        disabled={unwatching}
+                        onCheckedChange={() => toggle(location.id)}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <code
+                          title={location.path}
+                          className="block truncate text-xs text-muted-foreground"
+                        >
+                          {location.path}
+                        </code>
+                        <span className="mt-0.5 flex items-center gap-2">
+                          <span className="text-xs tabular-nums text-muted-foreground">
+                            {location.bookCount} {location.bookCount === 1 ? "book" : "books"} ·{" "}
+                            {formatMb(location.totalBytes)}
                           </span>
-                        )}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
+                      <Badge
+                        data-testid={`folder-status-${location.id}`}
+                        variant="outline"
+                        className={`mt-0.5 ${status.className}`}
+                      >
+                        {status.label}
+                      </Badge>
+                    </label>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -226,8 +293,13 @@ export function FoldersSettings() {
         open={confirming}
         folders={chosen}
         busy={unwatching}
+        progress={unwatchProgress}
+        error={unwatchError}
         onConfirm={() => void confirmUnwatch()}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => {
+          setConfirming(false);
+          setUnwatchError(null);
+        }}
       />
     </div>
   );

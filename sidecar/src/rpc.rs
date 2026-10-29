@@ -598,6 +598,7 @@ mod tests {
             watcher: Arc::new(watcher),
             startup_recovery: None,
             sync: None,
+            importing: Default::default(),
         })
     }
 
@@ -757,18 +758,53 @@ mod tests {
 
         assert_eq!(result["imported"], json!(2));
         let fired = fired.lock().unwrap();
+        let progress: Vec<_> = fired
+            .iter()
+            .filter(|(name, _)| *name == "import-progress")
+            .collect();
         assert_eq!(
-            fired.len(),
+            progress.len(),
             1,
             "batched: one event for both books, not one per book"
         );
-        let (name, payload) = &fired[0];
+        let (name, payload) = progress[0];
         assert_eq!(*name, "import-progress");
         let books = payload["books"].as_array().expect("payload.books array");
         assert_eq!(books.len(), 2);
         for book in books {
             assert!(book["id"].as_i64().unwrap() > 0);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_storage_stats_reports_in_flight_scan_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let busy = tmp.path().join("busy");
+        std::fs::create_dir(&busy).unwrap();
+        let busy = busy.to_string_lossy().into_owned();
+        crate::repository::library_locations::add_location(&state.db, &busy)
+            .await
+            .unwrap();
+
+        let run = state.importing.start(&busy).unwrap();
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("importing"));
+
+        run.mark_refreshing();
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("refreshing"));
+
+        run.finish();
+        state.importing.finish(&busy);
+        let result = dispatch(&state, &test_events(), "get_storage_stats", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result["locations"][0]["status"], json!("idle"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

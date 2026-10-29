@@ -9,7 +9,8 @@ pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect
 pub use book::{Book, BookFormat, NewBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
 pub use library::{
-    CatalogCounts, LibraryLocationStat, LibraryStats, StartupRecovery, StorageStats,
+    CatalogCounts, LibraryLocationStat, LibraryLocationStatus, LibraryStats, StartupRecovery,
+    StorageStats,
 };
 pub use metadata::{BookMetadata, MetadataFields, MetadataOverridden};
 pub use reading_progress::{ProgressUpdate, ReadingProgress};

@@ -11,19 +11,183 @@ pub mod services;
 pub mod sync;
 pub mod worker;
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::SqlitePool;
+use tokio::sync::watch;
 
 use crate::db::connection::init_pool_recovering;
-use crate::domain::StartupRecovery;
+use crate::domain::{LibraryLocationStatus, StartupRecovery};
+use crate::repository::library_locations::is_under;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
 use crate::services::library_watcher::LibraryWatcher;
 use crate::sync::engine::SyncService;
+
+/// One folder import in flight. Unwatch cancels it and waits for
+/// `finished` before purging, so the scan cannot write rows after the
+/// folder and its books are gone.
+#[derive(Clone)]
+pub struct ImportRun {
+    cancel: Arc<AtomicBool>,
+    finished: Arc<watch::Sender<bool>>,
+    /// 0 = a new folder's first scan, 1 = re-scanning a watched folder.
+    mode: Arc<AtomicU8>,
+}
+
+impl ImportRun {
+    pub fn new() -> Self {
+        let (finished, _) = watch::channel(false);
+        Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished: Arc::new(finished),
+            mode: Arc::new(AtomicU8::new(0)),
+        }
+    }
+
+    pub fn mark_refreshing(&self) {
+        self.mode.store(1, Ordering::Relaxed);
+    }
+
+    pub fn scan_status(&self) -> LibraryLocationStatus {
+        if self.mode.load(Ordering::Relaxed) == 1 {
+            LibraryLocationStatus::Refreshing
+        } else {
+            LibraryLocationStatus::Importing
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The flag the importer polls between files and batches.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    /// Called once the scan has stopped. A watch channel is used instead of
+    /// a bare notification so an unwatch that arrives after this point
+    /// still observes the finished state.
+    pub fn finish(&self) {
+        let _ = self.finished.send(true);
+    }
+
+    pub async fn wait_finished(&self) {
+        let mut finished = self.finished.subscribe();
+        if *finished.borrow() {
+            return;
+        }
+        // A dropped sender means the run ended too.
+        let _ = finished.wait_for(|done| *done).await;
+    }
+}
+
+impl Default for ImportRun {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for ImportRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportRun")
+            .field("cancelled", &self.cancelled())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The shared import/unwatch handshake. Both sides take the same lock, so an
+/// unwatch that starts before a scan is registered still blocks that scan
+/// from registering, and a scan that starts first is visible to the unwatch.
+#[derive(Debug, Clone, Default)]
+pub struct ImportRegistry {
+    inner: Arc<Mutex<ImportRegistryState>>,
+}
+
+#[derive(Debug, Default)]
+struct ImportRegistryState {
+    running: HashMap<String, ImportRun>,
+    /// Roots an unwatch is cancelling and purging. A new scan that overlaps
+    /// one of these waits until the purge clears it.
+    blocking: HashSet<String>,
+}
+
+impl ImportRegistry {
+    /// Register a scan, or refuse when the folder overlaps a running scan or
+    /// an unwatch that is still purging.
+    pub fn start(&self, root: &str) -> Result<ImportRun, String> {
+        let mut inner = self.inner.lock().expect("importing mutex poisoned");
+        if inner.blocking.iter().any(|blocked| overlaps(blocked, root))
+            || inner.running.keys().any(|busy| overlaps(busy, root))
+        {
+            return Err(format!("{root} is already importing or being unwatched"));
+        }
+        let run = ImportRun::new();
+        inner.running.insert(root.to_string(), run.clone());
+        Ok(run)
+    }
+
+    /// Unregister a finished scan. Only `start` inserts running entries and
+    /// it refuses overlaps, so the entry belongs to this run.
+    pub fn finish(&self, root: &str) {
+        self.inner
+            .lock()
+            .expect("importing mutex poisoned")
+            .running
+            .remove(root);
+    }
+
+    /// Block the roots for the duration of an unwatch and return the scans
+    /// that overlap them. The caller must call [`clear_blocking`] when the
+    /// purge is done, on every exit path.
+    pub fn block(&self, roots: &[String]) -> (Vec<ImportRun>, Vec<String>) {
+        let mut inner = self.inner.lock().expect("importing mutex poisoned");
+        let runs = inner
+            .running
+            .iter()
+            .filter(|(busy, _)| roots.iter().any(|root| overlaps(busy, root)))
+            .map(|(_, run)| run.clone())
+            .collect();
+        let mut newly_blocked = Vec::new();
+        for root in roots {
+            if inner.blocking.insert(root.clone()) {
+                newly_blocked.push(root.clone());
+            }
+        }
+        (runs, newly_blocked)
+    }
+
+    pub fn clear_blocking(&self, roots: &[String]) {
+        let mut inner = self.inner.lock().expect("importing mutex poisoned");
+        for root in roots {
+            inner.blocking.remove(root);
+        }
+    }
+
+    /// The scan state of every folder with an import in flight, keyed by
+    /// the same path the watch list stores.
+    pub fn statuses(&self) -> HashMap<String, LibraryLocationStatus> {
+        let inner = self.inner.lock().expect("importing mutex poisoned");
+        inner
+            .running
+            .iter()
+            .map(|(path, run)| (path.clone(), run.scan_status()))
+            .collect()
+    }
+}
+
+fn overlaps(left: &str, right: &str) -> bool {
+    left == right || is_under(left, right) || is_under(right, left)
+}
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -36,6 +200,9 @@ pub struct AppState {
     /// Background cloud-folder sync. `None` in unit tests that construct the
     /// state by hand; production wires it in `init_state`.
     pub sync: Option<Arc<SyncService>>,
+    /// Folder imports in flight, keyed by root. Unwatch cancels and waits
+    /// for these before purging so a scan cannot race the purge.
+    pub importing: ImportRegistry,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -298,6 +465,7 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         watcher: Arc::new(watcher),
         startup_recovery,
         sync: Some(sync),
+        importing: ImportRegistry::default(),
     })
 }
 

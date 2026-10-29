@@ -25,7 +25,7 @@ use tuxbooks_lib::repository::{
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{LibraryChange, PathChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
-use tuxbooks_lib::AppState;
+use tuxbooks_lib::{AppState, ImportRegistry};
 
 const DEBOUNCE: Duration = Duration::from_millis(50);
 const WAIT: Duration = Duration::from_secs(15);
@@ -43,6 +43,7 @@ struct TestEnv {
     emitter: EventEmitter,
     fired: Arc<Mutex<FiredEvents>>,
     changes: mpsc::Receiver<LibraryChange>,
+    importing: ImportRegistry,
 }
 
 fn write_epub(path: &Path, title: &str) {
@@ -126,6 +127,7 @@ async fn setup() -> TestEnv {
         emitter,
         fired,
         changes: change_rx,
+        importing: ImportRegistry::default(),
     }
 }
 
@@ -149,6 +151,7 @@ impl TestEnv {
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
             sync: None,
+            importing: self.importing.clone(),
         })
     }
 
@@ -222,6 +225,22 @@ impl TestEnv {
             .collect()
     }
 
+    /// `(removed, total)` pairs from the progress events the dialog draws.
+    fn unwatch_progress(&self) -> Vec<(u64, u64)> {
+        self.fired
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, _)| *name == "unwatch-progress")
+            .map(|(_, payload)| {
+                (
+                    payload.get("removed").and_then(Value::as_u64).unwrap(),
+                    payload.get("total").and_then(Value::as_u64).unwrap(),
+                )
+            })
+            .collect()
+    }
+
     /// A sibling directory outside `library`, used to keep a second watched
     /// root next to the first.
     fn sibling(&self, name: &str) -> PathBuf {
@@ -256,6 +275,27 @@ impl TestEnv {
 
     async fn count(&self) -> i64 {
         book_repo::count_books(&self.pool).await.unwrap()
+    }
+}
+
+fn plain_book(path: &Path, title: &str) -> NewBook {
+    NewBook {
+        path: path.to_string_lossy().into_owned(),
+        title: title.into(),
+        subtitle: None,
+        author: None,
+        authors: Vec::new(),
+        subjects: Vec::new(),
+        publisher: None,
+        language: Some("en".into()),
+        isbn: None,
+        description: None,
+        cover_path: None,
+        publication_date: None,
+        series: None,
+        series_index: None,
+        file_size: 10,
+        file_mtime: 1,
     }
 }
 
@@ -712,6 +752,16 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         vec![book_id],
         "the library hears `removed`, so the row drops without a restart"
     );
+    assert_eq!(
+        env.unwatch_progress().first(),
+        Some(&(0, 1)),
+        "the dialog hears the purge start at zero"
+    );
+    assert_eq!(
+        env.unwatch_progress().last(),
+        Some(&(1, 1)),
+        "and finish on the promised count"
+    );
 
     // ...and the file itself is untouched, byte for byte.
     assert_eq!(
@@ -719,6 +769,124 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         before,
         "unwatching must never touch files on disk"
     );
+}
+
+/// Unwatch during a scan cancels the scan and then purges what it already
+/// imported. Nothing may land after the purge, or the orphan state returns.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_a_folder_cancels_its_import_and_purges_what_landed() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    for index in 0..200 {
+        write_epub(
+            &shelf.join(format!("book-{index}.epub")),
+            &format!("Shelf Book {index}"),
+        );
+    }
+    let shelf_path = shelf.to_string_lossy().into_owned();
+
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let emitter = EventEmitter::new(move |name, _| {
+        if name == "import-progress" {
+            let _ = progress_tx.send(());
+        }
+    });
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "import_paths",
+        "params": { "paths": [shelf_path.clone()] },
+    })
+    .to_string();
+    let state = env.state();
+    let import = tokio::spawn(async move { handle_request_line(&state, &emitter, &request).await });
+    progress_rx
+        .recv()
+        .await
+        .expect("the import should report progress");
+
+    let partial = env.count().await;
+    assert!(
+        partial > 0 && partial < 200,
+        "unwatch must land mid-import, got {partial} rows"
+    );
+    assert_eq!(env.unwatch(&[shelf_path.as_str()]).await, 1);
+
+    let outcome = import.await.expect("the import task must finish cleanly");
+    let RequestLineOutcome::Response(line) = outcome else {
+        panic!("the import response must not be malformed");
+    };
+    let response: Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(
+        response["result"]["cancelled"], true,
+        "the import must report that it was cancelled: {response}"
+    );
+
+    assert_eq!(
+        env.count().await,
+        0,
+        "the unwatch must purge the books the cancelled scan had imported"
+    );
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![env.library.to_string_lossy().into_owned()],
+        "the folder must leave the watch list"
+    );
+}
+
+/// An unwatch blocks the folder under the same lock a scan uses to start,
+/// so a scan that was already in flight cannot re-register the folder while
+/// the purge runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_import_cannot_start_while_its_folder_is_being_unwatched() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    write_epub(&shelf.join("book.epub"), "Shelf Book");
+    let shelf_path = shelf.to_string_lossy().into_owned();
+
+    let (_runs, blocked) = env.importing.block(&[shelf_path]);
+    let report = env.import_paths(&[shelf.as_path()]).await;
+    let failed = report["failed"].as_array().unwrap();
+    assert_eq!(failed.len(), 1, "{report}");
+    assert!(
+        failed[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("being unwatched"),
+        "{report}"
+    );
+    assert_eq!(env.count().await, 0, "a blocked folder must import nothing");
+
+    env.importing.clear_blocking(&blocked);
+    let report = env.import_paths(&[shelf.as_path()]).await;
+    assert_eq!(report["imported"], 1, "{report}");
+}
+
+/// A purge big enough to batch must show intermediate counts, not jump from
+/// zero to done when the last row goes.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_reports_batched_progress_for_a_large_folder() {
+    let env = setup().await;
+    for index in 0..30 {
+        let path = env.path(&format!("bulk-{index}.epub"));
+        book_repo::insert_book(&env.pool, &plain_book(&path, &format!("Bulk {index}")))
+            .await
+            .unwrap();
+    }
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+
+    let progress = env.unwatch_progress();
+    assert_eq!(progress.first(), Some(&(0, 30)));
+    assert!(
+        progress.len() > 2,
+        "intermediate batches must reach the dialog: {progress:?}"
+    );
+    assert_eq!(progress.last(), Some(&(30, 30)));
+    assert_eq!(env.count().await, 0);
 }
 
 /// A disk change inside the unwatched folder must not reach the catalog,
@@ -1477,6 +1645,103 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
     write_epub(&shelf.join("late.epub"), "Shelf Late");
     wait_for_titles(&env, ["Shelf Late"]);
     assert_eq!(env.count().await, 3);
+
+    assert!(
+        env.fired
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(name, _)| *name == "watched-folders-changed"),
+        "the settings view must hear that the folder was registered"
+    );
+}
+
+/// Dropping several files from one folder scans that folder once. The broken
+/// sibling is the observable: a second scan would report it a second time.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_several_files_from_one_folder_scans_it_once() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    write_epub(&shelf.join("first.epub"), "Shelf First");
+    write_epub(&shelf.join("second.epub"), "Shelf Second");
+    std::fs::write(shelf.join("broken.epub"), b"not an epub").unwrap();
+
+    let report = env
+        .import_paths(&[&shelf.join("first.epub"), &shelf.join("second.epub")])
+        .await;
+
+    assert_eq!(report["imported"].as_u64(), Some(2), "{report}");
+    assert_eq!(report["updated"].as_u64(), Some(0), "{report}");
+    assert_eq!(
+        report["failed"].as_array().unwrap().len(),
+        1,
+        "one scan reports the broken sibling once: {report}"
+    );
+    assert_eq!(env.count().await, 2);
+}
+
+/// A quit during a folder import must not orphan the books it already
+/// persisted. Registration happens before the scan, so an interrupted run
+/// leaves a watched folder and startup catch-up finishes the import.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    for index in 0..60 {
+        write_epub(
+            &shelf.join(format!("book-{index}.epub")),
+            &format!("Shelf Book {index}"),
+        );
+    }
+
+    // Drive the real JSON-RPC command in a task and abort it as soon as the
+    // first progress batch lands, which is after at least one row committed.
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let emitter = EventEmitter::new(move |name, _| {
+        if name == "import-progress" {
+            let _ = progress_tx.send(());
+        }
+    });
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "import_paths",
+        "params": { "paths": [shelf.to_string_lossy()] },
+    })
+    .to_string();
+    let state = env.state();
+    let import = tokio::spawn(async move { handle_request_line(&state, &emitter, &request).await });
+    progress_rx
+        .recv()
+        .await
+        .expect("the import should report progress");
+    import.abort();
+    let _ = import.await;
+
+    let partial = env.count().await;
+    assert!(
+        partial > 0 && partial < 60,
+        "the abort must land mid-import, got {partial} rows"
+    );
+    assert_eq!(
+        library_locations::list_locations(&env.pool).await.unwrap(),
+        vec![
+            env.library.to_string_lossy().into_owned(),
+            shelf.to_string_lossy().into_owned()
+        ],
+        "an interrupted import must leave its folder watched"
+    );
+
+    // The next launch reconciles watched locations. That is what resumes the
+    // import the user never got to finish.
+    env.reconciler.reconcile_location(&shelf).await.unwrap();
+    assert_eq!(
+        env.count().await,
+        60,
+        "startup catch-up must import the books the quit left behind"
+    );
 }
 
 /// Importing a file from a folder that is already watched neither

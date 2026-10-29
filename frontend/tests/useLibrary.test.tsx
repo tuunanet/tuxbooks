@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vite-plus/test";
 import { EVENT_FLUSH_MS, useLibraryData } from "@/hooks/useLibrary";
 import { makeBook } from "./factories";
-import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
+import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 
 const emptyLibrary = {
   get_library_stats: { bookCount: 0, collectionCount: 0 },
@@ -60,6 +60,55 @@ describe("useLibraryData import-progress streaming", () => {
   });
 });
 
+describe("useLibraryData fetch ordering", () => {
+  it("ignores an older fetch that resolves after a newer one", async () => {
+    type TestBook = ReturnType<typeof makeBook>;
+    mockInvoke(emptyLibrary);
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resolveStale: (books: TestBook[]) => void = () => {};
+    let resolveClean: (books: TestBook[]) => void = () => {};
+    const stale = new Promise<TestBook[]>((resolve) => {
+      resolveStale = resolve;
+    });
+    const clean = new Promise<TestBook[]>((resolve) => {
+      resolveClean = resolve;
+    });
+    let listCalls = 0;
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "list_books") {
+        listCalls += 1;
+        return listCalls === 1 ? stale : clean;
+      }
+      if (method === "get_library_stats") {
+        return Promise.resolve({ bookCount: 1, collectionCount: 0 });
+      }
+      if (method === "list_collections") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    let older: Promise<void> = Promise.resolve();
+    let newer: Promise<void> = Promise.resolve();
+    act(() => {
+      older = result.current.refresh();
+      newer = result.current.refresh();
+    });
+
+    await act(async () => {
+      resolveClean([]);
+      await newer;
+    });
+    expect(result.current.books).toEqual([]);
+
+    await act(async () => {
+      resolveStale([makeBook({ id: 1, title: "Purged Book" })]);
+      await older;
+    });
+    expect(result.current.books).toEqual([]);
+  });
+});
+
 describe("useLibraryData library-changed synchronization", () => {
   it("patches a book pushed by the filesystem watcher", async () => {
     const first = makeBook({ id: 3, title: "Before" });
@@ -112,6 +161,27 @@ describe("useLibraryData library-changed synchronization", () => {
 
     await waitFor(() => expect(result.current.books).toHaveLength(0));
     expect(result.current.stats?.bookCount).toBe(0);
+  });
+
+  it("does not lower the count for a removal that is not in the list", async () => {
+    const book = makeBook({ id: 9, title: "Kept Book" });
+    mockInvoke({
+      ...emptyLibrary,
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [book],
+    });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // A late purge event after a refresh must not subtract a book that the
+    // fresh list no longer contains.
+    act(() => {
+      emitBridgeEvent("library-changed", { kind: "removed", bookId: 999 });
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, EVENT_FLUSH_MS + 20)));
+
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.stats?.bookCount).toBe(1);
   });
 
   it("reflects reading progress saved by the reader", async () => {

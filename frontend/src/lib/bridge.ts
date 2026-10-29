@@ -36,6 +36,7 @@ export type {
 export type { StorageRootId } from "../../../electron/shared/pathSchema";
 export type {
   LibraryLocationStat,
+  LibraryLocationStatus,
   StorageEntry,
   StorageEntryKind,
   StorageReport,
@@ -171,6 +172,34 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
  */
 export function unwatchLocations(paths: string[]): Promise<number> {
   return invoke("unwatch_locations", { paths });
+}
+
+/** How many of an unwatch's promised books have left the catalog so far. */
+export interface UnwatchProgress {
+  removed: number;
+  total: number;
+}
+
+/**
+ * Subscribe to watched-folder changes (a folder registered, collapsed into a
+ * parent, or removed). The settings view reloads its folder list so a folder
+ * appears while its import is still running, not only after it finishes.
+ */
+export function onWatchedFoldersChanged(callback: () => void): Promise<() => void> {
+  const unlisten = onEvent<null>("watched-folders-changed", () => callback());
+  return Promise.resolve(unlisten);
+}
+
+/**
+ * Subscribe to unwatch progress (the `unwatch-progress` backend event). The
+ * sidecar batches counts while it purges the removed folders' books, so the
+ * dialog can show a bar instead of looking frozen. Resolves an unlisten fn.
+ */
+export function onUnwatchProgress(
+  callback: (progress: UnwatchProgress) => void,
+): Promise<() => void> {
+  const unlisten = onEvent<UnwatchProgress>("unwatch-progress", callback);
+  return Promise.resolve(unlisten);
 }
 
 /**

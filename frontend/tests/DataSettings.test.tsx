@@ -71,6 +71,7 @@ const REPORT: StorageReport = {
       bookCount: 12,
       totalBytes: 24 * 1024 * 1024,
       missingFromDisk: false,
+      status: "idle",
     },
   ],
   bookTotalBytes: 24 * 1024 * 1024,
@@ -205,6 +206,7 @@ describe("DataSettings", () => {
       bookCount: 1,
       totalBytes: 1024,
       missingFromDisk: false,
+      status: "idle" as const,
     }));
     storageReportMock.mockResolvedValue({
       ...REPORT,

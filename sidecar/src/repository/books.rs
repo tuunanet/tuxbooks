@@ -121,6 +121,27 @@ pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     Ok(books)
 }
 
+/// The fields an import needs to decide whether a file changed and which
+/// cover it already owns. Deliberately excludes description and every other
+/// payload column: a stat-only re-import must not read whole library rows.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct BookFileSnapshot {
+    pub path: String,
+    pub available: bool,
+    pub file_size: i64,
+    pub file_mtime: i64,
+    pub cover_path: Option<String>,
+}
+
+pub async fn list_file_snapshots(pool: &SqlitePool) -> Result<Vec<BookFileSnapshot>, AppError> {
+    let snapshots = sqlx::query_as::<_, BookFileSnapshot>(
+        "SELECT path, available, file_size, file_mtime, cover_path FROM books",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(snapshots)
+}
+
 /// Every referenced cover path — the live set for artwork-cache sweeps.
 pub async fn list_cover_paths(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
     let paths: Vec<String> =

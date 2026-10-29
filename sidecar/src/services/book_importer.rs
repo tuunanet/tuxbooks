@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -39,6 +40,9 @@ pub struct ImportReport {
     /// the report says where they came from instead of naming a watch that
     /// was never started.
     pub covered: Vec<String>,
+    /// The scan stopped because its folder was unwatched mid-import. Counts
+    /// cover only the books that landed before the cancel.
+    pub cancelled: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -110,14 +114,37 @@ pub async fn import_directory(
     pdfium_dirs: &[PathBuf],
     on_book: &(dyn Fn(&crate::domain::Book) + Send + Sync),
 ) -> Result<ImportReport, AppError> {
+    import_directory_with_cancel(pool, library_root, covers_dir, pdfium_dirs, on_book, None).await
+}
+
+/// The cancellable form of [`import_directory`]. `cancel` is polled between
+/// files and before each persisted book; a cancelled run stops scheduling
+/// parses, drops any results still in the channel, and returns a report with
+/// `cancelled` set. Workers already parsing finish, but nothing they produce
+/// is written to the catalog.
+pub async fn import_directory_with_cancel(
+    pool: &SqlitePool,
+    library_root: &Path,
+    covers_dir: &Path,
+    pdfium_dirs: &[PathBuf],
+    on_book: &(dyn Fn(&crate::domain::Book) + Send + Sync),
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<ImportReport, AppError> {
+    let cancelled = || {
+        cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    };
     let files = list_book_files(library_root).map_err(|err| match err {
         ScanError::Io { source, .. } => AppError::Io(source),
         other => AppError::InvalidInput(other.to_string()),
     })?;
 
     // One snapshot of the known rows: stored size/mtime for the skip check
-    // and the stored cover path for the keep-what-works rule.
-    let known: HashMap<String, crate::domain::Book> = books::list_books(pool)
+    // and the stored cover path for the keep-what-works rule. Only those
+    // columns are read, so a 10k-book re-import does not deserialize 10k
+    // descriptions to compare two integers.
+    let known: HashMap<String, books::BookFileSnapshot> = books::list_file_snapshots(pool)
         .await?
         .into_iter()
         .map(|book| (book.path.clone(), book))
@@ -126,6 +153,10 @@ pub async fn import_directory(
     let mut report = ImportReport::default();
     let mut queued: Vec<(PathBuf, Option<String>)> = Vec::new();
     for path in files {
+        if cancelled() {
+            report.cancelled = true;
+            break;
+        }
         let path_str = path.to_string_lossy().into_owned();
         let stored = known.get(&path_str);
         let stats = file_stats(&path);
@@ -147,12 +178,23 @@ pub async fn import_directory(
     let (tx, mut rx) = mpsc::channel::<(PathBuf, Result<NewBook, String>)>(PARSE_CONCURRENCY);
     let mut workers = Vec::with_capacity(queued.len());
     for (path, previous_cover) in queued {
+        if cancelled() {
+            report.cancelled = true;
+            break;
+        }
         let semaphore = semaphore.clone();
         let tx = tx.clone();
+        let cancel = cancel.clone();
         let covers_dir = covers_dir.to_path_buf();
         let pdfium_dirs = pdfium_dirs.to_vec();
         workers.push(tokio::spawn(async move {
             let _permit = semaphore.acquire().await;
+            if cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return;
+            }
             let parse_path = path.clone();
             let result = tokio::task::spawn_blocking(move || -> Result<NewBook, String> {
                 let parsed = parse_book(&parse_path).map_err(|err| err.to_string())?;
@@ -174,6 +216,10 @@ pub async fn import_directory(
     drop(tx);
 
     while let Some((path, result)) = rx.recv().await {
+        if cancelled() {
+            report.cancelled = true;
+            break;
+        }
         match result {
             Err(error) => report.failed.push(FailedImport {
                 path: path.to_string_lossy().into_owned(),
@@ -192,6 +238,10 @@ pub async fn import_directory(
             }
         }
     }
+    // Close the channel before joining: a cancelled persister must not leave
+    // a worker blocked on a full channel waiting for a reader that never
+    // comes back.
+    drop(rx);
     for worker in workers {
         worker
             .await

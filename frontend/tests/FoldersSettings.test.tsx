@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import type { StorageReport } from "@/lib/bridge";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
-import { mockInvoke, pickDirectoryMock, storageReportMock, invokeMock } from "./mocks/bridge";
+import {
+  emitBridgeEvent,
+  invokeMock,
+  mockInvoke,
+  pickDirectoryMock,
+  storageReportMock,
+} from "./mocks/bridge";
 
 const REPORT: StorageReport = {
   roots: [],
@@ -20,6 +26,7 @@ const REPORT: StorageReport = {
       bookCount: 12,
       totalBytes: 24 * 1024 * 1024,
       missingFromDisk: false,
+      status: "idle",
     },
     {
       id: 2,
@@ -28,6 +35,7 @@ const REPORT: StorageReport = {
       bookCount: 3,
       totalBytes: 1024 * 1024,
       missingFromDisk: true,
+      status: "importing",
     },
   ],
   bookTotalBytes: 25 * 1024 * 1024,
@@ -76,12 +84,42 @@ describe("FoldersSettings", () => {
     expect(gone).toHaveTextContent("3 books · 1.0 MB");
   });
 
+  it("reloads when the backend reports a watched-folder change", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+    const calls = storageReportMock.mock.calls.length;
+
+    act(() => emitBridgeEvent("watched-folders-changed", null));
+
+    await waitFor(() => expect(storageReportMock.mock.calls.length).toBeGreaterThan(calls));
+  });
+
   it("labels a watched folder whose path is gone from disk", async () => {
     renderFolders();
 
     await screen.findByTestId("folders-list");
-    expect(screen.getByTestId("folder-missing-2")).toHaveTextContent("Missing from disk");
-    expect(screen.getByTestId("folder-row-1")).not.toHaveTextContent("Missing from disk");
+    expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Missing");
+    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-destructive/10");
+    expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Up to date");
+    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-emerald-500/10");
+  });
+
+  it("tags importing and refreshing folders in the status column", async () => {
+    const base = REPORT.bookLocations[0]!;
+    storageReportMock.mockResolvedValue({
+      ...REPORT,
+      bookLocations: [
+        { ...base, id: 1, status: "importing" },
+        { ...base, id: 2, status: "refreshing" },
+      ],
+    });
+    renderFolders();
+
+    await screen.findByTestId("folders-list");
+    expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Importing");
+    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-blue-500/10");
+    expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Refreshing");
+    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-amber-500/10");
   });
 
   it("explains that a watched folder can be a cloud-synced directory", async () => {
@@ -159,6 +197,7 @@ function manyFolders(count: number): StorageReport {
     bookCount: 2,
     totalBytes: 1024 * 1024,
     missingFromDisk: false,
+    status: "idle" as const,
   }));
   return { ...REPORT, bookLocations };
 }
@@ -275,8 +314,44 @@ describe("FoldersSettings unwatch", () => {
       const rows = within(screen.getByTestId("folders-list")).getAllByRole("listitem");
       expect(rows).toHaveLength(1);
     });
+    await waitFor(() =>
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "list_books").length,
+      ).toBeGreaterThanOrEqual(2),
+    );
     expect(screen.queryByTestId("unwatch-dialog")).toBeNull();
     expect(screen.getByTestId("folders-unwatch")).toBeDisabled();
+  });
+
+  it("shows how many books are left while the unwatch purges them", async () => {
+    let finishUnwatch: (value: number) => void = () => {};
+    const pending = new Promise<number>((resolve) => {
+      finishUnwatch = resolve;
+    });
+    renderFolders({ unwatch_locations: pending });
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+    await screen.findByTestId("unwatch-dialog");
+    await userEvent.click(screen.getByTestId("unwatch-confirm"));
+
+    // Nothing is reported until the sidecar sends its first count.
+    expect(screen.queryByTestId("unwatch-progress")).toBeNull();
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 0, total: 12 }));
+    const progress = await screen.findByTestId("unwatch-progress");
+    expect(progress).toHaveTextContent("Removing 0 of 12 books");
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 5, total: 12 }));
+    expect(progress).toHaveTextContent("Removing 5 of 12 books");
+    expect(within(progress).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 12, total: 12 }));
+    expect(progress).toHaveTextContent("Removing 12 of 12 books");
+
+    await act(async () => finishUnwatch(1));
+    await waitFor(() => expect(screen.queryByTestId("unwatch-dialog")).toBeNull());
   });
 
   it("closes the dialog without unwatching anything", async () => {
@@ -309,6 +384,7 @@ describe("FoldersSettings unwatch", () => {
     // Nothing happened, so nothing may look like it did: the folder is still
     // selected, the choice is still on screen, and the list was not re-read.
     expect(screen.getByTestId("unwatch-dialog")).toBe(dialog);
+    expect(within(dialog).getByTestId("unwatch-error")).toHaveTextContent("database is locked");
     expect(screen.getByTestId("folder-select-1")).toBeChecked();
     expect(screen.getByTestId("folders-unwatch")).toBeEnabled();
     expect(storageReportMock).toHaveBeenCalledTimes(1);
@@ -342,6 +418,7 @@ describe("FoldersSettings unwatch", () => {
           bookCount: 0,
           totalBytes: 0,
           missingFromDisk: false,
+          status: "idle",
         },
       ],
     });
@@ -370,6 +447,7 @@ describe("FoldersSettings unwatch", () => {
           bookCount: 1,
           totalBytes: 1024,
           missingFromDisk: false,
+          status: "idle",
         },
       ],
     });
