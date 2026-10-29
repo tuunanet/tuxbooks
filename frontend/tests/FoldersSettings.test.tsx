@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import type { StorageReport } from "@/lib/bridge";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
-import { mockInvoke, pickDirectoryMock, storageReportMock, invokeMock } from "./mocks/bridge";
+import {
+  emitBridgeEvent,
+  invokeMock,
+  mockInvoke,
+  pickDirectoryMock,
+  storageReportMock,
+} from "./mocks/bridge";
 
 const REPORT: StorageReport = {
   roots: [],
@@ -277,6 +283,37 @@ describe("FoldersSettings unwatch", () => {
     });
     expect(screen.queryByTestId("unwatch-dialog")).toBeNull();
     expect(screen.getByTestId("folders-unwatch")).toBeDisabled();
+  });
+
+  it("shows how many books are left while the unwatch purges them", async () => {
+    let finishUnwatch: (value: number) => void = () => {};
+    const pending = new Promise<number>((resolve) => {
+      finishUnwatch = resolve;
+    });
+    renderFolders({ unwatch_locations: pending });
+    await screen.findByTestId("folders-list");
+
+    await userEvent.click(screen.getByTestId("folder-select-1"));
+    await userEvent.click(screen.getByTestId("folders-unwatch"));
+    await screen.findByTestId("unwatch-dialog");
+    await userEvent.click(screen.getByTestId("unwatch-confirm"));
+
+    // Nothing is reported until the sidecar sends its first count.
+    expect(screen.queryByTestId("unwatch-progress")).toBeNull();
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 0, total: 12 }));
+    const progress = await screen.findByTestId("unwatch-progress");
+    expect(progress).toHaveTextContent("Removing 0 of 12 books");
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 5, total: 12 }));
+    expect(progress).toHaveTextContent("Removing 5 of 12 books");
+    expect(within(progress).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+
+    act(() => emitBridgeEvent("unwatch-progress", { removed: 12, total: 12 }));
+    expect(progress).toHaveTextContent("Removing 12 of 12 books");
+
+    await act(async () => finishUnwatch(1));
+    await waitFor(() => expect(screen.queryByTestId("unwatch-dialog")).toBeNull());
   });
 
   it("closes the dialog without unwatching anything", async () => {

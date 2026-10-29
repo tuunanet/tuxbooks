@@ -37,7 +37,7 @@ pub async fn remove_book(
     events: &EventEmitter,
     book_id: i64,
 ) -> Result<bool, AppError> {
-    let removed = books::delete_book(&state.db, book_id).await?;
+    let removed = delete_book_and_notify(state, events, book_id).await?;
     if removed {
         if let Err(err) = crate::services::artwork_cache::sweep_unreferenced_covers(
             &state.db,
@@ -47,6 +47,21 @@ pub async fn remove_book(
         {
             eprintln!("cover sweep after removal failed: {err}");
         }
+    }
+    Ok(removed)
+}
+
+/// The row half of `remove_book`: delete the book and tell the client to
+/// drop it, without sweeping the artwork cache. A bulk caller (unwatch) uses
+/// this per book and sweeps once at the end, so removing N books costs one
+/// cache scan rather than N.
+pub(crate) async fn delete_book_and_notify(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<bool, AppError> {
+    let removed = books::delete_book(&state.db, book_id).await?;
+    if removed {
         events.emit("library-changed", &LibraryChange::Removed { book_id });
     }
     Ok(removed)

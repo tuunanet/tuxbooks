@@ -4,9 +4,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { UnwatchFoldersDialog } from "@/components/settings/UnwatchFoldersDialog";
 import {
   getStorageReport,
+  onUnwatchProgress,
   pickDirectory,
   unwatchLocations,
   type StorageReport,
+  type UnwatchProgress,
 } from "@/lib/bridge";
 import { formatMb } from "@/lib/format";
 import { useImport } from "@/state/importState";
@@ -27,6 +29,7 @@ export function FoldersSettings() {
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [confirming, setConfirming] = useState(false);
   const [unwatching, setUnwatching] = useState(false);
+  const [unwatchProgress, setUnwatchProgress] = useState<UnwatchProgress | null>(null);
 
   const load = useCallback(
     () =>
@@ -83,14 +86,18 @@ export function FoldersSettings() {
 
   const confirmUnwatch = useCallback(async () => {
     setUnwatching(true);
+    let unlisten: (() => void) | undefined;
     let unwatched = false;
     try {
+      unlisten = await onUnwatchProgress(setUnwatchProgress);
       await unwatchLocations(chosen.map((location) => location.path));
       unwatched = true;
     } catch (error) {
       console.error("unwatch_locations failed:", error);
     } finally {
+      unlisten?.();
       setUnwatching(false);
+      setUnwatchProgress(null);
     }
     // A failed unwatch keeps the dialog open: the selection is still there
     // to retry or cancel instead of closing over nothing that happened.
@@ -226,6 +233,7 @@ export function FoldersSettings() {
         open={confirming}
         folders={chosen}
         busy={unwatching}
+        progress={unwatchProgress}
         onConfirm={() => void confirmUnwatch()}
         onCancel={() => setConfirming(false)}
       />

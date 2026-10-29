@@ -222,6 +222,22 @@ impl TestEnv {
             .collect()
     }
 
+    /// `(removed, total)` pairs from the progress events the dialog draws.
+    fn unwatch_progress(&self) -> Vec<(u64, u64)> {
+        self.fired
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(name, _)| *name == "unwatch-progress")
+            .map(|(_, payload)| {
+                (
+                    payload.get("removed").and_then(Value::as_u64).unwrap(),
+                    payload.get("total").and_then(Value::as_u64).unwrap(),
+                )
+            })
+            .collect()
+    }
+
     /// A sibling directory outside `library`, used to keep a second watched
     /// root next to the first.
     fn sibling(&self, name: &str) -> PathBuf {
@@ -256,6 +272,27 @@ impl TestEnv {
 
     async fn count(&self) -> i64 {
         book_repo::count_books(&self.pool).await.unwrap()
+    }
+}
+
+fn plain_book(path: &Path, title: &str) -> NewBook {
+    NewBook {
+        path: path.to_string_lossy().into_owned(),
+        title: title.into(),
+        subtitle: None,
+        author: None,
+        authors: Vec::new(),
+        subjects: Vec::new(),
+        publisher: None,
+        language: Some("en".into()),
+        isbn: None,
+        description: None,
+        cover_path: None,
+        publication_date: None,
+        series: None,
+        series_index: None,
+        file_size: 10,
+        file_mtime: 1,
     }
 }
 
@@ -712,6 +749,16 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         vec![book_id],
         "the library hears `removed`, so the row drops without a restart"
     );
+    assert_eq!(
+        env.unwatch_progress().first(),
+        Some(&(0, 1)),
+        "the dialog hears the purge start at zero"
+    );
+    assert_eq!(
+        env.unwatch_progress().last(),
+        Some(&(1, 1)),
+        "and finish on the promised count"
+    );
 
     // ...and the file itself is untouched, byte for byte.
     assert_eq!(
@@ -719,6 +766,31 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         before,
         "unwatching must never touch files on disk"
     );
+}
+
+/// A purge big enough to batch must show intermediate counts, not jump from
+/// zero to done when the last row goes.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwatching_reports_batched_progress_for_a_large_folder() {
+    let env = setup().await;
+    for index in 0..30 {
+        let path = env.path(&format!("bulk-{index}.epub"));
+        book_repo::insert_book(&env.pool, &plain_book(&path, &format!("Bulk {index}")))
+            .await
+            .unwrap();
+    }
+
+    let root = env.library.to_string_lossy().into_owned();
+    assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
+
+    let progress = env.unwatch_progress();
+    assert_eq!(progress.first(), Some(&(0, 30)));
+    assert!(
+        progress.len() > 2,
+        "intermediate batches must reach the dialog: {progress:?}"
+    );
+    assert_eq!(progress.last(), Some(&(30, 30)));
+    assert_eq!(env.count().await, 0);
 }
 
 /// A disk change inside the unwatched folder must not reach the catalog,

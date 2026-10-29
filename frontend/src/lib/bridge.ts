@@ -173,6 +173,24 @@ export function unwatchLocations(paths: string[]): Promise<number> {
   return invoke("unwatch_locations", { paths });
 }
 
+/** How many of an unwatch's promised books have left the catalog so far. */
+export interface UnwatchProgress {
+  removed: number;
+  total: number;
+}
+
+/**
+ * Subscribe to unwatch progress (the `unwatch-progress` backend event). The
+ * sidecar batches counts while it purges the removed folders' books, so the
+ * dialog can show a bar instead of looking frozen. Resolves an unlisten fn.
+ */
+export function onUnwatchProgress(
+  callback: (progress: UnwatchProgress) => void,
+): Promise<() => void> {
+  const unlisten = onEvent<UnwatchProgress>("unwatch-progress", callback);
+  return Promise.resolve(unlisten);
+}
+
 /**
  * Subscribe to import progress (the `import-progress` backend event). The
  * sidecar batches persisted books and emits them as arrays — the callback

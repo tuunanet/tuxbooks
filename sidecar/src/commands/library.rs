@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::commands::books::remove_book;
+use crate::commands::books::delete_book_and_notify;
 use crate::commands::emit_changed_book;
 use crate::domain::{StartupRecovery, StorageStats};
 use crate::error::AppError;
@@ -27,6 +27,15 @@ const EVENT_BATCH_WINDOW_MS: u128 = 250;
 #[serde(rename_all = "camelCase")]
 struct ImportProgressBatch {
     books: Vec<crate::domain::Book>,
+}
+
+/// Wire shape of one `unwatch-progress` event: `removed` books are gone out
+/// of the `total` the dialog promised to remove.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnwatchProgress {
+    removed: usize,
+    total: usize,
 }
 
 /// Accumulates persisted books and emits them as batched `import-progress`
@@ -289,12 +298,14 @@ async fn covered_by_watched_ancestor(pool: &SqlitePool, path: &str) -> Result<bo
 
 /// Unwatch one or more folders: the rows leave the watch list, every book
 /// the folders own leaves the catalog, and the filesystem watcher stops
-/// observing those paths. The purge runs through `remove_book`, the delete
-/// cascade the library's own Remove uses, so progress, collections, and
-/// annotations go with the row, and every removal announces itself through
-/// the existing `library-changed` event so the library view updates
-/// without a restart. Files on disk are never touched. Returns how many
-/// folders were actually listed.
+/// observing those paths. The purge runs the same delete cascade as the
+/// library's own Remove, so progress, collections, and annotations go with
+/// the row, and every removal announces itself through the existing
+/// `library-changed` event so the library view updates without a restart.
+/// Batched `unwatch-progress` events report how many of the promised books
+/// are gone while the purge runs; the artwork cache is swept once at the
+/// end instead of once per book. Files on disk are never touched. Returns
+/// how many folders were actually listed.
 ///
 /// A folder inside another watched folder is refused (ADR 0010). The folder
 /// above watches the whole subtree recursively, so the books this unwatch
@@ -358,20 +369,62 @@ pub async fn unwatch_locations(
     let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     state.watcher.unwatch_all(&dying);
 
-    let mut removed = 0usize;
+    let mut removed_folders = 0usize;
     for path in &roots {
         if !library_locations::remove_location(&state.db, path).await? {
             continue;
         }
-        removed += 1;
+        removed_folders += 1;
     }
 
     // The same delete cascade the library's own Remove uses: progress,
     // collections, and annotations go with the row. Files on disk do not.
+    // The cache scan runs once below, not once per row.
+    let total = doomed.len();
+    events.emit("unwatch-progress", &UnwatchProgress { removed: 0, total });
+    let mut processed = 0usize;
+    let mut last_reported = 0usize;
+    let mut last_flush = Instant::now();
     for book_id in doomed {
-        remove_book(state, events, book_id).await?;
+        delete_book_and_notify(state, events, book_id).await?;
+        processed += 1;
+        if processed % EVENT_BATCH_BOOKS == 0
+            || last_flush.elapsed().as_millis() >= EVENT_BATCH_WINDOW_MS
+        {
+            events.emit(
+                "unwatch-progress",
+                &UnwatchProgress {
+                    removed: processed,
+                    total,
+                },
+            );
+            last_reported = processed;
+            last_flush = Instant::now();
+        }
     }
-    Ok(removed)
+
+    // Sweep before the final count so a bar reading "all done" never sits
+    // behind work still in flight.
+    if processed > 0 {
+        if let Err(err) = crate::services::artwork_cache::sweep_unreferenced_covers(
+            &state.db,
+            &covers_dir(&state.db_path),
+        )
+        .await
+        {
+            eprintln!("cover sweep after unwatch failed: {err}");
+        }
+    }
+    if processed != last_reported {
+        events.emit(
+            "unwatch-progress",
+            &UnwatchProgress {
+                removed: processed,
+                total,
+            },
+        );
+    }
+    Ok(removed_folders)
 }
 
 /// Reconnect an unavailable book to a new file chosen by the user. The book

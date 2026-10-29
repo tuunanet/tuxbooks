@@ -7,7 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { StorageReport } from "@/lib/bridge";
+import { Progress } from "@/components/ui/progress";
+import type { StorageReport, UnwatchProgress } from "@/lib/bridge";
 
 const MAX_LISTED = 3;
 
@@ -20,6 +21,8 @@ interface UnwatchFoldersDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
+  /** Removal counts while the purge runs; null before it starts. */
+  progress?: UnwatchProgress | null;
 }
 
 function titleFor(folders: FolderRow[]): string {
@@ -52,9 +55,11 @@ export function UnwatchFoldersDialog({
   onConfirm,
   onCancel,
   busy = false,
+  progress = null,
 }: UnwatchFoldersDialogProps) {
   const several = folders.length > 1;
   const books = folders.reduce((total, folder) => total + folder.bookCount, 0);
+  const removing = busy && progress !== null && progress.total > 0;
 
   return (
     <Dialog
@@ -86,6 +91,18 @@ export function UnwatchFoldersDialog({
           <p data-testid="unwatch-overflow" className="text-xs text-muted-foreground">
             {`+${folders.length - MAX_LISTED} more`}
           </p>
+        )}
+
+        {removing && (
+          <div data-testid="unwatch-progress" className="space-y-1.5">
+            <Progress
+              aria-label="Unwatch progress"
+              value={Math.min(100, Math.round((progress.removed / progress.total) * 100))}
+            />
+            <p aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
+              {`Removing ${progress.removed} of ${progress.total} books`}
+            </p>
+          </div>
         )}
 
         <DialogFooter>
