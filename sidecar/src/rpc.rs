@@ -758,12 +758,16 @@ mod tests {
 
         assert_eq!(result["imported"], json!(2));
         let fired = fired.lock().unwrap();
+        let progress: Vec<_> = fired
+            .iter()
+            .filter(|(name, _)| *name == "import-progress")
+            .collect();
         assert_eq!(
-            fired.len(),
+            progress.len(),
             1,
             "batched: one event for both books, not one per book"
         );
-        let (name, payload) = &fired[0];
+        let (name, payload) = progress[0];
         assert_eq!(*name, "import-progress");
         let books = payload["books"].as_array().expect("payload.books array");
         assert_eq!(books.len(), 2);

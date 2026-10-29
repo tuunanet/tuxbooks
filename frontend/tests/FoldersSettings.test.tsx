@@ -82,6 +82,16 @@ describe("FoldersSettings", () => {
     expect(gone).toHaveTextContent("3 books · 1.0 MB");
   });
 
+  it("reloads when the backend reports a watched-folder change", async () => {
+    renderFolders();
+    await screen.findByTestId("folders-list");
+    const calls = storageReportMock.mock.calls.length;
+
+    act(() => emitBridgeEvent("watched-folders-changed", null));
+
+    await waitFor(() => expect(storageReportMock.mock.calls.length).toBeGreaterThan(calls));
+  });
+
   it("labels a watched folder whose path is gone from disk", async () => {
     renderFolders();
 

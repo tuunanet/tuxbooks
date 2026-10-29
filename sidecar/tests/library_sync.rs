@@ -1645,6 +1645,15 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
     write_epub(&shelf.join("late.epub"), "Shelf Late");
     wait_for_titles(&env, ["Shelf Late"]);
     assert_eq!(env.count().await, 3);
+
+    assert!(
+        env.fired
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(name, _)| *name == "watched-folders-changed"),
+        "the settings view must hear that the folder was registered"
+    );
 }
 
 /// Dropping several files from one folder scans that folder once. The broken

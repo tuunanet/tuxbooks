@@ -110,6 +110,7 @@ pub async fn scan_library(
     let mut report = ImportReport::default();
     register_and_import_folder(
         state,
+        events,
         &root,
         &covers,
         &pdfium_dirs,
@@ -193,6 +194,7 @@ pub async fn import_paths(
     for folder in folders {
         if let Err(err) = register_and_import_folder(
             state,
+            events,
             &folder,
             &covers,
             &pdfium_dirs,
@@ -233,6 +235,7 @@ fn queue_folder(folders: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, folder:
 /// produces no disclosure and no duplicate row.
 async fn register_and_import_folder(
     state: &AppState,
+    events: &EventEmitter,
     root: &Path,
     covers: &Path,
     pdfium_dirs: &[PathBuf],
@@ -252,7 +255,7 @@ async fn register_and_import_folder(
         run: run.clone(),
     };
 
-    let watch = register_location(state, root, report).await?;
+    let watch = register_location(state, events, root, report).await?;
     let outcome = import_directory_with_cancel(
         &state.db,
         root,
@@ -284,6 +287,10 @@ async fn register_and_import_folder(
     report.skipped += folder_report.skipped;
     report.cancelled |= folder_report.cancelled;
     report.failed.append(&mut folder_report.failed);
+    // The settings list opened during the import now has the final counts.
+    if watch && !cancelled {
+        events.emit("watched-folders-changed", &());
+    }
     Ok(())
 }
 
@@ -323,6 +330,7 @@ impl Drop for UnwatchBlockGuard {
 /// covers it (ADR 0010), so no separate watch is needed.
 async fn register_location(
     state: &AppState,
+    events: &EventEmitter,
     root: &Path,
     report: &mut ImportReport,
 ) -> Result<bool, AppError> {
@@ -337,13 +345,20 @@ async fn register_location(
     // process dies between the two, the list briefly holds a nested entry
     // but every book still has a watched owner; the reverse order would
     // orphan the descendants' books during the gap.
-    if library_locations::add_location(&state.db, &root).await? {
+    let added = library_locations::add_location(&state.db, &root).await?;
+    if added {
         report.watched.push(root.clone());
     }
     // A watched folder inside another adds nothing (ADR 0010). Its row goes
     // without a purge and its books stay, owned by this folder from here on.
-    for gone in library_locations::collapse_descendants(&state.db, &root).await? {
-        state.watcher.unwatch(Path::new(&gone));
+    let collapsed = library_locations::collapse_descendants(&state.db, &root).await?;
+    for gone in &collapsed {
+        state.watcher.unwatch(Path::new(gone));
+    }
+    // The folder is registered before its scan, so Settings can show it
+    // while the import is still running instead of after it finishes.
+    if added || !collapsed.is_empty() {
+        events.emit("watched-folders-changed", &());
     }
     Ok(true)
 }
@@ -458,6 +473,9 @@ pub async fn unwatch_locations(
             continue;
         }
         removed_folders += 1;
+    }
+    if removed_folders > 0 {
+        events.emit("watched-folders-changed", &());
     }
 
     // The same delete cascade the library's own Remove uses: progress,

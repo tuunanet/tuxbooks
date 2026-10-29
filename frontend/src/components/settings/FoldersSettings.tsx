@@ -5,6 +5,7 @@ import { UnwatchFoldersDialog } from "@/components/settings/UnwatchFoldersDialog
 import {
   getStorageReport,
   onUnwatchProgress,
+  onWatchedFoldersChanged,
   pickDirectory,
   unwatchLocations,
   type StorageReport,
@@ -50,6 +51,23 @@ export function FoldersSettings() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onWatchedFoldersChanged(() => {
+      if (!disposed) void load();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("watched-folders-changed subscription failed:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [load]);
 
   const locations = useMemo(() => report?.bookLocations ?? [], [report]);
