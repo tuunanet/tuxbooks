@@ -59,8 +59,14 @@ describe("SyncSettings", () => {
     renderSettings();
     expect(await screen.findByText("Syncs between machines")).toBeInTheDocument();
     expect(screen.getByText("Reading progress and last-opened time")).toBeInTheDocument();
+    expect(
+      screen.getByText("Library metadata edits (values the book file cannot store)"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Book files (EPUB and PDF)")).toBeInTheDocument();
     expect(screen.getByText("The library catalog and watched folders")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Saving metadata into an EPUB or PDF rewrites the book file/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(await screen.findByTestId("sync-connect"));
 

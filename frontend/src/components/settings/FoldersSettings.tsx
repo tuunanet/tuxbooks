@@ -148,9 +148,9 @@ export function FoldersSettings() {
             TuxBooks reads them and imports new ones as they arrive.
           </p>
           <p className="text-sm text-muted-foreground">
-            Reading progress, bookmarks, collections, and metadata edits travel separately. Connect
-            a folder in Settings &gt; Sync to share them between machines. That folder never carries
-            book files.
+            Reading progress, bookmarks, collections, and library-side metadata edits travel
+            separately. Connect a folder in Settings &gt; Sync to share them between machines. That
+            folder never carries book files.
           </p>
           <p className="text-xs text-muted-foreground">
             Keep the folder available offline. TuxBooks cannot open a file the client has not

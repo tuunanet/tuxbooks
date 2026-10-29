@@ -15,6 +15,9 @@ test.describe("settings sync tab", () => {
     await expect(page.getByRole("heading", { name: "Cloud folder" })).toBeVisible();
     await expect(page.getByText("Syncs between machines")).toBeVisible();
     await expect(page.getByText("Book files (EPUB and PDF)")).toBeVisible();
+    await expect(
+      page.getByText(/Saving metadata into an EPUB or PDF rewrites the book file/i),
+    ).toBeVisible();
   });
 
   test("explains that a watched folder can live in a cloud folder", async ({ page }) => {

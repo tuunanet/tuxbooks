@@ -45,6 +45,23 @@ syncs. The client then copies the book files and TuxBooks syncs reading state
 separately. Each machine adds the folder once, because watched locations and
 absolute paths stay local.
 
+## Book files and backups
+
+Sync never moves, copies, or deletes a book file. A metadata embed is a file
+write: it changes the EPUB or PDF and leaves a one-time `<file>.bak` beside it
+(`book.epub.bak`, `book.pdf.bak`). If the book folder is cloud-synced, the
+client carries both files, and the other machine reimports the new bytes on its
+next watch pass. If the book folder is not cloud-synced, an embedded metadata
+edit stays on the machine that wrote it; only library-side overrides, the
+values the format cannot store, travel through the state folder.
+
+The scanner, watcher, and identity sweep ignore `.bak` files and the hidden
+`*.tuxbooks-*.tmp` files. TuxBooks never deletes or overwrites an existing
+backup. A backup deleted in a cloud-synced folder is deleted everywhere that
+client syncs it, and TuxBooks cannot recreate the original afterward. The next
+embed makes a fresh backup of the file as it exists at that moment, not of the
+file's first version.
+
 ## Book identity
 
 Row ids and absolute paths are machine-specific. A book's shared identity is a

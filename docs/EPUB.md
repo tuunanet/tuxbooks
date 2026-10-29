@@ -70,7 +70,11 @@ swapped in atomically, so a failure never truncates a book. The cover image
 and all resources are copied untouched. Before the first write a one-time
 `<file>.bak` copy of the original is made (later embeds keep it), so the
 pre-embed file is always recoverable; the `.bak` extension is never scanned
-into the library.
+into the library. If the book folder is cloud-synced, the client carries the
+backup with the book, and deleting it there removes it on every machine.
+TuxBooks never deletes or overwrites an existing backup. Once every copy of
+the backup is gone, the original cannot be recovered; the next embed backs up
+the file as it is then.
 
 ## Error handling
 

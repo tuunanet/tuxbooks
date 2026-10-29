@@ -249,12 +249,12 @@ export function SyncSettings() {
               <li>Reading progress and last-opened time</li>
               <li>Bookmarks, highlights, and notes</li>
               <li>Collections and which books are in them</li>
-              <li>Metadata edits like title, author, and series</li>
+              <li>Library metadata edits (values the book file cannot store)</li>
               <li>Custom covers</li>
             </ul>
           </div>
           <div className="rounded-md border p-3">
-            <p className="font-medium">Stays on this machine</p>
+            <p className="font-medium">Not carried by this sync</p>
             <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
               <li>Book files (EPUB and PDF)</li>
               <li>The library catalog and watched folders</li>
@@ -262,6 +262,13 @@ export function SyncSettings() {
             </ul>
           </div>
         </div>
+
+        <p className="mt-3 text-sm text-muted-foreground">
+          Saving metadata into an EPUB or PDF rewrites the book file. Those edits, and the one-time{" "}
+          <span className="font-mono">.bak</span> backup next to it, reach another machine only when
+          your cloud client carries the book folder as well. This folder holds library-side state
+          only.
+        </p>
 
         <p className="mt-3 text-sm text-muted-foreground">
           If your books already live in a cloud folder, your client keeps syncing the files.

@@ -176,7 +176,9 @@ subtitle — keep their override, so the effective view is unchanged. Covers
 are never embedded: the artwork cache stays the only cover store. Before
 the first write, a one-time `<file>.bak` copy of the original is kept beside
 the book (`<file>.epub.bak` / `<file>.pdf.bak`; the `.bak` extension is
-never scanned into the library). The re-parse also updates the FTS index
+never scanned into the library). TuxBooks never deletes or overwrites an
+existing backup. If the book folder is cloud-synced, the client carries the
+backup with the book; see `docs/SYNC.md`. The re-parse also updates the FTS index
 through the normal effective-column triggers. `reset_book_metadata` drops
 every override, returning the book to its source-file metadata; with no
 overrides left, the reset affordance disables itself.

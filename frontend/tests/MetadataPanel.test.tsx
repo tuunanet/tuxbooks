@@ -283,6 +283,13 @@ describe("MetadataPanel", () => {
     expect(screen.getByTestId("metadata-panel")).toHaveTextContent(
       /Saving writes these values into the PDF file/i,
     );
+    expect(screen.getByTestId("metadata-panel")).toHaveTextContent(
+      /Other machines get them only when they receive the file/i,
+    );
+    const backupNote = screen.getByTestId("metadata-panel-backup-note");
+    expect(backupNote).toHaveTextContent(/later saves keep it/i);
+    expect(backupNote).toHaveTextContent(/deleting it there removes it on every machine/i);
+    expect(backupNote).toHaveTextContent(/cannot recreate the original/i);
   });
 
   it("offers the library cover curation below the fields", async () => {

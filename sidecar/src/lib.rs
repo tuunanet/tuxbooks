@@ -62,12 +62,21 @@ pub(crate) fn backup_path(path: &Path) -> PathBuf {
 /// Copy `path` to `<path>.bak` the first time a file is about to be rewritten,
 /// so the backup always holds the pre-embed original. No-op (and no error)
 /// when a backup already exists; a failed copy is an error, so the caller
-/// aborts without modifying the source. The copy itself is atomic (temp +
-/// rename), so a crash can never leave a truncated backup.
+/// aborts without modifying the source. An existing path that is not a regular
+/// file is an error rather than a silent skip. The copy itself is atomic (temp
+/// + rename), so a crash can never leave a truncated backup.
 pub(crate) fn backup_file_once(path: &Path) -> std::io::Result<Option<PathBuf>> {
     let backup = backup_path(path);
-    if backup.exists() {
-        return Ok(None);
+    match std::fs::metadata(&backup) {
+        Ok(meta) if meta.is_file() => return Ok(None),
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("backup path {} is not a regular file", backup.display()),
+            ))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let unique = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -295,4 +304,43 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
 /// Service entry point: JSON-RPC over stdio until stdin closes.
 pub async fn run() -> i32 {
     rpc::serve().await
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+
+    #[test]
+    fn the_first_backup_wins_and_later_writes_keep_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"original").unwrap();
+
+        let backup = backup_file_once(&path).unwrap().expect("a backup is made");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"original");
+
+        std::fs::write(&path, b"edited").unwrap();
+        assert!(backup_file_once(&path).unwrap().is_none());
+        assert_eq!(
+            std::fs::read(&backup).unwrap(),
+            b"original",
+            "a second embed keeps the first backup"
+        );
+    }
+
+    #[test]
+    fn a_directory_at_the_backup_path_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::create_dir(backup_path(&path)).unwrap();
+
+        let err = backup_file_once(&path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"original",
+            "the source is untouched"
+        );
+    }
 }
