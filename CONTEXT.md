@@ -201,6 +201,13 @@ content-hash aliases, so a rewritten file keeps its identity and two
 independently imported copies converge.
 _Avoid_: content hash (that is only the discovery key), ISBN key
 
+**Provider link**:
+The record that one durable book is also tracked on a third-party reading
+service, keyed by book identity and holding the remote id and last known
+provider status. It survives the book leaving the library; see
+[PROVIDERS.md](docs/PROVIDERS.md).
+_Avoid_: account link (a link belongs to a book), sync binding
+
 **Tombstone**:
 A shared delete marker for an annotation or collection. It wins over a
 concurrent edit and stays restorable from the trash for 30 days.

@@ -38,6 +38,22 @@ export interface Book {
   progressPercent: number | null;
   /** When the reading position was last saved. */
   progressUpdatedAt: string | null;
+  /** Third-party links owned by this durable book (ADR 0014 D11). */
+  providerLinks?: ProviderLink[];
+}
+
+/** A provider's cached reading status; TuxBooks progress stays in `progressPercent`. */
+export type ProviderReadingStatus = "want_to_read" | "reading" | "paused" | "finished" | "dropped";
+
+/** One link between a durable book and the same book on a third-party service. */
+export interface ProviderLink {
+  bookUid: string;
+  provider: string;
+  remoteId: string;
+  status: ProviderReadingStatus | null;
+  statusUpdatedAt: string | null;
+  linkedAt: string;
+  updatedAt: string;
 }
 
 /** A user-defined collection with its member book ids (mirrors `domain::CollectionSummary`). */
@@ -121,6 +137,8 @@ export interface ReadingHistoryBook {
   annotationCount: number;
   lastOpenedAt: string | null;
   metadataState: "available" | "waiting_for_file";
+  /** Links that outlived the book's file rows. */
+  providerLinks?: ProviderLink[];
 }
 
 /**

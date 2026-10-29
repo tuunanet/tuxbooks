@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use sqlx::SqlitePool;
 
 use crate::domain::Book;
 use crate::domain::NewBook;
+use crate::domain::ProviderLink;
 use crate::domain::ReadingHistoryBook;
 use crate::domain::SearchHit;
 use crate::error::AppError;
@@ -306,12 +309,27 @@ pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
 }
 
 pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
-    let books = sqlx::query_as::<_, Book>(&format!(
+    let mut books = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY bf.title COLLATE NOCASE, br.id"
     ))
     .fetch_all(pool)
     .await?;
+    let mut links = group_provider_links(crate::repository::providers::list_all_links(pool).await?);
+    for book in &mut books {
+        if let Some(uid) = &book.book_uid {
+            book.provider_links = links.remove(uid).unwrap_or_default();
+        }
+    }
     Ok(books)
+}
+
+/// Bucket links by durable book so one query decorates a whole payload.
+fn group_provider_links(links: Vec<ProviderLink>) -> HashMap<String, Vec<ProviderLink>> {
+    let mut grouped: HashMap<String, Vec<ProviderLink>> = HashMap::new();
+    for link in links {
+        grouped.entry(link.book_uid.clone()).or_default().push(link);
+    }
+    grouped
 }
 
 /// Reading history: durable books with no file rows (ADR 0014 D6). Progress
@@ -322,7 +340,7 @@ pub async fn list_reading_history(
     pool: &SqlitePool,
     match_query: Option<&str>,
 ) -> Result<Vec<ReadingHistoryBook>, AppError> {
-    let books = sqlx::query_as::<_, ReadingHistoryBook>(
+    let mut books = sqlx::query_as::<_, ReadingHistoryBook>(
         r#"
         SELECT br.id, br.uid AS book_uid, br.title, br.author, br.cover_path,
                rp.progress_percent,
@@ -341,6 +359,10 @@ pub async fn list_reading_history(
     .bind(match_query)
     .fetch_all(pool)
     .await?;
+    let mut links = group_provider_links(crate::repository::providers::list_all_links(pool).await?);
+    for book in &mut books {
+        book.provider_links = links.remove(&book.book_uid).unwrap_or_default();
+    }
     Ok(books)
 }
 
@@ -398,7 +420,13 @@ pub async fn get_book(pool: &SqlitePool, id: i64) -> Result<Option<Book>, AppErr
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    Ok(book)
+    let Some(mut book) = book else {
+        return Ok(None);
+    };
+    if let Some(uid) = &book.book_uid {
+        book.provider_links = crate::repository::providers::list_links(pool, uid).await?;
+    }
+    Ok(Some(book))
 }
 
 /// Read a durable book through one of its file rows (internal callers that

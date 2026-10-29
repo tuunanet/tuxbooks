@@ -7,7 +7,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
-import { makeBook, makeReadingHistoryBook } from "./factories";
+import { makeBook, makeProviderLink, makeReadingHistoryBook } from "./factories";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function renderHistory(
@@ -51,6 +51,17 @@ describe("ReadingHistoryView", () => {
     expect(screen.getByTestId("reading-history-annotations")).toHaveTextContent("3 annotations");
     expect(screen.getByTestId("reading-history-count")).toHaveTextContent("1 book");
     expect(invokeMock).toHaveBeenCalledWith("list_reading_history", {});
+  });
+
+  it("shows the provider link that survived the file", async () => {
+    renderHistory([
+      makeReadingHistoryBook({
+        providerLinks: [makeProviderLink({ provider: "hardcover", status: "reading" })],
+      }),
+    ]);
+
+    const provider = await screen.findByTestId("reading-history-provider");
+    expect(provider).toHaveTextContent("Hardcover · Reading");
   });
 
   it("searches Reading history through the sidecar", async () => {

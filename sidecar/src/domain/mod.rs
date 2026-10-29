@@ -3,6 +3,7 @@ pub mod book;
 pub mod collection;
 pub mod library;
 pub mod metadata;
+pub mod provider;
 pub mod reading_progress;
 
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
@@ -13,4 +14,5 @@ pub use library::{
     StorageStats,
 };
 pub use metadata::{BookMetadata, MetadataFields, MetadataOverridden};
+pub use provider::{ProviderLink, ProviderReadingStatus};
 pub use reading_progress::{ProgressUpdate, ReadingProgress};
