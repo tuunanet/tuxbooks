@@ -184,11 +184,11 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
 }
 
 /**
- * Leave the watch list: the folders stop syncing and their rows go away,
- * and every book the folders own leaves the catalog through the same
- * delete cascade the library's own Remove uses — reading progress and
- * annotations go with the row, files on disk are never touched. Returns
- * how many folders were actually listed.
+ * Leave the watch list: the folders stop syncing and their library
+ * memberships go away, while reading progress and annotations stay with the
+ * durable book (ADR 0014) and return if the same bytes are imported again.
+ * Files on disk are never touched. Returns how many folders were actually
+ * listed.
  */
 export function unwatchLocations(paths: string[]): Promise<number> {
   return invoke("unwatch_locations", { paths });

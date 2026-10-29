@@ -976,11 +976,11 @@ async fn unwatching_a_folder_already_gone_from_disk_still_works() {
         .is_empty());
 }
 
-/// What purge takes with it: the books leave through the same delete
-/// cascade the library's own Remove uses, so reading progress and
-/// annotations go with the row while every file stays where it was.
+/// What unwatch keeps: the file rows and their library membership go, while
+/// reading progress and annotations stay with the durable book and the files
+/// stay where they are (ADR 0014 D4).
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_cascades_progress_and_annotations_with_the_books() {
+async fn unwatching_keeps_progress_and_annotations_with_the_durable_book() {
     let env = setup().await;
     let file = env.write_book("dropped.epub", "Dropped Book");
     wait_for_titles(&env, ["Dropped Book"]);
@@ -1011,26 +1011,25 @@ async fn unwatching_cascades_progress_and_annotations_with_the_books() {
     let root = env.library.to_string_lossy().into_owned();
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
-    // The catalog rows are gone, not merely detached...
+    // The library membership is gone, not merely detached...
     assert_eq!(env.count().await, 0, "the book must leave the library");
     assert!(library_locations::list_locations(&env.pool)
         .await
         .unwrap()
         .is_empty());
-    // ...the cascade took the reading progress and the annotations with it...
-    assert!(
-        reading_progress::get_progress(&env.pool, book.id)
-            .await
-            .unwrap()
-            .is_none(),
-        "removal must run the existing delete cascade"
-    );
-    assert!(
+    // ...but the durable book still owns its reading data...
+    let progress = reading_progress::get_progress(&env.pool, book.id)
+        .await
+        .unwrap()
+        .expect("progress survives the unwatch");
+    assert_eq!(progress.character_offset, Some(42));
+    assert_eq!(
         annotations::list_annotations(&env.pool, book.id)
             .await
             .unwrap()
-            .is_empty(),
-        "annotations belong to the book row and must go with it"
+            .len(),
+        1,
+        "annotations belong to the durable book and stay"
     );
     // ...and the file itself is still there.
     assert!(
@@ -1333,10 +1332,11 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
 
     // Metadata on the nested folder's book, so the test can prove the
     // collapse takes none of it along.
-    let sub_id = book_repo::find_id_by_path(&env.pool, &sub_file.to_string_lossy())
+    let sub_id = book_repo::get_book_by_path(&env.pool, &sub_file.to_string_lossy())
         .await
         .unwrap()
-        .unwrap();
+        .expect("sub book")
+        .id;
     add_progress(&env.pool, sub_id, 42).await;
     annotations::insert_annotation(
         &env.pool,
@@ -1433,8 +1433,9 @@ async fn upgrade_collapse_is_idempotent() {
 }
 
 /// The upgrade purge is the mirror promise applied once to an old catalog:
-/// every book outside all watched folders leaves through the delete cascade,
-/// watched-folder books stay, and not one file on disk moves.
+/// every book outside all watched folders loses its file rows and library
+/// membership, watched-folder books stay, and not one file on disk moves.
+/// Reading state stays with the durable record.
 #[tokio::test(flavor = "multi_thread")]
 async fn upgrade_purge_removes_books_outside_every_watched_folder() {
     let env = setup().await;
@@ -1498,16 +1499,22 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(titles, vec!["Kept Book".to_string()]);
 
-    // The cascade took the purged books' metadata with them, while the
-    // surviving book's collection membership is untouched.
-    assert!(reading_progress::get_progress(&env.pool, stray_id)
+    // The purged books' durable state stays while the surviving book's
+    // collection membership is untouched. Collection membership is still
+    // file-keyed in this slice, so it goes with the file row (ticket .4).
+    let progress = reading_progress::get_progress(&env.pool, stray_id)
         .await
         .unwrap()
-        .is_none());
-    assert!(annotations::list_annotations(&env.pool, stray_id)
-        .await
-        .unwrap()
-        .is_empty());
+        .expect("purge keeps the durable reading progress");
+    assert_eq!(progress.character_offset, Some(42));
+    assert_eq!(
+        annotations::list_annotations(&env.pool, stray_id)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "purge keeps annotations"
+    );
     assert!(
         collections::list_collection_ids_for_book(&env.pool, stray_id)
             .await

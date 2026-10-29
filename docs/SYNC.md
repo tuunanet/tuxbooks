@@ -176,19 +176,23 @@ winner, but the loser is inspectable and can be dismissed once read.
 Triggers on `annotations`, `reading_progress`, `book_metadata_overrides`,
 `book_authors`, `book_subjects`, `collections`, `book_collections`, and
 `books.last_opened_at` write a canonical snapshot into `sync_dirty` at the
-moment of the change. The capture pass uses that snapshot, not the current row,
-so a remote projection that lands between the edit and the sync pass cannot
-erase the edit.
+moment of the change. Progress is keyed by the durable book uid; annotations
+carry the durable book id beside their portable uid. The capture pass uses
+that snapshot, not the current row, so a remote projection that lands between
+the edit and the sync pass cannot erase the edit. Capture waits until the
+book's content hash has been bound, so two devices publish the same bytes
+under one shared identity.
 
-Triggers check that the parent book or collection still exists. Cascades caused
-by unwatching or deleting a book are local disappearances and are skipped.
+Triggers check that the parent durable book or collection still exists.
+Cascades caused by unwatching or deleting a file row are local disappearances
+and are skipped.
 
-Projection writes the merged state back into the local, path-keyed catalog:
-annotations upsert by portable uid, progress upserts by book id, metadata calls
-the same recompute path as a local edit (without rewriting the source file), and
-memberships insert or delete join rows. Projection is idempotent. The local
-writes fire the same triggers; the next capture pass sees no field change and
-clears the echo markers.
+Projection writes the merged state back into the local catalog: annotations
+and progress upsert by durable book uid (the reader resolves the active file
+from it), metadata calls the same recompute path as a local edit (without
+rewriting the source file), and memberships insert or delete join rows.
+Projection is idempotent. The local writes fire the same triggers; the next
+capture pass sees no field change and clears the echo markers.
 
 ## Bootstrap
 

@@ -40,7 +40,11 @@ pub async fn list_collection_summaries(
 ) -> Result<Vec<CollectionSummary>, AppError> {
     let collections = list_collections(pool).await?;
     let membership: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT collection_id, book_id FROM book_collections ORDER BY collection_id, book_id",
+        "SELECT bc.collection_id, br.id AS book_id \
+         FROM book_collections bc \
+         JOIN books b ON b.id = bc.book_id \
+         JOIN book_records br ON br.uid = b.book_uid \
+         ORDER BY bc.collection_id, br.id",
     )
     .fetch_all(pool)
     .await?;
@@ -56,7 +60,10 @@ pub async fn list_collection_summaries(
         .collect();
     for (collection_id, book_id) in membership {
         if let Some(summary) = summaries.iter_mut().find(|s| s.id == collection_id) {
-            summary.book_ids.push(book_id);
+            // Duplicate copies share one durable book, so one entry per book.
+            if !summary.book_ids.contains(&book_id) {
+                summary.book_ids.push(book_id);
+            }
         }
     }
     Ok(summaries)
@@ -87,11 +94,15 @@ pub async fn list_collection_ids_for_book(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<Vec<i64>, AppError> {
-    let ids: Vec<i64> =
-        sqlx::query_scalar("SELECT collection_id FROM book_collections WHERE book_id = ?1")
-            .bind(book_id)
-            .fetch_all(pool)
-            .await?;
+    let ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT DISTINCT collection_id FROM book_collections \
+         WHERE book_id IN (SELECT b.id FROM books b \
+                           JOIN book_records br ON br.uid = b.book_uid \
+                           WHERE br.id = ?1)",
+    )
+    .bind(book_id)
+    .fetch_all(pool)
+    .await?;
     Ok(ids)
 }
 
@@ -101,12 +112,18 @@ pub async fn add_book_to_collection(
     collection_id: i64,
 ) -> Result<(), AppError> {
     // Idempotent: the PK (book_id, collection_id) makes a repeated add a
-    // no-op instead of a UNIQUE-constraint error.
-    sqlx::query("INSERT OR IGNORE INTO book_collections (book_id, collection_id) VALUES (?1, ?2)")
-        .bind(book_id)
-        .bind(collection_id)
-        .execute(pool)
-        .await?;
+    // no-op instead of a UNIQUE-constraint error. Membership still hangs off
+    // the active file row in this slice; ticket .4 moves it to the book.
+    sqlx::query(
+        "INSERT OR IGNORE INTO book_collections (book_id, collection_id) \
+         SELECT b.id, ?2 FROM books b \
+         JOIN book_records br ON br.uid = b.book_uid \
+         WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1",
+    )
+    .bind(book_id)
+    .bind(collection_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -115,12 +132,17 @@ pub async fn remove_book_from_collection(
     book_id: i64,
     collection_id: i64,
 ) -> Result<bool, AppError> {
-    let result =
-        sqlx::query("DELETE FROM book_collections WHERE book_id = ?1 AND collection_id = ?2")
-            .bind(book_id)
-            .bind(collection_id)
-            .execute(pool)
-            .await?;
+    let result = sqlx::query(
+        "DELETE FROM book_collections \
+         WHERE collection_id = ?2 \
+           AND book_id IN (SELECT b.id FROM books b \
+                           JOIN book_records br ON br.uid = b.book_uid \
+                           WHERE br.id = ?1)",
+    )
+    .bind(book_id)
+    .bind(collection_id)
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 

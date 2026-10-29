@@ -509,6 +509,47 @@ pub async fn merge_book_identity(
         .execute(&mut *tx)
         .await?
         .rows_affected();
+
+    // User state moved to the durable key in 0018. Annotations from both
+    // copies are kept (union; duplicate highlights are possible). Progress
+    // keeps the newest saved position; a tie falls back deterministically to
+    // the losing copy's row so exactly one survives.
+    sqlx::query("UPDATE annotations SET book_uid = ?2 WHERE book_uid = ?1")
+        .bind(&loser)
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM reading_progress WHERE book_uid = ?2 AND EXISTS (
+             SELECT 1 FROM reading_progress l
+             WHERE l.book_uid = ?1
+               AND l.updated_at >= reading_progress.updated_at
+         )",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE OR IGNORE reading_progress SET book_uid = ?2 WHERE book_uid = ?1")
+        .bind(&loser)
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM reading_progress WHERE book_uid = ?1")
+        .bind(&loser)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "UPDATE book_records SET
+             progress_percent = (SELECT progress_percent FROM reading_progress WHERE book_uid = ?2),
+             annotation_count = (SELECT COUNT(*) FROM annotations WHERE book_uid = ?2)
+         WHERE uid = ?2",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+
     sqlx::query("DELETE FROM book_records WHERE uid = ?1")
         .bind(&loser)
         .execute(&mut *tx)
@@ -516,8 +557,8 @@ pub async fn merge_book_identity(
     if rekeyed > 0 {
         let detail = format!(
             "Two file rows turned out to be the same book and were merged into one book \
-             (identity {winner}). Progress keeps the canonical copy; annotations and \
-             collection membership from both copies are kept."
+             (identity {winner}). Progress keeps the newest saved position; annotations \
+             from both copies are kept."
         );
         sqlx::query(
             r#"

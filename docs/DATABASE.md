@@ -52,33 +52,37 @@ real modifications from duplicate events without re-parsing documents.
 file may share it). `hash_state` is the durable progress of the background
 content-hash pass: `pending`, `hashed`, or `failed`.
 
-## Durable book records (migration 0017)
+## Durable book records (migrations 0017–0018)
 
 ADR 0014 separates the durable **book** from the **file** that happens to
-contain it. This slice adds the foundation without changing what the user
-sees: existing user-state tables are still keyed by `books.id`, and Remove
-and Unwatch still remove the book with its state until ticket `tuxbooks-ip6.2`
-flips them.
+contain it. Migration 0017 built the identity foundation; migration 0018 makes
+reading progress and annotations survive the file leaving the library. The
+public numeric book id is `book_records.id`; a file row is a location, and the
+reader resolves the active file from the durable book.
 
-- `book_records` — one row per durable book, keyed by a random 128-bit
-  `uid`. It carries an identity, a metadata snapshot, `last_opened_at`, a
-  progress snapshot, an annotation count, and `metadata_state`
+- `book_records` — one row per durable book, with a stable numeric `id`, a
+  random 128-bit `uid`, a metadata snapshot, `last_opened_at`, a progress
+  snapshot, an annotation count, and `metadata_state`
   (`available` / `waiting_for_file`). File rows that already shared a sync
   uuid collapse into one record. The snapshot is authoritative only for a
   book with no file; a book with a file reads its effective metadata from
-  the file row, and triggers keep the snapshot in step.
+  the file row, and triggers keep the snapshot in step. Unlike the 0017
+  slice, deleting the last file row keeps the record.
 - `books.book_uid` — the file's durable book. The migration reuses the uuid
   from `sync_book_bindings` when one exists, otherwise it generates one.
   `book_uid` is not UNIQUE: duplicate copies and moves are several files for
   one book.
-- `books.hash_state` — the background hash pass writes `pending` before a
-  file is hashed, `hashed` after the content hash is bound, and `failed`
-  when the file cannot be read. It is the resume point after a restart, and
-  the durable state the next slice's destructive actions wait on.
+- `books.hash_state` — `pending` before a file is hashed, `hashed` after the
+  content hash is bound, and `failed` when the file cannot be read. New
+  imports hash before they are published; the background pass resumes the
+  backfill after a restart. Remove and Unwatch finish any pending hash for
+  the affected file rows first, so a re-import can reattach; a failed hash is
+  recorded as a relink issue and does not block the action.
 - `migration_issues` — visible merges and failures: two file rows that
-  shared a uuid, two hashes that turned out to be the same book, and a book
-  whose hash failed and now needs a relink. The Application Data settings
-  tab lists open issues and can dismiss them.
+  shared a uuid, two hashes that turned out to be the same book, duplicate
+  progress that was unioned, and a book whose hash failed and now needs a
+  relink. The Application Data settings tab lists open issues and can dismiss
+  them.
 
 The upgrade takes a **pre-migration backup** before applying pending
 migrations: `VACUUM INTO` writes `<db>.pre-migration-<timestamp>.bak` beside
@@ -101,10 +105,11 @@ annotation count when present. A record with no metadata is labelled
 `import_paths` (a folder import, or the parent of a picked file), by
 `scan_library`, or by the test seeding; only these are watched and
 reconciled. Unwatching a folder deletes its row, which is what stops the
-sync, and removes the books those folders owned from the catalog through
-the normal delete cascade — files on disk are never touched. Books outside
-watched locations are never touched by reconciliation — a fresh database
-that predates milestone 3 stays unwatched until the next import.
+sync, and ends the library membership of the file rows it owns. The durable
+book and its reading progress and annotations stay (ADR 0014 D4); files on
+disk are never touched. Books outside watched locations are never touched by
+reconciliation — a fresh database that predates milestone 3 stays unwatched
+until the next import.
 
 ### collections
 
@@ -117,7 +122,8 @@ Join table, PK `(book_id, collection_id)`, both FK with
 
 ### reading_progress
 
-PK `book_id` (FK, cascade) — one progress row per book.
+PK `book_uid` (FK `book_records`, cascade) — one progress row per durable
+book, so it survives every file leaving the library.
 `chapter_href`, `cfi`, `character_offset`, `page_number`, `scroll_offset`,
 `progress_percent` (REAL, CHECK 0..=100 or NULL), `updated_at`. The reader
 writes the format-specific locators it tracks; `progress_percent` is the
@@ -139,28 +145,29 @@ One row per persistent reading annotation (milestone 6): bookmarks,
 highlights, the short bookmark label, and the note attached to either (1:1
 through the nullable `note` column — there is no separate notes table).
 
-| column        | type                                           | notes                                                         |
-| ------------- | ---------------------------------------------- | ------------------------------------------------------------- |
-| id            | INTEGER PK AUTOINCREMENT                       |                                                               |
-| book_id       | INTEGER NOT NULL, FK `books` ON DELETE CASCADE |                                                               |
-| kind          | TEXT NOT NULL, CHECK `bookmark`\|`highlight`   |                                                               |
-| cfi           | TEXT                                           | canonical EPUB CFI (bookmarks and highlights)                 |
-| chapter_href  | TEXT                                           | spine href of the EPUB section (display grouping)             |
-| page_number   | INTEGER, CHECK >= 1                            | 1-based PDF page                                              |
-| page_fraction | REAL, CHECK 0..=1                              | optional page-local anchor (PDF bookmarks)                    |
-| text          | TEXT                                           | selected text (highlights; mandatory for EPUB, optional PDF)  |
-| color         | TEXT                                           | highlight palette key (`yellow`, `green`, …)                  |
-| geometry      | TEXT                                           | JSON array of rects normalized to page space (PDF highlights) |
-| label         | TEXT, CHECK <= 50 characters                   | short bookmark label (bookmarks only)                         |
-| note          | TEXT                                           | the attached note (empty string = no note text)               |
-| created_at    | TEXT NOT NULL, DB default                      |                                                               |
-| modified_at   | TEXT NOT NULL, DB default                      | bumped on UPDATE                                              |
+| column        | type                                               | notes                                                         |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| id            | INTEGER PK AUTOINCREMENT                           |                                                               |
+| book_uid      | TEXT NOT NULL, FK `book_records` ON DELETE CASCADE | durable book, not the file row                                |
+| kind          | TEXT NOT NULL, CHECK `bookmark`\|`highlight`       |                                                               |
+| cfi           | TEXT                                               | canonical EPUB CFI (bookmarks and highlights)                 |
+| chapter_href  | TEXT                                               | spine href of the EPUB section (display grouping)             |
+| page_number   | INTEGER, CHECK >= 1                                | 1-based PDF page                                              |
+| page_fraction | REAL, CHECK 0..=1                                  | optional page-local anchor (PDF bookmarks)                    |
+| text          | TEXT                                               | selected text (highlights; mandatory for EPUB, optional PDF)  |
+| color         | TEXT                                               | highlight palette key (`yellow`, `green`, …)                  |
+| geometry      | TEXT                                               | JSON array of rects normalized to page space (PDF highlights) |
+| label         | TEXT, CHECK <= 50 characters                       | short bookmark label (bookmarks only)                         |
+| note          | TEXT                                               | the attached note (empty string = no note text)               |
+| created_at    | TEXT NOT NULL, DB default                          |                                                               |
+| modified_at   | TEXT NOT NULL, DB default                          | bumped on UPDATE                                              |
 
 Locator invariant: every row names one stable document position — a CFI or
 a page number — never UI pixels. PDF highlight `geometry` is stored
 normalized to page space (`0..1` per axis, validated by the service), so
 highlights redraw correctly at any zoom or window size. Index on
-`(book_id, kind)`; deleting a book cascades.
+`(book_uid, kind)`; deleting the durable book cascades, while removing a file
+row does not.
 
 ## Metadata curation (milestone 7)
 
@@ -232,7 +239,10 @@ through the normal effective-column triggers. `reset_book_metadata` drops
 every override, returning the book to its source-file metadata; with no
 overrides left, the reset affordance disables itself.
 
-Deleting a book cascades to all of these tables.
+Deleting a durable book cascades to all of these tables. Removing a file row
+(Remove, Unwatch) leaves the durable book and its progress and annotations in
+place; collection membership and metadata overrides still hang off the file
+row until ticket `tuxbooks-ip6.4`.
 
 ## Full-text search
 
@@ -257,8 +267,9 @@ into quoted prefix phrases ANDed together (`wind river` →
 ## Cloud-folder sync (migration 0015)
 
 The sync engine keeps its bookkeeping in the same SQLite file. The catalog
-tables stay path-keyed; nothing here changes how imports, readers, or search
-work. The full contract is [SYNC.md](SYNC.md).
+tables stay path-keyed; reading progress and annotations are keyed by the
+durable book uid. Nothing here changes how imports, readers, or search work.
+The full contract is [SYNC.md](SYNC.md).
 
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.

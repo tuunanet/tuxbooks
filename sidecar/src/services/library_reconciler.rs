@@ -223,9 +223,12 @@ impl Reconciler {
             return;
         };
         let path_str = path.to_string_lossy().into_owned();
-        match books::get_book_by_path(&self.pool, &path_str).await {
-            Ok(Some(book)) => {
-                if book.available && book.file_size == stats.0 && book.file_mtime == stats.1 {
+        match books::file_snapshot_by_path(&self.pool, &path_str).await {
+            Ok(Some(snapshot)) => {
+                if snapshot.available
+                    && snapshot.file_size == stats.0
+                    && snapshot.file_mtime == stats.1
+                {
                     return;
                 }
             }
@@ -295,7 +298,16 @@ impl Reconciler {
 
         let (size, mtime) = file_stats(to).unwrap_or((book.file_size, book.file_mtime));
         let to_str = to.to_string_lossy().into_owned();
-        match books::relink_book(&self.pool, book.id, &to_str, size, mtime).await {
+        // Resolve the moved row itself, not the book's active copy: a duplicate
+        // copy that moves must move its own location.
+        let Some(file_id) = books::find_file_id_by_path(&self.pool, &from_str)
+            .await
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+        match books::relink_book(&self.pool, file_id, &to_str, size, mtime).await {
             Ok(books::RelinkOutcome::Relinked) => {
                 let Some(relinked) = books::get_book(&self.pool, book.id).await.ok().flatten()
                 else {
@@ -336,7 +348,10 @@ impl Reconciler {
                 .ok()
                 .and_then(|_| file_stats(Path::new(&new_path)))
                 .unwrap_or((book.file_size, book.file_mtime));
-            match books::relink_book(&self.pool, book.id, &new_path, size, mtime).await {
+            let Some(file_id) = book.file_id else {
+                continue;
+            };
+            match books::relink_book(&self.pool, file_id, &new_path, size, mtime).await {
                 Ok(books::RelinkOutcome::Relinked) => {
                     if let Some(updated) = books::get_book(&self.pool, book.id).await.ok().flatten()
                     {
@@ -485,7 +500,10 @@ impl Reconciler {
         };
 
         let (size, mtime) = file_stats(path).unwrap_or((candidate.file_size, candidate.file_mtime));
-        match books::relink_book(&self.pool, candidate.id, &path_str, size, mtime).await {
+        let Some(file_id) = candidate.file_id else {
+            return false;
+        };
+        match books::relink_book(&self.pool, file_id, &path_str, size, mtime).await {
             Ok(books::RelinkOutcome::Relinked) => {
                 if let Some(relinked) = books::get_book(&self.pool, candidate.id)
                     .await
@@ -527,10 +545,11 @@ pub async fn reconnect_book(
     let parsed = crate::services::library_scanner::parse_book(path).map_err(|err| {
         AppError::InvalidInput(format!("that file is not a readable book: {err}"))
     })?;
-    let previous_cover = books::get_book(pool, book_id)
+    let known = books::get_book(pool, book_id)
         .await?
-        .ok_or(AppError::NotFound)?
-        .cover_path;
+        .ok_or(AppError::NotFound)?;
+    let file_id = known.file_id.ok_or(AppError::NotFound)?;
+    let previous_cover = known.cover_path;
     let new_book = crate::services::book_importer::new_book_from_parsed(
         path,
         &parsed,
@@ -539,19 +558,19 @@ pub async fn reconnect_book(
         previous_cover.as_deref(),
     )?;
 
-    if let Some(existing) = books::find_id_by_path(pool, &new_book.path).await? {
-        if existing != book_id {
+    if let Some(existing) = books::find_file_id_by_path(pool, &new_book.path).await? {
+        if existing != file_id {
             return Err(AppError::InvalidInput(
                 "that file is already in the library".into(),
             ));
         }
     }
-    if !books::update_book_by_id(pool, book_id, &new_book).await? {
+    if !books::update_book_by_id(pool, file_id, &new_book).await? {
         return Err(AppError::NotFound);
     }
     // The newly located file becomes the source truth; user metadata
     // overrides stay on top of it (milestone 7).
-    crate::services::metadata::apply_source_metadata(pool, book_id, &new_book).await?;
+    crate::services::metadata::apply_source_metadata(pool, file_id, &new_book).await?;
     books::get_book(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)

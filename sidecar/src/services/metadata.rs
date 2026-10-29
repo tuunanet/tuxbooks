@@ -45,12 +45,15 @@ pub async fn get_book_metadata(
     let Some(book) = books::get_book(pool, book_id).await? else {
         return Ok(None);
     };
-    let source = load_source(pool, book_id).await?;
-    let overrides = repo::get_overrides(pool, book_id)
+    let Some(file_id) = book.file_id else {
+        return Ok(None);
+    };
+    let source = load_source(pool, file_id).await?;
+    let overrides = repo::get_overrides(pool, file_id)
         .await?
         .unwrap_or_default();
-    let authors = effective_authors(pool, book_id, &source.authors, &overrides).await?;
-    let subjects = effective_subjects(pool, book_id, &source.subjects, &overrides).await?;
+    let authors = effective_authors(pool, file_id, &source.authors, &overrides).await?;
+    let subjects = effective_subjects(pool, file_id, &source.subjects, &overrides).await?;
 
     let source_authors = source.authors.clone();
     let source_subjects = source.subjects.clone();
@@ -193,6 +196,7 @@ pub async fn embed_book_metadata(
     let book = books::get_book(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?;
+    let file_id = book.file_id.ok_or(AppError::NotFound)?;
     let path = std::path::PathBuf::from(&book.path);
     if !path.exists() {
         return Err(AppError::InvalidInput(
@@ -202,7 +206,7 @@ pub async fn embed_book_metadata(
 
     // Persist the form first: embedding the current edits is the point of the
     // action, and it keeps the no-Save flow coherent.
-    apply_form(pool, book_id, form).await?;
+    apply_form(pool, file_id, form).await?;
     let desired = get_book_metadata(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?
@@ -211,7 +215,7 @@ pub async fn embed_book_metadata(
     // Set the crash marker before the bytes change. If the process dies before
     // the snapshot update below, the sync identity sweep still rehashes the
     // file and publishes the new content-hash alias.
-    books::mark_rehash_pending(pool, book_id).await?;
+    books::mark_rehash_pending(pool, file_id).await?;
 
     // The rewrite runs in the document worker (the parse-heavy half); the
     // sidecar keeps the only write authority: backup + atomic replace.
@@ -270,18 +274,18 @@ pub async fn embed_book_metadata(
     // existing extracted cover (covers stay cache-side).
     let parsed = crate::services::library_scanner::parse_book(&path)
         .map_err(|err| AppError::InvalidInput(format!("rewritten file is unreadable: {err}")))?;
-    let existing_cover = load_source(pool, book_id).await?.cover_path;
+    let existing_cover = load_source(pool, file_id).await?.cover_path;
     let source =
         crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
-    repo::upsert_source_metadata(pool, book_id, &source).await?;
+    repo::upsert_source_metadata(pool, file_id, &source).await?;
     // The rewrite changed the bytes, so the stored file snapshot is stale.
     // Sync uses this snapshot to decide when to rehash and publish the new
     // content-hash alias; leaving it stale would strand other machines on the
     // old identity.
-    books::update_file_snapshot(pool, book_id, source.file_size, source.file_mtime).await?;
-    books::clear_rehash_pending(pool, book_id).await?;
+    books::update_file_snapshot(pool, file_id, source.file_size, source.file_mtime).await?;
+    books::clear_rehash_pending(pool, file_id).await?;
 
-    apply_form(pool, book_id, &desired).await?;
+    apply_form(pool, file_id, &desired).await?;
 
     get_book_metadata(pool, book_id)
         .await?
@@ -299,7 +303,11 @@ pub async fn apply_synced_overrides(
     authors: &[String],
     subjects: &[String],
 ) -> Result<(), AppError> {
-    if books::get_book(pool, book_id).await?.is_none() {
+    let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM books WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    if exists.is_none() {
         return Ok(());
     }
     repo::upsert_overrides(pool, book_id, overrides).await?;
@@ -321,8 +329,12 @@ pub async fn reset_book_metadata(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<BookMetadata, AppError> {
-    repo::clear_overrides(pool, book_id).await?;
-    recompute_and_apply(pool, book_id).await?;
+    let file_id = books::get_book(pool, book_id)
+        .await?
+        .and_then(|book| book.file_id)
+        .ok_or(AppError::NotFound)?;
+    repo::clear_overrides(pool, file_id).await?;
+    recompute_and_apply(pool, file_id).await?;
     repo::sweep_orphans(pool).await?;
 
     get_book_metadata(pool, book_id)
@@ -339,9 +351,10 @@ pub async fn set_book_cover(
     image_path: &str,
     covers_dir: &std::path::Path,
 ) -> Result<Book, AppError> {
-    if books::get_book(pool, book_id).await?.is_none() {
-        return Err(AppError::NotFound);
-    }
+    let file_id = books::get_book(pool, book_id)
+        .await?
+        .and_then(|book| book.file_id)
+        .ok_or(AppError::NotFound)?;
     let data = std::fs::read(image_path)?;
     let media_type = detect_image_media_type(&data).ok_or_else(|| {
         AppError::InvalidInput("that file is not a PNG, JPEG, GIF, or WebP image".into())
@@ -349,12 +362,12 @@ pub async fn set_book_cover(
     let stored = crate::services::book_importer::write_cover_bytes(media_type, &data, covers_dir)?
         .ok_or_else(|| AppError::InvalidInput("cover image was empty".into()))?;
 
-    let mut overrides = repo::get_overrides(pool, book_id)
+    let mut overrides = repo::get_overrides(pool, file_id)
         .await?
         .unwrap_or_default();
     overrides.cover_path = Some(stored);
-    repo::upsert_overrides(pool, book_id, &overrides).await?;
-    recompute_and_apply(pool, book_id).await?;
+    repo::upsert_overrides(pool, file_id, &overrides).await?;
+    recompute_and_apply(pool, file_id).await?;
 
     books::get_book(pool, book_id)
         .await?
@@ -363,12 +376,16 @@ pub async fn set_book_cover(
 
 /// Remove a cover override; the extracted (source) cover returns.
 pub async fn clear_book_cover_override(pool: &SqlitePool, book_id: i64) -> Result<Book, AppError> {
-    let mut overrides = repo::get_overrides(pool, book_id)
+    let file_id = books::get_book(pool, book_id)
+        .await?
+        .and_then(|book| book.file_id)
+        .ok_or(AppError::NotFound)?;
+    let mut overrides = repo::get_overrides(pool, file_id)
         .await?
         .unwrap_or_default();
     overrides.cover_path = None;
-    repo::upsert_overrides(pool, book_id, &overrides).await?;
-    recompute_and_apply(pool, book_id).await?;
+    repo::upsert_overrides(pool, file_id, &overrides).await?;
+    recompute_and_apply(pool, file_id).await?;
 
     books::get_book(pool, book_id)
         .await?
@@ -492,7 +509,7 @@ async fn load_source(pool: &SqlitePool, book_id: i64) -> Result<SourceMetadata, 
             subjects: parse_json_list(row.subjects.as_deref()),
         });
     }
-    let book = books::get_book(pool, book_id)
+    let book = books::get_book_by_file_id(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(SourceMetadata {

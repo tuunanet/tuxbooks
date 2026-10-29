@@ -253,11 +253,11 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch /home/u/Books?");
-    expect(dialog).toHaveTextContent("The 12 books in this folder are removed from your library");
+    expect(dialog).toHaveTextContent("The 12 books in this folder leave your library");
     expect(within(dialog).queryByTestId("unwatch-names")).toBeNull();
   });
 
-  it("states the progress loss and the files-stay promise with no remove checkbox", async () => {
+  it("states that reading data is kept and the files-stay promise with no remove checkbox", async () => {
     renderFolders();
     await screen.findByTestId("folders-list");
 
@@ -267,7 +267,7 @@ describe("FoldersSettings unwatch", () => {
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(within(dialog).queryByTestId("unwatch-remove-books")).toBeNull();
     expect(dialog).toHaveTextContent(
-      "The 12 books in this folder are removed from your library, along with their reading progress and annotations. Your files on disk stay untouched.",
+      "The 12 books in this folder leave your library. Their reading progress and annotations are kept. Your files on disk stay untouched.",
     );
   });
 
@@ -282,7 +282,7 @@ describe("FoldersSettings unwatch", () => {
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent("Unwatch 5 folders?");
     expect(dialog).toHaveTextContent(
-      "The 10 books in these folders are removed from your library, along with their reading progress and annotations.",
+      "The 10 books in these folders leave your library. Their reading progress and annotations are kept.",
     );
 
     const names = within(dialog).getByTestId("unwatch-names");
@@ -459,7 +459,7 @@ describe("FoldersSettings unwatch", () => {
 
     const dialog = await screen.findByTestId("unwatch-dialog");
     expect(dialog).toHaveTextContent(
-      "The 1 book in this folder is removed from your library, along with its reading progress and annotations.",
+      "The 1 book in this folder leaves your library. Its reading progress and annotations are kept.",
     );
   });
 });

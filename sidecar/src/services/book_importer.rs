@@ -226,15 +226,15 @@ pub async fn import_directory_with_cancel(
                 error,
             }),
             Ok(new_book) => {
-                let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+                let upserted = books::upsert_file(pool, &new_book).await?;
                 // Record the fresh parse as source truth and re-merge the
                 // effective view, so user metadata overrides survive file
                 // changes (milestone 7).
-                crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
-                if let Some(book) = books::get_book(pool, id).await? {
-                    on_book(&book);
-                }
-                bump(&mut report, inserted);
+                crate::services::metadata::apply_source_metadata(pool, upserted.file_id, &new_book)
+                    .await?;
+                let book = finalize_import(pool, upserted.file_id).await?;
+                on_book(&book);
+                bump(&mut report, upserted.inserted);
             }
         }
     }
@@ -272,12 +272,36 @@ pub async fn import_file(
         pdfium_dirs,
         previous_cover.as_deref(),
     )?;
-    let (id, inserted) = books::upsert_book(pool, &new_book).await?;
+    let upserted = books::upsert_file(pool, &new_book).await?;
     // Record the fresh parse as source truth and re-merge the effective
     // view, so user metadata overrides survive file changes (milestone 7).
-    crate::services::metadata::apply_source_metadata(pool, id, &new_book).await?;
-    let book = books::get_book(pool, id).await?.expect("row just upserted");
-    Ok(Some(ImportOutcome { book, inserted }))
+    crate::services::metadata::apply_source_metadata(pool, upserted.file_id, &new_book).await?;
+    let book = finalize_import(pool, upserted.file_id).await?;
+    Ok(Some(ImportOutcome {
+        book,
+        inserted: upserted.inserted,
+    }))
+}
+
+/// Hash a freshly imported file before the row is published to the UI
+/// (ADR 0014 D8). A failed hash does not fail the import: the book keeps its
+/// record, `hash_state` says failed, and a later remove/unwatch may proceed
+/// with the book marked as needing a relink.
+async fn finalize_import(pool: &SqlitePool, file_id: i64) -> Result<crate::domain::Book, AppError> {
+    match crate::sync::identity::ensure_book_identity(pool, file_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+        }
+        Err(err) => {
+            eprintln!("import: could not hash book file {file_id}: {err}");
+            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+        }
+    }
+    let id = books::durable_id_for_file(pool, file_id)
+        .await?
+        .ok_or_else(|| AppError::InvalidInput("imported book has no durable record".into()))?;
+    books::get_book(pool, id).await?.ok_or(AppError::NotFound)
 }
 
 fn bump(report: &mut ImportReport, inserted: bool) {
@@ -513,7 +537,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(report.imported, 1);
+        assert_eq!(report.imported, 1, "{report:?}");
         assert_eq!(report.updated, 0);
         assert_eq!(report.failed.len(), 1);
         assert!(report.failed[0].path.ends_with("bad.epub"));
@@ -665,10 +689,16 @@ mod tests {
             .unwrap();
         assert_eq!(report.imported, 2, "{report:?}");
 
+        // Exact duplicate bytes share one durable book, so the library shows
+        // one entry even though both locations exist.
         let listed = books::list_books(&pool).await.unwrap();
-        let path_a = listed[0].cover_path.as_deref().expect("cover a");
-        let path_b = listed[1].cover_path.as_deref().expect("cover b");
-        assert_eq!(path_a, path_b, "identical content must share one file");
+        assert_eq!(listed.len(), 1, "duplicate bytes collapse to one book");
+        let path_a = listed[0].cover_path.as_deref().expect("cover");
+        let file_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(file_rows, 2, "both locations are kept");
 
         let files: Vec<_> = std::fs::read_dir(&covers).unwrap().flatten().collect();
         assert_eq!(files.len(), 1, "exactly one cache file");

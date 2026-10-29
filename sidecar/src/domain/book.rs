@@ -42,9 +42,15 @@ impl BookFormat {
 /// resolved through the normalized `series` table by the repository queries.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
 pub struct Book {
+    /// Public numeric identity: `book_records.id`, the durable book (ADR 0014).
     pub id: i64,
     /// Stable durable identity (ADR 0014). Several file rows can share it.
     pub book_uid: Option<String>,
+    /// Internal file row this read resolved to, if the book currently has a
+    /// file in the library. File-level tables (metadata, collections) still
+    /// key by this row until ticket .4. Never crosses the IPC boundary.
+    #[sqlx(default)]
+    pub file_id: Option<i64>,
     pub path: String,
     pub title: String,
     pub subtitle: Option<String>,
@@ -173,6 +179,7 @@ mod tests {
         Book {
             id: 1,
             book_uid: Some("0123456789abcdef0123456789abcdef".into()),
+            file_id: Some(1),
             path: path.into(),
             title: "T".into(),
             subtitle: None,

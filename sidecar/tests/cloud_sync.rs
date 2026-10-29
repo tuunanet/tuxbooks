@@ -70,7 +70,7 @@ async fn add_book(device: &Device, name: &str, bytes: &[u8]) -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    books::upsert_book(
+    let upserted = books::upsert_file(
         &device.pool,
         &NewBook {
             path: path.to_string_lossy().into_owned(),
@@ -92,8 +92,32 @@ async fn add_book(device: &Device, name: &str, bytes: &[u8]) -> i64 {
         },
     )
     .await
-    .unwrap()
-    .0
+    .unwrap();
+    // Import hashes before the row is published (ADR 0014 D8).
+    tuxbooks_lib::sync::identity::ensure_book_identity(&device.pool, upserted.file_id)
+        .await
+        .unwrap();
+    books::durable_id_for_file(&device.pool, upserted.file_id)
+        .await
+        .unwrap()
+        .expect("hashed book")
+}
+
+async fn book_id(device: &Device, name: &str) -> i64 {
+    let path = device.db_path.parent().unwrap().join("library").join(name);
+    books::get_book_by_path(&device.pool, &path.to_string_lossy())
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("book {name} missing"))
+        .id
+}
+
+async fn file_row_id(device: &Device, name: &str) -> i64 {
+    let path = device.db_path.parent().unwrap().join("library").join(name);
+    books::find_file_id_by_path(&device.pool, &path.to_string_lossy())
+        .await
+        .unwrap()
+        .unwrap_or_else(|| panic!("file row {name} missing"))
 }
 
 async fn update_book_bytes(device: &Device, book_id: i64, bytes: &[u8]) {
@@ -132,6 +156,13 @@ async fn update_book_bytes(device: &Device, book_id: i64, bytes: &[u8]) {
     )
     .await
     .unwrap();
+    let file_id = books::find_file_id_by_path(&device.pool, &book.path)
+        .await
+        .unwrap()
+        .expect("rewritten file row");
+    tuxbooks_lib::sync::identity::ensure_book_identity(&device.pool, file_id)
+        .await
+        .unwrap();
 }
 
 async fn add_bookmark(device: &Device, book_id: i64, cfi: &str, _text: &str) -> i64 {
@@ -180,10 +211,11 @@ async fn annotation_written_on_one_machine_appears_on_the_other() {
     run(&a).await;
 
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"the exact same book bytes").await;
+    let _b_book = add_book(&b, "same.epub", b"the exact same book bytes").await;
     run(&b).await;
     run(&b).await;
 
+    let b_book = book_id(&b, "same.epub").await;
     assert_eq!(annotation_count(&b, b_book).await, 1);
     let listed = annotations::list_annotations(&b.pool, b_book)
         .await
@@ -214,6 +246,8 @@ async fn two_machines_that_import_the_same_book_before_meeting_converge() {
     run(&b).await;
     run(&a).await;
 
+    let a_book = book_id(&a, "same.epub").await;
+    let b_book = book_id(&b, "same.epub").await;
     assert_eq!(
         annotation_count(&a, a_book).await,
         2,
@@ -248,9 +282,10 @@ async fn progress_moves_as_one_locator_and_the_later_write_wins() {
     run(&a).await;
 
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"progress book").await;
+    let _b_book = add_book(&b, "same.epub", b"progress book").await;
     run(&b).await;
     run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
     assert_eq!(progress_percent(&b, b_book).await, Some(10.0));
 
     reading_progress::upsert_progress(
@@ -268,6 +303,7 @@ async fn progress_moves_as_one_locator_and_the_later_write_wins() {
     run(&a).await;
     run(&a).await;
 
+    let a_book = book_id(&a, "same.epub").await;
     assert_eq!(progress_percent(&a, a_book).await, Some(55.0));
     let progress = reading_progress::get_progress(&a.pool, a_book)
         .await
@@ -292,7 +328,7 @@ async fn collection_and_membership_survive_the_trip() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"collection book").await;
+    let _b_book = add_book(&b, "same.epub", b"collection book").await;
     run(&b).await;
     run(&b).await;
 
@@ -301,6 +337,7 @@ async fn collection_and_membership_survive_the_trip() {
         .unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].name, "Favorites");
+    let b_book = book_id(&b, "same.epub").await;
     assert_eq!(summaries[0].book_ids, vec![b_book]);
 }
 
@@ -316,9 +353,10 @@ async fn an_unwatch_on_one_machine_does_not_delete_the_other_machines_state() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", bytes).await;
+    let _b_book = add_book(&b, "same.epub", bytes).await;
     run(&b).await;
     run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
     assert_eq!(annotation_count(&b, b_book).await, 1);
 
     books::delete_book(&a.pool, a_book).await.unwrap();
@@ -330,9 +368,10 @@ async fn an_unwatch_on_one_machine_does_not_delete_the_other_machines_state() {
         "A's local removal must not become a shared delete"
     );
 
-    let a_book_again = add_book(&a, "same.epub", bytes).await;
+    let _a_book_again = add_book(&a, "same.epub", bytes).await;
     run(&a).await;
     run(&a).await;
+    let a_book_again = book_id(&a, "same.epub").await;
     assert_eq!(
         annotation_count(&a, a_book_again).await,
         1,
@@ -372,12 +411,12 @@ async fn duplicate_and_corrupt_operation_files_are_tolerated() {
     std::os::unix::fs::symlink(&first, corrupt_dir.join("linked.json")).unwrap();
 
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"duplicate ops").await;
+    let _b_book = add_book(&b, "same.epub", b"duplicate ops").await;
     run(&b).await;
     run(&b).await;
 
     assert_eq!(
-        annotation_count(&b, b_book).await,
+        annotation_count(&b, book_id(&b, "same.epub").await).await,
         1,
         "a conflict copy must not duplicate the annotation"
     );
@@ -415,7 +454,7 @@ async fn metadata_override_authors_and_cover_travel_together() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     let b = device().await;
-    let a_book = add_book(&a, "same.epub", b"metadata book").await;
+    let _a_book = add_book(&a, "same.epub", b"metadata book").await;
 
     let covers = a.db_path.parent().unwrap().join("covers");
     std::fs::create_dir_all(&covers).unwrap();
@@ -432,7 +471,7 @@ async fn metadata_override_authors_and_cover_travel_together() {
     };
     metadata::apply_synced_overrides(
         &a.pool,
-        a_book,
+        file_row_id(&a, "same.epub").await,
         &overrides,
         &["Alice".into(), "Bob".into()],
         &["Essays".into()],
@@ -443,14 +482,15 @@ async fn metadata_override_authors_and_cover_travel_together() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"metadata book").await;
+    let _b_book = add_book(&b, "same.epub", b"metadata book").await;
     run(&b).await;
     run(&b).await;
 
+    let b_book = book_id(&b, "same.epub").await;
     let book = books::get_book(&b.pool, b_book).await.unwrap().unwrap();
     assert_eq!(book.title, "Curated title");
     assert_eq!(book.author.as_deref(), Some("Alice, Bob"));
-    let authors = metadata_repo::list_book_authors(&b.pool, b_book)
+    let authors = metadata_repo::list_book_authors(&b.pool, file_row_id(&b, "same.epub").await)
         .await
         .unwrap();
     assert_eq!(authors, vec!["Alice".to_string(), "Bob".to_string()]);
@@ -472,33 +512,38 @@ async fn a_rewritten_file_keeps_its_book_identity() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"version one").await;
+    let _b_book = add_book(&b, "same.epub", b"version one").await;
     run(&b).await;
     run(&b).await;
-    assert_eq!(annotation_count(&b, b_book).await, 1);
+    assert_eq!(
+        annotation_count(&b, book_id(&b, "same.epub").await).await,
+        1
+    );
 
     // Simulate a metadata embed on A: same row, new bytes.
+    let a_book = book_id(&a, "same.epub").await;
     update_book_bytes(&a, a_book, b"version two with new metadata").await;
     run(&a).await;
     run(&a).await;
     run(&b).await;
     assert_eq!(
-        annotation_count(&a, a_book).await,
+        annotation_count(&a, book_id(&a, "same.epub").await).await,
         1,
         "the rewriting device keeps its book"
     );
     assert_eq!(
-        annotation_count(&b, b_book).await,
+        annotation_count(&b, book_id(&b, "same.epub").await).await,
         1,
         "the other device keeps the annotation under the old alias"
     );
 
     // B's cloud client eventually delivers the rewritten bytes.
+    let b_book = book_id(&b, "same.epub").await;
     update_book_bytes(&b, b_book, b"version two with new metadata").await;
     run(&b).await;
     run(&b).await;
     assert_eq!(
-        annotation_count(&b, b_book).await,
+        annotation_count(&b, book_id(&b, "same.epub").await).await,
         1,
         "the new hash alias resolves to the same book"
     );
@@ -591,9 +636,10 @@ async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     connect(&b, sync_dir.path()).await;
-    let b_book = add_book(&b, "same.epub", b"conflict book").await;
+    let _b_book = add_book(&b, "same.epub", b"conflict book").await;
     run(&b).await;
     run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
     let b_annotation = annotations::list_annotations(&b.pool, b_book)
         .await
         .unwrap()[0]
@@ -627,12 +673,12 @@ async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
     run(&a).await;
     run(&b).await;
 
-    let a_note = annotations::list_annotations(&a.pool, a_book)
+    let a_note = annotations::list_annotations(&a.pool, book_id(&a, "same.epub").await)
         .await
         .unwrap()[0]
         .note
         .clone();
-    let b_note = annotations::list_annotations(&b.pool, b_book)
+    let b_note = annotations::list_annotations(&b.pool, book_id(&b, "same.epub").await)
         .await
         .unwrap()[0]
         .note
@@ -668,7 +714,7 @@ async fn operations_are_ordered_by_clock_not_by_file_name() {
 
     let book_uid: String =
         sqlx::query_scalar("SELECT book_uid FROM sync_book_bindings WHERE book_id = ?1")
-            .bind(a_book)
+            .bind(file_row_id(&a, "same.epub").await)
             .fetch_one(&a.pool)
             .await
             .unwrap();
@@ -751,7 +797,7 @@ async fn a_disappearing_folder_becomes_a_sync_issue() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn deleting_the_canonical_copy_reprojects_to_the_duplicate() {
+async fn deleting_one_copy_keeps_the_book_and_its_state() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     let first = add_book(&a, "copy-one.epub", b"duplicate content").await;
@@ -762,21 +808,28 @@ async fn deleting_the_canonical_copy_reprojects_to_the_duplicate() {
     run(&a).await;
     run(&a).await;
 
+    assert_eq!(first, second, "duplicate bytes share one durable book");
     assert_eq!(annotation_count(&a, first).await, 1);
-    assert_eq!(annotation_count(&a, second).await, 0);
     let issues = a.service.issues().await.unwrap();
     assert!(
         issues.iter().any(|issue| issue.kind == "duplicate_book"),
         "the duplicate copy is named in Sync issues: {issues:?}"
     );
 
-    books::delete_book(&a.pool, first).await.unwrap();
+    // Removing one location ends that copy's membership only.
+    let first_file = file_row_id(&a, "copy-one.epub").await;
+    books::delete_file_row(&a.pool, first_file).await.unwrap();
     run(&a).await;
     run(&a).await;
 
     assert_eq!(
         annotation_count(&a, second).await,
         1,
-        "the remaining copy inherits the shared state"
+        "the remaining copy keeps the shared state"
+    );
+    assert_eq!(
+        book_id(&a, "copy-two.epub").await,
+        second,
+        "the surviving copy is still in the library"
     );
 }

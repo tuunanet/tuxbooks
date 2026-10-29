@@ -19,27 +19,31 @@ const SHARED_UID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const RECOVERED_UID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const WAITING_UID: &str = "cccccccccccccccccccccccccccccccc";
 
-/// A copy of the migration set up to and including 0016, so a test can create
-/// the schema the previous release shipped.
-async fn pre_change_migrator(dir: &Path) -> sqlx::migrate::Migrator {
+/// A copy of the migration set up to and including `max_version`, so a test
+/// can create the schema an earlier release shipped.
+async fn migrator_through(dir: &Path, max_version: u64) -> sqlx::migrate::Migrator {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let target = dir.join("migrations");
+    let target = dir.join(format!("migrations-{max_version}"));
     std::fs::create_dir_all(&target).unwrap();
     for entry in std::fs::read_dir(&source).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(version) = name
-            .strip_prefix("00")
+            .strip_prefix('0')
             .and_then(|rest| rest.split('_').next())
             .and_then(|digits| digits.parse::<u64>().ok())
         else {
             continue;
         };
-        if version <= 16 {
+        if version <= max_version {
             std::fs::copy(entry.path(), target.join(&name)).unwrap();
         }
     }
     sqlx::migrate::Migrator::new(target).await.unwrap()
+}
+
+async fn pre_change_migrator(dir: &Path) -> sqlx::migrate::Migrator {
+    migrator_through(dir, 16).await
 }
 
 async fn pre_change_pool(dir: &Path) -> (PathBuf, SqlitePool) {
@@ -232,34 +236,40 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
     assert_eq!(backups.len(), 1, "one backup per upgrade: {backups:?}");
     assert_eq!(count_backup_books(&backups[0]).await, 3);
 
-    // Everything the user sees survives through the repository API.
+    // Everything the user sees survives through the repository API. The two
+    // rows that already shared one sync identity now show as one library
+    // entry (ADR 0014 D7), so three file rows mean two books.
     let listed = books::list_books(&pool).await.unwrap();
-    assert_eq!(listed.len(), 3);
+    assert_eq!(listed.len(), 2);
     let alpha = books::get_book_by_path(&pool, "/library/alpha.epub")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(alpha.title, "Alpha Override");
+    let book_id = alpha.id;
+    // The durable record keeps the latest last-opened across the copies.
     assert_eq!(
         alpha.last_opened_at.unwrap().to_rfc3339(),
-        "2026-01-02T00:00:00+00:00"
+        "2026-01-05T00:00:00+00:00"
     );
-    let progress = reading_progress::get_progress(&pool, 1).await.unwrap();
+    let progress = reading_progress::get_progress(&pool, book_id)
+        .await
+        .unwrap();
     assert_eq!(progress.unwrap().progress_percent, Some(25.0));
     assert_eq!(
-        annotations::list_annotations(&pool, 1).await.unwrap().len(),
+        annotations::list_annotations(&pool, book_id)
+            .await
+            .unwrap()
+            .len(),
         1
     );
     let shelves = collections::list_collection_summaries(&pool).await.unwrap();
-    assert_eq!(shelves[0].book_ids, vec![1]);
+    assert_eq!(shelves[0].book_ids, vec![book_id]);
     let beta = books::get_book_by_path(&pool, "/library/beta.epub")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        beta.last_opened_at.unwrap().to_rfc3339(),
-        "2026-01-05T00:00:00+00:00"
-    );
+    assert_eq!(beta.id, book_id, "both copies resolve to the same book");
 
     // File rows share the durable book their sync binding already named.
     let alpha_uid = alpha.book_uid.clone().expect("alpha has a bookUid");
@@ -330,6 +340,132 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
             && issue.book_uid.as_deref() == Some(SHARED_UID)),
         "expected a duplicate identity issue: {issues:?}"
     );
+}
+
+#[tokio::test]
+async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 17)
+        .await
+        .run(&fixture)
+        .await
+        .unwrap();
+
+    // Two file rows already share one durable identity, each carrying its own
+    // state. This is the shape T1 could identify but not merge.
+    sqlx::query(
+        r#"
+        INSERT INTO books (id, book_uid, path, title)
+        VALUES
+            (1, ?1, '/library/alpha.epub', 'Alpha'),
+            (2, ?1, '/library/beta.epub', 'Beta')
+        "#,
+    )
+    .bind(SHARED_UID)
+    .execute(&fixture)
+    .await
+    .unwrap();
+    for (book_id, percent, updated_at) in [
+        (1, 10.0, "2026-01-01T00:00:00.000Z"),
+        (2, 80.0, "2026-02-01T00:00:00.000Z"),
+    ] {
+        sqlx::query(
+            "INSERT INTO reading_progress (book_id, chapter_href, progress_percent, updated_at)
+             VALUES (?1, 'chapter-1.xhtml', ?2, ?3)",
+        )
+        .bind(book_id)
+        .bind(percent)
+        .bind(updated_at)
+        .execute(&fixture)
+        .await
+        .unwrap();
+    }
+    for (book_id, cfi) in [
+        (1, "epubcfi(/6/2!/4/2,/1:0,/1:8)"),
+        (2, "epubcfi(/6/4!/4/2,/1:0,/1:8)"),
+    ] {
+        sqlx::query(
+            "INSERT INTO annotations (book_id, kind, cfi, text)
+             VALUES (?1, 'highlight', ?2, 'passage')",
+        )
+        .bind(book_id)
+        .bind(cfi)
+        .execute(&fixture)
+        .await
+        .unwrap();
+    }
+    fixture.close().await;
+
+    let (pool, recovery) = init_pool_recovering(&db_path).await.unwrap();
+    assert!(recovery.is_none());
+
+    let book = books::get_book_by_path(&pool, "/library/alpha.epub")
+        .await
+        .unwrap()
+        .expect("durable book");
+    // Both copies resolve to one book.
+    assert_eq!(
+        book.id,
+        books::get_book_by_path(&pool, "/library/beta.epub")
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+    );
+
+    // Newest progress wins; every annotation is kept.
+    let progress = reading_progress::get_progress(&pool, book.id)
+        .await
+        .unwrap()
+        .expect("merged progress");
+    assert_eq!(progress.progress_percent, Some(80.0));
+    assert_eq!(
+        annotations::list_annotations(&pool, book.id)
+            .await
+            .unwrap()
+            .len(),
+        2,
+        "annotations from both copies are unioned"
+    );
+
+    let issues = migration::list_open(&pool).await.unwrap();
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.kind == "duplicate_state_merged"
+                && issue.issue_key == format!("duplicate-progress:{SHARED_UID}")),
+        "the merge is visible: {issues:?}"
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.kind == "duplicate_state_merged"
+                && issue.issue_key == format!("duplicate-annotations:{SHARED_UID}")),
+        "the annotation union is visible: {issues:?}"
+    );
+
+    // The durable record survives the last file row.
+    assert!(books::delete_book(&pool, book.id).await.unwrap());
+    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
+        .bind(SHARED_UID)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept, 1);
+    assert!(reading_progress::get_progress(&pool, book.id)
+        .await
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -418,10 +554,10 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
     std::fs::write(&second_path, b"the same exact bytes").unwrap();
     std::fs::write(&other_path, b"other bytes").unwrap();
 
-    let first = books::insert_book(&pool, &sample(&first_path.to_string_lossy(), "First", 21))
+    let _first = books::insert_book(&pool, &sample(&first_path.to_string_lossy(), "First", 21))
         .await
         .unwrap();
-    let second = books::insert_book(&pool, &sample(&second_path.to_string_lossy(), "Second", 21))
+    let _second = books::insert_book(&pool, &sample(&second_path.to_string_lossy(), "Second", 21))
         .await
         .unwrap();
     let other = books::insert_book(&pool, &sample(&other_path.to_string_lossy(), "Other", 11))
@@ -455,22 +591,42 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
         "a collapse is recorded as a visible issue"
     );
 
-    // Deleting one copy keeps the durable record; the last one removes it
-    // (the destructive behaviour stays until ticket .2).
-    assert!(books::delete_book(&pool, first).await.unwrap());
+    // Deleting file rows ends membership only; the durable record survives
+    // the last one (ticket .2).
+    let first_book = books::get_book_by_path(&pool, &first_path.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("first copy");
+    let second_book = books::get_book_by_path(&pool, &second_path.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("second copy");
+    assert_eq!(first_book.id, second_book.id, "equal bytes share one book");
+    let first_file = books::find_file_id_by_path(&pool, &first_path.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("first file row");
+    assert!(
+        books::delete_file_row(&pool, first_file).await.unwrap(),
+        "the first location is removed"
+    );
     let still_there: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
         .bind(first_uid)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(still_there, 1, "another file still carries the book");
-    assert!(books::delete_book(&pool, second).await.unwrap());
-    let gone: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
+    let second_file = books::find_file_id_by_path(&pool, &second_path.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("second file row");
+    assert!(books::delete_file_row(&pool, second_file).await.unwrap());
+    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
         .bind(first_uid)
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(gone, 0, "removing the last file removes the book");
+    assert_eq!(kept, 1, "removing the last file keeps the durable book");
 
     // Resume: a pending row is picked up by the next pass, exactly as after
     // a restart. `other` remains hashed and is never re-read.
