@@ -116,8 +116,10 @@ pub async fn import_directory(
     })?;
 
     // One snapshot of the known rows: stored size/mtime for the skip check
-    // and the stored cover path for the keep-what-works rule.
-    let known: HashMap<String, crate::domain::Book> = books::list_books(pool)
+    // and the stored cover path for the keep-what-works rule. Only those
+    // columns are read, so a 10k-book re-import does not deserialize 10k
+    // descriptions to compare two integers.
+    let known: HashMap<String, books::BookFileSnapshot> = books::list_file_snapshots(pool)
         .await?
         .into_iter()
         .map(|book| (book.path.clone(), book))

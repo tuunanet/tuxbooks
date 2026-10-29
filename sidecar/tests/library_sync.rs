@@ -1551,6 +1551,31 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
     assert_eq!(env.count().await, 3);
 }
 
+/// Dropping several files from one folder scans that folder once. The broken
+/// sibling is the observable: a second scan would report it a second time.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_several_files_from_one_folder_scans_it_once() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    write_epub(&shelf.join("first.epub"), "Shelf First");
+    write_epub(&shelf.join("second.epub"), "Shelf Second");
+    std::fs::write(shelf.join("broken.epub"), b"not an epub").unwrap();
+
+    let report = env
+        .import_paths(&[&shelf.join("first.epub"), &shelf.join("second.epub")])
+        .await;
+
+    assert_eq!(report["imported"].as_u64(), Some(2), "{report}");
+    assert_eq!(report["updated"].as_u64(), Some(0), "{report}");
+    assert_eq!(
+        report["failed"].as_array().unwrap().len(),
+        1,
+        "one scan reports the broken sibling once: {report}"
+    );
+    assert_eq!(env.count().await, 2);
+}
+
 /// Importing a file from a folder that is already watched neither
 /// duplicates rows nor errors: the scan skips the unchanged files, the
 /// registration is a no-op, and no second watch is disclosed.

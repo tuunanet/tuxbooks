@@ -1,4 +1,5 @@
 use sqlx::SqlitePool;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -131,6 +132,10 @@ pub async fn import_paths(
     };
 
     let mut report = ImportReport::default();
+    // Folder scans run after every explicit entry is in hand, so a drop of
+    // ten books from one folder scans that folder once instead of ten times.
+    let mut folders: Vec<PathBuf> = Vec::new();
+    let mut seen_folders: HashSet<PathBuf> = HashSet::new();
     for raw in paths {
         let path = PathBuf::from(raw.trim());
         if path.as_os_str().is_empty() {
@@ -143,15 +148,7 @@ pub async fn import_paths(
             continue;
         }
         if path.is_dir() {
-            import_and_watch_folder(
-                state,
-                &path,
-                &covers,
-                &pdfium_dirs,
-                &emit_progress,
-                &mut report,
-            )
-            .await;
+            queue_folder(&mut folders, &mut seen_folders, path);
         } else if path.is_file() {
             match import_file(&state.db, &path, &covers, &pdfium_dirs).await {
                 Ok(Some(outcome)) => {
@@ -166,15 +163,7 @@ pub async fn import_paths(
                     // mirror never holds a book no watched folder owns.
                     if let Some(parent) = path.parent() {
                         if !parent.as_os_str().is_empty() {
-                            import_and_watch_folder(
-                                state,
-                                parent,
-                                &covers,
-                                &pdfium_dirs,
-                                &emit_progress,
-                                &mut report,
-                            )
-                            .await;
+                            queue_folder(&mut folders, &mut seen_folders, parent.to_path_buf());
                         }
                     }
                 }
@@ -200,8 +189,27 @@ pub async fn import_paths(
                 });
         }
     }
+    for folder in &folders {
+        import_and_watch_folder(
+            state,
+            folder,
+            &covers,
+            &pdfium_dirs,
+            &emit_progress,
+            &mut report,
+        )
+        .await;
+    }
     batch.lock().unwrap().flush();
     Ok(report)
+}
+
+/// Add a folder to the scan queue once, preserving the order the caller
+/// named it.
+fn queue_folder(folders: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, folder: PathBuf) {
+    if seen.insert(folder.clone()) {
+        folders.push(folder);
+    }
 }
 
 /// Scan `root` for book files, register it as a watched library location,
