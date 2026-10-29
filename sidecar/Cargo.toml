@@ -49,6 +49,10 @@ base64 = "0.22"
 # main process is killed hard, the kernel reaps the sidecar immediately
 # instead of leaving it watching the library against the next instance.
 libc = "0.2"
+# Content identity for cloud-folder sync (docs/SYNC.md): the hash is a
+# discovery key, never the book identity. sha2 is already in the lockfile
+# through sqlx, so this adds no new package to the tree.
+sha2 = "0.10"
 
 [dev-dependencies]
 proptest = "1"

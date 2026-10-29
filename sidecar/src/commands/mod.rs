@@ -5,6 +5,7 @@ pub mod library;
 pub mod metadata;
 pub mod progress;
 pub mod reader;
+pub mod sync;
 
 use crate::error::AppError;
 use crate::rpc::EventEmitter;

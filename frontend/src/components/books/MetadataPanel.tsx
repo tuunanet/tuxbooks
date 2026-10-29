@@ -109,11 +109,19 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
         ) : (
           <>
             <div className="mt-4 flex items-start gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2.5 text-xs text-sky-900 dark:text-sky-100">
-              <p>
-                Saving writes these values into the {formatLabel} file, keeping a one-time{" "}
-                {formatLabel.toLowerCase()} <span className="font-mono">.bak</span> backup. Fields{" "}
-                {formatLabel} cannot store stay as library edits.
-              </p>
+              <div className="flex flex-col gap-1.5">
+                <p>
+                  Saving writes these values into the {formatLabel} file. Other machines get them
+                  only when they receive the file. Fields {formatLabel} cannot store stay as library
+                  edits.
+                </p>
+                <p data-testid="metadata-panel-backup-note">
+                  The first save creates a one-time <span className="font-mono">.bak</span> copy
+                  next to the book; later saves keep it. If the book folder is cloud-synced, the
+                  backup travels with it, and deleting it there removes it on every machine.
+                  TuxBooks cannot recreate the original after that.
+                </p>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-4">

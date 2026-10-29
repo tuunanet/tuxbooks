@@ -33,7 +33,10 @@ Comments explain a constraint, trap, root cause, or decision that code cannot ex
 - Wire DTOs serialize `camelCase`, in JSON-RPC payloads and the preload
   bridge alike.
 - Business logic lives in `domain/`/`services/`; SQL only in
-  `repository/` (module table in [ARCHITECTURE.md](ARCHITECTURE.md)).
+  `repository/` (module table in [ARCHITECTURE.md](ARCHITECTURE.md)). The
+  self-contained cloud-sync storage engine (`sidecar/src/sync/`) is the
+  documented exception: its SQL and its on-disk operation contract change
+  together. Command and service code never embed SQL.
 - `epub/` and `domain/` stay independent of any runtime (Electron, Tauri).
 
 ## Frontend

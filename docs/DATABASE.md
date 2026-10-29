@@ -176,7 +176,9 @@ subtitle — keep their override, so the effective view is unchanged. Covers
 are never embedded: the artwork cache stays the only cover store. Before
 the first write, a one-time `<file>.bak` copy of the original is kept beside
 the book (`<file>.epub.bak` / `<file>.pdf.bak`; the `.bak` extension is
-never scanned into the library). The re-parse also updates the FTS index
+never scanned into the library). TuxBooks never deletes or overwrites an
+existing backup. If the book folder is cloud-synced, the client carries the
+backup with the book; see `docs/SYNC.md`. The re-parse also updates the FTS index
 through the normal effective-column triggers. `reset_book_metadata` drops
 every override, returning the book to its source-file metadata; with no
 overrides left, the reset affordance disables itself.
@@ -202,6 +204,42 @@ User queries never reach FTS5 raw: `services/search.rs`
 (`build_fts_query`) strips quotes and turns whitespace-separated tokens
 into quoted prefix phrases ANDed together (`wind river` →
 `"wind"* "river"*`), so input cannot inject MATCH syntax.
+
+## Cloud-folder sync (migration 0015)
+
+The sync engine keeps its bookkeeping in the same SQLite file. The catalog
+tables stay path-keyed; nothing here changes how imports, readers, or search
+work. The full contract is [SYNC.md](SYNC.md).
+
+- `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
+  flag, last sync, last error, and the hybrid logical clock.
+- `sync_dirty` — one row per entity with a pending local change. Triggers write
+  the canonical snapshot at change time (`old_json`/`new_json`); the capture
+  pass drains it. Cascades caused by a vanished book or collection are skipped
+  by the triggers.
+- `sync_state_entities` / `sync_state_fields` — the materialized shared state.
+  Entities carry tombstones and entity-level clocks; fields carry one value and
+  one clock each.
+- `sync_book_aliases` / `sync_book_bindings` — content hash to shared uuid, and
+  local book row to shared uuid with the hash snapshot used to detect rewrites.
+- `sync_book_merges` / `sync_entity_merges` — deterministic identity merges
+  (smallest uuid wins) so replay order cannot resurrect a losing id.
+- `sync_ops` / `sync_applied_ops` — locally emitted operations and every applied
+  operation id. `sync_remote_files` caches file size/mtime and retry counts so a
+  pass only reads new or changed files.
+- `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
+  losing field values, and the 30-day delete restore list.
+- `sync_reproject` — book uuids whose canonical local row was deleted. The
+  engine projects the shared state onto the next bound row, so a duplicate
+  copy does not look empty after the first copy is removed.
+- `books.rehash_pending` — set before a metadata embed rewrites the file and
+  cleared after the size/mtime snapshot is refreshed. The identity sweep treats
+  it as a forced rehash, which closes the crash window between the rewrite and
+  the snapshot update.
+
+`annotations.sync_uid` and `collections.sync_uid` are the portable entity ids;
+existing rows are backfilled in the migration. The sync worker fills a null uid
+on first use, so a row created while sync is off is never a constraint error.
 
 ## Conventions
 

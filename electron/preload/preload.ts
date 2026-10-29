@@ -43,6 +43,11 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.dialog, "directory");
   },
 
+  /** Native picker for the cloud-sync folder; null when cancelled. */
+  pickSyncFolder(): Promise<string | null> {
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "sync-folder");
+  },
+
   /** Native single-file picker (relocate a missing book); null when cancelled. */
   pickBookFile(): Promise<string | null> {
     return ipcRenderer.invoke(IPC_CHANNELS.dialog, "book-file");

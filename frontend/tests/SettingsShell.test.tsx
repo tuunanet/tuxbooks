@@ -61,6 +61,7 @@ describe("SettingsShell", () => {
       "PDF",
       "Keyboard Shortcuts",
       "Watched folders",
+      "Sync",
       "Application Data",
       "About",
     ]) {
@@ -82,6 +83,7 @@ describe("SettingsShell", () => {
       "PDF",
       "Keyboard Shortcuts",
       "Watched folders",
+      "Sync",
       "Application Data",
       "About",
     ]);

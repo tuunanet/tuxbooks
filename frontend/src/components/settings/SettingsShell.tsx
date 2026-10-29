@@ -5,6 +5,7 @@ import { AboutSection } from "@/components/settings/AboutSection";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
 import { DataSettings } from "@/components/settings/DataSettings";
 import { FoldersSettings } from "@/components/settings/FoldersSettings";
+import { SyncSettings } from "@/components/settings/SyncSettings";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -35,7 +36,15 @@ import { cn } from "@/lib/utils";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 
-type SettingsSectionId = "general" | "reading" | "pdf" | "shortcuts" | "folders" | "data" | "about";
+type SettingsSectionId =
+  | "general"
+  | "reading"
+  | "pdf"
+  | "shortcuts"
+  | "folders"
+  | "sync"
+  | "data"
+  | "about";
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
@@ -43,6 +52,7 @@ const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "pdf", label: "PDF" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
   { id: "folders", label: "Watched folders" },
+  { id: "sync", label: "Sync" },
   { id: "data", label: "Application Data" },
   { id: "about", label: "About" },
 ];
@@ -470,6 +480,8 @@ export function SettingsShell() {
           <DataSettings />
         ) : active === "folders" ? (
           <FoldersSettings />
+        ) : active === "sync" ? (
+          <SyncSettings />
         ) : active === "about" ? (
           <AboutSection />
         ) : (

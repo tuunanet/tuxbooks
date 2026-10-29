@@ -8,6 +8,7 @@ pub mod pdf;
 pub mod repository;
 pub mod rpc;
 pub mod services;
+pub mod sync;
 pub mod worker;
 
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::domain::StartupRecovery;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
 use crate::services::library_watcher::LibraryWatcher;
+use crate::sync::engine::SyncService;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -31,6 +33,9 @@ pub struct AppState {
     /// Set once at startup when a broken database was quarantined; read by
     /// `get_startup_recovery` so main can name the file in the dialog.
     pub startup_recovery: Option<StartupRecovery>,
+    /// Background cloud-folder sync. `None` in unit tests that construct the
+    /// state by hand; production wires it in `init_state`.
+    pub sync: Option<Arc<SyncService>>,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -57,12 +62,21 @@ pub(crate) fn backup_path(path: &Path) -> PathBuf {
 /// Copy `path` to `<path>.bak` the first time a file is about to be rewritten,
 /// so the backup always holds the pre-embed original. No-op (and no error)
 /// when a backup already exists; a failed copy is an error, so the caller
-/// aborts without modifying the source. The copy itself is atomic (temp +
-/// rename), so a crash can never leave a truncated backup.
+/// aborts without modifying the source. An existing path that is not a regular
+/// file is an error rather than a silent skip. The copy itself is atomic (temp
+/// + rename), so a crash can never leave a truncated backup.
 pub(crate) fn backup_file_once(path: &Path) -> std::io::Result<Option<PathBuf>> {
     let backup = backup_path(path);
-    if backup.exists() {
-        return Ok(None);
+    match std::fs::metadata(&backup) {
+        Ok(meta) if meta.is_file() => return Ok(None),
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("backup path {} is not a regular file", backup.display()),
+            ))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let unique = ATOMIC_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -169,6 +183,7 @@ fn app_data_dir() -> PathBuf {
 /// callback receives every service-layer change (`library-changed`) — the
 /// JSON-RPC server forwards it to the Electron main process.
 pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error> {
+    let sync_events = events.clone();
     let db_path = resolve_db_path();
     let (pool, startup_recovery) = init_pool_recovering(&db_path)
         .await
@@ -270,15 +285,62 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         );
     });
 
+    let sync = Arc::new(
+        SyncService::new(pool.clone(), &db_path, sync_events)
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to initialize cloud sync: {err}"))?,
+    );
+    sync.start();
+
     Ok(AppState {
         db: pool,
         db_path,
         watcher: Arc::new(watcher),
         startup_recovery,
+        sync: Some(sync),
     })
 }
 
 /// Service entry point: JSON-RPC over stdio until stdin closes.
 pub async fn run() -> i32 {
     rpc::serve().await
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+
+    #[test]
+    fn the_first_backup_wins_and_later_writes_keep_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"original").unwrap();
+
+        let backup = backup_file_once(&path).unwrap().expect("a backup is made");
+        assert_eq!(std::fs::read(&backup).unwrap(), b"original");
+
+        std::fs::write(&path, b"edited").unwrap();
+        assert!(backup_file_once(&path).unwrap().is_none());
+        assert_eq!(
+            std::fs::read(&backup).unwrap(),
+            b"original",
+            "a second embed keeps the first backup"
+        );
+    }
+
+    #[test]
+    fn a_directory_at_the_backup_path_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::create_dir(backup_path(&path)).unwrap();
+
+        let err = backup_file_once(&path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"original",
+            "the source is untouched"
+        );
+    }
 }

@@ -202,6 +202,20 @@ struct SaveProgressArgs {
     progress: commands::progress::ProgressInput,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncConnectArgs {
+    path: String,
+    device_name: Option<String>,
+    confirm_library_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncDeviceNameArgs {
+    name: String,
+}
+
 /// The method table. Returns the JSON value to send as the request's result.
 async fn dispatch(
     state: &AppState,
@@ -396,6 +410,32 @@ async fn dispatch(
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::annotations::delete_annotation(state, p.id)))
         }
+        "sync_status" => Ok(call!(commands::sync::status(state))),
+        "sync_connect" => {
+            let p: SyncConnectArgs = parse_params(params)?;
+            Ok(call!(commands::sync::connect(
+                state,
+                p.path,
+                p.device_name,
+                p.confirm_library_id
+            )))
+        }
+        "sync_disconnect" => Ok(call!(commands::sync::disconnect(state))),
+        "sync_now" => Ok(call!(commands::sync::sync_now(state))),
+        "sync_issues" => Ok(call!(commands::sync::issues(state))),
+        "sync_dismiss_issue" => {
+            let p: IdArgs = parse_params(params)?;
+            Ok(call!(commands::sync::dismiss_issue(state, p.id)))
+        }
+        "sync_trash" => Ok(call!(commands::sync::trash(state))),
+        "sync_restore" => {
+            let p: IdArgs = parse_params(params)?;
+            Ok(call!(commands::sync::restore(state, p.id)))
+        }
+        "sync_set_device_name" => {
+            let p: SyncDeviceNameArgs = parse_params(params)?;
+            Ok(call!(commands::sync::set_device_name(state, p.name)))
+        }
         other => Err(RpcError::method_not_found(other)),
     }
 }
@@ -459,6 +499,9 @@ pub async fn serve() -> i32 {
         }
     }
 
+    if let Some(sync) = &state.sync {
+        sync.shutdown().await;
+    }
     drop(request_tx);
     let _ignored = writer.await;
     0
@@ -554,6 +597,7 @@ mod tests {
             db_path: dir.join("t.db"),
             watcher: Arc::new(watcher),
             startup_recovery: None,
+            sync: None,
         })
     }
 

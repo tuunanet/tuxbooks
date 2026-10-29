@@ -115,6 +115,27 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
     },
   );
 
+  it("issues a picked sync folder to the invoke policy", async () => {
+    const { handlers, sidecar, dialog } = harness();
+    dialog.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ["/home/me/Dropbox"],
+    });
+
+    const picked = await handlers.get(IPC_CHANNELS.dialog)!(
+      senderEvent(ALLOWED) as never,
+      "sync-folder",
+    );
+    expect(picked).toBe("/home/me/Dropbox");
+
+    await handlers.get(IPC_CHANNELS.invoke)!(senderEvent(ALLOWED) as never, "sync_connect", {
+      path: "/home/me/Dropbox",
+    });
+    expect(sidecar.call).toHaveBeenCalledWith("sync_connect", {
+      path: "/home/me/Dropbox",
+    });
+  });
+
   it.each(ALL_CHANNELS)("%s admits the application page", async (channel) => {
     const { handlers, sidecar, dialog, shell, clipboard } = harness();
     const handler = handlers.get(channel);
