@@ -1,12 +1,14 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { ArrowLeft, BookOpen, FileWarning } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
 import { BookBookmarksPanel } from "./BookBookmarksPanel";
+import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
+import { ResetBookDialog } from "./ResetBookDialog";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
@@ -35,7 +37,10 @@ function formatDate(iso: string | null): string {
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
   const { books, collections } = useLibrary();
-  const { locateBook, removeBookFromLibrary } = useBookActions();
+  const { locateBook, removeBookFromLibrary, resetReadingData, forgetBookFromLibrary } =
+    useBookActions();
+  const [resetOpen, setResetOpen] = useState(false);
+  const [forgetOpen, setForgetOpen] = useState(false);
   const dispatch = useAppDispatch();
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   // One curation view is shared by the Overview subjects row and the
@@ -238,6 +243,33 @@ export function BookDetail() {
               )}
             </div>
           </div>
+
+          <div className="mt-8 rounded-md border p-4">
+            <h3 className="text-sm font-medium">Reading data</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Reset clears progress, annotations, collections, metadata overrides, and provider
+              links but keeps this book and its file. Forget moves them to the 30-day trash and
+              rebinds the file to a fresh identity.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="detail-reset"
+                onClick={() => setResetOpen(true)}
+              >
+                Reset Reading Data…
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                data-testid="detail-forget"
+                onClick={() => setForgetOpen(true)}
+              >
+                Forget Book…
+              </Button>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="metadata">
@@ -252,6 +284,27 @@ export function BookDetail() {
           <BookBookmarksPanel book={book} />
         </TabsContent>
       </Tabs>
+
+      <ResetBookDialog
+        open={resetOpen}
+        title={book.title}
+        onConfirm={() => {
+          setResetOpen(false);
+          void resetReadingData(book.id);
+        }}
+        onCancel={() => setResetOpen(false)}
+      />
+      <ForgetBookDialog
+        open={forgetOpen}
+        count={1}
+        keepsFile
+        onConfirm={() => {
+          setForgetOpen(false);
+          void forgetBookFromLibrary(book.id);
+          dispatch({ type: "return-to-library" });
+        }}
+        onCancel={() => setForgetOpen(false)}
+      />
     </section>
   );
 }

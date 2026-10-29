@@ -8,6 +8,8 @@ import { revealBook } from "@/lib/bridge";
 import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
 import { BulkRemoveDialog } from "./BulkRemoveDialog";
 import { EmptyLibraryState } from "./EmptyLibraryState";
+import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
+import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryEmptyState } from "./LibraryEmptyState";
 import { LibraryHeader } from "./LibraryHeader";
@@ -53,10 +55,18 @@ function LibrarySkeleton() {
 export function LibraryView({ section }: LibraryViewProps) {
   const { books, collections, loading, error, refresh } = useLibrary();
   const bookActions = useBookActions();
-  const { locateBook, removeBookFromLibrary, markFinished } = bookActions;
+  const {
+    locateBook,
+    removeBookFromLibrary,
+    resetReadingData,
+    forgetBookFromLibrary,
+    markFinished,
+  } = bookActions;
   const collectionActions = useCollectionActions();
   const app = useAppState();
   const dispatch = useAppDispatch();
+  const [resetTarget, setResetTarget] = useState<Book | null>(null);
+  const [forgetTarget, setForgetTarget] = useState<Book | null>(null);
 
   // View mode and sort are presentation preferences. The search query is app
   // state scoped to the section and cleared when the section changes; the
@@ -176,6 +186,14 @@ export function LibraryView({ section }: LibraryViewProps) {
     onLocate: locateBook,
     onEditMetadata: openMetadataEditor,
     onRemove: removeBookFromLibrary,
+    onReset: (bookId: number) => {
+      const target = books.find((candidate) => candidate.id === bookId);
+      if (target) setResetTarget(target);
+    },
+    onForget: (bookId: number) => {
+      const target = books.find((candidate) => candidate.id === bookId);
+      if (target) setForgetTarget(target);
+    },
     onAddToCollection: collectionActions.addBook,
     onRemoveFromCollection: collectionActions.removeBook,
     onMarkFinished: markFinished,
@@ -220,6 +238,27 @@ export function LibraryView({ section }: LibraryViewProps) {
         count={selectedIds.length}
         onConfirm={() => void bulk.confirmBulkRemove()}
         onCancel={() => bulk.setBulkRemoveOpen(false)}
+      />
+      <ResetBookDialog
+        open={resetTarget !== null}
+        title={resetTarget?.title}
+        onConfirm={() => {
+          const target = resetTarget;
+          setResetTarget(null);
+          if (target) void resetReadingData(target.id);
+        }}
+        onCancel={() => setResetTarget(null)}
+      />
+      <ForgetBookDialog
+        open={forgetTarget !== null}
+        count={1}
+        keepsFile
+        onConfirm={() => {
+          const target = forgetTarget;
+          setForgetTarget(null);
+          if (target) void forgetBookFromLibrary(target.id);
+        }}
+        onCancel={() => setForgetTarget(null)}
       />
       {visible.length === 0 ? (
         <LibraryEmptyState

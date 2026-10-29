@@ -25,6 +25,8 @@ interface BookContextMenuProps {
   onLocate?: (bookId: number) => void;
   onEditMetadata?: (bookId: number) => void;
   onRemove?: (bookId: number) => void;
+  onReset?: (bookId: number) => void;
+  onForget?: (bookId: number) => void;
   onAddToCollection?: (bookId: number, collectionId: number) => void;
   onRemoveFromCollection?: (bookId: number, collectionId: number) => void;
   onMarkFinished?: (bookId: number) => void;
@@ -148,6 +150,8 @@ export function BookContextMenu({
   onLocate,
   onEditMetadata,
   onRemove,
+  onReset,
+  onForget,
   onAddToCollection,
   onRemoveFromCollection,
   onMarkFinished,
@@ -226,6 +230,9 @@ export function BookContextMenu({
             >
               Edit Metadata
             </ContextMenuItem>
+            <ContextMenuItem data-testid="context-reset-book" onSelect={() => onReset?.(book.id)}>
+              Reset Reading Data…
+            </ContextMenuItem>
             <ContextMenuItem
               data-testid="context-reveal-file"
               disabled={!book.available}
@@ -241,6 +248,13 @@ export function BookContextMenu({
               onSelect={() => onRemove?.(book.id)}
             >
               Remove from Library
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-testid="context-forget-book"
+              variant="destructive"
+              onSelect={() => onForget?.(book.id)}
+            >
+              Forget Book…
             </ContextMenuItem>
           </>
         ) : (

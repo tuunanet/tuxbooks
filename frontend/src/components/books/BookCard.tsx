@@ -30,6 +30,8 @@ export interface InteractiveBookProps {
   onLocate?: (bookId: number) => void;
   onEditMetadata?: (bookId: number) => void;
   onRemove?: (bookId: number) => void;
+  onReset?: (bookId: number) => void;
+  onForget?: (bookId: number) => void;
   onAddToCollection?: (bookId: number, collectionId: number) => void;
   onRemoveFromCollection?: (bookId: number, collectionId: number) => void;
   onMarkFinished?: (bookId: number) => void;
@@ -65,6 +67,8 @@ export function BookCard({
   onLocate,
   onEditMetadata,
   onRemove,
+  onReset,
+  onForget,
   onAddToCollection,
   onRemoveFromCollection,
   onMarkFinished,
@@ -87,6 +91,8 @@ export function BookCard({
         onLocate={onLocate}
         onEditMetadata={onEditMetadata}
         onRemove={onRemove}
+        onReset={onReset}
+        onForget={onForget}
         onAddToCollection={onAddToCollection}
         onRemoveFromCollection={onRemoveFromCollection}
         onMarkFinished={onMarkFinished}

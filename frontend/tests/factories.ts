@@ -1,6 +1,7 @@
 import type {
   Annotation,
   Book,
+  BookTrashEntry,
   CollectionSummary,
   ProviderLink,
   ReadingHistoryBook,
@@ -51,6 +52,23 @@ export function makeReadingHistoryBook(
     lastOpenedAt: "2026-03-01T00:00:00.000Z",
     metadataState: "available",
     providerLinks: [],
+    ...overrides,
+  };
+}
+
+export function makeBookTrashEntry(overrides: Partial<BookTrashEntry> = {}): BookTrashEntry {
+  return {
+    id: 7,
+    bookId: 41,
+    bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+    title: "A Forgotten Book",
+    author: "Ada Lovelace",
+    deletedAt: "2026-03-01T00:00:00.000Z",
+    expiresAt: "2026-03-31T00:00:00.000Z",
+    progressPercent: 42,
+    annotationCount: 2,
+    replacementBookId: 51,
+    hasNewState: false,
     ...overrides,
   };
 }

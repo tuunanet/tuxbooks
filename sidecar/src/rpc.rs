@@ -135,6 +135,20 @@ struct BookUidArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BookIdsArgs {
+    book_ids: Vec<i64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreBookArgs {
+    trash_id: i64,
+    #[serde(default)]
+    mode: Option<crate::domain::RestoreMode>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProviderLinkArgs {
     book_uid: String,
     provider: String,
@@ -317,6 +331,31 @@ async fn dispatch(
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::books::remove_book(
                 state, events, p.book_id
+            )))
+        }
+        "reset_book_reading_data" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::reset_book_reading_data(
+                state, events, p.book_id
+            )))
+        }
+        "forget_book" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::forget_book(
+                state, events, p.book_id
+            )))
+        }
+        "forget_books" => {
+            let p: BookIdsArgs = parse_params(params)?;
+            Ok(call!(commands::books::forget_books(
+                state, events, p.book_ids
+            )))
+        }
+        "list_book_trash" => Ok(call!(commands::books::list_book_trash(state))),
+        "restore_book" => {
+            let p: RestoreBookArgs = parse_params(params)?;
+            Ok(call!(commands::books::restore_book(
+                state, events, p.trash_id, p.mode
             )))
         }
         "scan_library" => {

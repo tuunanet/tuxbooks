@@ -11,7 +11,10 @@ import type {
   Book,
   BookFormat,
   BookMetadata,
+  BookTrashEntry,
+  BulkForgetOutcome,
   CollectionSummary,
+  ForgetOutcome,
   ImportReport,
   LibraryChange,
   LibraryStats,
@@ -19,6 +22,8 @@ import type {
   ReadingHistoryBook,
   ReadingProgressInput,
   ReadingProgressRecord,
+  RestoreMode,
+  RestoreOutcome,
   SearchHit,
 } from "@/types/domain";
 import type { StorageRootId } from "../../../electron/shared/pathSchema";
@@ -28,12 +33,18 @@ export type {
   Book,
   BookFormat,
   BookMetadata,
+  BookTrashEntry,
+  BulkForgetOutcome,
   CollectionSummary,
+  ForgetOutcome,
   ImportReport,
   LibraryChange,
   LibraryStats,
   MetadataFields,
   ReadingHistoryBook,
+  RestoreConflict,
+  RestoreMode,
+  RestoreOutcome,
 } from "@/types/domain";
 export type { StorageRootId } from "../../../electron/shared/pathSchema";
 export type {
@@ -262,6 +273,42 @@ export function onLibraryChanged(callback: (change: LibraryChange) => void): Pro
 /** Remove a book from the library (source file on disk is never touched). */
 export function removeBook(bookId: number): Promise<boolean> {
   return invoke("remove_book", { bookId });
+}
+
+/**
+ * Reset reading data for one book: clear progress, annotations, collection
+ * membership, metadata overrides, and provider links, but keep the durable
+ * identity and the current file. The book stays in the library as unread.
+ */
+export function resetBookReadingData(bookId: number): Promise<boolean> {
+  return invoke("reset_book_reading_data", { bookId });
+}
+
+/**
+ * Forget one book: move its identity and state to the 30-day trash. When the
+ * book has a file, the library entry stays and is rebound to a fresh identity.
+ */
+export function forgetBook(bookId: number): Promise<ForgetOutcome> {
+  return invoke("forget_book", { bookId });
+}
+
+/** Bulk Forget for Reading history. */
+export function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
+  return invoke("forget_books", { bookIds });
+}
+
+/** Forgotten books still restorable inside the 30-day window. */
+export function listBookTrash(): Promise<BookTrashEntry[]> {
+  return invoke("list_book_trash");
+}
+
+/**
+ * Restore a Forgotten book. With no mode, the backend restores silently when
+ * the fresh identity has no new progress or annotations and returns
+ * `status: "conflict"` when it does. Replace, Keep, and Merge resolve it.
+ */
+export function restoreBook(trashId: number, mode?: RestoreMode): Promise<RestoreOutcome> {
+  return invoke("restore_book", mode === undefined ? { trashId } : { trashId, mode });
 }
 
 /** Curation view of a book: effective metadata, source values, overridden flags. */

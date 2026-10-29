@@ -1,5 +1,12 @@
 import { useCallback } from "react";
-import { markBookFinished, pickBookFile, reconnectBook, removeBook } from "@/lib/bridge";
+import {
+  forgetBook,
+  markBookFinished,
+  pickBookFile,
+  reconnectBook,
+  removeBook,
+  resetBookReadingData,
+} from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
 
 function toMessage(err: unknown): string {
@@ -37,6 +44,35 @@ export function useBookActions() {
     }
   }, []);
 
+  /** Reset keeps the book and file; only user-owned reading state goes. */
+  const resetReadingData = useCallback(
+    async (bookId: number) => {
+      try {
+        await resetBookReadingData(bookId);
+        await refresh();
+      } catch (err) {
+        console.error("reset reading data failed:", toMessage(err));
+      }
+    },
+    [refresh],
+  );
+
+  /**
+   * Forget moves the old identity to the 30-day trash. A book with a file
+   * stays in the library under a fresh identity.
+   */
+  const forgetBookFromLibrary = useCallback(
+    async (bookId: number) => {
+      try {
+        await forgetBook(bookId);
+        await refresh();
+      } catch (err) {
+        console.error("forget failed:", toMessage(err));
+      }
+    },
+    [refresh],
+  );
+
   const markFinished = useCallback(
     async (bookId: number) => {
       try {
@@ -71,5 +107,12 @@ export function useBookActions() {
     [refresh],
   );
 
-  return { locateBook, removeBookFromLibrary, markFinished, markManyFinished };
+  return {
+    locateBook,
+    removeBookFromLibrary,
+    resetReadingData,
+    forgetBookFromLibrary,
+    markFinished,
+    markManyFinished,
+  };
 }
