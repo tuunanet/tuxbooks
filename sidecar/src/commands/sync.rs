@@ -21,9 +21,10 @@ pub async fn connect(
     path: String,
     device_name: Option<String>,
     confirm_library_id: Option<String>,
+    start_new: bool,
 ) -> Result<SyncConnectResult, AppError> {
     service(state)?
-        .connect(&path, device_name, confirm_library_id)
+        .connect(&path, device_name, confirm_library_id, start_new)
         .await
 }
 

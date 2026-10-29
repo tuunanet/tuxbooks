@@ -146,6 +146,43 @@ describe("SyncSettings", () => {
     expect(await screen.findByTestId("sync-status")).toHaveTextContent("Up to date");
   });
 
+  it("starts a new library in a folder that already has one, without moving files", async () => {
+    const mismatch = {
+      localLibraryId: "11111111111111111111111111111111",
+      remoteLibraryId: "22222222222222222222222222222222",
+    };
+    const archived = "/home/me/Dropbox/TuxBooks.before-20261029T150000Z";
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") return Promise.resolve(DISABLED);
+      if (method === "sync_connect") {
+        if (params?.startNew === true) {
+          return Promise.resolve({
+            status: ENABLED,
+            mismatch: null,
+            archivedLibraryPath: archived,
+          });
+        }
+        return Promise.resolve({ status: DISABLED, mismatch });
+      }
+      if (method === "sync_issues" || method === "sync_trash") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("sync-connect"));
+    expect(await screen.findByTestId("sync-mismatch")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sync-start-new"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("sync_connect", {
+        path: "/home/me/Dropbox",
+        startNew: true,
+      });
+    });
+    expect(await screen.findByTestId("sync-notice")).toHaveTextContent(archived);
+    expect(await screen.findByTestId("sync-status")).toHaveTextContent("Up to date");
+  });
+
   it("disconnects only after confirmation", async () => {
     mockInvoke({
       sync_status: ENABLED,

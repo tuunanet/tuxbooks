@@ -126,11 +126,14 @@ export interface SyncMismatch {
 export interface SyncConnectResult {
   status: SyncStatus;
   mismatch: SyncMismatch | null;
+  /** Set when starting a new library moved the previous one aside. */
+  archivedLibraryPath: string | null;
 }
 
 export interface SyncConnectOptions {
   deviceName?: string;
   confirmLibraryId?: string;
+  startNew?: boolean;
 }
 
 /** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */

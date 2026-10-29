@@ -44,6 +44,9 @@ pub struct FolderInfo {
     pub root: PathBuf,
     pub library: LibraryFile,
     pub device: DeviceFile,
+    /// True when `library.json` already existed. A freshly created library
+    /// must not be mistaken for a different, established library.
+    pub existed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +84,37 @@ pub fn resolve_root(folder: &Path) -> Result<PathBuf, AppError> {
     fs::canonicalize(&root).map_err(AppError::Io)
 }
 
+/// Move an existing sync library aside so the chosen folder can host a new
+/// one. Returns the archived path, or `None` when the folder has no library
+/// yet. Nothing is deleted; the old operation log and snapshots stay together
+/// under a sibling name.
+pub fn archive_existing_library(folder: &Path, stamp: &str) -> Result<Option<PathBuf>, AppError> {
+    let root = resolve_root(folder)?;
+    if !root.join(LIBRARY_FILE).exists() {
+        return Ok(None);
+    }
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(SYNC_DIR_NAME);
+    let safe_stamp: String = stamp
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect();
+    let base = format!("{name}.before-{safe_stamp}");
+    let mut target = root.with_file_name(&base);
+    let mut suffix = 1;
+    while target.exists() {
+        target = root.with_file_name(format!("{base}-{suffix}"));
+        suffix += 1;
+    }
+    fs::rename(&root, &target).map_err(AppError::Io)?;
+    // The chosen folder can itself be the `TuxBooks` root. Recreate it so the
+    // caller can immediately create the fresh library there.
+    fs::create_dir_all(folder)?;
+    Ok(Some(target))
+}
+
 pub fn connect(
     folder: &Path,
     device_id: &str,
@@ -91,7 +125,8 @@ pub fn connect(
     probe_writable(&root)?;
 
     let library_path = root.join(LIBRARY_FILE);
-    let library = if library_path.exists() {
+    let existed = library_path.exists();
+    let library = if existed {
         read_json::<LibraryFile>(&library_path)?
     } else {
         let library = LibraryFile {
@@ -146,6 +181,7 @@ pub fn connect(
         root,
         library,
         device,
+        existed,
     })
 }
 
@@ -697,6 +733,67 @@ mod tests {
         assert_eq!(root.file_name().unwrap(), SYNC_DIR_NAME);
         let again = resolve_root(&root).unwrap();
         assert_eq!(again, root);
+    }
+
+    #[test]
+    fn connect_reports_whether_it_created_the_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+
+        let first = connect(&folder, "device", "Laptop", "2026-10-29T15:00:00Z").unwrap();
+        assert!(!first.existed, "the first connect creates the library");
+
+        let second = connect(&folder, "device", "Laptop", "2026-10-29T15:00:01Z").unwrap();
+        assert!(second.existed, "the second connect finds the same library");
+        assert_eq!(first.library.library_id, second.library.library_id);
+    }
+
+    #[test]
+    fn archive_moves_an_existing_library_aside_and_keeps_its_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        let first = connect(&folder, "device", "Laptop", "2026-10-29T15:00:00Z").unwrap();
+        let old_id = first.library.library_id.clone();
+
+        let archived = archive_existing_library(&folder, "2026-10-29T15:01:00Z")
+            .unwrap()
+            .expect("an existing library was archived");
+        assert!(archived.join(LIBRARY_FILE).exists());
+        assert!(archived
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("TuxBooks.before-"));
+
+        let next = connect(&folder, "device", "Laptop", "2026-10-29T15:01:01Z").unwrap();
+        assert!(!next.existed);
+        assert_ne!(next.library.library_id, old_id);
+    }
+
+    #[test]
+    fn archiving_a_folder_named_tuxbooks_recreates_the_chosen_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let chosen = tmp.path().join("TuxBooks");
+        fs::create_dir_all(&chosen).unwrap();
+        connect(&chosen, "device", "Laptop", "2026-10-29T15:00:00Z").unwrap();
+        let old_id = connect(&chosen, "device", "Laptop", "2026-10-29T15:00:01Z")
+            .unwrap()
+            .library
+            .library_id;
+
+        let archived = archive_existing_library(&chosen, "2026-10-29T15:02:00Z")
+            .unwrap()
+            .expect("library archived");
+        assert!(
+            chosen.is_dir(),
+            "the chosen path is ready for a new library"
+        );
+        let next = connect(&chosen, "device", "Laptop", "2026-10-29T15:02:01Z").unwrap();
+        assert!(!next.existed);
+        assert_ne!(next.library.library_id, old_id);
+        assert!(archived.join(LIBRARY_FILE).exists());
     }
 
     #[test]
