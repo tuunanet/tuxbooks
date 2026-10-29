@@ -219,10 +219,11 @@ ADR 0014 D5 makes the two destructive actions explicit and different:
 - `book_trash` — `book_id`, `book_uid`, `replacement_book_uid` (the fresh
   identity, NULL when there was no file), `snapshot_json` (the old record,
   progress, annotations, collection membership, overrides, lists, provider
-  links, and aliases), `deleted_at`, `expires_at`, `restored_at`. The 30-day
-  window matches annotation and collection deletes, but the table is
-  deliberately separate from `sync_trash`: one row here is a whole book, not
-  one sync entity.
+  links, and aliases), `deleted_at`, `expires_at`, `restored_at`, and
+  `resolution` (`restore`, `discard`, or NULL while open). A partial unique
+  index keeps one open row per identity. The 30-day window matches annotation
+  and collection deletes, but the table is deliberately separate from
+  `sync_trash`: one row here is a whole book, not one sync entity.
 - Restore looks up `replacement_book_uid`. If that fresh book has no progress
   and no annotations, the old record and state are restored and the fresh
   record is deleted. If it has new progress or annotations, the command
@@ -338,6 +339,27 @@ User queries never reach FTS5 raw: `services/search.rs`
 into quoted prefix phrases ANDed together (`wind river` →
 `"wind"* "river"*`), so input cannot inject MATCH syntax.
 
+## Shared Forget (migration 0023)
+
+The local trash row is the durable record of a Forget; the sync mirror keeps
+the remote side:
+
+- `sync_book_trash` — one row per forgotten `book_uid`: the portable
+  `snapshot_json` (collection memberships by collection uid, provider links
+  omitted), `replacement_book_uid`, the delete clock, the 30-day window,
+  `restored_at`, `discarded`, and the restore clock. A missing snapshot is
+  allowed so a delete always propagates; the receiver records a Sync issue
+  instead of offering a fake restore.
+- A `book` entity in `sync_state_entities` carries the tombstone. It does not
+  invent tombstones for annotations or progress: the book tombstone is the
+  authority, and stale operations for a forgotten uuid are ignored.
+- Triggers on `book_trash` insert/restore write the `book` marker into
+  `sync_dirty`, so Forget and restore work with sync off and drain when a
+  folder is connected later.
+- Alias selection and identity merges refuse a uuid that has an open Forget
+  row. That is what stops `sync_book_aliases` and stale `sync_book_merges`
+  edges from resurrecting the old identity.
+
 ## Cloud-folder sync (migration 0015)
 
 The sync engine keeps its bookkeeping in the same SQLite file. Reading
@@ -350,9 +372,10 @@ full contract is [SYNC.md](SYNC.md).
   flag, last sync, last error, and the hybrid logical clock.
 - `sync_dirty` — one row per entity with a pending local change. Triggers write
   the canonical snapshot at change time (`old_json`/`new_json`); the capture
-  pass drains it. Progress, metadata, and last-opened key on `book_uid`;
-  membership keys on `book_uid:collection_id`. Triggers skip a vanished
-  collection's cascade (a local deletion, not a shared delete).
+  pass drains it. Progress, metadata, last-opened, and book lifecycle key on
+  `book_uid`; annotations carry `book_uid` directly; membership keys on
+  `book_uid:collection_id`. Triggers skip a vanished collection's cascade (a
+  local deletion, not a shared delete).
 - `sync_state_entities` / `sync_state_fields` — the materialized shared state.
   Entities carry tombstones and entity-level clocks; fields carry one value and
   one clock each.
@@ -364,7 +387,9 @@ full contract is [SYNC.md](SYNC.md).
   operation id. `sync_remote_files` caches file size/mtime and retry counts so a
   pass only reads new or changed files.
 - `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
-  losing field values, and the 30-day delete restore list.
+  losing field values, and the 30-day delete restore list for single entities.
+- `sync_book_trash` — whole-book Forget snapshots, clocks, and the remote
+  restore/discard state. Separate from per-entity `sync_trash` (migration 0023).
 - `sync_reproject` — book uuids whose canonical local row was deleted. The
   engine projects the shared state onto the next bound row, so a duplicate
   copy does not look empty after the first copy is removed.

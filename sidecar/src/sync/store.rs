@@ -440,6 +440,10 @@ pub fn validate_op(op: &Op) -> Result<(), String> {
         if op.book_uid.as_deref() != Some(op.entity_uid.as_str()) {
             return Err("book identity entity_uid must equal book_uid".into());
         }
+    } else if op.kind == EntityKind::Book {
+        if op.book_uid.as_deref() != Some(op.entity_uid.as_str()) {
+            return Err("book entity_uid must equal book_uid".into());
+        }
     } else if op.kind != EntityKind::Collection
         && op.kind != EntityKind::BookIdentity
         && op.book_uid.is_none()
@@ -531,6 +535,16 @@ fn validate_field_value(kind: EntityKind, field: &str, value: &Value) -> Result<
             _ => Err("content_hash must be 64 lowercase hex characters".into()),
         },
         (EntityKind::BookIdentity, _) => Err(format!("unknown identity field {field}")),
+        (EntityKind::Book, "snapshot") => bounded_string(value, field),
+        (EntityKind::Book, "replacement_book_uid") => match value.as_str() {
+            Some(uid) if is_safe_uid(uid) => Ok(()),
+            _ => Err("replacement_book_uid must be a safe uid".into()),
+        },
+        (EntityKind::Book, "discarded") => match value.as_bool() {
+            Some(_) => Ok(()),
+            None => Err("discarded must be a boolean".into()),
+        },
+        (EntityKind::Book, _) => Err(format!("unknown book field {field}")),
     }
 }
 

@@ -51,6 +51,9 @@ pub enum EntityKind {
     Membership,
     Opened,
     BookIdentity,
+    /// Whole-book Forget/restore lifecycle (ADR 0014 D5). `entity_uid` is the
+    /// forgotten book uid.
+    Book,
 }
 
 impl EntityKind {
@@ -63,6 +66,7 @@ impl EntityKind {
             Self::Membership => "membership",
             Self::Opened => "opened",
             Self::BookIdentity => "book_identity",
+            Self::Book => "book",
         }
     }
 
@@ -75,6 +79,7 @@ impl EntityKind {
             "membership" => Self::Membership,
             "opened" => Self::Opened,
             "book_identity" => Self::BookIdentity,
+            "book" => Self::Book,
             _ => return None,
         })
     }
@@ -86,7 +91,7 @@ impl EntityKind {
     /// another changes a highlight colour.
     pub fn merge_mode(self) -> MergeMode {
         match self {
-            Self::Progress | Self::Membership | Self::Opened => MergeMode::Entity,
+            Self::Progress | Self::Membership | Self::Opened | Self::Book => MergeMode::Entity,
             _ => MergeMode::Field,
         }
     }
@@ -177,6 +182,9 @@ pub fn field_names(kind: EntityKind) -> &'static [&'static str] {
         EntityKind::Membership => &["present", "added_at"],
         EntityKind::Opened => &["last_opened_at"],
         EntityKind::BookIdentity => &["content_hash"],
+        // The snapshot is a serialized portable book snapshot. `discarded`
+        // closes the remote trash entry after a local Keep/Merge resolution.
+        EntityKind::Book => &["snapshot", "replacement_book_uid", "discarded"],
     }
 }
 
@@ -229,6 +237,7 @@ pub fn state_display(kind: EntityKind, state: &State) -> String {
         EntityKind::Opened => "last opened".to_string(),
         EntityKind::Membership => "collection membership".to_string(),
         EntityKind::BookIdentity => "book identity".to_string(),
+        EntityKind::Book => "forgotten book".to_string(),
     }
 }
 

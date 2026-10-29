@@ -145,11 +145,15 @@ pub async fn bind_hash(
             .flatten();
 
     let existing_uid = match &existing {
-        Some((uid, _)) => Some(canonical_book_uid(pool, uid).await?),
+        Some((uid, _)) => resolve_identity(pool, uid).await?,
         None => None,
     };
     let alias_uid = match &alias {
-        Some(uid) => Some(canonical_book_uid(pool, uid).await?),
+        Some(uid) => resolve_identity(pool, uid).await?,
+        None => None,
+    };
+    let current_uid = match &current_uid {
+        Some(uid) => resolve_identity(pool, uid).await?,
         None => None,
     };
     let uid = match (&existing_uid, &alias_uid) {
@@ -157,7 +161,7 @@ pub async fn bind_hash(
         (Some(existing), None) => existing.clone(),
         (None, Some(alias)) => alias.clone(),
         (None, None) => match current_uid.clone() {
-            Some(current) => canonical_book_uid(pool, &current).await?,
+            Some(current) => current,
             None => {
                 sqlx::query_scalar("SELECT lower(hex(randomblob(16)))")
                     .fetch_one(pool)
@@ -379,6 +383,36 @@ pub async fn canonical_book_uid(pool: &SqlitePool, uid: &str) -> Result<String, 
     Ok(current)
 }
 
+/// Whether `uid` (after identity merges) has an open shared Forget. `None`
+/// means the identity is live; `Some(replacement)` means it was forgotten,
+/// with the fresh identity the current file was rebound to, when there is one.
+pub(crate) async fn forgotten_replacement(
+    pool: &SqlitePool,
+    uid: &str,
+) -> Result<Option<Option<String>>, AppError> {
+    let canonical = canonical_book_uid(pool, uid).await?;
+    let replacement: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT replacement_book_uid FROM sync_book_trash
+         WHERE book_uid = ?1 AND restored_at IS NULL",
+    )
+    .bind(&canonical)
+    .fetch_optional(pool)
+    .await?;
+    Ok(replacement)
+}
+
+/// Resolve a candidate identity for alias selection. A forgotten uuid is not
+/// a candidate; its fresh replacement is, so both machines keep the bytes under
+/// one live identity.
+async fn resolve_identity(pool: &SqlitePool, uid: &str) -> Result<Option<String>, AppError> {
+    let uid = canonical_book_uid(pool, uid).await?;
+    Ok(match forgotten_replacement(pool, &uid).await? {
+        Some(Some(replacement)) => Some(replacement),
+        Some(None) => None,
+        None => Some(uid),
+    })
+}
+
 /// Re-key every shared row from `loser` to `winner`. This is how two devices
 /// that imported the same bytes before meeting converge on one identity.
 pub async fn merge_book_identity(
@@ -389,6 +423,14 @@ pub async fn merge_book_identity(
     let winner = canonical_book_uid(pool, winner).await?;
     let loser = canonical_book_uid(pool, loser).await?;
     if loser == winner {
+        return Ok(());
+    }
+    // Delete wins. Folding a live or forgotten identity into a forgotten one
+    // would resurrect the old uuid through sync_book_merges; leave the two
+    // identities alone until an explicit restore clears the tombstone.
+    if forgotten_replacement(pool, &winner).await?.is_some()
+        || forgotten_replacement(pool, &loser).await?.is_some()
+    {
         return Ok(());
     }
 
