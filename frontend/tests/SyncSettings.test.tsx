@@ -57,6 +57,11 @@ describe("SyncSettings", () => {
     });
 
     renderSettings();
+    expect(await screen.findByText("Syncs between machines")).toBeInTheDocument();
+    expect(screen.getByText("Reading progress and last-opened time")).toBeInTheDocument();
+    expect(screen.getByText("Book files (EPUB and PDF)")).toBeInTheDocument();
+    expect(screen.getByText("The library catalog and watched folders")).toBeInTheDocument();
+
     fireEvent.click(await screen.findByTestId("sync-connect"));
 
     await waitFor(() => {

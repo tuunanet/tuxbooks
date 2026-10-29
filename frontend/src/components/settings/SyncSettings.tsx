@@ -238,9 +238,35 @@ export function SyncSettings() {
       <section className="rounded-lg border p-4">
         <h3 className="text-base font-medium">Cloud folder</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          TuxBooks syncs through a folder your cloud client already keeps in sync. It never talks to
-          Google Drive or Dropbox directly, so any folder works: Dropbox, Google Drive, Nextcloud,
-          or Syncthing.
+          TuxBooks keeps a small set of reading state in a folder your cloud client already syncs.
+          It never talks to Google Drive or Dropbox directly.
+        </p>
+
+        <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <div className="rounded-md border p-3">
+            <p className="font-medium">Syncs between machines</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
+              <li>Reading progress and last-opened time</li>
+              <li>Bookmarks, highlights, and notes</li>
+              <li>Collections and which books are in them</li>
+              <li>Metadata edits like title, author, and series</li>
+              <li>Custom covers</li>
+            </ul>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="font-medium">Stays on this machine</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
+              <li>Book files (EPUB and PDF)</li>
+              <li>The library catalog and watched folders</li>
+              <li>Reader appearance and theme</li>
+            </ul>
+          </div>
+        </div>
+
+        <p className="mt-3 text-sm text-muted-foreground">
+          If your books already live in a cloud folder, your client keeps syncing the files.
+          TuxBooks only writes its own state under a <span className="font-mono">TuxBooks</span>{" "}
+          subfolder and leaves everything else alone.
         </p>
 
         {status === null ? (
@@ -248,8 +274,8 @@ export function SyncSettings() {
         ) : !enabled ? (
           <div className="mt-4 flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
-              Choose the folder. TuxBooks creates a <span className="font-mono">TuxBooks</span>{" "}
-              subfolder for its own files and leaves everything else alone.
+              Choose the folder your client syncs. Dropbox, Google Drive, Nextcloud, Syncthing, and
+              any other local folder work.
             </p>
             <div>
               <Button data-testid="sync-connect" onClick={() => void connect()} disabled={busy}>
