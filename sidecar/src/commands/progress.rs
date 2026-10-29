@@ -57,7 +57,12 @@ pub async fn save_reading_progress(
     book_id: i64,
     progress: ProgressInput,
 ) -> Result<(), AppError> {
-    upsert_progress(&state.db, book_id, &progress.into()).await?;
+    let update: crate::domain::ProgressUpdate = progress.into();
+    upsert_progress(&state.db, book_id, &update).await?;
+    // A local page turn is the only thing that queues a provider update; an
+    // absent book has no file row and the queue write is skipped.
+    crate::services::providers::queue_page_turn(&state.db, book_id, update.progress_percent)
+        .await?;
     emit_book_changed(state, events, book_id).await
 }
 

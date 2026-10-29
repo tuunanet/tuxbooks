@@ -83,11 +83,16 @@ pub struct Book {
     /// When the reading position was last saved; drives "In Progress" /
     /// "Finished" recency assumptions in the UI.
     pub progress_updated_at: Option<DateTime<Utc>>,
+    /// Third-party links owned by this durable book (ADR 0014 D11). Filled by
+    /// the repository after the book query; the `books` join has no column
+    /// for it.
+    #[sqlx(skip)]
+    pub provider_links: Vec<crate::domain::ProviderLink>,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 24)?;
+        let mut state = serializer.serialize_struct("Book", 25)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("bookUid", &self.book_uid)?;
         state.serialize_field("path", &self.path)?;
@@ -117,6 +122,7 @@ impl Serialize for Book {
         state.serialize_field("seriesName", &self.series_name)?;
         state.serialize_field("progressPercent", &self.progress_percent)?;
         state.serialize_field("progressUpdatedAt", &self.progress_updated_at)?;
+        state.serialize_field("providerLinks", &self.provider_links)?;
         state.end()
     }
 }
@@ -140,6 +146,10 @@ pub struct ReadingHistoryBook {
     /// `available` when the durable snapshot has metadata, `waiting_for_file`
     /// for a record recovered from the sync mirror without one.
     pub metadata_state: String,
+    /// Provider links survive the last file row leaving, so Reading history
+    /// can show where the book is tracked elsewhere.
+    #[sqlx(skip)]
+    pub provider_links: Vec<crate::domain::ProviderLink>,
 }
 
 /// One library full-text search hit: the book's identity plus an FTS5
@@ -223,6 +233,7 @@ mod tests {
             series_name: None,
             progress_percent: None,
             progress_updated_at: None,
+            provider_links: Vec::new(),
         }
     }
 

@@ -12,6 +12,7 @@ import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
+import { providerLinkLabel } from "@/lib/providers";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
 function formatDate(iso: string | null): string {
@@ -217,6 +218,21 @@ export function BookDetail() {
                 memberCollections.map((collection) => (
                   <Badge key={collection.id} variant="secondary">
                     {collection.name}
+                  </Badge>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">Provider links</h3>
+            <div data-testid="detail-providers" className="mt-2 flex flex-wrap gap-1.5">
+              {(book.providerLinks ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">Not linked to a reading service.</p>
+              ) : (
+                (book.providerLinks ?? []).map((link) => (
+                  <Badge key={`${link.provider}:${link.remoteId}`} variant="secondary">
+                    {providerLinkLabel(link)}
                   </Badge>
                 ))
               )}

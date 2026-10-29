@@ -179,6 +179,25 @@ highlights redraw correctly at any zoom or window size. Index on
 `(book_uid, kind)`; deleting the durable book cascades, while removing a file
 row does not.
 
+## Provider links (migration 0021)
+
+Third-party links belong to the durable book, so they survive every file row
+leaving the library (ADR 0014 D11, [PROVIDERS.md](PROVIDERS.md)).
+
+- `book_provider_links` — one row per `(book_uid, provider)`: `remote_id`, the
+  provider's cached `status` (`want_to_read`, `reading`, `paused`, `finished`,
+  or `dropped`; NULL until reported), `status_updated_at`, `linked_at`, and
+  `updated_at`. `book_uid` is a FK to `book_records` with cascade, and
+  `(provider, remote_id)` is unique.
+- `book_provider_pending_progress` — at most one queued local page-turn per
+  link (`book_uid`, `provider`, `progress_percent`, `queued_at`). It has a
+  composite FK to `book_provider_links` with cascade. Remote updates never
+  write here, and the write is skipped when the book has no file row.
+
+The cached status is provider data, not a second TuxBooks reading status.
+Reading status remains `reading_progress`; a `finished` remote status maps to
+`progress_percent = 100`.
+
 ## Metadata curation (milestone 7)
 
 Milestone 7 keeps two layers so a book's curated metadata can never lose

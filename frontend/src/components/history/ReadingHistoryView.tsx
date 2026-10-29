@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLibrary } from "@/hooks/useLibrary";
+import { providerLinkLabel } from "@/lib/providers";
 import {
   onImportProgress,
   onLibraryChanged,
@@ -60,7 +61,11 @@ function HistoryBookRow({ book, busy, onRelink }: HistoryBookRowProps) {
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="reading-history-progress">{progress}</span>
           <span data-testid="reading-history-annotations">{annotations}</span>
-          {/* Provider link storage lands with ticket tuxbooks-ip6.3. */}
+          {(book.providerLinks ?? []).map((link) => (
+            <span key={`${link.provider}:${link.remoteId}`} data-testid="reading-history-provider">
+              {providerLinkLabel(link)}
+            </span>
+          ))}
         </div>
       </div>
       <Button

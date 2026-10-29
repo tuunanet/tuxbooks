@@ -264,6 +264,11 @@ is an import path plus a registry entry: see [FORMATS.md](FORMATS.md) and
   persists the form and writes the fields the format supports into the
   EPUB/PDF (see [EPUB.md](EPUB.md) / [PDF.md](PDF.md)), atomically and
   cover-free; fields the format cannot hold keep their override.
+- `providers`: third-party link state keyed by durable `book_uid`
+  ([PROVIDERS.md](PROVIDERS.md)). It stores links and remote status, maps a
+  finished status onto existing progress, queues one local page-turn per
+  link while a file exists, and unlinks on request. It never calls a provider
+  API; OAuth and HTTP belong to the future adapter.
 
 Collection and progress plumbing stays in thin method + repository layers:
 collections CRUD over `repository::collections`; `mark_book_finished` over

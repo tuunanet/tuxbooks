@@ -129,6 +129,38 @@ struct BookIdArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BookUidArgs {
+    book_uid: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderLinkArgs {
+    book_uid: String,
+    provider: String,
+    remote_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderUnlinkArgs {
+    book_uid: String,
+    provider: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderUpdateArgs {
+    book_uid: String,
+    provider: String,
+    #[serde(default)]
+    status: Option<crate::domain::ProviderReadingStatus>,
+    #[serde(default)]
+    progress_percent: Option<f64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CollectionIdArgs {
     collection_id: i64,
 }
@@ -239,6 +271,37 @@ async fn dispatch(
         "list_reading_history" => {
             let p: ReadingHistoryArgs = parse_params(params)?;
             Ok(call!(commands::books::list_reading_history(state, p.query)))
+        }
+        "list_provider_links" => {
+            let p: BookUidArgs = parse_params(params)?;
+            Ok(call!(commands::providers::list_provider_links(
+                state, p.book_uid
+            )))
+        }
+        "link_provider_book" => {
+            let p: ProviderLinkArgs = parse_params(params)?;
+            Ok(call!(commands::providers::link_provider_book(
+                state,
+                p.book_uid,
+                p.provider,
+                p.remote_id
+            )))
+        }
+        "unlink_provider_book" => {
+            let p: ProviderUnlinkArgs = parse_params(params)?;
+            Ok(call!(commands::providers::unlink_provider_book(
+                state, p.book_uid, p.provider
+            )))
+        }
+        "apply_provider_reading_update" => {
+            let p: ProviderUpdateArgs = parse_params(params)?;
+            Ok(call!(commands::providers::apply_provider_reading_update(
+                state,
+                p.book_uid,
+                p.provider,
+                p.status,
+                p.progress_percent
+            )))
         }
         "identity_backfill_status" => Ok(call!(commands::books::identity_backfill_status(state))),
         "migration_issues" => Ok(call!(commands::books::migration_issues(state))),

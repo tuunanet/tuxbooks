@@ -9,7 +9,7 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
 import { useAppState } from "@/state/appState";
-import { makeAnnotation, makeBook } from "./factories";
+import { makeAnnotation, makeBook, makeProviderLink } from "./factories";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function renderDetail(
@@ -49,6 +49,17 @@ describe("BookDetail", () => {
     expect(facts).toHaveTextContent("Jan 1, 2026");
     expect(facts).toHaveTextContent("/tmp/library/minimal.epub");
     expect(screen.getByText("Back to All Books")).toBeInTheDocument();
+  });
+
+  it("shows a provider link that survived the file", async () => {
+    renderDetail({}, [
+      makeBook({
+        providerLinks: [makeProviderLink({ provider: "hardcover", status: "finished" })],
+      }),
+    ]);
+
+    await screen.findByTestId("detail-title");
+    expect(screen.getByTestId("detail-providers")).toHaveTextContent("Hardcover · Finished");
   });
 
   it("shows a PDF badge and em-dashes for missing fields", async () => {

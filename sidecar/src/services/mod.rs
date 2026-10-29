@@ -6,5 +6,6 @@ pub mod library_reconciler;
 pub mod library_scanner;
 pub mod library_watcher;
 pub mod metadata;
+pub mod providers;
 pub mod reader;
 pub mod search;

@@ -1,4 +1,10 @@
-import type { Annotation, Book, CollectionSummary, ReadingHistoryBook } from "@/types/domain";
+import type {
+  Annotation,
+  Book,
+  CollectionSummary,
+  ProviderLink,
+  ReadingHistoryBook,
+} from "@/types/domain";
 
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {
@@ -26,6 +32,7 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     seriesName: null,
     progressPercent: null,
     progressUpdatedAt: null,
+    providerLinks: [],
     ...overrides,
   };
 }
@@ -43,6 +50,20 @@ export function makeReadingHistoryBook(
     annotationCount: 3,
     lastOpenedAt: "2026-03-01T00:00:00.000Z",
     metadataState: "available",
+    providerLinks: [],
+    ...overrides,
+  };
+}
+
+export function makeProviderLink(overrides: Partial<ProviderLink> = {}): ProviderLink {
+  return {
+    bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+    provider: "hardcover",
+    remoteId: "hc-42",
+    status: "reading",
+    statusUpdatedAt: "2026-03-01T00:00:00.000Z",
+    linkedAt: "2026-02-01T00:00:00.000Z",
+    updatedAt: "2026-03-01T00:00:00.000Z",
     ...overrides,
   };
 }

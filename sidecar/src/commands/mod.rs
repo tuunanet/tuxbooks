@@ -4,6 +4,7 @@ pub mod collections;
 pub mod library;
 pub mod metadata;
 pub mod progress;
+pub mod providers;
 pub mod reader;
 pub mod sync;
 
