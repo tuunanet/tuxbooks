@@ -4,6 +4,55 @@ TuxBooks is a local-first ebook library and reader for EPUB and PDF. This
 context covers the vocabulary shared by the library, the readers, and the
 document workers.
 
+## Books and library
+
+**Book**:
+The durable unit a reader thinks of as one title. It owns reading progress,
+annotations, collection membership, metadata overrides, last-opened, and
+provider links, and it can exist with no file in the library.
+_Avoid_: title, volume (for the durable record)
+
+**Book file**:
+A copy of a book at an absolute path. A book can have more than one file; a
+file belongs to exactly one watched folder or single-file import.
+_Avoid_: copy, edition (an edition is a different book identity)
+
+**Catalog**:
+The local index of book files and their source metadata. It is derived from
+the watched folders and does not own user state.
+_Avoid_: library (that term means current membership)
+
+**Library membership**:
+The state of a book having at least one file inside a watched folder. Import
+creates it; Remove and Unwatch end it. It never owns reading progress or
+annotations.
+_Avoid_: loose book, library entry
+
+**Unavailable book**:
+A book whose file row still belongs to a watched folder but whose file is
+missing. It stays in the library until the file returns or the user removes it.
+_Avoid_: orphan, loose book
+
+**Reading history**:
+The view of books with no current library membership. It shows their durable
+state and lets the user relink or forget them.
+_Avoid_: archive, trash (the 30-day restore list is the trash)
+
+**Reset reading data**:
+Clearing a book's user state while keeping its identity and current file.
+_Avoid_: delete book, clear library
+
+**Forget book**:
+Erasing a book's identity and user state. The current file, if any, is rebound
+to a fresh identity; the old record stays restorable in the trash for 30 days.
+_Avoid_: remove from library (that keeps the reading state)
+
+**Relink**:
+Attaching a file to an existing book. Reconnecting an unavailable file and
+confirming a different edition as the same work are both relinks; only the
+first keeps the same book identity automatically.
+_Avoid_: reconnect (for a different edition)
+
 ## Documents and engines
 
 **Papers**:
@@ -101,7 +150,7 @@ The mechanism behind the Smart dark mode, coarser than object-level recoloring.
 Everything TuxBooks stores to run: the catalog database, the cover cache, the
 GPU fallback marker, and the browser caches and settings in the Electron config
 directory. It never includes the user's book files.
-_Avoid_: the library (that term means the catalog index)
+_Avoid_: the library (that term means the books currently in the watch list)
 
 **Cache**:
 The subset of app data the app regenerates by itself: the Chromium browser caches
@@ -117,10 +166,10 @@ _Avoid_: library location, book folder
 
 **Unwatch**:
 Removing a watched folder from the watch list. Its files stay on disk and its
-books are removed from the catalog. Only folders that are not inside another
-watched folder are ever listed, so every one of them can be unwatched on its
-own.
-_Avoid_: remove folder, stop tracking
+books leave the library; their reading history is kept and reappears if the
+files return. Only folders that are not inside another watched folder are ever
+listed, so every one of them can be unwatched on its own.
+_Avoid_: remove folder, stop tracking, delete books
 
 **Sync folder**:
 The user-chosen folder a cloud client already mirrors. TuxBooks writes only
@@ -128,10 +177,17 @@ inside its `TuxBooks` child and never calls the provider's API. See
 [SYNC.md](docs/SYNC.md).
 _Avoid_: cloud drive, remote, backup folder
 
+**User state**:
+The durable state a book owns: reading progress, annotations, metadata
+overrides, collections and membership, last-opened, and provider links. Local
+disappearance never deletes it.
+_Avoid_: catalog data, file metadata
+
 **Shared state**:
-The user-authored state that travels between machines: reading progress,
-annotations, metadata overrides, collections and membership, last-opened, and
-cover-override blobs. The catalog, paths, and watched locations are not shared.
+The subset of user state that travels between machines through a sync folder:
+reading progress, annotations, metadata overrides, collections and membership,
+last-opened, and cover-override blobs. The catalog, paths, and watched
+locations are not shared.
 _Avoid_: synced database, cloud library
 
 **Device**:
@@ -140,9 +196,9 @@ kept apart in the sync folder; the name is display only.
 _Avoid_: machine, client
 
 **Book identity**:
-The shared uuid for a logical book. It is linked to SHA-256 content-hash
-aliases, so a rewritten file keeps its identity and two independently imported
-copies converge.
+The stable uuid for a book, assigned locally at import and linked to SHA-256
+content-hash aliases, so a rewritten file keeps its identity and two
+independently imported copies converge.
 _Avoid_: content hash (that is only the discovery key), ISBN key
 
 **Tombstone**:
