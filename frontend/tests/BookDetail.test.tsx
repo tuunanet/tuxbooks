@@ -9,16 +9,21 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { AppState } from "@/state/appState";
 import { useAppState } from "@/state/appState";
-import { makeAnnotation, makeBook, makeProviderLink } from "./factories";
+import { makeAnnotation, makeBook, makeBookFile, makeProviderLink } from "./factories";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function renderDetail(
   state: Partial<AppState> = {},
   books: ReturnType<typeof makeBook>[] = [makeBook()],
+  files = [makeBookFile()],
+  extraResponses: Record<string, unknown> = {},
 ) {
   mockInvoke({
     get_library_stats: { bookCount: books.length, collectionCount: 0 },
     list_books: books,
+    list_book_files: files,
+    list_collections: [],
+    ...extraResponses,
   });
   return render(
     <AppStateProvider
@@ -49,6 +54,38 @@ describe("BookDetail", () => {
     expect(facts).toHaveTextContent("Jan 1, 2026");
     expect(facts).toHaveTextContent("/tmp/library/minimal.epub");
     expect(screen.getByText("Back to All Books")).toBeInTheDocument();
+  });
+
+  it("lists every duplicate location and removes one copy", async () => {
+    const first = makeBookFile({ id: 11, path: "/tmp/library/first.epub" });
+    const second = makeBookFile({ id: 12, path: "/tmp/library/second.epub", active: false });
+
+    renderDetail({}, [makeBook({ path: first.path })], [first, second], {
+      remove_book_file: true,
+    });
+
+    const locations = await screen.findByTestId("detail-file-locations");
+    await waitFor(() => {
+      expect(locations).toHaveTextContent("/tmp/library/first.epub");
+      expect(locations).toHaveTextContent("/tmp/library/second.epub");
+    });
+    // The active-file rule marks exactly one copy.
+    expect(screen.getByTestId("detail-file-active-11")).toBeInTheDocument();
+    expect(screen.queryByTestId("detail-file-active-12")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("detail-file-remove-12"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("remove_book_file", { bookId: 1, fileId: 12 });
+    });
+  });
+
+  it("does not offer to remove a book's only file copy", async () => {
+    renderDetail();
+
+    expect(await screen.findByTestId("detail-file-locations")).toHaveTextContent(
+      "/tmp/library/minimal.epub",
+    );
+    expect(screen.queryByTestId("detail-file-remove-1")).not.toBeInTheDocument();
   });
 
   it("shows a provider link that survived the file", async () => {

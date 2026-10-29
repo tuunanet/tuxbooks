@@ -8,7 +8,7 @@ pub mod provider;
 pub mod reading_progress;
 
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
-pub use book::{Book, BookFormat, NewBook, ReadingHistoryBook, SearchHit};
+pub use book::{Book, BookFile, BookFormat, NewBook, ReadingHistoryBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
 pub use library::{
     CatalogCounts, LibraryLocationStat, LibraryLocationStatus, LibraryStats, StartupRecovery,

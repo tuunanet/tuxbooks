@@ -20,9 +20,10 @@ pub enum LibraryLocationStatus {
     Refreshing,
 }
 
-/// Book count and total file bytes under one watched library location.
-/// `missing_from_disk` is checked when the aggregate is served, so a watched
-/// folder that vanished keeps its row and stays cleanable.
+/// Durable book count and total file bytes under one watched library
+/// location. Duplicate copies count once as a book but every file's bytes are
+/// included. `missing_from_disk` is checked when the aggregate is served, so a
+/// watched folder that vanished keeps its row and stays cleanable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryLocationStat {
@@ -37,7 +38,9 @@ pub struct LibraryLocationStat {
     pub status: LibraryLocationStatus,
 }
 
-/// Row counts for the catalog tables shown on the Application Data tab.
+/// Counts for the Application Data tab. `books` follows the library's durable
+/// book identity (duplicate file rows count once); the other fields count
+/// their catalog rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogCounts {

@@ -1,15 +1,18 @@
 import { Fragment, useState } from "react";
-import { ArrowLeft, BookOpen, FileWarning } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
 import { BookBookmarksPanel } from "./BookBookmarksPanel";
+import { BookFileLocations } from "./BookFileLocations";
+import { BookReadingActions } from "./BookReadingActions";
 import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
 import { ResetBookDialog } from "./ResetBookDialog";
 import { useBookActions } from "@/hooks/useBookActions";
+import { useBookFiles } from "@/hooks/useBookFiles";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
@@ -29,16 +32,22 @@ function formatDate(iso: string | null): string {
  * Book detail view, rendered inside the library shell (sidebar stays).
  * Data comes from the shared `list_books` payload — there is no
  * `get_book` command yet (decision D1). Reading position comes from the
- * same payload's progress join (milestone 10). The Overview/Metadata rail
- * makes metadata the primary, transparent surface (issue #58); Highlights
- * and Bookmarks review what the reader captured and open the book at a row's
- * position.
+ * same payload's progress join (milestone 10). File locations come from
+ * `list_book_files`, so one library entry can list every duplicate copy
+ * (ADR 0014 D7). The Overview/Metadata rail makes metadata the primary,
+ * transparent surface (issue #58); Highlights and Bookmarks review what the
+ * reader captured and open the book at a row's position.
  */
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
   const { books, collections } = useLibrary();
-  const { locateBook, removeBookFromLibrary, resetReadingData, forgetBookFromLibrary } =
-    useBookActions();
+  const {
+    locateBook,
+    removeBookFromLibrary,
+    removeBookFile: removeCopy,
+    resetReadingData,
+    forgetBookFromLibrary,
+  } = useBookActions();
   const [resetOpen, setResetOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
   const dispatch = useAppDispatch();
@@ -46,6 +55,7 @@ export function BookDetail() {
   // One curation view is shared by the Overview subjects row and the
   // Metadata panel, so saves and resets refresh both.
   const curation = useBookMetadata(book ? book.id : null);
+  const { files, refresh: refreshFiles } = useBookFiles(book ? book.id : null);
   const subjects = curation.metadata?.effective.subjects ?? [];
   const memberCollections =
     book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
@@ -69,6 +79,10 @@ export function BookDetail() {
       </section>
     );
   }
+
+  const removeFile = async (fileId: number) => {
+    if (await removeCopy(book.id, fileId)) await refreshFiles();
+  };
 
   const facts: [string, string][] = [
     ["Format", book.format.toUpperCase()],
@@ -107,50 +121,12 @@ export function BookDetail() {
             </Badge>
           )}
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {!book.available ? (
-              // Missing file: recovery replaces the reading entry point. The
-              // row survives on the backend, so reconnecting keeps progress.
-              <div
-                data-testid="detail-missing"
-                className="w-full rounded-md border border-destructive/50 bg-destructive/10 p-3"
-              >
-                <p className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <FileWarning data-icon="inline-start" className="size-4" />
-                  File unavailable
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  The source file is missing at its recorded location. Locate it to keep this book's
-                  reading progress, or remove it from the library.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    data-testid="detail-locate"
-                    onClick={() => void locateBook(book.id)}
-                  >
-                    Locate File…
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="detail-remove"
-                    onClick={() => void removeBookFromLibrary(book.id)}
-                  >
-                    Remove from Library
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                data-testid="detail-continue"
-                onClick={() => dispatch({ type: "open-reader", bookId: book.id })}
-              >
-                <BookOpen data-icon="inline-start" />
-                Continue Reading
-              </Button>
-            )}
-          </div>
+          <BookReadingActions
+            book={book}
+            onLocate={() => void locateBook(book.id)}
+            onRemoveFromLibrary={() => void removeBookFromLibrary(book.id)}
+            onContinue={() => dispatch({ type: "open-reader", bookId: book.id })}
+          />
         </div>
       </div>
 
@@ -211,6 +187,12 @@ export function BookDetail() {
               ))}
             </dl>
           </div>
+
+          <BookFileLocations
+            book={book}
+            files={files}
+            onRemove={(fileId) => void removeFile(fileId)}
+          />
 
           <div className="mt-8">
             <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>

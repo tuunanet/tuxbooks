@@ -42,6 +42,22 @@ export interface Book {
   providerLinks?: ProviderLink[];
 }
 
+/**
+ * One file location of a durable book (mirrors `domain::BookFile`, ADR 0014
+ * D7). Several locations share the same book entry and its reading state.
+ */
+export interface BookFile {
+  /** Internal file-row id, used to remove this copy (never a public book id). */
+  id: number;
+  path: string;
+  available: boolean;
+  fileSize: number;
+  fileMtime: number;
+  addedAt: string;
+  /** The copy the reader opens: available first, then the lowest row id. */
+  active: boolean;
+}
+
 /** A provider's cached reading status; TuxBooks progress stays in `progressPercent`. */
 export type ProviderReadingStatus = "want_to_read" | "reading" | "paused" | "finished" | "dropped";
 

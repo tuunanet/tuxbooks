@@ -129,6 +129,13 @@ struct BookIdArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BookFileArgs {
+    book_id: i64,
+    file_id: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BookUidArgs {
     book_uid: String,
 }
@@ -282,6 +289,16 @@ async fn dispatch(
         "get_storage_stats" => Ok(call!(commands::library::get_storage_stats(state))),
         "get_startup_recovery" => Ok(call!(commands::library::get_startup_recovery(state))),
         "list_books" => Ok(call!(commands::books::list_books(state))),
+        "list_book_files" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::list_book_files(state, p.book_id)))
+        }
+        "remove_book_file" => {
+            let p: BookFileArgs = parse_params(params)?;
+            Ok(call!(commands::books::remove_book_file(
+                state, events, p.book_id, p.file_id
+            )))
+        }
         "list_reading_history" => {
             let p: ReadingHistoryArgs = parse_params(params)?;
             Ok(call!(commands::books::list_reading_history(state, p.query)))

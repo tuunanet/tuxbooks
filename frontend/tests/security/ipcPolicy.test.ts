@@ -303,6 +303,8 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     it("rejects invalid book ids on bookId-bearing methods", () => {
       for (const method of [
         "remove_book",
+        "list_book_files",
+        "remove_book_file",
         "get_book_metadata",
         "get_book_bytes",
         "get_book_resource",
@@ -312,6 +314,18 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
           /invalid bookId/,
         );
       }
+    });
+
+    it("requires a positive file id when removing one copy", () => {
+      expect(() =>
+        validateInvokeParams("remove_book_file", { bookId: 1, fileId: 0 }, issued()),
+      ).toThrow(/invalid fileId/);
+      expect(() =>
+        validateInvokeParams("remove_book_file", { bookId: 1, fileId: "2" }, issued()),
+      ).toThrow(/invalid fileId/);
+      expect(() =>
+        validateInvokeParams("remove_book_file", { bookId: 1, fileId: 2 }, issued()),
+      ).not.toThrow();
     });
 
     it("rejects oversized member paths on get_book_resource", () => {

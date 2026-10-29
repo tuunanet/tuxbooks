@@ -91,10 +91,16 @@ export function installTuxbooksMock(): void {
 
 installTuxbooksMock();
 
-/** Route mocked `invoke` calls by method name. Passing an `Error` makes it reject. */
+/**
+ * Route mocked `invoke` calls by method name. Passing an `Error` makes it
+ * reject. Book detail always reads its file locations; tests that do not
+ * exercise duplicates get an empty list rather than an unexpected-invoke
+ * rejection.
+ */
 export function mockInvoke(responses: Record<string, unknown | Promise<unknown>>): void {
   invokeMock.mockImplementation((method: string) => {
-    const response = responses[method];
+    const response =
+      method in responses ? responses[method] : method === "list_book_files" ? [] : undefined;
     if (response === undefined) {
       return Promise.reject(new Error(`unexpected invoke(${method}) in test`));
     }

@@ -1,5 +1,5 @@
 use crate::domain::{
-    Book, BookTrashEntry, BulkForgetOutcome, ForgetOutcome, LibraryStats, RestoreMode,
+    Book, BookFile, BookTrashEntry, BulkForgetOutcome, ForgetOutcome, LibraryStats, RestoreMode,
     RestoreOutcome, RestoreStatus, SearchHit,
 };
 use crate::error::AppError;
@@ -21,6 +21,12 @@ pub async fn get_library_stats(state: &AppState) -> Result<LibraryStats, AppErro
 /// All books in the library, ordered by title.
 pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
     books::list_books(&state.db).await
+}
+
+/// Every file location of one durable book (ADR 0014 D7). The library still
+/// shows one entry; the book details use this to list the duplicate copies.
+pub async fn list_book_files(state: &AppState, book_id: i64) -> Result<Vec<BookFile>, AppError> {
+    books::list_files_for_book(&state.db, book_id).await
 }
 
 /// Reading history: durable books with no file rows, newest activity first.
@@ -108,6 +114,22 @@ pub(crate) async fn delete_book_and_notify(
         events.emit("library-changed", &LibraryChange::Removed { book_id });
     }
     Ok(removed)
+}
+
+/// Remove one file copy from the book details. The durable book, its reading
+/// progress, annotations, collections, metadata, and last-opened stay; the
+/// book leaves the library only when its last file row is gone.
+pub async fn remove_book_file(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    file_id: i64,
+) -> Result<bool, AppError> {
+    match books::durable_id_for_file(&state.db, file_id).await? {
+        Some(owner) if owner == book_id => {}
+        _ => return Err(AppError::NotFound),
+    }
+    delete_file_row_and_notify(state, events, file_id, book_id).await
 }
 
 /// Remove one file copy (an unwatch owns locations, not whole books). The

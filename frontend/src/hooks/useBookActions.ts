@@ -5,6 +5,7 @@ import {
   pickBookFile,
   reconnectBook,
   removeBook,
+  removeBookFile as removeBookFileCommand,
   resetBookReadingData,
 } from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
@@ -41,6 +42,20 @@ export function useBookActions() {
       await removeBook(bookId);
     } catch (err) {
       console.error("remove failed:", toMessage(err));
+    }
+  }, []);
+
+  /**
+   * Drop one file copy. The durable book and its reading state stay while
+   * another location remains; the file on disk is never touched.
+   */
+  const removeBookFile = useCallback(async (bookId: number, fileId: number) => {
+    try {
+      await removeBookFileCommand(bookId, fileId);
+      return true;
+    } catch (err) {
+      console.error("remove copy failed:", toMessage(err));
+      return false;
     }
   }, []);
 
@@ -110,6 +125,7 @@ export function useBookActions() {
   return {
     locateBook,
     removeBookFromLibrary,
+    removeBookFile,
     resetReadingData,
     forgetBookFromLibrary,
     markFinished,
