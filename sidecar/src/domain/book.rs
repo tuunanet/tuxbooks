@@ -47,8 +47,9 @@ pub struct Book {
     /// Stable durable identity (ADR 0014). Several file rows can share it.
     pub book_uid: Option<String>,
     /// Internal file row this read resolved to, if the book currently has a
-    /// file in the library. File-level tables (metadata, collections) still
-    /// key by this row until ticket .4. Never crosses the IPC boundary.
+    /// file in the library. Reading state (progress, annotations, metadata,
+    /// collections, last-opened) keys on the durable book, not this row.
+    /// Never crosses the IPC boundary.
     #[sqlx(default)]
     pub file_id: Option<i64>,
     pub path: String,

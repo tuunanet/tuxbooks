@@ -14,32 +14,32 @@ and `foreign_keys` is forced ON for every connection.
 
 ### books
 
-| column           | type                                    | notes                                                |
-| ---------------- | --------------------------------------- | ---------------------------------------------------- |
-| id               | INTEGER PK AUTOINCREMENT                |                                                      |
-| path             | TEXT NOT NULL UNIQUE                    | absolute file path                                   |
-| title            | TEXT NOT NULL, CHECK non-blank          |                                                      |
-| subtitle         | TEXT                                    |                                                      |
-| author           | TEXT                                    | display projection of the author list (see metadata) |
-| publisher        | TEXT                                    |                                                      |
-| language         | TEXT                                    |                                                      |
-| isbn             | TEXT                                    |                                                      |
-| description      | TEXT                                    |                                                      |
-| cover_path       | TEXT                                    | extracted cover image file                           |
-| added_at         | TEXT NOT NULL, DB default               | set by INSERT                                        |
-| modified_at      | TEXT NOT NULL, DB default               | bumped on UPDATE                                     |
-| last_opened_at   | TEXT NULL                               | set when reading starts                              |
-| available        | INTEGER NOT NULL DEFAULT 1              | 0 once the file disappears                           |
-| file_size        | INTEGER NOT NULL DEFAULT 0              | bytes at last import                                 |
-| file_mtime       | INTEGER NOT NULL DEFAULT 0              | unix seconds at last import                          |
-| publication_date | TEXT                                    | effective (override over source)                     |
-| series_id        | INTEGER, FK `series` ON DELETE SET NULL | effective series membership                          |
-| series_index     | REAL                                    | position inside the series                           |
-| book_uid         | TEXT                                    | durable book identity (see below)                    |
-| hash_state       | TEXT NOT NULL DEFAULT 'pending'         | `pending`, `hashed`, or `failed`                     |
+| column           | type                                    | notes                                               |
+| ---------------- | --------------------------------------- | --------------------------------------------------- |
+| id               | INTEGER PK AUTOINCREMENT                |                                                     |
+| path             | TEXT NOT NULL UNIQUE                    | absolute file path                                  |
+| title            | TEXT NOT NULL, CHECK non-blank          | source title of this file                           |
+| subtitle         | TEXT                                    | source subtitle                                     |
+| author           | TEXT                                    | source display projection of the file's author list |
+| publisher        | TEXT                                    | source publisher                                    |
+| language         | TEXT                                    | source language                                     |
+| isbn             | TEXT                                    | source ISBN                                         |
+| description      | TEXT                                    | source description                                  |
+| cover_path       | TEXT                                    | extracted cover image file from this copy           |
+| added_at         | TEXT NOT NULL, DB default               | set by INSERT                                       |
+| modified_at      | TEXT NOT NULL, DB default               | bumped on UPDATE                                    |
+| available        | INTEGER NOT NULL DEFAULT 1              | 0 once the file disappears                          |
+| file_size        | INTEGER NOT NULL DEFAULT 0              | bytes at last import                                |
+| file_mtime       | INTEGER NOT NULL DEFAULT 0              | unix seconds at last import                         |
+| publication_date | TEXT                                    | source publication date                             |
+| series_id        | INTEGER, FK `series` ON DELETE SET NULL | source series membership                            |
+| series_index     | REAL                                    | source position inside the series                   |
+| book_uid         | TEXT                                    | durable book identity (see below)                   |
+| hash_state       | TEXT NOT NULL DEFAULT 'pending'         | `pending`, `hashed`, or `failed`                    |
 
-The bibliographic columns hold the **effective** metadata — user overrides
-(milestone 7) merged over the source-file values. `series_name` is not a
+A `books` row is a **file** in the library. Its bibliographic columns are the
+source values from the last parse of that file; the durable book record holds
+the effective view (user overrides merged over source). `series_name` is not a
 column: book queries LEFT JOIN the `series` table.
 
 `available`/`file_size`/`file_mtime` back the filesystem watcher (milestone
@@ -52,22 +52,22 @@ real modifications from duplicate events without re-parsing documents.
 file may share it). `hash_state` is the durable progress of the background
 content-hash pass: `pending`, `hashed`, or `failed`.
 
-## Durable book records (migrations 0017–0018)
+## Durable book records (migrations 0017–0019)
 
 ADR 0014 separates the durable **book** from the **file** that happens to
-contain it. Migration 0017 built the identity foundation; migration 0018 makes
-reading progress and annotations survive the file leaving the library. The
-public numeric book id is `book_records.id`; a file row is a location, and the
-reader resolves the active file from the durable book.
+contain it. Migration 0017 built the identity foundation; 0018 moved reading
+progress and annotations onto the book; 0019 moved collection membership,
+metadata overrides, effective metadata, and last-opened. The public numeric
+book id is `book_records.id`; a file row is a location, and the reader
+resolves the active file from the durable book.
 
 - `book_records` — one row per durable book, with a stable numeric `id`, a
-  random 128-bit `uid`, a metadata snapshot, `last_opened_at`, a progress
-  snapshot, an annotation count, and `metadata_state`
-  (`available` / `waiting_for_file`). File rows that already shared a sync
-  uuid collapse into one record. The snapshot is authoritative only for a
-  book with no file; a book with a file reads its effective metadata from
-  the file row, and triggers keep the snapshot in step. Unlike the 0017
-  slice, deleting the last file row keeps the record.
+  random 128-bit `uid`, the **effective** bibliographic columns (title
+  through `series_id`), `last_opened_at`, a progress snapshot, an annotation
+  count, and `metadata_state` (`available` / `waiting_for_file`). File rows
+  that already shared a sync uuid collapse into one record. A book with no
+  file keeps its last effective snapshot for Reading history. Deleting the
+  last file row keeps the record.
 - `books.book_uid` — the file's durable book. The migration reuses the uuid
   from `sync_book_bindings` when one exists, otherwise it generates one.
   `book_uid` is not UNIQUE: duplicate copies and moves are several files for
@@ -80,9 +80,16 @@ reader resolves the active file from the durable book.
   recorded as a relink issue and does not block the action.
 - `migration_issues` — visible merges and failures: two file rows that
   shared a uuid, two hashes that turned out to be the same book, duplicate
-  progress that was unioned, and a book whose hash failed and now needs a
-  relink. The Application Data settings tab lists open issues and can dismiss
-  them.
+  progress/annotations/collections/metadata/last-opened that was unioned or
+  resolved newest-wins, and a book whose hash failed and now needs a relink.
+  The Application Data settings tab lists open issues and can dismiss them.
+
+When duplicate file rows collapse into one durable book, migration 0019 and
+`sync::identity::merge_book_identity` agree on the rules: collection
+membership unions, annotations union, and the newest last-opened and metadata
+overrides win. Metadata overrides have no timestamp of their own, so the
+newest file row's `modified_at` is the ordering signal; a tie is recorded as
+an ambiguous `duplicate_state_merged` issue.
 
 The upgrade takes a **pre-migration backup** before applying pending
 migrations: `VACUUM INTO` writes `<db>.pre-migration-<timestamp>.bak` beside
@@ -117,8 +124,11 @@ until the next import.
 
 ### book_collections
 
-Join table, PK `(book_id, collection_id)`, both FK with
-`ON DELETE CASCADE`.
+Join table, PK `(book_uid, collection_id)`. `book_uid` is FK
+`book_records` and `collection_id` is FK `collections`, both with
+`ON DELETE CASCADE`. Membership belongs to the durable book, so Remove and
+Unwatch never remove a shelf entry; deleting the book record (Forget, later
+slice) or the collection does.
 
 ### reading_progress
 
@@ -175,40 +185,45 @@ Milestone 7 keeps two layers so a book's curated metadata can never lose
 the file's own values, while one Save writes the fields the format supports
 into the file:
 
-1. `book_source_metadata` — **file truth**, one row per book, refreshed by
-   the importer on every (re)import, by the reconnect flow, and by every
+1. `book_source_metadata` — **file truth**, one row per file row, refreshed
+   by the importer on every (re)import, by the reconnect flow, and by every
    save that rewrites the file. `authors`/`subjects` are JSON arrays (NULL
    = pre-normalization backfill, treated as empty); `cover_path` is the
-   extracted cover at import time.
-2. `book_metadata_overrides` — **user truth**, one row per book (created by
-   migration 0008 for existing rows). `NULL` = inherit the source value;
-   an empty string = explicitly cleared. `cover_path` overrides the
-   extracted cover. `authors_customized`/`subjects_customized` gate whether
-   a re-import may replace the normalized lists (0 = follow the file,
+   extracted cover at import time. The `books` source columns hold the same
+   values as a fallback for rows that predate the snapshot.
+2. `book_metadata_overrides` — **user truth**, one row per durable book
+   (`book_uid`, FK `book_records`). `NULL` = inherit the source value; an
+   empty string = explicitly cleared. `cover_path` overrides the extracted
+   cover. `authors_customized`/`subjects_customized` gate whether a
+   re-import may replace the normalized lists (0 = follow the file,
    1 = the user owns the list).
-3. `books` columns — the **effective view** every reader path consumes,
-   recomputed by `services/metadata.rs` after imports, edits, resets, and
-   cover changes. The FTS5 triggers then keep the search index in sync
-   automatically.
+3. `book_records` effective columns — the **effective view** every reader
+   path consumes, recomputed by `repository/metadata.rs::recompute_effective`
+   after imports, edits, resets, and cover changes. The FTS triggers then
+   keep the search index in sync automatically.
+
+A book with several file rows takes its source values from the most recently
+refreshed file (`books.modified_at`), so re-importing a duplicate refreshes
+the effective view without touching the user's overrides. Source metadata
+stays per file; `get_book_metadata` reports that primary file's source.
 
 ### Normalized entities
 
 - `authors` (shared vocabulary, UNIQUE name) + `book_authors` (join table
-  with a `position` for display order). `books.author` is a maintained
-  display projection (joined with `", "`) so FTS and list views keep
-  working unchanged.
-- `subjects` + `book_subjects`.
-- `series` + `books.series_id`/`books.series_index`. Source and override
-  series are stored by name in their layers; the effective name is
-  resolved to a shared `series` row id. Series/author/subject rows no
-  book references are swept (`sweep_orphans`) after edits, resets, and
-  removals.
-- Collection membership stays in `collections`/`book_collections`
-  (unchanged since milestone 3).
+  keyed by `book_uid`, with a `position` for display order).
+  `book_records.author` is a maintained display projection (joined with
+  `", "`) so FTS and list views keep working unchanged.
+- `subjects` + `book_subjects` (keyed by `book_uid`).
+- `series` + `book_records.series_id`/`book_records.series_index`. Source and
+  override series are stored by name in their layers; the effective name is
+  resolved to a shared `series` row id. Series/author/subject rows no book
+  references are swept (`sweep_orphans`) after edits, resets, and removals.
+- Collection membership stays in `collections`/`book_collections`, now
+  keyed by `book_uid`.
 
 ### Merge and override rules
 
-Implemented once in `services/metadata.rs::recompute_and_apply`:
+Implemented once in `repository/metadata.rs::recompute_effective`:
 
 - Scalar fields: override `NULL` → source value; `Some("")` → cleared;
   `Some(v)` → `v`.
@@ -239,24 +254,28 @@ through the normal effective-column triggers. `reset_book_metadata` drops
 every override, returning the book to its source-file metadata; with no
 overrides left, the reset affordance disables itself.
 
-Deleting a durable book cascades to all of these tables. Removing a file row
-(Remove, Unwatch) leaves the durable book and its progress and annotations in
-place; collection membership and metadata overrides still hang off the file
-row until ticket `tuxbooks-ip6.4`.
+Deleting a durable book (Forget, a later slice) cascades its overrides, lists,
+membership, progress, and annotations; deleting its file rows also removes the
+per-file source snapshots. Removing a file row (Remove, Unwatch) leaves the
+durable book, and therefore its progress, annotations, collection membership,
+metadata overrides, customized lists, and last-opened, in place. No user-state
+table has a foreign key to `books`.
 
 ## Full-text search
 
-`books_fts` is an FTS5 **external-content** table over
-`books(title, subtitle, author, publisher, isbn, description, path)` kept
-in sync by three triggers (`books_fts_ai/ad/au`). Search code joins
-`books_fts.rowid = books.id` and uses `snippet(…, -1, …)` (automatic
-column: the snippet comes from whichever column matched best); the index
-never needs a backfill. Migration `0006` widened the index from the
-original four columns (external-content tables cannot be altered, so the
-table and triggers are recreated and `'rebuild'` re-reads every row); the
-path column doubles as the file-name field — the default tokenizer splits
-on `/` and `.`, so bare file-name tokens match. If you change `books`
-columns covered by the index, update those triggers — the test
+`books_fts` is an FTS5 table over
+`book_records(title, subtitle, author, publisher, isbn, description)` plus the
+active file's `path`. It is a regular (not external-content) index because the
+metadata owner and the path live in different tables: a trigger on
+`book_records` refreshes the metadata columns, and triggers on `books`
+refresh the path when a file is added, moved, made unavailable, or removed.
+Migration 0019 rebuilt the index and dropped the old external-content
+triggers. Search code joins `books_fts.rowid = book_records.id`, joins the
+active file so Reading-history books are excluded, and uses
+`snippet(…, -1, …)` (automatic column: the snippet comes from whichever column
+matched best). The path column doubles as the file-name field — the tokenizer
+splits on `/` and `.`, so bare file-name tokens match. If you change the
+indexed `book_records` or `books` columns, update those triggers — the test
 `updating_book_keeps_fts_index_in_sync` must keep passing.
 
 User queries never reach FTS5 raw: `services/search.rs`
@@ -266,17 +285,19 @@ into quoted prefix phrases ANDed together (`wind river` →
 
 ## Cloud-folder sync (migration 0015)
 
-The sync engine keeps its bookkeeping in the same SQLite file. The catalog
-tables stay path-keyed; reading progress and annotations are keyed by the
-durable book uid. Nothing here changes how imports, readers, or search work.
-The full contract is [SYNC.md](SYNC.md).
+The sync engine keeps its bookkeeping in the same SQLite file. Reading
+progress, annotations, metadata overrides, collection membership, and
+last-opened are keyed by the durable book uid; a file row is only a
+location. Nothing here changes how imports, readers, or search work. The
+full contract is [SYNC.md](SYNC.md).
 
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.
 - `sync_dirty` — one row per entity with a pending local change. Triggers write
   the canonical snapshot at change time (`old_json`/`new_json`); the capture
-  pass drains it. Cascades caused by a vanished book or collection are skipped
-  by the triggers.
+  pass drains it. Progress, metadata, and last-opened key on `book_uid`;
+  membership keys on `book_uid:collection_id`. Triggers skip a vanished
+  collection's cascade (a local deletion, not a shared delete).
 - `sync_state_entities` / `sync_state_fields` — the materialized shared state.
   Entities carry tombstones and entity-level clocks; fields carry one value and
   one clock each.
@@ -308,9 +329,9 @@ on first use, so a row created while sync is off is never a constraint error.
   builds do not need `DATABASE_URL` or `sqlx prepare`.
 - Imports upsert by `path`; a re-scan updates metadata instead of
   duplicating rows. After the upsert, the importer records the fresh parse
-  in `book_source_metadata` and re-merges the effective view
-  (`services::metadata::apply_source_metadata`), so user overrides survive
-  file changes (milestone 7).
+  in `book_source_metadata` for that file and re-merges the durable book's
+  effective view (`repository::metadata::record_imported_source`), so user
+  overrides survive file changes (milestone 7).
 - Tests always create the pool in a `tempfile` temp dir.
 
 ## Reconciliation rules (milestone 3)

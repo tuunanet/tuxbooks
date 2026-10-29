@@ -444,15 +444,15 @@ impl SyncService {
         sqlx::query("UPDATE reading_progress SET updated_at = updated_at")
             .execute(&mut *tx)
             .await?;
-        sqlx::query("UPDATE book_metadata_overrides SET book_id = book_id")
+        sqlx::query("UPDATE book_metadata_overrides SET book_uid = book_uid")
             .execute(&mut *tx)
             .await?;
         sqlx::query(
             r#"
             INSERT INTO sync_dirty (kind, entity_key, op, old_json, new_json)
-            SELECT 'opened', CAST(id AS TEXT), 'upsert', NULL,
+            SELECT 'opened', uid, 'upsert', NULL,
                    json_object('last_opened_at', last_opened_at)
-            FROM books WHERE last_opened_at IS NOT NULL
+            FROM book_records WHERE last_opened_at IS NOT NULL
             ON CONFLICT(kind, entity_key) DO NOTHING
             "#,
         )
@@ -462,16 +462,16 @@ impl SyncService {
             r#"
             INSERT INTO sync_dirty (kind, entity_key, op, old_json, new_json)
             SELECT 'membership',
-                   CAST(bc.book_id AS TEXT) || ':' || CAST(bc.collection_id AS TEXT),
+                   bc.book_uid || ':' || CAST(bc.collection_id AS TEXT),
                    'upsert', NULL,
                    json_object(
-                       'book_id', bc.book_id,
+                       'book_uid', bc.book_uid,
                        'collection_id', bc.collection_id,
                        'present', json('true'),
                        'added_at', bc.added_at
                    )
             FROM book_collections bc
-            WHERE EXISTS (SELECT 1 FROM books b WHERE b.id = bc.book_id)
+            WHERE EXISTS (SELECT 1 FROM book_records br WHERE br.uid = bc.book_uid)
               AND EXISTS (SELECT 1 FROM collections c WHERE c.id = bc.collection_id)
             ON CONFLICT(kind, entity_key) DO NOTHING
             "#,

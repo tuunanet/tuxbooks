@@ -22,6 +22,43 @@ pub struct SourceMetadataRow {
     pub subjects: Option<String>,
 }
 
+/// A book's source-file truth, parsed for the merge rules. Kept per file row
+/// (`book_source_metadata`) because duplicate copies can carry different file
+/// metadata; the effective view on the durable book follows the most recently
+/// refreshed file.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SourceMetadata {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub publisher: Option<String>,
+    pub language: Option<String>,
+    pub isbn: Option<String>,
+    pub description: Option<String>,
+    pub publication_date: Option<String>,
+    pub series: Option<String>,
+    pub series_index: Option<f64>,
+    pub cover_path: Option<String>,
+    pub authors: Vec<String>,
+    pub subjects: Vec<String>,
+}
+
+/// The source columns on a file row, used when the structured source snapshot
+/// predates the row.
+#[derive(sqlx::FromRow)]
+struct FileSourceRow {
+    title: String,
+    subtitle: Option<String>,
+    author: Option<String>,
+    publisher: Option<String>,
+    language: Option<String>,
+    isbn: Option<String>,
+    description: Option<String>,
+    publication_date: Option<String>,
+    series_index: Option<f64>,
+    cover_path: Option<String>,
+    series: Option<String>,
+}
+
 /// The user's curation layer, stored verbatim in `book_metadata_overrides`.
 /// `None` means "inherit the source value"; an empty string means "explicitly
 /// cleared". List customization is a boolean gate on re-import replacement.
@@ -41,9 +78,9 @@ pub struct OverrideRow {
     pub subjects_customized: bool,
 }
 
-/// Write the source-file truth for a book (the importer calls this on every
-/// import/reconcile). The snapshot never touches `books` — that is the
-/// effective view the metadata service recomputes.
+/// Write the source-file truth for one file row (the importer calls this on
+/// every import/reconcile). This is the per-file layer; `book_records` holds
+/// the effective view that the metadata service recomputes from it.
 pub async fn upsert_source_metadata(
     pool: &SqlitePool,
     book_id: i64,
@@ -107,37 +144,37 @@ pub async fn get_source_metadata(
 
 pub async fn get_overrides(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
 ) -> Result<Option<OverrideRow>, AppError> {
     let row = sqlx::query_as::<_, OverrideRow>(
         r#"
         SELECT title, subtitle, publisher, language, isbn, description,
                publication_date, series, series_index, cover_path,
                authors_customized, subjects_customized
-        FROM book_metadata_overrides WHERE book_id = ?1
+        FROM book_metadata_overrides WHERE book_uid = ?1
         "#,
     )
-    .bind(book_id)
+    .bind(book_uid)
     .fetch_optional(pool)
     .await?;
     Ok(row)
 }
 
-/// Replace the whole override row for a book (the edit service computes all
-/// cells; minimal-override rules keep untouched fields at NULL).
+/// Replace the whole override row for a durable book (the edit service
+/// computes all cells; minimal-override rules keep untouched fields at NULL).
 pub async fn upsert_overrides(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     overrides: &OverrideRow,
 ) -> Result<(), AppError> {
     sqlx::query(
         r#"
         INSERT INTO book_metadata_overrides (
-            book_id, title, subtitle, publisher, language, isbn, description,
+            book_uid, title, subtitle, publisher, language, isbn, description,
             publication_date, series, series_index, cover_path,
             authors_customized, subjects_customized
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-        ON CONFLICT(book_id) DO UPDATE SET
+        ON CONFLICT(book_uid) DO UPDATE SET
             title = excluded.title,
             subtitle = excluded.subtitle,
             publisher = excluded.publisher,
@@ -152,7 +189,7 @@ pub async fn upsert_overrides(
             subjects_customized = excluded.subjects_customized
         "#,
     )
-    .bind(book_id)
+    .bind(book_uid)
     .bind(&overrides.title)
     .bind(&overrides.subtitle)
     .bind(&overrides.publisher)
@@ -170,11 +207,11 @@ pub async fn upsert_overrides(
     Ok(())
 }
 
-/// Drop every override for a book (reset to source); the list gates reopen
-/// so the next re-import follows the file again.
-pub async fn clear_overrides(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
-    sqlx::query("DELETE FROM book_metadata_overrides WHERE book_id = ?1")
-        .bind(book_id)
+/// Drop every override for a durable book (reset to source); the list gates
+/// reopen so the next re-import follows the file again.
+pub async fn clear_overrides(pool: &SqlitePool, book_uid: &str) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM book_metadata_overrides WHERE book_uid = ?1")
+        .bind(book_uid)
         .execute(pool)
         .await?;
     Ok(())
@@ -185,7 +222,7 @@ pub async fn clear_overrides(pool: &SqlitePool, book_id: i64) -> Result<(), AppE
 /// the display order stable.
 pub async fn replace_book_authors(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     names: &[String],
 ) -> Result<(), AppError> {
     for name in names {
@@ -194,18 +231,18 @@ pub async fn replace_book_authors(
             .execute(pool)
             .await?;
     }
-    sqlx::query("DELETE FROM book_authors WHERE book_id = ?1")
-        .bind(book_id)
+    sqlx::query("DELETE FROM book_authors WHERE book_uid = ?1")
+        .bind(book_uid)
         .execute(pool)
         .await?;
     for (position, name) in names.iter().enumerate() {
         sqlx::query(
             r#"
-            INSERT INTO book_authors (book_id, author_id, position)
+            INSERT INTO book_authors (book_uid, author_id, position)
             VALUES (?1, (SELECT id FROM authors WHERE name = ?2), ?3)
             "#,
         )
-        .bind(book_id)
+        .bind(book_uid)
         .bind(name)
         .bind(position as i64)
         .execute(pool)
@@ -214,16 +251,16 @@ pub async fn replace_book_authors(
     Ok(())
 }
 
-pub async fn list_book_authors(pool: &SqlitePool, book_id: i64) -> Result<Vec<String>, AppError> {
+pub async fn list_book_authors(pool: &SqlitePool, book_uid: &str) -> Result<Vec<String>, AppError> {
     let names: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT a.name FROM book_authors ba
         JOIN authors a ON a.id = ba.author_id
-        WHERE ba.book_id = ?1
+        WHERE ba.book_uid = ?1
         ORDER BY ba.position, a.name
         "#,
     )
-    .bind(book_id)
+    .bind(book_uid)
     .fetch_all(pool)
     .await?;
     Ok(names)
@@ -232,7 +269,7 @@ pub async fn list_book_authors(pool: &SqlitePool, book_id: i64) -> Result<Vec<St
 /// Replace a book's normalized subject list (same shared-vocabulary rules).
 pub async fn replace_book_subjects(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     names: &[String],
 ) -> Result<(), AppError> {
     for name in names {
@@ -241,15 +278,15 @@ pub async fn replace_book_subjects(
             .execute(pool)
             .await?;
     }
-    sqlx::query("DELETE FROM book_subjects WHERE book_id = ?1")
-        .bind(book_id)
+    sqlx::query("DELETE FROM book_subjects WHERE book_uid = ?1")
+        .bind(book_uid)
         .execute(pool)
         .await?;
     for name in names {
         sqlx::query(
-            "INSERT INTO book_subjects (book_id, subject_id) VALUES (?1, (SELECT id FROM subjects WHERE name = ?2))",
+            "INSERT INTO book_subjects (book_uid, subject_id) VALUES (?1, (SELECT id FROM subjects WHERE name = ?2))",
         )
-        .bind(book_id)
+        .bind(book_uid)
         .bind(name)
         .execute(pool)
         .await?;
@@ -257,16 +294,19 @@ pub async fn replace_book_subjects(
     Ok(())
 }
 
-pub async fn list_book_subjects(pool: &SqlitePool, book_id: i64) -> Result<Vec<String>, AppError> {
+pub async fn list_book_subjects(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<Vec<String>, AppError> {
     let names: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT s.name FROM book_subjects bs
         JOIN subjects s ON s.id = bs.subject_id
-        WHERE bs.book_id = ?1
+        WHERE bs.book_uid = ?1
         ORDER BY s.name
         "#,
     )
-    .bind(book_id)
+    .bind(book_uid)
     .fetch_all(pool)
     .await?;
     Ok(names)
@@ -287,9 +327,9 @@ pub async fn ensure_series(pool: &SqlitePool, name: &str) -> Result<i64, AppErro
 }
 
 /// Values the metadata service has merged (override over source), written
-/// back into the effective `books` columns every reader path consumes.
+/// back into the effective `book_records` columns every reader path consumes.
 /// `author` is the display projection of the normalized author list, which
-/// keeps the FTS index and list views working without schema changes.
+/// keeps FTS and list views working.
 pub struct EffectiveValues {
     pub title: String,
     pub subtitle: Option<String>,
@@ -306,20 +346,20 @@ pub struct EffectiveValues {
 
 pub async fn apply_effective(
     pool: &SqlitePool,
-    book_id: i64,
+    book_uid: &str,
     values: &EffectiveValues,
 ) -> Result<(), AppError> {
     sqlx::query(
         r#"
-        UPDATE books SET
+        UPDATE book_records SET
             title = ?2, subtitle = ?3, author = ?4, publisher = ?5, language = ?6,
             isbn = ?7, description = ?8, publication_date = ?9, series_id = ?10,
             series_index = ?11, cover_path = ?12,
-            modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE id = ?1
+            series = (SELECT name FROM series WHERE id = ?10)
+        WHERE uid = ?1
         "#,
     )
-    .bind(book_id)
+    .bind(book_uid)
     .bind(&values.title)
     .bind(&values.subtitle)
     .bind(&values.author)
@@ -336,10 +376,221 @@ pub async fn apply_effective(
     Ok(())
 }
 
+/// The durable uid behind a file row.
+pub async fn book_uid_for_file(
+    pool: &SqlitePool,
+    file_id: i64,
+) -> Result<Option<String>, AppError> {
+    let uid: Option<String> = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(uid)
+}
+
+/// The durable uid behind the public numeric book id.
+pub async fn book_uid_for_id(pool: &SqlitePool, book_id: i64) -> Result<Option<String>, AppError> {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(uid)
+}
+
+/// The file row whose source metadata currently drives the effective view:
+/// the most recently refreshed copy of the book.
+pub async fn primary_file_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM books WHERE book_uid = ?1 \
+         ORDER BY modified_at DESC, id DESC LIMIT 1",
+    )
+    .bind(book_uid)
+    .fetch_optional(pool)
+    .await?;
+    Ok(id)
+}
+
+/// Read the source snapshot for one file row, falling back to that row's own
+/// source columns when the structured snapshot predates the row.
+pub async fn load_source(pool: &SqlitePool, file_id: i64) -> Result<SourceMetadata, AppError> {
+    if let Some(row) = get_source_metadata(pool, file_id).await? {
+        return Ok(SourceMetadata {
+            title: row.title,
+            subtitle: row.subtitle,
+            publisher: row.publisher,
+            language: row.language,
+            isbn: row.isbn,
+            description: row.description,
+            publication_date: row.publication_date,
+            series: row.series,
+            series_index: row.series_index,
+            cover_path: row.cover_path,
+            authors: parse_json_list(row.authors.as_deref()),
+            subjects: parse_json_list(row.subjects.as_deref()),
+        });
+    }
+    let row = sqlx::query_as::<_, FileSourceRow>(
+        "SELECT b.title, b.subtitle, b.author, b.publisher, b.language, b.isbn, \
+                b.description, b.publication_date, b.series_index, b.cover_path, \
+                (SELECT name FROM series WHERE id = b.series_id) AS series \
+         FROM books b WHERE b.id = ?1",
+    )
+    .bind(file_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(SourceMetadata::default());
+    };
+    let authors: Vec<String> = row
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .into_iter()
+        .collect();
+    Ok(SourceMetadata {
+        title: row.title,
+        subtitle: row.subtitle,
+        publisher: row.publisher,
+        language: row.language,
+        isbn: row.isbn,
+        description: row.description,
+        publication_date: row.publication_date,
+        series: row.series,
+        series_index: row.series_index,
+        cover_path: row.cover_path,
+        authors,
+        subjects: Vec::new(),
+    })
+}
+
+/// Record a fresh parse as the source truth for one file row, then recompute
+/// the durable book's effective view. Overrides survive, so a re-import only
+/// refreshes the source layer.
+pub async fn record_imported_source(
+    pool: &SqlitePool,
+    file_id: i64,
+    source: &NewBook,
+) -> Result<(), AppError> {
+    upsert_source_metadata(pool, file_id, source).await?;
+    if let Some(uid) = book_uid_for_file(pool, file_id).await? {
+        recompute_effective(pool, &uid, file_id).await?;
+    }
+    Ok(())
+}
+
+/// Recompute a durable book's effective metadata from one file's source
+/// snapshot plus the book's overrides. The merge rules live here so imports,
+/// edits, resets, covers, and sync projection all use exactly one copy.
+pub async fn recompute_effective(
+    pool: &SqlitePool,
+    book_uid: &str,
+    source_file_id: i64,
+) -> Result<(), AppError> {
+    let source = load_source(pool, source_file_id).await?;
+    let overrides = get_overrides(pool, book_uid).await?.unwrap_or_default();
+
+    let authors = if overrides.authors_customized {
+        list_book_authors(pool, book_uid).await?
+    } else {
+        replace_book_authors(pool, book_uid, &source.authors).await?;
+        source.authors.clone()
+    };
+    if !overrides.subjects_customized {
+        replace_book_subjects(pool, book_uid, &source.subjects).await?;
+    }
+    let title = clean_required(
+        scalar_value(&overrides.title, Some(&source.title))
+            .as_deref()
+            .unwrap_or_default(),
+        "title",
+    )?;
+    let (series, series_index) = effective_series(&overrides, &source);
+    let series_id = match series.as_deref() {
+        Some(name) => Some(ensure_series(pool, name).await?),
+        None => None,
+    };
+
+    apply_effective(
+        pool,
+        book_uid,
+        &EffectiveValues {
+            title,
+            subtitle: scalar_value(&overrides.subtitle, source.subtitle.as_deref()),
+            author: display_authors(&authors),
+            publisher: scalar_value(&overrides.publisher, source.publisher.as_deref()),
+            language: scalar_value(&overrides.language, source.language.as_deref()),
+            isbn: scalar_value(&overrides.isbn, source.isbn.as_deref()),
+            description: scalar_value(&overrides.description, source.description.as_deref()),
+            publication_date: scalar_value(
+                &overrides.publication_date,
+                source.publication_date.as_deref(),
+            ),
+            series_id,
+            series_index,
+            cover_path: overrides
+                .cover_path
+                .clone()
+                .or_else(|| source.cover_path.clone()),
+        },
+    )
+    .await
+}
+
+/// Merge one scalar: `None` inherits the source, `Some("")` clears,
+/// `Some(value)` overrides.
+pub(crate) fn scalar_value(
+    override_value: &Option<String>,
+    source_value: Option<&str>,
+) -> Option<String> {
+    match override_value {
+        None => source_value.filter(|v| !v.is_empty()).map(str::to_owned),
+        Some(value) if value.is_empty() => None,
+        Some(value) => Some(value.clone()),
+    }
+}
+
+/// The effective series name/index (one unit): an overridden unit owns both,
+/// an empty name is an explicit clear, and `None` inherits both.
+pub(crate) fn effective_series(
+    overrides: &OverrideRow,
+    source: &SourceMetadata,
+) -> (Option<String>, Option<f64>) {
+    match overrides.series.as_deref() {
+        None => (source.series.clone(), source.series_index),
+        Some("") => (None, None),
+        Some(name) => (Some(name.to_owned()), overrides.series_index),
+    }
+}
+
+/// The `author` display projection of the normalized list, which keeps FTS
+/// and every existing read path working unchanged.
+pub(crate) fn display_authors(authors: &[String]) -> Option<String> {
+    if authors.is_empty() {
+        None
+    } else {
+        Some(authors.join(", "))
+    }
+}
+
+pub(crate) fn parse_json_list(json: Option<&str>) -> Vec<String> {
+    json.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn clean_required(value: &str, field: &str) -> Result<String, AppError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput(format!("{field} must not be empty")));
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Delete authors/subjects/series rows no book references anymore (after
 /// list replacement, resets, or book removal). Series rows are referenced
-/// only through `books.series_id`; author/subject rows only through their
-/// join tables.
+/// through `book_records.series_id`; author/subject rows through their join
+/// tables.
 pub async fn sweep_orphans(pool: &SqlitePool) -> Result<(), AppError> {
     sqlx::query("DELETE FROM authors WHERE NOT EXISTS (SELECT 1 FROM book_authors WHERE author_id = authors.id)")
         .execute(pool)
@@ -350,7 +601,7 @@ pub async fn sweep_orphans(pool: &SqlitePool) -> Result<(), AppError> {
     .execute(pool)
     .await?;
     sqlx::query(
-        "DELETE FROM series WHERE NOT EXISTS (SELECT 1 FROM books WHERE series_id = series.id)",
+        "DELETE FROM series WHERE NOT EXISTS (SELECT 1 FROM book_records WHERE series_id = series.id)",
     )
     .execute(pool)
     .await?;

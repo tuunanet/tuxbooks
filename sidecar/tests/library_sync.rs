@@ -1499,9 +1499,8 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(titles, vec!["Kept Book".to_string()]);
 
-    // The purged books' durable state stays while the surviving book's
-    // collection membership is untouched. Collection membership is still
-    // file-keyed in this slice, so it goes with the file row (ticket .4).
+    // The purged books' durable state stays, including collection membership;
+    // the surviving book's membership is untouched.
     let progress = reading_progress::get_progress(&env.pool, stray_id)
         .await
         .unwrap()
@@ -1515,11 +1514,12 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
         1,
         "purge keeps annotations"
     );
-    assert!(
+    assert_eq!(
         collections::list_collection_ids_for_book(&env.pool, stray_id)
             .await
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        vec![favorites],
+        "purge keeps durable collection membership"
     );
     assert_eq!(
         collections::list_collection_ids_for_book(&env.pool, kept_id)
