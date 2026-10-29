@@ -60,6 +60,7 @@ describe("preload surface audit (T-5)", () => {
       "invoke",
       "onEvent",
       "pickDirectory",
+      "pickSyncFolder",
       "pickBookFile",
       "pickBookFiles",
       "pickCoverImage",

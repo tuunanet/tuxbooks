@@ -208,6 +208,11 @@ pub async fn embed_book_metadata(
         .ok_or(AppError::NotFound)?
         .effective;
 
+    // Set the crash marker before the bytes change. If the process dies before
+    // the snapshot update below, the sync identity sweep still rehashes the
+    // file and publishes the new content-hash alias.
+    books::mark_rehash_pending(pool, book_id).await?;
+
     // The rewrite runs in the document worker (the parse-heavy half); the
     // sidecar keeps the only write authority: backup + atomic replace.
     let client = crate::worker::WorkerClient::locate()?;
@@ -269,12 +274,44 @@ pub async fn embed_book_metadata(
     let source =
         crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
     repo::upsert_source_metadata(pool, book_id, &source).await?;
+    // The rewrite changed the bytes, so the stored file snapshot is stale.
+    // Sync uses this snapshot to decide when to rehash and publish the new
+    // content-hash alias; leaving it stale would strand other machines on the
+    // old identity.
+    books::update_file_snapshot(pool, book_id, source.file_size, source.file_mtime).await?;
+    books::clear_rehash_pending(pool, book_id).await?;
 
     apply_form(pool, book_id, &desired).await?;
 
     get_book_metadata(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)
+}
+
+/// Apply a metadata override that arrived from cloud-folder sync. This is the
+/// database-only path: unlike `embed_book_metadata`, the source EPUB/PDF is
+/// never rewritten. The lists travel beside the scalar overrides because the
+/// override table stores only the customization gates.
+pub async fn apply_synced_overrides(
+    pool: &SqlitePool,
+    book_id: i64,
+    overrides: &repo::OverrideRow,
+    authors: &[String],
+    subjects: &[String],
+) -> Result<(), AppError> {
+    if books::get_book(pool, book_id).await?.is_none() {
+        return Ok(());
+    }
+    repo::upsert_overrides(pool, book_id, overrides).await?;
+    if overrides.authors_customized {
+        repo::replace_book_authors(pool, book_id, authors).await?;
+    }
+    if overrides.subjects_customized {
+        repo::replace_book_subjects(pool, book_id, subjects).await?;
+    }
+    recompute_and_apply(pool, book_id).await?;
+    repo::sweep_orphans(pool).await?;
+    Ok(())
 }
 
 /// Drop every override: the book returns to exactly its source-file metadata
@@ -1138,6 +1175,28 @@ mod tests {
         assert!(
             crate::backup_path(&epub_path).exists(),
             "the pre-embed original is backed up"
+        );
+
+        // The rewrite changed the bytes; the stored snapshot must move too,
+        // or the sync identity sweep never notices the new hash.
+        let metadata = std::fs::metadata(&epub_path).unwrap();
+        let expected_mtime = metadata
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let (size, mtime, rehash_pending): (i64, i64, i64) =
+            sqlx::query_as("SELECT file_size, file_mtime, rehash_pending FROM books WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(size, metadata.len() as i64);
+        assert_eq!(mtime, expected_mtime);
+        assert_eq!(
+            rehash_pending, 0,
+            "a successful embed clears the crash marker"
         );
     }
 

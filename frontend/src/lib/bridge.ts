@@ -42,11 +42,63 @@ export type {
   StorageRoot,
 } from "../../../electron/shared/storageReport";
 
+export type SyncState = "disabled" | "idle" | "syncing" | "error";
+
+/** Snapshot of the cloud-folder sync engine (docs/SYNC.md). */
+export interface SyncStatus {
+  enabled: boolean;
+  folder: string | null;
+  libraryId: string | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  state: SyncState;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  pendingLocal: number;
+  waitingBooks: number;
+  issues: number;
+  trash: number;
+  conflicts: number;
+}
+
+export interface SyncIssue {
+  id: number;
+  kind: string;
+  detail: string;
+  fileName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncTrashEntry {
+  id: number;
+  kind: string;
+  label: string;
+  deletedAt: string;
+  expiresAt: string;
+}
+
+export interface SyncMismatch {
+  localLibraryId: string;
+  remoteLibraryId: string;
+}
+
+export interface SyncConnectResult {
+  status: SyncStatus;
+  mismatch: SyncMismatch | null;
+}
+
+export interface SyncConnectOptions {
+  deviceName?: string;
+  confirmLibraryId?: string;
+}
+
 /** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */
 export interface TuxbooksApi {
   invoke(method: string, params?: Record<string, unknown>): Promise<unknown>;
   onEvent(name: string, callback: (payload: unknown) => void): () => void;
   pickDirectory(): Promise<string | null>;
+  pickSyncFolder(): Promise<string | null>;
   pickBookFile(): Promise<string | null>;
   pickBookFiles(): Promise<string[]>;
   pickCoverImage(): Promise<string | null>;
@@ -279,6 +331,69 @@ export function deleteAnnotation(id: number): Promise<boolean> {
 /** Native folder picker; resolves to null when the user cancels. */
 export function pickDirectory(): Promise<string | null> {
   return tuxbooks().pickDirectory();
+}
+
+/** Native picker for the folder a cloud client keeps in sync. */
+export function pickSyncFolder(): Promise<string | null> {
+  return tuxbooks().pickSyncFolder();
+}
+
+export function getSyncStatus(): Promise<SyncStatus> {
+  return invoke("sync_status");
+}
+
+/**
+ * Connect a sync folder. A `mismatch` result is expected when the folder
+ * belongs to another library; call again with `confirmLibraryId` to merge this
+ * machine's state into it.
+ */
+export function connectSync(
+  path: string,
+  options: SyncConnectOptions = {},
+): Promise<SyncConnectResult> {
+  return invoke("sync_connect", { path, ...options });
+}
+
+export function disconnectSync(): Promise<SyncStatus> {
+  return invoke("sync_disconnect");
+}
+
+export function syncNow(): Promise<SyncStatus> {
+  return invoke("sync_now");
+}
+
+export function listSyncIssues(): Promise<SyncIssue[]> {
+  return invoke("sync_issues");
+}
+
+export function dismissSyncIssue(id: number): Promise<boolean> {
+  return invoke("sync_dismiss_issue", { id });
+}
+
+export function listSyncTrash(): Promise<SyncTrashEntry[]> {
+  return invoke("sync_trash");
+}
+
+export function restoreSyncTrash(id: number): Promise<boolean> {
+  return invoke("sync_restore", { id });
+}
+
+export function setSyncDeviceName(name: string): Promise<SyncStatus> {
+  return invoke("sync_set_device_name", { name });
+}
+
+/** Live status updates from the engine (the `sync-status` event). */
+export function onSyncStatus(callback: (status: SyncStatus) => void): Promise<() => void> {
+  const unlisten = onEvent<SyncStatus>("sync-status", callback);
+  return Promise.resolve(unlisten);
+}
+
+/** Books whose annotations/progress changed in another app instance. */
+export function onSyncApplied(
+  callback: (payload: { bookIds: number[] }) => void,
+): Promise<() => void> {
+  const unlisten = onEvent<{ bookIds: number[] }>("sync-applied", callback);
+  return Promise.resolve(unlisten);
 }
 
 /** Native file picker for relocating a missing book; null when cancelled. */

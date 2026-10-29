@@ -122,6 +122,12 @@ minimumReleaseAgeExclude:
   # @electron/get onto undici 7.30.1, clearing that GHSA-xjj6-f33q-929c
   # instance (advisory GHSA-xjj6-f33q-929c, 7.x path). Remove 2026-11-19.
   - "electron@44.9.1"
+  # 2026-10-29: systeminformation GHSA-3f7j-7jwc-fxfj (high; Windows
+  # command injection in services()). 5.33.16 is the oldest patched release
+  # and is 10 days old, younger than the 30-day floor. Dev-only: reaches the
+  # tree through shadcn's @dotenvx/dotenvx CLI and is not packaged. Remove
+  # 2026-11-18.
+  - "systeminformation@5.33.16"
 # pnpm 10 blocks dependency postinstall scripts by default.
 onlyBuiltDependencies:
   # esbuild's install script places its platform binary; the Vite build needs it.
@@ -136,6 +142,10 @@ catalog:
 overrides:
   vite@*: "catalog:"
   vitest@*: "catalog:"
+  # 2026-10-29: GHSA-3f7j-7jwc-fxfj, patched in 5.33.16. Exact pin so the
+  # resolver does not fall back to the older mature 5.33.14. Dev-only via
+  # shadcn's @dotenvx/dotenvx CLI; remove when 5.33.16 ages past the floor.
+  systeminformation: "5.33.16"
 peerDependencyRules:
   allowAny:
     - vite

@@ -251,6 +251,15 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "create_annotation",
   "update_annotation",
   "delete_annotation",
+  "sync_status",
+  "sync_connect",
+  "sync_disconnect",
+  "sync_now",
+  "sync_issues",
+  "sync_dismiss_issue",
+  "sync_trash",
+  "sync_restore",
+  "sync_set_device_name",
 ]);
 
 /** Stable ids for the two app-owned storage roots. */

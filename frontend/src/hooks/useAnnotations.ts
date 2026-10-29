@@ -3,6 +3,7 @@ import {
   createAnnotation,
   deleteAnnotation,
   listAnnotations,
+  onSyncApplied,
   updateAnnotation,
 } from "@/lib/bridge";
 import type { Annotation, AnnotationInput, AnnotationPatch } from "@/types/domain";
@@ -44,6 +45,31 @@ export function useAnnotations(bookId: number | null) {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [bookId]);
+
+  // Cloud-folder sync can land annotations while the reader is open. Refetch
+  // only when this book changed; the engine names the affected book ids.
+  useEffect(() => {
+    if (bookId === null) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void onSyncApplied(({ bookIds }) => {
+      if (!bookIds.includes(bookId)) return;
+      void listAnnotations(bookId)
+        .then((annotations) => {
+          if (!cancelled && bookIdRef.current === bookId) {
+            setSnapshot({ bookId, annotations });
+          }
+        })
+        .catch((err: unknown) => console.error("Failed to refresh synced annotations", err));
+    }).then((stop) => {
+      if (cancelled) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, [bookId]);
 

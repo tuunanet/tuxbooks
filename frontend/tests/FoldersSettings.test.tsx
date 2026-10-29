@@ -84,6 +84,16 @@ describe("FoldersSettings", () => {
     expect(screen.getByTestId("folder-row-1")).not.toHaveTextContent("Missing from disk");
   });
 
+  it("explains that a watched folder can be a cloud-synced directory", async () => {
+    renderFolders();
+
+    const hint = await screen.findByTestId("folders-cloud-hint");
+    expect(hint).toHaveTextContent("one your cloud client keeps in sync");
+    expect(hint).toHaveTextContent("Settings > Sync");
+    expect(hint).toHaveTextContent("never carries book files");
+    expect(hint).toHaveTextContent("cannot open a file the client has not downloaded yet");
+  });
+
   it("shows an empty list as an invitation to add a folder", async () => {
     storageReportMock.mockResolvedValue({ ...REPORT, bookLocations: [] });
     renderFolders();

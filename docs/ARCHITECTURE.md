@@ -1,9 +1,11 @@
 # Architecture
 
 tuxbooks is a local-first desktop ebook library manager. There is no backend
-server, no cloud sync, and no network dependency: Chromium (via Electron) is
-the sole desktop web runtime; a native Rust service owns the database and
-the filesystem; Readium and PDFium render books.
+server and no network dependency: Chromium (via Electron) is the sole desktop
+web runtime; a native Rust service owns the database and the filesystem;
+Readium and PDFium render books. Optional cloud-folder sync (ADR 0013) writes
+user state into a folder the user's file-sync client already mirrors; the app
+itself makes no network calls.
 
 **Migration state:** the Electron migration is complete; this doc
 describes the current contract.
@@ -170,7 +172,14 @@ Each has bitten before (or is a known trap of the Electron stack):
 | `db/`                     | sqlx, migrations                                                                                      | tauri, electron               |
 | `repository/`             | sqlx, domain                                                                                          | tauri, epub, pdf              |
 | `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points) | tauri, electron               |
-| method table              | services, domain                                                                                      | sqlx details                  |
+| `sync/`                   | domain, repository, db, services (metadata projection + `LibraryChange`), store, `rpc::EventEmitter`  | tauri, electron, network      |
+| method table              | services, sync, domain                                                                                | sqlx details                  |
+
+The sync subsystem is the one storage engine outside `repository/`: its SQL,
+operation format, and on-disk folder contract change together, so splitting
+them would leave the merge rules and the queries that enforce them in
+different modules. Command and service code still never embed SQL; the
+exception is `sync/` only.
 
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /
@@ -273,6 +282,30 @@ command layer, which batches them into `import-progress` events
 (`{ books: [...] }`, count/time-triggered `ProgressBatcher`). The
 watcher's per-file `import_file` path is unchanged.
 
+## Cloud-folder sync
+
+Optional two-way sync of user-authored state through a folder a cloud client
+already mirrors (`sidecar/src/sync/`, [SYNC.md](SYNC.md), [ADR 0013](adr/0013-cloud-folder-sync.md)).
+The engine never calls a provider API. Local book rows, paths, watched
+locations, and source metadata stay local; the shared set is reading progress,
+annotations, metadata overrides, collections and membership, `last_opened_at`,
+and cover-override blobs.
+
+- Identity: a shared uuid per book, discovered through SHA-256 content-hash
+  aliases. A rewritten file keeps its uuid; independently imported copies
+  converge on the smallest uuid.
+- Transport: immutable per-device operation files under `TuxBooks/ops/`, temp
+  then rename. Duplicate or conflict-copy files dedupe by operation id.
+- Merge: hybrid logical clocks, field-level LWW for annotations/metadata/
+  collections, entity-level LWW for progress/membership/last-opened, and
+  delete-wins tombstones with a 30-day restore.
+- Local changes: triggers write a snapshot into `sync_dirty`; the capture pass
+  uses that snapshot, so a remote projection cannot erase an edit that has not
+  been drained. Cascades from a vanished book or collection are skipped.
+- Background only: a pass runs every 10 seconds and on demand, with a final
+  flush on shutdown. Failures go to `sync_issues` and the Settings > Sync tab;
+  startup, the library, and the reader never wait for sync.
+
 ## Frontend structure
 
 ```
@@ -311,7 +344,8 @@ frontend/src/
                           ReaderNavigation holds the Search, Bookmarks, and
                           Highlights tabs.
         collections/      CollectionDialog
-        settings/         SettingsShell
+        settings/         SettingsShell, SyncSettings (folder connect,
+                          status, issues, trash)
         ui/               shadcn/ui primitives (components.json, radix-nova)
 ```
 

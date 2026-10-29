@@ -148,6 +148,7 @@ impl TestEnv {
             db_path: self.db_path.clone(),
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
+            sync: None,
         })
     }
 
@@ -589,6 +590,8 @@ async fn non_book_files_never_produce_changes() {
     let env = setup().await;
     std::fs::write(env.path("notes.txt"), b"not a book").unwrap();
     std::fs::write(env.path("data.json"), b"{}").unwrap();
+    std::fs::write(env.path("book.epub.bak"), b"pre-embed backup").unwrap();
+    std::fs::write(env.path(".book.epub.tuxbooks-0.tmp"), b"in flight").unwrap();
 
     let deadline = Instant::now() + Duration::from_millis(1000);
     while Instant::now() < deadline {

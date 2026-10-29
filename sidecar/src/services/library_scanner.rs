@@ -235,6 +235,23 @@ mod tests {
     }
 
     #[test]
+    fn backups_and_hidden_temp_files_are_not_books() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(&root.join("book.epub"), b"PK\x03\x04");
+        write_file(&root.join("book.epub.bak"), b"PK\x03\x04");
+        write_file(&root.join("book.pdf.bak"), b"%PDF-1.7");
+        write_file(&root.join(".book.epub.tuxbooks-0.tmp"), b"PK\x03\x04");
+
+        let entries = scan_directory(root).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].path.file_name().unwrap().to_string_lossy(),
+            "book.epub"
+        );
+    }
+
+    #[test]
     fn entries_are_sorted_by_path() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();

@@ -70,7 +70,11 @@ database-side as overrides (the embed flow reports them as still overridden).
 Library subjects are not written to `/Keywords` — that mapping is a deliberate
 follow-up, so `/Keywords` stays a read-only file property for now. A one-time
 `<file>.bak` copy of the original is made before the first write
-(later embeds keep it), so the pre-embed file is always recoverable.
+(later embeds keep it), so the pre-embed file is always recoverable. If the
+book folder is cloud-synced, the client carries the backup with the book, and
+deleting it there removes it on every machine. TuxBooks never deletes or
+overwrites an existing backup. Once every copy of the backup is gone, the
+original cannot be recovered; the next embed backs up the file as it is then.
 
 ## Error handling
 
