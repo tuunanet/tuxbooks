@@ -87,6 +87,14 @@ describe("Sidebar", () => {
     expect(onSectionChange).toHaveBeenCalledWith({ kind: "settings" });
   });
 
+  it("navigates to Reading history", async () => {
+    const onSectionChange = vi.fn();
+    renderSidebar(onSectionChange);
+
+    await userEvent.click(screen.getByRole("button", { name: "Reading history" }));
+    expect(onSectionChange).toHaveBeenCalledWith({ kind: "reading-history" });
+  });
+
   it("opens the create-collection dialog", async () => {
     renderSidebar(vi.fn());
 

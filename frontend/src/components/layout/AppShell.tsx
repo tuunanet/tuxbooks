@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { BookDetail } from "@/components/books/BookDetail";
+import { ReadingHistoryView } from "@/components/history/ReadingHistoryView";
 import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
@@ -91,6 +92,8 @@ function Shell() {
           <BookDetail />
         ) : app.section.kind === "settings" ? (
           <SettingsShell />
+        ) : app.section.kind === "reading-history" ? (
+          <ReadingHistoryView />
         ) : (
           /* Smart and collection sections share the library view; collection
              filtering happens inside (milestone 10). */

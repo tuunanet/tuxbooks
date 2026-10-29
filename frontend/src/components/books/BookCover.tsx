@@ -4,7 +4,7 @@ import { coverFileUrl } from "@/lib/bridge";
 import type { Book } from "@/types/domain";
 
 interface BookCoverProps {
-  book: Book;
+  book: Pick<Book, "title" | "coverPath">;
   className?: string;
   initialClassName?: string;
 }

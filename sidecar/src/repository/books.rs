@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::domain::Book;
 use crate::domain::NewBook;
+use crate::domain::ReadingHistoryBook;
 use crate::domain::SearchHit;
 use crate::error::AppError;
 use crate::repository::library_locations::{list_locations, location_index, owning_location};
@@ -90,6 +91,49 @@ async fn insert_file_row(pool: &SqlitePool, book: &NewBook) -> Result<i64, AppEr
     .await?;
     crate::repository::metadata::record_imported_source(pool, id, book).await?;
     Ok(id)
+}
+
+/// Insert a file row already bound to a known durable book. Used by relink:
+/// the book comes from Reading history, so the new location must not mint a
+/// second durable record. The 0019 insert trigger sees the existing
+/// `book_uid` and leaves the durable snapshot alone (`ON CONFLICT DO
+/// NOTHING`); the caller records the fresh source metadata afterwards.
+pub async fn insert_file_for_book(
+    pool: &SqlitePool,
+    durable_id: i64,
+    book: &NewBook,
+) -> Result<i64, AppError> {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(durable_id)
+        .fetch_optional(pool)
+        .await?;
+    let uid = uid.ok_or(AppError::NotFound)?;
+    let file_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO books (
+            book_uid, path, title, subtitle, author, publisher, language, isbn,
+            description, cover_path, file_size, file_mtime
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        RETURNING id
+        "#,
+    )
+    .bind(&uid)
+    .bind(&book.path)
+    .bind(&book.title)
+    .bind(&book.subtitle)
+    .bind(&book.author)
+    .bind(&book.publisher)
+    .bind(&book.language)
+    .bind(&book.isbn)
+    .bind(&book.description)
+    .bind(&book.cover_path)
+    .bind(book.file_size)
+    .bind(book.file_mtime)
+    .fetch_one(pool)
+    .await?;
+    crate::repository::metadata::record_imported_source(pool, file_id, book).await?;
+    Ok(file_id)
 }
 
 /// Update an existing file row (matched by path). Returns false if no row
@@ -207,6 +251,52 @@ pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Bo
     }
 }
 
+/// A Reading-history book selected for relink: its durable key and the cover
+/// snapshot used as the fallback when the picked file cannot extract one.
+#[derive(Debug, Clone)]
+pub struct RelinkTarget {
+    pub book_uid: String,
+    pub cover_path: Option<String>,
+}
+
+/// The durable record a relink will attach a file to, or `None` when the id
+/// names no book.
+pub async fn relink_target(
+    pool: &SqlitePool,
+    durable_id: i64,
+) -> Result<Option<RelinkTarget>, AppError> {
+    let target = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT uid, cover_path FROM book_records WHERE id = ?1",
+    )
+    .bind(durable_id)
+    .fetch_optional(pool)
+    .await?
+    .map(|(book_uid, cover_path)| RelinkTarget {
+        book_uid,
+        cover_path,
+    });
+    Ok(target)
+}
+
+/// Whether a durable book still has any file row. Relink only applies to a
+/// Reading-history book, which by definition has none.
+pub async fn has_file_rows(pool: &SqlitePool, book_uid: &str) -> Result<bool, AppError> {
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE book_uid = ?1")
+        .bind(book_uid)
+        .fetch_one(pool)
+        .await?;
+    Ok(rows > 0)
+}
+
+/// A relinked book has a file again, so its snapshot is no longer waiting.
+pub async fn mark_metadata_available(pool: &SqlitePool, durable_id: i64) -> Result<(), AppError> {
+    sqlx::query("UPDATE book_records SET metadata_state = 'available' WHERE id = ?1")
+        .bind(durable_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Library entries: one per durable book that currently has a file.
 pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT book_uid) FROM books")
@@ -219,6 +309,36 @@ pub async fn list_books(pool: &SqlitePool) -> Result<Vec<Book>, AppError> {
     let books = sqlx::query_as::<_, Book>(&format!(
         "SELECT {BOOK_COLUMNS}{BOOK_FROM} ORDER BY bf.title COLLATE NOCASE, br.id"
     ))
+    .fetch_all(pool)
+    .await?;
+    Ok(books)
+}
+
+/// Reading history: durable books with no file rows (ADR 0014 D6). Progress
+/// and annotation count are read from the state tables, not the migration
+/// snapshot, so they stay current while the file is absent. `match_query` is
+/// already-sanitized FTS5 MATCH syntax; `None` lists every history book.
+pub async fn list_reading_history(
+    pool: &SqlitePool,
+    match_query: Option<&str>,
+) -> Result<Vec<ReadingHistoryBook>, AppError> {
+    let books = sqlx::query_as::<_, ReadingHistoryBook>(
+        r#"
+        SELECT br.id, br.uid AS book_uid, br.title, br.author, br.cover_path,
+               rp.progress_percent,
+               (SELECT COUNT(*) FROM annotations a WHERE a.book_uid = br.uid)
+                   AS annotation_count,
+               br.last_opened_at, br.metadata_state
+        FROM book_records br
+        LEFT JOIN reading_progress rp ON rp.book_uid = br.uid
+        WHERE NOT EXISTS (SELECT 1 FROM books b WHERE b.book_uid = br.uid)
+          AND (?1 IS NULL OR br.id IN (
+              SELECT rowid FROM books_fts WHERE books_fts MATCH ?1
+          ))
+        ORDER BY COALESCE(br.last_opened_at, br.created_at) DESC, br.id
+        "#,
+    )
+    .bind(match_query)
     .fetch_all(pool)
     .await?;
     Ok(books)

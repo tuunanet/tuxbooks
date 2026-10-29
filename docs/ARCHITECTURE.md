@@ -69,10 +69,10 @@ in `frontend/tests/security/`:
 - `electron/main/ipcPolicy.ts` — the `tuxbooks:invoke` policy: sender must
   be the app page (`app://bundle` or the dev server), method allowlist,
   per-method param schemas, and an 8 MB params cap. `scan_library`,
-  `reconnect_book`, and `set_book_cover` accept only paths main itself
-  issued through a native dialog; `import_paths` accepts drag-and-drop
-  paths and `unwatch_locations` names rows from the watch list (both
-  shape-checked). Reveal takes a book id and resolves the path via the
+  `reconnect_book`, `relink_book`, and `set_book_cover` accept only paths
+  main itself issued through a native dialog; `import_paths` accepts
+  drag-and-drop paths and `unwatch_locations` names rows from the watch list
+  (both shape-checked). Reveal takes a book id and resolves the path via the
   sidecar.
 - `electron/main/ipcHandlers.ts` — the ipcMain handler wiring: invoke, the
   native dialogs, and reveal. Every channel gates its sender (the same

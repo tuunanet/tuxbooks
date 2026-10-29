@@ -121,6 +121,27 @@ impl Serialize for Book {
     }
 }
 
+/// One Reading-history row: a durable book with no file rows (ADR 0014 D6).
+/// `id` is the durable book record id, so the row keeps a stable `bookId`
+/// even when there is no file to read. Metadata comes from the durable
+/// snapshot, while progress and annotation count are read from the state
+/// tables so they stay current while the file is gone.
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingHistoryBook {
+    pub id: i64,
+    pub book_uid: String,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub cover_path: Option<String>,
+    pub progress_percent: Option<f64>,
+    pub annotation_count: i64,
+    pub last_opened_at: Option<DateTime<Utc>>,
+    /// `available` when the durable snapshot has metadata, `waiting_for_file`
+    /// for a record recovered from the sync mirror without one.
+    pub metadata_state: String,
+}
+
 /// One library full-text search hit: the book's identity plus an FTS5
 /// snippet taken from whichever indexed column matched best.
 #[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]

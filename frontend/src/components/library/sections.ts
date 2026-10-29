@@ -15,6 +15,8 @@ export function sectionTitle(section: LibrarySection): string {
       return SMART_SECTION_TITLES[section.id];
     case "collection":
       return "Collection";
+    case "reading-history":
+      return "Reading history";
     case "settings":
       return "Settings";
   }

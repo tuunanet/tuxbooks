@@ -141,6 +141,13 @@ struct QueryArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ReadingHistoryArgs {
+    #[serde(default)]
+    query: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PathArgs {
     path: String,
 }
@@ -229,6 +236,10 @@ async fn dispatch(
         "get_storage_stats" => Ok(call!(commands::library::get_storage_stats(state))),
         "get_startup_recovery" => Ok(call!(commands::library::get_startup_recovery(state))),
         "list_books" => Ok(call!(commands::books::list_books(state))),
+        "list_reading_history" => {
+            let p: ReadingHistoryArgs = parse_params(params)?;
+            Ok(call!(commands::books::list_reading_history(state, p.query)))
+        }
         "identity_backfill_status" => Ok(call!(commands::books::identity_backfill_status(state))),
         "migration_issues" => Ok(call!(commands::books::migration_issues(state))),
         "migration_dismiss_issue" => {
@@ -266,6 +277,12 @@ async fn dispatch(
         "reconnect_book" => {
             let p: ReconnectArgs = parse_params(params)?;
             Ok(call!(commands::library::reconnect_book(
+                state, events, p.book_id, p.path
+            )))
+        }
+        "relink_book" => {
+            let p: ReconnectArgs = parse_params(params)?;
+            Ok(call!(commands::library::relink_book(
                 state, events, p.book_id, p.path
             )))
         }

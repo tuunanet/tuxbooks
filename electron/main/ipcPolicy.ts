@@ -85,6 +85,7 @@ function requireResourcePath(params: Record<string, unknown>): void {
 const ISSUED_PATH_METHODS = new Set([
   "scan_library",
   "reconnect_book",
+  "relink_book",
   "set_book_cover",
   "sync_connect",
 ]);
@@ -143,7 +144,7 @@ function validateIssuedPaths(
     requireIssued(issued, "directory", record.path, "path");
     return;
   }
-  if (method === "reconnect_book") {
+  if (method === "reconnect_book" || method === "relink_book") {
     requireBookId(record);
     requireLibraryPath(record.path, "path");
     requireIssued(issued, "book-file", record.path, "path");
@@ -216,6 +217,13 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
     return;
   }
   if (method === "search_books" && typeof record.query !== "string") {
+    throw policyError("invalid query");
+  }
+  if (
+    method === "list_reading_history" &&
+    record.query !== undefined &&
+    typeof record.query !== "string"
+  ) {
     throw policyError("invalid query");
   }
   if (method === "create_collection" && typeof record.name !== "string") {

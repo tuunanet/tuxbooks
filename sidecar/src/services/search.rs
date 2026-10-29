@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-use crate::domain::SearchHit;
+use crate::domain::{ReadingHistoryBook, SearchHit};
 use crate::error::AppError;
 use crate::repository::books;
 
@@ -30,6 +30,23 @@ pub async fn search_books(pool: &SqlitePool, query: &str) -> Result<Vec<SearchHi
     let match_query = build_fts_query(query)
         .ok_or_else(|| AppError::InvalidInput("search query is empty".into()))?;
     books::search_fts(pool, &match_query).await
+}
+
+/// Reading-history list with an optional user search. An empty or absent
+/// query lists every book without a file; otherwise the same FTS5 index and
+/// sanitizer as library search apply, with the opposite membership filter.
+pub async fn list_reading_history(
+    pool: &SqlitePool,
+    query: Option<&str>,
+) -> Result<Vec<ReadingHistoryBook>, AppError> {
+    let match_query = match query.map(str::trim).filter(|query| !query.is_empty()) {
+        Some(query) => Some(
+            build_fts_query(query)
+                .ok_or_else(|| AppError::InvalidInput("search query is empty".into()))?,
+        ),
+        None => None,
+    };
+    books::list_reading_history(pool, match_query.as_deref()).await
 }
 
 #[cfg(test)]
