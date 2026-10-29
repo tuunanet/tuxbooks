@@ -1,4 +1,4 @@
-import type { Annotation, Book, CollectionSummary } from "@/types/domain";
+import type { Annotation, Book, CollectionSummary, ReadingHistoryBook } from "@/types/domain";
 
 export function makeBook(overrides: Partial<Book> = {}): Book {
   return {
@@ -26,6 +26,23 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     seriesName: null,
     progressPercent: null,
     progressUpdatedAt: null,
+    ...overrides,
+  };
+}
+
+export function makeReadingHistoryBook(
+  overrides: Partial<ReadingHistoryBook> = {},
+): ReadingHistoryBook {
+  return {
+    id: 41,
+    bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+    title: "A Fine History",
+    author: "Ada Lovelace",
+    coverPath: null,
+    progressPercent: 42,
+    annotationCount: 3,
+    lastOpenedAt: "2026-03-01T00:00:00.000Z",
+    metadataState: "available",
     ...overrides,
   };
 }

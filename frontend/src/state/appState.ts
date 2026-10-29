@@ -22,6 +22,7 @@ export type SmartSectionId =
 export type LibrarySection =
   | { kind: "smart"; id: SmartSectionId }
   | { kind: "collection"; id: number }
+  | { kind: "reading-history" }
   | { kind: "settings" };
 
 export interface AppState {

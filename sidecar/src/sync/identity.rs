@@ -90,7 +90,7 @@ pub async fn ensure_book_identity(
     Ok(identity)
 }
 
-fn hash_file(path: &Path) -> Result<(String, i64, i64), std::io::Error> {
+pub(crate) fn hash_file(path: &Path) -> Result<(String, i64, i64), std::io::Error> {
     use std::io::Read;
 
     let mut file = std::fs::File::open(path)?;
@@ -347,6 +347,20 @@ pub async fn mark_identity_dirty(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// The durable uid a content hash is already known by, if any. Relink uses
+/// this to refuse attaching a file whose bytes belong to another book.
+pub(crate) async fn alias_book_uid(
+    pool: &SqlitePool,
+    content_hash: &str,
+) -> Result<Option<String>, AppError> {
+    let uid: Option<String> =
+        sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
+            .bind(content_hash)
+            .fetch_optional(pool)
+            .await?;
+    Ok(uid)
 }
 
 pub async fn canonical_book_uid(pool: &SqlitePool, uid: &str) -> Result<String, AppError> {

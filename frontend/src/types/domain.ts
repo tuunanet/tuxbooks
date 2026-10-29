@@ -107,6 +107,23 @@ export interface LibraryStats {
 }
 
 /**
+ * One Reading-history row (mirrors `domain::ReadingHistoryBook`): a durable
+ * book with no file rows. `id` is the durable book id and stays the stable
+ * `bookId` even while there is no file to read.
+ */
+export interface ReadingHistoryBook {
+  id: number;
+  bookUid: string;
+  title: string | null;
+  author: string | null;
+  coverPath: string | null;
+  progressPercent: number | null;
+  annotationCount: number;
+  lastOpenedAt: string | null;
+  metadataState: "available" | "waiting_for_file";
+}
+
+/**
  * One full-text library search hit (mirrors `domain::SearchHit`). The
  * snippet comes from whichever indexed column matched best, with `<em>` /
  * `</em>` markers around the matching text.

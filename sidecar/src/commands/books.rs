@@ -20,6 +20,16 @@ pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
     books::list_books(&state.db).await
 }
 
+/// Reading history: durable books with no file rows, newest activity first.
+/// `query` is optional user text; when present, the same FTS5 index and
+/// sanitizer as library search apply with the opposite membership filter.
+pub async fn list_reading_history(
+    state: &AppState,
+    query: Option<String>,
+) -> Result<Vec<crate::domain::ReadingHistoryBook>, AppError> {
+    crate::services::search::list_reading_history(&state.db, query.as_deref()).await
+}
+
 /// Durable progress of the background content-hash pass (ADR 0014 D8).
 pub async fn identity_backfill_status(
     state: &AppState,

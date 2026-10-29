@@ -580,6 +580,32 @@ pub async fn reconnect_book(
     Ok(book)
 }
 
+/// Relink a Reading-history book to a file chosen by the user (ADR 0014 D6).
+/// The book keeps its durable identity and every piece of state while the new
+/// file row makes it a library membership again.
+pub async fn relink_book(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+    path: String,
+) -> Result<crate::domain::Book, AppError> {
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidInput("book path is empty".into()));
+    }
+    let covers = covers_dir(&state.db_path);
+    let pdfium_dirs = pdfium_library_dirs();
+    let book = crate::services::library_reconciler::relink_book(
+        &state.db,
+        book_id,
+        std::path::Path::new(&path),
+        &covers,
+        &pdfium_dirs,
+    )
+    .await?;
+    emit_changed_book(events, book.clone());
+    Ok(book)
+}
+
 /// Aggregate stats for the Application Data tab (data-management spec): each
 /// watched location with its book count and total book bytes, the library's
 /// total book bytes, and the catalog row counts.

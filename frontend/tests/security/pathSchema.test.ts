@@ -314,6 +314,7 @@ describe("boundary configuration tables (T-5)", () => {
       "scan_library",
       "import_paths",
       "reconnect_book",
+      "relink_book",
       "set_book_cover",
       "get_book_bytes",
       "get_book_resource",

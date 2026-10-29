@@ -576,6 +576,85 @@ pub async fn reconnect_book(
         .ok_or(AppError::NotFound)
 }
 
+/// Relink a Reading-history book to a file the user picked. The book has no
+/// file row (that is what puts it in Reading history), so this attaches a new
+/// file row to the *existing* durable record instead of importing a new book.
+/// The chosen bytes must not already belong to another book: the content-hash
+/// aliases are checked before the row is written. Reading progress,
+/// annotations, collections, metadata overrides, and last-opened stay keyed by
+/// the same `book_uid`. A hash failure keeps the file row and records a relink
+/// issue, exactly like an import.
+pub async fn relink_book(
+    pool: &SqlitePool,
+    book_id: i64,
+    path: &Path,
+    covers_dir: &Path,
+    pdfium_dirs: &[PathBuf],
+) -> Result<Book, AppError> {
+    if !path.is_file() {
+        return Err(AppError::InvalidInput(format!(
+            "no file exists at {}",
+            path.display()
+        )));
+    }
+    let known = books::relink_target(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if books::has_file_rows(pool, &known.book_uid).await? {
+        return Err(AppError::InvalidInput(
+            "that book is still in the library; relink is for Reading history".into(),
+        ));
+    }
+    if books::find_file_id_by_path(pool, &path.to_string_lossy())
+        .await?
+        .is_some()
+    {
+        return Err(AppError::InvalidInput(
+            "that file is already in the library".into(),
+        ));
+    }
+
+    let parsed = crate::services::library_scanner::parse_book(path).map_err(|err| {
+        AppError::InvalidInput(format!("that file is not a readable book: {err}"))
+    })?;
+    let new_book = crate::services::book_importer::new_book_from_parsed(
+        path,
+        &parsed,
+        covers_dir,
+        pdfium_dirs,
+        known.cover_path.as_deref(),
+    )?;
+
+    // Hash before writing the row: if these bytes already belong to another
+    // durable book, binding them here would merge two identities by accident.
+    // A hash failure is not fatal — the relink proceeds and is marked failed.
+    let hashed = crate::sync::identity::hash_file(path).ok();
+    if let Some((hash, _, _)) = &hashed {
+        if let Some(alias) = crate::sync::identity::alias_book_uid(pool, hash).await? {
+            let alias = crate::sync::identity::canonical_book_uid(pool, &alias).await?;
+            if alias != known.book_uid {
+                return Err(AppError::InvalidInput(
+                    "that file belongs to another book in the library".into(),
+                ));
+            }
+        }
+    }
+
+    let file_id = books::insert_file_for_book(pool, book_id, &new_book).await?;
+    match hashed {
+        Some((hash, size, mtime)) => {
+            crate::sync::identity::bind_hash(pool, file_id, &hash, size, mtime).await?;
+        }
+        None => {
+            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+        }
+    }
+    books::mark_metadata_available(pool, book_id).await?;
+    books::get_book(pool, book_id)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
 /// Shared reconciler handle used by the watcher thread and app state.
 pub type SharedReconciler = Arc<Reconciler>;
 

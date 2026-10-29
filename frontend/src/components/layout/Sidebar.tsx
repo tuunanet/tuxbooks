@@ -99,6 +99,12 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
                 </ItemButton>
               );
             })}
+            <ItemButton
+              active={active.kind === "reading-history"}
+              onClick={() => onSectionChange({ kind: "reading-history" })}
+            >
+              Reading history
+            </ItemButton>
           </div>
         </div>
 

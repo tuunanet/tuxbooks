@@ -33,6 +33,13 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     expect(() =>
       validateInvokeParams("search_books", { query: "verne" }, new IssuedPaths()),
     ).not.toThrow();
+    expect(() => validateInvokeParams("list_reading_history", {}, new IssuedPaths())).not.toThrow();
+    expect(() =>
+      validateInvokeParams("list_reading_history", { query: "verne" }, new IssuedPaths()),
+    ).not.toThrow();
+    expect(() =>
+      validateInvokeParams("list_reading_history", { query: 7 }, new IssuedPaths()),
+    ).toThrow(/invalid query/);
   });
 
   it("rejects unknown methods and non-object params", () => {
@@ -194,6 +201,35 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       expect(() =>
         validateInvokeParams(
           "reconnect_book",
+          { bookId: 0, path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/invalid bookId/);
+    });
+  });
+
+  describe("relink_book", () => {
+    it("accepts a dialog-issued file for a valid book id", () => {
+      expect(() =>
+        validateInvokeParams(
+          "relink_book",
+          { bookId: 7, path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).not.toThrow();
+    });
+
+    it("rejects un-issued paths and invalid book ids", () => {
+      expect(() =>
+        validateInvokeParams(
+          "relink_book",
+          { bookId: 7, path: "/etc/passwd" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/not issued/);
+      expect(() =>
+        validateInvokeParams(
+          "relink_book",
           { bookId: 0, path: "/tmp/found.epub" },
           issued({ "book-file": ["/tmp/found.epub"] }),
         ),

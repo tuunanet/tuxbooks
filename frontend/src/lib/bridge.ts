@@ -16,6 +16,7 @@ import type {
   LibraryChange,
   LibraryStats,
   MetadataFields,
+  ReadingHistoryBook,
   ReadingProgressInput,
   ReadingProgressRecord,
   SearchHit,
@@ -32,6 +33,7 @@ export type {
   LibraryChange,
   LibraryStats,
   MetadataFields,
+  ReadingHistoryBook,
 } from "@/types/domain";
 export type { StorageRootId } from "../../../electron/shared/pathSchema";
 export type {
@@ -164,6 +166,18 @@ export function listBooks(): Promise<Book[]> {
   return invoke("list_books");
 }
 
+/**
+ * Reading history: durable books with no file rows, newest activity first.
+ * An optional query searches the same FTS index with the opposite membership
+ * filter, so library books never appear here.
+ */
+export function listReadingHistory(query?: string): Promise<ReadingHistoryBook[]> {
+  return invoke(
+    "list_reading_history",
+    query === undefined || query.trim() === "" ? {} : { query },
+  );
+}
+
 /** Full-text library search (FTS5 over titles, authors, publishers, and more). */
 export function searchLibrary(query: string): Promise<SearchHit[]> {
   return invoke("search_books", { query });
@@ -288,6 +302,16 @@ export function pickCoverImage(): Promise<string | null> {
 /** Reconnect an unavailable book to a newly located file, keeping its identity. */
 export function reconnectBook(bookId: number, path: string): Promise<Book> {
   return invoke("reconnect_book", { bookId, path });
+}
+
+/**
+ * Attach a picked file to a Reading-history book. The durable book returns to
+ * the library with its progress, annotations, collections, metadata overrides,
+ * and last-opened intact; the backend rejects bytes that already belong to a
+ * different book.
+ */
+export function relinkBook(bookId: number, path: string): Promise<Book> {
+  return invoke("relink_book", { bookId, path });
 }
 
 /**

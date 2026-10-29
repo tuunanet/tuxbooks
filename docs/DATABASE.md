@@ -270,8 +270,11 @@ metadata owner and the path live in different tables: a trigger on
 `book_records` refreshes the metadata columns, and triggers on `books`
 refresh the path when a file is added, moved, made unavailable, or removed.
 Migration 0019 rebuilt the index and dropped the old external-content
-triggers. Search code joins `books_fts.rowid = book_records.id`, joins the
-active file so Reading-history books are excluded, and uses
+triggers; migration 0020 keeps a durable book indexed after its last file
+row is removed (with a NULL path), so Reading history is searchable too.
+Search code joins `books_fts.rowid = book_records.id`; library results join
+the active file so Reading-history books are excluded, and Reading-history
+results require the absence of a file. Both use
 `snippet(…, -1, …)` (automatic column: the snippet comes from whichever column
 matched best). The path column doubles as the file-name field — the tokenizer
 splits on `/` and `.`, so bare file-name tokens match. If you change the
