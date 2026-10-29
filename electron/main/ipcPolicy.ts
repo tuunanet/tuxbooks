@@ -186,101 +186,111 @@ function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPath
 /** Bulk Forget is a selection from loaded rows; bound it like a batch. */
 const MAX_BULK_BOOK_IDS = 1000;
 
-function validateBookLifecycleShape(method: string, record: Record<string, unknown>): boolean {
-  if (method === "forget_books") {
-    const ids = record.bookIds;
-    if (
-      !Array.isArray(ids) ||
-      ids.length > MAX_BULK_BOOK_IDS ||
-      ids.some((id) => !isValidBookId(id))
-    ) {
-      throw policyError("invalid bookIds");
-    }
-    return true;
+type ShapeCheck = (record: Record<string, unknown>) => void;
+
+function requirePositiveId(value: unknown, label: string): void {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw policyError(`invalid ${label}`);
   }
-  if (method === "restore_book") {
-    const trashId = record.trashId;
-    if (typeof trashId !== "number" || !Number.isSafeInteger(trashId) || trashId < 1) {
-      throw policyError("invalid trashId");
-    }
-    const mode = record.mode;
-    if (mode !== undefined && mode !== "replace" && mode !== "keep" && mode !== "merge") {
-      throw policyError("invalid restore mode");
-    }
-    return true;
-  }
-  return false;
 }
 
-/** Sync methods with a small id or name payload; true when handled. */
-function validateSyncShape(method: string, record: Record<string, unknown>): boolean {
-  if (method === "sync_dismiss_issue" || method === "sync_restore") {
-    const id = record.id;
-    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) {
-      throw policyError("invalid sync id");
-    }
-    return true;
-  }
-  if (method === "sync_set_device_name") {
-    const name = record.name;
-    if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
-      throw policyError("invalid device name");
-    }
-    return true;
-  }
-  return false;
-}
-
-/** Per-method parameter shapes that do not carry issued paths. */
-function validateMethodShape(method: string, record: Record<string, unknown>): void {
+function validatePathList(record: Record<string, unknown>): void {
   // The two path-list methods are not issued-path methods: drag-and-drop
   // never passes a dialog (`import_paths`), and `unwatch_locations` names
   // rows the renderer read back from `get_storage_stats`. Neither can be
   // gated on a dialog claim, so both are bound to the path schema and the
   // count instead.
-  if (method === "import_paths" || method === "unwatch_locations") {
-    const paths = record.paths;
-    if (
-      !Array.isArray(paths) ||
-      paths.length > MAX_IMPORT_PATHS ||
-      paths.some((candidate) => typeof candidate !== "string" || !isValidLibraryPath(candidate))
-    ) {
-      throw policyError("invalid paths");
-    }
-    return;
-  }
-  if (method === "search_books" && typeof record.query !== "string") {
-    throw policyError("invalid query");
-  }
+  const paths = record.paths;
   if (
-    method === "list_reading_history" &&
-    record.query !== undefined &&
-    typeof record.query !== "string"
+    !Array.isArray(paths) ||
+    paths.length > MAX_IMPORT_PATHS ||
+    paths.some((candidate) => typeof candidate !== "string" || !isValidLibraryPath(candidate))
   ) {
+    throw policyError("invalid paths");
+  }
+}
+
+function validateSearchQuery(record: Record<string, unknown>): void {
+  if (typeof record.query !== "string") throw policyError("invalid query");
+}
+
+function validateOptionalSearchQuery(record: Record<string, unknown>): void {
+  if (record.query !== undefined && typeof record.query !== "string") {
     throw policyError("invalid query");
   }
-  if (method === "create_collection" && typeof record.name !== "string") {
-    throw policyError("invalid name");
+}
+
+function validateCollectionName(record: Record<string, unknown>): void {
+  if (typeof record.name !== "string") throw policyError("invalid name");
+}
+
+function validateForgetBooks(record: Record<string, unknown>): void {
+  const ids = record.bookIds;
+  if (
+    !Array.isArray(ids) ||
+    ids.length > MAX_BULK_BOOK_IDS ||
+    ids.some((id) => !isValidBookId(id))
+  ) {
+    throw policyError("invalid bookIds");
   }
-  if (validateBookLifecycleShape(method, record)) {
-    return;
+}
+
+function validateRestoreBook(record: Record<string, unknown>): void {
+  requirePositiveId(record.trashId, "trashId");
+  const mode = record.mode;
+  if (mode !== undefined && mode !== "replace" && mode !== "keep" && mode !== "merge") {
+    throw policyError("invalid restore mode");
   }
-  if (validateSyncShape(method, record)) {
-    return;
+}
+
+function validateSyncId(record: Record<string, unknown>): void {
+  requirePositiveId(record.id, "sync id");
+}
+
+function validateSyncDeviceName(record: Record<string, unknown>): void {
+  const name = record.name;
+  if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
+    throw policyError("invalid device name");
   }
-  if (BOOK_ID_METHODS.has(method)) {
-    requireBookId(record);
-  }
-  if (method === "remove_book_file") {
-    const fileId = record.fileId;
-    if (typeof fileId !== "number" || !Number.isSafeInteger(fileId) || fileId < 1) {
-      throw policyError("invalid fileId");
-    }
-  }
-  if (method === "get_book_resource") {
-    requireResourcePath(record);
-  }
-  if (method === "get_book_bytes") {
-    requireByteRange(record);
-  }
+}
+
+function validateBookFile(record: Record<string, unknown>): void {
+  requireBookId(record);
+  requirePositiveId(record.fileId, "fileId");
+}
+
+function validateBookResource(record: Record<string, unknown>): void {
+  requireBookId(record);
+  requireResourcePath(record);
+}
+
+function validateBookBytes(record: Record<string, unknown>): void {
+  requireBookId(record);
+  requireByteRange(record);
+}
+
+/** Explicit shapes for methods that need more than a book id. */
+const METHOD_SHAPES = new Map<string, ShapeCheck>([
+  ["import_paths", validatePathList],
+  ["unwatch_locations", validatePathList],
+  ["search_books", validateSearchQuery],
+  ["list_reading_history", validateOptionalSearchQuery],
+  ["create_collection", validateCollectionName],
+  ["forget_books", validateForgetBooks],
+  ["restore_book", validateRestoreBook],
+  ["sync_dismiss_issue", validateSyncId],
+  ["sync_restore", validateSyncId],
+  ["sync_set_device_name", validateSyncDeviceName],
+  ["remove_book_file", validateBookFile],
+  ["get_book_resource", validateBookResource],
+  ["get_book_bytes", validateBookBytes],
+]);
+
+for (const method of BOOK_ID_METHODS) {
+  if (!METHOD_SHAPES.has(method)) METHOD_SHAPES.set(method, requireBookId);
+}
+
+/** Per-method parameter shapes that do not carry issued paths. */
+function validateMethodShape(method: string, record: Record<string, unknown>): void {
+  METHOD_SHAPES.get(method)?.(record);
 }

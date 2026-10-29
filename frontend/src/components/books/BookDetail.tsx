@@ -1,10 +1,12 @@
 import { Fragment, useState } from "react";
-import { ArrowLeft, BookOpen, FileWarning } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
 import { BookBookmarksPanel } from "./BookBookmarksPanel";
+import { BookFileLocations } from "./BookFileLocations";
+import { BookReadingActions } from "./BookReadingActions";
 import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
@@ -15,8 +17,6 @@ import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
-import type { BookFile } from "@/lib/bridge";
-import { formatMb } from "@/lib/format";
 import { providerLinkLabel } from "@/lib/providers";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
@@ -26,13 +26,6 @@ function formatDate(iso: string | null): string {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(new Date(iso));
-}
-
-/** Exact-enough sizes; a small EPUB must not read as "0.0 MB". */
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return formatMb(bytes);
 }
 
 /**
@@ -87,23 +80,6 @@ export function BookDetail() {
     );
   }
 
-  // Before the locations query resolves, the active file from `list_books`
-  // is the one fact the details already know. The fallback keeps the path
-  // visible without pretending a second copy exists.
-  const locations: BookFile[] =
-    files.length > 0
-      ? files
-      : [
-          {
-            id: -1,
-            path: book.path,
-            available: book.available,
-            fileSize: book.fileSize,
-            fileMtime: book.fileMtime,
-            addedAt: book.addedAt,
-            active: true,
-          },
-        ];
   const removeFile = async (fileId: number) => {
     if (await removeCopy(book.id, fileId)) await refreshFiles();
   };
@@ -145,50 +121,12 @@ export function BookDetail() {
             </Badge>
           )}
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {!book.available ? (
-              // Missing file: recovery replaces the reading entry point. The
-              // row survives on the backend, so reconnecting keeps progress.
-              <div
-                data-testid="detail-missing"
-                className="w-full rounded-md border border-destructive/50 bg-destructive/10 p-3"
-              >
-                <p className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <FileWarning data-icon="inline-start" className="size-4" />
-                  File unavailable
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  The source file is missing at its recorded location. Locate it to keep this book's
-                  reading progress, or remove it from the library.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    data-testid="detail-locate"
-                    onClick={() => void locateBook(book.id)}
-                  >
-                    Locate File…
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    data-testid="detail-remove"
-                    onClick={() => void removeBookFromLibrary(book.id)}
-                  >
-                    Remove from Library
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                data-testid="detail-continue"
-                onClick={() => dispatch({ type: "open-reader", bookId: book.id })}
-              >
-                <BookOpen data-icon="inline-start" />
-                Continue Reading
-              </Button>
-            )}
-          </div>
+          <BookReadingActions
+            book={book}
+            onLocate={() => void locateBook(book.id)}
+            onRemoveFromLibrary={() => void removeBookFromLibrary(book.id)}
+            onContinue={() => dispatch({ type: "open-reader", bookId: book.id })}
+          />
         </div>
       </div>
 
@@ -250,63 +188,11 @@ export function BookDetail() {
             </dl>
           </div>
 
-          <div className="mt-8">
-            <h3 className="text-sm font-medium text-muted-foreground">File locations</h3>
-            <ul
-              data-testid="detail-file-locations"
-              className="mt-2 divide-y rounded-lg border text-sm"
-            >
-              {locations.map((file) => (
-                <li
-                  key={file.id}
-                  data-testid={`detail-file-${file.id}`}
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <code className="block break-all text-xs text-muted-foreground">
-                      {file.path}
-                    </code>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      {file.active && (
-                        <Badge
-                          variant="secondary"
-                          data-testid={`detail-file-active-${file.id}`}
-                          className="text-[10px]"
-                        >
-                          Reading from
-                        </Badge>
-                      )}
-                      {file.available ? (
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {formatFileSize(file.fileSize)}
-                        </span>
-                      ) : (
-                        <Badge variant="destructive" className="text-[10px]">
-                          Missing
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  {locations.length > 1 && file.id > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      data-testid={`detail-file-remove-${file.id}`}
-                      onClick={() => void removeFile(file.id)}
-                    >
-                      Remove copy
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {locations.length > 1 && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                These copies share progress, annotations, and collections. Removing one keeps the
-                book and your reading data; the file on disk is never touched.
-              </p>
-            )}
-          </div>
+          <BookFileLocations
+            book={book}
+            files={files}
+            onRemove={(fileId) => void removeFile(fileId)}
+          />
 
           <div className="mt-8">
             <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
