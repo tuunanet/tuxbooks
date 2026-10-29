@@ -18,7 +18,7 @@ use crate::domain::{
 };
 use crate::error::AppError;
 use crate::repository::metadata;
-use crate::sync::model::TRASH_DAYS;
+use crate::sync::model::{MAX_FIELD_STRING_BYTES, TRASH_DAYS};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 struct BookRowSnapshot {
@@ -78,6 +78,12 @@ struct AnnotationSnapshot {
 struct CollectionSnapshot {
     collection_id: i64,
     added_at: String,
+    /// Portable collection id. Local collection ids are machine-specific and
+    /// must not cross the sync boundary.
+    #[serde(default)]
+    collection_uid: Option<String>,
+    #[serde(default)]
+    collection_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -405,7 +411,7 @@ pub async fn restore(
 
         match mode {
             Some(RestoreMode::Keep) => {
-                mark_restored(pool, trash_id).await?;
+                mark_restored(pool, trash_id, "discard").await?;
                 let book_uid: Option<String> =
                     sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
                         .bind(replacement_id)
@@ -420,7 +426,7 @@ pub async fn restore(
             }
             Some(RestoreMode::Merge) => {
                 merge_into(pool, &snapshot, replacement_id).await?;
-                mark_restored(pool, trash_id).await?;
+                mark_restored(pool, trash_id, "discard").await?;
                 let book_uid: Option<String> =
                     sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
                         .bind(replacement_id)
@@ -438,7 +444,7 @@ pub async fn restore(
     }
 
     let restored_id = restore_replace(pool, &snapshot, replacement_id).await?;
-    mark_restored(pool, trash_id).await?;
+    mark_restored(pool, trash_id, "restore").await?;
     Ok(RestoreOutcome {
         status: RestoreStatus::Restored,
         book_id: Some(restored_id),
@@ -447,10 +453,11 @@ pub async fn restore(
     })
 }
 
-async fn mark_restored(pool: &SqlitePool, trash_id: i64) -> Result<(), AppError> {
-    sqlx::query("UPDATE book_trash SET restored_at = ?2 WHERE id = ?1")
+async fn mark_restored(pool: &SqlitePool, trash_id: i64, resolution: &str) -> Result<(), AppError> {
+    sqlx::query("UPDATE book_trash SET restored_at = ?2, resolution = ?3 WHERE id = ?1")
         .bind(trash_id)
         .bind(now())
+        .bind(resolution)
         .execute(pool)
         .await?;
     Ok(())
@@ -491,18 +498,7 @@ async fn restore_conflict(
 }
 
 async fn load_snapshot(pool: &SqlitePool, book_id: i64) -> Result<Option<BookSnapshot>, AppError> {
-    let book = sqlx::query_as::<_, BookRowSnapshot>(
-        "SELECT br.uid, br.created_at, br.title, br.subtitle, br.author, br.publisher,
-                br.language, br.isbn, br.description, br.publication_date,
-                (SELECT name FROM series WHERE id = br.series_id) AS series,
-                br.series_index, br.cover_path, br.last_opened_at,
-                br.progress_percent, br.annotation_count, br.metadata_state
-         FROM book_records br WHERE br.id = ?1",
-    )
-    .bind(book_id)
-    .fetch_optional(pool)
-    .await?;
-    let Some(book) = book else {
+    let Some(book) = load_book_row(pool, book_id).await? else {
         return Ok(None);
     };
     let uid = book.uid.clone();
@@ -524,8 +520,11 @@ async fn load_snapshot(pool: &SqlitePool, book_id: i64) -> Result<Option<BookSna
     .fetch_all(pool)
     .await?;
     let collections = sqlx::query_as::<_, CollectionSnapshot>(
-        "SELECT collection_id, added_at FROM book_collections
-         WHERE book_uid = ?1 ORDER BY collection_id",
+        "SELECT bc.collection_id, bc.added_at,
+                c.sync_uid AS collection_uid, c.name AS collection_name
+         FROM book_collections bc
+         LEFT JOIN collections c ON c.id = bc.collection_id
+         WHERE bc.book_uid = ?1 ORDER BY bc.collection_id",
     )
     .bind(&uid)
     .fetch_all(pool)
@@ -646,10 +645,14 @@ async fn restore_replace(
         .execute(&mut *tx)
         .await?;
 
-    let id_taken: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE id = ?1")
-        .bind(snapshot.book_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let id_taken: Option<i64> = if snapshot.book_id > 0 {
+        sqlx::query_scalar("SELECT id FROM book_records WHERE id = ?1")
+            .bind(snapshot.book_id)
+            .fetch_optional(&mut *tx)
+            .await?
+    } else {
+        None
+    };
     let restored_id: i64 = if id_taken.is_none() {
         sqlx::query_scalar(
             "INSERT INTO book_records (
@@ -1101,4 +1104,497 @@ async fn merge_into(
         metadata::recompute_effective(pool, &fresh_uid, file_id).await?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shared Forget and restore (ADR 0014 D3/D5, ticket tuxbooks-ip6.9)
+// ---------------------------------------------------------------------------
+
+fn parse_snapshot(json: &str) -> Result<BookSnapshot, AppError> {
+    serde_json::from_str(json)
+        .map_err(|err| AppError::InvalidInput(format!("book snapshot is not readable: {err}")))
+}
+
+fn serialize_snapshot(snapshot: &BookSnapshot) -> Result<String, AppError> {
+    serde_json::to_string(snapshot)
+        .map_err(|err| AppError::InvalidInput(format!("book snapshot is not serializable: {err}")))
+}
+
+/// Turn the local trash snapshot into the portable shape that crosses the
+/// sync boundary. Local collection ids become collection uids, and provider
+/// links stay local (they are not part of the shared contract).
+pub async fn shared_snapshot_json(
+    pool: &SqlitePool,
+    local_json: &str,
+) -> Result<Option<String>, AppError> {
+    let mut snapshot = parse_snapshot(local_json)?;
+    snapshot.book_id = 0;
+    snapshot.providers.clear();
+    for collection in &mut snapshot.collections {
+        if collection.collection_uid.is_none() {
+            let row: Option<(Option<String>, Option<String>)> =
+                sqlx::query_as("SELECT sync_uid, name FROM collections WHERE id = ?1")
+                    .bind(collection.collection_id)
+                    .fetch_optional(pool)
+                    .await?;
+            if let Some((uid, name)) = row {
+                collection.collection_uid = uid;
+                collection.collection_name = name;
+            }
+        }
+        // Local ids are meaningless on the receiving machine.
+        collection.collection_id = 0;
+    }
+    let json = serialize_snapshot(&snapshot)?;
+    if json.len() > MAX_FIELD_STRING_BYTES {
+        return Ok(None);
+    }
+    Ok(Some(json))
+}
+
+/// Turn a shared snapshot back into the local shape. Collection uids resolve
+/// to the receiving machine's ids; unknown shelves are skipped and named so
+/// the caller can surface them instead of silently losing the membership.
+async fn local_snapshot_json(
+    pool: &SqlitePool,
+    shared_json: &str,
+    local_book_id: i64,
+    local_book_uid: &str,
+) -> Result<(String, Vec<String>), AppError> {
+    let mut snapshot = parse_snapshot(shared_json)?;
+    snapshot.book_id = local_book_id;
+    snapshot.book.uid = local_book_uid.to_string();
+    let mut unresolved = Vec::new();
+    for collection in &mut snapshot.collections {
+        let id: Option<i64> = match (
+            collection.collection_uid.as_deref(),
+            collection.collection_name.as_deref(),
+        ) {
+            (Some(uid), _) => {
+                sqlx::query_scalar("SELECT id FROM collections WHERE sync_uid = ?1")
+                    .bind(uid)
+                    .fetch_optional(pool)
+                    .await?
+            }
+            (None, Some(name)) => {
+                sqlx::query_scalar("SELECT id FROM collections WHERE name = ?1")
+                    .bind(name)
+                    .fetch_optional(pool)
+                    .await?
+            }
+            (None, None) => None,
+        };
+        match id {
+            Some(id) => collection.collection_id = id,
+            None => {
+                collection.collection_id = 0;
+                unresolved.push(
+                    collection
+                        .collection_name
+                        .clone()
+                        .or_else(|| collection.collection_uid.clone())
+                        .unwrap_or_else(|| "unknown collection".into()),
+                );
+            }
+        }
+    }
+    Ok((serialize_snapshot(&snapshot)?, unresolved))
+}
+
+async fn load_book_row(
+    pool: &SqlitePool,
+    book_id: i64,
+) -> Result<Option<BookRowSnapshot>, AppError> {
+    let row = sqlx::query_as::<_, BookRowSnapshot>(
+        "SELECT br.uid, br.created_at, br.title, br.subtitle, br.author, br.publisher,
+                br.language, br.isbn, br.description, br.publication_date,
+                (SELECT name FROM series WHERE id = br.series_id) AS series,
+                br.series_index, br.cover_path, br.last_opened_at,
+                br.progress_percent, br.annotation_count, br.metadata_state
+         FROM book_records br WHERE br.id = ?1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Create the fresh identity that keeps a file in the library after a Forget.
+/// `source` is either the shared snapshot's book row or the old local row.
+async fn insert_fresh_from_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    new_uid: &str,
+    source: &BookRowSnapshot,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "INSERT INTO book_records (
+            uid, title, subtitle, author, publisher, language, isbn, description,
+            publication_date, series, series_index, series_id, cover_path,
+            metadata_state
+         )
+         VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+            (SELECT id FROM series WHERE name = ?10), ?12, ?13
+         )
+         ON CONFLICT(uid) DO NOTHING",
+    )
+    .bind(new_uid)
+    .bind(&source.title)
+    .bind(&source.subtitle)
+    .bind(&source.author)
+    .bind(&source.publisher)
+    .bind(&source.language)
+    .bind(&source.isbn)
+    .bind(&source.description)
+    .bind(&source.publication_date)
+    .bind(&source.series)
+    .bind(source.series_index)
+    .bind(&source.cover_path)
+    .bind(&source.metadata_state)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn insert_local_trash(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    book_id: i64,
+    old_uid: &str,
+    replacement_uid: Option<&str>,
+    snapshot_json: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "INSERT INTO book_trash
+            (book_id, book_uid, replacement_book_uid, snapshot_json, deleted_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(book_uid) WHERE restored_at IS NULL DO UPDATE SET
+            book_id = excluded.book_id,
+            replacement_book_uid = excluded.replacement_book_uid,
+            snapshot_json = excluded.snapshot_json,
+            expires_at = excluded.expires_at",
+    )
+    .bind(book_id)
+    .bind(old_uid)
+    .bind(replacement_uid)
+    .bind(snapshot_json)
+    .bind(now())
+    .bind(expires_at())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Apply a shared Forget on this machine: keep any current file under the
+/// sender's fresh identity, erase the old identity, and put the snapshot in
+/// this machine's Reading-history trash.
+pub async fn apply_remote_forget(
+    pool: &SqlitePool,
+    old_uid: &str,
+    replacement_uid: Option<&str>,
+    shared_snapshot: Option<&str>,
+) -> Result<Option<i64>, AppError> {
+    let old_id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(old_uid)
+        .fetch_optional(pool)
+        .await?;
+    let local = match shared_snapshot {
+        Some(shared) => match local_snapshot_json(pool, shared, old_id.unwrap_or(0), old_uid).await
+        {
+            Ok(local) => Some(local),
+            Err(err) => {
+                let _ = crate::sync::identity::record_issue(
+                    pool,
+                    &format!("forget-snapshot-invalid:{old_uid}"),
+                    "book_snapshot_invalid",
+                    &format!(
+                        "the shared Forget carried an unreadable snapshot ({err}); \
+                         the delete was applied but no local restore is available"
+                    ),
+                    None,
+                )
+                .await;
+                None
+            }
+        },
+        None => None,
+    };
+    let old_row = match old_id {
+        Some(id) => load_book_row(pool, id).await?,
+        None => None,
+    };
+    let snapshot_for_aliases = local
+        .as_ref()
+        .map(|(json, _)| parse_snapshot(json))
+        .transpose()?;
+    let mut alias_hashes = snapshot_for_aliases
+        .as_ref()
+        .map(|snapshot| snapshot.aliases.clone())
+        .unwrap_or_default();
+    let bound_hashes: Vec<String> =
+        sqlx::query_scalar("SELECT content_hash FROM sync_book_bindings WHERE book_uid = ?1")
+            .bind(old_uid)
+            .fetch_all(pool)
+            .await?;
+    alias_hashes.extend(bound_hashes);
+    alias_hashes.retain(|hash| crate::sync::model::is_hex_hash(hash));
+    alias_hashes.sort();
+    alias_hashes.dedup();
+
+    // The sender had no file and so published no replacement uuid, but this
+    // machine may still hold the file. Keep its library entry under a fresh
+    // identity and publish that identity later; the old uuid stays dead.
+    let mut effective_replacement = replacement_uid.map(str::to_string);
+    let mut minted_replacement = false;
+    if effective_replacement.is_none() {
+        let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE book_uid = ?1")
+            .bind(old_uid)
+            .fetch_one(pool)
+            .await?;
+        if files > 0 {
+            effective_replacement = Some(
+                sqlx::query_scalar("SELECT lower(hex(randomblob(16)))")
+                    .fetch_one(pool)
+                    .await?,
+            );
+            minted_replacement = true;
+        }
+    }
+    let replacement_uid = effective_replacement.as_deref();
+
+    let mut tx = pool.begin().await?;
+    match replacement_uid {
+        Some(replacement) => {
+            if let Some(snapshot) = &snapshot_for_aliases {
+                insert_fresh_from_row(&mut tx, replacement, &snapshot.book).await?;
+            } else if let Some(row) = &old_row {
+                insert_fresh_from_row(&mut tx, replacement, row).await?;
+            } else {
+                let source = BookRowSnapshot {
+                    uid: old_uid.to_string(),
+                    created_at: now(),
+                    title: Some("Unknown".into()),
+                    subtitle: None,
+                    author: None,
+                    publisher: None,
+                    language: None,
+                    isbn: None,
+                    description: None,
+                    publication_date: None,
+                    series: None,
+                    series_index: None,
+                    cover_path: None,
+                    last_opened_at: None,
+                    progress_percent: None,
+                    annotation_count: 0,
+                    metadata_state: "waiting_for_file".into(),
+                };
+                insert_fresh_from_row(&mut tx, replacement, &source).await?;
+            }
+            sqlx::query("UPDATE books SET book_uid = ?2 WHERE book_uid = ?1")
+                .bind(old_uid)
+                .bind(replacement)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE sync_book_bindings SET book_uid = ?2 WHERE book_uid = ?1")
+                .bind(old_uid)
+                .bind(replacement)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM sync_book_aliases WHERE book_uid = ?1")
+                .bind(old_uid)
+                .execute(&mut *tx)
+                .await?;
+            for hash in &alias_hashes {
+                sqlx::query(
+                    "INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)
+                     ON CONFLICT(content_hash) DO UPDATE SET book_uid = excluded.book_uid",
+                )
+                .bind(hash)
+                .bind(replacement)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        None => {
+            sqlx::query("DELETE FROM sync_book_aliases WHERE book_uid = ?1")
+                .bind(old_uid)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    if let Some(id) = old_id {
+        sqlx::query("DELETE FROM book_records WHERE id = ?1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    } else {
+        sqlx::query("DELETE FROM book_records WHERE uid = ?1")
+            .bind(old_uid)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    let mut unresolved = Vec::new();
+    if let Some((local_json, names)) = &local {
+        unresolved = names.clone();
+        insert_local_trash(
+            &mut tx,
+            old_id.unwrap_or(0),
+            old_uid,
+            replacement_uid,
+            local_json,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+
+    if minted_replacement {
+        if let Some(uid) = replacement_uid {
+            for hash in &alias_hashes {
+                let _ = crate::sync::identity::mark_identity_dirty(pool, hash, uid).await;
+            }
+        }
+    }
+
+    if let Some(names) = (!unresolved.is_empty()).then_some(unresolved) {
+        let _ = crate::sync::identity::record_issue(
+            pool,
+            &format!("forget-collections:{old_uid}"),
+            "forget_membership_skipped",
+            &format!(
+                "the restored snapshot named shelves this library does not have yet ({})",
+                names.join(", ")
+            ),
+            None,
+        )
+        .await;
+    }
+    if local.is_none() {
+        let _ = crate::sync::identity::record_issue(
+            pool,
+            &format!("forget-snapshot:{old_uid}"),
+            "book_snapshot_missing",
+            "another machine forgot this book without a usable snapshot; the delete was applied but no restore is available here",
+            None,
+        )
+        .await;
+    }
+
+    match replacement_uid {
+        Some(uid) => Ok(
+            sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+                .bind(uid)
+                .fetch_optional(pool)
+                .await?,
+        ),
+        None => Ok(None),
+    }
+}
+
+/// Apply a shared restore on this machine. The local trash snapshot wins over
+/// the shared one when both exist, so local-only provider links survive.
+pub async fn apply_remote_restore(
+    pool: &SqlitePool,
+    old_uid: &str,
+    shared_snapshot: Option<&str>,
+) -> Result<Option<i64>, AppError> {
+    type TrashRow = (i64, Option<String>, String);
+    let row: Option<TrashRow> = sqlx::query_as(
+        "SELECT id, replacement_book_uid, snapshot_json FROM book_trash
+         WHERE book_uid = ?1 AND restored_at IS NULL
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(old_uid)
+    .fetch_optional(pool)
+    .await?;
+
+    let (trash_id, trash_replacement, snapshot_json) = match row {
+        Some((id, replacement, snapshot)) => (Some(id), replacement, snapshot),
+        None => {
+            let Some(shared) = shared_snapshot else {
+                let _ = crate::sync::identity::record_issue(
+                    pool,
+                    &format!("restore-snapshot:{old_uid}"),
+                    "book_snapshot_missing",
+                    "a shared restore arrived without a snapshot; the book was not recreated",
+                    None,
+                )
+                .await;
+                return Ok(None);
+            };
+            let (local, unresolved) = local_snapshot_json(pool, shared, 0, old_uid).await?;
+            if !unresolved.is_empty() {
+                let _ = crate::sync::identity::record_issue(
+                    pool,
+                    &format!("restore-collections:{old_uid}"),
+                    "forget_membership_skipped",
+                    &format!(
+                        "the restored snapshot named shelves this library does not have yet ({})",
+                        unresolved.join(", ")
+                    ),
+                    None,
+                )
+                .await;
+            }
+            (None, None, local)
+        }
+    };
+    let mut snapshot = parse_snapshot(&snapshot_json)?;
+    snapshot.book.uid = old_uid.to_string();
+    let replacement_id = match trash_replacement {
+        Some(uid) => {
+            let uid = crate::sync::identity::canonical_book_uid(pool, &uid).await?;
+            sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+                .bind(uid)
+                .fetch_optional(pool)
+                .await?
+        }
+        None => None,
+    };
+
+    if let Some(replacement_id) = replacement_id {
+        if let Some(conflict) = restore_conflict(pool, replacement_id).await? {
+            let _ = crate::sync::identity::record_issue(
+                pool,
+                &format!("restore-conflict:{old_uid}"),
+                "restore_conflict",
+                &format!(
+                    "a shared restore replaced newer local state on the fresh book \
+                     ({}% progress, {} annotations)",
+                    conflict.progress_percent.unwrap_or(0.0),
+                    conflict.annotation_count
+                ),
+                None,
+            )
+            .await;
+        }
+    }
+
+    let restored_id = restore_replace(pool, &snapshot, replacement_id).await?;
+    if let Some(trash_id) = trash_id {
+        sqlx::query("UPDATE book_trash SET restored_at = ?2, resolution = 'restore' WHERE id = ?1")
+            .bind(trash_id)
+            .bind(now())
+            .execute(pool)
+            .await?;
+    }
+    Ok(Some(restored_id))
+}
+
+/// Close a remote trash entry after the user chose Keep or Merge. The old
+/// identity stays forgotten; merged state travels through ordinary entity
+/// operations on the fresh identity.
+pub async fn apply_remote_discard(
+    pool: &SqlitePool,
+    old_uid: &str,
+) -> Result<Option<i64>, AppError> {
+    sqlx::query(
+        "UPDATE book_trash SET restored_at = ?2, resolution = 'discard'
+         WHERE book_uid = ?1 AND restored_at IS NULL",
+    )
+    .bind(old_uid)
+    .bind(now())
+    .execute(pool)
+    .await?;
+    Ok(None)
 }

@@ -897,6 +897,7 @@ impl SyncService {
             "sync_issues",
             "sync_conflicts",
             "sync_trash",
+            "sync_book_trash",
             "sync_dirty",
             "sync_reproject",
         ] {

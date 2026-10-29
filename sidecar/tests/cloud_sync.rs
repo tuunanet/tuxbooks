@@ -5,16 +5,18 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use serde_json::Value;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::{
-    AnnotationKind, AnnotationPatch, NewAnnotation, NewBook, ProgressUpdate,
+    AnnotationKind, AnnotationPatch, NewAnnotation, NewBook, ProgressUpdate, RestoreMode,
+    RestoreStatus,
 };
 use tuxbooks_lib::error::AppError;
 use tuxbooks_lib::repository::{
-    annotations, books, collections, metadata as metadata_repo, reading_progress,
+    annotations, books, collections, lifecycle, metadata as metadata_repo, reading_progress,
 };
 use tuxbooks_lib::rpc::EventEmitter;
 use tuxbooks_lib::services::metadata;
@@ -27,6 +29,29 @@ struct Device {
     pool: SqlitePool,
     service: SyncService,
     db_path: PathBuf,
+}
+
+/// A copy of the migration set up to and including `max_version`, so an
+/// upgrade test can seed the schema the previous release shipped.
+async fn migrator_through(dir: &Path, max_version: u64) -> sqlx::migrate::Migrator {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+    let target = dir.join(format!("migrations-{max_version}"));
+    std::fs::create_dir_all(&target).unwrap();
+    for entry in std::fs::read_dir(&source).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(version) = name
+            .strip_prefix('0')
+            .and_then(|rest| rest.split('_').next())
+            .and_then(|digits| digits.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        if version <= max_version {
+            std::fs::copy(entry.path(), target.join(&name)).unwrap();
+        }
+    }
+    sqlx::migrate::Migrator::new(target).await.unwrap()
 }
 
 async fn device() -> Device {
@@ -56,6 +81,12 @@ async fn connect(device: &Device, folder: &Path) {
 
 async fn run(device: &Device) {
     device.service.run_pass().await.unwrap();
+}
+
+fn write_manual_op(folder: &Path, device: &str, name: &str, op: &Op) {
+    let dir = folder.join("TuxBooks").join("ops").join(device);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(name), serde_json::to_vec(op).unwrap()).unwrap();
 }
 
 async fn add_book(device: &Device, name: &str, bytes: &[u8]) -> i64 {
@@ -197,6 +228,15 @@ async fn progress_percent(device: &Device, book_id: i64) -> Option<f64> {
         .await
         .unwrap()
         .and_then(|progress| progress.progress_percent)
+}
+
+async fn book_uid(device: &Device, book_id: i64) -> String {
+    books::get_book(&device.pool, book_id)
+        .await
+        .unwrap()
+        .expect("book exists")
+        .book_uid
+        .expect("book has a uid")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -833,4 +873,466 @@ async fn deleting_one_copy_keeps_the_book_and_its_state() {
         second,
         "the surviving copy is still in the library"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forget_on_one_machine_is_a_shared_delete_and_restores_on_the_other() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"book that will be forgotten";
+    let a_book = add_book(&a, "same.epub", bytes).await;
+    add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
+    reading_progress::upsert_progress(
+        &a.pool,
+        a_book,
+        &ProgressUpdate {
+            chapter_href: Some("c1.xhtml".into()),
+            progress_percent: Some(44.0),
+            ..ProgressUpdate::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    connect(&b, sync_dir.path()).await;
+    let _b_book = add_book(&b, "same.epub", bytes).await;
+    run(&b).await;
+    run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
+    assert_eq!(annotation_count(&b, b_book).await, 1);
+    assert_eq!(progress_percent(&b, b_book).await, Some(44.0));
+    // The two identities converge during the first trip; Forget acts on the
+    // canonical uuid, not the one this device minted before meeting.
+    run(&a).await;
+    let a_book = book_id(&a, "same.epub").await;
+    let old_uid = book_uid(&a, a_book).await;
+
+    let outcome = lifecycle::forget(&a.pool, a_book).await.unwrap();
+    let replacement = outcome.replacement_book_id.expect("file stays");
+    assert!(!book_uid(&a, replacement).await.is_empty());
+
+    run(&a).await;
+    run(&b).await;
+    run(&b).await;
+
+    // B's old identity is gone, and the file is a fresh unread book.
+    let b_fresh = book_id(&b, "same.epub").await;
+    assert_ne!(book_uid(&b, b_fresh).await, old_uid);
+    assert_eq!(annotation_count(&b, b_fresh).await, 0);
+    assert_eq!(progress_percent(&b, b_fresh).await, None);
+    let old_aliases: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_aliases WHERE book_uid = ?1")
+            .bind(&old_uid)
+            .fetch_one(&b.pool)
+            .await
+            .unwrap();
+    assert_eq!(old_aliases, 0, "the forgotten identity owns no alias");
+
+    let trash = lifecycle::list_trash(&b.pool).await.unwrap();
+    let entry = trash
+        .iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("the shared Forget appears in B's Reading history trash");
+    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
+    assert_eq!(progress_percent(&b, b_book).await, Some(44.0));
+    assert_eq!(annotation_count(&b, b_book).await, 1);
+
+    run(&b).await;
+    run(&a).await;
+    run(&a).await;
+
+    let a_restored = book_id(&a, "same.epub").await;
+    assert_eq!(book_uid(&a, a_restored).await, old_uid);
+    assert_eq!(progress_percent(&a, a_restored).await, Some(44.0));
+    assert_eq!(annotation_count(&a, a_restored).await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_no_file_forget_still_propagates_and_restores_on_the_machine_with_the_file() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"forgotten from reading history";
+    let a_book = add_book(&a, "same.epub", bytes).await;
+    add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    connect(&b, sync_dir.path()).await;
+    let _b_book = add_book(&b, "same.epub", bytes).await;
+    run(&b).await;
+    run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
+    assert_eq!(annotation_count(&b, b_book).await, 1);
+    // Let A consume B's identity operation before capturing the canonical ids.
+    run(&a).await;
+    let a_book = book_id(&a, "same.epub").await;
+    let old_uid = book_uid(&a, a_book).await;
+
+    // A drops its membership, then forgets the book from Reading history.
+    books::delete_book(&a.pool, a_book).await.unwrap();
+    run(&a).await;
+    let outcome = lifecycle::forget(&a.pool, a_book).await.unwrap();
+    assert!(outcome.replacement_book_id.is_none());
+
+    run(&a).await;
+    run(&b).await;
+    run(&b).await;
+
+    // B still has the bytes, so it keeps a fresh unread entry and the old
+    // identity moves to B's trash.
+    let b_fresh = book_id(&b, "same.epub").await;
+    assert_ne!(book_uid(&b, b_fresh).await, old_uid);
+    assert_eq!(annotation_count(&b, b_fresh).await, 0);
+    let trash = lifecycle::list_trash(&b.pool).await.unwrap();
+    let entry = trash
+        .iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("a remote Forget with no sender file is still restorable");
+    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
+    assert_eq!(annotation_count(&b, b_book).await, 1);
+
+    // A has no file, so the restore returns the book to A's Reading history.
+    run(&b).await;
+    run(&a).await;
+    run(&a).await;
+    let history = books::list_reading_history(&a.pool, None).await.unwrap();
+    let restored_a = history
+        .iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("A's reading history has the restored identity");
+    assert_eq!(restored_a.annotation_count, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_preserves_mirror_clocks_and_does_not_rebaseline() {
+    const OLD_UID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+    let library_id = a.service.status().await.unwrap().library_id.unwrap();
+
+    // A database created by the previous release, with mirror state and
+    // clocks that must survive the upgrade untouched.
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let old = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 22)
+        .await
+        .run(&old)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO book_records (uid, title) VALUES (?1, 'Upgraded')")
+        .bind(OLD_UID)
+        .execute(&old)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_entities
+            (kind, entity_uid, book_uid, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('progress', ?1, ?1, 111, 2, 'previous-device')",
+    )
+    .bind(OLD_UID)
+    .execute(&old)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_fields
+            (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('progress', ?1, 'progress_percent', '42.5', 111, 2, 'previous-device')",
+    )
+    .bind(OLD_UID)
+    .execute(&old)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO sync_book_merges (loser, winner) VALUES (?1, ?2)")
+        .bind("b".repeat(32))
+        .bind(OLD_UID)
+        .execute(&old)
+        .await
+        .unwrap();
+    for (key, value) in [
+        ("baseline_done", "1".to_string()),
+        ("enabled", "1".to_string()),
+        ("library_id", library_id),
+        (
+            "folder_path",
+            sync_dir.path().to_string_lossy().into_owned(),
+        ),
+    ] {
+        sqlx::query("INSERT INTO sync_meta (key, value) VALUES (?1, ?2)")
+            .bind(key)
+            .bind(value)
+            .execute(&old)
+            .await
+            .unwrap();
+    }
+    old.close().await;
+
+    let upgraded = init_pool(&db_path).await.unwrap();
+    let clock: (i64, i64, String, String) = sqlx::query_as(
+        "SELECT hlc_wall, hlc_counter, hlc_device, value_json
+         FROM sync_state_fields WHERE kind = 'progress' AND entity_uid = ?1",
+    )
+    .bind(OLD_UID)
+    .fetch_one(&upgraded)
+    .await
+    .unwrap();
+    assert_eq!(clock, (111, 2, "previous-device".into(), "42.5".into()));
+    let baseline: String =
+        sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'baseline_done'")
+            .fetch_one(&upgraded)
+            .await
+            .unwrap();
+    assert_eq!(baseline, "1", "the upgrade must not force a re-baseline");
+    let merges: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_merges")
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+    assert_eq!(merges, 1, "merged identities survive the upgrade");
+    let dirty: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+    assert_eq!(dirty, 0, "the migration does not touch local state");
+
+    // An older remote write must lose to the preserved clock.
+    let root = sync_dir.path().join("TuxBooks");
+    let manual_device = "c".repeat(32);
+    let manual_dir = root.join("ops").join(&manual_device);
+    std::fs::create_dir_all(&manual_dir).unwrap();
+    let op = Op {
+        schema: OP_SCHEMA,
+        op_id: "d".repeat(32),
+        device_id: manual_device.clone(),
+        hlc: Hlc {
+            wall: 50,
+            counter: 0,
+            device: manual_device.clone(),
+        },
+        kind: EntityKind::Progress,
+        entity_uid: OLD_UID.into(),
+        book_uid: Some(OLD_UID.into()),
+        deleted: false,
+        restore: false,
+        fields: serde_json::json!({ "progress_percent": 5.0 })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        prior: None,
+        created_at: "2026-10-01T00:00:00.000Z".into(),
+    };
+    std::fs::write(
+        manual_dir.join("00000000000000000050.json"),
+        serde_json::to_vec(&op).unwrap(),
+    )
+    .unwrap();
+
+    let events = EventEmitter::new(|_name: &'static str, _payload: Value| {});
+    let service = SyncService::new(upgraded.clone(), &db_path, events)
+        .await
+        .unwrap();
+    service.run_pass().await.unwrap();
+
+    let after: (i64, i64, String, String) = sqlx::query_as(
+        "SELECT hlc_wall, hlc_counter, hlc_device, value_json
+         FROM sync_state_fields WHERE kind = 'progress' AND entity_uid = ?1",
+    )
+    .bind(OLD_UID)
+    .fetch_one(&upgraded)
+    .await
+    .unwrap();
+    assert_eq!(after, clock, "the preserved clock still wins after a pass");
+    let baseline: String =
+        sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'baseline_done'")
+            .fetch_one(&upgraded)
+            .await
+            .unwrap();
+    assert_eq!(baseline, "1", "running the engine does not re-baseline");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_alias_or_edit_cannot_resurrect_a_forgotten_identity() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"forget then replay stale ops";
+    let a_book = add_book(&a, "same.epub", bytes).await;
+    add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    connect(&b, sync_dir.path()).await;
+    let _b_book = add_book(&b, "same.epub", bytes).await;
+    run(&b).await;
+    run(&b).await;
+    run(&a).await;
+    let a_book = book_id(&a, "same.epub").await;
+    let old_uid = book_uid(&a, a_book).await;
+
+    lifecycle::forget(&a.pool, a_book).await.unwrap();
+    run(&a).await;
+    run(&b).await;
+    run(&b).await;
+    let fresh_uid = book_uid(&b, book_id(&b, "same.epub").await).await;
+    assert_ne!(fresh_uid, old_uid);
+
+    // A device that had not seen the Forget yet replays an old identity alias
+    // and a stale progress edit with a newer clock.
+    let manual_device = "e".repeat(32);
+    let stale_hash = "f".repeat(64);
+    let identity = Op {
+        schema: OP_SCHEMA,
+        op_id: "1".repeat(32),
+        device_id: manual_device.clone(),
+        hlc: Hlc {
+            wall: 9_000_000_000_000,
+            counter: 0,
+            device: manual_device.clone(),
+        },
+        kind: EntityKind::BookIdentity,
+        entity_uid: old_uid.clone(),
+        book_uid: Some(old_uid.clone()),
+        deleted: false,
+        restore: false,
+        fields: serde_json::json!({ "content_hash": stale_hash })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        prior: None,
+        created_at: "2026-10-01T00:00:00.000Z".into(),
+    };
+    write_manual_op(
+        sync_dir.path(),
+        &manual_device,
+        "00000000000000000001.json",
+        &identity,
+    );
+    let edit = Op {
+        schema: OP_SCHEMA,
+        op_id: "2".repeat(32),
+        device_id: manual_device.clone(),
+        hlc: Hlc {
+            wall: 9_000_000_000_001,
+            counter: 0,
+            device: manual_device.clone(),
+        },
+        kind: EntityKind::Progress,
+        entity_uid: old_uid.clone(),
+        book_uid: Some(old_uid.clone()),
+        deleted: false,
+        restore: false,
+        fields: serde_json::json!({ "progress_percent": 99.0 })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        prior: None,
+        created_at: "2026-10-01T00:00:01.000Z".into(),
+    };
+    write_manual_op(
+        sync_dir.path(),
+        &manual_device,
+        "00000000000000000002.json",
+        &edit,
+    );
+    run(&b).await;
+    run(&b).await;
+
+    let old_records: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
+        .bind(&old_uid)
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
+    assert_eq!(old_records, 0, "the forgotten identity stays deleted");
+    let alias_owner: String =
+        sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
+            .bind(&stale_hash)
+            .fetch_one(&b.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        alias_owner, fresh_uid,
+        "a stale alias resolves to the fresh identity, never the old one"
+    );
+    let fresh = book_id(&b, "same.epub").await;
+    assert_eq!(progress_percent(&b, fresh).await, None);
+    assert_eq!(annotation_count(&b, fresh).await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keep_resolution_closes_the_remote_trash_without_restoring_the_old_identity() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"keep the fresh book";
+    let a_book = add_book(&a, "same.epub", bytes).await;
+    add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "old").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    connect(&b, sync_dir.path()).await;
+    let _b_book = add_book(&b, "same.epub", bytes).await;
+    run(&b).await;
+    run(&b).await;
+    run(&a).await;
+    let a_book = book_id(&a, "same.epub").await;
+    let old_uid = book_uid(&a, a_book).await;
+
+    lifecycle::forget(&a.pool, a_book).await.unwrap();
+    run(&a).await;
+    run(&b).await;
+    run(&b).await;
+
+    let b_fresh = book_id(&b, "same.epub").await;
+    let fresh_uid = book_uid(&b, b_fresh).await;
+    reading_progress::upsert_progress(
+        &b.pool,
+        b_fresh,
+        &ProgressUpdate {
+            progress_percent: Some(12.0),
+            ..ProgressUpdate::default()
+        },
+    )
+    .await
+    .unwrap();
+    let entry = lifecycle::list_trash(&b.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("remote trash entry");
+    let outcome = lifecycle::restore(&b.pool, entry.id, Some(RestoreMode::Keep))
+        .await
+        .unwrap();
+    assert_eq!(outcome.status, RestoreStatus::Kept);
+
+    run(&b).await;
+    run(&a).await;
+    run(&a).await;
+    assert!(
+        lifecycle::list_trash(&b.pool).await.unwrap().is_empty(),
+        "Keep closes B's trash entry"
+    );
+    assert!(
+        lifecycle::list_trash(&a.pool).await.unwrap().is_empty(),
+        "Keep propagates and closes A's copy too"
+    );
+    assert_eq!(book_uid(&b, b_fresh).await, fresh_uid);
+    assert_eq!(progress_percent(&b, b_fresh).await, Some(12.0));
+    let old_records: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
+        .bind(&old_uid)
+        .fetch_one(&a.pool)
+        .await
+        .unwrap();
+    assert_eq!(old_records, 0, "Keep never recreates the old identity");
 }

@@ -56,6 +56,41 @@ pub async fn apply_op(
         return Ok(affected);
     }
 
+    if op.kind == EntityKind::Book {
+        let affected = apply_book(pool, op).await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO sync_applied_ops (op_id, device_id, file_name)
+             VALUES (?1, ?2, ?3)",
+        )
+        .bind(&op.op_id)
+        .bind(&op.device_id)
+        .bind(file_name)
+        .execute(pool)
+        .await?;
+        return Ok(affected);
+    }
+
+    // A whole-book Forget wins over any in-flight edit. The losing value is
+    // not resurrected; the user asked to erase the identity.
+    if let Some(book_uid) = &op.book_uid {
+        let canonical = super::identity::canonical_book_uid(pool, book_uid).await?;
+        if super::identity::forgotten_replacement(pool, &canonical)
+            .await?
+            .is_some()
+        {
+            sqlx::query(
+                "INSERT OR IGNORE INTO sync_applied_ops (op_id, device_id, file_name)
+                 VALUES (?1, ?2, ?3)",
+            )
+            .bind(&op.op_id)
+            .bind(&op.device_id)
+            .bind(file_name)
+            .execute(pool)
+            .await?;
+            return Ok(Vec::new());
+        }
+    }
+
     let mut tx = pool.begin().await?;
     let affected = apply_state_op(&mut tx, op).await?;
     sqlx::query(
@@ -81,14 +116,28 @@ async fn apply_identity(pool: &SqlitePool, op: &Op) -> Result<Vec<Affected>, App
         .and_then(Value::as_str)
         .ok_or_else(|| AppError::InvalidInput("identity op is missing content_hash".into()))?;
     let incoming = super::identity::canonical_book_uid(pool, &op.entity_uid).await?;
+    let incoming = match super::identity::forgotten_replacement(pool, &incoming).await? {
+        // The old identity is dead. Its replacement is the live candidate.
+        Some(Some(replacement)) => replacement,
+        // Forgotten without a fresh identity: never republish the alias.
+        Some(None) => return Ok(Vec::new()),
+        None => incoming,
+    };
     let existing: Option<String> =
         sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
             .bind(content_hash)
             .fetch_optional(pool)
             .await?;
+    let existing = match existing {
+        Some(existing) => match super::identity::forgotten_replacement(pool, &existing).await? {
+            Some(Some(replacement)) => Some(replacement),
+            Some(None) => None,
+            None => Some(super::identity::canonical_book_uid(pool, &existing).await?),
+        },
+        None => None,
+    };
     let canonical = match existing {
         Some(existing) => {
-            let existing = super::identity::canonical_book_uid(pool, &existing).await?;
             let canonical = existing.clone().min(incoming.clone());
             if existing != canonical {
                 merge_book_identity(pool, &existing, &canonical).await?;
@@ -115,6 +164,349 @@ async fn apply_identity(pool: &SqlitePool, op: &Op) -> Result<Vec<Affected>, App
         entity_uid: canonical.clone(),
         book_uid: Some(canonical),
     }])
+}
+
+struct BookTrashRow {
+    replacement: Option<String>,
+    snapshot: Option<String>,
+    deleted: Hlc,
+    restored: Option<Hlc>,
+}
+
+/// Whether a book uid currently has an open shared Forget and whether its
+/// trash entry is already closed. Capture uses this to drop projection echoes.
+pub async fn book_lifecycle_state(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<(bool, bool), AppError> {
+    let deleted: Option<i64> = sqlx::query_scalar(
+        "SELECT deleted FROM sync_state_entities WHERE kind = 'book' AND entity_uid = ?1",
+    )
+    .bind(book_uid)
+    .fetch_optional(pool)
+    .await?;
+    let restored: Option<Option<String>> =
+        sqlx::query_scalar("SELECT restored_at FROM sync_book_trash WHERE book_uid = ?1")
+            .bind(book_uid)
+            .fetch_optional(pool)
+            .await?;
+    Ok((deleted.unwrap_or(0) != 0, restored.flatten().is_some()))
+}
+
+async fn load_book_trash(
+    tx: &mut Transaction<'_, Sqlite>,
+    book_uid: &str,
+) -> Result<Option<BookTrashRow>, AppError> {
+    type Row = (
+        Option<String>,
+        Option<String>,
+        i64,
+        i64,
+        String,
+        i64,
+        i64,
+        String,
+    );
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT replacement_book_uid, snapshot_json,
+                deleted_wall, deleted_count, deleted_dev,
+                restored_wall, restored_count, restored_dev
+         FROM sync_book_trash WHERE book_uid = ?1",
+    )
+    .bind(book_uid)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(
+        |(
+            replacement,
+            snapshot,
+            deleted_wall,
+            deleted_count,
+            deleted_dev,
+            restored_wall,
+            restored_count,
+            restored_dev,
+        )| BookTrashRow {
+            replacement,
+            snapshot,
+            deleted: Hlc {
+                wall: deleted_wall,
+                counter: deleted_count as u32,
+                device: deleted_dev,
+            },
+            restored: (restored_wall != 0).then_some(Hlc {
+                wall: restored_wall,
+                counter: restored_count as u32,
+                device: restored_dev,
+            }),
+        },
+    ))
+}
+
+/// Apply a whole-book Forget, restore, or discard. A Forget keeps the
+/// per-entity mirror rows under the old uid; the book tombstone is what makes
+/// them invisible, so no annotation tombstone is invented.
+async fn apply_book(pool: &SqlitePool, op: &Op) -> Result<Vec<Affected>, AppError> {
+    let book_uid = super::identity::canonical_book_uid(pool, &op.entity_uid).await?;
+    let mut tx = pool.begin().await?;
+    let existing = load_book_trash(&mut tx, &book_uid).await?;
+    let now = now_rfc3339();
+    let mut restore_without_snapshot = false;
+
+    if op.deleted {
+        let replacement = op
+            .prior
+            .as_ref()
+            .and_then(|prior| prior.get("replacement_book_uid"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let snapshot = op
+            .prior
+            .as_ref()
+            .and_then(|prior| prior.get("snapshot"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        if let Some(existing) = &existing {
+            if existing.deleted >= op.hlc {
+                tx.commit().await?;
+                return Ok(Vec::new());
+            }
+            if existing
+                .restored
+                .as_ref()
+                .is_some_and(|restored| restored >= &op.hlc)
+            {
+                tx.commit().await?;
+                return Ok(Vec::new());
+            }
+        }
+
+        let expires = (chrono::Utc::now() + chrono::Duration::days(TRASH_DAYS))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        sqlx::query(
+            r#"
+            INSERT INTO sync_book_trash
+                (book_uid, replacement_book_uid, snapshot_json, deleted_wall,
+                 deleted_count, deleted_dev, deleted_at, expires_at,
+                 restored_at, discarded, restored_wall, restored_count, restored_dev)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 0, 0, 0, '')
+            ON CONFLICT(book_uid) DO UPDATE SET
+                replacement_book_uid = excluded.replacement_book_uid,
+                snapshot_json = COALESCE(excluded.snapshot_json, sync_book_trash.snapshot_json),
+                deleted_wall = excluded.deleted_wall,
+                deleted_count = excluded.deleted_count,
+                deleted_dev = excluded.deleted_dev,
+                deleted_at = excluded.deleted_at,
+                expires_at = excluded.expires_at,
+                restored_at = NULL,
+                discarded = 0,
+                restored_wall = 0,
+                restored_count = 0,
+                restored_dev = ''
+            "#,
+        )
+        .bind(&book_uid)
+        .bind(&replacement)
+        .bind(&snapshot)
+        .bind(op.hlc.wall)
+        .bind(op.hlc.counter as i64)
+        .bind(&op.hlc.device)
+        .bind(&now)
+        .bind(&expires)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO sync_state_entities
+                (kind, entity_uid, book_uid, hlc_wall, hlc_counter, hlc_device,
+                 deleted, deleted_wall, deleted_count, deleted_dev)
+            VALUES ('book', ?1, ?1, ?2, ?3, ?4, 1, ?2, ?3, ?4)
+            ON CONFLICT(kind, entity_uid) DO UPDATE SET
+                book_uid = excluded.book_uid,
+                hlc_wall = excluded.hlc_wall,
+                hlc_counter = excluded.hlc_counter,
+                hlc_device = excluded.hlc_device,
+                deleted = 1,
+                deleted_wall = excluded.deleted_wall,
+                deleted_count = excluded.deleted_count,
+                deleted_dev = excluded.deleted_dev
+            "#,
+        )
+        .bind(&book_uid)
+        .bind(op.hlc.wall)
+        .bind(op.hlc.counter as i64)
+        .bind(&op.hlc.device)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("DELETE FROM sync_book_aliases WHERE book_uid = ?1")
+            .bind(&book_uid)
+            .execute(&mut *tx)
+            .await?;
+        if let Some(replacement) = &replacement {
+            for hash in snapshot_aliases(snapshot.as_deref()) {
+                sqlx::query(
+                    "INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)
+                     ON CONFLICT(content_hash) DO UPDATE SET book_uid = excluded.book_uid",
+                )
+                .bind(hash)
+                .bind(replacement)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+    } else {
+        let explicit_discard = op
+            .fields
+            .get("discarded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some(existing) = &existing {
+            if existing.deleted > op.hlc {
+                tx.commit().await?;
+                return Ok(Vec::new());
+            }
+            if existing
+                .restored
+                .as_ref()
+                .is_some_and(|restored| restored > &op.hlc)
+            {
+                tx.commit().await?;
+                return Ok(Vec::new());
+            }
+        }
+        let replacement = op
+            .fields
+            .get("replacement_book_uid")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| existing.as_ref().and_then(|row| row.replacement.clone()));
+        let snapshot = op
+            .fields
+            .get("snapshot")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| existing.as_ref().and_then(|row| row.snapshot.clone()));
+        // A restore with no snapshot cannot recreate the book. Keep the
+        // tombstone and record the failure instead of pretending it worked.
+        let discarded = explicit_discard || snapshot.is_none();
+        restore_without_snapshot = !explicit_discard && snapshot.is_none();
+
+        sqlx::query(
+            r#"
+            INSERT INTO sync_book_trash
+                (book_uid, replacement_book_uid, snapshot_json, deleted_wall,
+                 deleted_count, deleted_dev, deleted_at, expires_at,
+                 restored_at, discarded, restored_wall, restored_count, restored_dev)
+            VALUES (?1, ?2, ?3, ?4, ?7, ?8, ?5, ?5, ?5, ?6, ?4, ?7, ?8)
+            ON CONFLICT(book_uid) DO UPDATE SET
+                replacement_book_uid = COALESCE(excluded.replacement_book_uid,
+                                                sync_book_trash.replacement_book_uid),
+                restored_at = excluded.restored_at,
+                discarded = excluded.discarded,
+                restored_wall = excluded.restored_wall,
+                restored_count = excluded.restored_count,
+                restored_dev = excluded.restored_dev
+            "#,
+        )
+        .bind(&book_uid)
+        .bind(&replacement)
+        .bind(&snapshot)
+        .bind(op.hlc.wall)
+        .bind(&now)
+        .bind(i64::from(discarded))
+        .bind(op.hlc.counter as i64)
+        .bind(&op.hlc.device)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO sync_state_entities
+                (kind, entity_uid, book_uid, hlc_wall, hlc_counter, hlc_device,
+                 deleted, restored_wall, restored_count, restored_dev)
+            VALUES ('book', ?1, ?1, ?2, ?3, ?4, ?5, ?2, ?3, ?4)
+            ON CONFLICT(kind, entity_uid) DO UPDATE SET
+                book_uid = excluded.book_uid,
+                hlc_wall = excluded.hlc_wall,
+                hlc_counter = excluded.hlc_counter,
+                hlc_device = excluded.hlc_device,
+                deleted = excluded.deleted,
+                restored_wall = excluded.restored_wall,
+                restored_count = excluded.restored_count,
+                restored_dev = excluded.restored_dev
+            "#,
+        )
+        .bind(&book_uid)
+        .bind(op.hlc.wall)
+        .bind(op.hlc.counter as i64)
+        .bind(&op.hlc.device)
+        .bind(i64::from(discarded))
+        .execute(&mut *tx)
+        .await?;
+
+        if !discarded {
+            if let Some(replacement) = &replacement {
+                // The fresh identity is discarded with the restore; its
+                // aliases (including a post-Forget metadata rewrite) must not
+                // outlive it.
+                sqlx::query("DELETE FROM sync_book_aliases WHERE book_uid = ?1")
+                    .bind(replacement)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            for hash in snapshot_aliases(snapshot.as_deref()) {
+                sqlx::query(
+                    "INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)
+                     ON CONFLICT(content_hash) DO UPDATE SET book_uid = excluded.book_uid",
+                )
+                .bind(hash)
+                .bind(&book_uid)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+    }
+
+    tx.commit().await?;
+    if restore_without_snapshot {
+        super::identity::record_issue(
+            pool,
+            &format!("restore-snapshot-missing:{book_uid}"),
+            "book_snapshot_missing",
+            "a shared restore arrived without a usable snapshot; the book stays forgotten on this machine",
+            None,
+        )
+        .await?;
+    }
+    Ok(vec![Affected {
+        kind: EntityKind::Book,
+        entity_uid: book_uid.clone(),
+        book_uid: Some(book_uid),
+    }])
+}
+
+fn snapshot_aliases(snapshot: Option<&str>) -> Vec<String> {
+    let Some(snapshot) = snapshot else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(snapshot) else {
+        return Vec::new();
+    };
+    value
+        .get("aliases")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|hash| super::model::is_hex_hash(hash))
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 async fn apply_state_op(
@@ -719,6 +1111,12 @@ pub async fn project(
             project_collection(pool, item).await?;
             continue;
         }
+        if item.kind == EntityKind::Book {
+            if let Some(id) = project_book_lifecycle(pool, &item.entity_uid).await? {
+                books.push(id);
+            }
+            continue;
+        }
         let Some(book_uid) = &item.book_uid else {
             continue;
         };
@@ -739,7 +1137,7 @@ pub async fn project(
                 }
             }
             EntityKind::Membership => project_membership(pool, item, &state).await?,
-            EntityKind::Collection | EntityKind::BookIdentity => {}
+            EntityKind::Collection | EntityKind::BookIdentity | EntityKind::Book => {}
         }
         books.push(book_id);
     }
@@ -757,6 +1155,12 @@ pub async fn project_book(
     folder_root: &std::path::Path,
     covers_dir: &std::path::Path,
 ) -> Result<Vec<i64>, AppError> {
+    if super::identity::forgotten_replacement(pool, book_uid)
+        .await?
+        .is_some()
+    {
+        return Ok(Vec::new());
+    }
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
         "SELECT kind, entity_uid, book_uid FROM sync_state_entities WHERE book_uid = ?1",
     )
@@ -783,6 +1187,54 @@ async fn durable_record_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i
         .fetch_optional(pool)
         .await?;
     Ok(id)
+}
+
+/// Project a whole-book Forget, restore, or discard into the local durable
+/// tables. The book-level mirror row is authoritative; a projection failure
+/// becomes a visible Sync issue instead of silently dropping the snapshot.
+async fn project_book_lifecycle(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<Option<i64>, AppError> {
+    type LifecycleRow = (Option<String>, Option<String>, Option<String>, i64);
+    let row: Option<LifecycleRow> = sqlx::query_as(
+        "SELECT replacement_book_uid, snapshot_json, restored_at, discarded
+         FROM sync_book_trash WHERE book_uid = ?1",
+    )
+    .bind(book_uid)
+    .fetch_optional(pool)
+    .await?;
+    let Some((replacement, snapshot, restored_at, discarded)) = row else {
+        return Ok(None);
+    };
+    let result = if restored_at.is_none() {
+        crate::repository::lifecycle::apply_remote_forget(
+            pool,
+            book_uid,
+            replacement.as_deref(),
+            snapshot.as_deref(),
+        )
+        .await
+    } else if discarded != 0 {
+        crate::repository::lifecycle::apply_remote_discard(pool, book_uid).await
+    } else {
+        crate::repository::lifecycle::apply_remote_restore(pool, book_uid, snapshot.as_deref())
+            .await
+    };
+    match result {
+        Ok(id) => Ok(id),
+        Err(err) => {
+            super::identity::record_issue(
+                pool,
+                &format!("book-lifecycle:{book_uid}"),
+                "book_lifecycle_failed",
+                &format!("could not apply the shared change for forgotten book {book_uid}: {err}"),
+                None,
+            )
+            .await?;
+            Ok(None)
+        }
+    }
 }
 
 async fn project_annotation(

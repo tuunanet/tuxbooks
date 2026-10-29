@@ -97,6 +97,7 @@ async fn capture_one(
             capture_book_state(pool, root, covers_dir, row, kind).await
         }
         EntityKind::Membership => capture_membership(pool, root, row).await,
+        EntityKind::Book => capture_book(pool, root, row).await,
     }
 }
 
@@ -145,19 +146,21 @@ async fn capture_annotation(
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     };
-    let Some(book_id) = snapshot.get("book_id").and_then(Value::as_i64) else {
-        clear_row(pool, row).await?;
-        return Ok(Captured::Skipped);
-    };
-    let Some(book_uid) = durable_uid(pool, book_id).await? else {
-        clear_row(pool, row).await?;
-        return Ok(Captured::Skipped);
-    };
-    // Publish state only under a bound (content-derived) identity. The sync
-    // engine's identity sweep hashes the row first; capturing under a local
-    // uuid would make two devices disagree about the same bytes.
-    let Some(book_uid) = bound_uid(pool, &book_uid).await? else {
-        return Ok(Captured::PendingIdentity);
+    // 0023 triggers carry the durable key beside the public id. Older markers
+    // and fixtures may still only have the numeric id.
+    let book_uid = match snapshot.get("book_uid").and_then(Value::as_str) {
+        Some(uid) => uid.to_string(),
+        None => {
+            let Some(book_id) = snapshot.get("book_id").and_then(Value::as_i64) else {
+                clear_row(pool, row).await?;
+                return Ok(Captured::Skipped);
+            };
+            let Some(uid) = durable_uid(pool, book_id).await? else {
+                clear_row(pool, row).await?;
+                return Ok(Captured::Skipped);
+            };
+            uid
+        }
     };
     let annotation_id = row
         .entity_key
@@ -240,15 +243,15 @@ async fn capture_book_state(
     row: &DirtyRow,
     kind: EntityKind,
 ) -> Result<Captured, AppError> {
-    // Progress, opened, and metadata all key on the durable book now.
+    // Progress, opened, and metadata all key on the durable book now. The
+    // trigger snapshot is authoritative even before the identity sweep has
+    // hashed the book; aliases converge later if two devices chose different
+    // uuids for the same bytes.
     let uid = row.entity_key.clone();
     if !durable_exists(pool, &uid).await? {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     }
-    let Some(book_uid) = bound_uid(pool, &uid).await? else {
-        return Ok(Captured::PendingIdentity);
-    };
     let Some(mut snapshot) = snapshot_for(row) else {
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
@@ -280,13 +283,141 @@ async fn capture_book_state(
         pool,
         root,
         kind,
-        &book_uid,
-        Some(&book_uid),
+        &uid,
+        Some(&uid),
         row.op == "delete",
         false,
         state,
     )
     .await?;
+    clear_row(pool, row).await?;
+    Ok(Captured::Written)
+}
+
+/// Forget and restore are whole-book lifecycle operations. The local trash
+/// row carries the snapshot; the mirror sees one `book` entity with a
+/// tombstone (Forget) or a restore, never a tombstone per annotation.
+async fn capture_book(
+    pool: &SqlitePool,
+    root: &std::path::Path,
+    row: &DirtyRow,
+) -> Result<Captured, AppError> {
+    let payload = match row.op.as_str() {
+        "delete" => parse_snapshot(row.old_json.as_deref()),
+        _ => parse_snapshot(row.new_json.as_deref()),
+    };
+    let Some(payload) = payload else {
+        clear_row(pool, row).await?;
+        return Ok(Captured::Skipped);
+    };
+    let uid = row.entity_key.clone();
+    let replacement = payload
+        .get("replacement_book_uid")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let action = payload
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("restore");
+    let (mirror_deleted, trash_restored) = merge::book_lifecycle_state(pool, &uid).await?;
+
+    if row.op == "delete" {
+        // A projection that materialized a remote trash row fires this marker
+        // again; the mirror already holds the tombstone.
+        if mirror_deleted {
+            clear_row(pool, row).await?;
+            return Ok(Captured::Skipped);
+        }
+    } else if trash_restored {
+        // Echo of a remote restore/discard projection.
+        clear_row(pool, row).await?;
+        return Ok(Captured::Skipped);
+    }
+
+    let snapshot = match payload.get("snapshot_json").and_then(Value::as_str) {
+        Some(raw) => match crate::repository::lifecycle::shared_snapshot_json(pool, raw).await {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                record_issue(
+                    pool,
+                    &format!("book-snapshot:{uid}"),
+                    "book_snapshot_invalid",
+                    &format!(
+                        "could not publish the forgotten book snapshot: {err}; \
+                         other machines will not be able to restore it"
+                    ),
+                    None,
+                )
+                .await?;
+                None
+            }
+        },
+        None => None,
+    };
+    if snapshot.is_none() && action != "discard" {
+        record_issue(
+            pool,
+            &format!("book-snapshot-missing:{uid}"),
+            "book_snapshot_missing",
+            "this book was forgotten without a portable snapshot; other machines \
+             will see the delete but cannot offer a restore",
+            None,
+        )
+        .await?;
+    }
+
+    if row.op == "delete" {
+        let mut prior = Map::new();
+        prior.insert(
+            "snapshot".into(),
+            snapshot.map(Value::String).unwrap_or(Value::Null),
+        );
+        prior.insert(
+            "replacement_book_uid".into(),
+            replacement.map(Value::String).unwrap_or(Value::Null),
+        );
+        prior.insert("discarded".into(), Value::Null);
+        let op = build_op(
+            pool,
+            EntityKind::Book,
+            &uid,
+            Some(&uid),
+            true,
+            false,
+            Map::new(),
+            Some(prior),
+        )
+        .await?;
+        write_and_apply(pool, root, &op).await?;
+    } else {
+        let mut fields = Map::new();
+        if action == "discard" {
+            fields.insert("discarded".into(), Value::Bool(true));
+            fields.insert("snapshot".into(), Value::Null);
+        } else {
+            fields.insert(
+                "snapshot".into(),
+                snapshot.map(Value::String).unwrap_or(Value::Null),
+            );
+            fields.insert("discarded".into(), Value::Bool(false));
+        }
+        fields.insert(
+            "replacement_book_uid".into(),
+            replacement.map(Value::String).unwrap_or(Value::Null),
+        );
+        let op = build_op(
+            pool,
+            EntityKind::Book,
+            &uid,
+            Some(&uid),
+            false,
+            true,
+            fields,
+            None,
+        )
+        .await?;
+        write_and_apply(pool, root, &op).await?;
+    }
     clear_row(pool, row).await?;
     Ok(Captured::Written)
 }
@@ -312,9 +443,6 @@ async fn capture_membership(
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     }
-    let Some(book_uid) = bound_uid(pool, uid).await? else {
-        return Ok(Captured::PendingIdentity);
-    };
     let Some(collection_uid) =
         resolve_local_uid(pool, "collections", collection_id, None, false).await?
     else {
@@ -322,7 +450,7 @@ async fn capture_membership(
     };
     let collection_uid =
         canonical_entity_uid(pool, EntityKind::Collection, &collection_uid).await?;
-    let book_uid = canonical_book_uid(pool, &book_uid).await?;
+    let book_uid = canonical_book_uid(pool, uid).await?;
     let entity_uid = format!("{collection_uid}:{book_uid}");
     let mut state: State = BTreeMap::new();
     let present = row.op != "delete"
@@ -520,20 +648,6 @@ async fn durable_exists(pool: &SqlitePool, uid: &str) -> Result<bool, AppError> 
     Ok(exists.is_some())
 }
 
-/// The canonical published identity behind a durable uid, once a content hash
-/// has bound it. `None` means the identity sweep still owes this book a hash.
-async fn bound_uid(pool: &SqlitePool, uid: &str) -> Result<Option<String>, AppError> {
-    let bound: Option<String> =
-        sqlx::query_scalar("SELECT book_uid FROM sync_book_bindings WHERE book_uid = ?1 LIMIT 1")
-            .bind(uid)
-            .fetch_optional(pool)
-            .await?;
-    match bound {
-        Some(uid) => Ok(Some(canonical_book_uid(pool, &uid).await?)),
-        None => Ok(None),
-    }
-}
-
 /// The canonical durable uid behind a public numeric book id, when the book
 /// still has a durable record.
 async fn durable_uid(pool: &SqlitePool, book_id: i64) -> Result<Option<String>, AppError> {
@@ -633,5 +747,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn annotation_capture_uses_the_durable_uid_without_a_hash_binding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let (book_id, _) = crate::repository::books::upsert_book(
+            &pool,
+            &crate::domain::NewBook {
+                path: "/tmp/unhashed.epub".into(),
+                title: "Unhashed".into(),
+                subtitle: None,
+                author: None,
+                authors: Vec::new(),
+                subjects: Vec::new(),
+                publisher: None,
+                language: None,
+                isbn: None,
+                description: None,
+                publication_date: None,
+                series: None,
+                series_index: None,
+                cover_path: None,
+                file_size: 0,
+                file_mtime: 0,
+            },
+        )
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO annotations (book_uid, kind, cfi, text)
+             SELECT uid, 'bookmark', 'epubcfi(/6/4)', 'before the hash' FROM book_records WHERE id = ?1",
+        )
+        .bind(book_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let marker: String =
+            sqlx::query_scalar("SELECT new_json FROM sync_dirty WHERE kind = 'annotation' LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            marker.contains("\"book_uid\""),
+            "the trigger carries the durable key: {marker}"
+        );
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let covers = tmp.path().join("covers");
+        let report = drain(&pool, &root, &covers, 10).await.unwrap();
+        assert_eq!(report.written, 1, "capture does not wait for a binding");
+        let bindings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_bindings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(bindings, 0);
     }
 }

@@ -25,6 +25,7 @@ Status: implemented in `sidecar/src/sync/` and covered by
 | Collection membership                               | collection uid + book uid | entity-level LWW                    |
 | Last opened at                                      | book uid                  | entity-level LWW                    |
 | Book identity aliases                               | content hash              | canonical uuid is the smallest seen |
+| Forget and restore (whole book)                     | book uid                  | delete wins, explicit restore       |
 
 Cover overrides travel as content-addressed blobs under `blobs/covers/`.
 Everything else in the app data directory stays local:
@@ -138,6 +139,16 @@ validation and is retried.
 `prior`, so any device can offer the 30-day restore. `restore: true` is emitted
 only by the explicit restore action.
 
+A whole-book Forget is one `kind: "book"` operation with `entity_uid` and
+`book_uid` both set to the forgotten uuid. Its `prior` map carries
+`snapshot` (the portable book snapshot as a JSON string) and
+`replacement_book_uid` (the fresh identity when the sender still had a file).
+The snapshot names collection memberships by collection uid, never by a local
+row id, and leaves provider links out because those stay local. A restore is
+the same kind with `restore: true` and the snapshot in `fields`; a Keep or
+Merge resolution sends `discarded: true` instead, closing the remote trash
+entry without recreating the old identity.
+
 Clocks are hybrid logical clocks. Ordering is `(wall, counter, device id)`.
 `next_hlc` is a single SQLite upsert, so concurrent callers cannot receive the
 same value. Receiving a remote clock moves the local clock forward. A device
@@ -163,6 +174,13 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
 - **Absent books** do not delete state. Unwatching a folder, a missing file, or
   deleting a local book row never emits a shared delete. State waits under its
   book uuid and is projected when the same content is imported again.
+- **Forget is the explicit shared delete.** A `book` tombstone wins over
+  in-flight edits for the old uuid. Receivers rebind any local file rows to the
+  sender's fresh identity, remove the old aliases, and keep the snapshot in
+  their own Reading history trash. A forgotten uuid is not an identity-merge
+  candidate, so a stale alias or an old `sync_book_merges` edge cannot bring it
+  back. Restore is an explicit `book` operation; Keep and Merge close the
+  remote trash entry with a discard.
 - **Metadata lists** travel only when the user customized them. A machine with a
   different copy of the book does not fight over source-derived authors or
   subjects.
@@ -174,16 +192,17 @@ winner, but the loser is inspectable and can be dismissed once read.
 ## Local capture and projection
 
 Triggers on `annotations`, `reading_progress`, `book_metadata_overrides`,
-`book_authors`, `book_subjects`, `collections`, `book_collections`, and
-`book_records.last_opened_at` write a canonical snapshot into `sync_dirty` at
-the moment of the change. Progress, metadata, and last-opened key directly on
-the durable book uid; membership keys on collection uid + book uid;
-annotations carry the public book id beside their portable uid and resolve it
-to the uid. No capture path looks up a per-file sync binding. The capture pass
-uses that snapshot, not the current row, so a remote projection that lands
-between the edit and the sync pass cannot erase the edit. Capture waits until
-the book's content hash has been bound, so two devices publish the same bytes
-under one shared identity.
+`book_authors`, `book_subjects`, `collections`, `book_collections`,
+`book_records.last_opened_at`, and `book_trash` write a canonical snapshot into
+`sync_dirty` at the moment of the change. Progress, metadata, last-opened, and
+book lifecycle key directly on the durable book uid; annotations carry
+`book_uid` beside the public book id; membership keys on collection uid + book
+uid. No capture path looks up a per-file sync binding. The capture pass uses
+that snapshot, not the current row, so a remote projection that lands between
+the edit and the sync pass cannot erase the edit. Capture no longer waits for a
+content hash before publishing: the durable uuid is authoritative, and if two
+devices chose different uuids for the same bytes the identity aliases converge
+and merge them later.
 
 Triggers check that the parent durable book or collection still exists.
 Cascades caused by unwatching or deleting a file row are local disappearances
@@ -222,8 +241,19 @@ restore the entry for 30 days; restore emits an explicit upsert with
 `restore: true` and a newer clock. Restoring a collection also restores its
 membership state, which was never discarded.
 
-After 30 days the trash row is no longer offered. The operation log still holds
-the tombstone and prior state.
+Forget a book is the same 30-day idea at the whole-book level. The local
+`book_trash` row is written atomically with the local delete; a trigger turns it
+into a `book` operation. Receivers apply the book tombstone, keep their own
+copy of the snapshot in Reading history, and can restore it locally even if
+they never imported the file. A restore sends the snapshot back, recreates the
+old durable record and state, and moves file rows from the fresh identity to
+the old one. Keep and Merge stay local choices and send a discard so the other
+machines close their copy of the trash entry; Merge's state travels as ordinary
+entity operations on the fresh identity. Provider links are deliberately not
+part of the shared snapshot: a local restore keeps them on the machine that
+made the original Forget, and a restore elsewhere recreates the book without a
+provider link. The operation log still holds the tombstone and prior state
+after 30 days.
 
 ## Errors and status
 
@@ -240,7 +270,10 @@ Failures become rows in `sync_issues`:
 - a conflict where one side had to be discarded (both values are in the
   detail);
 - two local files bound to the same book identity, naming both paths;
-- a queued reprojection that failed.
+- a queued reprojection that failed;
+- a forgotten-book snapshot that could not be published or read back, so
+  another machine can apply the delete but cannot offer a restore;
+- a shared restore that had to replace newer local state on the fresh identity.
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
@@ -272,6 +305,9 @@ state unrecoverable, so it is not bolted on silently.
   create one file per event;
 - trash is offered for 30 days;
 - an operation is at most 1 MiB; a cover blob is at most 16 MiB;
+- a forgotten-book snapshot is capped at 512 KiB inside the operation. A larger
+  snapshot still sends the delete (so every machine forgets) and records an
+  issue instead of pretending the restore exists;
 - per pass: 250 dirty entities, 500 remote operations, and a few seconds of
   hashing. Remaining work continues on the next pass.
 
