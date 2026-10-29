@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sqlx::SqlitePool;
 
@@ -10,6 +10,10 @@ use crate::repository::library_locations::owning_location;
 /// library location with its book count and total file bytes, whether the
 /// path is still on disk, the library's total book bytes, and the catalog
 /// row counts. Locations keep registration order.
+///
+/// Counts follow the library (one per durable book, ADR 0014 D7) while bytes
+/// sum every file row, so a duplicate copy raises storage use without making
+/// the library look like it has two books.
 ///
 /// A book belongs to the most specific (longest matching) location whose
 /// path prefixes it, where a path matches when it equals the location or
@@ -33,14 +37,22 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
 
         let mut counts = vec![0_i64; locations.len()];
         let mut bytes = vec![0_i64; locations.len()];
+        let mut seen_books: Vec<HashSet<&str>> =
+            (0..locations.len()).map(|_| HashSet::new()).collect();
         let mut total_bytes = 0_i64;
-        let books: Vec<(String, i64)> = sqlx::query_as("SELECT path, file_size FROM books")
-            .fetch_all(pool)
-            .await?;
-        for (path, file_size) in &books {
+        // One row per file: bytes include every duplicate copy. The book count
+        // dedupes by durable uid, so one book in two folders counts once per
+        // folder that owns a file but never twice for two copies in one.
+        let books: Vec<(String, String, i64)> =
+            sqlx::query_as("SELECT COALESCE(book_uid, 'row:' || id), path, file_size FROM books")
+                .fetch_all(pool)
+                .await?;
+        for (book_uid, path, file_size) in &books {
             total_bytes += file_size;
             if let Some(index) = owning_location(path, &location_index) {
-                counts[index] += 1;
+                if seen_books[index].insert(book_uid.as_str()) {
+                    counts[index] += 1;
+                }
                 bytes[index] += file_size;
             }
         }
@@ -50,7 +62,7 @@ pub async fn storage_stats(pool: &SqlitePool) -> Result<StorageStats, AppError> 
     let catalog = sqlx::query_as::<_, CatalogCounts>(
         r#"
         SELECT
-            (SELECT COUNT(*) FROM books) AS books,
+            (SELECT COUNT(DISTINCT COALESCE(book_uid, 'row:' || id)) FROM books) AS books,
             (SELECT COUNT(*) FROM authors) AS authors,
             (SELECT COUNT(*) FROM collections) AS collections,
             (SELECT COUNT(*) FROM annotations) AS annotations,
@@ -249,5 +261,34 @@ mod tests {
         assert_eq!(stats.locations[0].path, "/empty");
         assert_eq!(stats.locations[0].book_count, 0);
         assert_eq!(stats.locations[0].total_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn duplicate_copies_count_as_one_book_but_every_byte() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool(tmp.path()).await;
+
+        library_locations::add_location(&pool, "/lib")
+            .await
+            .unwrap();
+        seed_book(&pool, "/lib/first.epub", 100).await;
+        seed_book(&pool, "/lib/second.epub", 100).await;
+        // The hash backfill collapses identical bytes onto one durable book.
+        let uid: String =
+            sqlx::query_scalar("SELECT book_uid FROM books WHERE path = '/lib/first.epub'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE books SET book_uid = ?1 WHERE path = '/lib/second.epub'")
+            .bind(&uid)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let stats = storage_stats(&pool).await.unwrap();
+        assert_eq!(stats.locations[0].book_count, 1);
+        assert_eq!(stats.locations[0].total_bytes, 200);
+        assert_eq!(stats.book_total_bytes, 200);
+        assert_eq!(stats.catalog.books, 1);
     }
 }

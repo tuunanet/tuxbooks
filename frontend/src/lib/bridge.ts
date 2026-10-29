@@ -9,6 +9,7 @@ import type {
   AnnotationInput,
   AnnotationPatch,
   Book,
+  BookFile,
   BookFormat,
   BookMetadata,
   BookTrashEntry,
@@ -31,6 +32,7 @@ import type { StorageReport } from "../../../electron/shared/storageReport";
 
 export type {
   Book,
+  BookFile,
   BookFormat,
   BookMetadata,
   BookTrashEntry,
@@ -273,6 +275,19 @@ export function onLibraryChanged(callback: (change: LibraryChange) => void): Pro
 /** Remove a book from the library (source file on disk is never touched). */
 export function removeBook(bookId: number): Promise<boolean> {
   return invoke("remove_book", { bookId });
+}
+
+/** Every file location of one durable book, in active-file order. */
+export function listBookFiles(bookId: number): Promise<BookFile[]> {
+  return invoke("list_book_files", { bookId });
+}
+
+/**
+ * Remove one file copy from a book. The durable book and its reading state
+ * stay while another copy remains; the file on disk is never touched.
+ */
+export function removeBookFile(bookId: number, fileId: number): Promise<boolean> {
+  return invoke("remove_book_file", { bookId, fileId });
 }
 
 /**

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use sqlx::SqlitePool;
 
 use crate::domain::Book;
+use crate::domain::BookFile;
 use crate::domain::NewBook;
 use crate::domain::ProviderLink;
 use crate::domain::ReadingHistoryBook;
@@ -39,10 +40,12 @@ const FILE_ROW_FROM: &str = " FROM books b \
      LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
 /// The active file of a book is the available copy with the lowest row id, so
 /// a duplicate copy that disappeared never hides the one that is still there.
+/// Path order is the final tiebreak; row ids are unique, so it only documents
+/// the rule for callers that read the same ordering without an id.
 const BOOK_FROM: &str = " FROM book_records br \
      JOIN books bf ON bf.id = ( \
          SELECT b2.id FROM books b2 WHERE b2.book_uid = br.uid \
-         ORDER BY b2.available DESC, b2.id LIMIT 1 \
+         ORDER BY b2.available DESC, b2.id, b2.path LIMIT 1 \
      ) \
      LEFT JOIN series s ON s.id = br.series_id \
      LEFT JOIN reading_progress rp ON rp.book_uid = br.uid";
@@ -227,18 +230,42 @@ pub async fn durable_id_for_file(pool: &SqlitePool, file_id: i64) -> Result<Opti
 }
 
 /// The file row the reader should use for a durable book: an available copy
-/// first, then the lowest id. `None` when the book currently has no file
-/// (Reading history, which this slice keeps for ticket .5).
+/// first, then the lowest id, then path. `None` when the book currently has no
+/// file (Reading history, ADR 0014 D6).
 pub async fn active_file_id(pool: &SqlitePool, durable_id: i64) -> Result<Option<i64>, AppError> {
     let id: Option<i64> = sqlx::query_scalar(
         "SELECT b.id FROM books b \
          JOIN book_records br ON br.uid = b.book_uid \
-         WHERE br.id = ?1 ORDER BY b.available DESC, b.id LIMIT 1",
+         WHERE br.id = ?1 ORDER BY b.available DESC, b.id, b.path LIMIT 1",
     )
     .bind(durable_id)
     .fetch_optional(pool)
     .await?;
     Ok(id)
+}
+
+/// Every file location of a durable book, in active-file order. `active`
+/// marks the copy the reader, metadata edits, and reconnect resolve to, so
+/// the details cannot disagree with the library about which file is current.
+pub async fn list_files_for_book(
+    pool: &SqlitePool,
+    durable_id: i64,
+) -> Result<Vec<BookFile>, AppError> {
+    let mut files = sqlx::query_as::<_, BookFile>(
+        "SELECT b.id, b.path, b.available, b.file_size, b.file_mtime, b.added_at \
+         FROM books b \
+         JOIN book_records br ON br.uid = b.book_uid \
+         WHERE br.id = ?1 \
+         ORDER BY b.available DESC, b.id, b.path",
+    )
+    .bind(durable_id)
+    .fetch_all(pool)
+    .await?;
+    // The first row under the active-file order is the copy the reader opens.
+    if let Some(active) = files.first_mut() {
+        active.active = true;
+    }
+    Ok(files)
 }
 
 pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Book>, AppError> {
@@ -302,9 +329,10 @@ pub async fn mark_metadata_available(pool: &SqlitePool, durable_id: i64) -> Resu
 
 /// Library entries: one per durable book that currently has a file.
 pub async fn count_books(pool: &SqlitePool) -> Result<i64, AppError> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT book_uid) FROM books")
-        .fetch_one(pool)
-        .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(DISTINCT COALESCE(book_uid, 'row:' || id)) FROM books")
+            .fetch_one(pool)
+            .await?;
     Ok(count)
 }
 
@@ -722,7 +750,7 @@ pub async fn search_fts(pool: &SqlitePool, match_query: &str) -> Result<Vec<Sear
         JOIN book_records br ON br.id = books_fts.rowid
         JOIN books b ON b.id = (
             SELECT b2.id FROM books b2 WHERE b2.book_uid = br.uid
-            ORDER BY b2.available DESC, b2.id LIMIT 1
+            ORDER BY b2.available DESC, b2.id, b2.path LIMIT 1
         )
         WHERE books_fts MATCH ?1
         ORDER BY rank

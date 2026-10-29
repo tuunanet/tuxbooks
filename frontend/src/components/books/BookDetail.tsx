@@ -10,10 +10,13 @@ import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
 import { ResetBookDialog } from "./ResetBookDialog";
 import { useBookActions } from "@/hooks/useBookActions";
+import { useBookFiles } from "@/hooks/useBookFiles";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
+import type { BookFile } from "@/lib/bridge";
+import { formatMb } from "@/lib/format";
 import { providerLinkLabel } from "@/lib/providers";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
@@ -25,20 +28,33 @@ function formatDate(iso: string | null): string {
   }).format(new Date(iso));
 }
 
+/** Exact-enough sizes; a small EPUB must not read as "0.0 MB". */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return formatMb(bytes);
+}
+
 /**
  * Book detail view, rendered inside the library shell (sidebar stays).
  * Data comes from the shared `list_books` payload — there is no
  * `get_book` command yet (decision D1). Reading position comes from the
- * same payload's progress join (milestone 10). The Overview/Metadata rail
- * makes metadata the primary, transparent surface (issue #58); Highlights
- * and Bookmarks review what the reader captured and open the book at a row's
- * position.
+ * same payload's progress join (milestone 10). File locations come from
+ * `list_book_files`, so one library entry can list every duplicate copy
+ * (ADR 0014 D7). The Overview/Metadata rail makes metadata the primary,
+ * transparent surface (issue #58); Highlights and Bookmarks review what the
+ * reader captured and open the book at a row's position.
  */
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
   const { books, collections } = useLibrary();
-  const { locateBook, removeBookFromLibrary, resetReadingData, forgetBookFromLibrary } =
-    useBookActions();
+  const {
+    locateBook,
+    removeBookFromLibrary,
+    removeBookFile: removeCopy,
+    resetReadingData,
+    forgetBookFromLibrary,
+  } = useBookActions();
   const [resetOpen, setResetOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
   const dispatch = useAppDispatch();
@@ -46,6 +62,7 @@ export function BookDetail() {
   // One curation view is shared by the Overview subjects row and the
   // Metadata panel, so saves and resets refresh both.
   const curation = useBookMetadata(book ? book.id : null);
+  const { files, refresh: refreshFiles } = useBookFiles(book ? book.id : null);
   const subjects = curation.metadata?.effective.subjects ?? [];
   const memberCollections =
     book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
@@ -69,6 +86,27 @@ export function BookDetail() {
       </section>
     );
   }
+
+  // Before the locations query resolves, the active file from `list_books`
+  // is the one fact the details already know. The fallback keeps the path
+  // visible without pretending a second copy exists.
+  const locations: BookFile[] =
+    files.length > 0
+      ? files
+      : [
+          {
+            id: -1,
+            path: book.path,
+            available: book.available,
+            fileSize: book.fileSize,
+            fileMtime: book.fileMtime,
+            addedAt: book.addedAt,
+            active: true,
+          },
+        ];
+  const removeFile = async (fileId: number) => {
+    if (await removeCopy(book.id, fileId)) await refreshFiles();
+  };
 
   const facts: [string, string][] = [
     ["Format", book.format.toUpperCase()],
@@ -210,6 +248,64 @@ export function BookDetail() {
                 </Fragment>
               ))}
             </dl>
+          </div>
+
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground">File locations</h3>
+            <ul
+              data-testid="detail-file-locations"
+              className="mt-2 divide-y rounded-lg border text-sm"
+            >
+              {locations.map((file) => (
+                <li
+                  key={file.id}
+                  data-testid={`detail-file-${file.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <code className="block break-all text-xs text-muted-foreground">
+                      {file.path}
+                    </code>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {file.active && (
+                        <Badge
+                          variant="secondary"
+                          data-testid={`detail-file-active-${file.id}`}
+                          className="text-[10px]"
+                        >
+                          Reading from
+                        </Badge>
+                      )}
+                      {file.available ? (
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {formatFileSize(file.fileSize)}
+                        </span>
+                      ) : (
+                        <Badge variant="destructive" className="text-[10px]">
+                          Missing
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  {locations.length > 1 && file.id > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid={`detail-file-remove-${file.id}`}
+                      onClick={() => void removeFile(file.id)}
+                    >
+                      Remove copy
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {locations.length > 1 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                These copies share progress, annotations, and collections. Removing one keeps the
+                book and your reading data; the file on disk is never touched.
+              </p>
+            )}
           </div>
 
           <div className="mt-8">

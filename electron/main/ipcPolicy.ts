@@ -92,6 +92,8 @@ const ISSUED_PATH_METHODS = new Set([
 
 const BOOK_ID_METHODS = new Set([
   "remove_book",
+  "remove_book_file",
+  "list_book_files",
   "reset_book_reading_data",
   "forget_book",
   "get_book_metadata",
@@ -268,6 +270,12 @@ function validateMethodShape(method: string, record: Record<string, unknown>): v
   }
   if (BOOK_ID_METHODS.has(method)) {
     requireBookId(record);
+  }
+  if (method === "remove_book_file") {
+    const fileId = record.fileId;
+    if (typeof fileId !== "number" || !Number.isSafeInteger(fileId) || fileId < 1) {
+      throw policyError("invalid fileId");
+    }
   }
   if (method === "get_book_resource") {
     requireResourcePath(record);

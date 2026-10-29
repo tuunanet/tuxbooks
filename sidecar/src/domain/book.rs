@@ -127,6 +127,28 @@ impl Serialize for Book {
     }
 }
 
+/// One file location of a durable book (ADR 0014 D7). The library still shows
+/// one entry per book; the details list every location and can remove a copy
+/// without touching the durable book or its state.
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookFile {
+    /// Internal file-row id, scoped to one durable book. Used for a targeted
+    /// "remove this copy" action, never as the public book id.
+    pub id: i64,
+    pub path: String,
+    /// Whether the copy is still on disk. An available copy wins the
+    /// active-file rule even when it has a higher row id.
+    pub available: bool,
+    pub file_size: i64,
+    pub file_mtime: i64,
+    pub added_at: DateTime<Utc>,
+    /// True for the copy the reader opens: available first, then lowest row
+    /// id. Filled by the repository from the same ordering it returns.
+    #[sqlx(default)]
+    pub active: bool,
+}
+
 /// One Reading-history row: a durable book with no file rows (ADR 0014 D6).
 /// `id` is the durable book record id, so the row keeps a stable `bookId`
 /// even when there is no file to read. Metadata comes from the durable

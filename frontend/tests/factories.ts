@@ -1,6 +1,7 @@
 import type {
   Annotation,
   Book,
+  BookFile,
   BookTrashEntry,
   CollectionSummary,
   ProviderLink,
@@ -34,6 +35,19 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     progressPercent: null,
     progressUpdatedAt: null,
     providerLinks: [],
+    ...overrides,
+  };
+}
+
+export function makeBookFile(overrides: Partial<BookFile> = {}): BookFile {
+  return {
+    id: 1,
+    path: "/tmp/library/minimal.epub",
+    available: true,
+    fileSize: 1024,
+    fileMtime: 1767225600,
+    addedAt: "2026-01-01T00:00:00.000Z",
+    active: true,
     ...overrides,
   };
 }
