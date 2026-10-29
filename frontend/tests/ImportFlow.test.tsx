@@ -111,6 +111,28 @@ describe("Import via the header menu", () => {
     );
   });
 
+  it("reports a cancelled import instead of the partial counts", async () => {
+    pickDirectoryMock.mockResolvedValue("/big/library");
+    renderShellWithLibrary([makeBook()], {
+      imported: 704,
+      updated: 0,
+      skipped: 0,
+      failed: [],
+      watched: ["/big/library"],
+      covered: [],
+      cancelled: true,
+    });
+    await screen.findByTestId("library-header");
+
+    await userEvent.click(screen.getByTestId("import-menu"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Import Folder…" }));
+
+    const status = await screen.findByTestId("import-status");
+    expect(status).toHaveTextContent("Import cancelled");
+    expect(status).not.toHaveTextContent("Imported 704 new");
+    expect(status).not.toHaveTextContent("Watching /big/library");
+  });
+
   it("imports the picked folder through import_paths and reports the result", async () => {
     pickDirectoryMock.mockResolvedValue("/picked/books");
     renderShellWithLibrary([makeBook()], {

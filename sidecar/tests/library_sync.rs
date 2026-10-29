@@ -8,7 +8,6 @@
 //! progress on worker threads while the test thread waits on the change
 //! channel.
 
-use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -26,7 +25,7 @@ use tuxbooks_lib::repository::{
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{LibraryChange, PathChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
-use tuxbooks_lib::AppState;
+use tuxbooks_lib::{AppState, ImportRegistry};
 
 const DEBOUNCE: Duration = Duration::from_millis(50);
 const WAIT: Duration = Duration::from_secs(15);
@@ -44,7 +43,7 @@ struct TestEnv {
     emitter: EventEmitter,
     fired: Arc<Mutex<FiredEvents>>,
     changes: mpsc::Receiver<LibraryChange>,
-    importing: Arc<Mutex<HashSet<String>>>,
+    importing: ImportRegistry,
 }
 
 fn write_epub(path: &Path, title: &str) {
@@ -128,7 +127,7 @@ async fn setup() -> TestEnv {
         emitter,
         fired,
         changes: change_rx,
-        importing: Arc::new(Mutex::new(HashSet::new())),
+        importing: Arc::new(Mutex::new(Default::default())),
     }
 }
 
@@ -772,27 +771,67 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
     );
 }
 
-/// A purge must not race a scan: the scan registers its folder before
-/// importing, so the folder is on the watch list while rows are still
-/// landing. Unwatch waits until the scan finishes.
+/// Unwatch during a scan cancels the scan and then purges what it already
+/// imported. Nothing may land after the purge, or the orphan state returns.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwatching_a_folder_that_is_still_importing_is_refused() {
+async fn unwatching_a_folder_cancels_its_import_and_purges_what_landed() {
     let env = setup().await;
     let shelf = env.sibling("shelf");
     std::fs::create_dir_all(&shelf).unwrap();
+    for index in 0..200 {
+        write_epub(
+            &shelf.join(format!("book-{index}.epub")),
+            &format!("Shelf Book {index}"),
+        );
+    }
     let shelf_path = shelf.to_string_lossy().into_owned();
-    library_locations::add_location(&env.pool, &shelf_path)
-        .await
-        .unwrap();
-    env.importing.lock().unwrap().insert(shelf_path.clone());
 
-    let response = env.unwatch_error(&[shelf_path.as_str()]).await;
-    let message = response["error"]["message"].as_str().unwrap();
-    assert!(message.contains("still importing"), "got: {message}");
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let emitter = EventEmitter::new(move |name, _| {
+        if name == "import-progress" {
+            let _ = progress_tx.send(());
+        }
+    });
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "import_paths",
+        "params": { "paths": [shelf_path.clone()] },
+    })
+    .to_string();
+    let state = env.state();
+    let import = tokio::spawn(async move { handle_request_line(&state, &emitter, &request).await });
+    progress_rx
+        .recv()
+        .await
+        .expect("the import should report progress");
+
+    let partial = env.count().await;
+    assert!(
+        partial > 0 && partial < 200,
+        "unwatch must land mid-import, got {partial} rows"
+    );
+    assert_eq!(env.unwatch(&[shelf_path.as_str()]).await, 1);
+
+    let outcome = import.await.expect("the import task must finish cleanly");
+    let RequestLineOutcome::Response(line) = outcome else {
+        panic!("the import response must not be malformed");
+    };
+    let response: Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(
+        response["result"]["cancelled"], true,
+        "the import must report that it was cancelled: {response}"
+    );
+
+    assert_eq!(
+        env.count().await,
+        0,
+        "the unwatch must purge the books the cancelled scan had imported"
+    );
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
-        vec![env.library.to_string_lossy().into_owned(), shelf_path],
-        "the refused unwatch must leave the watch list alone"
+        vec![env.library.to_string_lossy().into_owned()],
+        "the folder must leave the watch list"
     );
 }
 

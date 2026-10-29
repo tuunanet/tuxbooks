@@ -11,13 +11,14 @@ pub mod services;
 pub mod sync;
 pub mod worker;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::SqlitePool;
+use tokio::sync::watch;
 
 use crate::db::connection::init_pool_recovering;
 use crate::domain::StartupRecovery;
@@ -25,6 +26,70 @@ use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::Reconciler;
 use crate::services::library_watcher::LibraryWatcher;
 use crate::sync::engine::SyncService;
+
+/// One folder import in flight. Unwatch cancels it and waits for
+/// `finished` before purging, so the scan cannot write rows after the
+/// folder and its books are gone.
+#[derive(Clone)]
+pub struct ImportRun {
+    cancel: Arc<AtomicBool>,
+    finished: Arc<watch::Sender<bool>>,
+}
+
+impl ImportRun {
+    pub fn new() -> Self {
+        let (finished, _) = watch::channel(false);
+        Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished: Arc::new(finished),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The flag the importer polls between files and batches.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    /// Called once the scan has stopped. A watch channel is used instead of
+    /// a bare notification so an unwatch that arrives after this point
+    /// still observes the finished state.
+    pub fn finish(&self) {
+        let _ = self.finished.send(true);
+    }
+
+    pub async fn wait_finished(&self) {
+        let mut finished = self.finished.subscribe();
+        if *finished.borrow() {
+            return;
+        }
+        // A dropped sender means the run ended too.
+        let _ = finished.wait_for(|done| *done).await;
+    }
+}
+
+impl Default for ImportRun {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for ImportRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportRun")
+            .field("cancelled", &self.cancelled())
+            .finish_non_exhaustive()
+    }
+}
+
+pub type ImportRegistry = Arc<Mutex<HashMap<String, ImportRun>>>;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -37,10 +102,9 @@ pub struct AppState {
     /// Background cloud-folder sync. `None` in unit tests that construct the
     /// state by hand; production wires it in `init_state`.
     pub sync: Option<Arc<SyncService>>,
-    /// Folders whose import scan is running. Unwatch refuses these so a
-    /// purge cannot race the scan and leave the rows it writes outside every
-    /// watched location.
-    pub importing: Arc<Mutex<HashSet<String>>>,
+    /// Folder imports in flight, keyed by root. Unwatch cancels and waits
+    /// for these before purging so a scan cannot race the purge.
+    pub importing: ImportRegistry,
 }
 
 /// Directory where imported cover images are extracted, derived from the DB path.
@@ -303,7 +367,7 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         watcher: Arc::new(watcher),
         startup_recovery,
         sync: Some(sync),
-        importing: Arc::new(Mutex::new(HashSet::new())),
+        importing: Arc::new(Mutex::new(HashMap::new())),
     })
 }
 

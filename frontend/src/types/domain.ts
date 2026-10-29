@@ -130,6 +130,8 @@ export interface ImportReport {
    * says where they came from instead of naming a watch that never started.
    */
   covered: string[];
+  /** The run stopped because its folder was unwatched mid-scan. */
+  cancelled?: boolean;
 }
 
 /**

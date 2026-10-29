@@ -12,7 +12,7 @@ use crate::repository::books;
 use crate::repository::library_locations;
 use crate::repository::storage;
 use crate::rpc::EventEmitter;
-use crate::services::book_importer::{import_directory, ImportReport};
+use crate::services::book_importer::{import_directory_with_cancel, ImportReport};
 use crate::services::library_reconciler::reconnect_book as reconnect;
 use crate::services::library_scanner::has_book_extension;
 use crate::{covers_dir, pdfium_library_dirs, AppState};
@@ -240,28 +240,58 @@ async fn register_and_import_folder(
     report: &mut ImportReport,
 ) -> Result<(), AppError> {
     let root_key = root.to_string_lossy().into_owned();
-    state
-        .importing
-        .lock()
-        .expect("importing mutex poisoned")
-        .insert(root_key.clone());
-    let outcome = async {
-        register_and_watch(state, root, report).await?;
-        let mut folder_report =
-            import_directory(&state.db, root, covers, pdfium_dirs, emit_progress).await?;
-        report.imported += folder_report.imported;
-        report.updated += folder_report.updated;
-        report.skipped += folder_report.skipped;
-        report.failed.append(&mut folder_report.failed);
-        Ok(())
+    let run = crate::ImportRun::new();
+    {
+        let mut importing = state.importing.lock().expect("importing mutex poisoned");
+        if importing.contains_key(&root_key) {
+            return Err(AppError::InvalidInput(format!(
+                "{root_key} is already importing"
+            )));
+        }
+        importing.insert(root_key.clone(), run.clone());
     }
-    .await;
-    state
-        .importing
-        .lock()
-        .expect("importing mutex poisoned")
-        .remove(&root_key);
-    outcome
+    // Finish and unregister on every exit path, panics included, or an
+    // unwatch could wait forever for a run that is gone.
+    let _guard = ImportGuard {
+        importing: state.importing.clone(),
+        root: root_key,
+        run: run.clone(),
+    };
+
+    register_and_watch(state, root, report).await?;
+    let mut folder_report = import_directory_with_cancel(
+        &state.db,
+        root,
+        covers,
+        pdfium_dirs,
+        emit_progress,
+        Some(run.cancel_flag()),
+    )
+    .await?;
+    report.imported += folder_report.imported;
+    report.updated += folder_report.updated;
+    report.skipped += folder_report.skipped;
+    report.cancelled |= folder_report.cancelled;
+    report.failed.append(&mut folder_report.failed);
+    Ok(())
+}
+
+/// Removes a folder's entry from the in-flight registry and wakes anything
+/// waiting for it, including on an early return or unwind.
+struct ImportGuard {
+    importing: crate::ImportRegistry,
+    root: String,
+    run: crate::ImportRun,
+}
+
+impl Drop for ImportGuard {
+    fn drop(&mut self) {
+        self.run.finish();
+        self.importing
+            .lock()
+            .expect("importing mutex poisoned")
+            .remove(&self.root);
+    }
 }
 
 /// Register `root` as a watched library location, start the filesystem
@@ -322,8 +352,10 @@ async fn covered_by_watched_ancestor(pool: &SqlitePool, path: &str) -> Result<bo
 /// `library-changed` event so the library view updates without a restart.
 /// Batched `unwatch-progress` events report how many of the promised books
 /// are gone while the purge runs; the artwork cache is swept once at the
-/// end instead of once per book. Files on disk are never touched. Returns
-/// how many folders were actually listed.
+/// end instead of once per book. Files on disk are never touched. A folder
+/// whose import is still running is cancelled first and the purge waits for
+/// the scan to stop, so no book can land after the unwatch. Returns how
+/// many folders were actually listed.
 ///
 /// A folder inside another watched folder is refused (ADR 0010). The folder
 /// above watches the whole subtree recursively, so the books this unwatch
@@ -346,22 +378,29 @@ pub async fn unwatch_locations(
     }
 
     // A scan registers its folder before importing, so the folder is visible
-    // in Settings while the purge would race the rows still being written.
-    // Refuse until the scan finishes; the normal unwatch then removes the
-    // whole set.
-    {
+    // in Settings while rows are still landing. Cancel any matching scan and
+    // wait for it to stop before collecting the purge set: a row written
+    // after the purge would be orphaned all over again.
+    let runs: Vec<crate::ImportRun> = {
         let importing = state.importing.lock().expect("importing mutex poisoned");
-        for root in &roots {
-            if let Some(busy) = importing.iter().find(|busy| {
-                busy.as_str() == root.as_str()
-                    || library_locations::is_under(busy, root)
-                    || library_locations::is_under(root, busy)
-            }) {
-                return Err(AppError::InvalidInput(format!(
-                    "cannot unwatch {root} while {busy} is still importing"
-                )));
-            }
-        }
+        importing
+            .iter()
+            .filter(|(busy, _)| {
+                let busy = busy.as_str();
+                roots.iter().any(|root| {
+                    busy == root.as_str()
+                        || library_locations::is_under(busy, root)
+                        || library_locations::is_under(root, busy)
+                })
+            })
+            .map(|(_, run)| run.clone())
+            .collect()
+    };
+    for run in &runs {
+        run.cancel();
+    }
+    for run in &runs {
+        run.wait_finished().await;
     }
 
     // Read once, while every row still stands, so the refusal reasons about

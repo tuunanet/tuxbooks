@@ -18,6 +18,8 @@ export interface ImportSummary {
    * they came from instead of naming a watch that was never started.
    */
   covered: string[];
+  /** The run stopped because its folder was unwatched mid-scan. */
+  cancelled: boolean;
 }
 
 export type ImportPhase = "idle" | "importing" | "done";

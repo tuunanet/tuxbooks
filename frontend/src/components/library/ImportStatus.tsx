@@ -9,18 +9,22 @@ export function ImportStatus() {
   if (phase === "idle") return null;
 
   const failureWord = failures.length === 1 ? "item" : "items";
-  const summaryLine =
-    phase === "importing"
-      ? "Importing…"
-      : summary && (summary.imported > 0 || summary.updated > 0 || summary.skipped > 0)
-        ? [
-            summary.imported > 0 ? `Imported ${summary.imported} new` : null,
-            summary.updated > 0 ? `updated ${summary.updated}` : null,
-            summary.skipped > 0 ? `${summary.skipped} already in your library` : null,
-          ]
-            .filter(Boolean)
-            .join(", ")
-        : "No new books found";
+  let summaryLine: string;
+  if (phase === "importing") {
+    summaryLine = "Importing…";
+  } else if (summary?.cancelled) {
+    summaryLine = "Import cancelled";
+  } else if (summary && (summary.imported > 0 || summary.updated > 0 || summary.skipped > 0)) {
+    summaryLine = [
+      summary.imported > 0 ? `Imported ${summary.imported} new` : null,
+      summary.updated > 0 ? `updated ${summary.updated}` : null,
+      summary.skipped > 0 ? `${summary.skipped} already in your library` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+  } else {
+    summaryLine = "No new books found";
+  }
 
   return (
     <div
@@ -40,16 +44,18 @@ export function ImportStatus() {
           )}
           <div className="min-w-0 text-sm">
             <p>{summaryLine}</p>
-            {summary?.watched.map((folder) => (
-              <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
-                Watching {folder}
-              </p>
-            ))}
-            {summary?.covered.map((folder) => (
-              <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
-                Already covered by a folder you watch: {folder}
-              </p>
-            ))}
+            {!summary?.cancelled &&
+              summary?.watched.map((folder) => (
+                <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
+                  Watching {folder}
+                </p>
+              ))}
+            {!summary?.cancelled &&
+              summary?.covered.map((folder) => (
+                <p key={folder} className="mt-1 truncate text-muted-foreground" title={folder}>
+                  Already covered by a folder you watch: {folder}
+                </p>
+              ))}
             {failures.length > 0 && (
               <p className="mt-1 text-muted-foreground">
                 {failures.length} {failureWord} could not be imported:
