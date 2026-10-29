@@ -357,4 +357,73 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       ).not.toThrow();
     });
   });
+
+  describe("durable-state and provider methods", () => {
+    const bookUid = "a".repeat(32);
+
+    it("allows backfill and migration status, and validates the dismiss id", () => {
+      expect(() => validateInvokeParams("identity_backfill_status", {}, issued())).not.toThrow();
+      expect(() => validateInvokeParams("migration_issues", {}, issued())).not.toThrow();
+      expect(() =>
+        validateInvokeParams("migration_dismiss_issue", { id: 1 }, issued()),
+      ).not.toThrow();
+      expect(() => validateInvokeParams("migration_dismiss_issue", { id: 0 }, issued())).toThrow(
+        /invalid migration issue id/,
+      );
+    });
+
+    it("validates provider link parameters by durable book uid", () => {
+      expect(() =>
+        validateInvokeParams("list_provider_links", { bookUid }, issued()),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams("list_provider_links", { bookUid: "nope" }, issued()),
+      ).toThrow(/invalid bookUid/);
+      expect(() =>
+        validateInvokeParams(
+          "link_provider_book",
+          { bookUid, provider: "hardcover", remoteId: "remote-1" },
+          issued(),
+        ),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams(
+          "link_provider_book",
+          { bookUid, provider: "", remoteId: "remote-1" },
+          issued(),
+        ),
+      ).toThrow(/invalid provider/);
+      expect(() =>
+        validateInvokeParams(
+          "link_provider_book",
+          { bookUid, provider: "hardcover", remoteId: "" },
+          issued(),
+        ),
+      ).toThrow(/invalid remoteId/);
+      expect(() =>
+        validateInvokeParams("unlink_provider_book", { bookUid, provider: "hardcover" }, issued()),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams(
+          "apply_provider_reading_update",
+          { bookUid, provider: "hardcover", status: "reading", progressPercent: 42.5 },
+          issued(),
+        ),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams(
+          "apply_provider_reading_update",
+          { bookUid, provider: "hardcover", status: "sideways" },
+          issued(),
+        ),
+      ).toThrow(/invalid provider status/);
+      expect(() =>
+        validateInvokeParams(
+          "apply_provider_reading_update",
+          { bookUid, provider: "hardcover", progressPercent: 101 },
+          issued(),
+        ),
+      ).toThrow(/invalid progressPercent/);
+    });
+  });
 });
