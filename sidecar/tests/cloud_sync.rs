@@ -23,6 +23,7 @@ use tuxbooks_lib::services::metadata;
 use tuxbooks_lib::sync::clock;
 use tuxbooks_lib::sync::engine::SyncService;
 use tuxbooks_lib::sync::model::{EntityKind, Hlc, Op, OP_SCHEMA};
+use tuxbooks_lib::sync::waiting;
 
 struct Device {
     _dir: TempDir,
@@ -695,6 +696,72 @@ async fn starting_a_new_library_archives_the_existing_one() {
     )
     .unwrap();
     assert_eq!(current["library_id"], new_id);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_book_can_be_hidden_on_one_machine_and_still_attach_later() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"waiting book bytes";
+    let a_book = add_book(&a, "waiting.epub", bytes).await;
+    reading_progress::upsert_progress(
+        &a.pool,
+        a_book,
+        &ProgressUpdate {
+            progress_percent: Some(42.0),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    annotations::insert_annotation(
+        &a.pool,
+        a_book,
+        &NewAnnotation {
+            kind: AnnotationKind::Highlight,
+            cfi: Some("epubcfi(/6/4)".into()),
+            chapter_href: Some("chapter1.xhtml".into()),
+            page_number: None,
+            page_fraction: None,
+            text: Some("sample highlight".into()),
+            color: Some("yellow".into()),
+            geometry: None,
+        },
+    )
+    .await
+    .unwrap();
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    connect(&b, sync_dir.path()).await;
+    run(&b).await;
+    let waiting_books = waiting::list(&b.pool).await.unwrap();
+    assert_eq!(waiting_books.len(), 1);
+    let waiting_book = &waiting_books[0];
+    assert_eq!(waiting_book.annotation_count, 1);
+    assert_eq!(waiting_book.progress_percent, Some(42.0));
+    assert_eq!(
+        waiting_book.sample_annotation.as_deref(),
+        Some("sample highlight")
+    );
+    assert_eq!(b.service.status().await.unwrap().waiting_books, 1);
+
+    assert!(b
+        .service
+        .forget_waiting_book(&waiting_book.book_uid)
+        .await
+        .unwrap());
+    assert!(waiting::list(&b.pool).await.unwrap().is_empty());
+    assert_eq!(b.service.status().await.unwrap().waiting_books, 0);
+
+    // Hiding the waiting state is local. Importing the same bytes still joins
+    // the mirror state to the book.
+    add_book(&b, "waiting.epub", bytes).await;
+    run(&b).await;
+    let b_book = book_id(&b, "waiting.epub").await;
+    assert_eq!(annotation_count(&b, b_book).await, 1);
+    assert_eq!(progress_percent(&b, b_book).await, Some(42.0));
 }
 
 #[tokio::test(flavor = "multi_thread")]

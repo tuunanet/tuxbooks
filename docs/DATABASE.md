@@ -418,6 +418,9 @@ full contract is [SYNC.md](SYNC.md).
   losing field values, and the 30-day delete restore list for single entities.
 - `sync_book_trash` — whole-book Forget snapshots, clocks, and the remote
   restore/discard state. Separate from per-entity `sync_trash` (migration 0023).
+- `sync_ignored_books` — local-only hiding of books whose shared state is
+  waiting for a file. The mirror state stays so importing the exact bytes can
+  still attach it (migration 0025).
 - `sync_reproject` — book uuids whose canonical local row was deleted. The
   engine projects the shared state onto the next bound row, so a duplicate
   copy does not look empty after the first copy is removed.

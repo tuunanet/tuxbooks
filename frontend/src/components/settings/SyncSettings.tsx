@@ -4,9 +4,11 @@ import {
   connectSync,
   disconnectSync,
   dismissSyncIssue,
+  forgetWaitingBook,
   getSyncStatus,
   listSyncIssues,
   listSyncTrash,
+  listWaitingBooks,
   onSyncStatus,
   pickSyncFolder,
   restoreSyncTrash,
@@ -17,6 +19,7 @@ import {
   type SyncState,
   type SyncStatus,
   type SyncTrashEntry,
+  type WaitingBook,
 } from "@/lib/bridge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,6 +70,7 @@ export function SyncSettings() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [trash, setTrash] = useState<SyncTrashEntry[]>([]);
+  const [waitingBooks, setWaitingBooks] = useState<WaitingBook[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mismatch, setMismatch] = useState<MismatchPrompt | null>(null);
@@ -82,9 +86,14 @@ export function SyncSettings() {
 
   const loadLists = useCallback(async () => {
     try {
-      const [nextIssues, nextTrash] = await Promise.all([listSyncIssues(), listSyncTrash()]);
+      const [nextIssues, nextTrash, nextWaiting] = await Promise.all([
+        listSyncIssues(),
+        listSyncTrash(),
+        listWaitingBooks(),
+      ]);
       setIssues(nextIssues);
       setTrash(nextTrash);
+      setWaitingBooks(nextWaiting);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -98,13 +107,19 @@ export function SyncSettings() {
         if (!active) return;
         applyStatus(next);
         if (next.enabled) {
-          const [nextIssues, nextTrash] = await Promise.all([listSyncIssues(), listSyncTrash()]);
+          const [nextIssues, nextTrash, nextWaiting] = await Promise.all([
+            listSyncIssues(),
+            listSyncTrash(),
+            listWaitingBooks(),
+          ]);
           if (!active) return;
           setIssues(nextIssues);
           setTrash(nextTrash);
+          setWaitingBooks(nextWaiting);
         } else {
           setIssues([]);
           setTrash([]);
+          setWaitingBooks([]);
         }
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
@@ -209,6 +224,23 @@ export function SyncSettings() {
     }
   }, [applyStatus]);
 
+  const forgetWaiting = useCallback(
+    async (bookUid: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await forgetWaitingBook(bookUid);
+        applyStatus(await getSyncStatus());
+        await loadLists();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
   const disconnect = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -217,6 +249,7 @@ export function SyncSettings() {
       setConfirmDisconnect(false);
       setIssues([]);
       setTrash([]);
+      setWaitingBooks([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -393,6 +426,62 @@ export function SyncSettings() {
                 <Unplug className="size-4" aria-hidden />
                 Disconnect
               </Button>
+            </div>
+
+            <div data-testid="waiting-books" className="rounded-md border p-3">
+              <h3 className="font-medium">Waiting for books</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Shared reading state for books whose file is not in this library. Import the exact
+                file to attach it. Forget on this device hides it here; the synced copy stays in the
+                folder and on other devices.
+              </p>
+              {waitingBooks.length === 0 ? (
+                <p data-testid="waiting-books-empty" className="mt-3 text-sm text-muted-foreground">
+                  No books are waiting for a file.
+                </p>
+              ) : (
+                <ul className="mt-3 flex flex-col gap-3">
+                  {waitingBooks.map((book) => (
+                    <li
+                      key={book.bookUid}
+                      data-testid={`waiting-book-${book.bookUid}`}
+                      className="flex flex-wrap items-start justify-between gap-3 border-t pt-3 first:border-t-0 first:pt-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{book.title ?? "Unknown book"}</p>
+                        {book.author ? (
+                          <p className="truncate text-xs text-muted-foreground">{book.author}</p>
+                        ) : null}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {book.progressPercent === null
+                            ? "No progress"
+                            : `${Math.round(book.progressPercent)}%`}
+                          {" · "}
+                          {book.annotationCount}{" "}
+                          {book.annotationCount === 1 ? "annotation" : "annotations"}
+                        </p>
+                        {book.sampleAnnotation ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Sample: {book.sampleAnnotation}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
+                          {book.bookUid}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-testid={`forget-waiting-${book.bookUid}`}
+                        onClick={() => void forgetWaiting(book.bookUid)}
+                        disabled={busy}
+                      >
+                        Forget on this device
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         )}

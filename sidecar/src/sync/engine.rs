@@ -27,6 +27,7 @@ use super::identity::{ensure_book_identity, record_issue};
 use super::merge::{self, Affected};
 use super::model::{canonical_from_snapshot, state_display, EntityKind};
 use super::store;
+use super::waiting;
 
 const PASS_INTERVAL: Duration = Duration::from_secs(10);
 const DIRTY_POLL: Duration = Duration::from_secs(2);
@@ -232,6 +233,18 @@ impl SyncService {
         Ok(self.status_snapshot())
     }
 
+    pub async fn waiting_books(&self) -> Result<Vec<waiting::WaitingBook>, AppError> {
+        waiting::list(&self.inner.pool).await
+    }
+
+    pub async fn forget_waiting_book(&self, book_uid: &str) -> Result<bool, AppError> {
+        let ignored = waiting::forget(&self.inner.pool, book_uid).await?;
+        if ignored {
+            self.refresh_status().await?;
+        }
+        Ok(ignored)
+    }
+
     fn status_snapshot(&self) -> SyncStatus {
         self.inner
             .status
@@ -268,13 +281,7 @@ impl SyncService {
         let conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
             .fetch_one(pool)
             .await?;
-        let waiting_books: i64 = sqlx::query_scalar(
-            "SELECT COUNT(DISTINCT book_uid) FROM sync_state_entities
-             WHERE book_uid IS NOT NULL
-               AND book_uid NOT IN (SELECT book_uid FROM sync_book_bindings)",
-        )
-        .fetch_one(pool)
-        .await?;
+        let waiting_books = waiting::count(pool).await?;
         let enabled = get_meta(pool, META_ENABLED)
             .await?
             .is_some_and(|value| value == "1");

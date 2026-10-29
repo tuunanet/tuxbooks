@@ -128,7 +128,9 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (method === "sync_issues" || method === "sync_trash") return Promise.resolve([]);
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+        return Promise.resolve([]);
+      }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
     });
 
@@ -164,7 +166,9 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (method === "sync_issues" || method === "sync_trash") return Promise.resolve([]);
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+        return Promise.resolve([]);
+      }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
     });
 
@@ -181,6 +185,47 @@ describe("SyncSettings", () => {
     });
     expect(await screen.findByTestId("sync-notice")).toHaveTextContent(archived);
     expect(await screen.findByTestId("sync-status")).toHaveTextContent("Up to date");
+  });
+
+  it("lists waiting books and forgets one on this device", async () => {
+    const waiting = {
+      bookUid: "a".repeat(32),
+      title: null,
+      author: null,
+      progressPercent: 12.1212121212121,
+      annotationCount: 2,
+      lastOpenedAt: null,
+      sampleAnnotation: "xbooks PDF Fixtur",
+    };
+    let forgotten = false;
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") {
+        return Promise.resolve({ ...ENABLED, waitingBooks: forgotten ? 0 : 1 });
+      }
+      if (method === "sync_issues" || method === "sync_trash") return Promise.resolve([]);
+      if (method === "list_waiting_books") return Promise.resolve(forgotten ? [] : [waiting]);
+      if (method === "forget_waiting_book") {
+        expect(params).toEqual({ bookUid: waiting.bookUid });
+        forgotten = true;
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId(`waiting-book-${waiting.bookUid}`)).toBeInTheDocument();
+    expect(screen.getByText("Unknown book")).toBeInTheDocument();
+    expect(screen.getByText(/12%/)).toBeInTheDocument();
+    expect(screen.getByText(/2 annotations/)).toBeInTheDocument();
+    expect(screen.getByText(/Sample: xbooks PDF Fixtur/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId(`forget-waiting-${waiting.bookUid}`));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("forget_waiting_book", {
+        bookUid: waiting.bookUid,
+      }),
+    );
+    expect(await screen.findByTestId("waiting-books-empty")).toBeInTheDocument();
   });
 
   it("disconnects only after confirmation", async () => {

@@ -12,3 +12,4 @@ pub mod identity;
 pub mod merge;
 pub mod model;
 pub mod store;
+pub mod waiting;

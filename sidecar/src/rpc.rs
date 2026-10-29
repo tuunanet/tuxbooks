@@ -587,6 +587,13 @@ async fn dispatch(
         }
         "sync_disconnect" => Ok(call!(commands::sync::disconnect(state))),
         "sync_now" => Ok(call!(commands::sync::sync_now(state))),
+        "list_waiting_books" => Ok(call!(commands::sync::waiting_books(state))),
+        "forget_waiting_book" => {
+            let p: BookUidArgs = parse_params(params)?;
+            Ok(call!(commands::sync::forget_waiting_book(
+                state, p.book_uid
+            )))
+        }
         "sync_issues" => Ok(call!(commands::sync::issues(state))),
         "sync_dismiss_issue" => {
             let p: IdArgs = parse_params(params)?;

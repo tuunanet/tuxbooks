@@ -273,6 +273,8 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "sync_connect",
   "sync_disconnect",
   "sync_now",
+  "list_waiting_books",
+  "forget_waiting_book",
   "sync_issues",
   "sync_dismiss_issue",
   "sync_trash",
