@@ -45,6 +45,14 @@ pub async fn forget_waiting_book(state: &AppState, book_uid: String) -> Result<b
     service(state)?.forget_waiting_book(&book_uid).await
 }
 
+pub async fn forget_all_waiting_books(state: &AppState) -> Result<usize, AppError> {
+    service(state)?.forget_all_waiting_books().await
+}
+
+pub async fn dismiss_all_issues(state: &AppState) -> Result<usize, AppError> {
+    service(state)?.dismiss_all_issues().await
+}
+
 pub async fn issues(state: &AppState) -> Result<Vec<SyncIssue>, AppError> {
     service(state)?.issues().await
 }

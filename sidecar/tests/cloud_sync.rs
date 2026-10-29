@@ -765,6 +765,38 @@ async fn a_waiting_book_can_be_hidden_on_one_machine_and_still_attach_later() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn all_waiting_books_can_be_hidden_at_once() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let one = add_book(&a, "one.epub", b"one").await;
+    let two = add_book(&a, "two.epub", b"two").await;
+    for (book_id, percent) in [(one, 10.0), (two, 20.0)] {
+        reading_progress::upsert_progress(
+            &a.pool,
+            book_id,
+            &ProgressUpdate {
+                progress_percent: Some(percent),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    connect(&b, sync_dir.path()).await;
+    run(&b).await;
+    assert_eq!(waiting::list(&b.pool).await.unwrap().len(), 2);
+    assert_eq!(b.service.status().await.unwrap().waiting_books, 2);
+
+    assert_eq!(waiting::forget_all(&b.pool).await.unwrap(), 2);
+    assert!(waiting::list(&b.pool).await.unwrap().is_empty());
+    assert_eq!(b.service.status().await.unwrap().waiting_books, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn same_named_collections_merge_instead_of_duplicating() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;

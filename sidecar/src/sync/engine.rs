@@ -245,6 +245,26 @@ impl SyncService {
         Ok(ignored)
     }
 
+    pub async fn forget_all_waiting_books(&self) -> Result<usize, AppError> {
+        let ignored = waiting::forget_all(&self.inner.pool).await?;
+        if ignored > 0 {
+            self.refresh_status().await?;
+        }
+        Ok(ignored)
+    }
+
+    pub async fn dismiss_all_issues(&self) -> Result<usize, AppError> {
+        let result =
+            sqlx::query("UPDATE sync_issues SET resolved_at = ?1 WHERE resolved_at IS NULL")
+                .bind(now_rfc3339())
+                .execute(&self.inner.pool)
+                .await?;
+        if result.rows_affected() > 0 {
+            self.refresh_status().await?;
+        }
+        Ok(result.rows_affected() as usize)
+    }
+
     fn status_snapshot(&self) -> SyncStatus {
         self.inner
             .status

@@ -135,6 +135,17 @@ async fn value_field(
     Ok(parsed.filter(|value| !value.is_null()))
 }
 
+/// Hide every waiting book on this device. The mirror state stays in the
+/// folder for a future import; other devices are untouched.
+pub async fn forget_all(pool: &SqlitePool) -> Result<usize, AppError> {
+    let sql = format!(
+        "INSERT OR IGNORE INTO sync_ignored_books (book_uid)
+         SELECT book_uid FROM ({WAITING_UIDS})"
+    );
+    let result = sqlx::query(&sql).execute(pool).await?;
+    Ok(result.rows_affected() as usize)
+}
+
 /// Hide a waiting book on this device. The mirror state stays in place so the
 /// same bytes can still project it later. Returns false when the uid is not
 /// currently waiting.
