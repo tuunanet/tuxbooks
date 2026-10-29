@@ -240,16 +240,10 @@ async fn register_and_import_folder(
     report: &mut ImportReport,
 ) -> Result<(), AppError> {
     let root_key = root.to_string_lossy().into_owned();
-    let run = crate::ImportRun::new();
-    {
-        let mut importing = state.importing.lock().expect("importing mutex poisoned");
-        if importing.contains_key(&root_key) {
-            return Err(AppError::InvalidInput(format!(
-                "{root_key} is already importing"
-            )));
-        }
-        importing.insert(root_key.clone(), run.clone());
-    }
+    let run = state
+        .importing
+        .start(&root_key)
+        .map_err(AppError::InvalidInput)?;
     // Finish and unregister on every exit path, panics included, or an
     // unwatch could wait forever for a run that is gone.
     let _guard = ImportGuard {
@@ -258,8 +252,8 @@ async fn register_and_import_folder(
         run: run.clone(),
     };
 
-    register_and_watch(state, root, report).await?;
-    let mut folder_report = import_directory_with_cancel(
+    let watch = register_location(state, root, report).await?;
+    let outcome = import_directory_with_cancel(
         &state.db,
         root,
         covers,
@@ -267,7 +261,14 @@ async fn register_and_import_folder(
         emit_progress,
         Some(run.cancel_flag()),
     )
-    .await?;
+    .await;
+    // Start watching only after the scan, so the watcher cannot import the
+    // same files concurrently. A failed or cancelled scan still gets its
+    // watch: the folder is registered and the next event or launch retries.
+    if watch {
+        state.watcher.watch(root);
+    }
+    let mut folder_report = outcome?;
     report.imported += folder_report.imported;
     report.updated += folder_report.updated;
     report.skipped += folder_report.skipped;
@@ -287,35 +288,40 @@ struct ImportGuard {
 impl Drop for ImportGuard {
     fn drop(&mut self) {
         self.run.finish();
-        self.importing
-            .lock()
-            .expect("importing mutex poisoned")
-            .remove(&self.root);
+        self.importing.finish(&self.root);
     }
 }
 
-/// Register `root` as a watched library location, start the filesystem
-/// watcher on it, and disclose a first-time registration in `report.watched`
-/// — one tail every import path shares, so the disclosure rule lives in one
-/// place. Registration is idempotent: an already-watched folder produces no
-/// disclosure and no duplicate row.
-///
-/// A folder already inside a watched folder is not registered at all (ADR
-/// 0010). The folder above watches the whole subtree recursively, so a row
-/// of its own would add nothing and could never be unwatched on its own. It
-/// is disclosed in `report.covered` instead, so importing one still says
-/// where its books came from.
-async fn register_and_watch(
+/// Releases the roots an unwatch blocked, on every exit path. A scan that
+/// overlaps one of them keeps failing to start until the purge is over.
+struct UnwatchBlockGuard {
+    importing: crate::ImportRegistry,
+    roots: Vec<String>,
+}
+
+impl Drop for UnwatchBlockGuard {
+    fn drop(&mut self) {
+        self.importing.clear_blocking(&self.roots);
+    }
+}
+
+/// Register `root` as a watched location without starting its filesystem
+/// watcher yet — the caller starts the watcher after the scan. The row must
+/// exist before any book lands so a quit leaves a watched folder that
+/// startup catch-up finishes. Returns true when `root` is now a watched
+/// location the caller should watch; false when a watched ancestor already
+/// covers it (ADR 0010), so no separate watch is needed.
+async fn register_location(
     state: &AppState,
     root: &Path,
     report: &mut ImportReport,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     let root = root.to_string_lossy().into_owned();
     if covered_by_watched_ancestor(&state.db, &root).await? {
         if !report.covered.contains(&root) {
             report.covered.push(root);
         }
-        return Ok(());
+        return Ok(false);
     }
     // Add the parent before dropping the nested rows it now covers. If the
     // process dies between the two, the list briefly holds a nested entry
@@ -329,8 +335,7 @@ async fn register_and_watch(
     for gone in library_locations::collapse_descendants(&state.db, &root).await? {
         state.watcher.unwatch(Path::new(&gone));
     }
-    state.watcher.watch(Path::new(&root));
-    Ok(())
+    Ok(true)
 }
 
 /// True when `path` is already inside a watched folder, which watches the
@@ -402,24 +407,15 @@ pub async fn unwatch_locations(
     }
 
     // A scan registers its folder before importing, so the folder is visible
-    // in Settings while rows are still landing. Cancel any matching scan and
-    // wait for it to stop before collecting the purge set: a row written
-    // after the purge would be orphaned all over again. This runs after the
-    // refusals above so a rejected request cannot cancel an unrelated scan.
-    let runs: Vec<crate::ImportRun> = {
-        let importing = state.importing.lock().expect("importing mutex poisoned");
-        importing
-            .iter()
-            .filter(|(busy, _)| {
-                let busy = busy.as_str();
-                roots.iter().any(|root| {
-                    busy == root.as_str()
-                        || library_locations::is_under(busy, root)
-                        || library_locations::is_under(root, busy)
-                })
-            })
-            .map(|(_, run)| run.clone())
-            .collect()
+    // in Settings while rows are still landing. Block the roots under the
+    // same lock a new scan uses to register, then cancel any matching scan
+    // and wait for it to stop before collecting the purge set. Without the
+    // shared lock, an import that had not registered yet could start after
+    // this purge and re-create the folder.
+    let (runs, blocked) = state.importing.block(&roots);
+    let _unwatch_block = UnwatchBlockGuard {
+        importing: state.importing.clone(),
+        roots: blocked,
     };
     for run in &runs {
         run.cancel();

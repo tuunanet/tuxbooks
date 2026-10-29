@@ -127,7 +127,7 @@ async fn setup() -> TestEnv {
         emitter,
         fired,
         changes: change_rx,
-        importing: Arc::new(Mutex::new(Default::default())),
+        importing: ImportRegistry::default(),
     }
 }
 
@@ -151,7 +151,7 @@ impl TestEnv {
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
             sync: None,
-            importing: Arc::clone(&self.importing),
+            importing: self.importing.clone(),
         })
     }
 
@@ -833,6 +833,35 @@ async fn unwatching_a_folder_cancels_its_import_and_purges_what_landed() {
         vec![env.library.to_string_lossy().into_owned()],
         "the folder must leave the watch list"
     );
+}
+
+/// An unwatch blocks the folder under the same lock a scan uses to start,
+/// so a scan that was already in flight cannot re-register the folder while
+/// the purge runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_import_cannot_start_while_its_folder_is_being_unwatched() {
+    let env = setup().await;
+    let shelf = env.sibling("shelf");
+    std::fs::create_dir_all(&shelf).unwrap();
+    write_epub(&shelf.join("book.epub"), "Shelf Book");
+    let shelf_path = shelf.to_string_lossy().into_owned();
+
+    let (_runs, blocked) = env.importing.block(&[shelf_path]);
+    let report = env.import_paths(&[shelf.as_path()]).await;
+    let failed = report["failed"].as_array().unwrap();
+    assert_eq!(failed.len(), 1, "{report}");
+    assert!(
+        failed[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("being unwatched"),
+        "{report}"
+    );
+    assert_eq!(env.count().await, 0, "a blocked folder must import nothing");
+
+    env.importing.clear_blocking(&blocked);
+    let report = env.import_paths(&[shelf.as_path()]).await;
+    assert_eq!(report["imported"], 1, "{report}");
 }
 
 /// A purge big enough to batch must show intermediate counts, not jump from

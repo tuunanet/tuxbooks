@@ -115,23 +115,21 @@ impl Reconciler {
         // A queued batch can outlive the location it came from: the user
         // unwatchs a folder while its debounce is still in flight, and the
         // trailing modify would re-import the very books the unwatch just
-        // purged (the ghost comes back). The watch list is the source of
-        // truth, so drop events whose paths no registered location holds
-        // anymore (bd tuxbooks-crn).
-        let registered = match library_locations::list_locations(&self.pool).await {
-            Ok(locations) => locations,
-            Err(err) => {
-                eprintln!("reconciler: cannot list watched locations: {err}");
-                return;
-            }
-        };
-        let under_watch = |paths: &[&Path]| {
-            paths
-                .iter()
-                .any(|path| registered.iter().any(|root| path.starts_with(root)))
-        };
-
+        // purged (the ghost comes back). Re-read the watch list for every
+        // change, not once per batch: an unwatch can land mid-batch.
         for change in changes {
+            let registered = match library_locations::list_locations(&self.pool).await {
+                Ok(locations) => locations,
+                Err(err) => {
+                    eprintln!("reconciler: cannot list watched locations: {err}");
+                    return;
+                }
+            };
+            let under_watch = |paths: &[&Path]| {
+                paths
+                    .iter()
+                    .any(|path| registered.iter().any(|root| path.starts_with(root)))
+            };
             let keep = match &change {
                 PathChange::Created(path)
                 | PathChange::Modified(path)
