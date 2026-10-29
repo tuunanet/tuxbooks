@@ -227,6 +227,13 @@ work. The full contract is [SYNC.md](SYNC.md).
   pass only reads new or changed files.
 - `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
   losing field values, and the 30-day delete restore list.
+- `sync_reproject` — book uuids whose canonical local row was deleted. The
+  engine projects the shared state onto the next bound row, so a duplicate
+  copy does not look empty after the first copy is removed.
+- `books.rehash_pending` — set before a metadata embed rewrites the file and
+  cleared after the size/mtime snapshot is refreshed. The identity sweep treats
+  it as a forced rehash, which closes the crash window between the rewrite and
+  the snapshot update.
 
 `annotations.sync_uid` and `collections.sync_uid` are the portable entity ids;
 existing rows are backfilled in the migration. The sync worker fills a null uid

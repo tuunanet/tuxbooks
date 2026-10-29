@@ -54,6 +54,12 @@ an alias:
   and the new hash is added as another alias. The old alias is never removed,
   so a machine that has not received the rewritten file yet still resolves to
   the same book;
+- the embed sets `books.rehash_pending` before the bytes change and clears it
+  after the snapshot update. If the process dies in between, the sweep sees the
+  marker and rehashes anyway;
+- if two local files map to the same uuid, the lowest book id is the projection
+  target and Sync issues names the duplicate. Deleting the canonical row queues
+  the uuid, and the engine projects the shared state onto the next bound row;
 - if two machines independently imported the same bytes before meeting, both
   publish an alias for the same hash. Every device resolves the aliases to the
   lexicographically smallest uuid and re-keys the losing state. The resolution
@@ -203,7 +209,9 @@ Failures become rows in `sync_issues`:
   issue records it);
 - a book that could not be projected;
 - a conflict where one side had to be discarded (both values are in the
-  detail).
+  detail);
+- two local files bound to the same book identity, naming both paths;
+- a queued reprojection that failed.
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
@@ -267,7 +275,11 @@ folder. It covers:
 - a rewritten file keeping its identity across two machines;
 - library mismatch confirmation;
 - same-name collection merge;
-- concurrent note edits converging with the loser kept.
+- concurrent note edits converging with the loser kept;
+- duplicate copies sharing one uuid, the duplicate issue, and state moving to
+  the remaining copy when the canonical row is deleted;
+- a pending rehash surviving a missed snapshot update, as in a crash between
+  the rewrite and the snapshot write.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, and the IPC policy for the sync folder.

@@ -774,11 +774,13 @@ pub async fn project_book(
 }
 
 async fn local_book_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
-    let id: Option<i64> =
-        sqlx::query_scalar("SELECT book_id FROM sync_book_bindings WHERE book_uid = ?1 LIMIT 1")
-            .bind(book_uid)
-            .fetch_optional(pool)
-            .await?;
+    let id: Option<i64> = sqlx::query_scalar(
+        "SELECT book_id FROM sync_book_bindings
+         WHERE book_uid = ?1 ORDER BY book_id LIMIT 1",
+    )
+    .bind(book_uid)
+    .fetch_optional(pool)
+    .await?;
     Ok(id)
 }
 

@@ -408,6 +408,7 @@ impl SyncService {
         }
 
         self.sync_remote(&root).await?;
+        self.reproject_queued(&root).await?;
 
         // Projection writes local rows, which fire the same triggers; drain
         // the echo markers so the next pass starts clean.
@@ -497,7 +498,8 @@ impl SyncService {
                 FROM books b
                 LEFT JOIN sync_book_bindings s ON s.book_id = b.id
                 WHERE b.id > ?1 AND b.available = 1
-                  AND (s.book_id IS NULL
+                  AND (b.rehash_pending = 1
+                       OR s.book_id IS NULL
                        OR s.hashed_size != b.file_size
                        OR s.hashed_mtime != b.file_mtime)
                 ORDER BY b.id
@@ -682,6 +684,62 @@ impl SyncService {
         Ok(())
     }
 
+    /// Deleting the canonical local row of a shared book queues its uuid. If
+    /// another bound row remains, project the shared state onto it so a
+    /// duplicate copy does not look empty after the first copy is removed.
+    async fn reproject_queued(&self, root: &Path) -> Result<(), AppError> {
+        let uids: Vec<String> = sqlx::query_scalar(
+            "SELECT book_uid FROM sync_reproject ORDER BY requested_at, book_uid LIMIT 25",
+        )
+        .fetch_all(&self.inner.pool)
+        .await?;
+        let mut books = Vec::new();
+        for book_uid in uids {
+            let has_binding: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM sync_book_bindings WHERE book_uid = ?1 LIMIT 1")
+                    .bind(&book_uid)
+                    .fetch_optional(&self.inner.pool)
+                    .await?;
+            if has_binding.is_some() {
+                match merge::project_book(&self.inner.pool, &book_uid, root, &self.inner.covers_dir)
+                    .await
+                {
+                    Ok(mut projected) => books.append(&mut projected),
+                    Err(err) => {
+                        record_issue(
+                            &self.inner.pool,
+                            &format!("reproject:{book_uid}"),
+                            "reprojection_failed",
+                            &format!("could not project state for {book_uid}: {err}"),
+                            None,
+                        )
+                        .await?;
+                        continue;
+                    }
+                }
+            }
+            sqlx::query(
+                "UPDATE sync_issues SET resolved_at = ?2
+                 WHERE issue_key LIKE ?1 AND resolved_at IS NULL",
+            )
+            .bind(format!("duplicate-book:{book_uid}:%"))
+            .bind(now_rfc3339())
+            .execute(&self.inner.pool)
+            .await?;
+            super::identity::record_duplicate_bindings(&self.inner.pool, &book_uid).await?;
+            sqlx::query("DELETE FROM sync_reproject WHERE book_uid = ?1")
+                .bind(&book_uid)
+                .execute(&self.inner.pool)
+                .await?;
+        }
+        books.sort_unstable();
+        books.dedup();
+        if !books.is_empty() {
+            self.emit_changes(&books).await;
+        }
+        Ok(())
+    }
+
     async fn record_file_failure(
         &self,
         file: &store::RemoteFile,
@@ -840,6 +898,7 @@ impl SyncService {
             "sync_conflicts",
             "sync_trash",
             "sync_dirty",
+            "sync_reproject",
         ] {
             sqlx::query(&format!("DELETE FROM {table}"))
                 .execute(&mut *tx)

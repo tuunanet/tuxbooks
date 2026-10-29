@@ -208,6 +208,11 @@ pub async fn embed_book_metadata(
         .ok_or(AppError::NotFound)?
         .effective;
 
+    // Set the crash marker before the bytes change. If the process dies before
+    // the snapshot update below, the sync identity sweep still rehashes the
+    // file and publishes the new content-hash alias.
+    books::mark_rehash_pending(pool, book_id).await?;
+
     // The rewrite runs in the document worker (the parse-heavy half); the
     // sidecar keeps the only write authority: backup + atomic replace.
     let client = crate::worker::WorkerClient::locate()?;
@@ -274,6 +279,7 @@ pub async fn embed_book_metadata(
     // content-hash alias; leaving it stale would strand other machines on the
     // old identity.
     books::update_file_snapshot(pool, book_id, source.file_size, source.file_mtime).await?;
+    books::clear_rehash_pending(pool, book_id).await?;
 
     apply_form(pool, book_id, &desired).await?;
 
@@ -1180,14 +1186,18 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let (size, mtime): (i64, i64) =
-            sqlx::query_as("SELECT file_size, file_mtime FROM books WHERE id = ?1")
+        let (size, mtime, rehash_pending): (i64, i64, i64) =
+            sqlx::query_as("SELECT file_size, file_mtime, rehash_pending FROM books WHERE id = ?1")
                 .bind(id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(size, metadata.len() as i64);
         assert_eq!(mtime, expected_mtime);
+        assert_eq!(
+            rehash_pending, 0,
+            "a successful embed clears the crash marker"
+        );
     }
 
     #[tokio::test]

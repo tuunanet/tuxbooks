@@ -749,3 +749,34 @@ async fn a_disappearing_folder_becomes_a_sync_issue() {
         "a folder failure must surface in Sync issues: {issues:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_the_canonical_copy_reprojects_to_the_duplicate() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let first = add_book(&a, "copy-one.epub", b"duplicate content").await;
+    let second = add_book(&a, "copy-two.epub", b"duplicate content").await;
+    add_bookmark(&a, first, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
+
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    run(&a).await;
+
+    assert_eq!(annotation_count(&a, first).await, 1);
+    assert_eq!(annotation_count(&a, second).await, 0);
+    let issues = a.service.issues().await.unwrap();
+    assert!(
+        issues.iter().any(|issue| issue.kind == "duplicate_book"),
+        "the duplicate copy is named in Sync issues: {issues:?}"
+    );
+
+    books::delete_book(&a.pool, first).await.unwrap();
+    run(&a).await;
+    run(&a).await;
+
+    assert_eq!(
+        annotation_count(&a, second).await,
+        1,
+        "the remaining copy inherits the shared state"
+    );
+}

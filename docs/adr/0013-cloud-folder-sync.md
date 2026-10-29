@@ -124,6 +124,10 @@ snapshot can be added for inspection later.
 - New JSON-RPC methods and a Settings > Sync tab.
 - A book file is hashed lazily, not at import, so import performance is
   unchanged. A book's shared state may wait a few passes for its hash.
+- A metadata embed sets a rehash marker before it rewrites the file and clears
+  it after the snapshot update, so a crash cannot strand the identity. Duplicate
+  local files for one uuid project onto the lowest book id and surface a Sync
+  issue; deleting that row moves the state to the next copy.
 - Two machines with very different wall clocks can produce surprising LWW
   winners until the clocks converge. The losing value is kept.
 - Two independently created annotations on the same passage can duplicate.

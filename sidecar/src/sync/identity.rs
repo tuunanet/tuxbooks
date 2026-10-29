@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
+use crate::repository::books;
 
 use super::clock::now_rfc3339;
 use super::model::{EntityKind, Hlc};
@@ -32,12 +33,14 @@ pub async fn ensure_book_identity(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<Option<BookIdentity>, AppError> {
-    let row: Option<(String, i64, i64, i64)> =
-        sqlx::query_as("SELECT path, available, file_size, file_mtime FROM books WHERE id = ?1")
-            .bind(book_id)
-            .fetch_optional(pool)
-            .await?;
-    let Some((path, available, stored_size, stored_mtime)) = row else {
+    let row: Option<(String, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT path, available, file_size, file_mtime, rehash_pending
+         FROM books WHERE id = ?1",
+    )
+    .bind(book_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((path, available, stored_size, stored_mtime, rehash_pending)) = row else {
         return Ok(None);
     };
     if available == 0 {
@@ -52,7 +55,7 @@ pub async fn ensure_book_identity(
     .fetch_optional(pool)
     .await?;
     if let Some((uid, hash, size, mtime)) = &existing {
-        if *size == stored_size && *mtime == stored_mtime {
+        if rehash_pending == 0 && *size == stored_size && *mtime == stored_mtime {
             return Ok(Some(BookIdentity {
                 book_id,
                 book_uid: uid.clone(),
@@ -74,7 +77,9 @@ pub async fn ensure_book_identity(
         }
     };
     let (hash, size, mtime) = hashed;
-    bind_hash(pool, book_id, &hash, size, mtime).await
+    let identity = bind_hash(pool, book_id, &hash, size, mtime).await?;
+    books::clear_rehash_pending(pool, book_id).await?;
+    Ok(identity)
 }
 
 fn hash_file(path: &Path) -> Result<(String, i64, i64), std::io::Error> {
@@ -192,6 +197,8 @@ pub async fn bind_hash(
     .execute(pool)
     .await?;
 
+    record_duplicate_bindings(pool, &uid).await?;
+
     let hash_is_new = existing
         .as_ref()
         .is_none_or(|(_, hash)| hash != content_hash);
@@ -206,6 +213,46 @@ pub async fn bind_hash(
         size,
         mtime,
     }))
+}
+
+/// A uuid can be bound to more than one local row when the library holds two
+/// copies of the same content, or when a cloud client delivered two rewritten
+/// versions of one book. Projection follows the lowest book id. Say so in Sync
+/// issues instead of leaving the other copy silently empty.
+pub(crate) async fn record_duplicate_bindings(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<(), AppError> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT b.id, b.path
+         FROM sync_book_bindings s
+         JOIN books b ON b.id = s.book_id
+         WHERE s.book_uid = ?1
+         ORDER BY b.id",
+    )
+    .bind(book_uid)
+    .fetch_all(pool)
+    .await?;
+    if rows.len() < 2 {
+        return Ok(());
+    }
+    let (canonical_id, canonical_path) = &rows[0];
+    for (duplicate_id, duplicate_path) in rows.iter().skip(1) {
+        record_issue(
+            pool,
+            &format!("duplicate-book:{book_uid}:{duplicate_id}"),
+            "duplicate_book",
+            &format!(
+                "This library has more than one file for the same book. \
+                 Annotations and progress follow \"{canonical_path}\" (book {canonical_id}). \
+                 The duplicate is \"{duplicate_path}\" (book {duplicate_id}). \
+                 Remove one copy if it is not wanted."
+            ),
+            None,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Publish an alias through the normal dirty/op pipeline. Identity operations
@@ -769,5 +816,64 @@ mod tests {
                 .await
                 .unwrap();
         assert!(pending >= 1, "the new alias is published");
+    }
+
+    #[tokio::test]
+    async fn a_pending_rehash_survives_a_missed_snapshot_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let path = tmp.path().join("book.epub");
+        std::fs::write(&path, b"version one").unwrap();
+        let book_id = book_with_file(&pool, &path).await;
+        let first = ensure_book_identity(&pool, book_id).await.unwrap().unwrap();
+
+        // Simulate a crash after the rewrite but before the snapshot update:
+        // the row and the binding both still describe the old file.
+        books::mark_rehash_pending(&pool, book_id).await.unwrap();
+        std::fs::write(&path, b"version two is longer").unwrap();
+        let second = ensure_book_identity(&pool, book_id).await.unwrap().unwrap();
+
+        assert_eq!(first.book_uid, second.book_uid);
+        assert_ne!(first.content_hash, second.content_hash);
+        let (pending, hashed): (i64, String) = sqlx::query_as(
+            "SELECT b.rehash_pending, s.content_hash
+             FROM books b JOIN sync_book_bindings s ON s.book_id = b.id
+             WHERE b.id = ?1",
+        )
+        .bind(book_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending, 0);
+        assert_eq!(hashed, second.content_hash);
+    }
+
+    #[tokio::test]
+    async fn duplicate_bindings_share_one_uuid_and_record_an_issue() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let first_path = tmp.path().join("first.epub");
+        let second_path = tmp.path().join("second.epub");
+        std::fs::write(&first_path, b"the same bytes").unwrap();
+        std::fs::write(&second_path, b"the same bytes").unwrap();
+        let first = book_with_file(&pool, &first_path).await;
+        let second = book_with_file(&pool, &second_path).await;
+
+        let first_identity = ensure_book_identity(&pool, first).await.unwrap().unwrap();
+        let second_identity = ensure_book_identity(&pool, second).await.unwrap().unwrap();
+        assert_eq!(first_identity.book_uid, second_identity.book_uid);
+
+        let issues: Vec<(String, String)> =
+            sqlx::query_as("SELECT kind, detail FROM sync_issues WHERE kind = 'duplicate_book'")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(issues.len(), 1, "one duplicate issue for the second copy");
+        assert!(issues[0].1.contains("first.epub"));
+        assert!(issues[0].1.contains("second.epub"));
     }
 }

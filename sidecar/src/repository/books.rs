@@ -202,6 +202,25 @@ pub async fn update_book_by_id(
     Ok(result.rows_affected() > 0)
 }
 
+/// Mark that the stored file snapshot may not describe the bytes on disk.
+/// The sync identity sweep treats this as a forced rehash, so a crash between
+/// a rewrite and the snapshot update cannot strand the book identity.
+pub async fn mark_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
+    sqlx::query("UPDATE books SET rehash_pending = 1 WHERE id = ?1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn clear_rehash_pending(pool: &SqlitePool, id: i64) -> Result<(), AppError> {
+    sqlx::query("UPDATE books SET rehash_pending = 0 WHERE id = ?1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Refresh only the size/mtime snapshot after a rewrite that already updated
 /// the source metadata. The sync identity sweep watches this snapshot to know
 /// when to rehash the file.
