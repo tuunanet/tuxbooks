@@ -268,6 +268,61 @@ function validateEditionLink(record: Record<string, unknown>): void {
   }
 }
 
+const BOOK_UID_RE = /^[0-9a-f]{32}$/;
+const PROVIDER_STATUSES = new Set(["want_to_read", "reading", "paused", "finished", "dropped"]);
+
+function requireBookUid(value: unknown): void {
+  if (typeof value !== "string" || !BOOK_UID_RE.test(value)) {
+    throw policyError("invalid bookUid");
+  }
+}
+
+function requireNonEmptyString(value: unknown, label: string, maxLength: number): void {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
+    throw policyError(`invalid ${label}`);
+  }
+}
+
+function validateMigrationId(record: Record<string, unknown>): void {
+  requirePositiveId(record.id, "migration issue id");
+}
+
+function validateProviderBook(record: Record<string, unknown>): void {
+  requireBookUid(record.bookUid);
+}
+
+function validateProviderLink(record: Record<string, unknown>): void {
+  requireBookUid(record.bookUid);
+  requireNonEmptyString(record.provider, "provider", 64);
+  requireNonEmptyString(record.remoteId, "remoteId", 512);
+}
+
+function validateProviderUnlink(record: Record<string, unknown>): void {
+  requireBookUid(record.bookUid);
+  requireNonEmptyString(record.provider, "provider", 64);
+}
+
+function validateProviderUpdate(record: Record<string, unknown>): void {
+  requireBookUid(record.bookUid);
+  requireNonEmptyString(record.provider, "provider", 64);
+  const status = record.status;
+  if (
+    status !== undefined &&
+    status !== null &&
+    (typeof status !== "string" || !PROVIDER_STATUSES.has(status))
+  ) {
+    throw policyError("invalid provider status");
+  }
+  const progress = record.progressPercent;
+  if (
+    progress !== undefined &&
+    progress !== null &&
+    (typeof progress !== "number" || !Number.isFinite(progress) || progress < 0 || progress > 100)
+  ) {
+    throw policyError("invalid progressPercent");
+  }
+}
+
 function validateBookResource(record: Record<string, unknown>): void {
   requireBookId(record);
   requireResourcePath(record);
@@ -292,6 +347,11 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["sync_set_device_name", validateSyncDeviceName],
   ["remove_book_file", validateBookFile],
   ["link_book_edition", validateEditionLink],
+  ["migration_dismiss_issue", validateMigrationId],
+  ["list_provider_links", validateProviderBook],
+  ["link_provider_book", validateProviderLink],
+  ["unlink_provider_book", validateProviderUnlink],
+  ["apply_provider_reading_update", validateProviderUpdate],
   ["get_book_resource", validateBookResource],
   ["get_book_bytes", validateBookBytes],
 ]);
