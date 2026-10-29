@@ -225,6 +225,8 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "get_startup_recovery",
   "list_books",
   "list_book_files",
+  "list_book_editions",
+  "link_book_edition",
   "list_reading_history",
   "search_books",
   "remove_book",

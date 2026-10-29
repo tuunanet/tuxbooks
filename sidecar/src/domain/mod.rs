@@ -1,6 +1,7 @@
 pub mod annotation;
 pub mod book;
 pub mod collection;
+pub mod edition;
 pub mod library;
 pub mod lifecycle;
 pub mod metadata;
@@ -10,6 +11,7 @@ pub mod reading_progress;
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
 pub use book::{Book, BookFile, BookFormat, NewBook, ReadingHistoryBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
+pub use edition::{EditionBook, EditionLinkOutcome};
 pub use library::{
     CatalogCounts, LibraryLocationStat, LibraryLocationStatus, LibraryStats, StartupRecovery,
     StorageStats,

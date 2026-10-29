@@ -72,6 +72,32 @@ export interface ProviderLink {
   updatedAt: string;
 }
 
+/**
+ * One durable book linked to another as a different edition of the same work
+ * (ADR 0014 D9). The books stay separate identities; only progress percentage
+ * and provider links move across a confirmed link.
+ */
+export interface EditionBook {
+  id: number;
+  bookUid: string;
+  title: string | null;
+  author: string | null;
+  /** False when the linked edition is currently in Reading history. */
+  inLibrary: boolean;
+}
+
+/** Result of one confirmed cross-edition link. */
+export interface EditionLinkOutcome {
+  sourceBookId: number;
+  targetBookId: number;
+  sourceBookUid: string;
+  targetBookUid: string;
+  /** The percentage seeded into the target, or null when nothing was copied. */
+  copiedProgressPercent: number | null;
+  /** Providers whose link and cached status moved to the target edition. */
+  movedProviders: string[];
+}
+
 /** A user-defined collection with its member book ids (mirrors `domain::CollectionSummary`). */
 export interface CollectionSummary {
   id: number;

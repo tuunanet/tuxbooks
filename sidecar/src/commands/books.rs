@@ -1,9 +1,9 @@
 use crate::domain::{
-    Book, BookFile, BookTrashEntry, BulkForgetOutcome, ForgetOutcome, LibraryStats, RestoreMode,
-    RestoreOutcome, RestoreStatus, SearchHit,
+    Book, BookFile, BookTrashEntry, BulkForgetOutcome, EditionBook, EditionLinkOutcome,
+    ForgetOutcome, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus, SearchHit,
 };
 use crate::error::AppError;
-use crate::repository::{books, collections, lifecycle};
+use crate::repository::{books, collections, editions, lifecycle};
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 use crate::AppState;
@@ -27,6 +27,36 @@ pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
 /// shows one entry; the book details use this to list the duplicate copies.
 pub async fn list_book_files(state: &AppState, book_id: i64) -> Result<Vec<BookFile>, AppError> {
     books::list_files_for_book(&state.db, book_id).await
+}
+
+/// Every edition linked to one durable book, newest activity first. Linking
+/// never merges identities; a linked edition with no file is in Reading
+/// history.
+pub async fn list_book_editions(
+    state: &AppState,
+    book_id: i64,
+) -> Result<Vec<EditionBook>, AppError> {
+    editions::list_editions(&state.db, book_id).await
+}
+
+/// Confirm that two books are editions of one work (ADR 0014 D9). The books
+/// stay separate identities. The source percentage is copied without a
+/// locator, provider links and status move to the target, and annotations
+/// stay with the source. A duplicate link or a provider conflict is rejected
+/// before anything changes.
+pub async fn link_book_edition(
+    state: &AppState,
+    events: &EventEmitter,
+    source_book_id: i64,
+    target_book_id: i64,
+) -> Result<EditionLinkOutcome, AppError> {
+    let outcome = editions::link_editions(&state.db, source_book_id, target_book_id).await?;
+    // Both books changed: the target gained progress and provider links, the
+    // source lost them. A book with no file row has no library event to emit;
+    // Reading history reloads on the target's event.
+    crate::commands::emit_book_changed(state, events, outcome.source_book_id).await?;
+    crate::commands::emit_book_changed(state, events, outcome.target_book_id).await?;
+    Ok(outcome)
 }
 
 /// Reading history: durable books with no file rows, newest activity first.

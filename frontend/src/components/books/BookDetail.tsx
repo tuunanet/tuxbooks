@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookCover } from "./BookCover";
 import { BookBookmarksPanel } from "./BookBookmarksPanel";
+import { BookEditions } from "./BookEditions";
 import { BookFileLocations } from "./BookFileLocations";
 import { BookReadingActions } from "./BookReadingActions";
 import { ForgetBookDialog } from "./ForgetBookDialog";
@@ -225,6 +226,8 @@ export function BookDetail() {
               )}
             </div>
           </div>
+
+          <BookEditions book={book} />
 
           <div className="mt-8 rounded-md border p-4">
             <h3 className="text-sm font-medium">Reading data</h3>

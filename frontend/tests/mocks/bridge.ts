@@ -100,7 +100,11 @@ installTuxbooksMock();
 export function mockInvoke(responses: Record<string, unknown | Promise<unknown>>): void {
   invokeMock.mockImplementation((method: string) => {
     const response =
-      method in responses ? responses[method] : method === "list_book_files" ? [] : undefined;
+      method in responses
+        ? responses[method]
+        : method === "list_book_files" || method === "list_book_editions"
+          ? []
+          : undefined;
     if (response === undefined) {
       return Promise.reject(new Error(`unexpected invoke(${method}) in test`));
     }

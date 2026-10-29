@@ -203,9 +203,18 @@ export function parsePdfProgress(
   pageCount: number,
 ): number | null {
   const page = record?.pageNumber;
-  return typeof page === "number" && Number.isInteger(page) && page >= 1 && page <= pageCount
-    ? page
-    : null;
+  if (typeof page === "number" && Number.isInteger(page) && page >= 1 && page <= pageCount) {
+    return page;
+  }
+  if (page !== null && page !== undefined) return null;
+  // A cross-edition link copies a percentage without a page. Resolve that
+  // coarse position to the nearest page so opening the new edition still
+  // starts near where the reader stopped.
+  const percent = record?.progressPercent;
+  if (typeof percent === "number" && Number.isFinite(percent) && pageCount > 0) {
+    return Math.min(pageCount, Math.max(1, Math.round((percent / 100) * pageCount)));
+  }
+  return null;
 }
 
 export function pdfProgressPayload(page: number, position: number): ReadingProgressInput {

@@ -155,8 +155,15 @@ describe("progress persistence mapping", () => {
     expect(parsePdfProgress({ ...record, pageNumber: 0 }, 10)).toBeNull();
     expect(parsePdfProgress({ ...record, pageNumber: 11 }, 10)).toBeNull();
     expect(parsePdfProgress({ ...record, pageNumber: 4.5 }, 10)).toBeNull();
-    expect(parsePdfProgress({ ...record, pageNumber: null }, 10)).toBeNull();
     expect(parsePdfProgress(null, 10)).toBeNull();
+  });
+
+  it("resolves a percentage-only PDF row to the nearest page", () => {
+    expect(parsePdfProgress({ ...record, pageNumber: null }, 10)).toBe(6);
+    expect(parsePdfProgress({ ...record, pageNumber: null, progressPercent: 50 }, 10)).toBe(5);
+    expect(parsePdfProgress({ ...record, pageNumber: null, progressPercent: 100 }, 10)).toBe(10);
+    expect(parsePdfProgress({ ...record, pageNumber: null, progressPercent: null }, 10)).toBeNull();
+    expect(parsePdfProgress({ ...record, pageNumber: null, progressPercent: 50 }, 0)).toBeNull();
   });
 
   it("serializes each format's payload with the engine markers", () => {

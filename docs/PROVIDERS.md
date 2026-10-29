@@ -116,5 +116,9 @@ Outside this module, the Hardcover adapter owns:
    history intact.
 
 Cross-device provider links and full sync durability are ticket
-tuxbooks-ip6.9. Cross-edition relink is ticket tuxbooks-ip6.8. Neither
-changes the storage contract here.
+tuxbooks-ip6.9. Cross-edition relink is ticket tuxbooks-ip6.8: a confirmed
+link moves a book's provider link and cached status to the current edition,
+but it never creates two local links to one remote record. If the target
+already tracks the same provider, the link command returns a conflict and
+the user must unlink explicitly first. See `docs/DATABASE.md` for the local
+`book_edition_links` relation.

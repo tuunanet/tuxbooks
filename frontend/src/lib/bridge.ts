@@ -15,6 +15,8 @@ import type {
   BookTrashEntry,
   BulkForgetOutcome,
   CollectionSummary,
+  EditionBook,
+  EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
   LibraryChange,
@@ -38,6 +40,8 @@ export type {
   BookTrashEntry,
   BulkForgetOutcome,
   CollectionSummary,
+  EditionBook,
+  EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
   LibraryChange,
@@ -280,6 +284,27 @@ export function removeBook(bookId: number): Promise<boolean> {
 /** Every file location of one durable book, in active-file order. */
 export function listBookFiles(bookId: number): Promise<BookFile[]> {
   return invoke("list_book_files", { bookId });
+}
+
+/**
+ * Every durable book the user confirmed as another edition of this one.
+ * Linked editions keep separate identities and annotations.
+ */
+export function listBookEditions(bookId: number): Promise<EditionBook[]> {
+  return invoke("list_book_editions", { bookId });
+}
+
+/**
+ * Confirm that two durable books are editions of one work. The books stay
+ * separate; the source percentage is copied without a locator, provider
+ * links and status move to the current (target) edition, and annotations
+ * stay with the source.
+ */
+export function linkBookEdition(
+  sourceBookId: number,
+  targetBookId: number,
+): Promise<EditionLinkOutcome> {
+  return invoke("link_book_edition", { sourceBookId, targetBookId });
 }
 
 /**
