@@ -168,9 +168,12 @@ Existing books get a `book_uid` immediately. Books that already share a uuid
 collapse into one durable book; books that discover the same content hash later
 merge with newest progress winning, annotations and collection membership
 unioned, metadata overrides newest winning, and a migration issue recording the
-merge. State that the sync mirror still holds for books unwatched before the
-upgrade is recovered best-effort; metadata may be missing and the record is
-labelled waiting for its file. State already cascaded away with sync off cannot
+merge. That last part is revised: merges are silent now. The losing state still
+moves to the winner, but no migration issue is recorded; `sync_book_merges`
+keeps the audit trail, and migration 0026 resolves the informational rows older
+versions left open. State that the sync mirror still holds for books unwatched
+before the upgrade is recovered best-effort; metadata may be missing and the
+record is labelled waiting for its file. State already cascaded away with sync off cannot
 be recovered.
 
 ### D11. Provider links hang off the book

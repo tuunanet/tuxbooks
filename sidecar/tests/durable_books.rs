@@ -335,13 +335,82 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
         ]
     );
 
-    // The pre-existing duplicate is visible, not silently collapsed.
+    // Identity merge notices are no longer shown. The upgrade used to leave a
+    // duplicate-identity row open; 0026 resolves it and keeps the audit trail.
     let issues = migration::list_open(&pool).await.unwrap();
     assert!(
-        issues.iter().any(|issue| issue.kind == "duplicate_identity"
-            && issue.book_uid.as_deref() == Some(SHARED_UID)),
-        "expected a duplicate identity issue: {issues:?}"
+        issues
+            .iter()
+            .all(|issue| issue.kind != "duplicate_identity"),
+        "duplicate identity notices stay resolved: {issues:?}"
     );
+    let resolved: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM migration_issues
+         WHERE kind = 'duplicate_identity' AND resolved_at IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(resolved, 1, "the old notice is kept as a resolved row");
+}
+
+#[tokio::test]
+async fn migration_0026_resolves_identity_notices_but_keeps_hash_failures() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 25)
+        .await
+        .run(&fixture)
+        .await
+        .unwrap();
+
+    for (key, kind) in [
+        ("identity-merged:a:b", "identity_merged"),
+        ("duplicate-progress:c", "duplicate_state_merged"),
+        ("duplicate-identity:d", "duplicate_identity"),
+        ("hash-failed:7", "hash_failed"),
+    ] {
+        sqlx::query(
+            "INSERT INTO migration_issues (issue_key, kind, detail)
+             VALUES (?1, ?2, 'fixture')",
+        )
+        .bind(key)
+        .bind(kind)
+        .execute(&fixture)
+        .await
+        .unwrap();
+    }
+    fixture.close().await;
+
+    let (pool, recovery) = init_pool_recovering(&db_path).await.unwrap();
+    assert!(recovery.is_none());
+
+    let open: Vec<String> = sqlx::query_scalar(
+        "SELECT kind FROM migration_issues WHERE resolved_at IS NULL ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        open,
+        vec!["hash_failed".to_string()],
+        "only the relink issue stays open"
+    );
+    let resolved: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM migration_issues WHERE resolved_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(resolved, 3, "the informational notices are resolved");
 }
 
 #[tokio::test]
@@ -440,20 +509,31 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
         "annotations from both copies are unioned"
     );
 
+    // 0018 records what it unioned; 0026 resolves those notices, so the audit
+    // trail stays without listing internal uids in Settings.
     let issues = migration::list_open(&pool).await.unwrap();
     assert!(
         issues
             .iter()
-            .any(|issue| issue.kind == "duplicate_state_merged"
-                && issue.issue_key == format!("duplicate-progress:{SHARED_UID}")),
-        "the merge is visible: {issues:?}"
+            .all(|issue| issue.kind != "duplicate_state_merged"),
+        "union notices stay resolved: {issues:?}"
     );
-    assert!(
-        issues
-            .iter()
-            .any(|issue| issue.kind == "duplicate_state_merged"
-                && issue.issue_key == format!("duplicate-annotations:{SHARED_UID}")),
-        "the annotation union is visible: {issues:?}"
+    let resolved: Vec<String> = sqlx::query_scalar(
+        "SELECT issue_key FROM migration_issues
+         WHERE resolved_at IS NOT NULL AND issue_key IN (?1, ?2)
+         ORDER BY issue_key",
+    )
+    .bind(format!("duplicate-progress:{SHARED_UID}"))
+    .bind(format!("duplicate-annotations:{SHARED_UID}"))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        resolved,
+        vec![
+            format!("duplicate-annotations:{SHARED_UID}"),
+            format!("duplicate-progress:{SHARED_UID}"),
+        ]
     );
 
     // The durable record survives the last file row.
@@ -587,11 +667,20 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
         .await
         .unwrap();
     assert_eq!(records, 1);
+    // A collapse is automatic: it stays in the merge diagnostics table and is
+    // not recorded as a user issue.
     let issues = migration::list_open(&pool).await.unwrap();
     assert!(
-        issues.iter().any(|issue| issue.kind == "identity_merged"),
-        "a collapse is recorded as a visible issue"
+        issues
+            .iter()
+            .all(|issue| issue.kind != "identity_merged" && issue.kind != "duplicate_state_merged"),
+        "an automatic merge is not a user issue: {issues:?}"
     );
+    let merges: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_merges")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(merges > 0, "the collapse is kept for diagnostics");
 
     // Deleting file rows ends membership only; the durable record survives
     // the last one (ticket .2).
@@ -789,34 +878,34 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
     let other = shelves.iter().find(|shelf| shelf.name == "Other").unwrap();
     assert_eq!(other.book_ids, vec![book.id]);
 
+    // The unions are recorded by 0019 and resolved by 0026: no informational
+    // row reaches Settings, but the history is still inspectable.
     let issues = migration::list_open(&pool).await.unwrap();
     assert!(
         issues
             .iter()
-            .any(|issue| issue.kind == "duplicate_state_merged"
-                && issue.issue_key == format!("duplicate-collections:{SHARED_UID}")),
-        "collection union is visible: {issues:?}"
+            .all(|issue| issue.kind != "duplicate_state_merged"),
+        "union notices stay resolved: {issues:?}"
     );
+    let resolved: Vec<(String, String)> = sqlx::query_as(
+        "SELECT issue_key, detail FROM migration_issues
+         WHERE resolved_at IS NOT NULL AND issue_key IN (?1, ?2, ?3)
+         ORDER BY issue_key",
+    )
+    .bind(format!("duplicate-collections:{SHARED_UID}"))
+    .bind(format!("duplicate-metadata:{SHARED_UID}"))
+    .bind(format!("duplicate-opened:{SHARED_UID}"))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(resolved.len(), 3, "each union keeps its resolved row");
+    let metadata = resolved
+        .iter()
+        .find(|(key, _)| key == &format!("duplicate-metadata:{SHARED_UID}"))
+        .expect("the metadata notice");
     assert!(
-        issues
-            .iter()
-            .any(|issue| issue.kind == "duplicate_state_merged"
-                && issue.issue_key == format!("duplicate-metadata:{SHARED_UID}")),
-        "metadata merge is visible: {issues:?}"
-    );
-    assert!(
-        issues
-            .iter()
-            .any(|issue| issue.kind == "duplicate_state_merged"
-                && issue.issue_key == format!("duplicate-opened:{SHARED_UID}")),
-        "last-opened merge is visible: {issues:?}"
-    );
-    assert!(
-        issues.iter().any(
-            |issue| issue.issue_key == format!("duplicate-metadata:{SHARED_UID}")
-                && issue.detail.contains("ambiguous")
-        ),
-        "the override tie is labelled ambiguous: {issues:?}"
+        metadata.1.contains("ambiguous"),
+        "the override tie is labelled ambiguous: {metadata:?}"
     );
 
     // Source metadata stays per file.

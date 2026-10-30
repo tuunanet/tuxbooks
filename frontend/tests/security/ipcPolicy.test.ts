@@ -386,17 +386,6 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
   describe("durable-state and provider methods", () => {
     const bookUid = "a".repeat(32);
 
-    it("allows backfill and migration status, and validates the dismiss id", () => {
-      expect(() => validateInvokeParams("identity_backfill_status", {}, issued())).not.toThrow();
-      expect(() => validateInvokeParams("migration_issues", {}, issued())).not.toThrow();
-      expect(() =>
-        validateInvokeParams("migration_dismiss_issue", { id: 1 }, issued()),
-      ).not.toThrow();
-      expect(() => validateInvokeParams("migration_dismiss_issue", { id: 0 }, issued())).toThrow(
-        /invalid migration issue id/,
-      );
-    });
-
     it("validates waiting-book actions by durable book uid", () => {
       expect(() => validateInvokeParams("list_waiting_books", {}, issued())).not.toThrow();
       expect(() =>

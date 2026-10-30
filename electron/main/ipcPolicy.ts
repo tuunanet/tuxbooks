@@ -290,10 +290,6 @@ function requireNonEmptyString(value: unknown, label: string, maxLength: number)
   }
 }
 
-function validateMigrationId(record: Record<string, unknown>): void {
-  requirePositiveId(record.id, "migration issue id");
-}
-
 function validateBookUidRecord(record: Record<string, unknown>): void {
   requireBookUid(record.bookUid);
 }
@@ -354,7 +350,6 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["sync_set_device_name", validateSyncDeviceName],
   ["remove_book_file", validateBookFile],
   ["link_book_edition", validateEditionLink],
-  ["migration_dismiss_issue", validateMigrationId],
   ["forget_waiting_book", validateBookUidRecord],
   ["list_provider_links", validateBookUidRecord],
   ["link_provider_book", validateProviderLink],

@@ -1,8 +1,9 @@
-//! Visible upgrade issues (ADR 0014 D10).
+//! Relink issues (ADR 0014 D10).
 //!
-//! Identity merges and failed background hashes are not errors the user can
-//! act on immediately, but they must not be silent: a merged duplicate or a
-//! book that needs a relink is recorded here and surfaced in Settings.
+//! A failed content hash is recorded here so the book keeps a durable record
+//! and can be found again after a relink. Identity merges are automatic and
+//! keep their audit trail in `sync_book_merges` instead. The open list and
+//! dismiss helpers stay for the hash-retry path that clears these rows.
 
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
@@ -59,7 +60,7 @@ pub async fn record_issue(
     Ok(())
 }
 
-/// Open issues, newest first, for the Settings list.
+/// Open issues, newest first.
 pub async fn list_open(pool: &SqlitePool) -> Result<Vec<MigrationIssue>, AppError> {
     let issues = sqlx::query_as::<_, MigrationIssue>(
         "SELECT id, issue_key, kind, detail, book_uid, created_at, resolved_at

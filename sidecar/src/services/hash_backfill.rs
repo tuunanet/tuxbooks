@@ -11,17 +11,12 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::repository::identity_backfill;
 use crate::repository::migration;
-use crate::rpc::EventEmitter;
 use crate::sync::identity::ensure_book_identity;
-
-/// Event carrying [`HashBackfillStatus`] to the renderer.
-pub const EVENT: &str = "identity-backfill";
 
 /// How many books one batch claims before yielding. Small enough that a
 /// shutdown or a new import does not wait on a whole library.
@@ -30,8 +25,7 @@ const BATCH: i64 = 16;
 /// How long an idle pass waits before looking for new pending rows.
 const IDLE_POLL: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HashBackfillStatus {
     /// File rows whose bytes can be hashed right now.
     pub total: i64,
@@ -145,27 +139,12 @@ async fn mark_failed(pool: &SqlitePool, book_id: i64) -> Result<(), AppError> {
 
 /// Start the background pass. The first pass begins as soon as the runtime
 /// schedules it, so opening a large library is never blocked on hashing.
-pub fn start(pool: SqlitePool, events: EventEmitter) {
+pub fn start(pool: SqlitePool) {
     tokio::spawn(async move {
-        let mut last: Option<HashBackfillStatus> = None;
         loop {
             match process_batch(&pool).await {
-                Ok(0) => {
-                    if let Ok(current) = status(&pool).await {
-                        if last != Some(current) {
-                            events.emit(EVENT, &current);
-                            last = Some(current);
-                        }
-                    }
-                    tokio::time::sleep(IDLE_POLL).await;
-                }
-                Ok(_) => {
-                    if let Ok(current) = status(&pool).await {
-                        events.emit(EVENT, &current);
-                        last = Some(current);
-                    }
-                    tokio::task::yield_now().await;
-                }
+                Ok(0) => tokio::time::sleep(IDLE_POLL).await,
+                Ok(_) => tokio::task::yield_now().await,
                 Err(err) => {
                     eprintln!("identity backfill paused: {err}");
                     tokio::time::sleep(IDLE_POLL).await;

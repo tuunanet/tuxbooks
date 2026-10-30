@@ -356,12 +356,6 @@ async fn dispatch(
                 p.progress_percent
             )))
         }
-        "identity_backfill_status" => Ok(call!(commands::books::identity_backfill_status(state))),
-        "migration_issues" => Ok(call!(commands::books::migration_issues(state))),
-        "migration_dismiss_issue" => {
-            let p: IdArgs = parse_params(params)?;
-            Ok(call!(commands::books::dismiss_migration_issue(state, p.id)))
-        }
         "search_books" => {
             let p: QueryArgs = parse_params(params)?;
             Ok(call!(commands::books::search_books(state, p.query)))
