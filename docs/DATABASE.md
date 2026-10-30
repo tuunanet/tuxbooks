@@ -390,6 +390,32 @@ the remote side:
   row. That is what stops `sync_book_aliases` and stale `sync_book_merges`
   edges from resurrecting the old identity.
 
+## Conflict review (migration 0027)
+
+`sync_conflicts` records the value a last-writer-wins merge discarded, with both
+JSON values, both hybrid clocks, and the devices that wrote them. Migration
+0027 adds `resolved_at` and an index on it. The applied winner is never rolled
+back by the row itself; the queue only records what was lost.
+
+- A resolved row keeps `resolved_at` for the audit trail and leaves the open
+  count. `keep_winner` only stamps it. `apply_loser` publishes the discarded
+  value as a normal operation with a fresh clock, so every device converges;
+  delete/edit (`__deleted__`) and lost restores (`__restore__`) republish the
+  explicit restore operation instead, which also closes the local trash entry
+  on every device that applies the restore.
+- An unresolved row older than 30 days is deleted during a status refresh or a
+  conflict list, matching the trash window. Its `sync_issues` row closes when
+  no other open conflict shares the key.
+- Each status refresh and list first reconciles open rows against the mirror.
+  A row closes once a newer write has moved the value or clock past its
+  winner, so every device that replays a resolution settles its own copy.
+- Several losing writes for one `(kind, entity_uid, field)` share one issue and
+  one key. The issue is resolved only after the last of them is settled.
+- Progress conflicts stay in the table for diagnostics but are left out of the
+  review list and the status count, and never open an issue.
+- Book identity conflicts are keep-only because identity merges are
+  deterministic.
+
 ## Cloud-folder sync (migration 0015)
 
 The sync engine keeps its bookkeeping in the same SQLite file. Reading
@@ -417,7 +443,8 @@ full contract is [SYNC.md](SYNC.md).
   operation id. `sync_remote_files` caches file size/mtime and retry counts so a
   pass only reads new or changed files.
 - `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
-  losing field values, and the 30-day delete restore list for single entities.
+  losing field values with their resolution and 30-day expiry, and the 30-day
+  delete restore list for single entities.
 - `sync_book_trash` — whole-book Forget snapshots, clocks, and the remote
   restore/discard state. Separate from per-entity `sync_trash` (migration 0023).
 - `sync_ignored_books` — local-only hiding of books whose shared state is

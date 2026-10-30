@@ -255,6 +255,16 @@ function validateSyncId(record: Record<string, unknown>): void {
   requirePositiveId(record.id, "sync id");
 }
 
+const CONFLICT_RESOLUTIONS = new Set(["keep_winner", "apply_loser"]);
+
+function validateSyncConflictResolution(record: Record<string, unknown>): void {
+  requirePositiveId(record.id, "sync conflict id");
+  const resolution = record.resolution;
+  if (typeof resolution !== "string" || !CONFLICT_RESOLUTIONS.has(resolution)) {
+    throw policyError("invalid conflict resolution");
+  }
+}
+
 function validateSyncDeviceName(record: Record<string, unknown>): void {
   const name = record.name;
   if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
@@ -347,6 +357,7 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["restore_book", validateRestoreBook],
   ["sync_dismiss_issue", validateSyncId],
   ["sync_restore", validateSyncId],
+  ["sync_resolve_conflict", validateSyncConflictResolution],
   ["sync_set_device_name", validateSyncDeviceName],
   ["remove_book_file", validateBookFile],
   ["link_book_edition", validateEditionLink],

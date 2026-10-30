@@ -534,6 +534,21 @@ async fn emit_state(
     Ok(())
 }
 
+/// Publish a normal state operation with a fresh clock. Conflict resolution
+/// reuses this so a re-applied losing value is an ordinary write every device
+/// converges on, not a local-only patch the next pass would undo.
+pub async fn write_fields(
+    pool: &SqlitePool,
+    root: &std::path::Path,
+    kind: EntityKind,
+    entity_uid: &str,
+    book_uid: Option<&str>,
+    fields: Map<String, Value>,
+) -> Result<(), AppError> {
+    let op = build_op(pool, kind, entity_uid, book_uid, false, false, fields, None).await?;
+    write_and_apply(pool, root, &op).await
+}
+
 /// Explicitly restore a tombstoned entity from the trash payload. This is the
 /// only path that sets `restore`, which is what keeps a concurrent edit from
 /// resurrecting a delete.

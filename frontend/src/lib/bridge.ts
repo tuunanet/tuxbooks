@@ -98,6 +98,34 @@ export interface SyncTrashEntry {
   expiresAt: string;
 }
 
+/** One losing value the merge kept, waiting for a keep/apply choice. */
+export interface SyncConflict {
+  id: number;
+  kind: string;
+  entityUid: string;
+  bookUid: string | null;
+  bookTitle: string | null;
+  bookAuthor: string | null;
+  field: string;
+  /** Readable name for `__entity__`, `__deleted__`, and `__restore__`. */
+  fieldLabel: string | null;
+  winner: unknown;
+  loser: unknown;
+  winnerDeviceId: string;
+  winnerDeviceName: string;
+  winnerWall: number;
+  winnerCounter: number;
+  loserDeviceId: string;
+  loserDeviceName: string;
+  loserWall: number;
+  loserCounter: number;
+  createdAt: string;
+  canApplyLoser: boolean;
+  applyLoserBlockedReason: string | null;
+}
+
+export type SyncConflictResolution = "keep_winner" | "apply_loser";
+
 export interface SyncMismatch {
   localLibraryId: string;
   remoteLibraryId: string;
@@ -546,6 +574,18 @@ export function listSyncTrash(): Promise<SyncTrashEntry[]> {
 
 export function restoreSyncTrash(id: number): Promise<boolean> {
   return invoke("sync_restore", { id });
+}
+
+export function listSyncConflicts(): Promise<SyncConflict[]> {
+  return invoke("sync_conflicts");
+}
+
+/** `apply_loser` republishes the losing value; every device converges on it. */
+export function resolveSyncConflict(
+  id: number,
+  resolution: SyncConflictResolution,
+): Promise<boolean> {
+  return invoke("sync_resolve_conflict", { id, resolution });
 }
 
 export function setSyncDeviceName(name: string): Promise<SyncStatus> {

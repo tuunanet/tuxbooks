@@ -217,6 +217,12 @@ pub fn changed_fields(previous: &State, current: &State) -> Map<String, Value> {
     changed
 }
 
+/// Stable issue key for one conflict. Several losing writes for the same field
+/// share the key, so the issue closes only when the last of them settles.
+pub fn conflict_issue_key(kind: EntityKind, entity_uid: &str, field: &str) -> String {
+    format!("conflict:{}:{entity_uid}:{field}", kind.as_str())
+}
+
 pub fn state_display(kind: EntityKind, state: &State) -> String {
     match kind {
         EntityKind::Annotation => state
