@@ -121,6 +121,15 @@ struct IdArgs {
     id: i64,
 }
 
+/// One conflict resolution: the row id and either `keep_winner` or
+/// `apply_loser`. The enum itself is validated in the service.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncResolveConflictArgs {
+    id: i64,
+    resolution: String,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BookIdArgs {
@@ -599,6 +608,15 @@ async fn dispatch(
         "sync_restore" => {
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::sync::restore(state, p.id)))
+        }
+        "sync_conflicts" => Ok(call!(commands::sync::conflicts(state))),
+        "sync_resolve_conflict" => {
+            let p: SyncResolveConflictArgs = parse_params(params)?;
+            Ok(call!(commands::sync::resolve_conflict(
+                state,
+                p.id,
+                p.resolution
+            )))
         }
         "sync_set_device_name" => {
             let p: SyncDeviceNameArgs = parse_params(params)?;

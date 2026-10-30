@@ -237,6 +237,24 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), App
     }
 }
 
+/// Display name for a device that wrote an operation. The folder is untrusted
+/// and a device may never have written its file here, so a missing or
+/// malformed `device.json` falls back to the id the operation carries. That
+/// keeps conflict review readable without turning an unreadable folder into a
+/// failure.
+pub fn device_name(root: &Path, device_id: &str) -> String {
+    if !is_safe_uid(device_id) {
+        return device_id.to_string();
+    }
+    let path = root.join("devices").join(device_id).join("device.json");
+    let name = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<DeviceFile>(&bytes).ok())
+        .map(|device| device.name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    name.unwrap_or_else(|| device_id.to_string())
+}
+
 pub fn op_relative_path(op: &Op) -> String {
     format!(
         "ops/{}/{:020}-{:06}-{}.json",

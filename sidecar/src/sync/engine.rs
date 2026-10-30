@@ -23,6 +23,7 @@ use super::clock::{
     delete_meta, device_id, get_meta, now_rfc3339, set_meta, META_BASELINE_DONE, META_DEVICE_NAME,
     META_ENABLED, META_FOLDER, META_LAST_ERROR, META_LAST_SYNC, META_LIBRARY_ID,
 };
+use super::conflict;
 use super::identity::{ensure_book_identity, record_issue};
 use super::merge::{self, Affected};
 use super::model::{canonical_from_snapshot, state_display, EntityKind};
@@ -284,6 +285,9 @@ impl SyncService {
 
     async fn refresh_status(&self) -> Result<(), AppError> {
         let pool = &self.inner.pool;
+        // Expire unread conflicts first so the count, the list, and the open
+        // issues always agree. Cheap enough to run with every refresh.
+        conflict::expire(pool).await?;
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;
@@ -298,9 +302,10 @@ impl SyncService {
         .bind(now_rfc3339())
         .fetch_one(pool)
         .await?;
-        let conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
-            .fetch_one(pool)
-            .await?;
+        let conflicts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL")
+                .fetch_one(pool)
+                .await?;
         let waiting_books = waiting::count(pool).await?;
         let enabled = get_meta(pool, META_ENABLED)
             .await?
@@ -1081,6 +1086,61 @@ impl SyncService {
         }];
         let books =
             merge::project(&self.inner.pool, &root, &self.inner.covers_dir, &affected).await?;
+        self.emit_changes(&books).await;
+        self.refresh_status().await?;
+        self.emit_status();
+        Ok(true)
+    }
+
+    fn sync_root(&self) -> Option<PathBuf> {
+        let folder = self.status_snapshot().folder?;
+        store::resolve_root(Path::new(&folder)).ok()
+    }
+
+    /// Open, unexpired conflicts newest first, with the values, device names,
+    /// and clocks the review UI needs.
+    pub async fn list_conflicts(&self) -> Result<Vec<conflict::SyncConflict>, AppError> {
+        self.refresh_status().await?;
+        let root = self.sync_root();
+        conflict::list(&self.inner.pool, root.as_deref()).await
+    }
+
+    /// Settle one conflict. `keep_winner` leaves the applied state alone;
+    /// `apply_loser` publishes the losing value as a fresh synced write so
+    /// every device converges on it.
+    pub async fn resolve_conflict(&self, id: i64, resolution: &str) -> Result<bool, AppError> {
+        let Some(resolution) = conflict::Resolution::parse(resolution) else {
+            return Err(AppError::InvalidInput(format!(
+                "unknown conflict resolution {resolution:?}"
+            )));
+        };
+        let _guard = self.inner.pass_lock.lock().await;
+        conflict::expire(&self.inner.pool).await?;
+        let Some(open) = conflict::open(&self.inner.pool, id).await? else {
+            return Ok(false);
+        };
+        let mut books = Vec::new();
+        if resolution == conflict::Resolution::ApplyLoser {
+            if let Some(reason) = conflict::apply_blocked_reason(open.kind, &open.field) {
+                return Err(AppError::InvalidInput(reason.into()));
+            }
+            let Some(folder) = self.status_snapshot().folder else {
+                return Err(AppError::InvalidInput(
+                    "sync is not connected; re-apply the value from its original screen".into(),
+                ));
+            };
+            let root = store::resolve_root(Path::new(&folder))?;
+            let affected = conflict::apply_loser(&self.inner.pool, &root, &open).await?;
+            books = merge::project(
+                &self.inner.pool,
+                &root,
+                &self.inner.covers_dir,
+                std::slice::from_ref(&affected),
+            )
+            .await?;
+        }
+        conflict::mark_resolved(&self.inner.pool, id).await?;
+        conflict::close_issue_if_settled(&self.inner.pool, &open).await?;
         self.emit_changes(&books).await;
         self.refresh_status().await?;
         self.emit_status();

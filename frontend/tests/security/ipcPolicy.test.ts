@@ -167,6 +167,31 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       );
     });
 
+    it("validates the conflict id and resolution choice", () => {
+      for (const resolution of ["keep_winner", "apply_loser"]) {
+        expect(() =>
+          validateInvokeParams("sync_resolve_conflict", { id: 3, resolution }, issued()),
+        ).not.toThrow();
+      }
+      expect(() =>
+        validateInvokeParams(
+          "sync_resolve_conflict",
+          { id: 0, resolution: "keep_winner" },
+          issued(),
+        ),
+      ).toThrow(/sync conflict id/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_resolve_conflict",
+          { id: 3, resolution: "apply_winner" },
+          issued(),
+        ),
+      ).toThrow(/conflict resolution/);
+      expect(() => validateInvokeParams("sync_resolve_conflict", { id: 3 }, issued())).toThrow(
+        /conflict resolution/,
+      );
+    });
+
     it("validates Reset, Forget, and restore parameters", () => {
       expect(() =>
         validateInvokeParams("reset_book_reading_data", { bookId: 1 }, issued()),
