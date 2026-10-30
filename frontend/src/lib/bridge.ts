@@ -573,6 +573,12 @@ export function forgetAllWaitingBooks(): Promise<number> {
   return invoke("forget_all_waiting_books");
 }
 
+/** Attach a waiting book to the file the user located. The sidecar verifies
+ * the bytes; a mismatch rejects and leaves the book waiting. */
+export function attachWaitingBook(bookUid: string, path: string): Promise<Book> {
+  return invoke("attach_waiting_book", { bookUid, path });
+}
+
 export function dismissAllSyncIssues(): Promise<number> {
   return invoke("dismiss_all_sync_issues");
 }

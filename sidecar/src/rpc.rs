@@ -158,6 +158,13 @@ struct BookUidArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AttachWaitingBookArgs {
+    book_uid: String,
+    path: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BookIdsArgs {
     book_ids: Vec<i64>,
 }
@@ -604,6 +611,12 @@ async fn dispatch(
             )))
         }
         "forget_all_waiting_books" => Ok(call!(commands::sync::forget_all_waiting_books(state))),
+        "attach_waiting_book" => {
+            let p: AttachWaitingBookArgs = parse_params(params)?;
+            Ok(call!(commands::sync::attach_waiting_book(
+                state, events, p.book_uid, p.path
+            )))
+        }
         "sync_issues" => Ok(call!(commands::sync::issues(state))),
         "dismiss_all_sync_issues" => Ok(call!(commands::sync::dismiss_all_issues(state))),
         "sync_dismiss_issue" => {

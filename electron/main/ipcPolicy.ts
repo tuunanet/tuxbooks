@@ -86,6 +86,7 @@ const ISSUED_PATH_METHODS = new Set([
   "scan_library",
   "reconnect_book",
   "relink_book",
+  "attach_waiting_book",
   "set_book_cover",
   "sync_connect",
 ]);
@@ -152,6 +153,14 @@ function validateIssuedPaths(
   }
   if (method === "reconnect_book" || method === "relink_book") {
     requireBookId(record);
+    requireLibraryPath(record.path, "path");
+    requireIssued(issued, "book-file", record.path, "path");
+    return;
+  }
+  if (method === "attach_waiting_book") {
+    // The waiting book is named by its shared uid, not a local row id; the
+    // picked file must be the one the dialog handed back.
+    requireBookUid(record.bookUid);
     requireLibraryPath(record.path, "path");
     requireIssued(issued, "book-file", record.path, "path");
     return;

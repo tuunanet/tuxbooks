@@ -50,6 +50,26 @@ pub async fn forget_all_waiting_books(state: &AppState) -> Result<usize, AppErro
     service(state)?.forget_all_waiting_books().await
 }
 
+/// Attach a waiting book to a file the user picked. The sidecar hashes the
+/// bytes and refuses a mismatch, so this only imports the exact content the
+/// waiting uid already describes.
+pub async fn attach_waiting_book(
+    state: &AppState,
+    events: &crate::rpc::EventEmitter,
+    book_uid: String,
+    path: String,
+) -> Result<crate::domain::Book, AppError> {
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidInput("book path is empty".into()));
+    }
+    let pdfium_dirs = crate::pdfium_library_dirs();
+    let book = service(state)?
+        .attach_waiting_book(&book_uid, std::path::Path::new(&path), &pdfium_dirs)
+        .await?;
+    crate::commands::emit_changed_book(events, book.clone());
+    Ok(book)
+}
+
 pub async fn dismiss_all_issues(state: &AppState) -> Result<usize, AppError> {
     service(state)?.dismiss_all_issues().await
 }

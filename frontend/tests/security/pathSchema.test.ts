@@ -332,6 +332,7 @@ describe("boundary configuration tables (T-5)", () => {
       "sync_resolve_conflict",
       "list_waiting_books",
       "forget_waiting_book",
+      "attach_waiting_book",
       "forget_all_waiting_books",
       "dismiss_all_sync_issues",
       "sync_retry_issue",
