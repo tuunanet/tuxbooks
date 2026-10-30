@@ -303,7 +303,7 @@ export function ReaderShell() {
         onPreviewChange={progress.setPreview}
         onCommit={setPosition}
         label={progress.label}
-        onLabelChange={progress.setLabel}
+        onLabelClear={progress.clearLabel}
         onReadLabel={progress.readLabel}
         progressBarRef={progress.barRef}
         onReleaseFocus={progress.releaseFocus}
