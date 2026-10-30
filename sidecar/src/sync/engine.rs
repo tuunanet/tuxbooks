@@ -288,8 +288,12 @@ impl SyncService {
         // Settle conflicts whose winner has moved and expire unread rows first,
         // so the count, the list, and the open issues always agree. Both are
         // best effort: a busy database must not fail a status read.
-        let _ = conflict::reconcile(pool).await;
-        let _ = conflict::expire(pool).await;
+        if let Err(err) = conflict::reconcile(pool).await {
+            eprintln!("sync review: reconcile failed: {err}");
+        }
+        if let Err(err) = conflict::expire(pool).await {
+            eprintln!("sync review: expiry failed: {err}");
+        }
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;

@@ -11,6 +11,7 @@
 //! closes on every device that replays the newer write. Progress conflicts are
 //! recorded for diagnostics but never reach the review list or an issue.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Serialize;
@@ -30,6 +31,14 @@ const LIST_LIMIT: i64 = 100;
 /// The durable book a conflict belongs to. A `book` conflict keys on the
 /// entity uid itself; every other kind reads the mirror row.
 const BOOK_UID_EXPR: &str = "COALESCE(CASE WHEN c.kind = 'book' THEN c.entity_uid END, e.book_uid)";
+
+/// An issue has no live conflict behind it. Shared by the reconcile and expiry
+/// sweep and the single-key settlement path so the key join lives in one place.
+const NO_LIVE_CONFLICT: &str = "NOT EXISTS (
+    SELECT 1 FROM sync_conflicts c
+    WHERE c.resolved_at IS NULL
+      AND 'conflict:' || c.kind || ':' || c.entity_uid || ':' || c.field = sync_issues.issue_key
+)";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,35 +170,24 @@ async fn is_live(
             }))
         }
         "__deleted__" | "__restore__" => {
-            type Tombstone = (i64, i64, i64, String, i64, i64, String);
+            // Live only while the same tombstone is still the one in effect.
+            // A restore followed by a later delete is a new cycle, so the old
+            // row no longer describes a choice the user can make.
+            type Tombstone = (i64, i64, i64, String);
             let row: Option<Tombstone> = sqlx::query_as(
-                "SELECT deleted, deleted_wall, deleted_count, deleted_dev,
-                        restored_wall, restored_count, restored_dev
+                "SELECT deleted, deleted_wall, deleted_count, deleted_dev
                  FROM sync_state_entities WHERE kind = ?1 AND entity_uid = ?2",
             )
             .bind(kind.as_str())
             .bind(entity_uid)
             .fetch_optional(pool)
             .await?;
-            let Some((deleted, wall, counter, device, restored_wall, restored_count, restored_dev)) =
-                row
-            else {
-                return Ok(false);
-            };
-            if deleted != 0 {
-                return Ok(true);
-            }
-            let delete = Hlc {
-                wall,
-                counter: counter as u32,
-                device,
-            };
-            let restored = Hlc {
-                wall: restored_wall,
-                counter: restored_count as u32,
-                device: restored_dev,
-            };
-            Ok(delete >= restored)
+            Ok(row.is_some_and(|(deleted, wall, counter, device)| {
+                deleted != 0
+                    && wall == winner_hlc.wall
+                    && counter == winner_hlc.counter as i64
+                    && device == winner_hlc.device
+            }))
         }
         _ => {
             let row: Option<(String, i64, i64, String)> = sqlx::query_as(
@@ -215,21 +213,13 @@ async fn is_live(
 /// issues that never belong in the review. One query so both reconcile and
 /// expiry can skip their write transaction when there is nothing to close.
 async fn stale_issue_count(pool: &SqlitePool) -> Result<i64, AppError> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(&format!(
         r#"
         SELECT COUNT(*) FROM sync_issues
         WHERE kind = 'conflict' AND resolved_at IS NULL
-          AND (
-              issue_key LIKE 'conflict:progress:%'
-              OR NOT EXISTS (
-                  SELECT 1 FROM sync_conflicts c
-                  WHERE c.resolved_at IS NULL
-                    AND 'conflict:' || c.kind || ':' || c.entity_uid || ':' || c.field
-                        = sync_issues.issue_key
-              )
-          )
-        "#,
-    )
+          AND (issue_key LIKE 'conflict:progress:%' OR {NO_LIVE_CONFLICT})
+        "#
+    ))
     .fetch_one(pool)
     .await
     .map_err(Into::into)
@@ -239,21 +229,13 @@ async fn close_conflict_issues(
     tx: &mut Transaction<'_, Sqlite>,
     now: &str,
 ) -> Result<(), AppError> {
-    sqlx::query(
+    sqlx::query(&format!(
         r#"
         UPDATE sync_issues SET resolved_at = ?1
         WHERE kind = 'conflict' AND resolved_at IS NULL
-          AND (
-              issue_key LIKE 'conflict:progress:%'
-              OR NOT EXISTS (
-                  SELECT 1 FROM sync_conflicts c
-                  WHERE c.resolved_at IS NULL
-                    AND 'conflict:' || c.kind || ':' || c.entity_uid || ':' || c.field
-                        = sync_issues.issue_key
-              )
-          )
-        "#,
-    )
+          AND (issue_key LIKE 'conflict:progress:%' OR {NO_LIVE_CONFLICT})
+        "#
+    ))
     .bind(now)
     .execute(&mut **tx)
     .await?;
@@ -345,8 +327,16 @@ pub async fn expire(pool: &SqlitePool) -> Result<u64, AppError> {
     Ok(deleted.rows_affected())
 }
 
-fn device_name(root: Option<&Path>, id: &str) -> String {
-    root.map_or_else(|| id.to_string(), |root| store::device_name(root, id))
+fn device_name(root: Option<&Path>, cache: &mut HashMap<String, String>, id: &str) -> String {
+    let Some(root) = root else {
+        return id.to_string();
+    };
+    if let Some(name) = cache.get(id) {
+        return name.clone();
+    }
+    let name = store::device_name(root, id);
+    cache.insert(id.to_string(), name.clone());
+    name
 }
 
 fn parse_value(json: &str) -> Value {
@@ -357,8 +347,6 @@ fn parse_value(json: &str) -> Value {
 /// never reaches this list. Book titles and device names come from the local
 /// catalog and the sync folder; a missing folder only costs the names.
 pub async fn list(pool: &SqlitePool, root: Option<&Path>) -> Result<Vec<SyncConflict>, AppError> {
-    // Best effort: a busy database must not fail a read.
-    let _ = reconcile(pool).await;
     let rows: Vec<ConflictRow> = sqlx::query_as(&format!(
         r#"
         SELECT c.id, c.kind, c.entity_uid, c.field, c.winner_json, c.loser_json,
@@ -382,6 +370,7 @@ pub async fn list(pool: &SqlitePool, root: Option<&Path>) -> Result<Vec<SyncConf
     .fetch_all(pool)
     .await?;
 
+    let mut names = HashMap::new();
     Ok(rows
         .into_iter()
         .map(|row| {
@@ -400,11 +389,11 @@ pub async fn list(pool: &SqlitePool, root: Option<&Path>) -> Result<Vec<SyncConf
                 field_label: field_label(&row.field),
                 winner: parse_value(&row.winner_json),
                 loser: parse_value(&row.loser_json),
-                winner_device_name: device_name(root, &row.winner_dev),
+                winner_device_name: device_name(root, &mut names, &row.winner_dev),
                 winner_device_id: row.winner_dev,
                 winner_wall: row.winner_wall,
                 winner_counter: row.winner_counter,
-                loser_device_name: device_name(root, &row.loser_dev),
+                loser_device_name: device_name(root, &mut names, &row.loser_dev),
                 loser_device_id: row.loser_dev,
                 loser_wall: row.loser_wall,
                 loser_counter: row.loser_counter,
@@ -523,22 +512,15 @@ pub async fn settle(pool: &SqlitePool, id: i64, conflict: &OpenConflict) -> Resu
     .rows_affected()
         > 0;
     let issue_key = conflict_issue_key(conflict.kind, &conflict.entity_uid, &conflict.field);
-    sqlx::query(
+    sqlx::query(&format!(
         r#"
         UPDATE sync_issues SET resolved_at = ?1
         WHERE kind = 'conflict' AND resolved_at IS NULL AND issue_key = ?2
-          AND NOT EXISTS (
-              SELECT 1 FROM sync_conflicts
-              WHERE kind = ?3 AND entity_uid = ?4 AND field = ?5
-                AND resolved_at IS NULL
-          )
-        "#,
-    )
+          AND {NO_LIVE_CONFLICT}
+        "#
+    ))
     .bind(&now)
     .bind(issue_key)
-    .bind(conflict.kind.as_str())
-    .bind(&conflict.entity_uid)
-    .bind(&conflict.field)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -626,14 +608,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         let id = "a".repeat(32);
-        assert_eq!(device_name(Some(root), &id), id);
-        assert_eq!(device_name(Some(root), "../evil"), "../evil");
-        assert_eq!(device_name(None, &id), id);
+        assert_eq!(device_name(Some(root), &mut HashMap::new(), &id), id);
+        assert_eq!(
+            device_name(Some(root), &mut HashMap::new(), "../evil"),
+            "../evil"
+        );
+        assert_eq!(device_name(None, &mut HashMap::new(), &id), id);
 
         let dir = root.join("devices").join(&id);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("device.json"), b"{not json").unwrap();
-        assert_eq!(device_name(Some(root), &id), id);
+        assert_eq!(device_name(Some(root), &mut HashMap::new(), &id), id);
 
         std::fs::write(
             dir.join("device.json"),
@@ -646,7 +631,34 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(device_name(Some(root), &id), "Laptop");
+        assert_eq!(device_name(Some(root), &mut HashMap::new(), &id), "Laptop");
+    }
+
+    #[test]
+    fn a_device_name_is_cached_for_the_rest_of_the_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let id = "b".repeat(32);
+        let dir = root.join("devices").join(&id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("device.json"),
+            serde_json::to_vec(&json!({
+                "schema": 1,
+                "device_id": id,
+                "name": "Laptop",
+                "created_at": "2026-10-30T00:00:00.000Z"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut cache = HashMap::new();
+        assert_eq!(device_name(Some(root), &mut cache, &id), "Laptop");
+        // The cache answers after the file is gone, so one list reads each
+        // device once even when both columns name it.
+        std::fs::remove_file(dir.join("device.json")).unwrap();
+        assert_eq!(device_name(Some(root), &mut cache, &id), "Laptop");
     }
 
     #[tokio::test]
@@ -918,6 +930,38 @@ mod tests {
         .unwrap();
         assert_eq!(reconcile(&pool).await.unwrap(), 1);
         assert!(open(&pool, id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_tombstone_conflict_from_an_older_delete_cycle_is_not_live() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let id = insert_conflict(&pool, "annotation", "34", "__deleted__", &now_rfc3339()).await;
+        insert_issue(&pool, "conflict:annotation:34:__deleted__").await;
+        // The conflict's winner is the delete at 2/aaa. A restore happened at
+        // 5/bbb and a later delete at 9/ccc is the one now in effect.
+        sqlx::query(
+            "INSERT INTO sync_state_entities
+                (kind, entity_uid, deleted, deleted_wall, deleted_count, deleted_dev,
+                 restored_wall, restored_count, restored_dev)
+             VALUES ('annotation', '34', 1, 9, 0, 'ccc', 5, 0, 'bbb')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            reconcile(&pool).await.unwrap(),
+            1,
+            "the old delete cycle no longer wins"
+        );
+        assert!(open(&pool, id).await.unwrap().is_none());
+        let issue: Option<String> =
+            sqlx::query_scalar("SELECT resolved_at FROM sync_issues LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(issue.is_some(), "the stale issue closes too");
     }
 
     #[tokio::test]

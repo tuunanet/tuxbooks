@@ -1489,12 +1489,14 @@ async fn applying_the_loser_for_each_kind_converges_on_the_second_device() {
     let conflicts = a.service.list_conflicts().await.unwrap();
     assert_eq!(conflicts.len(), 3, "progress is never shown: {conflicts:?}");
     assert!(conflicts.iter().all(|conflict| conflict.kind != "progress"));
-    for issue in a.service.issues().await.unwrap() {
-        assert!(
-            !issue.detail.contains("progress"),
-            "progress never opens a review issue: {issue:?}"
-        );
-    }
+    let progress_issues: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_issues
+         WHERE resolved_at IS NULL AND issue_key LIKE 'conflict:progress:%'",
+    )
+    .fetch_one(&a.pool)
+    .await
+    .unwrap();
+    assert_eq!(progress_issues, 0, "progress never opens a review issue");
     for (kind, field) in [
         ("annotation", "note"),
         ("metadata", "title"),
