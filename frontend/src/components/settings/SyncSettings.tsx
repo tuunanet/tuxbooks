@@ -619,9 +619,14 @@ export function SyncSettings() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className={cn("rounded-md border p-2", value > 0 ? "bg-muted/40" : undefined)}>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-medium tabular-nums">{value}</p>
+    <div
+      className={cn(
+        "flex h-full flex-col justify-between gap-1 rounded-md border p-2",
+        value > 0 ? "bg-muted/40" : undefined,
+      )}
+    >
+      <p className="text-xs leading-tight text-muted-foreground">{label}</p>
+      <p className="text-lg font-medium leading-none tabular-nums">{value}</p>
     </div>
   );
 }
