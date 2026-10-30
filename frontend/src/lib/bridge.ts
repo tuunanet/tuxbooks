@@ -86,9 +86,14 @@ export interface SyncIssue {
   kind: string;
   detail: string;
   fileName: string | null;
+  action: SyncIssueAction;
+  target: string;
   createdAt: string;
   updatedAt: string;
 }
+
+/** What the Sync issues row offers; computed by the sidecar from the kind. */
+export type SyncIssueAction = "retry" | "open_folder" | "copy_details" | "dismiss";
 
 export interface SyncTrashEntry {
   id: number;
@@ -168,6 +173,7 @@ export interface TuxbooksApi {
   storageReport(): Promise<StorageReport>;
   openDataFolder(rootId: StorageRootId): Promise<void>;
   openLibraryLocation(locationId: number): Promise<void>;
+  openSyncFolder(): Promise<void>;
   copyDataPath(rootId: StorageRootId): Promise<void>;
   copyLibraryLocationPath(locationId: number): Promise<void>;
   clearCache(): Promise<number>;
@@ -568,6 +574,11 @@ export function dismissSyncIssue(id: number): Promise<boolean> {
   return invoke("sync_dismiss_issue", { id });
 }
 
+/** Run the retry path behind an actionable issue; resolves when the row closed. */
+export function retrySyncIssue(id: number): Promise<boolean> {
+  return invoke("sync_retry_issue", { id });
+}
+
 export function listSyncTrash(): Promise<SyncTrashEntry[]> {
   return invoke("sync_trash");
 }
@@ -634,6 +645,11 @@ export function openDataFolder(rootId: StorageRootId): Promise<void> {
 /** Open one watched library location in the system file manager (by id). */
 export function openLibraryLocation(locationId: number): Promise<void> {
   return tuxbooks().openLibraryLocation(locationId);
+}
+
+/** Open the connected cloud-sync folder; the renderer passes no path. */
+export function openSyncFolder(): Promise<void> {
+  return tuxbooks().openSyncFolder();
 }
 
 /** Copy one app-owned storage root's path to the native clipboard (by root id). */

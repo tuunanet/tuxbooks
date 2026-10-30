@@ -62,6 +62,10 @@ pub async fn dismiss_issue(state: &AppState, id: i64) -> Result<bool, AppError> 
     service(state)?.dismiss_issue(id).await
 }
 
+pub async fn retry_issue(state: &AppState, id: i64) -> Result<bool, AppError> {
+    service(state)?.retry_issue(id).await
+}
+
 pub async fn trash(state: &AppState) -> Result<Vec<SyncTrashEntry>, AppError> {
     service(state)?.trash().await
 }

@@ -356,6 +356,7 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["forget_books", validateForgetBooks],
   ["restore_book", validateRestoreBook],
   ["sync_dismiss_issue", validateSyncId],
+  ["sync_retry_issue", validateSyncId],
   ["sync_restore", validateSyncId],
   ["sync_resolve_conflict", validateSyncConflictResolution],
   ["sync_set_device_name", validateSyncDeviceName],

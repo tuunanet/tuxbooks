@@ -407,6 +407,15 @@ pub fn store_cover_blob(root: &Path, covers_dir: &Path, file_name: &str) -> Resu
     write_bytes_atomic(&destination, &bytes)
 }
 
+/// True when the sync folder carries a usable, content-addressed cover blob.
+pub fn cover_blob_exists(root: &Path, file_name: &str) -> bool {
+    let Some(name) = cover_file_name(file_name) else {
+        return false;
+    };
+    std::fs::metadata(root.join(COVER_BLOB_DIR).join(name))
+        .is_ok_and(|metadata| metadata.len() <= 16 * 1024 * 1024)
+}
+
 pub fn apply_cover_blob(root: &Path, covers_dir: &Path, file_name: &str) -> Result<bool, AppError> {
     let Some(name) = cover_file_name(file_name) else {
         return Ok(false);

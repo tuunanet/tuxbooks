@@ -92,6 +92,11 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.openLibraryLocation, locationId);
   },
 
+  /** Open the connected cloud-sync folder. The renderer never passes a path. */
+  openSyncFolder(): Promise<void> {
+    return ipcRenderer.invoke(IPC_CHANNELS.openSyncFolder);
+  },
+
   /** Copy one app-owned storage root's path to the clipboard, by stable id. */
   copyDataPath(rootId: string): Promise<void> {
     if (!isStorageRootId(rootId)) {

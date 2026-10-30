@@ -604,6 +604,10 @@ async fn dispatch(
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::sync::dismiss_issue(state, p.id)))
         }
+        "sync_retry_issue" => {
+            let p: IdArgs = parse_params(params)?;
+            Ok(call!(commands::sync::retry_issue(state, p.id)))
+        }
         "sync_trash" => Ok(call!(commands::sync::trash(state))),
         "sync_restore" => {
             let p: IdArgs = parse_params(params)?;

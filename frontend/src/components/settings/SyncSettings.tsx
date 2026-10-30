@@ -12,10 +12,12 @@ import {
   listSyncIssues,
   listSyncTrash,
   listWaitingBooks,
+  openSyncFolder,
   onSyncStatus,
   pickSyncFolder,
   resolveSyncConflict,
   restoreSyncTrash,
+  retrySyncIssue,
   setSyncDeviceName,
   syncNow,
   type SyncConflict,
@@ -45,6 +47,7 @@ import {
   SyncIssuesSection,
   SyncTrashSection,
   WaitingBooksSection,
+  formatIssueDetails,
 } from "./SyncLists";
 import { formatSyncTime as formatTime } from "./syncFormat";
 
@@ -302,6 +305,48 @@ export function SyncSettings() {
     },
     [applyStatus, loadLists],
   );
+
+  /**
+   * Run the primary action the sidecar mapped for a row. Retry and dismiss
+   * reload status and lists for immediate feedback; the sync event reloads
+   * them again, which is cheap and keeps every list consistent.
+   */
+  const issueAction = useCallback(
+    async (issue: SyncIssue) => {
+      setError(null);
+      setNotice(null);
+      try {
+        if (issue.action === "retry") {
+          setBusy(true);
+          await retrySyncIssue(issue.id);
+          applyStatus(await getSyncStatus());
+          await loadLists();
+        } else if (issue.action === "open_folder") {
+          await openSyncFolder();
+        } else if (issue.action === "copy_details") {
+          await navigator.clipboard.writeText(formatIssueDetails(issue));
+          setNotice("Copied issue details.");
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
+  /** Secondary action on any row: copy the readable block to the clipboard. */
+  const copyIssueDetails = useCallback(async (issue: SyncIssue) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await navigator.clipboard.writeText(formatIssueDetails(issue));
+      setNotice("Copied issue details.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
 
   const dismissAllIssues = useCallback(async () => {
     setBusy(true);
@@ -576,6 +621,8 @@ export function SyncSettings() {
           issues={issues}
           total={status?.issues ?? 0}
           busy={busy}
+          onAction={(issue) => void issueAction(issue)}
+          onCopyDetails={(issue) => void copyIssueDetails(issue)}
           onDismiss={(id) => void dismiss(id)}
           onDismissAll={() => void dismissAllIssues()}
         />

@@ -334,6 +334,7 @@ describe("boundary configuration tables (T-5)", () => {
       "forget_waiting_book",
       "forget_all_waiting_books",
       "dismiss_all_sync_issues",
+      "sync_retry_issue",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }
@@ -349,6 +350,7 @@ describe("boundary configuration tables (T-5)", () => {
       storageReport: "tuxbooks:storage-report",
       openDataFolder: "tuxbooks:open-data-folder",
       openLibraryLocation: "tuxbooks:open-library-location",
+      openSyncFolder: "tuxbooks:open-sync-folder",
       copyDataPath: "tuxbooks:copy-data-path",
       copyLibraryLocationPath: "tuxbooks:copy-library-location-path",
       clearCache: "tuxbooks:clear-cache",
