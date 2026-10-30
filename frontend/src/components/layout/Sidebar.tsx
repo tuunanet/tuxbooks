@@ -6,6 +6,7 @@ import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
+import { useSyncAttention } from "@/state/syncAttentionState";
 
 interface SidebarProps {
   active: LibrarySection;
@@ -64,6 +65,7 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const { collections } = useLibrary();
   const { create, remove } = useCollectionActions();
+  const { attention: syncNeedsAttention } = useSyncAttention();
 
   return (
     <aside
@@ -165,7 +167,19 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
           active={active.kind === "settings"}
           onClick={() => onSectionChange({ kind: "settings" })}
         >
-          Settings
+          <span className="flex items-center gap-2">
+            <span>Settings</span>
+            {syncNeedsAttention ? (
+              <>
+                <span
+                  data-testid="settings-attention-dot"
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full bg-destructive"
+                />
+                <span className="sr-only">Sync needs attention</span>
+              </>
+            ) : null}
+          </span>
         </ItemButton>
       </div>
     </aside>
