@@ -42,6 +42,7 @@ const ALL_CHANNELS = [
   IPC_CHANNELS.storageReport,
   IPC_CHANNELS.openDataFolder,
   IPC_CHANNELS.openLibraryLocation,
+  IPC_CHANNELS.openSyncFolder,
   IPC_CHANNELS.copyDataPath,
   IPC_CHANNELS.copyLibraryLocationPath,
   IPC_CHANNELS.clearCache,
@@ -57,6 +58,7 @@ function argsFor(channel: string): unknown[] {
   if (channel === IPC_CHANNELS.storageReport) return [];
   if (channel === IPC_CHANNELS.openDataFolder) return ["app-data"];
   if (channel === IPC_CHANNELS.openLibraryLocation) return [1];
+  if (channel === IPC_CHANNELS.openSyncFolder) return [];
   if (channel === IPC_CHANNELS.copyDataPath) return ["app-data"];
   if (channel === IPC_CHANNELS.copyLibraryLocationPath) return [1];
   if (channel === IPC_CHANNELS.clearCache) return [];
@@ -78,6 +80,7 @@ function harness(storageDirs: StorageDirs = STORAGE_DIRS): {
     call: vi.fn(async (method: string) => {
       if (method === "list_books") return [{ id: 3, path: "/library/3.epub" }];
       if (method === "get_storage_stats") return LIBRARY_STATS;
+      if (method === "sync_status") return { folder: "/home/me/Dropbox" };
       return {};
     }),
   };
@@ -158,6 +161,9 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
     if (channel === IPC_CHANNELS.openLibraryLocation) {
       expect(shell.openPath).toHaveBeenCalledWith("/books");
     }
+    if (channel === IPC_CHANNELS.openSyncFolder) {
+      expect(shell.openPath).toHaveBeenCalledWith("/home/me/Dropbox");
+    }
     if (channel === IPC_CHANNELS.copyDataPath) {
       expect(clipboard.writeText).toHaveBeenCalledWith(STORAGE_DIRS.dataDir);
     }
@@ -221,6 +227,35 @@ describe("open library location channel (data-management spec)", () => {
     await expect(handler!(senderEvent(ALLOWED) as never, 99)).rejects.toThrow(
       /no library location 99/,
     );
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("open sync folder channel (data-management spec)", () => {
+  it("opens the folder the sidecar reports and ignores renderer arguments", async () => {
+    const { handlers, shell } = harness();
+    const handler = handlers.get(IPC_CHANNELS.openSyncFolder);
+    expect(handler).toBeDefined();
+
+    await handler!(senderEvent(ALLOWED) as never, "/etc/passwd");
+    expect(shell.openPath).toHaveBeenCalledWith("/home/me/Dropbox");
+  });
+
+  it("rejects when sync is not connected", async () => {
+    const handlers = new Map<string, IpcHandler>();
+    const sidecar = { call: vi.fn(async () => ({ folder: null })) };
+    const shell = { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") };
+    registerIpcHandlers((channel, handler) => handlers.set(channel, handler), {
+      sidecar,
+      issued: new IssuedPaths(),
+      dialog: { showOpenDialog: vi.fn() },
+      shell,
+      clipboard: { writeText: vi.fn() },
+      storageDirs: STORAGE_DIRS,
+      debugIpc: false,
+    });
+    const handler = handlers.get(IPC_CHANNELS.openSyncFolder)!;
+    await expect(handler(senderEvent(ALLOWED) as never)).rejects.toThrow(/not connected/);
     expect(shell.openPath).not.toHaveBeenCalled();
   });
 });

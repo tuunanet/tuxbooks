@@ -1263,6 +1263,39 @@ async fn project_book_lifecycle(
     }
 }
 
+/// Replay the whole-book lifecycle projection from the mirror. Used by the
+/// Retry action after `project_book_lifecycle` recorded a failure: the
+/// operation is already marked applied, so another pass would not re-run it.
+pub async fn retry_book_lifecycle(pool: &SqlitePool, book_uid: &str) -> Result<bool, AppError> {
+    let canonical = super::identity::canonical_book_uid(pool, book_uid).await?;
+    type LifecycleRow = (Option<String>, Option<String>, Option<String>, i64);
+    let row: Option<LifecycleRow> = sqlx::query_as(
+        "SELECT replacement_book_uid, snapshot_json, restored_at, discarded
+         FROM sync_book_trash WHERE book_uid = ?1",
+    )
+    .bind(&canonical)
+    .fetch_optional(pool)
+    .await?;
+    let Some((replacement, snapshot, restored_at, discarded)) = row else {
+        return Ok(false);
+    };
+    if restored_at.is_none() {
+        crate::repository::lifecycle::apply_remote_forget(
+            pool,
+            &canonical,
+            replacement.as_deref(),
+            snapshot.as_deref(),
+        )
+        .await?;
+    } else if discarded != 0 {
+        crate::repository::lifecycle::apply_remote_discard(pool, &canonical).await?;
+    } else {
+        crate::repository::lifecycle::apply_remote_restore(pool, &canonical, snapshot.as_deref())
+            .await?;
+    }
+    Ok(true)
+}
+
 async fn project_annotation(
     pool: &SqlitePool,
     book_id: i64,

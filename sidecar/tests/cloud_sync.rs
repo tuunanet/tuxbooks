@@ -22,7 +22,7 @@ use tuxbooks_lib::repository::{
 use tuxbooks_lib::rpc::EventEmitter;
 use tuxbooks_lib::services::metadata;
 use tuxbooks_lib::sync::clock;
-use tuxbooks_lib::sync::engine::{SyncService, SyncState};
+use tuxbooks_lib::sync::engine::{SyncIssueAction, SyncService, SyncState};
 use tuxbooks_lib::sync::model::{EntityKind, Hlc, Op, OP_SCHEMA};
 use tuxbooks_lib::sync::waiting;
 
@@ -1352,13 +1352,21 @@ async fn keeping_the_winner_resolves_the_row_and_issue_without_touching_state() 
     .await;
 
     let conflict = a.service.list_conflicts().await.unwrap().remove(0);
-    assert!(a
-        .service
-        .issues()
-        .await
-        .unwrap()
-        .iter()
-        .any(|issue| issue.kind == "conflict"));
+    assert!(
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .all(|issue| issue.kind != "conflict"),
+        "conflicts stay in the review list, not Sync issues"
+    );
+    assert_eq!(a.service.status().await.unwrap().conflicts, 1);
+    assert_eq!(
+        a.service.status().await.unwrap().issues,
+        0,
+        "conflicts are counted by the review, not as Sync issues"
+    );
     assert!(a
         .service
         .resolve_conflict(conflict.id, "keep_winner")
@@ -1540,18 +1548,14 @@ async fn applying_the_loser_for_each_kind_converges_on_the_second_device() {
         b.service.list_conflicts().await.unwrap().is_empty(),
         "device B settles the conflicts it replayed"
     );
-    let b_issues: Vec<_> = b
-        .service
-        .issues()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|issue| issue.kind == "conflict")
-        .collect();
-    assert!(
-        b_issues.is_empty(),
-        "B closes the shared issues: {b_issues:?}"
-    );
+    let b_open: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_issues
+         WHERE kind = 'conflict' AND resolved_at IS NULL",
+    )
+    .fetch_one(&b.pool)
+    .await
+    .unwrap();
+    assert_eq!(b_open, 0, "B closes the shared conflict issues");
     assert_eq!(b.service.status().await.unwrap().conflicts, 0);
 }
 
@@ -1760,15 +1764,23 @@ async fn two_losing_edits_share_one_issue_until_the_last_is_resolved() {
 
     let conflicts = a.service.list_conflicts().await.unwrap();
     assert_eq!(conflicts.len(), 2, "two losing edits");
-    let issues: Vec<_> = a
-        .service
-        .issues()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|issue| issue.kind == "conflict")
-        .collect();
-    assert_eq!(issues.len(), 1, "they share one issue");
+    let shared: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_issues
+         WHERE kind = 'conflict' AND resolved_at IS NULL",
+    )
+    .fetch_one(&a.pool)
+    .await
+    .unwrap();
+    assert_eq!(shared, 1, "they share one issue");
+    assert!(
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .all(|issue| issue.kind != "conflict"),
+        "the review owns conflict rows"
+    );
 
     assert!(a
         .service
@@ -2020,6 +2032,13 @@ async fn deleting_one_copy_keeps_the_book_and_its_state() {
         book_id(&a, "copy-two.epub").await,
         second,
         "the surviving copy is still in the library"
+    );
+    assert!(
+        !open_issue_kinds(&a)
+            .await
+            .iter()
+            .any(|kind| kind == "duplicate_book"),
+        "the duplicate issue closes once one binding remains"
     );
 }
 
@@ -2752,7 +2771,7 @@ async fn a_missing_or_corrupt_library_file_fails_the_pass_and_recovers() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sync_issues_can_be_dismissed_one_by_one_or_all_at_once() {
+async fn sync_issues_can_be_dismissed_only_when_they_are_informational() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     connect(&a, sync_dir.path()).await;
@@ -2763,17 +2782,54 @@ async fn sync_issues_can_be_dismissed_one_by_one_or_all_at_once() {
     std::fs::write(op_dir.join("two.json"), b"{still not json").unwrap();
 
     run(&a).await;
-    let issues = a.service.issues().await.unwrap();
-    assert_eq!(issues.len(), 2, "one issue per rejected file: {issues:?}");
-
-    assert!(a.service.dismiss_issue(issues[0].id).await.unwrap());
+    let retryable = a.service.issues().await.unwrap();
+    assert_eq!(
+        retryable.len(),
+        2,
+        "one issue per rejected file: {retryable:?}"
+    );
+    assert!(retryable
+        .iter()
+        .all(|issue| issue.action == SyncIssueAction::Retry));
     assert!(
-        !a.service.dismiss_issue(issues[0].id).await.unwrap(),
+        a.service.dismiss_issue(retryable[0].id).await.is_err(),
+        "a retryable row cannot be hidden with Dismiss"
+    );
+
+    for (key, kind) in [
+        ("duplicate-book:abc:1", "duplicate_book"),
+        ("dirty-kind:mystery", "invalid_dirty_kind"),
+    ] {
+        sqlx::query("INSERT INTO sync_issues (issue_key, kind, detail) VALUES (?1, ?2, 'info')")
+            .bind(key)
+            .bind(kind)
+            .execute(&a.pool)
+            .await
+            .unwrap();
+    }
+    let informational = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.kind == "duplicate_book")
+        .expect("the informational row is listed");
+    assert_eq!(informational.action, SyncIssueAction::CopyDetails);
+    assert!(a.service.dismiss_issue(informational.id).await.unwrap());
+    assert!(
+        !a.service.dismiss_issue(informational.id).await.unwrap(),
         "an already dismissed issue is not dismissed twice"
     );
-    assert_eq!(a.service.dismiss_all_issues().await.unwrap(), 1);
-    assert!(a.service.issues().await.unwrap().is_empty());
-    assert_eq!(a.service.status().await.unwrap().issues, 0);
+
+    assert_eq!(
+        a.service.dismiss_all_issues().await.unwrap(),
+        1,
+        "only the remaining informational row is dismissed"
+    );
+    let left = a.service.issues().await.unwrap();
+    assert_eq!(left.len(), 2, "the retryable rows stay: {left:?}");
+    assert_eq!(a.service.status().await.unwrap().issues, 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3097,4 +3153,825 @@ async fn the_background_loop_starts_and_stops() {
         "shutdown stops the background loop from running another pass"
     );
     assert!(service.status().await.unwrap().enabled);
+}
+
+async fn insert_issue(device: &Device, key: &str, kind: &str) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO sync_issues (issue_key, kind, detail)
+         VALUES (?1, ?2, 'test detail') RETURNING id",
+    )
+    .bind(key)
+    .bind(kind)
+    .fetch_one(&device.pool)
+    .await
+    .unwrap()
+}
+
+async fn open_issue_kinds(device: &Device) -> Vec<String> {
+    sqlx::query_scalar("SELECT kind FROM sync_issues WHERE resolved_at IS NULL ORDER BY kind")
+        .fetch_all(&device.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn issue_actions_and_targets_are_computed_on_the_server() {
+    let a = device().await;
+    let book = add_book(&a, "target.epub", b"issue target bytes").await;
+    let uid = book_uid(&a, book).await;
+    let file_id = file_row_id(&a, "target.epub").await;
+
+    let short = "0".repeat(32);
+    let cases = [
+        (
+            format!("project-book:{file_id}"),
+            "projection_failed",
+            "retry",
+            "target",
+        ),
+        (
+            "project-book:999999".to_string(),
+            "projection_failed",
+            "retry",
+            "Book 999999",
+        ),
+        (
+            "project-book:not-an-id".to_string(),
+            "projection_failed",
+            "retry",
+            "project-book:not-an-id",
+        ),
+        (
+            format!("identity:{file_id}"),
+            "identity_failed",
+            "retry",
+            "target",
+        ),
+        (
+            format!("reproject:{uid}"),
+            "reprojection_failed",
+            "retry",
+            "target",
+        ),
+        (
+            format!("reproject:{short}"),
+            "reprojection_failed",
+            "retry",
+            "Book 00000000",
+        ),
+        (
+            format!("book-lifecycle:{uid}"),
+            "book_lifecycle_failed",
+            "retry",
+            "target",
+        ),
+        (
+            format!("book-lifecycle:{short}"),
+            "book_lifecycle_failed",
+            "retry",
+            "Book 00000000",
+        ),
+        ("sync-pass".to_string(), "sync_failed", "retry", "Sync pass"),
+        (
+            "file:ops/abc/one.json".into(),
+            "operation_retrying",
+            "retry",
+            "ops/abc/one.json",
+        ),
+        (
+            "file:ops/abc/bad.json".into(),
+            "operation_rejected",
+            "open_folder",
+            "ops/abc/bad.json",
+        ),
+        (
+            "cover-missing:0123456789abcdef.png".into(),
+            "cover_missing",
+            "retry",
+            "0123456789abcdef.png",
+        ),
+        (
+            "cover:0123456789abcdef.png".into(),
+            "cover_blob_failed",
+            "retry",
+            "0123456789abcdef.png",
+        ),
+        (
+            format!("duplicate-book:{uid}:{file_id}"),
+            "duplicate_book",
+            "copy_details",
+            "target",
+        ),
+        (
+            format!("duplicate-book:{short}:{file_id}"),
+            "duplicate_book",
+            "copy_details",
+            "Book 00000000",
+        ),
+        (
+            format!("restore-snapshot-missing:{uid}"),
+            "book_snapshot_missing",
+            "copy_details",
+            "target",
+        ),
+        (
+            format!("book-snapshot:{uid}"),
+            "book_snapshot_invalid",
+            "copy_details",
+            "target",
+        ),
+        (
+            "dirty-kind:mystery".into(),
+            "invalid_dirty_kind",
+            "dismiss",
+            "mystery",
+        ),
+        (
+            "future:value".into(),
+            "future_kind",
+            "copy_details",
+            "value",
+        ),
+    ];
+    for (key, kind, _, _) in &cases {
+        insert_issue(&a, key, kind).await;
+    }
+
+    let issues = a.service.issues().await.unwrap();
+    assert_eq!(issues.len(), cases.len());
+    assert!(
+        serde_json::to_value(&issues[0])
+            .unwrap()
+            .get("issueKey")
+            .is_none(),
+        "the internal key stays in the sidecar"
+    );
+    let ids: Vec<(i64, String)> = sqlx::query_as("SELECT id, issue_key FROM sync_issues")
+        .fetch_all(&a.pool)
+        .await
+        .unwrap();
+    for (key, kind, action, expected_target) in cases {
+        let id = ids
+            .iter()
+            .find(|(_, issue_key)| issue_key == &key)
+            .unwrap_or_else(|| panic!("missing issue {key}"))
+            .0;
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == id)
+            .unwrap_or_else(|| panic!("missing DTO for {key}"));
+        assert_eq!(issue.kind, kind);
+        assert_eq!(
+            serde_json::to_value(issue.action).unwrap(),
+            Value::String(action.into()),
+            "action for {kind}"
+        );
+        assert_eq!(issue.target, expected_target, "target for {kind}");
+    }
+
+    let informational = issues
+        .iter()
+        .find(|issue| issue.kind == "duplicate_book")
+        .unwrap();
+    assert!(
+        a.service.retry_issue(informational.id).await.is_err(),
+        "an informational row has no retry path"
+    );
+    assert!(!a.service.retry_issue(999_999).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retry_reports_rows_it_cannot_repair_and_closes_gone_targets() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+
+    // A missing book row means the condition is gone.
+    let gone = insert_issue(&a, "identity:999999", "identity_failed").await;
+    assert!(a.service.retry_issue(gone).await.unwrap());
+
+    // An existing row whose file is unavailable cannot be repaired now.
+    let _book = add_book(&a, "unavailable.epub", b"unavailable retry bytes").await;
+    let file_id = file_row_id(&a, "unavailable.epub").await;
+    sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let unavailable = insert_issue(&a, &format!("identity:{file_id}"), "identity_failed").await;
+    let err = a.service.retry_issue(unavailable).await.unwrap_err();
+    assert!(err.to_string().contains("no available file"), "got {err}");
+
+    // A malformed key is reported instead of guessed at.
+    let malformed = insert_issue(&a, "project-book:not-a-number", "projection_failed").await;
+    let err = a.service.retry_issue(malformed).await.unwrap_err();
+    assert!(err.to_string().contains("cannot be retried"), "got {err}");
+    let detail = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.id == malformed)
+        .expect("the failed row stays open")
+        .detail;
+    assert!(detail.contains("retry failed"), "{detail}");
+
+    // An orphaned reprojection target is already resolved.
+    let orphan_uid = "e".repeat(32);
+    let orphan = insert_issue(
+        &a,
+        &format!("reproject:{orphan_uid}"),
+        "reprojection_failed",
+    )
+    .await;
+    assert!(a.service.retry_issue(orphan).await.unwrap());
+
+    // A cover publish failure retries from the local cover cache.
+    let name = "abcdef0123456789.png";
+    let covers = tuxbooks_lib::covers_dir(&a.db_path);
+    std::fs::create_dir_all(&covers).unwrap();
+    std::fs::write(covers.join(name), b"cover bytes").unwrap();
+    let cover = insert_issue(&a, &format!("cover:{name}"), "cover_blob_failed").await;
+    assert!(a.service.retry_issue(cover).await.unwrap());
+    assert!(
+        sync_dir
+            .path()
+            .join("TuxBooks/blobs/covers")
+            .join(name)
+            .exists(),
+        "the retry published the cover blob"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_projection_reprojects_the_book_and_closes_the_row() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "retry-project.epub", b"retry projection bytes").await;
+    let annotation = add_bookmark(&a, book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let annotation_uid = annotation_sync_uid(&a, annotation).await;
+
+    sqlx::query("DELETE FROM annotations WHERE sync_uid = ?1")
+        .bind(&annotation_uid)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let file_id = file_row_id(&a, "retry-project.epub").await;
+    sqlx::query("UPDATE books SET book_uid = NULL WHERE id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let issue = insert_issue(&a, &format!("project-book:{file_id}"), "projection_failed").await;
+
+    assert!(a.service.retry_issue(issue).await.unwrap());
+    assert_eq!(a.service.issues().await.unwrap().len(), 0);
+    assert_eq!(
+        annotation_count(&a, book).await,
+        1,
+        "the retry projected the shared annotation"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_identity_hashes_and_binds_the_book() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "retry-identity.epub", b"retry identity bytes").await;
+    connect(&a, sync_dir.path()).await;
+    let file_id = file_row_id(&a, "retry-identity.epub").await;
+    sqlx::query("DELETE FROM sync_book_bindings WHERE book_id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let issue = insert_issue(&a, &format!("identity:{file_id}"), "identity_failed").await;
+
+    assert!(a.service.retry_issue(issue).await.unwrap());
+    let bindings: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_bindings WHERE book_id = ?1")
+            .bind(file_id)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(bindings, 1, "the retry rebound the book");
+    assert_eq!(book_uid(&a, book).await.len(), 32);
+    assert_eq!(a.service.issues().await.unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_reprojection_restores_the_projected_state() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "retry-reproject.epub", b"retry reproject bytes").await;
+    let annotation = add_bookmark(&a, book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let uid = book_uid(&a, book).await;
+    let annotation_uid = annotation_sync_uid(&a, annotation).await;
+    sqlx::query("DELETE FROM annotations WHERE sync_uid = ?1")
+        .bind(&annotation_uid)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let issue = insert_issue(&a, &format!("reproject:{uid}"), "reprojection_failed").await;
+
+    assert!(a.service.retry_issue(issue).await.unwrap());
+    assert_eq!(annotation_count(&a, book).await, 1);
+    assert_eq!(a.service.issues().await.unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_lifecycle_failure_applies_the_forget() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "retry-lifecycle.epub", b"retry lifecycle bytes").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let uid = book_uid(&a, book).await;
+
+    sqlx::query(
+        "INSERT INTO sync_book_trash
+             (book_uid, deleted_wall, deleted_count, deleted_dev, deleted_at, expires_at)
+         VALUES (?1, 10, 0, ?2, '2026-10-30T00:00:00.000Z', '2026-11-29T00:00:00.000Z')",
+    )
+    .bind(&uid)
+    .bind("f".repeat(32))
+    .execute(&a.pool)
+    .await
+    .unwrap();
+    let issue = insert_issue(
+        &a,
+        &format!("book-lifecycle:{uid}"),
+        "book_lifecycle_failed",
+    )
+    .await;
+
+    assert!(a.service.retry_issue(issue).await.unwrap());
+    let records: Vec<String> = sqlx::query_scalar("SELECT uid FROM book_records")
+        .fetch_all(&a.pool)
+        .await
+        .unwrap();
+    assert!(
+        !records.contains(&uid),
+        "the retry applied the shared Forget and erased the old identity: {records:?}"
+    );
+    let file_uid: Option<String> = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_row_id(&a, "retry-lifecycle.epub").await)
+        .fetch_optional(&a.pool)
+        .await
+        .unwrap()
+        .flatten();
+    assert_ne!(
+        file_uid.as_deref(),
+        Some(uid.as_str()),
+        "the file keeps its content under a fresh identity"
+    );
+    let remaining = open_issue_kinds(&a).await;
+    assert!(
+        !remaining.iter().any(|kind| kind == "book_lifecycle_failed"),
+        "the lifecycle row closes: {remaining:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lifecycle_retry_without_a_mirror_row_keeps_the_issue_open() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "lifecycle-empty.epub", b"empty lifecycle bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let issue = insert_issue(
+        &a,
+        &format!("book-lifecycle:{uid}"),
+        "book_lifecycle_failed",
+    )
+    .await;
+
+    assert!(
+        !a.service.retry_issue(issue).await.unwrap(),
+        "a replay with nothing to apply is not a repair"
+    );
+    let kept = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == issue)
+        .expect("the row stays open");
+    assert!(
+        kept.detail.contains("retry did not clear"),
+        "{}",
+        kept.detail
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_failed_pass_clears_its_issue() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let library = sync_dir.path().join("TuxBooks/library.json");
+    let saved = std::fs::read(&library).unwrap();
+    std::fs::remove_file(&library).unwrap();
+    assert!(a.service.run_pass().await.is_err());
+
+    let issue = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.kind == "sync_failed")
+        .expect("the failed pass is an issue");
+    std::fs::write(&library, saved).unwrap();
+
+    assert!(a.service.retry_issue(issue.id).await.unwrap());
+    assert_eq!(a.service.status().await.unwrap().state, SyncState::Idle);
+    assert!(open_issue_kinds(&a).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_missing_cover_reports_until_the_blob_arrives() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "cover-retry.epub", b"cover retry bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let name = "0123456789abcdef.png";
+    let mut op = review_op(
+        20,
+        EntityKind::Metadata,
+        &uid,
+        &uid,
+        json!({ "title": "Cover retry", "cover_path": name }),
+    );
+    op.book_uid = Some(uid.clone());
+    write_manual_op(sync_dir.path(), &"f".repeat(32), "cover.json", &op);
+    run(&a).await;
+
+    let issue = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.kind == "cover_missing")
+        .expect("the missing cover is listed");
+    assert!(
+        a.service.retry_issue(issue.id).await.is_err(),
+        "nothing to apply while the blob is absent"
+    );
+    let retried = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == issue.id)
+        .expect("the row stays open");
+    assert!(
+        retried.detail.contains("retry failed"),
+        "the failure updates the detail: {}",
+        retried.detail
+    );
+
+    let blob_dir = sync_dir.path().join("TuxBooks/blobs/covers");
+    std::fs::create_dir_all(&blob_dir).unwrap();
+    std::fs::write(blob_dir.join(name), b"\x89PNG\r\n\x1a\ncover retry bytes").unwrap();
+    assert!(a.service.retry_issue(issue.id).await.unwrap());
+    assert!(open_issue_kinds(&a).await.is_empty());
+    let applied = books::get_book(&a.pool, book_id(&a, "cover-retry.epub").await)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        applied.cover_path.is_some(),
+        "the retry set the cover on the book"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cover_issue_closes_only_after_the_cover_is_applied() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "cover-apply.epub", b"cover apply bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let name = "fedcba9876543210.png";
+    let mut op = review_op(
+        20,
+        EntityKind::Metadata,
+        &uid,
+        &uid,
+        json!({ "title": "Cover apply", "cover_path": name }),
+    );
+    op.book_uid = Some(uid.clone());
+    write_manual_op(sync_dir.path(), &"f".repeat(32), "cover.json", &op);
+    run(&a).await;
+
+    assert!(
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .any(|issue| issue.kind == "cover_missing"),
+        "the missing cover is listed"
+    );
+    let blob_dir = sync_dir.path().join("TuxBooks/blobs/covers");
+    std::fs::create_dir_all(&blob_dir).unwrap();
+
+    std::fs::write(blob_dir.join(name), b"not an image").unwrap();
+    assert!(
+        a.service.status().await.unwrap().issues >= 1,
+        "corrupt blob cannot clear the row"
+    );
+
+    let oversized = std::fs::File::create(blob_dir.join(name)).unwrap();
+    oversized.set_len(16 * 1024 * 1024 + 1).unwrap();
+    assert!(
+        a.service.status().await.unwrap().issues >= 1,
+        "an oversized blob cannot clear the row"
+    );
+
+    std::fs::write(blob_dir.join(name), b"\x89PNG\r\n\x1a\ncover apply bytes").unwrap();
+    assert!(
+        a.service.status().await.unwrap().issues >= 1,
+        "a blob in the folder is not an applied cover"
+    );
+
+    // The normal projection path copies the blob into the cache and points the
+    // book at it. Only then does the row close.
+    let covers = tuxbooks_lib::covers_dir(&a.db_path);
+    std::fs::create_dir_all(&covers).unwrap();
+    std::fs::copy(blob_dir.join(name), covers.join(name)).unwrap();
+    sqlx::query("UPDATE book_records SET cover_path = ?2 WHERE uid = ?1")
+        .bind(&uid)
+        .bind(covers.join(name).to_string_lossy().into_owned())
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
+    assert!(open_issue_kinds(&a).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rejected_operation_closes_when_it_is_applied_or_removed() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "ops-retry.epub", b"operation retry bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let device_id = "f".repeat(32);
+    let op_dir = sync_dir.path().join("TuxBooks/ops").join(&device_id);
+    std::fs::create_dir_all(&op_dir).unwrap();
+    std::fs::write(op_dir.join("one.json"), b"{not json").unwrap();
+    std::fs::write(op_dir.join("two.json"), b"{still not json").unwrap();
+    run(&a).await;
+    assert_eq!(
+        open_issue_kinds(&a).await,
+        vec![
+            "operation_retrying".to_string(),
+            "operation_retrying".to_string()
+        ]
+    );
+
+    // Fix one file: the next pass applies it and the current cache row closes
+    // the issue without an explicit dismiss.
+    let fixed = review_op(
+        30,
+        EntityKind::Metadata,
+        &uid,
+        &uid,
+        json!({ "title": "Fixed operation" }),
+    );
+    write_manual_op(sync_dir.path(), &device_id, "one.json", &fixed);
+    run(&a).await;
+    let kinds = open_issue_kinds(&a).await;
+    assert_eq!(
+        kinds,
+        vec!["operation_retrying".to_string()],
+        "the applied file closes its issue"
+    );
+
+    // Remove the other file: nothing is left to retry.
+    std::fs::remove_file(op_dir.join("two.json")).unwrap();
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
+    assert!(open_issue_kinds(&a).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_still_broken_operation_keeps_the_issue_open() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    connect(&a, sync_dir.path()).await;
+    let device_id = "f".repeat(32);
+    let op_dir = sync_dir.path().join("TuxBooks/ops").join(&device_id);
+    std::fs::create_dir_all(&op_dir).unwrap();
+    std::fs::write(op_dir.join("broken.json"), b"{not json").unwrap();
+    run(&a).await;
+    let issue = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.kind == "operation_retrying")
+        .expect("the broken file is listed");
+
+    assert!(
+        !a.service.retry_issue(issue.id).await.unwrap(),
+        "a still broken file is not resolved"
+    );
+    let kept = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == issue.id)
+        .expect("the row stays open");
+    assert!(kept.detail.contains("attempt"), "{}", kept.detail);
+    assert!(
+        kept.detail.contains("retry did not clear"),
+        "{}",
+        kept.detail
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operation_issue_ignores_a_stale_applied_row() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "stale-op.epub", b"stale operation bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let device_id = "f".repeat(32);
+    let op_dir = sync_dir.path().join("TuxBooks/ops").join(&device_id);
+    std::fs::create_dir_all(&op_dir).unwrap();
+
+    let first = review_op(
+        40,
+        EntityKind::Metadata,
+        &uid,
+        &uid,
+        json!({ "title": "First operation" }),
+    );
+    write_manual_op(sync_dir.path(), &device_id, "same.json", &first);
+    run(&a).await;
+    assert!(open_issue_kinds(&a).await.is_empty());
+    let applied: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_applied_ops WHERE file_name = ?1")
+            .bind(format!("ops/{device_id}/same.json"))
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(applied, 1, "the first version applied");
+
+    // The same path is rewritten and corrupt: the old applied row must not
+    // close the fresh issue.
+    std::fs::write(op_dir.join("same.json"), b"{corrupt rewrite").unwrap();
+    run(&a).await;
+    assert_eq!(
+        open_issue_kinds(&a).await,
+        vec!["operation_retrying".to_string()],
+        "a stale applied-op row cannot hide the fresh failure"
+    );
+    assert!(a.service.status().await.unwrap().issues >= 1);
+
+    let second = review_op(
+        41,
+        EntityKind::Metadata,
+        &uid,
+        &uid,
+        json!({ "title": "Second operation" }),
+    );
+    write_manual_op(sync_dir.path(), &device_id, "same.json", &second);
+    run(&a).await;
+    assert!(
+        open_issue_kinds(&a).await.is_empty(),
+        "the fixed file closes"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_natural_projection_repairs_a_current_binding() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "natural-project.epub", b"natural project bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let file_id = file_row_id(&a, "natural-project.epub").await;
+
+    // Shared state is waiting for a projection that failed after identity was
+    // already current. The open issue must make the next sweep project even
+    // though the binding did not change.
+    let annotation_uid = "c".repeat(32);
+    sqlx::query(
+        "INSERT INTO sync_state_entities (kind, entity_uid, book_uid)
+         VALUES ('annotation', ?1, ?2)",
+    )
+    .bind(&annotation_uid)
+    .bind(&uid)
+    .execute(&a.pool)
+    .await
+    .unwrap();
+    insert_issue(&a, &format!("project-book:{file_id}"), "projection_failed").await;
+
+    run(&a).await;
+    assert!(
+        !open_issue_kinds(&a)
+            .await
+            .iter()
+            .any(|kind| kind == "projection_failed"),
+        "the current binding projected and closed the issue"
+    );
+    let projected: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM annotations WHERE sync_uid = ?1")
+        .bind(&annotation_uid)
+        .fetch_one(&a.pool)
+        .await
+        .unwrap();
+    assert_eq!(projected, 1, "the shared annotation was projected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn natural_repairs_close_identity_and_reprojection_issues() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "natural-repair.epub", b"natural repair bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    let file_id = file_row_id(&a, "natural-repair.epub").await;
+
+    // A missing binding makes the next identity sweep hash and bind again.
+    sqlx::query("DELETE FROM sync_book_bindings WHERE book_id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    insert_issue(&a, &format!("identity:{file_id}"), "identity_failed").await;
+    insert_issue(&a, &format!("reproject:{uid}"), "reprojection_failed").await;
+    sqlx::query("INSERT INTO sync_reproject (book_uid) VALUES (?1)")
+        .bind(&uid)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+
+    run(&a).await;
+    assert!(
+        open_issue_kinds(&a).await.is_empty(),
+        "a natural pass closes both: {:?}",
+        open_issue_kinds(&a).await
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conflicts_are_never_dismissed() {
+    let a = device().await;
+    let uid = "a".repeat(32);
+    let device = "f".repeat(32);
+    sqlx::query(
+        "INSERT INTO sync_state_fields
+             (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('annotation', ?1, 'note', '\"kept\"', 2, 0, ?2)",
+    )
+    .bind(&uid)
+    .bind(&device)
+    .execute(&a.pool)
+    .await
+    .unwrap();
+    insert_review_conflict(&a, "annotation", &uid, "note", "2026-10-30T00:00:00.000Z").await;
+    let conflict = insert_issue(&a, &format!("conflict:annotation:{uid}:note"), "conflict").await;
+    let informational = insert_issue(&a, "dirty-kind:mystery", "invalid_dirty_kind").await;
+
+    assert!(
+        !a.service.dismiss_issue(conflict).await.unwrap(),
+        "a conflict is not dismissible"
+    );
+    assert_eq!(
+        a.service.dismiss_all_issues().await.unwrap(),
+        1,
+        "Dismiss all closes only the informational row"
+    );
+    let conflict_open: Option<String> =
+        sqlx::query_scalar("SELECT resolved_at FROM sync_issues WHERE id = ?1")
+            .bind(conflict)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert!(conflict_open.is_none(), "the live conflict stays open");
+    let info_open: Option<String> =
+        sqlx::query_scalar("SELECT resolved_at FROM sync_issues WHERE id = ?1")
+            .bind(informational)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert!(info_open.is_some(), "the informational row is dismissed");
 }

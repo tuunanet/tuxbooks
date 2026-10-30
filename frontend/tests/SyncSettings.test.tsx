@@ -1,9 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { SyncSettings } from "@/components/settings/SyncSettings";
-import type { SyncConflict, SyncStatus } from "@/lib/bridge";
-import { invokeMock, mockInvoke, pickSyncFolderMock, emitBridgeEvent } from "./mocks/bridge";
+import type { SyncConflict, SyncIssue, SyncStatus } from "@/lib/bridge";
+import {
+  invokeMock,
+  mockInvoke,
+  openSyncFolderMock,
+  pickSyncFolderMock,
+  emitBridgeEvent,
+} from "./mocks/bridge";
 
 const DISABLED: SyncStatus = {
   enabled: false,
@@ -45,6 +51,22 @@ const LOCAL_DEVICE = ENABLED.deviceId ?? "";
 const OTHER_DEVICE = "11111111111111111111111111111111";
 const CONFLICT_TIME = Date.parse("2026-10-28T10:00:00.000Z");
 
+const clipboardWrite = vi.fn(async (_text: string) => {});
+
+function issue(overrides: Partial<SyncIssue> = {}): SyncIssue {
+  return {
+    id: 7,
+    kind: "operation_retrying",
+    detail: "attempt 1: operation is not readable",
+    fileName: "ops/abc/broken.json",
+    action: "retry",
+    target: "ops/abc/broken.json",
+    createdAt: "2026-10-28T10:00:00.000Z",
+    updatedAt: "2026-10-28T10:01:00.000Z",
+    ...overrides,
+  };
+}
+
 function conflict(overrides: Partial<SyncConflict> = {}): SyncConflict {
   return {
     id: 1,
@@ -80,6 +102,13 @@ beforeEach(() => {
   invokeMock.mockReset();
   pickSyncFolderMock.mockReset();
   pickSyncFolderMock.mockResolvedValue("/home/me/Dropbox");
+  openSyncFolderMock.mockReset();
+  openSyncFolderMock.mockResolvedValue(undefined);
+  clipboardWrite.mockReset();
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: clipboardWrite },
+    configurable: true,
+  });
 });
 
 describe("SyncSettings", () => {
@@ -118,14 +147,13 @@ describe("SyncSettings", () => {
     mockInvoke({
       sync_status: { ...ENABLED, issues: 1 },
       sync_issues: [
-        {
-          id: 7,
-          kind: "operation_rejected",
-          detail: "operation is larger than the 1 MiB limit",
-          fileName: "ops/abc/broken.json",
-          createdAt: "2026-10-28T10:00:00.000Z",
-          updatedAt: "2026-10-28T10:01:00.000Z",
-        },
+        issue({
+          kind: "duplicate_book",
+          action: "copy_details",
+          target: "copy-two.epub",
+          detail: "two files share one book identity",
+          fileName: null,
+        }),
       ],
       sync_trash: [
         {
@@ -142,7 +170,7 @@ describe("SyncSettings", () => {
     });
 
     renderSettings();
-    expect(await screen.findByText("operation rejected")).toBeInTheDocument();
+    expect(await screen.findByText("duplicate book")).toBeInTheDocument();
     expect(screen.getByText("passage")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("sync-dismiss-7"));
@@ -287,19 +315,17 @@ describe("SyncSettings", () => {
       lastOpenedAt: null,
       sampleAnnotation: null,
     };
-    const issue = {
-      id: 7,
-      kind: "operation_rejected",
+    const issueRow = issue({
+      kind: "duplicate_book",
+      action: "copy_details",
       detail: "operation rejected",
       fileName: null,
-      createdAt: "2026-10-28T10:00:00.000Z",
-      updatedAt: "2026-10-28T10:01:00.000Z",
-    };
+    });
     invokeMock.mockImplementation((method: string) => {
       if (method === "sync_status") {
         return Promise.resolve({ ...ENABLED, waitingBooks: 1, issues: 1 });
       }
-      if (method === "sync_issues") return Promise.resolve([issue]);
+      if (method === "sync_issues") return Promise.resolve([issueRow]);
       if (method === "sync_trash") return Promise.resolve([]);
       if (method === "sync_conflicts") return Promise.resolve([]);
       if (method === "list_waiting_books") return Promise.resolve([waiting]);
@@ -835,5 +861,139 @@ describe("SyncSettings", () => {
     expect(
       await screen.findByText(/The list loads the first 6 of 150 conflicts/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("Sync issue actions", () => {
+  function routeIssue(target: SyncIssue, extra: Record<string, unknown> = {}) {
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "sync_status") return Promise.resolve({ ...ENABLED, issues: 1 });
+      if (method === "sync_issues") return Promise.resolve([target]);
+      if (method === "sync_trash" || method === "sync_conflicts") return Promise.resolve([]);
+      if (method === "list_waiting_books") return Promise.resolve([]);
+      if (method in extra) {
+        const response = extra[method];
+        return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+  }
+
+  it("retries an actionable row without offering Dismiss", async () => {
+    let resolved = false;
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "sync_status") {
+        return Promise.resolve({ ...ENABLED, issues: resolved ? 0 : 1 });
+      }
+      if (method === "sync_issues") return Promise.resolve(resolved ? [] : [issue()]);
+      if (method === "sync_retry_issue") {
+        resolved = true;
+        return Promise.resolve(true);
+      }
+      if (method === "sync_trash" || method === "sync_conflicts") return Promise.resolve([]);
+      if (method === "list_waiting_books") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+    renderSettings();
+
+    const retry = await screen.findByTestId("sync-retry-7");
+    expect(retry).toHaveAccessibleName("Retry ops/abc/broken.json");
+    expect(screen.queryByTestId("sync-dismiss-7")).not.toBeInTheDocument();
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("sync_retry_issue", { id: 7 }));
+    await waitFor(() => expect(screen.queryByTestId("sync-retry-7")).not.toBeInTheDocument());
+    expect(screen.getByText("No sync issues.")).toBeInTheDocument();
+  });
+
+  it("keeps the row and shows the error when a retry fails", async () => {
+    routeIssue(issue(), { sync_retry_issue: new Error("retry failed: bookmark is gone") });
+    renderSettings();
+
+    fireEvent.click(await screen.findByTestId("sync-retry-7"));
+    expect(await screen.findByTestId("sync-action-error")).toHaveTextContent(
+      "retry failed: bookmark is gone",
+    );
+    expect(screen.getByTestId("sync-retry-7")).toBeInTheDocument();
+  });
+
+  it("opens the sync folder for a rejected operation without a renderer path", async () => {
+    routeIssue(
+      issue({
+        kind: "operation_rejected",
+        action: "open_folder",
+        target: "ops/abc/broken.json",
+      }),
+    );
+    renderSettings();
+
+    fireEvent.click(await screen.findByTestId("sync-open-folder-7"));
+    expect(screen.getByTestId("sync-open-folder-7")).toHaveAccessibleName(
+      "Open folder for ops/abc/broken.json",
+    );
+    await waitFor(() => expect(openSyncFolderMock).toHaveBeenCalledTimes(1));
+    expect(openSyncFolderMock).toHaveBeenCalledWith();
+    expect(screen.queryByTestId("sync-dismiss-7")).not.toBeInTheDocument();
+  });
+
+  it("copies a readable detail block and keeps Dismiss for informational rows", async () => {
+    routeIssue(
+      issue({
+        kind: "duplicate_book",
+        action: "copy_details",
+        target: "copy-two.epub",
+      }),
+      { sync_dismiss_issue: true },
+    );
+    renderSettings();
+
+    fireEvent.click(await screen.findByTestId("sync-copy-details-7"));
+    expect(screen.getByTestId("sync-copy-details-7")).toHaveAccessibleName(
+      "Copy details for copy-two.epub",
+    );
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
+    const copied = String(clipboardWrite.mock.calls[0]?.[0]);
+    expect(copied).toContain("Sync issue: duplicate book");
+    expect(copied).toContain("Target: copy-two.epub");
+    expect(copied).toContain("File: ops/abc/broken.json");
+    expect(copied).toContain("Detail: attempt 1");
+    expect(await screen.findByTestId("sync-notice")).toHaveTextContent("Copied issue details.");
+
+    fireEvent.click(screen.getByTestId("sync-dismiss-7"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("sync_dismiss_issue", { id: 7 }));
+  });
+
+  it("shows Copy details and Dismiss on an informational row", async () => {
+    routeIssue(
+      issue({
+        kind: "duplicate_book",
+        action: "copy_details",
+        target: "copy-two.epub",
+      }),
+      { sync_dismiss_issue: true },
+    );
+    renderSettings();
+
+    expect(await screen.findByTestId("sync-copy-details-7")).toHaveTextContent("Copy details");
+    fireEvent.click(screen.getByTestId("sync-dismiss-7"));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("sync_dismiss_issue", { id: 7 }));
+  });
+
+  it("shows Dismiss as the primary action for an internal marker", async () => {
+    routeIssue(
+      issue({
+        kind: "invalid_dirty_kind",
+        action: "dismiss",
+        target: "mystery",
+      }),
+      { sync_dismiss_issue: true },
+    );
+    renderSettings();
+
+    fireEvent.click(await screen.findByTestId("sync-dismiss-7"));
+    expect(screen.getByTestId("sync-dismiss-7")).toHaveAccessibleName("Dismiss mystery");
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("sync_dismiss_issue", { id: 7 }));
+    expect(screen.queryByTestId("sync-retry-7")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sync-copy-details-7")).toBeInTheDocument();
   });
 });

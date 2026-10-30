@@ -156,6 +156,10 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
 
     it("validates the sync id and device name methods", () => {
       expect(() => validateInvokeParams("sync_restore", { id: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("sync_retry_issue", { id: 2 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("sync_retry_issue", { id: 0 }, issued())).toThrow(
+        /invalid sync id/,
+      );
       expect(() => validateInvokeParams("sync_restore", { id: 0 }, issued())).toThrow(
         /invalid sync id/,
       );

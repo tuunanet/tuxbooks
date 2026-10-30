@@ -212,11 +212,11 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   different copy of the book does not fight over source-derived authors or
   subjects.
 
-Losing field values are written to `sync_conflicts` and surfaced both in
-Settings > Sync and as a Sync issue, with the kept and discarded values. The
-current state always has a winner, but the loser stays inspectable until the
-conflict is resolved. Settling a conflict is described under
-[Conflict review](#conflict-review).
+Losing field values are written to `sync_conflicts` and surfaced in
+Settings > Sync's [Conflict review](#conflict-review), with the kept and
+discarded values. The current state always has a winner, but the loser stays
+inspectable until the conflict is resolved. Settling a conflict is described
+under [Conflict review](#conflict-review).
 
 ## Conflict review
 
@@ -382,6 +382,60 @@ issues, conflicts, and recently deleted items. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
 
+### Sync issues and actions
+
+Each row carries a kind, a short target label, and one action the sidecar
+computes from the kind. The renderer never parses an issue key.
+
+| Kinds                                                                                                                                                             | Action       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed` | Retry        |
+| `operation_rejected`                                                                                                                                              | Open folder  |
+| `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                | Copy details |
+| `invalid_dirty_kind`                                                                                                                                              | Dismiss      |
+
+Retry does the work the kind needs, not just another background wake-up:
+
+- a projection or reprojection failure projects the shared state for that book;
+- an identity failure hashes and binds the book, then projects it;
+- a lifecycle failure replays the mirror's Forget, restore, or discard;
+- a failed pass runs one pass now;
+- an operation retrying has its failure cache cleared so the next pass reads
+  the file again;
+- a missing cover is applied to its book from the sync folder when the blob has
+  arrived;
+- a cover publish failure is tried again from the local cover cache.
+
+Open folder is for a rejected operation: the file passed the retry limit, so it
+has to be fixed or removed in the sync folder. The renderer passes no path;
+the main process opens the folder the sidecar reports.
+
+Dismiss stays for informational rows only. An actionable row cannot be
+dismissed, and Dismiss all closes only the informational rows; Retry and Open
+folder rows stay listed until their condition clears.
+
+### What closes an issue by itself
+
+A status refresh also sweeps open rows and closes the ones whose condition is
+gone:
+
+- the last duplicate binding for a book disappears;
+- an operation's current cache row says it applied cleanly (processed with no
+  failures), or the file no longer exists in the folder;
+- the missing cover is applied to the book, not merely present in the folder;
+- a later identity pass binds and projects the book, or the reprojection
+  queue succeeds; an open projection issue makes the next pass project even
+  when the binding did not change;
+- the book behind a projection, identity, reprojection, or lifecycle row is
+  gone;
+- a retry closes its own row when the work shows the condition is gone;
+- a successful pass closes the `sync_failed` row.
+
+Conflicts are never in this list. They are counted and shown by
+[Conflict review](#conflict-review), which owns them until the user settles
+them. They are excluded from the Sync issues list and from its status count, so
+a Dismiss button can never hide a conflict without resolving it.
+
 ## Security and privacy
 
 The folder is untrusted input:
@@ -450,12 +504,17 @@ folder. It covers:
   device-id fallback;
 - duplicate copies sharing one uuid, the duplicate issue, and state moving to
   the remaining copy when the canonical row is deleted;
+- issue actions and targets, retry for projection, identity, reprojection,
+  lifecycle, and a failed pass, auto-resolution when the condition clears,
+  dismissal refused for actionable rows, and conflicts excluded from the issue
+  list and count;
 - a pending rehash surviving a missed snapshot update, as in a crash between
   the rewrite and the snapshot write.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
-trash actions, conflict grouping and device-relative choices, the bulk keep,
-the session set-aside, and the IPC policy for the sync folder.
+trash actions, the primary action per issue kind, Copy details, opening the sync
+folder without a renderer path, conflict grouping and device-relative choices,
+the bulk keep, the session set-aside, and the IPC policy for the sync folder.
 
 ## Out of scope
 

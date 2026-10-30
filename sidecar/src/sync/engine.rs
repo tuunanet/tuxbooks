@@ -64,6 +64,48 @@ pub struct SyncStatus {
     pub conflicts: i64,
 }
 
+/// What the UI offers on one issue row. The action is computed from the kind
+/// here, so the renderer never parses issue keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncIssueAction {
+    /// The condition can be repaired now; run the matching retry path.
+    Retry,
+    /// The repair is outside the app, in the sync folder.
+    OpenFolder,
+    /// The row is informational; copy its details for a bug report.
+    CopyDetails,
+    /// The row is informational and has nothing worth copying.
+    Dismiss,
+}
+
+impl SyncIssueAction {
+    pub fn for_kind(kind: &str) -> Self {
+        match kind {
+            "projection_failed"
+            | "identity_failed"
+            | "reprojection_failed"
+            | "book_lifecycle_failed"
+            | "sync_failed"
+            | "operation_retrying"
+            | "cover_missing"
+            | "cover_blob_failed" => Self::Retry,
+            // A rejected operation failed the retry limit. The file has to be
+            // fixed or removed in the sync folder before another pass helps.
+            "operation_rejected" => Self::OpenFolder,
+            // An unknown dirty marker is internal state that is cleared as it
+            // is reported, so there is nothing for the user to repair.
+            "invalid_dirty_kind" => Self::Dismiss,
+            _ => Self::CopyDetails,
+        }
+    }
+
+    /// Informational rows may be dismissed; actionable rows must not be hidden.
+    fn is_informational(self) -> bool {
+        matches!(self, Self::CopyDetails | Self::Dismiss)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncIssue {
@@ -71,6 +113,8 @@ pub struct SyncIssue {
     pub kind: String,
     pub detail: String,
     pub file_name: Option<String>,
+    pub action: SyncIssueAction,
+    pub target: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -254,16 +298,37 @@ impl SyncService {
         Ok(ignored)
     }
 
+    /// Dismiss every informational issue. Actionable rows stay open: hiding a
+    /// row the app can still repair would make the problem look gone.
     pub async fn dismiss_all_issues(&self) -> Result<usize, AppError> {
-        let result =
-            sqlx::query("UPDATE sync_issues SET resolved_at = ?1 WHERE resolved_at IS NULL")
-                .bind(now_rfc3339())
-                .execute(&self.inner.pool)
+        let rows: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, kind FROM sync_issues WHERE resolved_at IS NULL")
+                .fetch_all(&self.inner.pool)
                 .await?;
-        if result.rows_affected() > 0 {
-            self.refresh_status().await?;
+        let ids: Vec<i64> = rows
+            .into_iter()
+            .filter(|(_, kind)| {
+                kind != "conflict" && SyncIssueAction::for_kind(kind).is_informational()
+            })
+            .map(|(id, _)| id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(0);
         }
-        Ok(result.rows_affected() as usize)
+        let now = now_rfc3339();
+        let mut tx = self.inner.pool.begin().await?;
+        for id in &ids {
+            sqlx::query(
+                "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
+            )
+            .bind(id)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.refresh_status().await?;
+        Ok(ids.len())
     }
 
     fn status_snapshot(&self) -> SyncStatus {
@@ -294,13 +359,24 @@ impl SyncService {
         if let Err(err) = conflict::expire(pool).await {
             eprintln!("sync review: expiry failed: {err}");
         }
+        // Close rows whose condition is gone before counting, so the count,
+        // the list, and the open rows always agree. Best effort, like the
+        // conflict reconcile above.
+        if let Err(err) = self.resolve_cleared_issues().await {
+            eprintln!("sync issues: auto-resolve failed: {err}");
+        }
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;
-        let issues: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues WHERE resolved_at IS NULL")
-                .fetch_one(pool)
-                .await?;
+        // Conflicts live in the Conflict review section, which has its own
+        // count. Listing them here would offer a Dismiss button that hides a
+        // conflict without settling it.
+        let issues: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_issues
+             WHERE resolved_at IS NULL AND kind <> 'conflict'",
+        )
+        .fetch_one(pool)
+        .await?;
         let trash: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sync_trash
              WHERE restored_at IS NULL AND expires_at > ?1",
@@ -371,9 +447,13 @@ impl SyncService {
     }
 
     pub async fn run_pass(&self) -> Result<(), AppError> {
-        let guard = self.inner.pass_lock.lock().await;
+        let _guard = self.inner.pass_lock.lock().await;
+        self.run_pass_locked().await
+    }
+
+    /// Take the pass once. The caller must already hold `pass_lock`.
+    async fn run_pass_locked(&self) -> Result<(), AppError> {
         let result = self.pass_locked().await;
-        drop(guard);
         match result {
             Ok(()) => {
                 self.clear_error().await;
@@ -544,7 +624,12 @@ impl SyncService {
                   AND (b.rehash_pending = 1
                        OR s.book_id IS NULL
                        OR s.hashed_size != b.file_size
-                       OR s.hashed_mtime != b.file_mtime)
+                       OR s.hashed_mtime != b.file_mtime
+                       OR EXISTS (
+                           SELECT 1 FROM sync_issues i
+                           WHERE i.issue_key = 'project-book:' || b.id
+                             AND i.resolved_at IS NULL
+                       ))
                 ORDER BY b.id
                 LIMIT 25
                 "#,
@@ -559,11 +644,19 @@ impl SyncService {
                 last_id = book_id;
                 match ensure_book_identity(&self.inner.pool, book_id).await {
                     Ok(Some(identity)) => {
+                        // The identity condition is cleared as soon as hashing
+                        // and binding succeed, whether or not the hash moved.
+                        resolve_issue_key(&self.inner.pool, &format!("identity:{book_id}")).await?;
                         let changed =
                             before_hash.as_deref() != Some(identity.content_hash.as_str());
-                        if changed {
-                            bound += 1;
-                            if let Err(err) = merge::project_book(
+                        let needs_projection = changed
+                            || issue_key_open(&self.inner.pool, &format!("project-book:{book_id}"))
+                                .await?;
+                        if needs_projection {
+                            if changed {
+                                bound += 1;
+                            }
+                            match merge::project_book(
                                 &self.inner.pool,
                                 &identity.book_uid,
                                 root,
@@ -571,14 +664,25 @@ impl SyncService {
                             )
                             .await
                             {
-                                record_issue(
-                                    &self.inner.pool,
-                                    &format!("project-book:{book_id}"),
-                                    "projection_failed",
-                                    &format!("could not project state for book {book_id}: {err}"),
-                                    None,
-                                )
-                                .await?;
+                                Ok(_) => {
+                                    resolve_issue_key(
+                                        &self.inner.pool,
+                                        &format!("project-book:{book_id}"),
+                                    )
+                                    .await?;
+                                }
+                                Err(err) => {
+                                    record_issue(
+                                        &self.inner.pool,
+                                        &format!("project-book:{book_id}"),
+                                        "projection_failed",
+                                        &format!(
+                                            "could not project state for book {book_id}: {err}"
+                                        ),
+                                        None,
+                                    )
+                                    .await?;
+                                }
                             }
                         }
                     }
@@ -747,7 +851,11 @@ impl SyncService {
                 match merge::project_book(&self.inner.pool, &book_uid, root, &self.inner.covers_dir)
                     .await
                 {
-                    Ok(mut projected) => books.append(&mut projected),
+                    Ok(mut projected) => {
+                        books.append(&mut projected);
+                        resolve_issue_key(&self.inner.pool, &format!("reproject:{book_uid}"))
+                            .await?;
+                    }
                     Err(err) => {
                         record_issue(
                             &self.inner.pool,
@@ -760,6 +868,10 @@ impl SyncService {
                         continue;
                     }
                 }
+            } else {
+                // No copy is bound any more, so there is nothing left to
+                // reproject and the reported condition is gone.
+                resolve_issue_key(&self.inner.pool, &format!("reproject:{book_uid}")).await?;
             }
             sqlx::query(
                 "UPDATE sync_issues SET resolved_at = ?2
@@ -991,29 +1103,54 @@ impl SyncService {
     }
 
     pub async fn issues(&self) -> Result<Vec<SyncIssue>, AppError> {
-        let rows: Vec<(i64, String, String, Option<String>, String, String)> = sqlx::query_as(
-            "SELECT id, kind, detail, file_name, created_at, updated_at
-             FROM sync_issues WHERE resolved_at IS NULL
-             ORDER BY updated_at DESC, id DESC LIMIT 100",
+        type Row = (i64, String, String, String, Option<String>, String, String);
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id, issue_key, kind, detail, file_name, created_at, updated_at
+                 FROM sync_issues
+                 WHERE resolved_at IS NULL AND kind <> 'conflict'
+                 ORDER BY updated_at DESC, id DESC LIMIT 100",
         )
         .fetch_all(&self.inner.pool)
         .await?;
-        Ok(rows
-            .into_iter()
-            .map(
-                |(id, kind, detail, file_name, created_at, updated_at)| SyncIssue {
-                    id,
-                    kind,
-                    detail,
-                    file_name,
-                    created_at,
-                    updated_at,
-                },
-            )
-            .collect())
+        let mut issues = Vec::with_capacity(rows.len());
+        for (id, issue_key, kind, detail, file_name, created_at, updated_at) in rows {
+            let target =
+                issue_target(&self.inner.pool, &kind, &issue_key, file_name.as_deref()).await;
+            issues.push(SyncIssue {
+                id,
+                action: SyncIssueAction::for_kind(&kind),
+                kind,
+                detail,
+                file_name,
+                target,
+                created_at,
+                updated_at,
+            });
+        }
+        Ok(issues)
     }
 
+    /// Dismiss one informational row. Actionable rows refuse: they stay until
+    /// the condition clears or the retry runs.
     pub async fn dismiss_issue(&self, id: i64) -> Result<bool, AppError> {
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT kind FROM sync_issues WHERE id = ?1 AND resolved_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.inner.pool)
+        .await?;
+        let Some(kind) = kind else {
+            return Ok(false);
+        };
+        // Review owns conflicts. Dismissing one would hide it without settling it.
+        if kind == "conflict" {
+            return Ok(false);
+        }
+        if !SyncIssueAction::for_kind(&kind).is_informational() {
+            return Err(AppError::InvalidInput(
+                "this sync issue has an action; retry it or fix it in the sync folder".into(),
+            ));
+        }
         let result = sqlx::query(
             "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
         )
@@ -1021,7 +1158,481 @@ impl SyncService {
         .bind(now_rfc3339())
         .execute(&self.inner.pool)
         .await?;
+        if result.rows_affected() > 0 {
+            self.refresh_status().await?;
+            self.emit_status();
+        }
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Run the action behind one retryable issue. Returns true when the row
+    /// was resolved, false when the row was already gone or the work ran but
+    /// the condition is still there. A failed attempt updates the detail and
+    /// stays open.
+    pub async fn retry_issue(&self, id: i64) -> Result<bool, AppError> {
+        let row: Option<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT issue_key, kind, file_name FROM sync_issues
+             WHERE id = ?1 AND resolved_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.inner.pool)
+        .await?;
+        let Some((issue_key, kind, file_name)) = row else {
+            return Ok(false);
+        };
+        if SyncIssueAction::for_kind(&kind) != SyncIssueAction::Retry {
+            return Err(AppError::InvalidInput(
+                "this sync issue is not retryable; use its listed action".into(),
+            ));
+        }
+
+        let _guard = self.inner.pass_lock.lock().await;
+        let outcome = self
+            .retry_locked(&kind, &issue_key, file_name.as_deref())
+            .await;
+        match outcome {
+            Ok(cleared) => {
+                // A pass may have closed the row itself (sync_failed). The
+                // retry path reports whether the condition is actually gone;
+                // never close on Ok alone.
+                if !self.issue_is_open(id).await? || cleared {
+                    sqlx::query(
+                        "UPDATE sync_issues SET resolved_at = ?2
+                         WHERE id = ?1 AND resolved_at IS NULL",
+                    )
+                    .bind(id)
+                    .bind(now_rfc3339())
+                    .execute(&self.inner.pool)
+                    .await?;
+                    self.refresh_status().await?;
+                    self.emit_status();
+                    Ok(true)
+                } else {
+                    self.keep_issue_open(id).await?;
+                    self.refresh_status().await?;
+                    self.emit_status();
+                    Ok(false)
+                }
+            }
+            Err(err) => {
+                let detail = format!("retry failed: {err}");
+                let _ = sqlx::query(
+                    "UPDATE sync_issues
+                     SET detail = ?2,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     WHERE id = ?1 AND resolved_at IS NULL",
+                )
+                .bind(id)
+                .bind(&detail)
+                .execute(&self.inner.pool)
+                .await;
+                self.refresh_status().await?;
+                self.emit_status();
+                Err(err)
+            }
+        }
+    }
+
+    /// Run the retry path for one kind. The caller holds `pass_lock`. Returns
+    /// true when the work itself proves the condition is gone.
+    async fn retry_locked(
+        &self,
+        kind: &str,
+        issue_key: &str,
+        file_name: Option<&str>,
+    ) -> Result<bool, AppError> {
+        let folder = self.status_snapshot().folder.ok_or_else(|| {
+            AppError::InvalidInput("sync is not connected; reconnect the sync folder".into())
+        })?;
+        let root = store::resolve_root(Path::new(&folder))?;
+        match kind {
+            "projection_failed" => {
+                let book_id = parse_key_i64(issue_key, "project-book:")?;
+                self.reproject_file_row(book_id, &root).await?;
+                Ok(true)
+            }
+            "identity_failed" => {
+                let book_id = parse_key_i64(issue_key, "identity:")?;
+                match ensure_book_identity(&self.inner.pool, book_id).await? {
+                    Some(identity) => {
+                        merge::project_book(
+                            &self.inner.pool,
+                            &identity.book_uid,
+                            &root,
+                            &self.inner.covers_dir,
+                        )
+                        .await?;
+                        Ok(true)
+                    }
+                    None => {
+                        self.book_gone(book_id).await?;
+                        Ok(true)
+                    }
+                }
+            }
+            "reprojection_failed" => {
+                let book_uid = parse_key(issue_key, "reproject:")?;
+                self.reproject_book_or_gone(&book_uid, &root).await?;
+                Ok(true)
+            }
+            "book_lifecycle_failed" => {
+                let book_uid = parse_key(issue_key, "book-lifecycle:")?;
+                if !merge::retry_book_lifecycle(&self.inner.pool, &book_uid).await? {
+                    // Nothing in the mirror to replay. Leave the row open so a
+                    // later pass or restore can still settle it.
+                    return Ok(false);
+                }
+                if !self.status_snapshot().enabled {
+                    return Ok(true);
+                }
+                self.run_pass_locked().await?;
+                Ok(true)
+            }
+            "sync_failed" => {
+                if !self.status_snapshot().enabled {
+                    return Err(AppError::InvalidInput(
+                        "sync is not connected; reconnect the sync folder".into(),
+                    ));
+                }
+                self.run_pass_locked().await?;
+                Ok(true)
+            }
+            "operation_retrying" => {
+                // Drop the cached failure so the next pass reads the file
+                // again instead of skipping it as already processed.
+                let relative = parse_key(issue_key, "file:")?;
+                sqlx::query("DELETE FROM sync_remote_files WHERE relative_path = ?1")
+                    .bind(&relative)
+                    .execute(&self.inner.pool)
+                    .await?;
+                if !self.status_snapshot().enabled {
+                    return Err(AppError::InvalidInput(
+                        "sync is not connected; reconnect the sync folder".into(),
+                    ));
+                }
+                self.run_pass_locked().await?;
+                self.operation_cleared(&relative, Some(&root)).await
+            }
+            "cover_missing" => {
+                let name = parse_key(issue_key, "cover-missing:")?;
+                self.apply_missing_cover(&name, file_name, &root).await?;
+                Ok(true)
+            }
+            "cover_blob_failed" => {
+                let name = parse_key(issue_key, "cover:")?;
+                store::store_cover_blob(&root, &self.inner.covers_dir, &name)?;
+                Ok(store::cover_blob_exists(&root, &name))
+            }
+            other => Err(AppError::InvalidInput(format!(
+                "sync issue kind {other} has no retry path"
+            ))),
+        }
+    }
+
+    /// Resolve a file-row id to its durable book and project that book.
+    async fn reproject_file_row(&self, book_id: i64, root: &Path) -> Result<(), AppError> {
+        let book_uid: Option<String> =
+            sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+                .bind(book_id)
+                .fetch_optional(&self.inner.pool)
+                .await?
+                .flatten();
+        match book_uid {
+            Some(book_uid) => {
+                merge::project_book(&self.inner.pool, &book_uid, root, &self.inner.covers_dir)
+                    .await?;
+                Ok(())
+            }
+            // The row disappeared before a binding existed, or a fresh import
+            // has not hashed it yet. Hashing here repairs both cases.
+            None => match ensure_book_identity(&self.inner.pool, book_id).await? {
+                Some(identity) => {
+                    merge::project_book(
+                        &self.inner.pool,
+                        &identity.book_uid,
+                        root,
+                        &self.inner.covers_dir,
+                    )
+                    .await?;
+                    Ok(())
+                }
+                None => self.book_gone(book_id).await,
+            },
+        }
+    }
+
+    async fn reproject_book_or_gone(&self, book_uid: &str, root: &Path) -> Result<(), AppError> {
+        let records: Option<i64> = sqlx::query_scalar("SELECT 1 FROM book_records WHERE uid = ?1")
+            .bind(book_uid)
+            .fetch_optional(&self.inner.pool)
+            .await?;
+        let bindings: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM sync_book_bindings WHERE book_uid = ?1 LIMIT 1")
+                .bind(book_uid)
+                .fetch_optional(&self.inner.pool)
+                .await?;
+        if records.is_none() && bindings.is_none() {
+            return Ok(());
+        }
+        merge::project_book(&self.inner.pool, book_uid, root, &self.inner.covers_dir).await?;
+        Ok(())
+    }
+
+    /// A missing file row means the reported condition is gone; nothing to do.
+    async fn book_gone(&self, book_id: i64) -> Result<(), AppError> {
+        let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM books WHERE id = ?1")
+            .bind(book_id)
+            .fetch_optional(&self.inner.pool)
+            .await?;
+        if exists.is_none() {
+            return Ok(());
+        }
+        Err(AppError::InvalidInput(format!(
+            "book {book_id} has no available file to retry"
+        )))
+    }
+
+    /// Apply a missing cover to the book, not just the cache. The metadata op
+    /// that referenced it already applied without the cover, so re-run the
+    /// normal cover path from the cached blob. Its triggers publish the new
+    /// override on the next pass.
+    async fn apply_missing_cover(
+        &self,
+        name: &str,
+        file_name: Option<&str>,
+        root: &Path,
+    ) -> Result<(), AppError> {
+        if !store::apply_cover_blob(root, &self.inner.covers_dir, name)? {
+            return Err(AppError::InvalidInput(format!(
+                "cover {name} is not in the sync folder yet"
+            )));
+        }
+        let relative = file_name.ok_or_else(|| {
+            AppError::InvalidInput("the missing cover has no operation file to read".into())
+        })?;
+        let op = read_sync_op(root, relative)?;
+        let book_uid = op.book_uid.unwrap_or(op.entity_uid);
+        let book_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM books WHERE book_uid = ?1 ORDER BY id LIMIT 1")
+                .bind(&book_uid)
+                .fetch_optional(&self.inner.pool)
+                .await?;
+        let book_id = book_id.ok_or_else(|| {
+            AppError::InvalidInput("the book for this cover is not in the library".into())
+        })?;
+        let image = self.inner.covers_dir.join(name);
+        let image = image.to_str().ok_or_else(|| {
+            AppError::InvalidInput("the cover cache path is not valid UTF-8".into())
+        })?;
+        crate::services::metadata::set_book_cover(
+            &self.inner.pool,
+            book_id,
+            image,
+            &self.inner.covers_dir,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// True when the condition behind one issue has cleared. This is the one
+    /// place that decides auto-resolution, shared by the status sweep and the
+    /// retry outcome check. Conflicts are never cleared here.
+    async fn issue_cleared(
+        &self,
+        kind: &str,
+        issue_key: &str,
+        file_name: Option<&str>,
+    ) -> Result<bool, AppError> {
+        let root = self.sync_root();
+        match kind {
+            "duplicate_book" => match issue_key
+                .strip_prefix("duplicate-book:")
+                .and_then(|rest| rest.split(':').next())
+            {
+                Some(uid) => Ok(self.binding_count(uid).await? < 2),
+                None => Ok(false),
+            },
+            "operation_retrying" | "operation_rejected" => match issue_key.strip_prefix("file:") {
+                Some(relative) => self.operation_cleared(relative, root.as_deref()).await,
+                None => Ok(false),
+            },
+            "cover_missing" => match issue_key.strip_prefix("cover-missing:") {
+                Some(name) => self.cover_applied(name, file_name).await,
+                None => Ok(false),
+            },
+            "cover_blob_failed" => match issue_key.strip_prefix("cover:") {
+                Some(name) => Ok(root
+                    .as_deref()
+                    .is_some_and(|root| store::cover_blob_exists(root, name))),
+                None => Ok(false),
+            },
+            "projection_failed" => match issue_key.strip_prefix("project-book:") {
+                Some(rest) => match rest.parse::<i64>() {
+                    Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
+                    Err(_) => Ok(false),
+                },
+                None => Ok(false),
+            },
+            "identity_failed" => match issue_key.strip_prefix("identity:") {
+                Some(rest) => match rest.parse::<i64>() {
+                    Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
+                    Err(_) => Ok(false),
+                },
+                None => Ok(false),
+            },
+            "reprojection_failed" => match issue_key.strip_prefix("reproject:") {
+                Some(uid) => {
+                    Ok(!self.book_record_exists(uid).await? && self.binding_count(uid).await? == 0)
+                }
+                None => Ok(false),
+            },
+            "book_lifecycle_failed" => match issue_key.strip_prefix("book-lifecycle:") {
+                Some(uid) => Ok(!self.book_record_exists(uid).await?),
+                None => Ok(false),
+            },
+            // Conflicts belong to review. Informational rows have no
+            // automatic condition.
+            _ => Ok(false),
+        }
+    }
+
+    /// Close open rows whose condition has cleared.
+    async fn resolve_cleared_issues(&self) -> Result<u64, AppError> {
+        let rows: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, issue_key, kind, file_name FROM sync_issues
+             WHERE resolved_at IS NULL",
+        )
+        .fetch_all(&self.inner.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let mut cleared = Vec::new();
+        for (id, issue_key, kind, file_name) in rows {
+            if self
+                .issue_cleared(&kind, &issue_key, file_name.as_deref())
+                .await?
+            {
+                cleared.push(id);
+            }
+        }
+        if cleared.is_empty() {
+            return Ok(0);
+        }
+        let now = now_rfc3339();
+        let mut tx = self.inner.pool.begin().await?;
+        for id in &cleared {
+            sqlx::query(
+                "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
+            )
+            .bind(id)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(cleared.len() as u64)
+    }
+
+    async fn binding_count(&self, book_uid: &str) -> Result<i64, AppError> {
+        Ok(
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_bindings WHERE book_uid = ?1")
+                .bind(book_uid)
+                .fetch_one(&self.inner.pool)
+                .await?,
+        )
+    }
+
+    async fn book_row_exists(&self, book_id: i64) -> Result<bool, AppError> {
+        let row: Option<i64> = sqlx::query_scalar("SELECT 1 FROM books WHERE id = ?1")
+            .bind(book_id)
+            .fetch_optional(&self.inner.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
+    async fn book_record_exists(&self, book_uid: &str) -> Result<bool, AppError> {
+        let row: Option<i64> = sqlx::query_scalar("SELECT 1 FROM book_records WHERE uid = ?1")
+            .bind(book_uid)
+            .fetch_optional(&self.inner.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
+    async fn issue_is_open(&self, id: i64) -> Result<bool, AppError> {
+        let row: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM sync_issues WHERE id = ?1 AND resolved_at IS NULL")
+                .bind(id)
+                .fetch_optional(&self.inner.pool)
+                .await?;
+        Ok(row.is_some())
+    }
+
+    /// Leave the row open and say the retry did not clear it, once.
+    async fn keep_issue_open(&self, id: i64) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE sync_issues
+             SET detail = CASE
+                     WHEN instr(detail, 'retry did not clear this condition') = 0
+                     THEN detail || ' (retry did not clear this condition)'
+                     ELSE detail
+                 END,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1 AND resolved_at IS NULL",
+        )
+        .bind(id)
+        .execute(&self.inner.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// A file is done when its current cache row says it applied cleanly, or
+    /// when it is gone. A stale applied-op row from an earlier version of the
+    /// same path does not count.
+    async fn operation_cleared(
+        &self,
+        relative: &str,
+        root: Option<&Path>,
+    ) -> Result<bool, AppError> {
+        let row: Option<(Option<String>, i64)> = sqlx::query_as(
+            "SELECT processed_at, failures FROM sync_remote_files WHERE relative_path = ?1",
+        )
+        .bind(relative)
+        .fetch_optional(&self.inner.pool)
+        .await?;
+        if row.is_some_and(|(processed_at, failures)| processed_at.is_some() && failures == 0) {
+            return Ok(true);
+        }
+        let Some(root) = root else {
+            return Ok(false);
+        };
+        let Some(path) = safe_sync_path(root, relative) else {
+            return Ok(false);
+        };
+        Ok(!path.exists())
+    }
+
+    /// The cover counts as applied only when this book's effective cover is
+    /// the blob named by the issue. A blob sitting in the folder is not enough.
+    async fn cover_applied(&self, name: &str, file_name: Option<&str>) -> Result<bool, AppError> {
+        let Some(root) = self.sync_root() else {
+            return Ok(false);
+        };
+        let Some(relative) = file_name else {
+            return Ok(false);
+        };
+        let Ok(op) = read_sync_op(&root, relative) else {
+            return Ok(false);
+        };
+        let book_uid = op.book_uid.unwrap_or(op.entity_uid);
+        let cover: Option<Option<String>> =
+            sqlx::query_scalar("SELECT cover_path FROM book_records WHERE uid = ?1")
+                .bind(&book_uid)
+                .fetch_optional(&self.inner.pool)
+                .await?;
+        Ok(cover.flatten().is_some_and(|path| {
+            Path::new(&path).file_name().and_then(|file| file.to_str()) == Some(name)
+        }))
     }
 
     pub async fn trash(&self) -> Result<Vec<SyncTrashEntry>, AppError> {
@@ -1155,6 +1766,126 @@ impl SyncService {
         self.emit_status();
         Ok(applied || settled)
     }
+}
+
+/// True when an issue with this internal key is still open.
+async fn issue_key_open(pool: &SqlitePool, issue_key: &str) -> Result<bool, AppError> {
+    let row: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
+    )
+    .bind(issue_key)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
+
+/// Close one issue by its internal key. Used by natural repair paths.
+async fn resolve_issue_key(pool: &SqlitePool, issue_key: &str) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE sync_issues SET resolved_at = ?2
+         WHERE issue_key = ?1 AND resolved_at IS NULL",
+    )
+    .bind(issue_key)
+    .bind(now_rfc3339())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Join a folder-relative issue path without allowing traversal.
+fn safe_sync_path(root: &Path, relative: &str) -> Option<PathBuf> {
+    if relative.starts_with('/') || relative.split('/').any(|part| part == "..") {
+        return None;
+    }
+    Some(root.join(relative))
+}
+
+/// Read the operation behind an issue row. Unreadable files are reported as a
+/// failed repair, never guessed at.
+fn read_sync_op(root: &Path, relative: &str) -> Result<super::model::Op, AppError> {
+    let path = safe_sync_path(root, relative).ok_or_else(|| {
+        AppError::InvalidInput("the operation path in this issue is not safe to read".into())
+    })?;
+    store::read_op(&path)
+        .map_err(|err| AppError::InvalidInput(format!("the operation file is not readable: {err}")))
+}
+
+/// Take the value after `prefix` from an issue key.
+fn parse_key(issue_key: &str, prefix: &str) -> Result<String, AppError> {
+    issue_key
+        .strip_prefix(prefix)
+        .filter(|rest| !rest.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            AppError::InvalidInput(format!("sync issue key {issue_key} cannot be retried"))
+        })
+}
+
+fn parse_key_i64(issue_key: &str, prefix: &str) -> Result<i64, AppError> {
+    parse_key(issue_key, prefix)?.parse::<i64>().map_err(|_| {
+        AppError::InvalidInput(format!("sync issue key {issue_key} cannot be retried"))
+    })
+}
+
+/// Short human label for an issue row. Keys carry internal ids; the UI gets a
+/// title, a relative file, or a kind name instead.
+async fn issue_target(
+    pool: &SqlitePool,
+    kind: &str,
+    issue_key: &str,
+    file_name: Option<&str>,
+) -> String {
+    let suffix = issue_key
+        .split_once(':')
+        .map(|(_, value)| value)
+        .unwrap_or(issue_key);
+    match kind {
+        "sync_failed" => "Sync pass".to_string(),
+        "projection_failed" | "identity_failed" => match suffix.parse::<i64>() {
+            Ok(book_id) => match file_book_title(pool, book_id).await {
+                Some(title) => title,
+                None => format!("Book {book_id}"),
+            },
+            Err(_) => issue_key.to_string(),
+        },
+        "duplicate_book" => {
+            let uid = suffix.split(':').next().unwrap_or(suffix);
+            durable_book_title(pool, uid)
+                .await
+                .unwrap_or_else(|| format!("Book {}", short_uid(uid)))
+        }
+        "reprojection_failed"
+        | "book_lifecycle_failed"
+        | "book_snapshot_missing"
+        | "book_snapshot_invalid" => durable_book_title(pool, suffix)
+            .await
+            .unwrap_or_else(|| format!("Book {}", short_uid(suffix))),
+        "operation_retrying" | "operation_rejected" | "cover_missing" | "cover_blob_failed"
+        | "invalid_dirty_kind" => suffix.to_string(),
+        _ => file_name.unwrap_or(suffix).to_string(),
+    }
+}
+
+async fn file_book_title(pool: &SqlitePool, book_id: i64) -> Option<String> {
+    sqlx::query_scalar("SELECT title FROM books WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn durable_book_title(pool: &SqlitePool, book_uid: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT title FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+fn short_uid(uid: &str) -> String {
+    uid.chars().take(8).collect()
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {

@@ -196,6 +196,17 @@ export function registerIpcHandlers(
     await shell.openPath(location.path);
   });
 
+  register(IPC_CHANNELS.openSyncFolder, async (event) => {
+    requireAppSender(event);
+    // The renderer asks to open the connected sync folder and passes no path;
+    // main resolves it from the sidecar status (data-management spec).
+    const status = (await sidecar.call("sync_status")) as { folder?: string | null };
+    if (!status.folder) {
+      throw new SidecarError("sync is not connected");
+    }
+    await shell.openPath(status.folder);
+  });
+
   register(IPC_CHANNELS.clearCache, async (event) => {
     requireAppSender(event);
     // Only the regenerable browser caches and the GPU marker are removed;
