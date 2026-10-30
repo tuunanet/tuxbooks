@@ -295,11 +295,11 @@ async fn finalize_import(pool: &SqlitePool, file_id: i64) -> Result<crate::domai
     match crate::sync::identity::ensure_book_identity(pool, file_id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
-            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+            crate::services::hash_backfill::mark_failed(pool, file_id).await?;
         }
         Err(err) => {
             eprintln!("import: could not hash book file {file_id}: {err}");
-            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+            crate::services::hash_backfill::mark_failed(pool, file_id).await?;
         }
     }
     let id = books::durable_id_for_file(pool, file_id)

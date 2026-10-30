@@ -116,8 +116,13 @@ an alias:
 
 Hashing is lazy and bounded: the sweep hashes books that have no binding or
 whose size/mtime changed, for a few seconds per pass. Imports never wait for a
-hash. A book whose file is unavailable keeps its binding and state, and a
-failed background hash leaves a relink issue in `migration_issues`.
+hash. A book whose file is unavailable keeps its binding and state. A failed
+background hash retries automatically with bounded backoff (1 minute, 5
+minutes, 15 minutes, 1 hour, 6 hours, then 24 hours as the cap), and a snapshot
+change or relink returns it to pending. With sync on, the failure opens one
+`hash_failed` Sync issue per book (not per location) with **Retry indexing**;
+with sync off, the book itself shows the warning and the same action. The book
+is failed when any of its locations failed.
 
 ## Folder layout
 
@@ -387,12 +392,12 @@ cannot starve the rest.
 Each row carries a kind, a short target label, and one action the sidecar
 computes from the kind. The renderer never parses an issue key.
 
-| Kinds                                                                                                                                                             | Action       |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed` | Retry        |
-| `operation_rejected`                                                                                                                                              | Open folder  |
-| `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                | Copy details |
-| `invalid_dirty_kind`                                                                                                                                              | Dismiss      |
+| Kinds                                                                                                                                                                            | Action       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed`, `hash_failed` | Retry        |
+| `operation_rejected`                                                                                                                                                             | Open folder  |
+| `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                               | Copy details |
+| `invalid_dirty_kind`                                                                                                                                                             | Dismiss      |
 
 Retry does the work the kind needs, not just another background wake-up:
 
@@ -404,7 +409,10 @@ Retry does the work the kind needs, not just another background wake-up:
   the file again;
 - a missing cover is applied to its book from the sync folder when the blob has
   arrived;
-- a cover publish failure is tried again from the local cover cache.
+- a cover publish failure is tried again from the local cover cache;
+- a failed hash runs the index pass for every available location of that book,
+  starting from a clean backoff. Indexing is local work, so it does not need
+  the folder connected.
 
 Open folder is for a rejected operation: the file passed the retry limit, so it
 has to be fixed or removed in the sync folder. The renderer passes no path;
@@ -428,6 +436,7 @@ gone:
   when the binding did not change;
 - the book behind a projection, identity, reprojection, or lifecycle row is
   gone;
+- a hash succeeds, whether the automatic backoff picked it up or Retry ran it;
 - a retry closes its own row when the work shows the condition is gone;
 - a successful pass closes the `sync_failed` row.
 

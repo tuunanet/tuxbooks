@@ -94,6 +94,7 @@ function makeBookShim() {
     available: true,
     fileSize: 1024,
     fileMtime: 1767225600,
+    hashState: "hashed" as const,
     publicationDate: null,
     seriesId: null,
     seriesIndex: null,

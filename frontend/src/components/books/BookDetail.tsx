@@ -48,9 +48,12 @@ export function BookDetail() {
     removeBookFile: removeCopy,
     resetReadingData,
     forgetBookFromLibrary,
+    retryIndexing,
   } = useBookActions();
   const [resetOpen, setResetOpen] = useState(false);
   const [forgetOpen, setForgetOpen] = useState(false);
+  const [indexingError, setIndexingError] = useState<string | null>(null);
+  const [indexingBusy, setIndexingBusy] = useState(false);
   const dispatch = useAppDispatch();
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   // One curation view is shared by the Overview subjects row and the
@@ -83,6 +86,18 @@ export function BookDetail() {
 
   const removeFile = async (fileId: number) => {
     if (await removeCopy(book.id, fileId)) await refreshFiles();
+  };
+
+  const retryIndexingNow = async () => {
+    if (indexingBusy) return;
+    setIndexingBusy(true);
+    setIndexingError(null);
+    try {
+      const result = await retryIndexing(book.id);
+      if (!result.ok) setIndexingError(result.error);
+    } finally {
+      setIndexingBusy(false);
+    }
   };
 
   const facts: [string, string][] = [
@@ -120,6 +135,36 @@ export function BookDetail() {
             <Badge variant="secondary" className="mt-2">
               PDF
             </Badge>
+          )}
+
+          {book.hashState === "failed" && (
+            <div
+              data-testid="detail-indexing-warning"
+              role="alert"
+              className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+            >
+              <p className="text-sm font-medium text-destructive">This book could not be indexed</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                TuxBooks could not read the file to build its content hash. The book and your
+                reading data are safe.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                data-testid="detail-retry-indexing"
+                disabled={indexingBusy}
+                aria-busy={indexingBusy}
+                onClick={() => void retryIndexingNow()}
+              >
+                {indexingBusy ? "Retrying…" : "Retry indexing"}
+              </Button>
+              {indexingError && (
+                <p data-testid="detail-indexing-error" className="mt-2 text-xs text-destructive">
+                  {indexingError}
+                </p>
+              )}
+            </div>
           )}
 
           <BookReadingActions

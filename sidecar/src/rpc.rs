@@ -381,6 +381,12 @@ async fn dispatch(
                 state, events, p.book_id
             )))
         }
+        "retry_indexing" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::retry_indexing(
+                state, events, p.book_id
+            )))
+        }
         "forget_book" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::books::forget_book(

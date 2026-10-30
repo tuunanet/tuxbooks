@@ -9,7 +9,7 @@ pub mod provider;
 pub mod reading_progress;
 
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
-pub use book::{Book, BookFile, BookFormat, NewBook, ReadingHistoryBook, SearchHit};
+pub use book::{Book, BookFile, BookFormat, IndexingRetry, NewBook, ReadingHistoryBook, SearchHit};
 pub use collection::{Collection, CollectionSummary, NewCollection};
 pub use edition::{EditionBook, EditionLinkOutcome};
 pub use library::{

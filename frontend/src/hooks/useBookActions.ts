@@ -7,12 +7,17 @@ import {
   removeBook,
   removeBookFile as removeBookFileCommand,
   resetBookReadingData,
+  retryIndexing as retryBookIndexing,
 } from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
 
 function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+const INDEXING_RETRY_FAILED =
+  "TuxBooks still could not index this book. It will keep trying while the file can be read.";
+const INDEXING_FILE_MISSING = "The file is not available. Use Locate File, then retry indexing.";
 
 /**
  * User-driven library maintenance (ROADMAP milestone 3): reconnect a book
@@ -88,6 +93,31 @@ export function useBookActions() {
     [refresh],
   );
 
+  /**
+   * Retry the content-hash pass for one book. The backend runs the hash now
+   * instead of waiting for its backoff; the library refresh then decides
+   * whether the warning stays. A still-failed result keeps the warning and
+   * returns the message the detail view shows.
+   */
+  const retryIndexing = useCallback(
+    async (bookId: number): Promise<{ ok: boolean; error: string | null }> => {
+      try {
+        const result = await retryBookIndexing(bookId);
+        await refresh();
+        if (result.hashState === "hashed") return { ok: true, error: null };
+        return {
+          ok: false,
+          error: result.hashState === "missing" ? INDEXING_FILE_MISSING : INDEXING_RETRY_FAILED,
+        };
+      } catch (err) {
+        console.error("retry indexing failed:", toMessage(err));
+        await refresh();
+        return { ok: false, error: INDEXING_RETRY_FAILED };
+      }
+    },
+    [refresh],
+  );
+
   const markFinished = useCallback(
     async (bookId: number) => {
       try {
@@ -128,6 +158,7 @@ export function useBookActions() {
     removeBookFile,
     resetReadingData,
     forgetBookFromLibrary,
+    retryIndexing,
     markFinished,
     markManyFinished,
   };

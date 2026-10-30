@@ -646,7 +646,7 @@ pub async fn relink_book(
             crate::sync::identity::bind_hash(pool, file_id, &hash, size, mtime).await?;
         }
         None => {
-            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+            crate::services::hash_backfill::mark_failed(pool, file_id).await?;
         }
     }
     books::mark_metadata_available(pool, book_id).await?;

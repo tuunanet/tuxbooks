@@ -3208,6 +3208,18 @@ async fn issue_actions_and_targets_are_computed_on_the_server() {
             "target",
         ),
         (
+            format!("hash-failed:{book}"),
+            "hash_failed",
+            "retry",
+            "target",
+        ),
+        (
+            "hash-failed:999999".to_string(),
+            "hash_failed",
+            "retry",
+            "Book 999999",
+        ),
+        (
             format!("reproject:{uid}"),
             "reprojection_failed",
             "retry",
@@ -3460,6 +3472,156 @@ async fn retrying_identity_hashes_and_binds_the_book() {
     assert_eq!(bindings, 1, "the retry rebound the book");
     assert_eq!(book_uid(&a, book).await.len(), 32);
     assert_eq!(a.service.issues().await.unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retrying_a_hash_failure_hashes_the_book_and_closes_the_issue() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "retry-hash.epub", b"retry hash bytes").await;
+    connect(&a, sync_dir.path()).await;
+    let file_id = file_row_id(&a, "retry-hash.epub").await;
+    // Keep the bytes readable so the retry has real work, but park the row in
+    // a failure with attempts spent and a retry far in the future.
+    sqlx::query(
+        "UPDATE books SET hash_state = 'failed', hash_attempts = 2,
+         hash_retry_at = '2999-01-01T00:00:00.000Z' WHERE id = ?1",
+    )
+    .bind(file_id)
+    .execute(&a.pool)
+    .await
+    .unwrap();
+    let issue = insert_issue(&a, &format!("hash-failed:{book}"), "hash_failed").await;
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+
+    assert!(a.service.retry_issue(issue).await.unwrap());
+    let (state, attempts, retry_at): (String, i64, Option<String>) =
+        sqlx::query_as("SELECT hash_state, hash_attempts, hash_retry_at FROM books WHERE id = ?1")
+            .bind(file_id)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(state, "hashed");
+    assert_eq!(attempts, 0, "a manual retry starts the budget over");
+    assert_eq!(retry_at, None);
+    assert_eq!(book_uid(&a, book).await.len(), 32);
+    assert_eq!(a.service.issues().await.unwrap().len(), 0);
+    assert_eq!(
+        a.service.status().await.unwrap().issues,
+        0,
+        "the status count drops with the resolved row"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_hash_retry_keeps_the_issue_open_and_the_sweep_adds_it() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "sweep-hash.epub", b"sweep hash bytes").await;
+    connect(&a, sync_dir.path()).await;
+    let file_id = file_row_id(&a, "sweep-hash.epub").await;
+    // The file disappears while the row still looks available: the retry has
+    // nothing to read and must report that instead of closing the row.
+    let path = books::get_book(&a.pool, book).await.unwrap().unwrap().path;
+    std::fs::remove_file(&path).unwrap();
+    // Drop the cached binding too: without it the pass must read the missing
+    // file instead of trusting the old snapshot.
+    sqlx::query("DELETE FROM sync_book_bindings WHERE book_id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE books SET hash_state = 'failed', hash_attempts = 1,
+         hash_retry_at = '2999-01-01T00:00:00.000Z' WHERE id = ?1",
+    )
+    .bind(file_id)
+    .execute(&a.pool)
+    .await
+    .unwrap();
+
+    // A status refresh gives the already-failed book its row.
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    let issue = a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|issue| issue.kind == "hash_failed")
+        .expect("the failed hash is listed");
+    assert_eq!(issue.action, SyncIssueAction::Retry);
+    assert_eq!(issue.target, "sweep-hash");
+    assert_eq!(
+        a.service.issues().await.unwrap().len(),
+        1,
+        "the sweep does not duplicate the row"
+    );
+
+    assert!(
+        !a.service.retry_issue(issue.id).await.unwrap(),
+        "a retry that still cannot read the file leaves the row open"
+    );
+    let (state, attempts, _): (String, i64, Option<String>) =
+        sqlx::query_as("SELECT hash_state, hash_attempts, hash_retry_at FROM books WHERE id = ?1")
+            .bind(file_id)
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(state, "failed");
+    assert_eq!(
+        attempts, 1,
+        "the retry reset the budget, then this attempt was counted"
+    );
+    assert_eq!(a.service.issues().await.unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_hash_keeps_its_issue_open_on_a_status_refresh() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "pending-hash.epub", b"pending hash bytes").await;
+    connect(&a, sync_dir.path()).await;
+    let file_id = file_row_id(&a, "pending-hash.epub").await;
+    sqlx::query("UPDATE books SET hash_state = 'pending' WHERE id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    let issue = insert_issue(&a, &format!("hash-failed:{book}"), "hash_failed").await;
+
+    // `pending` is the claimed state during a long automatic attempt. A status
+    // refresh must not close the row just because the hash is in progress.
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    let open = a.service.issues().await.unwrap();
+    assert!(
+        open.iter()
+            .any(|row| row.id == issue && row.kind == "hash_failed"),
+        "the pending attempt keeps the same row: {open:?}"
+    );
+
+    // A failure keeps it as well.
+    sqlx::query("UPDATE books SET hash_state = 'failed' WHERE id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    assert!(a
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .iter()
+        .any(|row| row.id == issue));
+
+    // Only a fully hashed book clears it.
+    sqlx::query("UPDATE books SET hash_state = 'hashed' WHERE id = ?1")
+        .bind(file_id)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
