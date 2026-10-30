@@ -285,9 +285,11 @@ impl SyncService {
 
     async fn refresh_status(&self) -> Result<(), AppError> {
         let pool = &self.inner.pool;
-        // Expire unread conflicts first so the count, the list, and the open
-        // issues always agree. Cheap enough to run with every refresh.
-        conflict::expire(pool).await?;
+        // Settle conflicts whose winner has moved and expire unread rows first,
+        // so the count, the list, and the open issues always agree. Both are
+        // best effort: a busy database must not fail a status read.
+        let _ = conflict::reconcile(pool).await;
+        let _ = conflict::expire(pool).await;
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;
@@ -302,10 +304,12 @@ impl SyncService {
         .bind(now_rfc3339())
         .fetch_one(pool)
         .await?;
-        let conflicts: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL")
-                .fetch_one(pool)
-                .await?;
+        let conflicts: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_conflicts
+             WHERE resolved_at IS NULL AND kind <> 'progress'",
+        )
+        .fetch_one(pool)
+        .await?;
         let waiting_books = waiting::count(pool).await?;
         let enabled = get_meta(pool, META_ENABLED)
             .await?
@@ -1120,6 +1124,7 @@ impl SyncService {
             return Ok(false);
         };
         let mut books = Vec::new();
+        let mut applied = false;
         if resolution == conflict::Resolution::ApplyLoser {
             if let Some(reason) = conflict::apply_blocked_reason(open.kind, &open.field) {
                 return Err(AppError::InvalidInput(reason.into()));
@@ -1138,13 +1143,13 @@ impl SyncService {
                 std::slice::from_ref(&affected),
             )
             .await?;
+            applied = true;
         }
-        conflict::mark_resolved(&self.inner.pool, id).await?;
-        conflict::close_issue_if_settled(&self.inner.pool, &open).await?;
+        let settled = conflict::settle(&self.inner.pool, id, &open).await?;
         self.emit_changes(&books).await;
         self.refresh_status().await?;
         self.emit_status();
-        Ok(true)
+        Ok(applied || settled)
     }
 }
 

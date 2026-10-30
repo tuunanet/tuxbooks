@@ -401,14 +401,20 @@ back by the row itself; the queue only records what was lost.
   count. `keep_winner` only stamps it. `apply_loser` publishes the discarded
   value as a normal operation with a fresh clock, so every device converges;
   delete/edit (`__deleted__`) and lost restores (`__restore__`) republish the
-  explicit restore operation instead.
+  explicit restore operation instead, which also closes the local trash entry
+  on every device that applies the restore.
 - An unresolved row older than 30 days is deleted during a status refresh or a
   conflict list, matching the trash window. Its `sync_issues` row closes when
   no other open conflict shares the key.
+- Each status refresh and list first reconciles open rows against the mirror.
+  A row closes once a newer write has moved the value or clock past its
+  winner, so every device that replays a resolution settles its own copy.
 - Several losing writes for one `(kind, entity_uid, field)` share one issue and
   one key. The issue is resolved only after the last of them is settled.
+- Progress conflicts stay in the table for diagnostics but are left out of the
+  review list and the status count, and never open an issue.
 - Book identity conflicts are keep-only because identity merges are
-  deterministic; a whole-book record conflict is settled from Reading history.
+  deterministic.
 
 ## Cloud-folder sync (migration 0015)
 

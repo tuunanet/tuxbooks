@@ -12,10 +12,11 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::AppError;
 
-use super::clock::{now_rfc3339, observe_hlc};
+use super::clock::{device_id, now_rfc3339, observe_hlc};
 use super::identity::merge_book_identity;
 use super::model::{
-    canonical_from_snapshot, field_names, EntityKind, Hlc, MergeMode, Op, State, TRASH_DAYS,
+    canonical_from_snapshot, conflict_issue_key, field_names, EntityKind, Hlc, MergeMode, Op,
+    State, TRASH_DAYS,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -618,6 +619,18 @@ async fn apply_upsert(
         .bind(entity_uid)
         .execute(&mut **tx)
         .await?;
+        // A restore closes the local Recently deleted entry on every device,
+        // not only on the one that picked it. The row is local trash, so this
+        // never travels in the operation.
+        sqlx::query(
+            "UPDATE sync_trash SET restored_at = ?3
+             WHERE kind = ?1 AND entity_uid = ?2 AND restored_at IS NULL",
+        )
+        .bind(op.kind.as_str())
+        .bind(entity_uid)
+        .bind(now_rfc3339())
+        .execute(&mut **tx)
+        .await?;
     }
 
     match op.kind.merge_mode() {
@@ -942,6 +955,7 @@ pub async fn record_tombstone_conflict(
     entity_uid: &str,
     loser: &State,
 ) -> Result<(), AppError> {
+    let loser_device = device_id(pool).await?;
     let mut tx = pool.begin().await?;
     let delete_hlc: Option<(i64, i64, String)> = sqlx::query_as(
         "SELECT deleted_wall, deleted_count, deleted_dev FROM sync_state_entities
@@ -956,6 +970,14 @@ pub async fn record_tombstone_conflict(
         return Ok(());
     };
     let loser = Value::Object(loser.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    // The local edit is the loser here and has no operation clock of its own
+    // yet. Record the writing device and a current wall time so the review row
+    // names who made it, without taking an HLC that would reorder the merge.
+    let loser_hlc = Hlc {
+        wall: chrono::Utc::now().timestamp_millis(),
+        counter: 0,
+        device: loser_device,
+    };
     record_conflict(
         &mut tx,
         kind,
@@ -968,7 +990,7 @@ pub async fn record_tombstone_conflict(
             counter: counter as u32,
             device,
         },
-        &Hlc::zero(),
+        &loser_hlc,
     )
     .await?;
     tx.commit().await?;
@@ -992,36 +1014,40 @@ async fn record_conflict(
     }
     let winner_text = serde_json::to_string(winner).unwrap_or_else(|_| "null".into());
     let loser_text = serde_json::to_string(loser).unwrap_or_else(|_| "null".into());
-    let issue_key = format!("conflict:{}:{entity_uid}:{field}", kind.as_str());
+    let issue_key = conflict_issue_key(kind, entity_uid, field);
     let detail = format!(
         "{} field {field}: kept {}, discarded {}",
         kind.as_str(),
         truncate(&winner_text, 1800),
         truncate(&loser_text, 1800)
     );
-    let existing: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
-    )
-    .bind(&issue_key)
-    .fetch_optional(&mut **tx)
-    .await?;
-    if let Some(id) = existing {
-        sqlx::query(
-            "UPDATE sync_issues SET detail = ?2,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-        )
-        .bind(id)
-        .bind(&detail)
-        .execute(&mut **tx)
-        .await?;
-    } else {
-        sqlx::query(
-            "INSERT INTO sync_issues (issue_key, kind, detail) VALUES (?1, 'conflict', ?2)",
+    // Progress and other additive state never ask the user for a choice. Keep
+    // the row for diagnostics, but do not open a review issue for it.
+    if kind != EntityKind::Progress {
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
         )
         .bind(&issue_key)
-        .bind(&detail)
-        .execute(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await?;
+        if let Some(id) = existing {
+            sqlx::query(
+                "UPDATE sync_issues SET detail = ?2,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(&detail)
+            .execute(&mut **tx)
+            .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO sync_issues (issue_key, kind, detail) VALUES (?1, 'conflict', ?2)",
+            )
+            .bind(&issue_key)
+            .bind(&detail)
+            .execute(&mut **tx)
+            .await?;
+        }
     }
     sqlx::query(
         r#"
@@ -2275,6 +2301,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(conflicts, 0);
+    }
+
+    #[tokio::test]
+    async fn a_local_edit_after_a_tombstone_records_its_device_and_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let book = create_book(&pool).await;
+        let uid = "c4".repeat(16);
+        apply_op(
+            &pool,
+            &op(EntityKind::Annotation, &uid, &book, json!({"note": "live"})),
+            "a.json",
+        )
+        .await
+        .unwrap();
+        let mut delete = op(EntityKind::Annotation, &uid, &book, json!({}));
+        delete.deleted = true;
+        delete.fields = Map::new();
+        delete.hlc.wall = 200;
+        apply_op(&pool, &delete, "b.json").await.unwrap();
+
+        let mut state = State::new();
+        state.insert("note".into(), json!("late edit"));
+        record_tombstone_conflict(&pool, EntityKind::Annotation, &uid, &state)
+            .await
+            .unwrap();
+
+        let row: (String, i64, i64, String) = sqlx::query_as(
+            "SELECT loser_dev, loser_wall, loser_count, field FROM sync_conflicts
+             WHERE entity_uid = ?1",
+        )
+        .bind(&uid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.3, "__deleted__");
+        assert_eq!(row.0, device_id(&pool).await.unwrap());
+        assert!(row.1 > 0, "the losing edit has a real wall time");
+        assert_eq!(row.2, 0);
     }
 
     #[tokio::test]

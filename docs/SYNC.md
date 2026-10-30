@@ -225,12 +225,13 @@ winner is applied immediately and stays applied.
 
 Each open row carries the kind, entity uid, field, both JSON values, both
 hybrid clocks with the writing device, and the time the conflict was recorded.
-Settings lists open rows newest first with the book title and author, the
-field, both values, and the device names. A special field name is labelled:
-`__entity__` is a whole-entity record, `__deleted__` is an edit that lost to a
-delete, and `__restore__` is a restore that lost to a newer delete. Several
-losing writes for one field share one issue; the issue closes only when the
-last conflict with that key is resolved.
+The `sync_conflicts` sidecar command returns open rows newest first with the
+book title and author, the field, both values, and the device names; Settings >
+Sync will use it for the review surface (ticket `tuxbooks-c6g.8`). A special
+field name is labelled: `__entity__` is a whole-entity record, `__deleted__` is
+an edit that lost to a delete, and `__restore__` is a restore that lost to a
+newer delete. Several losing writes for one field share one issue; the issue
+closes only when the last conflict with that key is resolved.
 
 Two resolutions are offered:
 
@@ -239,12 +240,19 @@ Two resolutions are offered:
   a fresh hybrid clock, so every device replays it and converges. A field
   conflict writes one field, a whole-entity conflict writes the whole record,
   and a delete/edit or lost-restore conflict writes the explicit restore
-  operation. Resolution never deletes the losing value from the row.
+  operation. Resolution never deletes the losing value from the row, and a
+  restore also closes the local Recently deleted entry on every device.
 
-Book identity merges are deterministic and can only be kept; replaying the
-losing uuid would resurrect an identity every device already collapsed. A
-whole-book record conflict is settled from Reading history trash, where the
-snapshot and the replacement identity are handled together.
+The queue is reconciled against the mirror on every status refresh and before
+a list. A row closes once its winner no longer matches the current value and
+clock, so a device that replays another device's resolution stops showing a
+stale choice and its issue closes with it. Book identity merges are
+deterministic and can only be kept; replaying the losing uuid would resurrect
+an identity every device already collapsed.
+
+Progress never prompts. Progress conflicts are kept in the table for
+diagnostics, but they are left out of the review list and the status count, and
+they never open an issue.
 
 Unresolved conflicts older than 30 days are removed on the next status refresh
 or list, and their issue closes when nothing else shares the key. The status
@@ -423,8 +431,10 @@ folder. It covers:
 - same-name collection merge;
 - concurrent note edits converging with the loser kept;
 - conflict review: listing values, devices and clocks, keep winner, applying
-  the loser for a field and a whole entity, delete/edit restore, one shared
-  issue across two losers, 30-day expiry, and the device-id fallback;
+  the loser for a field and a whole entity, delete/edit and lost-restore
+  recovery with trash closing on both devices, settlement after another
+  device resolves, one shared issue across two losers, 30-day expiry, and the
+  device-id fallback;
 - duplicate copies sharing one uuid, the duplicate issue, and state moving to
   the remaining copy when the canonical row is deleted;
 - a pending rehash surviving a missed snapshot update, as in a crash between

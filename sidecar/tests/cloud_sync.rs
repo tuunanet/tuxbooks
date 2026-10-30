@@ -1099,6 +1099,67 @@ async fn publish_op(folder: &Path, wall: i64, op: &Op, devices: &[&Device]) {
     }
 }
 
+fn review_delete_op(
+    wall: i64,
+    kind: EntityKind,
+    entity_uid: &str,
+    book_uid: &str,
+    prior: Value,
+) -> Op {
+    Op {
+        schema: OP_SCHEMA,
+        op_id: format!("{wall:032x}"),
+        device_id: REVIEW_DEVICE.into(),
+        hlc: Hlc {
+            wall,
+            counter: 0,
+            device: REVIEW_DEVICE.into(),
+        },
+        kind,
+        entity_uid: entity_uid.into(),
+        book_uid: Some(book_uid.into()),
+        deleted: true,
+        restore: false,
+        fields: serde_json::Map::new(),
+        prior: prior.as_object().cloned(),
+        created_at: "2026-10-30T00:00:00.000Z".into(),
+    }
+}
+
+fn review_restore_op(
+    wall: i64,
+    kind: EntityKind,
+    entity_uid: &str,
+    book_uid: &str,
+    fields: Value,
+) -> Op {
+    Op {
+        schema: OP_SCHEMA,
+        op_id: format!("{wall:032x}"),
+        device_id: REVIEW_DEVICE.into(),
+        hlc: Hlc {
+            wall,
+            counter: 0,
+            device: REVIEW_DEVICE.into(),
+        },
+        kind,
+        entity_uid: entity_uid.into(),
+        book_uid: Some(book_uid.into()),
+        deleted: false,
+        restore: true,
+        fields: fields.as_object().cloned().unwrap(),
+        prior: None,
+        created_at: "2026-10-30T00:00:00.000Z".into(),
+    }
+}
+
+async fn open_trash(device: &Device) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM sync_trash WHERE restored_at IS NULL")
+        .fetch_one(&device.pool)
+        .await
+        .unwrap()
+}
+
 async fn annotation_sync_uid(device: &Device, id: i64) -> String {
     sqlx::query_scalar("SELECT sync_uid FROM annotations WHERE id = ?1")
         .bind(id)
@@ -1157,6 +1218,19 @@ async fn assert_review_state(device: &Device) {
     assert_eq!(shelves.len(), 1);
     assert_eq!(shelves[0].name, "Loser shelf");
     assert_eq!(progress_percent(device, book).await, Some(20.0));
+}
+
+async fn insert_review_state(device: &Device, entity_uid: &str) {
+    sqlx::query(
+        "INSERT INTO sync_state_fields
+            (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('annotation', ?1, 'note', '\"kept\"', 2, 0, ?2)",
+    )
+    .bind(entity_uid)
+    .bind("f".repeat(32))
+    .execute(&device.pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1413,12 +1487,18 @@ async fn applying_the_loser_for_each_kind_converges_on_the_second_device() {
     }
 
     let conflicts = a.service.list_conflicts().await.unwrap();
-    assert_eq!(conflicts.len(), 4, "one per kind: {conflicts:?}");
+    assert_eq!(conflicts.len(), 3, "progress is never shown: {conflicts:?}");
+    assert!(conflicts.iter().all(|conflict| conflict.kind != "progress"));
+    for issue in a.service.issues().await.unwrap() {
+        assert!(
+            !issue.detail.contains("progress"),
+            "progress never opens a review issue: {issue:?}"
+        );
+    }
     for (kind, field) in [
         ("annotation", "note"),
         ("metadata", "title"),
         ("collection", "name"),
-        ("progress", "__entity__"),
     ] {
         let conflict = conflicts
             .iter()
@@ -1434,12 +1514,43 @@ async fn applying_the_loser_for_each_kind_converges_on_the_second_device() {
         );
     }
 
+    // Progress is settled without a prompt, so it is not reachable from the
+    // list. Resolve it the same way the module can.
+    let progress_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM sync_conflicts WHERE kind = 'progress' AND resolved_at IS NULL",
+    )
+    .fetch_one(&a.pool)
+    .await
+    .unwrap();
+    assert!(a
+        .service
+        .resolve_conflict(progress_id, "apply_loser")
+        .await
+        .unwrap());
+
     assert_review_state(&a).await;
 
     run(&b).await;
     run(&b).await;
     assert_review_state(&b).await;
     assert!(a.service.list_conflicts().await.unwrap().is_empty());
+    assert!(
+        b.service.list_conflicts().await.unwrap().is_empty(),
+        "device B settles the conflicts it replayed"
+    );
+    let b_issues: Vec<_> = b
+        .service
+        .issues()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|issue| issue.kind == "conflict")
+        .collect();
+    assert!(
+        b_issues.is_empty(),
+        "B closes the shared issues: {b_issues:?}"
+    );
+    assert_eq!(b.service.status().await.unwrap().conflicts, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1450,8 +1561,10 @@ async fn a_delete_that_discarded_an_edit_can_be_restored_from_the_review() {
     let a_book = add_book(&a, "review.epub", b"restore edit bytes").await;
     let annotation = add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
     connect(&a, sync_dir.path()).await;
+    a.service.set_device_name("Study").await.unwrap();
     run(&a).await;
     connect(&b, sync_dir.path()).await;
+    b.service.set_device_name("Desktop").await.unwrap();
     add_book(&b, "review.epub", b"restore edit bytes").await;
     run(&b).await;
     run(&b).await;
@@ -1489,6 +1602,16 @@ async fn a_delete_that_discarded_an_edit_can_be_restored_from_the_review() {
     assert_eq!(conflict.field_label, Some("delete versus edit"));
     assert_eq!(conflict.winner, json!("deleted"));
     assert_eq!(conflict.loser["note"], json!("edited after the delete"));
+    assert_eq!(
+        conflict.loser_device_id,
+        clock::device_id(&b.pool).await.unwrap(),
+        "the losing edit names the device that made it"
+    );
+    assert_eq!(conflict.loser_device_name, "Desktop");
+    assert!(conflict.loser_wall > 0, "the losing edit has a real time");
+    assert_eq!(open_trash(&a).await, 1);
+    assert_eq!(open_trash(&b).await, 1);
+    assert_eq!(a.service.status().await.unwrap().trash, 1);
 
     assert!(a
         .service
@@ -1510,8 +1633,87 @@ async fn a_delete_that_discarded_an_edit_can_be_restored_from_the_review() {
             Some("edited after the delete"),
             "with the edit that lost to the tombstone"
         );
+        assert_eq!(
+            open_trash(device).await,
+            0,
+            "the restore closes Recently deleted"
+        );
+        assert_eq!(device.service.status().await.unwrap().trash, 0);
     }
     assert!(a.service.list_conflicts().await.unwrap().is_empty());
+    assert!(
+        b.service.list_conflicts().await.unwrap().is_empty(),
+        "the replaying device settles its copy of the conflict"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lost_restore_can_be_applied_as_the_loser() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let a_book = add_book(&a, "review.epub", b"lost restore bytes").await;
+    let uid = book_uid(&a, a_book).await;
+    let a_annotation = add_bookmark(&a, a_book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let annotation_uid = annotation_sync_uid(&a, a_annotation).await;
+    connect(&b, sync_dir.path()).await;
+    add_book(&b, "review.epub", b"lost restore bytes").await;
+    run(&b).await;
+    run(&b).await;
+
+    let state = json!({
+        "kind": "bookmark",
+        "cfi": "epubcfi(/6/4!/4/2,/1:0,/1:8)",
+        "chapter_href": "chapter1.xhtml"
+    });
+    // Delete, then a restore that arrives with an older clock.
+    let delete = review_delete_op(
+        REVIEW_WALL + 60,
+        EntityKind::Annotation,
+        &annotation_uid,
+        &uid,
+        state.clone(),
+    );
+    publish_op(sync_dir.path(), delete.hlc.wall, &delete, &[&a, &b]).await;
+    let restore = review_restore_op(
+        REVIEW_WALL + 50,
+        EntityKind::Annotation,
+        &annotation_uid,
+        &uid,
+        state,
+    );
+    publish_op(sync_dir.path(), restore.hlc.wall, &restore, &[&a, &b]).await;
+
+    let conflicts = a.service.list_conflicts().await.unwrap();
+    let conflict = conflicts
+        .iter()
+        .find(|conflict| conflict.field == "__restore__")
+        .unwrap_or_else(|| panic!("no lost restore conflict: {conflicts:?}"));
+    assert_eq!(conflict.field_label, Some("restore that lost"));
+    assert_eq!(conflict.winner, json!("deleted"));
+    assert_eq!(open_trash(&a).await, 1);
+    assert_eq!(open_trash(&b).await, 1);
+
+    assert!(a
+        .service
+        .resolve_conflict(conflict.id, "apply_loser")
+        .await
+        .unwrap());
+    run(&b).await;
+
+    for device in [&a, &b] {
+        let book = book_id(device, "review.epub").await;
+        assert_eq!(
+            annotation_count(device, book).await,
+            1,
+            "the restore now wins"
+        );
+        assert_eq!(open_trash(device).await, 0);
+        assert_eq!(device.service.status().await.unwrap().trash, 0);
+        assert!(device.service.list_conflicts().await.unwrap().is_empty());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1604,6 +1806,7 @@ async fn unread_conflicts_expire_after_thirty_days() {
         "2000-01-01T00:00:00.000Z",
     )
     .await;
+    insert_review_state(&a, &"a".repeat(32)).await;
     let fresh = insert_review_conflict(
         &a,
         "annotation",
@@ -1612,6 +1815,7 @@ async fn unread_conflicts_expire_after_thirty_days() {
         &clock::now_rfc3339(),
     )
     .await;
+    insert_review_state(&a, &"b".repeat(32)).await;
     sqlx::query(
         "INSERT INTO sync_issues (issue_key, kind, detail)
          VALUES ('conflict:annotation:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:note',
@@ -1649,6 +1853,7 @@ async fn conflicts_still_list_with_device_ids_when_sync_is_off_or_the_folder_is_
         &clock::now_rfc3339(),
     )
     .await;
+    insert_review_state(&off, &"d".repeat(32)).await;
     let listed = off.service.list_conflicts().await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, id);
@@ -1666,6 +1871,7 @@ async fn conflicts_still_list_with_device_ids_when_sync_is_off_or_the_folder_is_
         &clock::now_rfc3339(),
     )
     .await;
+    insert_review_state(&a, &"e".repeat(32)).await;
     std::fs::remove_dir_all(sync_dir.path()).unwrap();
     let listed = a.service.list_conflicts().await.unwrap();
     assert_eq!(listed.len(), 1);
