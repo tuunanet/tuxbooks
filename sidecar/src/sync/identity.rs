@@ -58,11 +58,15 @@ pub async fn ensure_book_identity(
         if rehash_pending == 0 && *size == stored_size && *mtime == stored_mtime {
             // The binding may predate the durable split (a sync fixture) or a
             // migration row; make sure the file row points at its book.
-            sqlx::query("UPDATE books SET book_uid = ?2, hash_state = 'hashed' WHERE id = ?1")
-                .bind(book_id)
-                .bind(uid)
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "UPDATE books
+                 SET book_uid = ?2, hash_state = 'hashed', hash_attempts = 0, hash_retry_at = NULL
+                 WHERE id = ?1",
+            )
+            .bind(book_id)
+            .bind(uid)
+            .execute(pool)
+            .await?;
             ensure_book_record(pool, book_id).await?;
             return Ok(Some(BookIdentity {
                 book_id,
@@ -231,11 +235,15 @@ pub async fn bind_hash(
     .execute(pool)
     .await?;
 
-    sqlx::query("UPDATE books SET book_uid = ?2, hash_state = 'hashed' WHERE id = ?1")
-        .bind(book_id)
-        .bind(&uid)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE books
+         SET book_uid = ?2, hash_state = 'hashed', hash_attempts = 0, hash_retry_at = NULL
+         WHERE id = ?1",
+    )
+    .bind(book_id)
+    .bind(&uid)
+    .execute(pool)
+    .await?;
     ensure_book_record(pool, book_id).await?;
 
     record_duplicate_bindings(pool, &uid).await?;
@@ -1041,7 +1049,9 @@ pub async fn canonical_entity_uid(
     Ok(current)
 }
 
-/// Record an issue without duplicating an open row for the same key.
+/// Record an issue without duplicating an open row for the same key. The SQL
+/// lives in `repository::sync_issues` because services also record hash
+/// failures; this wrapper keeps the historical call sites readable.
 pub async fn record_issue(
     pool: &SqlitePool,
     key: &str,
@@ -1049,38 +1059,7 @@ pub async fn record_issue(
     detail: &str,
     file_name: Option<&str>,
 ) -> Result<(), AppError> {
-    let existing: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
-    )
-    .bind(key)
-    .fetch_optional(pool)
-    .await?;
-    if let Some(id) = existing {
-        sqlx::query(
-            "UPDATE sync_issues SET kind = ?2, detail = ?3, file_name = ?4,
-             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-        )
-        .bind(id)
-        .bind(kind)
-        .bind(detail)
-        .bind(file_name)
-        .execute(pool)
-        .await?;
-        return Ok(());
-    }
-    sqlx::query(
-        r#"
-        INSERT INTO sync_issues (issue_key, kind, detail, file_name)
-        VALUES (?1, ?2, ?3, ?4)
-        "#,
-    )
-    .bind(key)
-    .bind(kind)
-    .bind(detail)
-    .bind(file_name)
-    .execute(pool)
-    .await?;
-    Ok(())
+    crate::repository::sync_issues::record(pool, key, kind, detail, file_name).await
 }
 
 pub async fn touch_last_sync(pool: &SqlitePool) -> Result<(), AppError> {

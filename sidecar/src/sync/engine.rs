@@ -89,7 +89,8 @@ impl SyncIssueAction {
             | "sync_failed"
             | "operation_retrying"
             | "cover_missing"
-            | "cover_blob_failed" => Self::Retry,
+            | "cover_blob_failed"
+            | "hash_failed" => Self::Retry,
             // A rejected operation failed the retry limit. The file has to be
             // fixed or removed in the sync folder before another pass helps.
             "operation_rejected" => Self::OpenFolder,
@@ -364,6 +365,12 @@ impl SyncService {
         // conflict reconcile above.
         if let Err(err) = self.resolve_cleared_issues().await {
             eprintln!("sync issues: auto-resolve failed: {err}");
+        }
+        // A hash can fail while sync is off and be retried by the book's own
+        // backoff. The sweep gives every already-failed book its row, so
+        // turning sync on surfaces the failure instead of hiding it.
+        if let Err(err) = crate::services::hash_backfill::ensure_failed_issues(pool).await {
+            eprintln!("sync issues: hash failure sweep failed: {err}");
         }
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
@@ -1241,6 +1248,16 @@ impl SyncService {
         issue_key: &str,
         file_name: Option<&str>,
     ) -> Result<bool, AppError> {
+        // Indexing is local work. It must not depend on the sync folder still
+        // being connected, or a detached device could never retry the hash
+        // behind a row that is already listed. The issue key holds the durable
+        // book id, so every location is retried together.
+        if kind == "hash_failed" {
+            let book_id = parse_key_i64(issue_key, "hash-failed:")?;
+            let outcome =
+                crate::services::hash_backfill::retry_book(&self.inner.pool, book_id).await?;
+            return Ok(outcome.hash_state == crate::domain::IndexingRetry::HASHED);
+        }
         let folder = self.status_snapshot().folder.ok_or_else(|| {
             AppError::InvalidInput("sync is not connected; reconnect the sync folder".into())
         })?;
@@ -1480,6 +1497,20 @@ impl SyncService {
                 },
                 None => Ok(false),
             },
+            // A hash row clears only when the whole book is hashed. `pending`
+            // is the claimed state during an attempt, and `failed` is the
+            // result; closing on either would drop the issue mid-retry and
+            // reopen it with a new id on the next failure.
+            "hash_failed" => match issue_key.strip_prefix("hash-failed:") {
+                Some(rest) => match rest.parse::<i64>() {
+                    Ok(book_id) => match self.book_hash_state(book_id).await? {
+                        None => Ok(true),
+                        Some(state) => Ok(state == "hashed"),
+                    },
+                    Err(_) => Ok(false),
+                },
+                None => Ok(false),
+            },
             "reprojection_failed" => match issue_key.strip_prefix("reproject:") {
                 Some(uid) => {
                     Ok(!self.book_record_exists(uid).await? && self.binding_count(uid).await? == 0)
@@ -1549,6 +1580,10 @@ impl SyncService {
             .fetch_optional(&self.inner.pool)
             .await?;
         Ok(row.is_some())
+    }
+
+    async fn book_hash_state(&self, book_id: i64) -> Result<Option<String>, AppError> {
+        crate::repository::identity_backfill::aggregate_hash_state(&self.inner.pool, book_id).await
     }
 
     async fn book_record_exists(&self, book_uid: &str) -> Result<bool, AppError> {
@@ -1848,6 +1883,15 @@ async fn issue_target(
             },
             Err(_) => issue_key.to_string(),
         },
+        // A hash failure is keyed by the durable book id, so the label comes
+        // from the durable record rather than a file row.
+        "hash_failed" => match suffix.parse::<i64>() {
+            Ok(book_id) => match record_book_title(pool, book_id).await {
+                Some(title) => title,
+                None => format!("Book {book_id}"),
+            },
+            Err(_) => issue_key.to_string(),
+        },
         "duplicate_book" => {
             let uid = suffix.split(':').next().unwrap_or(suffix);
             durable_book_title(pool, uid)
@@ -1868,6 +1912,15 @@ async fn issue_target(
 
 async fn file_book_title(pool: &SqlitePool, book_id: i64) -> Option<String> {
     sqlx::query_scalar("SELECT title FROM books WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn record_book_title(pool: &SqlitePool, book_id: i64) -> Option<String> {
+    sqlx::query_scalar("SELECT title FROM book_records WHERE id = ?1")
         .bind(book_id)
         .fetch_optional(pool)
         .await

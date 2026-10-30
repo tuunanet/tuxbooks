@@ -71,6 +71,9 @@ pub struct Book {
     pub file_size: i64,
     /// Source file mtime as unix seconds at the last import/refresh.
     pub file_mtime: i64,
+    /// Durable progress of the content-hash pass for this file:
+    /// `pending`, `hashed`, or `failed` (retrying on the book's backoff clock).
+    pub hash_state: String,
     /// Effective publication date (override or source).
     pub publication_date: Option<String>,
     /// Effective series membership, resolved through the `series` table.
@@ -92,7 +95,7 @@ pub struct Book {
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 25)?;
+        let mut state = serializer.serialize_struct("Book", 26)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("bookUid", &self.book_uid)?;
         state.serialize_field("path", &self.path)?;
@@ -116,6 +119,7 @@ impl Serialize for Book {
         state.serialize_field("available", &self.available)?;
         state.serialize_field("fileSize", &self.file_size)?;
         state.serialize_field("fileMtime", &self.file_mtime)?;
+        state.serialize_field("hashState", &self.hash_state)?;
         state.serialize_field("publicationDate", &self.publication_date)?;
         state.serialize_field("seriesId", &self.series_id)?;
         state.serialize_field("seriesIndex", &self.series_index)?;
@@ -185,6 +189,24 @@ pub struct SearchHit {
     pub snippet: String,
 }
 
+/// Outcome of retrying the content-hash pass for one book. `hashed` means every
+/// location is hashed; `failed` means a location still cannot be read;
+/// `pending` means a location is waiting for its file; `missing` means no
+/// location was available, so nothing could be attempted.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexingRetry {
+    pub book_id: i64,
+    pub hash_state: String,
+}
+
+impl IndexingRetry {
+    pub const HASHED: &'static str = "hashed";
+    pub const FAILED: &'static str = "failed";
+    pub const PENDING: &'static str = "pending";
+    pub const MISSING: &'static str = "missing";
+}
+
 /// Data required to insert or update a book. `added_at`/`modified_at` are managed
 /// by the database; `last_opened_at` is lifecycle state, not import data.
 /// File snapshots (`file_size`/`file_mtime`) come from the filesystem at parse
@@ -249,6 +271,7 @@ mod tests {
             available: true,
             file_size: 0,
             file_mtime: 0,
+            hash_state: "pending".into(),
             publication_date: None,
             series_id: None,
             series_index: None,
@@ -268,6 +291,7 @@ mod tests {
         assert!(json.get("available").is_some());
         assert!(json.get("fileSize").is_some());
         assert!(json.get("fileMtime").is_some());
+        assert!(json.get("hashState").is_some());
         assert!(json.get("added_at").is_none());
     }
 

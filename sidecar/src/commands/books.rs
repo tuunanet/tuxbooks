@@ -1,6 +1,7 @@
 use crate::domain::{
     Book, BookFile, BookTrashEntry, BulkForgetOutcome, EditionBook, EditionLinkOutcome,
-    ForgetOutcome, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus, SearchHit,
+    ForgetOutcome, IndexingRetry, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus,
+    SearchHit,
 };
 use crate::error::AppError;
 use crate::repository::{books, collections, editions, lifecycle};
@@ -56,6 +57,24 @@ pub async fn link_book_edition(
     // Reading history reloads on the target's event.
     crate::commands::emit_book_changed(state, events, outcome.source_book_id).await?;
     crate::commands::emit_book_changed(state, events, outcome.target_book_id).await?;
+    Ok(outcome)
+}
+
+/// Retry the content-hash pass for one book now. The row is reset to pending
+/// with a clean backoff and hashed immediately. Unavailable locations are
+/// skipped, so a missing copy does not gain a failed attempt. The result
+/// reports the aggregate state afterwards, so the client keeps the book warning
+/// when a location is still unreadable. A fully hashed book clears the sync
+/// issue for the old failure.
+pub async fn retry_indexing(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<IndexingRetry, AppError> {
+    let outcome = crate::services::hash_backfill::retry_book(&state.db, book_id).await?;
+    if let Some(book) = books::get_book(&state.db, book_id).await? {
+        crate::commands::emit_changed_book(events, book);
+    }
     Ok(outcome)
 }
 

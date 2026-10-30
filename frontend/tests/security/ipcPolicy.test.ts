@@ -197,6 +197,10 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     });
 
     it("validates Reset, Forget, and restore parameters", () => {
+      expect(() => validateInvokeParams("retry_indexing", { bookId: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("retry_indexing", { bookId: 0 }, issued())).toThrow(
+        /invalid bookId/,
+      );
       expect(() =>
         validateInvokeParams("reset_book_reading_data", { bookId: 1 }, issued()),
       ).not.toThrow();

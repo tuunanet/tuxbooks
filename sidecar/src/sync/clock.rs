@@ -15,7 +15,7 @@ pub const META_DEVICE_ID: &str = "device_id";
 pub const META_DEVICE_NAME: &str = "device_name";
 pub const META_FOLDER: &str = "folder_path";
 pub const META_LIBRARY_ID: &str = "library_id";
-pub const META_ENABLED: &str = "enabled";
+pub use crate::repository::sync_issues::META_ENABLED;
 pub const META_BASELINE_DONE: &str = "baseline_done";
 pub const META_LAST_SYNC: &str = "last_sync_at";
 pub const META_LAST_ERROR: &str = "last_error";

@@ -28,6 +28,8 @@ export interface Book {
   available: boolean;
   fileSize: number;
   fileMtime: number;
+  /** Content-hash progress for the active file: pending, hashed, or failed. */
+  hashState: "pending" | "hashed" | "failed";
   /** Effective (override-over-source) publication date. */
   publicationDate: string | null;
   /** Effective series membership, resolved through the backend `series` table. */
@@ -40,6 +42,17 @@ export interface Book {
   progressUpdatedAt: string | null;
   /** Third-party links owned by this durable book (ADR 0014 D11). */
   providerLinks?: ProviderLink[];
+}
+
+/**
+ * Result of retrying the content-hash pass for one book. `hashed` means every
+ * location is hashed; `failed` means a location still cannot be read;
+ * `pending` means a location is waiting for its file; `missing` means no
+ * location was available, so nothing was attempted.
+ */
+export interface IndexingRetry {
+  bookId: number;
+  hashState: "hashed" | "failed" | "pending" | "missing";
 }
 
 /**

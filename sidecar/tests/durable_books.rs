@@ -13,7 +13,7 @@ use tuxbooks_lib::db::connection::{init_pool, init_pool_recovering};
 use tuxbooks_lib::domain::NewBook;
 use tuxbooks_lib::error::AppError;
 use tuxbooks_lib::repository::{
-    annotations, books, collections, metadata as metadata_repo, migration, reading_progress,
+    annotations, books, collections, metadata as metadata_repo, reading_progress,
 };
 use tuxbooks_lib::services::hash_backfill;
 
@@ -337,12 +337,14 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
 
     // Identity merge notices are no longer shown. The upgrade used to leave a
     // duplicate-identity row open; 0026 resolves it and keeps the audit trail.
-    let issues = migration::list_open(&pool).await.unwrap();
+    let open_kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert!(
-        issues
-            .iter()
-            .all(|issue| issue.kind != "duplicate_identity"),
-        "duplicate identity notices stay resolved: {issues:?}"
+        open_kinds.iter().all(|kind| kind != "duplicate_identity"),
+        "duplicate identity notices stay resolved: {open_kinds:?}"
     );
     let resolved: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM migration_issues
@@ -355,7 +357,7 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
 }
 
 #[tokio::test]
-async fn migration_0026_resolves_identity_notices_but_keeps_hash_failures() {
+async fn migration_0026_resolves_identity_notices_and_0028_resolves_hash_failures() {
     let tmp = tempfile::tempdir().unwrap();
     let db_path = tmp.path().join("tuxbooks.db");
     let fixture = SqlitePoolOptions::new()
@@ -367,7 +369,91 @@ async fn migration_0026_resolves_identity_notices_but_keeps_hash_failures() {
         )
         .await
         .unwrap();
+    // Stop before 0026 so both the informational notices and the hash relink
+    // row exist when the upgrade runs.
     migrator_through(tmp.path(), 25)
+        .await
+        .run(&fixture)
+        .await
+        .unwrap();
+
+    for (key, kind) in [
+        ("identity-merged:a:b", "identity_merged"),
+        ("duplicate-progress:c", "duplicate_state_merged"),
+        ("duplicate-identity:d", "duplicate_identity"),
+        ("hash-failed:7", "hash_failed"),
+    ] {
+        sqlx::query(
+            "INSERT INTO migration_issues (issue_key, kind, detail)
+             VALUES (?1, ?2, 'fixture')",
+        )
+        .bind(key)
+        .bind(kind)
+        .execute(&fixture)
+        .await
+        .unwrap();
+    }
+    fixture.close().await;
+
+    let (pool, recovery) = init_pool_recovering(&db_path).await.unwrap();
+    assert!(recovery.is_none());
+
+    let open: Vec<String> = sqlx::query_scalar(
+        "SELECT kind FROM migration_issues WHERE resolved_at IS NULL ORDER BY kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        open.is_empty(),
+        "0026 closes the identity notices and 0028 closes the hash relink: {open:?}"
+    );
+    for key in [
+        "identity-merged:a:b",
+        "duplicate-progress:c",
+        "duplicate-identity:d",
+        "hash-failed:7",
+    ] {
+        let resolved: Option<String> =
+            sqlx::query_scalar("SELECT resolved_at FROM migration_issues WHERE issue_key = ?1")
+                .bind(key)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            resolved.is_some(),
+            "{key} keeps its audit row and is resolved"
+        );
+    }
+
+    let hash_failure: (String, String) = sqlx::query_as(
+        "SELECT kind, detail FROM migration_issues WHERE issue_key = 'hash-failed:7'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(hash_failure.0, "hash_failed");
+    assert_eq!(
+        hash_failure.1, "fixture",
+        "the audit trail keeps the original detail"
+    );
+}
+
+#[tokio::test]
+async fn migration_0028_resolves_only_the_hash_failure_rows() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let fixture = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    // 0026 already ran here, so this isolates what 0028 itself changes.
+    migrator_through(tmp.path(), 27)
         .await
         .run(&fixture)
         .await
@@ -402,15 +488,19 @@ async fn migration_0026_resolves_identity_notices_but_keeps_hash_failures() {
     .unwrap();
     assert_eq!(
         open,
-        vec!["hash_failed".to_string()],
-        "only the relink issue stays open"
+        vec![
+            "duplicate_identity".to_string(),
+            "duplicate_state_merged".to_string(),
+            "identity_merged".to_string()
+        ],
+        "0028 closes only the hash relink row"
     );
     let resolved: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM migration_issues WHERE resolved_at IS NOT NULL")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(resolved, 3, "the informational notices are resolved");
+    assert_eq!(resolved, 1, "the old hash failure is closed, not deleted");
 }
 
 #[tokio::test]
@@ -511,12 +601,16 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
 
     // 0018 records what it unioned; 0026 resolves those notices, so the audit
     // trail stays without listing internal uids in Settings.
-    let issues = migration::list_open(&pool).await.unwrap();
+    let open_kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert!(
-        issues
+        open_kinds
             .iter()
-            .all(|issue| issue.kind != "duplicate_state_merged"),
-        "union notices stay resolved: {issues:?}"
+            .all(|kind| kind != "duplicate_state_merged"),
+        "union notices stay resolved: {open_kinds:?}"
     );
     let resolved: Vec<String> = sqlx::query_scalar(
         "SELECT issue_key FROM migration_issues
@@ -669,12 +763,16 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
     assert_eq!(records, 1);
     // A collapse is automatic: it stays in the merge diagnostics table and is
     // not recorded as a user issue.
-    let issues = migration::list_open(&pool).await.unwrap();
+    let open_kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert!(
-        issues
+        open_kinds
             .iter()
-            .all(|issue| issue.kind != "identity_merged" && issue.kind != "duplicate_state_merged"),
-        "an automatic merge is not a user issue: {issues:?}"
+            .all(|kind| kind != "identity_merged" && kind != "duplicate_state_merged"),
+        "an automatic merge is not a user issue: {open_kinds:?}"
     );
     let merges: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_book_merges")
         .fetch_one(&pool)
@@ -737,7 +835,7 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
 }
 
 #[tokio::test]
-async fn an_unreadable_file_becomes_a_visible_hash_failure() {
+async fn an_unreadable_file_becomes_a_retrying_failure_without_a_relink_row() {
     let tmp = tempfile::tempdir().unwrap();
     let pool = init_pool(&tmp.path().join("tuxbooks.db")).await.unwrap();
 
@@ -748,16 +846,25 @@ async fn an_unreadable_file_becomes_a_visible_hash_failure() {
 
     hash_backfill::run_until_idle(&pool).await.unwrap();
 
-    let state: String = sqlx::query_scalar("SELECT hash_state FROM books WHERE id = ?1")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let (state, attempts, retry_at): (String, i64, Option<String>) =
+        sqlx::query_as("SELECT hash_state, hash_attempts, hash_retry_at FROM books WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(state, "failed");
-    let issues = migration::list_open(&pool).await.unwrap();
-    assert!(
-        issues.iter().any(|issue| issue.kind == "hash_failed"),
-        "a failed hash is visible: {issues:?}"
+    assert_eq!(attempts, 1, "the failure is counted for the backoff");
+    assert!(retry_at.is_some(), "the retry has a due time");
+    // With sync off the book itself carries the failure; the retired
+    // migration_issues path must not write a row.
+    let relink_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM migration_issues WHERE kind = 'hash_failed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        relink_rows, 0,
+        "hash failures no longer use migration_issues"
     );
 }
 
@@ -880,12 +987,16 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
 
     // The unions are recorded by 0019 and resolved by 0026: no informational
     // row reaches Settings, but the history is still inspectable.
-    let issues = migration::list_open(&pool).await.unwrap();
+    let open_kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert!(
-        issues
+        open_kinds
             .iter()
-            .all(|issue| issue.kind != "duplicate_state_merged"),
-        "union notices stay resolved: {issues:?}"
+            .all(|kind| kind != "duplicate_state_merged"),
+        "union notices stay resolved: {open_kinds:?}"
     );
     let resolved: Vec<(String, String)> = sqlx::query_as(
         "SELECT issue_key, detail FROM migration_issues

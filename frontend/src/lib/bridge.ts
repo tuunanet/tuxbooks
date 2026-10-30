@@ -19,6 +19,7 @@ import type {
   EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
+  IndexingRetry,
   LibraryChange,
   LibraryStats,
   MetadataFields,
@@ -44,6 +45,7 @@ export type {
   EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
+  IndexingRetry,
   LibraryChange,
   LibraryStats,
   MetadataFields,
@@ -350,6 +352,15 @@ export function removeBookFile(bookId: number, fileId: number): Promise<boolean>
  */
 export function resetBookReadingData(bookId: number): Promise<boolean> {
   return invoke("reset_book_reading_data", { bookId });
+}
+
+/**
+ * Retry the content-hash pass for one book now instead of waiting for its
+ * automatic backoff. Resolves with the state afterwards, so the caller keeps
+ * the warning when the file is still unreadable.
+ */
+export function retryIndexing(bookId: number): Promise<IndexingRetry> {
+  return invoke("retry_indexing", { bookId });
 }
 
 /**

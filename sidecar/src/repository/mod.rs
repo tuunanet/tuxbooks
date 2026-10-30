@@ -6,7 +6,7 @@ pub mod identity_backfill;
 pub mod library_locations;
 pub mod lifecycle;
 pub mod metadata;
-pub mod migration;
 pub mod providers;
 pub mod reading_progress;
 pub mod storage;
+pub mod sync_issues;

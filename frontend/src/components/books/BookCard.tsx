@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import type { Book, CollectionSummary } from "@/types/domain";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { IndexingBadge } from "./IndexingBadge";
 import { bookSelectionClass } from "./selection";
 
 /**
@@ -138,6 +139,9 @@ export function BookCard({
               <Badge variant="destructive" className="absolute top-1.5 left-1.5">
                 Missing
               </Badge>
+            )}
+            {book.hashState === "failed" && (
+              <IndexingBadge className="absolute bottom-1.5 left-1.5" />
             )}
           </div>
           <div className="px-0.5 pt-2 pb-1">

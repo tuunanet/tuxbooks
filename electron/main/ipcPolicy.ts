@@ -96,6 +96,7 @@ const BOOK_ID_METHODS = new Set([
   "list_book_files",
   "list_book_editions",
   "reset_book_reading_data",
+  "retry_indexing",
   "forget_book",
   "get_book_metadata",
   "reset_book_metadata",
