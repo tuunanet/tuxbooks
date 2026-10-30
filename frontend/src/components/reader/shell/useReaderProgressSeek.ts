@@ -18,24 +18,42 @@ export function useReaderProgressSeek({ position, adapterRef }: UseReaderProgres
   // query runs inside the pointer handlers, so refs stay out of render, and
   // a null open adapter degrades the label to percent-only.
   const [label, setLabel] = useState<string | null>(null);
+  // Whether the positioning label is showing. A ref rather than the label
+  // state: a relocate re-render can queue its refresh effect before
+  // pointerleave clears the label, and that effect must not read the stale
+  // non-null label and put the tooltip back.
+  const labelOpenRef = useRef(false);
   const barRef = useRef<HTMLDivElement | null>(null);
 
-  const readLabel = useCallback(
+  const labelFor = useCallback(
     (percent: number) => {
       const location = adapterRef.current?.progressionIndexFor?.(percent / 100) ?? null;
-      setLabel(locationLabel(location, percent));
+      return locationLabel(location, percent);
     },
     [adapterRef],
   );
+
+  const readLabel = useCallback(
+    (percent: number) => {
+      labelOpenRef.current = true;
+      setLabel(labelFor(percent));
+    },
+    [labelFor],
+  );
+
+  const clearLabel = useCallback(() => {
+    labelOpenRef.current = false;
+    setLabel(null);
+  }, []);
 
   // The label is live while it shows: page turns move the value under a
   // resting pointer, and a label read only at pointer entry would sit frozen
   // at the location where the seek began.
   const barValue = preview ?? position;
   useEffect(() => {
-    if (label === null) return;
-    readLabel(barValue);
-  }, [label, barValue, readLabel]);
+    if (!labelOpenRef.current) return;
+    setLabel(labelFor(barValue));
+  }, [barValue, labelFor]);
 
   // A pointer seek is over: hand focus back to the reading surface.
   const releaseFocus = () => {
@@ -45,5 +63,13 @@ export function useReaderProgressSeek({ position, adapterRef }: UseReaderProgres
     }
   };
 
-  return { preview, setPreview, label, setLabel, readLabel, barRef, releaseFocus };
+  return {
+    preview,
+    setPreview,
+    label,
+    readLabel,
+    clearLabel,
+    barRef,
+    releaseFocus,
+  };
 }

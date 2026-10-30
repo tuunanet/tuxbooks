@@ -9,7 +9,7 @@ interface ReaderProgressFooterProps {
   onPreviewChange: (value: number | null) => void;
   onCommit: (value: number) => void;
   label: string | null;
-  onLabelChange: (label: string | null) => void;
+  onLabelClear: () => void;
   onReadLabel: (percent: number) => void;
   progressBarRef: RefObject<HTMLDivElement | null>;
   onReleaseFocus: () => void;
@@ -31,7 +31,7 @@ export function ReaderProgressFooter({
   onPreviewChange,
   onCommit,
   label,
-  onLabelChange,
+  onLabelClear,
   onReadLabel,
   progressBarRef,
   onReleaseFocus,
@@ -65,7 +65,7 @@ export function ReaderProgressFooter({
           }}
           onPointerEnter={() => onReadLabel(progressPreview ?? position)}
           onPointerDown={() => onReadLabel(progressPreview ?? position)}
-          onPointerLeave={() => onLabelChange(null)}
+          onPointerLeave={onLabelClear}
           // A pointer seek is over: hand focus back to the reading surface, so
           // arrows and space go straight back to turning pages instead of
           // nudging the thumb by 0.1% per keypress (the same focus policy as
