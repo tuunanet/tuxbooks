@@ -2793,14 +2793,14 @@ mod tests {
             .await
             .unwrap();
         assert!(deleted, "an older restore cannot resurrect the delete");
-        let field: String = sqlx::query_scalar(
-            "SELECT field FROM sync_conflicts WHERE entity_uid = ?1 AND field = '__restore__'",
+        let conflicts: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_conflicts WHERE entity_uid = ?1 AND field = '__restore__'",
         )
         .bind(&uid)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(field, "__restore__");
+        assert_eq!(conflicts, 1);
     }
 
     #[tokio::test]
@@ -3061,11 +3061,19 @@ mod tests {
             &[Affected {
                 kind: EntityKind::Metadata,
                 entity_uid: book_uid.clone(),
-                book_uid: Some(book_uid),
+                book_uid: Some(book_uid.clone()),
             }],
         )
         .await
         .unwrap();
+        let (title, cover): (String, Option<String>) =
+            sqlx::query_as("SELECT title, cover_path FROM book_records WHERE uid = ?1")
+                .bind(&book_uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(title, "No cover field");
+        assert!(cover.is_none(), "a null cover clears the stored path");
     }
 
     #[tokio::test]

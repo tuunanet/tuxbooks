@@ -45,18 +45,19 @@ which moved the frontend to vitest 5. It records the first run on the new
 instrument; Rust rows are n/a because that change did not touch the Rust
 instrument.
 
-Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`. On
-executable production lines (before `#[cfg(test)]`) the module measures
-98.3%, and every file is above 92%: capture 99.5%, identity 98.8%, merge
-99.6%, waiting 100%. The recovery paths carry the new tests: capture
-failures, identity merges, merge rules, and waiting books. llvm-cov's file
-summary also counts inline test lines, so its number is not a production-only
-figure. A stricter segment count that treats the uncovered error edge at the
-end of a multi-line `await` as an uncovered line reports 92.3% for the
-module: capture 93.7% and merge 93.4% clear 92, while identity (88.0%) and
-waiting (90.7%) sit at their measured ceilings under that count. The exact
-lines and the reason each one cannot be covered without injecting database
-failures are in the PR for `tuxbooks-c6g.3`.
+Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`.
+`just coverage` reports 98.3% for the module, but that is llvm-cov's whole-file
+summary and it includes inline test lines. Production-only coverage (segments
+before `#[cfg(test)]`, the measurement the review uses) is 92.3% for the
+module: capture 93.7%, identity 88.0%, merge 93.4%, and waiting 90.7%. The
+module clears the 92% floor on that count. Two files do not: identity and
+waiting stop at 88.0% and 90.7% because their remaining uncovered entries are
+branch bodies no caller can produce or the uncovered error edge of a
+multi-line `await`, not lines that failed to execute. `capture.rs:67` and
+`capture.rs:449` (`Captured::PendingIdentity`) are also unreachable:
+`capture_membership` always resolves or mints the collection uid, and
+`resolve_local_uid` returns `None` only for a deleted marker. The exact lines
+and reasons are in the PR for `tuxbooks-c6g.3`.
 
 Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.

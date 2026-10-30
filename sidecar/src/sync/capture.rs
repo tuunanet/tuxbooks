@@ -1248,6 +1248,65 @@ mod tests {
         assert_eq!(dirty_count(&pool).await, 0);
     }
 
+    /// `Captured::PendingIdentity` has no producer: the membership path calls
+    /// `resolve_local_uid` with `deleted = false`, and that helper only returns
+    /// `None` for a deleted marker. An unbound collection is not pending; it
+    /// gets a uid here, so the capture pass writes the membership instead of
+    /// counting it as waiting.
+    #[tokio::test]
+    async fn an_unbound_collection_membership_mints_a_uid_and_does_not_wait() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+        let collection_id: i64 =
+            sqlx::query_scalar("INSERT INTO collections (name) VALUES ('Shelf') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        // The collection insert queued its own marker; keep only the membership.
+        sqlx::query("DELETE FROM sync_dirty")
+            .execute(&pool)
+            .await
+            .unwrap();
+        insert_dirty(
+            &pool,
+            "membership",
+            &format!("{book_uid}:{collection_id}"),
+            "upsert",
+            None,
+            Some(&format!(
+                r#"{{"book_uid":"{book_uid}","collection_id":{collection_id},"present":true}}"#
+            )),
+        )
+        .await;
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(
+            report.pending_identity, 0,
+            "an unbound collection is resolved, never left pending"
+        );
+        assert_eq!(report.written, 1);
+        let collection_uid: String =
+            sqlx::query_scalar("SELECT sync_uid FROM collections WHERE id = ?1")
+                .bind(collection_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(collection_uid.len(), 32);
+        let (state, deleted) = crate::sync::merge::load_state(
+            &pool,
+            EntityKind::Membership,
+            &format!("{collection_uid}:{book_uid}"),
+        )
+        .await
+        .unwrap();
+        assert!(!deleted);
+        assert_eq!(state.get("present"), Some(&Value::Bool(true)));
+    }
+
     #[tokio::test]
     async fn a_forget_without_a_portable_snapshot_keeps_the_tombstone_and_warns() {
         let tmp = tempfile::tempdir().unwrap();
