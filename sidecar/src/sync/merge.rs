@@ -2690,6 +2690,535 @@ mod tests {
             .is_empty());
     }
 
+    #[tokio::test]
+    async fn a_second_forget_after_a_restore_is_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let uid = "f1".repeat(16);
+        sqlx::query(
+            "INSERT INTO sync_book_trash
+                (book_uid, snapshot_json, deleted_wall, deleted_count, deleted_dev,
+                 deleted_at, expires_at, restored_at, restored_wall, restored_count,
+                 restored_dev)
+             VALUES (?1, NULL, 50, 0, 'other', '2026-01-01T00:00:00.000Z',
+                     '2999-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z', 500, 0,
+                     'other')",
+        )
+        .bind(&uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut forget = op(EntityKind::Book, &uid, &uid, json!({}));
+        forget.deleted = true;
+        forget.fields = Map::new();
+        forget.hlc.wall = 100;
+        let affected = apply_op(&pool, &forget, "a.json").await.unwrap();
+        assert!(
+            affected.is_empty(),
+            "a delayed Forget cannot undo a completed restore"
+        );
+        let restored: Option<String> =
+            sqlx::query_scalar("SELECT restored_at FROM sync_book_trash WHERE book_uid = ?1")
+                .bind(&uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(restored.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_restore_older_than_the_tombstone_is_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let uid = "f2".repeat(16);
+        sqlx::query(
+            "INSERT INTO sync_book_trash
+                (book_uid, snapshot_json, deleted_wall, deleted_count, deleted_dev,
+                 deleted_at, expires_at)
+             VALUES (?1, NULL, 500, 0, 'other', '2026-01-01T00:00:00.000Z',
+                     '2999-01-01T00:00:00.000Z')",
+        )
+        .bind(&uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut restore = op(EntityKind::Book, &uid, &uid, json!({}));
+        restore.fields = json!({"discarded": false, "snapshot": null})
+            .as_object()
+            .cloned()
+            .unwrap();
+        restore.hlc.wall = 400;
+        let affected = apply_op(&pool, &restore, "a.json").await.unwrap();
+        assert!(affected.is_empty());
+        let restored: Option<String> =
+            sqlx::query_scalar("SELECT restored_at FROM sync_book_trash WHERE book_uid = ?1")
+                .bind(&uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(restored.is_none(), "the newer tombstone still stands");
+    }
+
+    #[tokio::test]
+    async fn a_restore_older_than_the_tombstone_is_kept_as_a_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let book = create_book(&pool).await;
+        let uid = "f3".repeat(16);
+        let mut delete = op(EntityKind::Annotation, &uid, &book, json!({}));
+        delete.deleted = true;
+        delete.fields = Map::new();
+        delete.hlc.wall = 200;
+        apply_op(&pool, &delete, "a.json").await.unwrap();
+
+        let mut restore = op(
+            EntityKind::Annotation,
+            &uid,
+            &book,
+            json!({"note": "late restore"}),
+        );
+        restore.restore = true;
+        restore.hlc.wall = 100;
+        apply_op(&pool, &restore, "b.json").await.unwrap();
+
+        let (_, deleted) = load_state(&pool, EntityKind::Annotation, &uid)
+            .await
+            .unwrap();
+        assert!(deleted, "an older restore cannot resurrect the delete");
+        let field: String = sqlx::query_scalar(
+            "SELECT field FROM sync_conflicts WHERE entity_uid = ?1 AND field = '__restore__'",
+        )
+        .bind(&uid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(field, "__restore__");
+    }
+
+    #[tokio::test]
+    async fn a_newer_progress_delete_tombstones_the_locator() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let book = create_book(&pool).await;
+        let uid = "f4".repeat(16);
+        let mut progress = op(
+            EntityKind::Progress,
+            &uid,
+            &book,
+            json!({"progress_percent": 30.0}),
+        );
+        progress.hlc.wall = 100;
+        apply_op(&pool, &progress, "a.json").await.unwrap();
+
+        let mut delete = op(EntityKind::Progress, &uid, &book, json!({}));
+        delete.deleted = true;
+        delete.fields = Map::new();
+        delete.hlc.wall = 200;
+        apply_op(&pool, &delete, "b.json").await.unwrap();
+
+        let (_, deleted) = load_state(&pool, EntityKind::Progress, &uid).await.unwrap();
+        assert!(deleted);
+    }
+
+    #[tokio::test]
+    async fn identical_older_values_and_repeated_conflicts_stay_quiet() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let book = create_book(&pool).await;
+
+        // An identical older progress op is not a conflict. Entity mode keeps
+        // the whole locator, so the comparison is against the full field set.
+        let progress = "f5".repeat(16);
+        let locator = |page: u64| {
+            json!({
+                "chapter_href": "c.xhtml",
+                "cfi": "epubcfi(/6/4)",
+                "character_offset": 0,
+                "page_number": page,
+                "scroll_offset": 0.0,
+                "progress_percent": 60.0,
+                "locator": "x",
+                "progression": 0.6,
+                "locations": "{}",
+                "engine": "readium",
+                "schema_version": 2
+            })
+        };
+        let mut newer = op(EntityKind::Progress, &progress, &book, locator(4));
+        newer.hlc.wall = 200;
+        apply_op(&pool, &newer, "a.json").await.unwrap();
+        let mut identical = op(EntityKind::Progress, &progress, &book, locator(4));
+        identical.hlc.wall = 100;
+        apply_op(&pool, &identical, "b.json").await.unwrap();
+        let conflicts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE entity_uid = ?1")
+                .bind(&progress)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(conflicts, 0);
+
+        // Two losing edits share one open issue and keep both conflict rows.
+        let annotation = "f6".repeat(16);
+        let mut newest = op(
+            EntityKind::Annotation,
+            &annotation,
+            &book,
+            json!({"note": "newest"}),
+        );
+        newest.hlc.wall = 300;
+        apply_op(&pool, &newest, "c.json").await.unwrap();
+        for (wall, note) in [(200, "older one"), (100, "older two")] {
+            let mut older = op(
+                EntityKind::Annotation,
+                &annotation,
+                &book,
+                json!({"note": note}),
+            );
+            older.hlc.wall = wall;
+            apply_op(&pool, &older, "d.json").await.unwrap();
+        }
+        let conflicts: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE entity_uid = ?1")
+                .bind(&annotation)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(conflicts, 2);
+        let issues: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_issues WHERE issue_key LIKE ?1 AND resolved_at IS NULL",
+        )
+        .bind(format!("conflict:annotation:{annotation}:note"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(issues, 1, "one issue per field, refreshed in place");
+    }
+
+    #[tokio::test]
+    async fn applying_an_op_with_a_merged_book_uid_uses_the_winner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let loser = "f7".repeat(16);
+        let winner = "f8".repeat(16);
+        sqlx::query("INSERT INTO sync_book_merges (loser, winner) VALUES (?1, ?2)")
+            .bind(&loser)
+            .bind(&winner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let affected = apply_op(
+            &pool,
+            &op(
+                EntityKind::Annotation,
+                &"f9".repeat(16),
+                &loser,
+                json!({"note": "via alias"}),
+            ),
+            "a.json",
+        )
+        .await
+        .unwrap();
+        assert_eq!(affected[0].book_uid.as_deref(), Some(winner.as_str()));
+    }
+
+    #[tokio::test]
+    async fn project_skips_a_missing_book_uid_and_a_book_without_a_trash_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let covers = tmp.path().join("covers");
+        let affected = vec![
+            Affected {
+                kind: EntityKind::Annotation,
+                entity_uid: "fa".repeat(16),
+                book_uid: None,
+            },
+            Affected {
+                kind: EntityKind::Book,
+                entity_uid: "fb".repeat(16),
+                book_uid: None,
+            },
+        ];
+        assert!(project(&pool, tmp.path(), &covers, &affected)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_shared_snapshot_becomes_a_lifecycle_issue() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let uid = "fc".repeat(16);
+        sqlx::query(
+            "INSERT INTO sync_book_trash
+                (book_uid, replacement_book_uid, snapshot_json, deleted_wall,
+                 deleted_count, deleted_dev, deleted_at, expires_at, restored_at,
+                 discarded, restored_wall, restored_count, restored_dev)
+             VALUES (?1, NULL, '{not json', 10, 0, 'other',
+                     '2026-01-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z',
+                     '2026-01-02T00:00:00.000Z', 0, 20, 0, 'other')",
+        )
+        .bind(&uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let covers = tmp.path().join("covers");
+        assert!(project(
+            &pool,
+            tmp.path(),
+            &covers,
+            &[Affected {
+                kind: EntityKind::Book,
+                entity_uid: uid.clone(),
+                book_uid: Some(uid.clone()),
+            }],
+        )
+        .await
+        .unwrap()
+        .is_empty());
+        let issue: String = sqlx::query_scalar(
+            "SELECT detail FROM sync_issues WHERE kind = 'book_lifecycle_failed'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(issue.contains(&uid), "{issue}");
+    }
+
+    #[tokio::test]
+    async fn metadata_projection_without_a_cover_blob_still_applies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+        let covers = tmp.path().join("covers");
+
+        put_state(
+            &pool,
+            EntityKind::Metadata,
+            &book_uid,
+            &[
+                ("title", json!("Missing cover")),
+                ("cover_path", json!("0123456789abcdef.png")),
+            ],
+        )
+        .await;
+        project(
+            &pool,
+            tmp.path(),
+            &covers,
+            &[Affected {
+                kind: EntityKind::Metadata,
+                entity_uid: book_uid.clone(),
+                book_uid: Some(book_uid.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+        let (title, cover): (String, Option<String>) =
+            sqlx::query_as("SELECT title, cover_path FROM book_records WHERE uid = ?1")
+                .bind(&book_uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(title, "Missing cover");
+        assert!(cover.is_none(), "the missing blob is not invented");
+
+        put_state(
+            &pool,
+            EntityKind::Metadata,
+            &book_uid,
+            &[
+                ("title", json!("No cover field")),
+                ("cover_path", Value::Null),
+            ],
+        )
+        .await;
+        project(
+            &pool,
+            tmp.path(),
+            &covers,
+            &[Affected {
+                kind: EntityKind::Metadata,
+                entity_uid: book_uid.clone(),
+                book_uid: Some(book_uid),
+            }],
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn collection_projection_skips_memberships_for_unknown_or_deleted_books() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let covers = tmp.path().join("covers");
+        let collection_uid = "fd".repeat(16);
+        put_state(
+            &pool,
+            EntityKind::Collection,
+            &collection_uid,
+            &[("name", json!("Shelf"))],
+        )
+        .await;
+        let unknown_book = "fe".repeat(16);
+        let unknown_entity = format!("{collection_uid}:{unknown_book}");
+        put_state(
+            &pool,
+            EntityKind::Membership,
+            &unknown_entity,
+            &[("present", json!(true))],
+        )
+        .await;
+        let deleted_book = "ff".repeat(16);
+        let deleted_entity = format!("{collection_uid}:{deleted_book}");
+        put_state(
+            &pool,
+            EntityKind::Membership,
+            &deleted_entity,
+            &[("present", json!(true))],
+        )
+        .await;
+        sqlx::query("UPDATE sync_state_entities SET deleted = 1 WHERE entity_uid = ?1")
+            .bind(&deleted_entity)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        project(
+            &pool,
+            tmp.path(),
+            &covers,
+            &[Affected {
+                kind: EntityKind::Collection,
+                entity_uid: collection_uid,
+                book_uid: None,
+            }],
+        )
+        .await
+        .unwrap();
+        let members: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_collections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(members, 0, "neither membership can be projected");
+    }
+
+    #[tokio::test]
+    async fn apply_identity_resolves_a_forgotten_alias_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        // The old alias owner has a replacement: the alias follows it.
+        let hash = "d1".repeat(32);
+        let dead = "d2".repeat(16);
+        let fresh = "d3".repeat(16);
+        forget_book(&pool, &dead, Some(&fresh)).await;
+        sqlx::query("INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)")
+            .bind(&hash)
+            .bind(&dead)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let incoming = "d4".repeat(16);
+        let identity = op(
+            EntityKind::BookIdentity,
+            &incoming,
+            &incoming,
+            json!({"content_hash": hash}),
+        );
+        let affected = apply_op(&pool, &identity, "a.json").await.unwrap();
+        assert_eq!(affected[0].entity_uid, fresh);
+        let owner: String =
+            sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
+                .bind(&hash)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, fresh);
+
+        // The old alias owner was forgotten with no replacement: the incoming
+        // identity owns the hash.
+        let orphan_hash = "d5".repeat(32);
+        let orphan = "d6".repeat(16);
+        forget_book(&pool, &orphan, None).await;
+        sqlx::query("INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)")
+            .bind(&orphan_hash)
+            .bind(&orphan)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let orphan_incoming = "a0".repeat(16);
+        let identity = op(
+            EntityKind::BookIdentity,
+            &orphan_incoming,
+            &orphan_incoming,
+            json!({"content_hash": orphan_hash}),
+        );
+        apply_op(&pool, &identity, "b.json").await.unwrap();
+        let owner: String =
+            sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
+                .bind(&orphan_hash)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, orphan_incoming);
+    }
+
+    #[tokio::test]
+    async fn applying_a_collection_op_uses_the_merged_entity_uid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let loser = "e1".repeat(16);
+        let winner = "e2".repeat(16);
+        sqlx::query(
+            "INSERT INTO sync_entity_merges (kind, loser, winner) VALUES ('collection', ?1, ?2)",
+        )
+        .bind(&loser)
+        .bind(&winner)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let affected = apply_op(
+            &pool,
+            &op(EntityKind::Collection, &loser, "", json!({"name": "Shelf"})),
+            "a.json",
+        )
+        .await
+        .unwrap();
+        assert_eq!(affected[0].entity_uid, winner);
+        let (state, _) = load_state(&pool, EntityKind::Collection, &winner)
+            .await
+            .unwrap();
+        assert_eq!(state.get("name"), Some(&json!("Shelf")));
+    }
+
     async fn create_book(pool: &SqlitePool) -> String {
         let book_id = crate::repository::books::upsert_book(
             pool,

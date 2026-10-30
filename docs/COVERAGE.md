@@ -45,12 +45,18 @@ which moved the frontend to vitest 5. It records the first run on the new
 instrument; Rust rows are n/a because that change did not touch the Rust
 instrument.
 
-Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`. The
-sync recovery work (`.1` through `.3`) left every file in the module at or
-above 92% lines, so the floor holds that level instead of the old module
-default. Sync decides whether a conflict, a Forget, or a waiting book
-converges on the next pass, so a coverage drop there gets the same gate as
-the reader.
+Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`. On
+executable production lines (before `#[cfg(test)]`) the module measures
+98.3%, and every file is above 92%: capture 99.5%, identity 98.8%, merge
+99.6%, waiting 100%. The recovery paths carry the new tests: capture
+failures, identity merges, merge rules, and waiting books. llvm-cov's file
+summary also counts inline test lines, so its number is not a production-only
+figure. A stricter segment count that treats the uncovered error edge at the
+end of a multi-line `await` as an uncovered line reports 92.3% for the
+module: capture 93.7% and merge 93.4% clear 92, while identity (88.0%) and
+waiting (90.7%) sit at their measured ceilings under that count. The exact
+lines and the reason each one cannot be covered without injecting database
+failures are in the PR for `tuxbooks-c6g.3`.
 
 Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.

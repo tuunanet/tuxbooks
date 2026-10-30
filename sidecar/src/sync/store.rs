@@ -717,6 +717,26 @@ mod tests {
         ))
         .is_err());
         assert!(validate_op(&op(EntityKind::Membership, json!({"present": "yes"}))).is_err());
+        assert!(validate_op(&op(
+            EntityKind::BookIdentity,
+            json!({"content_hash": "a".repeat(64), "evil": "x"})
+        ))
+        .is_err());
+        assert!(validate_op(&op(
+            EntityKind::Book,
+            json!({"snapshot": null, "evil": "x"})
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn archiving_a_folder_without_a_library_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        assert!(archive_existing_library(&folder, "2026-10-29T15:01:00Z")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

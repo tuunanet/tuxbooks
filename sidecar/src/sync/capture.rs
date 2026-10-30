@@ -1473,4 +1473,127 @@ mod tests {
             .unwrap();
         assert_eq!(restore, 1);
     }
+
+    #[tokio::test]
+    async fn incomplete_annotation_and_collection_markers_are_dropped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+
+        // No snapshot at all, and a marker that names no book.
+        insert_dirty(&pool, "annotation", "1", "upsert", None, None).await;
+        insert_dirty(&pool, "annotation", "2", "upsert", None, Some("{}")).await;
+        // A delete needs a portable uid; an old row without one is dropped.
+        insert_dirty(
+            &pool,
+            "annotation",
+            "3",
+            "delete",
+            Some(&format!(r#"{{"book_uid":"{book_uid}"}}"#)),
+            None,
+        )
+        .await;
+        insert_dirty(&pool, "collection", "1", "upsert", None, None).await;
+        insert_dirty(
+            &pool,
+            "collection",
+            "2",
+            "delete",
+            Some(r#"{"name":"Shelf"}"#),
+            None,
+        )
+        .await;
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(report.written, 0);
+        assert_eq!(dirty_count(&pool).await, 0);
+        assert_eq!(op_count(&pool).await, 0);
+    }
+
+    #[tokio::test]
+    async fn incomplete_book_state_and_book_markers_are_dropped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+
+        // The durable record exists, but the trigger snapshot did not survive.
+        insert_dirty(&pool, "metadata", &book_uid, "upsert", None, None).await;
+        insert_dirty(&pool, "opened", &book_uid, "upsert", None, None).await;
+        // A whole-book marker with no payload cannot name a lifecycle change.
+        insert_dirty(&pool, "book", &book_uid, "upsert", None, None).await;
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(report.written, 0);
+        assert_eq!(dirty_count(&pool).await, 0);
+    }
+
+    #[tokio::test]
+    async fn incomplete_membership_markers_are_dropped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+
+        insert_dirty(&pool, "membership", "1", "upsert", None, None).await;
+        insert_dirty(
+            &pool,
+            "membership",
+            "2",
+            "upsert",
+            None,
+            Some(r#"{"collection_id":1,"present":true}"#),
+        )
+        .await;
+        insert_dirty(
+            &pool,
+            "membership",
+            "3",
+            "upsert",
+            None,
+            Some(&format!(r#"{{"book_uid":"{book_uid}","present":true}}"#)),
+        )
+        .await;
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(report.written, 0);
+        assert_eq!(dirty_count(&pool).await, 0);
+    }
+
+    #[tokio::test]
+    async fn resolve_local_uid_ignores_an_unsafe_snapshot_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let id: i64 =
+            sqlx::query_scalar("INSERT INTO collections (name) VALUES ('Shelf') RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        // A hostile or empty uid falls back to the local row, then mints one.
+        let uid = resolve_local_uid(&pool, "collections", id, Some("../evil"), false)
+            .await
+            .unwrap()
+            .expect("a local uid is minted");
+        assert_eq!(uid.len(), 32);
+        let stored: String = sqlx::query_scalar("SELECT sync_uid FROM collections WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, uid);
+
+        // A delete with no portable uid cannot name the shared entity.
+        assert!(resolve_local_uid(&pool, "collections", id, None, true)
+            .await
+            .unwrap()
+            .is_none());
+    }
 }

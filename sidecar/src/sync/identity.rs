@@ -1715,4 +1715,402 @@ mod tests {
             .unwrap();
         assert!(!last.is_empty());
     }
+
+    #[tokio::test]
+    async fn bind_hash_folds_both_sides_of_an_alias_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        // Existing binding sorts before the alias.
+        let first_path = tmp.path().join("first.epub");
+        std::fs::write(&first_path, b"first").unwrap();
+        let first = book_with_file(&pool, &first_path).await;
+        let existing = "a".repeat(32);
+        let alias = "e".repeat(32);
+        let first_hash = "1".repeat(64);
+        sqlx::query(
+            "INSERT INTO sync_book_bindings
+                (book_id, book_uid, content_hash, hashed_size, hashed_mtime)
+             VALUES (?1, ?2, 'old', 0, 0)",
+        )
+        .bind(first)
+        .bind(&existing)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE books SET book_uid = ?2 WHERE id = ?1")
+            .bind(first)
+            .bind(&existing)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)")
+            .bind(&first_hash)
+            .bind(&alias)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let identity = bind_hash(&pool, first, &first_hash, 5, 0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity.book_uid, existing, "the smaller uid wins");
+        let merge: (String, String) =
+            sqlx::query_as("SELECT loser, winner FROM sync_book_merges WHERE loser = ?1")
+                .bind(&alias)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(merge.1, existing);
+
+        // Existing binding sorts after the alias.
+        let second_path = tmp.path().join("second.epub");
+        std::fs::write(&second_path, b"second").unwrap();
+        book_with_file(&pool, &second_path).await;
+        let second: i64 = sqlx::query_scalar("SELECT id FROM books WHERE path = ?1")
+            .bind(second_path.to_string_lossy().into_owned())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let later = "f".repeat(32);
+        let earlier = "b".repeat(32);
+        let second_hash = "2".repeat(64);
+        sqlx::query(
+            "INSERT INTO sync_book_bindings
+                (book_id, book_uid, content_hash, hashed_size, hashed_mtime)
+             VALUES (?1, ?2, 'old', 0, 0)",
+        )
+        .bind(second)
+        .bind(&later)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE books SET book_uid = ?2 WHERE id = ?1")
+            .bind(second)
+            .bind(&later)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sync_book_aliases (content_hash, book_uid) VALUES (?1, ?2)")
+            .bind(&second_hash)
+            .bind(&earlier)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let identity = bind_hash(&pool, second, &second_hash, 6, 0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity.book_uid, earlier);
+        let merge: (String, String) =
+            sqlx::query_as("SELECT loser, winner FROM sync_book_merges WHERE loser = ?1")
+                .bind(&later)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(merge.1, earlier);
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_binding_is_not_an_identity_candidate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let path = tmp.path().join("forgotten.epub");
+        std::fs::write(&path, b"forgotten identity").unwrap();
+        let file = book_with_file(&pool, &path).await;
+        let old = "c1".repeat(16);
+        let hash = "3".repeat(64);
+        sqlx::query(
+            "UPDATE sync_book_bindings SET book_uid = ?2, content_hash = 'old' WHERE book_id = ?1",
+        )
+        .bind(file)
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE books SET book_uid = ?2 WHERE id = ?1")
+            .bind(file)
+            .bind(&old)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO sync_book_trash
+                (book_uid, snapshot_json, deleted_wall, deleted_count, deleted_dev,
+                 deleted_at, expires_at)
+             VALUES (?1, NULL, 10, 0, 'other', '2026-01-01T00:00:00.000Z',
+                     '2999-01-01T00:00:00.000Z')",
+        )
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let identity = bind_hash(&pool, file, &hash, 18, 0).await.unwrap().unwrap();
+        assert_ne!(identity.book_uid, old);
+        let owner: String =
+            sqlx::query_scalar("SELECT book_uid FROM sync_book_aliases WHERE content_hash = ?1")
+                .bind(&hash)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, identity.book_uid);
+    }
+
+    #[tokio::test]
+    async fn bind_hash_handles_a_legacy_row_without_a_book_uid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let file: i64 = sqlx::query_scalar(
+            "INSERT INTO books (path, title, book_uid) VALUES ('/tmp/legacy.epub', 'Legacy', NULL)
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let hash = "4".repeat(64);
+        let identity = bind_hash(&pool, file, &hash, 0, 0).await.unwrap().unwrap();
+        assert_eq!(identity.book_uid.len(), 32);
+        assert_eq!(identity.content_hash, hash);
+    }
+
+    #[tokio::test]
+    async fn a_forgotten_binding_follows_its_replacement() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let path = tmp.path().join("replaced.epub");
+        std::fs::write(&path, b"replaced identity").unwrap();
+        let file = book_with_file(&pool, &path).await;
+        let old = "c4".repeat(16);
+        let fresh = "c5".repeat(16);
+        let hash = "5".repeat(64);
+        sqlx::query(
+            "INSERT INTO sync_book_bindings
+                (book_id, book_uid, content_hash, hashed_size, hashed_mtime)
+             VALUES (?1, ?2, 'old', 0, 0)",
+        )
+        .bind(file)
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE books SET book_uid = ?2 WHERE id = ?1")
+            .bind(file)
+            .bind(&old)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO sync_book_trash
+                (book_uid, replacement_book_uid, snapshot_json, deleted_wall,
+                 deleted_count, deleted_dev, deleted_at, expires_at)
+             VALUES (?1, ?2, NULL, 10, 0, 'other', '2026-01-01T00:00:00.000Z',
+                     '2999-01-01T00:00:00.000Z')",
+        )
+        .bind(&old)
+        .bind(&fresh)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let identity = bind_hash(&pool, file, &hash, 18, 0).await.unwrap().unwrap();
+        assert_eq!(
+            identity.book_uid, fresh,
+            "the alias follows the live replacement, never the dead identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn merging_identities_keeps_the_newer_entity_clock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let (loser, winner) = two_durable_books(&pool, tmp.path()).await;
+        state_row(&pool, "progress", &loser, &loser, 100).await;
+        state_field(&pool, "progress", &loser, "progress_percent", "10.0", 100).await;
+        state_row(&pool, "progress", &winner, &winner, 200).await;
+        state_field(&pool, "progress", &winner, "progress_percent", "20.0", 200).await;
+
+        merge_book_identity(&pool, &loser, &winner).await.unwrap();
+
+        let (state, _) = crate::sync::merge::load_state(
+            &pool,
+            crate::sync::model::EntityKind::Progress,
+            &winner,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.get("progress_percent"),
+            Some(&serde_json::json!(20.0)),
+            "the winner's newer locator survives"
+        );
+        let loser_fields: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_state_fields WHERE kind = 'progress' AND entity_uid = ?1",
+        )
+        .bind(&loser)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(loser_fields, 0);
+    }
+
+    #[tokio::test]
+    async fn merging_identities_keeps_the_newer_membership_entity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let (loser, winner) = two_durable_books(&pool, tmp.path()).await;
+        let collection = "c2".repeat(16);
+        state_row(
+            &pool,
+            "membership",
+            &format!("{collection}:{loser}"),
+            &loser,
+            300,
+        )
+        .await;
+        state_field(
+            &pool,
+            "membership",
+            &format!("{collection}:{loser}"),
+            "present",
+            "true",
+            300,
+        )
+        .await;
+        state_row(
+            &pool,
+            "membership",
+            &format!("{collection}:{winner}"),
+            &winner,
+            100,
+        )
+        .await;
+        state_field(
+            &pool,
+            "membership",
+            &format!("{collection}:{winner}"),
+            "present",
+            "false",
+            100,
+        )
+        .await;
+
+        merge_book_identity(&pool, &loser, &winner).await.unwrap();
+
+        let (state, deleted) = crate::sync::merge::load_state(
+            &pool,
+            crate::sync::model::EntityKind::Membership,
+            &format!("{collection}:{winner}"),
+        )
+        .await
+        .unwrap();
+        assert!(!deleted);
+        assert_eq!(
+            state.get("present"),
+            Some(&serde_json::json!(true)),
+            "the newer membership record wins"
+        );
+    }
+
+    #[tokio::test]
+    async fn merging_collections_keeps_the_newer_membership_clock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let loser = "b7".repeat(16);
+        let winner = "b8".repeat(16);
+        let book_uid = "b9".repeat(16);
+        state_row(&pool, "collection", &loser, "", 0).await;
+        state_field(&pool, "collection", &loser, "name", "\"Shelf\"", 10).await;
+        state_row(
+            &pool,
+            "membership",
+            &format!("{loser}:{book_uid}"),
+            &book_uid,
+            100,
+        )
+        .await;
+        state_field(
+            &pool,
+            "membership",
+            &format!("{loser}:{book_uid}"),
+            "present",
+            "true",
+            100,
+        )
+        .await;
+        state_row(
+            &pool,
+            "membership",
+            &format!("{winner}:{book_uid}"),
+            &book_uid,
+            300,
+        )
+        .await;
+        state_field(
+            &pool,
+            "membership",
+            &format!("{winner}:{book_uid}"),
+            "present",
+            "false",
+            300,
+        )
+        .await;
+
+        merge_collection_identity(&pool, &loser, &winner)
+            .await
+            .unwrap();
+
+        let (state, _) = crate::sync::merge::load_state(
+            &pool,
+            crate::sync::model::EntityKind::Membership,
+            &format!("{winner}:{book_uid}"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.get("present"),
+            Some(&serde_json::json!(false)),
+            "the newer membership clock survives"
+        );
+        let old: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_state_entities
+             WHERE kind = 'membership' AND entity_uid = ?1",
+        )
+        .bind(format!("{loser}:{book_uid}"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old, 0, "the losing membership row is removed");
+    }
+
+    #[tokio::test]
+    async fn merging_a_collection_with_itself_is_a_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let uid = "c3".repeat(16);
+        merge_collection_identity(&pool, &uid, &uid).await.unwrap();
+        let merges: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_entity_merges")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(merges, 0);
+    }
 }
