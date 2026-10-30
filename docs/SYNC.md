@@ -387,6 +387,17 @@ issues, conflicts, and recently deleted items. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
 
+The sidebar's Settings entry shows a small dot when sync is on and the engine
+reports an error, an open issue, or a conflict to review. The dot is visible
+wherever the sidebar is, including while Settings is open. It follows the same
+rule as Settings > Sync: with sync off, leftover counts stay hidden because the
+Settings lists are hidden too. A toast appears once when the state changes into
+attention, not on the first load and not on every status update. It sits
+bottom-center, is hidden in the reader, and does not sit over the import status
+or block reading or library interaction. Resolving the condition clears both; a
+dismissed toast stays hidden until attention clears and later returns. The toast
+does not auto-dismiss.
+
 ### Sync issues and actions
 
 Each row carries a kind, a short target label, and one action the sidecar
@@ -523,7 +534,10 @@ folder. It covers:
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, the primary action per issue kind, Copy details, opening the sync
 folder without a renderer path, conflict grouping and device-relative choices,
-the bulk keep, the session set-aside, and the IPC policy for the sync folder.
+the bulk keep, the session set-aside, the sidebar attention dot, the toast
+transition and dismissal, the always-mounted live region, the reader hide, the
+stale status-read race, unsubscribing on unmount, and the IPC policy for the
+sync folder.
 
 ## Out of scope
 

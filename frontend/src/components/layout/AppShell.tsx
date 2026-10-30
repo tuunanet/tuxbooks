@@ -15,8 +15,10 @@ import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
+import { SyncAttentionProvider } from "@/state/SyncAttentionProvider";
 import { useThemeState } from "@/state/themeState";
 import { Sidebar } from "./Sidebar";
+import { SyncAttentionToast } from "./SyncAttentionToast";
 
 /** Focuses the global search field once it exists (wired up in the search stage). */
 function GlobalSearchShortcut() {
@@ -113,15 +115,18 @@ export interface AppShellProps {
 export function AppShell({ initialState }: AppShellProps) {
   return (
     <AppStateProvider initialState={initialState}>
-      <ShortcutProvider>
-        <GlobalSearchShortcut />
-        <PdfEnginePrewarm />
-        <LibraryDataProvider>
-          <ImportProvider>
-            <Shell />
-          </ImportProvider>
-        </LibraryDataProvider>
-      </ShortcutProvider>
+      <SyncAttentionProvider>
+        <ShortcutProvider>
+          <GlobalSearchShortcut />
+          <PdfEnginePrewarm />
+          <LibraryDataProvider>
+            <ImportProvider>
+              <Shell />
+            </ImportProvider>
+          </LibraryDataProvider>
+        </ShortcutProvider>
+        <SyncAttentionToast />
+      </SyncAttentionProvider>
     </AppStateProvider>
   );
 }
