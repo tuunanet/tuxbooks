@@ -7,6 +7,7 @@ import {
   invokeMock,
   mockInvoke,
   openSyncFolderMock,
+  pickBookFileMock,
   pickSyncFolderMock,
   emitBridgeEvent,
 } from "./mocks/bridge";
@@ -102,6 +103,8 @@ beforeEach(() => {
   invokeMock.mockReset();
   pickSyncFolderMock.mockReset();
   pickSyncFolderMock.mockResolvedValue("/home/me/Dropbox");
+  pickBookFileMock.mockReset();
+  pickBookFileMock.mockResolvedValue(null);
   openSyncFolderMock.mockReset();
   openSyncFolderMock.mockResolvedValue(undefined);
   clipboardWrite.mockReset();
@@ -303,6 +306,105 @@ describe("SyncSettings", () => {
       }),
     );
     expect(await screen.findByTestId("waiting-books-empty")).toBeInTheDocument();
+  });
+
+  it("locates a waiting book from the picked file and reloads the list", async () => {
+    const waiting = {
+      bookUid: "c".repeat(32),
+      title: "Located",
+      author: null,
+      progressPercent: 30,
+      annotationCount: 1,
+      lastOpenedAt: null,
+      sampleAnnotation: null,
+    };
+    const picked = "/home/me/Downloads/located.epub";
+    pickBookFileMock.mockResolvedValue(picked);
+    let attached = false;
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") {
+        return Promise.resolve({ ...ENABLED, waitingBooks: attached ? 0 : 1 });
+      }
+      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+        return Promise.resolve([]);
+      }
+      if (method === "list_waiting_books") {
+        return Promise.resolve(attached ? [] : [waiting]);
+      }
+      if (method === "attach_waiting_book") {
+        expect(params).toEqual({ bookUid: waiting.bookUid, path: picked });
+        attached = true;
+        return Promise.resolve({ id: 9, bookUid: waiting.bookUid });
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId(`locate-waiting-${waiting.bookUid}`));
+
+    expect(await screen.findByTestId("sync-notice")).toHaveTextContent(
+      "Attached the waiting book.",
+    );
+    expect(await screen.findByTestId("waiting-books-empty")).toBeInTheDocument();
+  });
+
+  it("does not attach anything when the file picker is cancelled", async () => {
+    const waiting = {
+      bookUid: "d".repeat(32),
+      title: "Cancelled",
+      author: null,
+      progressPercent: null,
+      annotationCount: 0,
+      lastOpenedAt: null,
+      sampleAnnotation: null,
+    };
+    pickBookFileMock.mockResolvedValue(null);
+    mockInvoke({
+      sync_status: { ...ENABLED, waitingBooks: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [],
+      list_waiting_books: [waiting],
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId(`locate-waiting-${waiting.bookUid}`));
+
+    await waitFor(() => expect(pickBookFileMock).toHaveBeenCalled());
+    expect(invokesFor("attach_waiting_book")).toHaveLength(0);
+    expect(screen.getByTestId(`waiting-book-${waiting.bookUid}`)).toBeInTheDocument();
+  });
+
+  it("shows a byte mismatch and keeps the waiting row", async () => {
+    const waiting = {
+      bookUid: "e".repeat(32),
+      title: "Mismatch",
+      author: null,
+      progressPercent: null,
+      annotationCount: 0,
+      lastOpenedAt: null,
+      sampleAnnotation: null,
+    };
+    pickBookFileMock.mockResolvedValue("/tmp/other-edition.epub");
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "sync_status") return Promise.resolve({ ...ENABLED, waitingBooks: 1 });
+      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+        return Promise.resolve([]);
+      }
+      if (method === "list_waiting_books") return Promise.resolve([waiting]);
+      if (method === "attach_waiting_book") {
+        return Promise.reject(
+          new Error("those bytes belong to a different book, so nothing was attached"),
+        );
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId(`locate-waiting-${waiting.bookUid}`));
+
+    expect(await screen.findByTestId("sync-action-error")).toHaveTextContent("different book");
+    expect(screen.getByTestId(`waiting-book-${waiting.bookUid}`)).toBeInTheDocument();
   });
 
   it("forgets all waiting books and dismisses all issues from their sections", async () => {

@@ -40,6 +40,29 @@ const WAITING_UIDS: &str = r#"
       )
 "#;
 
+/// Whether this uid is hidden on this device. An ignored book keeps its mirror
+/// state in the folder but must not be attachable from Settings.
+pub async fn is_ignored(pool: &SqlitePool, book_uid: &str) -> Result<bool, AppError> {
+    let ignored: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sync_ignored_books WHERE book_uid = ?1)")
+            .bind(book_uid)
+            .fetch_one(pool)
+            .await?;
+    Ok(ignored != 0)
+}
+
+/// Whether this uid currently has mirror state and no local binding. The same
+/// predicate drives the list, so the attach command and the row cannot
+/// disagree about what is waiting.
+pub async fn is_waiting(pool: &SqlitePool, book_uid: &str) -> Result<bool, AppError> {
+    let sql = format!("SELECT 1 FROM ({WAITING_UIDS}) WHERE book_uid = ?1");
+    let waiting: Option<i64> = sqlx::query_scalar(&sql)
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?;
+    Ok(waiting.is_some())
+}
+
 /// Count the waiting books without loading their details.
 pub async fn count(pool: &SqlitePool) -> Result<i64, AppError> {
     let sql = format!("SELECT COUNT(*) FROM ({WAITING_UIDS})");

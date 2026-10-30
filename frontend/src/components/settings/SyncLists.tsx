@@ -172,10 +172,12 @@ function ViewAllDialog({
 function WaitingBookRow({
   book,
   busy,
+  onLocate,
   onForget,
 }: {
   book: WaitingBook;
   busy: boolean;
+  onLocate: (bookUid: string) => void;
   onForget: (bookUid: string) => void;
 }) {
   return (
@@ -198,15 +200,26 @@ function WaitingBookRow({
         ) : null}
         <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{book.bookUid}</p>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid={`forget-waiting-${book.bookUid}`}
-        onClick={() => onForget(book.bookUid)}
-        disabled={busy}
-      >
-        Forget on this device
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid={`locate-waiting-${book.bookUid}`}
+          onClick={() => onLocate(book.bookUid)}
+          disabled={busy}
+        >
+          Locate file
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          data-testid={`forget-waiting-${book.bookUid}`}
+          onClick={() => onForget(book.bookUid)}
+          disabled={busy}
+        >
+          Forget on this device
+        </Button>
+      </div>
     </li>
   );
 }
@@ -215,12 +228,14 @@ export function WaitingBooksSection({
   books,
   total,
   busy,
+  onLocate,
   onForget,
   onForgetAll,
 }: {
   books: WaitingBook[];
   total: number;
   busy: boolean;
+  onLocate: (bookUid: string) => void;
   onForget: (bookUid: string) => void;
   onForgetAll: () => void;
 }) {
@@ -246,9 +261,9 @@ export function WaitingBooksSection({
         <div>
           <h3 className="text-base font-medium">Waiting for books</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Shared reading state for books whose file is not in this library. Import the exact file
-            to attach it. Forget on this device hides it here; the synced copy stays in the folder
-            and on other devices.
+            Shared reading state for books whose file is not in this library. Locate file attaches
+            the book when you pick the exact bytes. Forget on this device hides it here; the synced
+            copy stays in the folder and on other devices.
           </p>
         </div>
         {total > 0 ? (
@@ -296,7 +311,13 @@ export function WaitingBooksSection({
           </div>
           <ul className="mt-3 flex flex-col gap-3">
             {summary.map((book) => (
-              <WaitingBookRow key={book.bookUid} book={book} busy={busy} onForget={onForget} />
+              <WaitingBookRow
+                key={book.bookUid}
+                book={book}
+                busy={busy}
+                onLocate={onLocate}
+                onForget={onForget}
+              />
             ))}
           </ul>
           {filtered.length === 0 ? (
@@ -331,7 +352,13 @@ export function WaitingBooksSection({
       >
         <ul className="flex flex-col gap-3">
           {filtered.map((book) => (
-            <WaitingBookRow key={book.bookUid} book={book} busy={busy} onForget={onForget} />
+            <WaitingBookRow
+              key={book.bookUid}
+              book={book}
+              busy={busy}
+              onLocate={onLocate}
+              onForget={onForget}
+            />
           ))}
         </ul>
       </ViewAllDialog>

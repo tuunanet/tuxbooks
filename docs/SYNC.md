@@ -353,13 +353,33 @@ with whatever metadata the folder carries, the progress percentage, the
 annotation count, and a sample annotation when no metadata is available.
 
 Settings shows the first five and a **View all** dialog with search by title or
-book uid. **Forget on this device** hides one waiting book here and removes it
-from the count; **Forget all on this device** hides every waiting book. The
+book uid. **Locate file** opens a file picker and attaches the book to the
+chosen file. **Forget on this device** hides one waiting book here and removes
+it from the count; **Forget all on this device** hides every waiting book. The
 shared copies stay in the folder, so importing the exact bytes can still attach
 the state later, and other devices are not affected. There is no shared-delete
 action for a waiting book; starting a new library is the way to leave the old
 library's waiting state behind, and the app archives the old library instead of
 deleting it.
+
+Locate file is a shortcut for "these are the bytes", not a new merge rule. The
+sidecar hashes the picked file and looks up the content-hash aliases. The alias
+must already exist and must resolve to the waiting uid. If the alias is missing
+or names a different book, the command refuses with an error that the bytes
+differ, adds nothing to the library, and leaves the row waiting. A different
+edition therefore never inherits another book's annotations or progress. On a
+match the sidecar creates the durable record for the waiting uid when this
+machine never had one, attaches the file to that identity, and projects the
+mirror state: progress, annotations, metadata overrides, collection membership,
+and last-opened. The book leaves the waiting list and appears in the library.
+
+Ignored waiting books never appear in the list, so their row has no Locate file
+action. The command also rejects an ignored uid if it is reached; importing the
+exact bytes through the normal import path still binds them after a local hide.
+A path that is not a readable book, a file already in the library, a hash read
+failure, or a byte mismatch leaves the waiting row in place. When the attempt
+created a durable record for the uid, a rejected file removes that record
+again, so a failed attach adds nothing to Reading history.
 
 ## Errors and status
 
@@ -510,6 +530,11 @@ folder. It covers:
 - progress replacing the whole locator;
 - collections and membership;
 - unwatching without a shared delete, then re-import restoring state;
+- a waiting book hidden locally and still attachable later, and Locate file
+  attaching the exact bytes with progress, annotations, metadata, last-opened,
+  and collection membership while a mismatch, an ignored book, a bad path, a
+  parse failure, and a projection failure each leave no phantom book and
+  repair against the attached file;
 - duplicate and corrupt operation files;
 - delete, trash, and restore;
 - metadata title, authors, subjects, and a cover blob;
@@ -533,7 +558,8 @@ folder. It covers:
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, the primary action per issue kind, Copy details, opening the sync
-folder without a renderer path, conflict grouping and device-relative choices,
+folder without a renderer path, Locate file for a waiting book and its
+cancel/mismatch paths, conflict grouping and device-relative choices,
 the bulk keep, the session set-aside, the sidebar attention dot, the toast
 transition and dismissal, the always-mounted live region, the reader hide, the
 stale status-read race, unsubscribing on unmount, and the IPC policy for the

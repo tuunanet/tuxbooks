@@ -274,6 +274,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "list_waiting_books",
   "forget_waiting_book",
   "forget_all_waiting_books",
+  "attach_waiting_book",
   "dismiss_all_sync_issues",
   "sync_issues",
   "sync_dismiss_issue",

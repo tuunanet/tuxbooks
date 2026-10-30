@@ -325,6 +325,35 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     });
   });
 
+  describe("attach_waiting_book", () => {
+    it("accepts a dialog-issued file for a waiting book uid", () => {
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "a".repeat(32), path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).not.toThrow();
+    });
+
+    it("rejects an un-issued path and a malformed uid", () => {
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "a".repeat(32), path: "/etc/passwd" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/not issued/);
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "not-a-uid", path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/invalid bookUid/);
+    });
+  });
+
   describe("set_book_cover", () => {
     it("requires a book id even with an issued image", () => {
       expect(() =>

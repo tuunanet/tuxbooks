@@ -303,6 +303,55 @@ pub struct RelinkTarget {
     pub cover_path: Option<String>,
 }
 
+/// Make sure a durable record exists for a shared identity that has no local
+/// file yet. A waiting book on a machine that never saw the file has mirror
+/// state but no `book_records` row; attaching its exact bytes needs that row
+/// first, so it is created under the same uid with no metadata.
+///
+/// Returns the record id and whether this call inserted it. The caller rolls a
+/// new record back when the attach fails, so a rejected file never leaves an
+/// untitled Reading-history row.
+pub async fn ensure_durable_record(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<(i64, bool), AppError> {
+    let inserted = sqlx::query(
+        "INSERT INTO book_records (uid, metadata_state) VALUES (?1, 'waiting_for_file')
+         ON CONFLICT(uid) DO NOTHING",
+    )
+    .bind(book_uid)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0;
+    let id: i64 = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok((id, inserted))
+}
+
+/// Remove a record a failed attach created, but only while nothing points at
+/// it. A file row or binding means the attach got far enough to keep the book.
+pub async fn discard_empty_durable_record(
+    pool: &SqlitePool,
+    durable_id: i64,
+    book_uid: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "DELETE FROM book_records
+         WHERE id = ?1 AND uid = ?2
+           AND NOT EXISTS (SELECT 1 FROM books WHERE book_uid = ?2)
+           AND NOT EXISTS (SELECT 1 FROM sync_book_bindings WHERE book_uid = ?2)",
+    )
+    .bind(durable_id)
+    .bind(book_uid)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// The durable record a relink will attach a file to, or `None` when the id
 /// names no book.
 pub async fn relink_target(

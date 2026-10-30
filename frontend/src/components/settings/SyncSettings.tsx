@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Unplug } from "lucide-react";
 import {
+  attachWaitingBook,
   connectSync,
   disconnectSync,
   dismissAllSyncIssues,
@@ -14,6 +15,7 @@ import {
   listWaitingBooks,
   openSyncFolder,
   onSyncStatus,
+  pickBookFile,
   pickSyncFolder,
   resolveSyncConflict,
   restoreSyncTrash,
@@ -254,6 +256,32 @@ export function SyncSettings() {
         await forgetWaitingBook(bookUid);
         applyStatus(await getSyncStatus());
         await loadLists();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
+  /**
+   * Locate the file behind a waiting book. The sidecar hashes the picked bytes
+   * and attaches only when they carry the waiting uid's alias, so a different
+   * edition is refused with a readable message and the row stays.
+   */
+  const locateWaiting = useCallback(
+    async (bookUid: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const path = await pickBookFile();
+        if (!path) return;
+        await attachWaitingBook(bookUid, path);
+        applyStatus(await getSyncStatus());
+        await loadLists();
+        setNotice("Attached the waiting book.");
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -590,6 +618,7 @@ export function SyncSettings() {
               books={waitingBooks}
               total={status.waitingBooks}
               busy={busy}
+              onLocate={(bookUid) => void locateWaiting(bookUid)}
               onForget={(bookUid) => void forgetWaiting(bookUid)}
               onForgetAll={() => void forgetAllWaiting()}
             />

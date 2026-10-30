@@ -600,6 +600,7 @@ pub async fn relink_book(
         std::path::Path::new(&path),
         &covers,
         &pdfium_dirs,
+        None,
     )
     .await?;
     emit_changed_book(events, book.clone());
