@@ -4,3 +4,9 @@ export function formatSyncTime(value: string | null): string {
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
 }
+
+/** Hybrid-clock wall times are milliseconds, not ISO strings. */
+export function formatSyncWall(wall: number): string {
+  if (!Number.isFinite(wall) || wall <= 0) return "Unknown time";
+  return new Date(wall).toLocaleString();
+}

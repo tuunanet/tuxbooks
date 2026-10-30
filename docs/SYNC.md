@@ -212,10 +212,11 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   different copy of the book does not fight over source-derived authors or
   subjects.
 
-Losing field values are written to `sync_conflicts` and surfaced as a Sync
-issue with both the kept and discarded values. The current state always has a
-winner, but the loser is inspectable and can be dismissed once read. Settling a
-conflict is described under [Conflict review](#conflict-review).
+Losing field values are written to `sync_conflicts` and surfaced both in
+Settings > Sync and as a Sync issue, with the kept and discarded values. The
+current state always has a winner, but the loser stays inspectable until the
+conflict is resolved. Settling a conflict is described under
+[Conflict review](#conflict-review).
 
 ## Conflict review
 
@@ -226,12 +227,14 @@ winner is applied immediately and stays applied.
 Each open row carries the kind, entity uid, field, both JSON values, both
 hybrid clocks with the writing device, and the time the conflict was recorded.
 The `sync_conflicts` sidecar command returns open rows newest first with the
-book title and author, the field, both values, and the device names; Settings >
-Sync will use it for the review surface (ticket `tuxbooks-c6g.8`). A special
-field name is labelled: `__entity__` is a whole-entity record, `__deleted__` is
-an edit that lost to a delete, and `__restore__` is a restore that lost to a
-newer delete. Several losing writes for one field share one issue; the issue
-closes only when the last conflict with that key is resolved.
+book title and author, the field, both values, and the device names. Settings >
+Sync lists them under Conflicts to review, grouped by book with delete and edit
+rows first, then whole-entity rows, then single fields. Each row shows the kept
+and the discarded value, both devices, and both times. A special field name is
+labelled: `__entity__` is a whole-entity record, `__deleted__` is an edit that
+lost to a delete, and `__restore__` is a restore that lost to a newer delete.
+Several losing writes for one field share one issue; the issue closes only when
+the last conflict with that key is resolved.
 
 Two resolutions are offered:
 
@@ -242,6 +245,16 @@ Two resolutions are offered:
   and a delete/edit or lost-restore conflict writes the explicit restore
   operation. Resolution never deletes the losing value from the row, and a
   restore also closes the local Recently deleted entry on every device.
+
+Settings > Sync offers Keep this device and Keep other when one side of the
+conflict is this device. Those labels choose between the applied winner and the
+discarded value, whichever device wrote each one. When neither side is this
+device, the buttons read Keep winner and Apply other. When replaying the loser
+is unsafe, that choice is disabled and the reason is shown. Decide later sets
+the row aside for this session without closing it. A bulk Keep current winner
+closes the rows shown with the applied value. The winner stays applied until you
+choose. When the backend reports more open rows than it loaded, the section says
+"Showing first N of M" and the bulk action covers only the loaded rows.
 
 The queue is reconciled against the mirror on every status refresh and before
 a list. A row closes once its winner no longer matches the current value and
@@ -441,7 +454,8 @@ folder. It covers:
   the rewrite and the snapshot write.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
-trash actions, and the IPC policy for the sync folder.
+trash actions, conflict grouping and device-relative choices, the bulk keep,
+the session set-aside, and the IPC policy for the sync folder.
 
 ## Out of scope
 

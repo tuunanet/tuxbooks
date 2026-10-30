@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { SyncSettings } from "@/components/settings/SyncSettings";
-import type { SyncStatus } from "@/lib/bridge";
-import { invokeMock, mockInvoke, pickSyncFolderMock } from "./mocks/bridge";
+import type { SyncConflict, SyncStatus } from "@/lib/bridge";
+import { invokeMock, mockInvoke, pickSyncFolderMock, emitBridgeEvent } from "./mocks/bridge";
 
 const DISABLED: SyncStatus = {
   enabled: false,
@@ -41,6 +41,41 @@ function renderSettings() {
   return render(<SyncSettings />);
 }
 
+const LOCAL_DEVICE = ENABLED.deviceId ?? "";
+const OTHER_DEVICE = "11111111111111111111111111111111";
+const CONFLICT_TIME = Date.parse("2026-10-28T10:00:00.000Z");
+
+function conflict(overrides: Partial<SyncConflict> = {}): SyncConflict {
+  return {
+    id: 1,
+    kind: "annotation",
+    entityUid: "a".repeat(32),
+    bookUid: "b".repeat(32),
+    bookTitle: "The Book",
+    bookAuthor: "Ada Author",
+    field: "note",
+    fieldLabel: null,
+    winner: "Kept note",
+    loser: "Discarded note",
+    winnerDeviceId: LOCAL_DEVICE,
+    winnerDeviceName: "Laptop",
+    winnerWall: CONFLICT_TIME,
+    winnerCounter: 0,
+    loserDeviceId: OTHER_DEVICE,
+    loserDeviceName: "Desktop",
+    loserWall: CONFLICT_TIME - 60_000,
+    loserCounter: 0,
+    createdAt: "2026-10-28T10:05:00.000Z",
+    canApplyLoser: true,
+    applyLoserBlockedReason: null,
+    ...overrides,
+  };
+}
+
+function invokesFor(method: string) {
+  return invokeMock.mock.calls.filter((call) => call[0] === method);
+}
+
 beforeEach(() => {
   invokeMock.mockReset();
   pickSyncFolderMock.mockReset();
@@ -54,6 +89,7 @@ describe("SyncSettings", () => {
       sync_connect: { status: ENABLED, mismatch: null },
       sync_issues: [],
       sync_trash: [],
+      sync_conflicts: [],
     });
 
     renderSettings();
@@ -102,6 +138,7 @@ describe("SyncSettings", () => {
       ],
       sync_restore: true,
       sync_dismiss_issue: true,
+      sync_conflicts: [],
     });
 
     renderSettings();
@@ -128,7 +165,12 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+      if (
+        method === "sync_issues" ||
+        method === "sync_trash" ||
+        method === "sync_conflicts" ||
+        method === "list_waiting_books"
+      ) {
         return Promise.resolve([]);
       }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
@@ -166,7 +208,12 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+      if (
+        method === "sync_issues" ||
+        method === "sync_trash" ||
+        method === "sync_conflicts" ||
+        method === "list_waiting_books"
+      ) {
         return Promise.resolve([]);
       }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
@@ -202,7 +249,9 @@ describe("SyncSettings", () => {
       if (method === "sync_status") {
         return Promise.resolve({ ...ENABLED, waitingBooks: forgotten ? 0 : 1 });
       }
-      if (method === "sync_issues" || method === "sync_trash") return Promise.resolve([]);
+      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+        return Promise.resolve([]);
+      }
       if (method === "list_waiting_books") return Promise.resolve(forgotten ? [] : [waiting]);
       if (method === "forget_waiting_book") {
         expect(params).toEqual({ bookUid: waiting.bookUid });
@@ -252,6 +301,7 @@ describe("SyncSettings", () => {
       }
       if (method === "sync_issues") return Promise.resolve([issue]);
       if (method === "sync_trash") return Promise.resolve([]);
+      if (method === "sync_conflicts") return Promise.resolve([]);
       if (method === "list_waiting_books") return Promise.resolve([waiting]);
       if (method === "forget_all_waiting_books") return Promise.resolve(1);
       if (method === "dismiss_all_sync_issues") return Promise.resolve(1);
@@ -273,6 +323,7 @@ describe("SyncSettings", () => {
       sync_status: ENABLED,
       sync_issues: [],
       sync_trash: [],
+      sync_conflicts: [],
       sync_disconnect: DISABLED,
     });
 
@@ -283,5 +334,506 @@ describe("SyncSettings", () => {
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("sync_disconnect"));
     expect(await screen.findByTestId("sync-connect")).toBeInTheDocument();
+  });
+
+  it("shows the conflict empty state when nothing is open", async () => {
+    mockInvoke({
+      sync_status: ENABLED,
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [],
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflicts-empty")).toHaveTextContent(
+      "No conflicts to review.",
+    );
+    expect(screen.getByText("Conflicts to review")).toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflicts-count")).toHaveTextContent("0");
+  });
+
+  it("uses the loaded list for the empty state, not the status count", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 3 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [],
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflicts-empty")).toHaveTextContent(
+      "No conflicts to review.",
+    );
+    expect(screen.queryByTestId("sync-conflicts-all-deferred")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflicts-count")).toHaveTextContent("3");
+  });
+
+  it("groups conflicts by book and puts delete/edit rows first", async () => {
+    const alpha = "a".repeat(32);
+    const beta = "b".repeat(32);
+    const conflicts = [
+      conflict({
+        id: 1,
+        bookUid: alpha,
+        bookTitle: "Book Alpha",
+        field: "note",
+        createdAt: "2026-10-28T10:00:00.000Z",
+      }),
+      conflict({
+        id: 2,
+        bookUid: beta,
+        bookTitle: "Book Beta",
+        field: "note",
+        createdAt: "2026-10-28T10:00:00.000Z",
+      }),
+      conflict({
+        id: 3,
+        bookUid: alpha,
+        bookTitle: "Book Alpha",
+        field: "__deleted__",
+        fieldLabel: "delete versus edit",
+        winner: "deleted",
+        loser: { note: "gone" },
+        createdAt: "2026-10-28T10:03:00.000Z",
+      }),
+      conflict({
+        id: 4,
+        bookUid: beta,
+        bookTitle: "Book Beta",
+        field: "__entity__",
+        fieldLabel: "whole entity",
+        winner: { position: "one", percent: 10 },
+        loser: { position: "two", percent: 20 },
+        createdAt: "2026-10-28T10:04:00.000Z",
+      }),
+      conflict({
+        id: 5,
+        bookUid: alpha,
+        bookTitle: "Book Alpha",
+        field: "color",
+        createdAt: "2026-10-28T10:02:00.000Z",
+      }),
+    ];
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: conflicts.length },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: conflicts,
+    });
+
+    renderSettings();
+    await screen.findByTestId("sync-conflicts-list");
+
+    expect(
+      screen.getAllByTestId(/^sync-conflict-\d+$/).map((row) => row.getAttribute("data-testid")),
+    ).toEqual([
+      "sync-conflict-3",
+      "sync-conflict-5",
+      "sync-conflict-1",
+      "sync-conflict-4",
+      "sync-conflict-2",
+    ]);
+    expect(screen.getByText("Book Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Book Beta")).toBeInTheDocument();
+    expect(screen.getByText("delete versus edit")).toBeInTheDocument();
+    expect(screen.getByText("whole entity")).toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflict-4-kept")).toHaveTextContent("position");
+    expect(screen.getByTestId("sync-conflict-4-kept")).toHaveTextContent("one");
+    expect(screen.getByTestId("sync-conflict-4-discarded")).toHaveTextContent("two");
+  });
+
+  it("shows the current winner as applied before any choice", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [conflict({ bookTitle: null, bookAuthor: null })],
+    });
+
+    renderSettings();
+    const kept = await screen.findByTestId("sync-conflict-1-kept");
+    expect(kept).toHaveTextContent("Currently kept");
+    expect(kept).toHaveTextContent("Kept note");
+    expect(kept).toHaveTextContent("Laptop (this device)");
+    expect(screen.getByTestId("sync-conflict-1-discarded")).toHaveTextContent("Discarded note");
+    expect(screen.getByText("Unknown book")).toBeInTheDocument();
+    expect(invokesFor("sync_resolve_conflict")).toHaveLength(0);
+  });
+
+  it("maps keep this device and keep other for a local winner", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [conflict()],
+      sync_resolve_conflict: true,
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflict-1-this-device")).toHaveTextContent(
+      "Keep this device",
+    );
+    expect(screen.getByTestId("sync-conflict-1-other")).toHaveTextContent("Keep other");
+
+    fireEvent.click(screen.getByTestId("sync-conflict-1-this-device"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "keep_winner",
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByTestId("sync-conflict-1-other")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("sync-conflict-1-other"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "apply_loser",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-conflict-1-this-device")).not.toBeDisabled(),
+    );
+  });
+
+  it("maps keep this device to applying the loser when the loser is local", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [
+        conflict({
+          winnerDeviceId: OTHER_DEVICE,
+          winnerDeviceName: "Desktop",
+          loserDeviceId: LOCAL_DEVICE,
+          loserDeviceName: "Laptop",
+        }),
+      ],
+      sync_resolve_conflict: true,
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflict-1-this-device")).toHaveTextContent(
+      "Keep this device",
+    );
+
+    fireEvent.click(screen.getByTestId("sync-conflict-1-this-device"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "apply_loser",
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByTestId("sync-conflict-1-other")).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId("sync-conflict-1-other"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "keep_winner",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-conflict-1-this-device")).not.toBeDisabled(),
+    );
+  });
+
+  it("uses neutral labels when neither device is this device", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [
+        conflict({
+          winnerDeviceId: OTHER_DEVICE,
+          winnerDeviceName: "Desktop",
+          loserDeviceId: "3".repeat(32),
+          loserDeviceName: "Tablet",
+        }),
+      ],
+      sync_resolve_conflict: true,
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflict-1-this-device")).toHaveTextContent(
+      "Keep winner",
+    );
+    expect(screen.getByTestId("sync-conflict-1-other")).toHaveTextContent("Apply other");
+
+    fireEvent.click(screen.getByTestId("sync-conflict-1-other"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "apply_loser",
+      }),
+    );
+  });
+
+  it("disables applying the loser when the backend blocks it", async () => {
+    const reason = "book identity merges are deterministic and cannot be replayed";
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [
+        conflict({
+          kind: "book_identity",
+          field: "content_hash",
+          winner: "abc",
+          loser: "def",
+          canApplyLoser: false,
+          applyLoserBlockedReason: reason,
+        }),
+      ],
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflict-1-other")).toBeDisabled();
+    expect(screen.getByTestId("sync-conflict-1-this-device")).not.toBeDisabled();
+    expect(screen.getByTestId("sync-conflict-1-blocked")).toHaveTextContent(reason);
+  });
+
+  it("keeps the current winner for every shown conflict from the bulk action", async () => {
+    let open = [
+      conflict({ id: 1, createdAt: "2026-10-28T10:05:00.000Z" }),
+      conflict({ id: 2, createdAt: "2026-10-28T10:04:00.000Z" }),
+    ];
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") return Promise.resolve({ ...ENABLED, conflicts: open.length });
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+        return Promise.resolve([]);
+      }
+      if (method === "sync_conflicts") return Promise.resolve(open);
+      if (method === "sync_resolve_conflict") {
+        open = open.filter((row) => row.id !== Number(params?.id));
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("sync-conflicts-keep-all"));
+    fireEvent.click(screen.getByTestId("sync-conflicts-keep-all-confirm"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "keep_winner",
+      });
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 2,
+        resolution: "keep_winner",
+      });
+    });
+    expect(await screen.findByTestId("sync-conflicts-empty")).toHaveTextContent(
+      "No conflicts to review.",
+    );
+    expect(await screen.findByTestId("sync-notice")).toHaveTextContent(
+      "Kept the current winner for 2 conflicts.",
+    );
+  });
+
+  it("continues the bulk action after one conflict fails and reloads", async () => {
+    let open = [conflict({ id: 1 }), conflict({ id: 2 })];
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") return Promise.resolve({ ...ENABLED, conflicts: open.length });
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+        return Promise.resolve([]);
+      }
+      if (method === "sync_conflicts") return Promise.resolve(open);
+      if (method === "sync_resolve_conflict") {
+        if (Number(params?.id) === 1) {
+          return Promise.reject(new Error("could not keep conflict 1"));
+        }
+        open = open.filter((row) => row.id !== Number(params?.id));
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("sync-conflicts-keep-all"));
+    fireEvent.click(screen.getByTestId("sync-conflicts-keep-all-confirm"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 2,
+        resolution: "keep_winner",
+      }),
+    );
+    expect(await screen.findByTestId("sync-action-error")).toHaveTextContent(
+      "could not keep conflict 1",
+    );
+    expect(screen.getByTestId("sync-conflict-1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("sync-conflict-2")).not.toBeInTheDocument());
+    expect(screen.getByTestId("sync-conflicts-count")).toHaveTextContent("1");
+  });
+
+  it("keeps the bulk action to conflicts that are not set aside", async () => {
+    let open = [conflict({ id: 1 }), conflict({ id: 2 })];
+    invokeMock.mockImplementation((method: string, params?: Record<string, unknown>) => {
+      if (method === "sync_status") return Promise.resolve({ ...ENABLED, conflicts: open.length });
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
+        return Promise.resolve([]);
+      }
+      if (method === "sync_conflicts") return Promise.resolve(open);
+      if (method === "sync_resolve_conflict") {
+        open = open.filter((row) => row.id !== Number(params?.id));
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("sync-conflict-2-later"));
+    fireEvent.click(screen.getByTestId("sync-conflicts-keep-all"));
+    fireEvent.click(screen.getByTestId("sync-conflicts-keep-all-confirm"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_resolve_conflict", {
+        id: 1,
+        resolution: "keep_winner",
+      }),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("sync_resolve_conflict", {
+      id: 2,
+      resolution: "keep_winner",
+    });
+    expect(await screen.findByTestId("sync-conflicts-all-deferred")).toBeInTheDocument();
+    expect(screen.getByText(/1 conflict is set aside for now/)).toBeInTheDocument();
+    expect(await screen.findByTestId("sync-notice")).toHaveTextContent(
+      "Kept the current winner for 1 conflict.",
+    );
+  });
+
+  it("describes a delete/edit conflict without dumping JSON", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [
+        conflict({
+          field: "__deleted__",
+          fieldLabel: "delete versus edit",
+          winner: "deleted",
+          loser: { note: "old note", color: "yellow" },
+        }),
+      ],
+    });
+
+    renderSettings();
+    expect(await screen.findByText("delete versus edit")).toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflict-1-kept")).toHaveTextContent("Deleted");
+    const discarded = screen.getByTestId("sync-conflict-1-discarded");
+    expect(discarded).toHaveTextContent("Edited · 2 fields");
+    expect(discarded).toHaveTextContent("note:");
+    expect(discarded).toHaveTextContent("old note");
+    expect(discarded).toHaveTextContent("color:");
+    expect(discarded).toHaveTextContent("yellow");
+    expect(discarded).not.toHaveTextContent("{");
+    expect(discarded).toHaveAttribute("title", expect.stringContaining('"note"'));
+  });
+
+  it("sets a conflict aside for the session without resolving it", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [conflict()],
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflicts-count")).toHaveTextContent("1");
+    expect(await screen.findByTestId("sync-conflict-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sync-conflict-1-later"));
+
+    expect(screen.queryByTestId("sync-conflict-1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflicts-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("sync-conflicts-all-deferred")).toBeInTheDocument();
+    expect(screen.getByText(/1 conflict is set aside for now/)).toBeInTheDocument();
+    expect(invokesFor("sync_resolve_conflict")).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId("sync-conflicts-show-deferred"));
+    expect(await screen.findByTestId("sync-conflict-1")).toBeInTheDocument();
+  });
+
+  it("clears set-aside rows when the sync library changes", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 1 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [conflict()],
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByTestId("sync-conflict-1-later"));
+    expect(screen.queryByTestId("sync-conflict-1")).not.toBeInTheDocument();
+
+    emitBridgeEvent("sync-status", {
+      ...ENABLED,
+      libraryId: "9".repeat(32),
+      folder: "/home/me/OtherDropbox",
+    });
+
+    expect(await screen.findByTestId("sync-conflict-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("sync-conflicts-all-deferred")).not.toBeInTheDocument();
+  });
+
+  it("shows every conflict in the view all dialog", async () => {
+    const conflicts = Array.from({ length: 6 }, (_, index) =>
+      conflict({
+        id: index + 1,
+        entityUid: `${index}`.repeat(32),
+        createdAt: `2026-10-28T10:0${index}:00.000Z`,
+      }),
+    );
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: conflicts.length },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: conflicts,
+    });
+
+    renderSettings();
+    expect(await screen.findAllByTestId(/^sync-conflict-\d+$/)).toHaveLength(5);
+
+    fireEvent.click(screen.getByTestId("sync-conflicts-view-all"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getAllByTestId(/^sync-conflict-\d+$/)).toHaveLength(6);
+
+    fireEvent.click(within(dialog).getByTestId("sync-conflicts-keep-all-dialog"));
+    expect(await screen.findByTestId("sync-conflicts-keep-all-confirm")).toBeInTheDocument();
+  });
+
+  it("reports the loaded rows when the backend has more conflicts", async () => {
+    const conflicts = Array.from({ length: 6 }, (_, index) =>
+      conflict({
+        id: index + 1,
+        entityUid: `${index}`.repeat(32),
+        createdAt: `2026-10-28T10:0${index}:00.000Z`,
+      }),
+    );
+    mockInvoke({
+      sync_status: { ...ENABLED, conflicts: 150 },
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: conflicts,
+    });
+
+    renderSettings();
+    expect(await screen.findByTestId("sync-conflicts-count")).toHaveTextContent("150");
+    expect(screen.getByText("Showing first 6 of 150.")).toBeInTheDocument();
+    expect(screen.getByTestId("sync-conflicts-view-all")).toHaveTextContent("View all 150");
+
+    fireEvent.click(screen.getByTestId("sync-conflicts-view-all"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Showing first 6 of 150.")).toBeInTheDocument();
+    expect(within(dialog).getAllByTestId(/^sync-conflict-\d+$/)).toHaveLength(6);
+
+    fireEvent.click(within(dialog).getByTestId("sync-conflicts-keep-all-dialog"));
+    expect(
+      await screen.findByText(/The list loads the first 6 of 150 conflicts/),
+    ).toBeInTheDocument();
   });
 });
