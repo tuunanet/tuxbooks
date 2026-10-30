@@ -78,18 +78,20 @@ resolves the active file from the durable book.
   backfill after a restart. Remove and Unwatch finish any pending hash for
   the affected file rows first, so a re-import can reattach; a failed hash is
   recorded as a relink issue and does not block the action.
-- `migration_issues` — visible merges and failures: two file rows that
-  shared a uuid, two hashes that turned out to be the same book, duplicate
-  progress/annotations/collections/metadata/last-opened that was unioned or
-  resolved newest-wins, and a book whose hash failed and now needs a relink.
-  The Application Data settings tab lists open issues and can dismiss them.
+- `migration_issues` — failures that still need a relink. A failed content
+  hash is recorded here and the book keeps its record. Identity merges and
+  duplicate-state unions are automatic and no longer recorded: earlier
+  versions left informational rows (`identity_merged`,
+  `duplicate_state_merged`, `duplicate_identity`), and migration 0026 resolves
+  those on upgrade.
 
 When duplicate file rows collapse into one durable book, migration 0019 and
 `sync::identity::merge_book_identity` agree on the rules: collection
 membership unions, annotations union, and the newest last-opened and metadata
 overrides win. Metadata overrides have no timestamp of their own, so the
-newest file row's `modified_at` is the ordering signal; a tie is recorded as
-an ambiguous `duplicate_state_merged` issue.
+newest file row's `modified_at` is the ordering signal; a tie keeps the
+current winner. Runtime identity merges keep their audit trail in
+`sync_book_merges`; upgrade-time unions keep the resolved rows above.
 
 The upgrade takes a **pre-migration backup** before applying pending
 migrations: `VACUUM INTO` writes `<db>.pre-migration-<timestamp>.bak` beside

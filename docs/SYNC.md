@@ -109,11 +109,15 @@ an alias:
 - if two machines independently imported the same bytes before meeting, both
   publish an alias for the same hash. Every device resolves the aliases to the
   lexicographically smallest uuid and re-keys the losing state. The resolution
-  is deterministic, so replay order cannot produce different winners.
+  is deterministic, so replay order cannot produce different winners. An
+  identity merge is silent: the losing state moves to the winner, the merge is
+  kept in `sync_book_merges` for diagnostics, and no Settings entry asks the
+  user to interpret a uuid.
 
 Hashing is lazy and bounded: the sweep hashes books that have no binding or
 whose size/mtime changed, for a few seconds per pass. Imports never wait for a
-hash. A book whose file is unavailable keeps its binding and state.
+hash. A book whose file is unavailable keeps its binding and state, and a
+failed background hash leaves a relink issue in `migration_issues`.
 
 ## Folder layout
 

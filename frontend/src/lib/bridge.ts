@@ -98,26 +98,6 @@ export interface SyncTrashEntry {
   expiresAt: string;
 }
 
-/** Durable progress of the background content-hash pass (ADR 0014). */
-export interface HashBackfillStatus {
-  total: number;
-  hashed: number;
-  pending: number;
-  failed: number;
-  waiting: number;
-}
-
-/** An identity merge or a book that needs a relink after the upgrade. */
-export interface MigrationIssue {
-  id: number;
-  issueKey: string;
-  kind: string;
-  detail: string;
-  bookUid: string | null;
-  createdAt: string;
-  resolvedAt: string | null;
-}
-
 export interface SyncMismatch {
   localLibraryId: string;
   remoteLibraryId: string;
@@ -558,27 +538,6 @@ export function listSyncIssues(): Promise<SyncIssue[]> {
 
 export function dismissSyncIssue(id: number): Promise<boolean> {
   return invoke("sync_dismiss_issue", { id });
-}
-
-/** Progress of the background book-identity hash pass. */
-export function getIdentityBackfillStatus(): Promise<HashBackfillStatus> {
-  return invoke("identity_backfill_status");
-}
-
-/** Live progress updates from the background hash pass. */
-export function onIdentityBackfill(
-  callback: (status: HashBackfillStatus) => void,
-): Promise<() => void> {
-  const unlisten = onEvent<HashBackfillStatus>("identity-backfill", callback);
-  return Promise.resolve(unlisten);
-}
-
-export function listMigrationIssues(): Promise<MigrationIssue[]> {
-  return invoke("migration_issues");
-}
-
-export function dismissMigrationIssue(id: number): Promise<boolean> {
-  return invoke("migration_dismiss_issue", { id });
 }
 
 export function listSyncTrash(): Promise<SyncTrashEntry[]> {

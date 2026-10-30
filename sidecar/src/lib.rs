@@ -351,7 +351,6 @@ fn app_data_dir() -> PathBuf {
 /// JSON-RPC server forwards it to the Electron main process.
 pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error> {
     let sync_events = events.clone();
-    let backfill_events = events.clone();
     let db_path = resolve_db_path();
     let (pool, startup_recovery) = init_pool_recovering(&db_path)
         .await
@@ -462,7 +461,7 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
 
     // Existing libraries get their content hashes in the background; startup
     // never waits for it and a restart resumes from `books.hash_state`.
-    services::hash_backfill::start(pool.clone(), backfill_events);
+    services::hash_backfill::start(pool.clone());
 
     Ok(AppState {
         db: pool,

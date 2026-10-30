@@ -560,12 +560,11 @@ pub async fn merge_book_identity(
     .bind(&winner)
     .execute(&mut *tx)
     .await?;
-    let rekeyed = sqlx::query("UPDATE books SET book_uid = ?2 WHERE book_uid = ?1")
+    sqlx::query("UPDATE books SET book_uid = ?2 WHERE book_uid = ?1")
         .bind(&loser)
         .bind(&winner)
         .execute(&mut *tx)
-        .await?
-        .rows_affected();
+        .await?;
 
     // User state moved to the durable key in 0018. Annotations from both
     // copies are kept (union; duplicate highlights are possible). Progress
@@ -608,8 +607,8 @@ pub async fn merge_book_identity(
     .await?;
 
     // Metadata overrides and collection membership now belong to the durable
-    // book too. The newest copy's overrides win; a tie keeps the winner and is
-    // recorded as ambiguous. Memberships from both copies are unioned.
+    // book too. The newest copy's overrides win; a tie keeps the winner.
+    // Memberships from both copies are unioned.
     let (winner_newest, loser_newest): (Option<String>, Option<String>) = sqlx::query_as(
         "SELECT
              (SELECT MAX(modified_at) FROM books WHERE book_uid = ?2),
@@ -665,26 +664,6 @@ pub async fn merge_book_identity(
             .execute(&mut *tx)
             .await?;
     }
-    if loser_has_overrides && winner_has_overrides && loser_newest == winner_newest {
-        sqlx::query(
-            r#"
-            INSERT INTO migration_issues (issue_key, kind, detail, book_uid)
-            SELECT ?1, 'duplicate_state_merged', ?2, ?3
-            WHERE NOT EXISTS (
-                SELECT 1 FROM migration_issues
-                WHERE issue_key = ?1 AND resolved_at IS NULL
-            )
-            "#,
-        )
-        .bind(format!("duplicate-metadata:{winner}"))
-        .bind(
-            "Two copies of this book both had metadata overrides with the same \
-             timestamp; one was kept, but which copy is newest is ambiguous.",
-        )
-        .bind(&winner)
-        .execute(&mut *tx)
-        .await?;
-    }
     sqlx::query(
         "INSERT OR IGNORE INTO book_collections (book_uid, collection_id, added_at)
          SELECT ?2, collection_id, added_at FROM book_collections WHERE book_uid = ?1",
@@ -698,29 +677,6 @@ pub async fn merge_book_identity(
         .bind(&loser)
         .execute(&mut *tx)
         .await?;
-    if rekeyed > 0 {
-        let detail = format!(
-            "Two file rows turned out to be the same book and were merged into one book \
-             (identity {winner}). Progress keeps the newest saved position; annotations \
-             and collection membership from both copies are kept; the newest metadata \
-             overrides win."
-        );
-        sqlx::query(
-            r#"
-            INSERT INTO migration_issues (issue_key, kind, detail, book_uid)
-            SELECT ?1, 'identity_merged', ?2, ?3
-            WHERE NOT EXISTS (
-                SELECT 1 FROM migration_issues
-                WHERE issue_key = ?1 AND resolved_at IS NULL
-            )
-            "#,
-        )
-        .bind(format!("identity-merged:{loser}:{winner}"))
-        .bind(detail)
-        .bind(&winner)
-        .execute(&mut *tx)
-        .await?;
-    }
 
     for kind in [
         EntityKind::Progress,
