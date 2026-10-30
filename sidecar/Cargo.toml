@@ -57,6 +57,8 @@ sha2 = "0.10"
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
+# Paused time for the background sync loop test only; never in the app build.
+tokio = { version = "1", features = ["test-util"] }
 
 # Debug builds compile dependencies optimized. Unoptimized lopdf/image/png
 # made a 25-PDF import take ~15s in dev (vs ~3s release); tuxbooks' own code

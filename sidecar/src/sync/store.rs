@@ -809,4 +809,395 @@ mod tests {
         assert_eq!(read.op_id, op.op_id);
         assert_eq!(read.kind, EntityKind::Annotation);
     }
+
+    #[test]
+    fn resolve_root_rejects_relative_and_missing_paths() {
+        assert!(resolve_root(Path::new("relative/path")).is_err());
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(resolve_root(&tmp.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn connect_rejects_newer_schemas_and_invalid_library_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        let root = resolve_root(&folder).unwrap();
+        write_json_atomic(
+            &root.join(LIBRARY_FILE),
+            &json!({
+                "schema": OP_SCHEMA + 1,
+                "library_id": "a".repeat(32),
+                "created_at": "2026-10-29T00:00:00.000Z",
+            }),
+        )
+        .unwrap();
+        let newer = connect(&folder, "device", "Laptop", "now").unwrap_err();
+        assert!(newer.to_string().contains("schema"), "{newer}");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        let root = resolve_root(&folder).unwrap();
+        write_json_atomic(
+            &root.join(LIBRARY_FILE),
+            &json!({
+                "schema": OP_SCHEMA,
+                "library_id": "not-a-library-id",
+                "created_at": "2026-10-29T00:00:00.000Z",
+            }),
+        )
+        .unwrap();
+        let invalid = connect(&folder, "device", "Laptop", "now").unwrap_err();
+        assert!(
+            invalid.to_string().contains("invalid library id"),
+            "{invalid}"
+        );
+    }
+
+    #[test]
+    fn connect_updates_a_renamed_device_and_rejects_a_foreign_device_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        let first = connect(&folder, "device", "Laptop", "2026-10-29T15:00:00Z").unwrap();
+        let second = connect(&folder, "device", "Desktop", "2026-10-29T15:00:01Z").unwrap();
+        assert_eq!(second.device.name, "Desktop");
+        assert_eq!(first.library.library_id, second.library.library_id);
+
+        let device_path = second.root.join("devices/device/device.json");
+        let mut foreign: DeviceFile = read_json(&device_path).unwrap();
+        foreign.device_id = "another-device".into();
+        write_json_atomic(&device_path, &foreign).unwrap();
+        let err = connect(&folder, "device", "Desktop", "2026-10-29T15:00:02Z").unwrap_err();
+        assert!(err.to_string().contains("does not match"), "{err}");
+    }
+
+    #[test]
+    fn archive_uses_a_suffixed_name_when_the_first_target_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+        connect(&folder, "device", "Laptop", "2026-10-29T15:00:00Z").unwrap();
+
+        let stamp = "2026-10-29T15:01:00Z";
+        let first_target = folder.join("TuxBooks.before-20261029T150100Z");
+        fs::create_dir_all(&first_target).unwrap();
+
+        let archived = archive_existing_library(&folder, stamp).unwrap().unwrap();
+        assert_eq!(archived, folder.join("TuxBooks.before-20261029T150100Z-1"));
+        assert!(archived.join(LIBRARY_FILE).exists());
+    }
+
+    #[test]
+    fn scan_ops_ignores_non_operation_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = resolve_root(tmp.path()).unwrap();
+        assert!(scan_ops(&root).unwrap().is_empty());
+
+        let op = op(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "cfi": "x"}),
+        );
+        let relative = write_op(&root, &op).unwrap();
+        let device_dir = root.join("ops").join(&op.device_id);
+        fs::write(device_dir.join("notes.txt"), b"not an op").unwrap();
+        fs::write(device_dir.join(".hidden.json"), b"{}").unwrap();
+        fs::create_dir_all(device_dir.join("nested.json")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let non_utf8 = std::ffi::OsString::from_vec(b"bad\xff.json".to_vec());
+            fs::write(device_dir.join(non_utf8), b"{}").unwrap();
+        }
+
+        let files = scan_ops(&root).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, relative);
+        assert!(files[0].size > 0);
+    }
+
+    #[test]
+    fn read_op_rejects_oversized_malformed_and_invalid_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = resolve_root(tmp.path()).unwrap();
+
+        assert!(read_op(&root.join("missing.json"))
+            .unwrap_err()
+            .contains("cannot stat"));
+
+        let oversized = root.join("oversized.json");
+        fs::write(&oversized, vec![b' '; MAX_OP_FILE_BYTES as usize + 1]).unwrap();
+        assert!(read_op(&oversized)
+            .unwrap_err()
+            .contains("over the 1 MiB limit"));
+
+        let malformed = root.join("malformed.json");
+        fs::write(&malformed, b"{not json").unwrap();
+        assert!(read_op(&malformed).unwrap_err().contains("invalid JSON"));
+
+        let mut invalid = op(EntityKind::Annotation, json!({"kind": "bookmark"}));
+        invalid.op_id = "short".into();
+        let invalid_path = root.join("invalid.json");
+        fs::write(&invalid_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(read_op(&invalid_path).unwrap_err().contains("op_id"));
+    }
+
+    #[test]
+    fn write_op_rejects_operations_over_the_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = resolve_root(tmp.path()).unwrap();
+        let oversized = op(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "note": "x".repeat(1_100_000)}),
+        );
+        let err = write_op(&root, &oversized).unwrap_err();
+        assert!(err.to_string().contains("1 MiB"), "{err}");
+    }
+
+    #[test]
+    fn cover_blob_storage_round_trips_and_rejects_bad_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = resolve_root(tmp.path()).unwrap();
+        let covers = tmp.path().join("covers");
+        let name = "0123456789abcdef.png";
+
+        assert!(store_cover_blob(&root, &covers, "../../etc/passwd").is_err());
+        store_cover_blob(&root, &covers, name).unwrap();
+        assert!(!root.join(COVER_BLOB_DIR).join(name).exists());
+
+        fs::create_dir_all(&covers).unwrap();
+        fs::write(covers.join(name), b"cover-bytes").unwrap();
+        store_cover_blob(&root, &covers, name).unwrap();
+        assert_eq!(
+            fs::read(root.join(COVER_BLOB_DIR).join(name)).unwrap(),
+            b"cover-bytes"
+        );
+        // An already stored blob is left alone.
+        store_cover_blob(&root, &covers, name).unwrap();
+
+        let oversized = "fedcba9876543210.png";
+        let file = fs::File::create(covers.join(oversized)).unwrap();
+        file.set_len(16 * 1024 * 1024 + 1).unwrap();
+        let err = store_cover_blob(&root, &covers, oversized).unwrap_err();
+        assert!(err.to_string().contains("16 MiB"), "{err}");
+    }
+
+    #[test]
+    fn apply_cover_blob_handles_existing_missing_and_oversized_blobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = resolve_root(tmp.path()).unwrap();
+        let covers = tmp.path().join("covers");
+        let name = "0123456789abcdef.png";
+
+        assert!(!apply_cover_blob(&root, &covers, "../../etc/passwd").unwrap());
+        assert!(!apply_cover_blob(&root, &covers, name).unwrap());
+
+        let blob_dir = root.join(COVER_BLOB_DIR);
+        fs::create_dir_all(&blob_dir).unwrap();
+        fs::write(blob_dir.join(name), b"blob").unwrap();
+        assert!(apply_cover_blob(&root, &covers, name).unwrap());
+        assert_eq!(fs::read(covers.join(name)).unwrap(), b"blob");
+        // An already cached cover is not copied again.
+        assert!(apply_cover_blob(&root, &covers, name).unwrap());
+
+        let oversized = "fedcba9876543210.png";
+        let file = fs::File::create(blob_dir.join(oversized)).unwrap();
+        file.set_len(16 * 1024 * 1024 + 1).unwrap();
+        let err = apply_cover_blob(&root, &covers, oversized).unwrap_err();
+        assert!(err.to_string().contains("16 MiB"), "{err}");
+    }
+
+    #[test]
+    fn validate_op_rejects_malformed_envelopes() {
+        let base = op(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "cfi": "x"}),
+        );
+
+        let mut bad = base.clone();
+        bad.schema = OP_SCHEMA + 1;
+        assert_op_rejected(&bad, "a newer schema");
+
+        let mut bad = base.clone();
+        bad.op_id = "short".into();
+        assert_op_rejected(&bad, "a malformed op id");
+
+        let mut bad = base.clone();
+        bad.device_id = "short".into();
+        assert_op_rejected(&bad, "a malformed device id");
+
+        let mut bad = base.clone();
+        bad.hlc.device = "c".repeat(32);
+        assert_op_rejected(&bad, "an hlc device that differs from the device id");
+
+        let mut bad = base.clone();
+        bad.hlc.wall = -1;
+        assert_op_rejected(&bad, "a negative hlc wall");
+
+        let mut bad = base.clone();
+        bad.entity_uid = "../escape".into();
+        assert_op_rejected(&bad, "an unsafe entity uid");
+
+        let mut bad = base.clone();
+        bad.book_uid = Some("../escape".into());
+        assert_op_rejected(&bad, "an unsafe book uid");
+
+        let mut bad = base.clone();
+        bad.deleted = true;
+        assert_op_rejected(&bad, "a delete that carries fields");
+
+        let mut bad = base.clone();
+        bad.fields.clear();
+        bad.deleted = true;
+        bad.restore = true;
+        assert_op_rejected(&bad, "a restore that is also a delete");
+
+        let mut bad = op(
+            EntityKind::BookIdentity,
+            json!({"content_hash": "a".repeat(64)}),
+        );
+        bad.deleted = true;
+        bad.fields.clear();
+        assert_op_rejected(&bad, "a book identity delete");
+
+        let mut bad = op(
+            EntityKind::BookIdentity,
+            json!({"content_hash": "a".repeat(64)}),
+        );
+        bad.book_uid = Some("f".repeat(32));
+        assert_op_rejected(&bad, "a book identity whose uid differs");
+
+        let mut bad = op(EntityKind::Book, json!({"snapshot": "{}"}));
+        bad.book_uid = Some("f".repeat(32));
+        assert_op_rejected(&bad, "a book whose uid differs");
+
+        let mut bad = op(EntityKind::Progress, json!({"progress_percent": 1.0}));
+        bad.book_uid = None;
+        assert_op_rejected(&bad, "a book-scoped progress op without a book");
+
+        let mut bad = op(EntityKind::Metadata, json!({"title": "Book"}));
+        bad.book_uid = None;
+        assert_op_rejected(&bad, "a book-scoped metadata op without a book");
+
+        let mut bad = base.clone();
+        bad.prior = json!({"evil": "x"}).as_object().cloned();
+        assert_op_rejected(&bad, "an unknown prior field");
+
+        let mut bad = base.clone();
+        bad.prior = json!({"page_number": 0}).as_object().cloned();
+        assert_op_rejected(&bad, "an invalid prior value");
+
+        let mut membership = op(EntityKind::Membership, json!({"present": true}));
+        membership.entity_uid = "collection-only".into();
+        assert_op_rejected(&membership, "a membership uid without a book part");
+
+        let mut collection = op(EntityKind::Collection, json!({"name": "Shelf"}));
+        collection.book_uid = None;
+        validate_op(&collection).unwrap();
+
+        let mut identity = op(
+            EntityKind::BookIdentity,
+            json!({"content_hash": "a".repeat(64)}),
+        );
+        identity.book_uid = Some(identity.entity_uid.clone());
+        validate_op(&identity).unwrap();
+    }
+
+    fn assert_op_rejected(op: &Op, because: &str) {
+        assert!(validate_op(op).is_err(), "expected rejection for {because}");
+    }
+
+    fn assert_field_rejected(kind: EntityKind, fields: Value) {
+        assert!(
+            validate_op(&op(kind, fields)).is_err(),
+            "expected {kind:?} fields to be rejected"
+        );
+    }
+
+    fn assert_field_accepted(kind: EntityKind, fields: Value) {
+        validate_op(&op(kind, fields)).unwrap();
+    }
+
+    #[test]
+    fn validate_field_values_rejects_bad_types_and_ranges() {
+        assert_field_rejected(EntityKind::Annotation, json!({"kind": "note"}));
+        assert_field_rejected(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "page_number": 0}),
+        );
+        assert_field_rejected(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "page_fraction": 1.5}),
+        );
+        assert_field_rejected(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "text": "x".repeat(MAX_FIELD_STRING_BYTES + 1)}),
+        );
+        assert_field_rejected(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "text": 5}),
+        );
+        assert_field_accepted(
+            EntityKind::Annotation,
+            json!({"kind": "bookmark", "page_fraction": 0.5, "text": null}),
+        );
+
+        assert_field_rejected(EntityKind::Progress, json!({"progress_percent": 101.0}));
+        assert_field_rejected(EntityKind::Progress, json!({"progress_percent": "x"}));
+        assert_field_rejected(EntityKind::Progress, json!({"progression": -0.1}));
+        assert_field_rejected(EntityKind::Progress, json!({"character_offset": -1}));
+        assert_field_rejected(EntityKind::Progress, json!({"character_offset": "x"}));
+        assert_field_rejected(EntityKind::Progress, json!({"page_number": 0}));
+        assert_field_rejected(EntityKind::Progress, json!({"scroll_offset": "x"}));
+        assert_field_rejected(EntityKind::Progress, json!({"schema_version": -1}));
+        assert_field_accepted(
+            EntityKind::Progress,
+            json!({"progress_percent": 50.0, "progression": 1.0, "character_offset": 0}),
+        );
+
+        assert_field_rejected(EntityKind::Metadata, json!({"series_index": "x"}));
+        assert_field_rejected(EntityKind::Metadata, json!({"authors_customized": "yes"}));
+        assert_field_rejected(EntityKind::Metadata, json!({"authors": "not-an-array"}));
+        assert_field_rejected(EntityKind::Metadata, json!({"authors": [1]}));
+        assert_field_rejected(
+            EntityKind::Metadata,
+            json!({"authors": vec!["x"; MAX_LIST_ITEMS + 1]}),
+        );
+        assert_field_rejected(EntityKind::Metadata, json!({"authors": ["x".repeat(1025)]}));
+        assert_field_accepted(
+            EntityKind::Metadata,
+            json!({"authors": ["Alice"], "subjects": ["Essays"], "series_index": 1.5}),
+        );
+
+        assert_field_rejected(EntityKind::Collection, json!({"name": ""}));
+        assert_field_rejected(EntityKind::Collection, json!({"name": "   "}));
+        assert_field_rejected(
+            EntityKind::Collection,
+            json!({"name": "x".repeat(MAX_COLLECTION_NAME_BYTES + 1)}),
+        );
+        assert_field_rejected(EntityKind::Collection, json!({"name": 5}));
+
+        assert_field_rejected(EntityKind::Membership, json!({"present": "yes"}));
+        assert_field_rejected(EntityKind::Membership, json!({"added_at": 5}));
+        assert_field_rejected(EntityKind::Opened, json!({"last_opened_at": 5}));
+
+        assert_field_rejected(EntityKind::BookIdentity, json!({"content_hash": "short"}));
+        assert_field_rejected(EntityKind::BookIdentity, json!({"unknown": "x"}));
+
+        assert_field_rejected(EntityKind::Book, json!({"snapshot": 5}));
+        assert_field_rejected(
+            EntityKind::Book,
+            json!({"replacement_book_uid": "../escape"}),
+        );
+        assert_field_rejected(EntityKind::Book, json!({"discarded": "yes"}));
+        assert_field_rejected(EntityKind::Book, json!({"unknown": "x"}));
+    }
+
+    #[test]
+    fn fields_object_requires_an_object() {
+        assert!(fields_object(json!({"note": "x"})).is_ok());
+        assert!(fields_object(json!(["not", "an", "object"])).is_err());
+        assert!(fields_object(Value::Null).is_err());
+    }
 }
