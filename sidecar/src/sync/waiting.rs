@@ -167,3 +167,149 @@ pub async fn forget(pool: &SqlitePool, book_uid: &str) -> Result<bool, AppError>
     .await?;
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WAITING: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const IGNORED: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const TOMBSTONED: &str = "cccccccccccccccccccccccccccccccc";
+
+    async fn insert_entity(pool: &SqlitePool, kind: &str, uid: &str, book_uid: &str) {
+        sqlx::query(
+            "INSERT INTO sync_state_entities (kind, entity_uid, book_uid) VALUES (?1, ?2, ?3)",
+        )
+        .bind(kind)
+        .bind(uid)
+        .bind(book_uid)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_field(pool: &SqlitePool, kind: &str, uid: &str, field: &str, value: &str) {
+        sqlx::query(
+            "INSERT INTO sync_state_fields
+                (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+             VALUES (?1, ?2, ?3, ?4, 1, 0, 'test')",
+        )
+        .bind(kind)
+        .bind(uid)
+        .bind(field)
+        .bind(value)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_reports_the_metadata_progress_and_annotation_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        insert_entity(&pool, "metadata", WAITING, WAITING).await;
+        insert_field(&pool, "metadata", WAITING, "title", "\"Waiting Title\"").await;
+        insert_field(
+            &pool,
+            "metadata",
+            WAITING,
+            "authors",
+            "[\"Alice\", \"Bob\", 7]",
+        )
+        .await;
+        insert_entity(&pool, "progress", "p1", WAITING).await;
+        insert_field(&pool, "progress", "p1", "progress_percent", "42.5").await;
+        insert_entity(&pool, "opened", "o1", WAITING).await;
+        insert_field(
+            &pool,
+            "opened",
+            "o1",
+            "last_opened_at",
+            "\"2026-01-02T03:04:05.000Z\"",
+        )
+        .await;
+        insert_entity(&pool, "annotation", "a1", WAITING).await;
+        insert_field(&pool, "annotation", "a1", "text", "\"the first highlight\"").await;
+        // A second annotation raises the count but is not the named sample.
+        insert_entity(&pool, "annotation", "a2", WAITING).await;
+
+        // Deleted annotations do not count.
+        insert_entity(&pool, "annotation", "a3", WAITING).await;
+        sqlx::query(
+            "UPDATE sync_state_entities SET deleted = 1 WHERE kind = 'annotation' AND entity_uid = 'a3'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Hidden books and books with a shared tombstone never appear.
+        insert_entity(&pool, "progress", "p2", IGNORED).await;
+        sqlx::query("INSERT INTO sync_ignored_books (book_uid) VALUES (?1)")
+            .bind(IGNORED)
+            .execute(&pool)
+            .await
+            .unwrap();
+        insert_entity(&pool, "progress", "p3", TOMBSTONED).await;
+        sqlx::query(
+            "INSERT INTO sync_state_entities (kind, entity_uid, book_uid, deleted)
+             VALUES ('book', ?1, ?1, 1)",
+        )
+        .bind(TOMBSTONED)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(count(&pool).await.unwrap(), 1);
+
+        let listed = list(&pool).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        let book = &listed[0];
+        assert_eq!(book.book_uid, WAITING);
+        assert_eq!(book.title.as_deref(), Some("Waiting Title"));
+        assert_eq!(book.author.as_deref(), Some("Alice, Bob"));
+        assert_eq!(book.progress_percent, Some(42.5));
+        assert_eq!(
+            book.last_opened_at.as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            book.sample_annotation.as_deref(),
+            Some("the first highlight")
+        );
+        assert_eq!(book.annotation_count, 2);
+    }
+
+    #[tokio::test]
+    async fn forgetting_hides_one_book_and_reports_unknown_uids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        insert_entity(&pool, "progress", "p1", WAITING).await;
+
+        assert!(
+            !forget(&pool, IGNORED).await.unwrap(),
+            "a uid that is not waiting cannot be forgotten"
+        );
+        assert!(forget(&pool, WAITING).await.unwrap());
+        assert!(list(&pool).await.unwrap().is_empty());
+        assert_eq!(count(&pool).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn forget_all_reports_how_many_books_it_hid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        insert_entity(&pool, "progress", "p1", WAITING).await;
+        insert_entity(&pool, "progress", "p2", "dddddddddddddddddddddddddddddddd").await;
+
+        assert_eq!(forget_all(&pool).await.unwrap(), 2);
+        assert!(list(&pool).await.unwrap().is_empty());
+        assert_eq!(forget_all(&pool).await.unwrap(), 0);
+    }
+}

@@ -25,7 +25,7 @@ touching a Rust module's behavior or tests.
 | PDF parser          | `sidecar/src/pdf/`                            | 80%      | n/a         |
 | Services            | `sidecar/src/services/`                       | 80%      | n/a         |
 | Repository          | `sidecar/src/repository/`                     | 80%      | n/a         |
-| Cloud sync          | `sidecar/src/sync/`                           | 80%      | n/a         |
+| Cloud sync          | `sidecar/src/sync/`                           | 92%      | n/a         |
 | Database            | `sidecar/src/db/`                             | 80%      | n/a         |
 | Domain models       | `sidecar/src/domain/`                         | 80%      | n/a         |
 | Library view        | `frontend/src/components/library/`            | 80%      | 91.05%      |
@@ -44,6 +44,13 @@ The v5 baseline column (2026-10-22) was taken by the vite-plus migration,
 which moved the frontend to vitest 5. It records the first run on the new
 instrument; Rust rows are n/a because that change did not touch the Rust
 instrument.
+
+Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`. The
+sync recovery work (`.1` through `.3`) left every file in the module at or
+above 92% lines, so the floor holds that level instead of the old module
+default. Sync decides whether a conflict, a Forget, or a waiting book
+converges on the next pass, so a coverage drop there gets the same gate as
+the reader.
 
 Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.
