@@ -278,6 +278,31 @@ async fn insert_trash(device: &Device, kind: &str, entity_uid: &str, prior_json:
     .unwrap()
 }
 
+async fn put_state_entity(pool: &SqlitePool, kind: &str, uid: &str, book_uid: &str) {
+    sqlx::query("INSERT INTO sync_state_entities (kind, entity_uid, book_uid) VALUES (?1, ?2, ?3)")
+        .bind(kind)
+        .bind(uid)
+        .bind(book_uid)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn put_state_field(pool: &SqlitePool, kind: &str, uid: &str, field: &str, value: &str) {
+    sqlx::query(
+        "INSERT INTO sync_state_fields
+            (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES (?1, ?2, ?3, ?4, 1, 0, 'test-device')",
+    )
+    .bind(kind)
+    .bind(uid)
+    .bind(field)
+    .bind(value)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn annotation_written_on_one_machine_appears_on_the_other() {
     let sync_dir = tempfile::tempdir().unwrap();
@@ -832,6 +857,109 @@ async fn all_waiting_books_can_be_hidden_at_once() {
     assert_eq!(waiting::forget_all(&b.pool).await.unwrap(), 2);
     assert!(waiting::list(&b.pool).await.unwrap().is_empty());
     assert_eq!(b.service.status().await.unwrap().waiting_books, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_books_report_metadata_progress_and_annotations() {
+    let a = device().await;
+    let uid = "a".repeat(32);
+    let ignored = "b".repeat(32);
+    let tombstoned = "c".repeat(32);
+
+    put_state_entity(&a.pool, "metadata", &uid, &uid).await;
+    put_state_field(&a.pool, "metadata", &uid, "title", "\"Waiting title\"").await;
+    put_state_field(
+        &a.pool,
+        "metadata",
+        &uid,
+        "authors",
+        "[\"Alice\", \"Bob\", 7]",
+    )
+    .await;
+    // A field the waiting list does not display is ignored, not fatal.
+    put_state_field(&a.pool, "metadata", &uid, "publisher", "\"Unused\"").await;
+    put_state_entity(&a.pool, "progress", "p1", &uid).await;
+    put_state_field(&a.pool, "progress", "p1", "progress_percent", "42.5").await;
+    put_state_entity(&a.pool, "opened", "o1", &uid).await;
+    put_state_field(
+        &a.pool,
+        "opened",
+        "o1",
+        "last_opened_at",
+        "\"2026-01-02T03:04:05.000Z\"",
+    )
+    .await;
+    put_state_entity(&a.pool, "annotation", "a1", &uid).await;
+    put_state_field(
+        &a.pool,
+        "annotation",
+        "a1",
+        "text",
+        "\"the first highlight\"",
+    )
+    .await;
+    put_state_entity(&a.pool, "annotation", "a2", &uid).await;
+    put_state_entity(&a.pool, "annotation", "a3", &uid).await;
+    sqlx::query(
+        "UPDATE sync_state_entities SET deleted = 1
+         WHERE kind = 'annotation' AND entity_uid = 'a3'",
+    )
+    .execute(&a.pool)
+    .await
+    .unwrap();
+
+    // Hidden books and books with a shared tombstone never appear.
+    put_state_entity(&a.pool, "progress", "p2", &ignored).await;
+    sqlx::query("INSERT INTO sync_ignored_books (book_uid) VALUES (?1)")
+        .bind(&ignored)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    put_state_entity(&a.pool, "progress", "p3", &tombstoned).await;
+    sqlx::query(
+        "INSERT INTO sync_state_entities (kind, entity_uid, book_uid, deleted)
+         VALUES ('book', ?1, ?1, 1)",
+    )
+    .bind(&tombstoned)
+    .execute(&a.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(waiting::count(&a.pool).await.unwrap(), 1);
+    let listed = a.service.waiting_books().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    let book = &listed[0];
+    assert_eq!(book.book_uid, uid);
+    assert_eq!(book.title.as_deref(), Some("Waiting title"));
+    assert_eq!(book.author.as_deref(), Some("Alice, Bob"));
+    assert_eq!(book.progress_percent, Some(42.5));
+    assert_eq!(
+        book.last_opened_at.as_deref(),
+        Some("2026-01-02T03:04:05.000Z")
+    );
+    assert_eq!(
+        book.sample_annotation.as_deref(),
+        Some("the first highlight")
+    );
+    assert_eq!(book.annotation_count, 2);
+    assert_eq!(a.service.status().await.unwrap().waiting_books, 1);
+    assert!(
+        !a.service.forget_waiting_book("dddd").await.unwrap(),
+        "an unknown uid is not waiting"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_service_forgets_all_waiting_books_in_one_call() {
+    let a = device().await;
+    put_state_entity(&a.pool, "progress", "p1", &"a".repeat(32)).await;
+    put_state_entity(&a.pool, "progress", "p2", &"b".repeat(32)).await;
+    assert_eq!(a.service.waiting_books().await.unwrap().len(), 2);
+
+    assert_eq!(a.service.forget_all_waiting_books().await.unwrap(), 2);
+    assert!(a.service.waiting_books().await.unwrap().is_empty());
+    assert_eq!(a.service.status().await.unwrap().waiting_books, 0);
+    assert_eq!(a.service.forget_all_waiting_books().await.unwrap(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2050,6 +2178,26 @@ async fn a_pass_rejects_a_folder_that_belongs_to_another_library() {
     let err = a.service.run_pass().await.unwrap_err();
     assert!(err.to_string().contains("different library"), "got {err}");
     assert_eq!(a.service.status().await.unwrap().state, SyncState::Error);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn service_debug_does_not_expose_its_internals() {
+    let a = device().await;
+    let text = format!("{:?}", a.service);
+    assert!(text.starts_with("SyncService"), "got {text}");
+    assert!(!text.contains("pool"), "got {text}");
+    assert!(!text.contains("events"), "got {text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn service_helpers_work_before_connecting() {
+    let a = device().await;
+    assert_eq!(a.service.dismiss_all_issues().await.unwrap(), 0);
+    let renamed = a.service.set_device_name("  Study  ").await.unwrap();
+    assert_eq!(renamed.device_name.as_deref(), Some("Study"));
+    assert!(!renamed.enabled);
+    a.service.shutdown().await;
+    assert!(!a.service.status().await.unwrap().enabled);
 }
 
 #[tokio::test(flavor = "multi_thread")]
