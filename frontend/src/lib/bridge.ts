@@ -578,7 +578,7 @@ export function pickDirectory(): Promise<string | null> {
   return tuxbooks().pickDirectory();
 }
 
-/** Native picker for the folder a cloud client keeps in sync. */
+/** Native picker for the sync folder: local, network, or cloud-synced. */
 export function pickSyncFolder(): Promise<string | null> {
   return tuxbooks().pickSyncFolder();
 }

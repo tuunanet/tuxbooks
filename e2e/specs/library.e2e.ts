@@ -24,7 +24,7 @@ test.describe("tuxbooks app shell", () => {
   });
 
   test("navigates to settings and back to the library", async ({ page }) => {
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
 
     await page.getByRole("button", { name: "All Books" }).click();

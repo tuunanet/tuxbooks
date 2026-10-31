@@ -122,14 +122,14 @@ describe("FoldersSettings", () => {
     expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-amber-500/10");
   });
 
-  it("explains that a watched folder can be a cloud-synced directory", async () => {
+  it("explains that a watched folder can be local, on a network path, or cloud-synced", async () => {
     renderFolders();
 
     const hint = await screen.findByTestId("folders-cloud-hint");
-    expect(hint).toHaveTextContent("one your cloud client keeps in sync");
+    expect(hint).toHaveTextContent("local, on a network path, or one your cloud client keeps in");
     expect(hint).toHaveTextContent("Settings > Sync");
     expect(hint).toHaveTextContent("never carries book files");
-    expect(hint).toHaveTextContent("cannot open a file the client has not downloaded yet");
+    expect(hint).toHaveTextContent("cannot open a file that has not downloaded yet");
   });
 
   it("shows an empty list as an invitation to add a folder", async () => {

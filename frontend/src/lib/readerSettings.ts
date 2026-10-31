@@ -1,5 +1,5 @@
 /**
- * Persisted reader-appearance defaults (Settings → EPUB / PDF).
+ * Persisted reader-appearance defaults (Settings → Viewer settings).
  *
  * Reader preferences used to reset with every reader session. They are now
  * saved on device so a chosen font, spacing, theme, or layout applies to the

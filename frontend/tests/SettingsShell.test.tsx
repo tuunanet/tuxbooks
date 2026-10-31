@@ -57,8 +57,7 @@ describe("SettingsShell", () => {
     expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
     for (const label of [
       "General",
-      "EPUB",
-      "PDF",
+      "Viewer settings",
       "Keyboard Shortcuts",
       "Watched folders",
       "Sync",
@@ -79,8 +78,7 @@ describe("SettingsShell", () => {
       .map((button) => button.textContent);
     expect(labels).toEqual([
       "General",
-      "EPUB",
-      "PDF",
+      "Viewer settings",
       "Keyboard Shortcuts",
       "Watched folders",
       "Sync",
@@ -112,18 +110,17 @@ describe("SettingsShell", () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
-    expect(screen.getByRole("heading", { name: "PDF" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
+    expect(screen.getByRole("heading", { name: "Viewer settings" })).toBeInTheDocument();
+    const readingRows = screen.getByTestId("settings-rows");
+    expect(readingRows).toHaveTextContent("Default reading appearance");
+    expect(readingRows).not.toHaveTextContent("How defaults are saved");
+
+    await userEvent.click(screen.getByRole("tab", { name: "PDF" }));
     const pdfRows = screen.getByTestId("settings-rows");
     expect(pdfRows).toHaveTextContent("Default PDF appearance");
     expect(pdfRows).not.toHaveTextContent("Rendering");
     expect(pdfRows).not.toHaveTextContent("Outlines and thumbnails");
-
-    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
-    expect(screen.getByRole("heading", { name: "EPUB" })).toBeInTheDocument();
-    const readingRows = screen.getByTestId("settings-rows");
-    expect(readingRows).toHaveTextContent("Default reading appearance");
-    expect(readingRows).not.toHaveTextContent("How defaults are saved");
   });
 
   it("opens the Folders section from the navigation", async () => {
@@ -207,11 +204,11 @@ describe("SettingsShell", () => {
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
   });
 
-  it("persists reader appearance defaults from the Reading section", async () => {
+  it("persists reader appearance defaults from the Viewer settings section", async () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
+    await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
     expect(screen.getByRole("radio", { name: "Paginated" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
@@ -230,18 +227,18 @@ describe("SettingsShell", () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
+    await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
     expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+    await userEvent.click(screen.getByRole("tab", { name: "PDF" }));
     expect(screen.queryByTestId("pref-book-mode")).not.toBeInTheDocument();
   });
 
-  it("persists and resets highlight color overrides from the Reading section", async () => {
+  it("persists and resets highlight color overrides from the Viewer settings section", async () => {
     renderSettings();
 
     await screen.findByTestId("settings-view");
-    await userEvent.click(screen.getByRole("button", { name: "EPUB" }));
+    await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
     expect(screen.getByTestId("highlight-settings")).toBeInTheDocument();
 
     // Pick a custom hue for the light-family yellow slot.

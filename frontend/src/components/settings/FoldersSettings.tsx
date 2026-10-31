@@ -207,9 +207,8 @@ export function FoldersSettings() {
 
         <div data-testid="folders-cloud-hint" className="mt-3 flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">
-            A watched folder can be local, on a mounted drive, or one your cloud client keeps in
-            sync (Dropbox, Google Drive, Nextcloud, Syncthing). Your client copies the book files.
-            TuxBooks reads them and imports new ones as they arrive.
+            A watched folder can be local, on a network path, or one your cloud client keeps in
+            sync. TuxBooks reads the book files where they are and imports new ones as they arrive.
           </p>
           <p className="text-sm text-muted-foreground">
             Reading progress, bookmarks, collections, and library-side metadata edits travel
@@ -217,8 +216,8 @@ export function FoldersSettings() {
             folder never carries book files.
           </p>
           <p className="text-xs text-muted-foreground">
-            Keep the folder available offline. TuxBooks cannot open a file the client has not
-            downloaded yet.
+            Keep network and cloud folders available offline. TuxBooks cannot open a file that has
+            not downloaded yet.
           </p>
         </div>
 

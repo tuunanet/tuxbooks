@@ -130,10 +130,10 @@ describe("SyncSettings", () => {
     expect(
       screen.getByText("Library metadata edits (values the book file cannot store)"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Book files (EPUB and PDF)")).toBeInTheDocument();
+    expect(screen.getByText("Book files themselves")).toBeInTheDocument();
     expect(screen.getByText("The library catalog and watched folders")).toBeInTheDocument();
     expect(
-      screen.getByText(/Saving metadata into an EPUB or PDF rewrites the book file/i),
+      screen.getByText(/Saving metadata into a book file rewrites that file/i),
     ).toBeInTheDocument();
 
     fireEvent.click(await screen.findByTestId("sync-connect"));

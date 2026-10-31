@@ -8,8 +8,10 @@ import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import { SyncSettings } from "@/components/settings/SyncSettings";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { epubForegroundFitsTheme, epubSurfaceTheme, isEpubHexColor } from "@/lib/epub/appearance";
+import { FORMATS } from "@/lib/formats";
 import {
   HIGHLIGHT_COLOR_KEYS,
   defaultHighlightHex,
@@ -35,21 +37,13 @@ import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
+import type { BookFormat } from "@/types/domain";
 
-type SettingsSectionId =
-  | "general"
-  | "reading"
-  | "pdf"
-  | "shortcuts"
-  | "folders"
-  | "sync"
-  | "data"
-  | "about";
+type SettingsSectionId = "general" | "viewer" | "shortcuts" | "folders" | "sync" | "data" | "about";
 
 const SECTIONS: { id: SettingsSectionId; label: string }[] = [
   { id: "general", label: "General" },
-  { id: "reading", label: "EPUB" },
-  { id: "pdf", label: "PDF" },
+  { id: "viewer", label: "Viewer settings" },
   { id: "shortcuts", label: "Keyboard Shortcuts" },
   { id: "folders", label: "Watched folders" },
   { id: "sync", label: "Sync" },
@@ -214,7 +208,7 @@ function HighlightFamilyRow({
 }
 
 /**
- * Highlight color defaults and overrides, shared by EPUB and PDF (the
+ * Highlight color defaults and overrides, shared by every reader (the
  * annotation model is format-agnostic). One row per theme family; the wash
  * for the active family is applied at render time, so a picked hue needs no
  * dark-mode variant.
@@ -232,8 +226,8 @@ function HighlightsSettingsCard({
     <div className="rounded-lg border p-4" data-testid="highlight-settings">
       <p className="text-sm font-medium">Highlight colors</p>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Applies to highlights in every book and PDF. Colors are tuned per theme family; picking a
-        color overrides the default for that family.
+        Applies to highlights in every book. Colors are tuned per theme family; picking a color
+        overrides the default for that family.
       </p>
       <div className="mt-4 flex flex-col gap-4">
         <HighlightFamilyRow
@@ -257,11 +251,35 @@ function HighlightsSettingsCard({
   );
 }
 
-/** The interactive reader-appearance editor shared by EPUB and PDF. */
-function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
+/**
+ * Appearance card copy per format. Titles name the format because the tabs do;
+ * `FORMATS` owns the ids, labels, and display order.
+ */
+const VIEWER_FORMAT_COPY: Record<BookFormat, { title: string; description: string }> = {
+  epub: {
+    title: "Default reading appearance",
+    description:
+      "Applied to every EPUB you open. You can still adjust these per session in the reader.",
+  },
+  pdf: {
+    title: "Default PDF appearance",
+    description:
+      "Applied to every PDF you open. PDFs are fixed-layout, so only the theme can be defaulted.",
+  },
+};
+
+/**
+ * Viewer settings: persisted default appearance, one tab per format. Highlight
+ * colors apply to every format, so that card sits below the tabs and is written
+ * once. Reset clears every stored default, so it sits above the tabs instead of
+ * inside one.
+ */
+function ViewerSettingsSection() {
   const { resolvedTheme } = useThemeState();
   const { stored, setPreferences, reset } = useStoredReaderSettings(resolvedTheme);
+  const [format, setFormat] = useState<BookFormat>("epub");
   const preferences = effectiveReaderPreferences(stored, resolvedTheme);
+  const formats = Object.keys(FORMATS) as BookFormat[];
 
   const setHighlightOverride = useCallback(
     (family: HighlightThemeFamily, color: HighlightColor, hex: string) => {
@@ -283,29 +301,43 @@ function ReaderSettingsSection({ format }: { format: "epub" | "pdf" }) {
 
   return (
     <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
-      <div className="rounded-lg border p-4">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium">
-              {format === "pdf" ? "Default PDF appearance" : "Default reading appearance"}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {format === "pdf"
-                ? "Applied to every PDF you open. PDFs are fixed-layout, so only the theme can be defaulted."
-                : "Applied to every EPUB you open. You can still adjust these per session in the reader."}
-            </p>
-          </div>
+      <Tabs
+        value={format}
+        onValueChange={(value) => {
+          if (Object.hasOwn(FORMATS, value)) setFormat(value as BookFormat);
+        }}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <TabsList aria-label="Default appearance per format">
+            {formats.map((id) => (
+              <TabsTrigger key={id} value={id} data-testid={`viewer-tab-${id}`}>
+                {FORMATS[id].label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
           <Button variant="ghost" size="sm" data-testid="reader-settings-reset" onClick={reset}>
             <RotateCcw data-icon="inline-start" />
-            Reset
+            Reset all
           </Button>
         </div>
-        <ReaderAppearanceControls
-          preferences={preferences}
-          setPreferences={setPreferences}
-          format={format}
-        />
-      </div>
+        {formats.map((id) => (
+          <TabsContent key={id} value={id} className="mt-3">
+            <div className="rounded-lg border p-4">
+              <p className="text-sm font-medium">{VIEWER_FORMAT_COPY[id].title}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {VIEWER_FORMAT_COPY[id].description}
+              </p>
+              <div className="mt-4">
+                <ReaderAppearanceControls
+                  preferences={preferences}
+                  setPreferences={setPreferences}
+                  format={id}
+                />
+              </div>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
       <HighlightsSettingsCard
         overrides={stored.preferences.highlightOverrides}
         onChange={setHighlightOverride}
@@ -455,12 +487,12 @@ function SettingsNavigation({
 }
 
 /**
- * Settings screen. General holds the app theme; EPUB and PDF hold real,
- * persisted default appearance controls (saved on device and applied whenever
- * a book opens); Watched folders lists each watched location with its counts;
- * Application Data shows the app-owned storage roots; Keyboard Shortcuts
- * describes the bindings; About shows the app version, creator credit, and
- * contributor doc links.
+ * Settings screen. General holds the app theme; Viewer settings holds the
+ * persisted default appearance, one tab per format, plus the highlight colors
+ * shared by every reader; Watched folders lists each watched location with its
+ * counts; Application Data shows the app-owned storage roots; Keyboard
+ * Shortcuts describes the bindings; About shows the app version, creator
+ * credit, and contributor doc links.
  */
 export function SettingsShell() {
   const [active, setActive] = useState<SettingsSectionId>("general");
@@ -474,8 +506,8 @@ export function SettingsShell() {
         </h2>
         {active === "general" ? (
           <GeneralSection />
-        ) : active === "reading" || active === "pdf" ? (
-          <ReaderSettingsSection format={active === "pdf" ? "pdf" : "epub"} />
+        ) : active === "viewer" ? (
+          <ViewerSettingsSection />
         ) : active === "data" ? (
           <DataSettings />
         ) : active === "folders" ? (
