@@ -19,6 +19,7 @@ import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
 import { providerLinkLabel } from "@/lib/providers";
+import type { Book, BookFile, CollectionSummary } from "@/lib/bridge";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
 function formatDate(iso: string | null): string {
@@ -27,6 +28,19 @@ function formatDate(iso: string | null): string {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(new Date(iso));
+}
+
+function bookFacts(book: Book): [string, string][] {
+  return [
+    ["Format", book.format.toUpperCase()],
+    ["Added", formatDate(book.addedAt)],
+    ["Last opened", formatDate(book.lastOpenedAt)],
+    [
+      "Reading position",
+      book.progressPercent === null ? "—" : `${Math.round(book.progressPercent)}%`,
+    ],
+    ["File", book.path],
+  ];
 }
 
 /**
@@ -61,8 +75,6 @@ export function BookDetail() {
   const curation = useBookMetadata(book ? book.id : null);
   const { files, refresh: refreshFiles } = useBookFiles(book ? book.id : null);
   const subjects = curation.metadata?.effective.subjects ?? [];
-  const memberCollections =
-    book === null ? [] : collections.filter((collection) => collection.bookIds.includes(book.id));
 
   if (!book) {
     return (
@@ -84,6 +96,10 @@ export function BookDetail() {
     );
   }
 
+  const memberCollections = collections.filter((collection) =>
+    collection.bookIds.includes(book.id),
+  );
+
   const removeFile = async (fileId: number) => {
     if (await removeCopy(book.id, fileId)) await refreshFiles();
   };
@@ -100,16 +116,7 @@ export function BookDetail() {
     }
   };
 
-  const facts: [string, string][] = [
-    ["Format", book.format.toUpperCase()],
-    ["Added", formatDate(book.addedAt)],
-    ["Last opened", formatDate(book.lastOpenedAt)],
-    [
-      "Reading position",
-      book.progressPercent === null ? "—" : `${Math.round(book.progressPercent)}%`,
-    ],
-    ["File", book.path],
-  ];
+  const facts = bookFacts(book);
 
   return (
     <section data-testid="book-detail" className="mx-auto max-w-3xl">
@@ -138,33 +145,11 @@ export function BookDetail() {
           )}
 
           {book.hashState === "failed" && (
-            <div
-              data-testid="detail-indexing-warning"
-              role="alert"
-              className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
-            >
-              <p className="text-sm font-medium text-destructive">This book could not be indexed</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                TuxBooks could not read the file to build its content hash. The book and your
-                reading data are safe.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                data-testid="detail-retry-indexing"
-                disabled={indexingBusy}
-                aria-busy={indexingBusy}
-                onClick={() => void retryIndexingNow()}
-              >
-                {indexingBusy ? "Retrying…" : "Retry indexing"}
-              </Button>
-              {indexingError && (
-                <p data-testid="detail-indexing-error" className="mt-2 text-xs text-destructive">
-                  {indexingError}
-                </p>
-              )}
-            </div>
+            <IndexingWarning
+              busy={indexingBusy}
+              error={indexingError}
+              onRetry={() => void retryIndexingNow()}
+            />
           )}
 
           <BookReadingActions
@@ -197,109 +182,16 @@ export function BookDetail() {
         </TabsList>
 
         <TabsContent value="overview">
-          {book.description && (
-            <div className="mt-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
-              <p className="mt-2 text-sm leading-relaxed">{book.description}</p>
-            </div>
-          )}
-
-          <div className="mt-8">
-            <h3 className="text-sm font-medium text-muted-foreground">Subjects</h3>
-            <div data-testid="detail-subjects" className="mt-2 flex flex-wrap gap-1.5">
-              {subjects.length === 0 ? (
-                <p className="text-sm text-muted-foreground">—</p>
-              ) : (
-                subjects.map((subject) => (
-                  <Badge key={subject} variant="secondary">
-                    {subject}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <h3 className="text-sm font-medium text-muted-foreground">Details</h3>
-            <dl
-              data-testid="detail-facts"
-              className="mt-2 grid grid-cols-[8rem_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm"
-            >
-              {facts.map(([label, value]) => (
-                <Fragment key={label}>
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className={label === "File" ? "break-all" : undefined}>{value}</dd>
-                </Fragment>
-              ))}
-            </dl>
-          </div>
-
-          <BookFileLocations
+          <BookOverviewTab
             book={book}
+            subjects={subjects}
+            facts={facts}
+            memberCollections={memberCollections}
             files={files}
-            onRemove={(fileId) => void removeFile(fileId)}
+            onRemoveFile={(fileId) => void removeFile(fileId)}
+            onReset={() => setResetOpen(true)}
+            onForget={() => setForgetOpen(true)}
           />
-
-          <div className="mt-8">
-            <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
-            <div data-testid="detail-collections" className="mt-2 flex flex-wrap gap-1.5">
-              {memberCollections.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Not in any collection — add one from a book's right-click menu.
-                </p>
-              ) : (
-                memberCollections.map((collection) => (
-                  <Badge key={collection.id} variant="secondary">
-                    {collection.name}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <h3 className="text-sm font-medium text-muted-foreground">Provider links</h3>
-            <div data-testid="detail-providers" className="mt-2 flex flex-wrap gap-1.5">
-              {(book.providerLinks ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">Not linked to a reading service.</p>
-              ) : (
-                (book.providerLinks ?? []).map((link) => (
-                  <Badge key={`${link.provider}:${link.remoteId}`} variant="secondary">
-                    {providerLinkLabel(link)}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </div>
-
-          <BookEditions book={book} />
-
-          <div className="mt-8 rounded-md border p-4">
-            <h3 className="text-sm font-medium">Reading data</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Reset clears progress, annotations, collections, metadata overrides, and provider
-              links but keeps this book and its file. Forget moves them to the 30-day trash and
-              rebinds the file to a fresh identity.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                data-testid="detail-reset"
-                onClick={() => setResetOpen(true)}
-              >
-                Reset Reading Data…
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                data-testid="detail-forget"
-                onClick={() => setForgetOpen(true)}
-              >
-                Forget Book…
-              </Button>
-            </div>
-          </div>
         </TabsContent>
 
         <TabsContent value="metadata">
@@ -336,5 +228,159 @@ export function BookDetail() {
         onCancel={() => setForgetOpen(false)}
       />
     </section>
+  );
+}
+
+type BookOverviewTabProps = {
+  book: Book;
+  subjects: string[];
+  facts: [string, string][];
+  memberCollections: CollectionSummary[];
+  files: BookFile[];
+  onRemoveFile: (fileId: number) => void;
+  onReset: () => void;
+  onForget: () => void;
+};
+
+function BookOverviewTab({
+  book,
+  subjects,
+  facts,
+  memberCollections,
+  files,
+  onRemoveFile,
+  onReset,
+  onForget,
+}: BookOverviewTabProps) {
+  return (
+    <>
+      {book.description && (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-muted-foreground">Description</h3>
+          <p className="mt-2 text-sm leading-relaxed">{book.description}</p>
+        </div>
+      )}
+
+      <div className="mt-8">
+        <h3 className="text-sm font-medium text-muted-foreground">Subjects</h3>
+        <div data-testid="detail-subjects" className="mt-2 flex flex-wrap gap-1.5">
+          {subjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">—</p>
+          ) : (
+            subjects.map((subject) => (
+              <Badge key={subject} variant="secondary">
+                {subject}
+              </Badge>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h3 className="text-sm font-medium text-muted-foreground">Details</h3>
+        <dl
+          data-testid="detail-facts"
+          className="mt-2 grid grid-cols-[8rem_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm"
+        >
+          {facts.map(([label, value]) => (
+            <Fragment key={label}>
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className={label === "File" ? "break-all" : undefined}>{value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      </div>
+
+      <BookFileLocations book={book} files={files} onRemove={onRemoveFile} />
+
+      <div className="mt-8">
+        <h3 className="text-sm font-medium text-muted-foreground">Collections</h3>
+        <div data-testid="detail-collections" className="mt-2 flex flex-wrap gap-1.5">
+          {memberCollections.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Not in any collection — add one from a book's right-click menu.
+            </p>
+          ) : (
+            memberCollections.map((collection) => (
+              <Badge key={collection.id} variant="secondary">
+                {collection.name}
+              </Badge>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <h3 className="text-sm font-medium text-muted-foreground">Provider links</h3>
+        <div data-testid="detail-providers" className="mt-2 flex flex-wrap gap-1.5">
+          {(book.providerLinks ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">Not linked to a reading service.</p>
+          ) : (
+            (book.providerLinks ?? []).map((link) => (
+              <Badge key={`${link.provider}:${link.remoteId}`} variant="secondary">
+                {providerLinkLabel(link)}
+              </Badge>
+            ))
+          )}
+        </div>
+      </div>
+
+      <BookEditions book={book} />
+
+      <div className="mt-8 rounded-md border p-4">
+        <h3 className="text-sm font-medium">Reading data</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Reset clears progress, annotations, collections, metadata overrides, and provider links
+          but keeps this book and its file. Forget moves them to the 30-day trash and rebinds the
+          file to a fresh identity.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" data-testid="detail-reset" onClick={onReset}>
+            Reset Reading Data…
+          </Button>
+          <Button size="sm" variant="destructive" data-testid="detail-forget" onClick={onForget}>
+            Forget Book…
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+type IndexingWarningProps = {
+  busy: boolean;
+  error: string | null;
+  onRetry: () => void;
+};
+
+function IndexingWarning({ busy, error, onRetry }: IndexingWarningProps) {
+  return (
+    <div
+      data-testid="detail-indexing-warning"
+      role="alert"
+      className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+    >
+      <p className="text-sm font-medium text-destructive">This book could not be indexed</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        TuxBooks could not read the file to build its content hash. The book and your reading data
+        are safe.
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="mt-2"
+        data-testid="detail-retry-indexing"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={onRetry}
+      >
+        {busy ? "Retrying…" : "Retry indexing"}
+      </Button>
+      {error && (
+        <p data-testid="detail-indexing-error" className="mt-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
