@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { SyncSettings } from "@/components/settings/SyncSettings";
@@ -144,6 +144,33 @@ describe("SyncSettings", () => {
     expect(await screen.findByTestId("sync-status")).toHaveTextContent("Up to date");
     expect(screen.getByTestId("sync-folder")).toHaveTextContent("/home/me/Dropbox");
     expect(screen.getByTestId("sync-device-name")).toHaveTextContent("Laptop");
+  });
+
+  it("keeps the typed device name when a status refresh arrives", async () => {
+    mockInvoke({
+      sync_status: ENABLED,
+      sync_issues: [],
+      sync_trash: [],
+      sync_conflicts: [],
+      sync_set_device_name: { ...ENABLED, deviceName: "Desk" },
+    });
+
+    renderSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const input = screen.getByLabelText("Name");
+    expect(input).toHaveValue("Laptop");
+    fireEvent.change(input, { target: { value: "Desk" } });
+
+    // The settings page polls and listens for sync-status; neither may reset
+    // the draft while the dialog is open.
+    act(() => emitBridgeEvent("sync-status", ENABLED));
+
+    expect(input).toHaveValue("Desk");
+
+    fireEvent.click(screen.getByTestId("sync-save-device"));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_set_device_name", { name: "Desk" }),
+    );
   });
 
   it("shows counts, issues, and the restore affordance", async () => {
