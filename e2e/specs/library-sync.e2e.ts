@@ -154,7 +154,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
 
     // Watching never happens silently: the shelf is listed where the user
     // manages watches — Settings > Watched folders.
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
@@ -212,7 +212,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
 
     // Unwatch it the way a user does: Settings > Watched folders > select >
     // Unwatch.
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
@@ -285,7 +285,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     expect(covered.covered).toEqual([child]);
 
     // The list carries one row, not two.
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");

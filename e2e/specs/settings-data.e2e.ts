@@ -11,7 +11,7 @@ test.describe("settings data tab", () => {
     page,
     electronApp,
   }) => {
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Application Data" }).click();
 

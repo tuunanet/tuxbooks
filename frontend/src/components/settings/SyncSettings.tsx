@@ -74,8 +74,8 @@ type MismatchPrompt = {
 
 /**
  * Settings > Sync. TuxBooks writes plain, schema-versioned JSON into a folder
- * that a cloud client already syncs; it never calls Google Drive or Dropbox
- * APIs. See docs/SYNC.md.
+ * the user already syncs, whether it lives on a local disk, a network path, or
+ * a cloud client's folder; it never calls a provider's API. See docs/SYNC.md.
  */
 export function SyncSettings() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -487,7 +487,7 @@ export function SyncSettings() {
 
   return (
     <div data-testid="sync-settings" className="mt-6 flex flex-col gap-6">
-      <CloudFolderSection
+      <SyncFolderSection
         status={status}
         enabled={enabled}
         busy={busy}
@@ -607,7 +607,7 @@ function SyncSections({
   );
 }
 
-type CloudFolderSectionProps = {
+type SyncFolderSectionProps = {
   status: SyncStatus | null;
   enabled: boolean;
   busy: boolean;
@@ -623,7 +623,7 @@ type CloudFolderSectionProps = {
   onForgetAll: () => void;
 };
 
-function CloudFolderSection({
+function SyncFolderSection({
   status,
   enabled,
   busy,
@@ -637,13 +637,13 @@ function CloudFolderSection({
   onLocate,
   onForget,
   onForgetAll,
-}: CloudFolderSectionProps) {
+}: SyncFolderSectionProps) {
   return (
     <section className="rounded-lg border p-4">
-      <h3 className="text-base font-medium">Cloud folder</h3>
+      <h3 className="text-base font-medium">Sync folder</h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        TuxBooks keeps a small set of reading state in a folder your cloud client already syncs. It
-        never talks to Google Drive or Dropbox directly.
+        TuxBooks keeps a small set of reading state in a folder every machine can reach. A local
+        directory, a network path, and a folder a cloud client keeps in sync all work the same way.
       </p>
 
       <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -660,7 +660,7 @@ function CloudFolderSection({
         <div className="rounded-md border p-3">
           <p className="font-medium">Not carried by this sync</p>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-muted-foreground">
-            <li>Book files (EPUB and PDF)</li>
+            <li>Book files themselves</li>
             <li>The library catalog and watched folders</li>
             <li>Reader appearance and theme</li>
           </ul>
@@ -668,16 +668,15 @@ function CloudFolderSection({
       </div>
 
       <p className="mt-3 text-sm text-muted-foreground">
-        Saving metadata into an EPUB or PDF rewrites the book file. Those edits, and the one-time{" "}
+        Saving metadata into a book file rewrites that file. Those edits, and the one-time{" "}
         <span className="font-mono">.bak</span> backup next to it, reach another machine only when
-        your cloud client carries the book folder as well. This folder holds library-side state
-        only.
+        the book folder syncs as well. This folder holds library-side state only.
       </p>
 
       <p className="mt-3 text-sm text-muted-foreground">
-        If your books already live in a cloud folder, your client keeps syncing the files. TuxBooks
-        only writes its own state under a <span className="font-mono">TuxBooks</span> subfolder and
-        leaves everything else alone.
+        If your books already live in a folder you sync, that sync keeps carrying the files.
+        TuxBooks only writes its own state under a <span className="font-mono">TuxBooks</span>{" "}
+        subfolder and leaves everything else alone.
       </p>
 
       {status === null ? (
@@ -685,8 +684,8 @@ function CloudFolderSection({
       ) : !enabled ? (
         <div className="mt-4 flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">
-            Choose the folder your client syncs. Dropbox, Google Drive, Nextcloud, Syncthing, and
-            any other local folder work.
+            Choose any folder every machine can reach. Local directories, network paths, and folders
+            a cloud client syncs all work.
           </p>
           <div>
             <Button data-testid="sync-connect" onClick={onConnect} disabled={busy}>
@@ -893,8 +892,8 @@ function DisconnectDialog({
         <DialogHeader>
           <DialogTitle>Disconnect this device?</DialogTitle>
           <DialogDescription>
-            Syncing stops on this machine. The cloud folder is left untouched, so another machine
-            can keep using it or you can reconnect later.
+            Syncing stops on this machine. The sync folder is left untouched, so another machine can
+            keep using it or you can reconnect later.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -961,7 +960,8 @@ function DeviceNameForm({ initialName, busy, onCancel, onSave }: DeviceNameFormP
       <DialogHeader>
         <DialogTitle>Device name</DialogTitle>
         <DialogDescription>
-          Shown in this app so you can tell machines apart. It is not sent to the cloud provider.
+          Shown in this app so you can tell machines apart. Other machines read it from the sync
+          folder.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-2">

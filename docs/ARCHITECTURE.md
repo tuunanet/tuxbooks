@@ -380,7 +380,7 @@ The reading surface follows the global theme too (`autoReaderTheme` in
 default) until a theme is picked in the reader's appearance menu or in
 Settings, which pins it. Reader appearance preferences persist on device in
 `localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader
-writes them on every change and Settings → EPUB/PDF edits the same store,
+writes them on every change and Settings → Viewer settings edits the same store,
 so defaults apply to every book. Values are re-validated and snapped onto the
 supported scales on read, so stale storage can never reach an engine.
 
