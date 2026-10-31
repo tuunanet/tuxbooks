@@ -476,6 +476,38 @@ Conflicts are never in this list. They are counted and shown by
 them. They are excluded from the Sync issues list and from its status count, so
 a Dismiss button can never hide a conflict without resolving it.
 
+### Copy diagnostics
+
+Application Data has a **Copy diagnostics** button for support. Nothing is
+collected in the background and nothing is written to disk: the
+`sync_diagnostics` command runs only when the button is clicked, then the
+renderer writes the JSON to the clipboard.
+
+The document carries:
+
+- sync on or off, the live sync state (including a pass that is running),
+  the folder, last sync, last error, and counts for pending local items,
+  waiting books, open issues, trash, and conflicts;
+- up to 20 of the newest books whose content hash failed, with the book id,
+  title, path, attempt count, and next retry time;
+- up to 20 open conflicts with the id, kind, field, book title, and creation
+  time;
+- up to 20 recent identity and entity merges, naming the losing and winning
+  uids and the entity kind. The merge tables carry no timestamp, so "recent"
+  means insertion order;
+- the sync folder's `library.json` schema, the operation schema, and the
+  database migration version.
+
+It deliberately leaves out book contents, annotation text, notes, conflict
+winner and loser values, cover bytes, tokens, and every other secret. Folder
+paths and book paths are included because Settings already shows them and
+support needs them to recognise a report.
+
+With sync off or no folder selected the command still succeeds: it reports
+sync as disabled, returns empty sync counts and lists, and keeps the local
+hash failures and schema versions. A missing or unreadable `library.json`
+reports a null library marker instead of failing the copy.
+
 ## Security and privacy
 
 The folder is untrusted input:

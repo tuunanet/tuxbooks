@@ -645,6 +645,7 @@ async fn dispatch(
             let p: SyncDeviceNameArgs = parse_params(params)?;
             Ok(call!(commands::sync::set_device_name(state, p.name)))
         }
+        "sync_diagnostics" => Ok(call!(commands::sync::diagnostics(state))),
         other => Err(RpcError::method_not_found(other)),
     }
 }
