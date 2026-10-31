@@ -429,7 +429,9 @@ The sync engine keeps its bookkeeping in the same SQLite file. Reading
 progress, annotations, metadata overrides, collection membership, and
 last-opened are keyed by the durable book uid; a file row is only a
 location. Nothing here changes how imports, readers, or search work. The
-full contract is [SYNC.md](SYNC.md).
+full contract is [SYNC.md](SYNC.md). The recovery decisions for issues,
+conflicts, and hash retry are in
+[ADR 0015](adr/0015-sync-recovery.md).
 
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.

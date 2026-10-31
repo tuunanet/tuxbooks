@@ -11,8 +11,10 @@ lock-free. Files can arrive late, out of order, duplicated as cloud conflict
 copies, or partially. Nothing in the folder is ever overwritten in place.
 
 Status: implemented in `sidecar/src/sync/` and covered by
-`sidecar/tests/cloud_sync.rs`. The decision record is
-[ADR 0013](adr/0013-cloud-folder-sync.md).
+`sidecar/tests/cloud_sync.rs`. The decision records are
+[ADR 0013](adr/0013-cloud-folder-sync.md) for the transport and
+[ADR 0015](adr/0015-sync-recovery.md) for recovery, issue actions, and
+conflict review.
 
 ## What syncs
 
@@ -200,9 +202,9 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   devices would create a position neither device had. Membership add/remove is
   also one value, so a later add can undo an earlier remove.
 - **Delete wins** for annotations and collections. A tombstone is permanent. A
-  concurrent edit that loses is stored in `sync_conflicts` and shown in Sync
-  issues; it does not resurrect the entity. The explicit trash restore is the
-  only way back.
+  concurrent edit that loses is stored in `sync_conflicts` and shown in
+  [Conflict review](#conflict-review); it does not resurrect the entity. The
+  explicit trash restore is the only way back.
 - **Absent books** do not delete state. Unwatching a folder, a missing file, or
   deleting a local book row never emits a shared delete. State waits under its
   book uuid and is projected when the same content is imported again.
@@ -227,7 +229,8 @@ under [Conflict review](#conflict-review).
 
 A discarded value stays in `sync_conflicts` until the user resolves it or the
 30-day window expires. The merge result does not wait for that decision: the
-winner is applied immediately and stays applied.
+winner is applied immediately and stays applied. The decisions are recorded in
+[ADR 0015](adr/0015-sync-recovery.md).
 
 Each open row carries the kind, entity uid, field, both JSON values, both
 hybrid clocks with the writing device, and the time the conflict was recorded.
@@ -393,8 +396,8 @@ Failures become rows in `sync_issues`:
 - a missing cover blob (the metadata edit is applied without the cover and the
   issue records it);
 - a book that could not be projected;
-- a conflict where one side had to be discarded (both values are in the
-  detail);
+- a conflict where one side had to be discarded; the losing value is held for
+  [Conflict review](#conflict-review) rather than listed as a sync issue;
 - two local files bound to the same book identity, naming both paths;
 - a queued reprojection that failed;
 - a forgotten-book snapshot that could not be published or read back, so
@@ -421,7 +424,9 @@ does not auto-dismiss.
 ### Sync issues and actions
 
 Each row carries a kind, a short target label, and one action the sidecar
-computes from the kind. The renderer never parses an issue key.
+computes from the kind. The renderer never parses an issue key. The action
+contract and the self-clearing rules are recorded in
+[ADR 0015](adr/0015-sync-recovery.md).
 
 | Kinds                                                                                                                                                                            | Action       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
@@ -492,9 +497,9 @@ The document carries:
   title, path, attempt count, and next retry time;
 - up to 20 open conflicts with the id, kind, field, book title, and creation
   time;
-- up to 20 recent identity and entity merges, naming the losing and winning
-  uids and the entity kind. The merge tables carry no timestamp, so "recent"
-  means insertion order;
+- up to 20 recent book-identity merges and up to 20 recent entity merges,
+  naming the losing and winning uids and the entity kind. The merge tables
+  carry no timestamp, so "recent" means insertion order;
 - the sync folder's `library.json` schema, the operation schema, and the
   database migration version.
 

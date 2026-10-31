@@ -220,6 +220,24 @@ A shared delete marker for an annotation or collection. It wins over a
 concurrent edit and stays restorable from the trash for 30 days.
 _Avoid_: deleted row, hard delete
 
+**Sync issue**:
+A failure or condition the sync subsystem records with one primary action, such
+as Retry, Open folder, or Copy details. It clears when the condition clears;
+only an informational row can be dismissed. See
+[ADR 0015](docs/adr/0015-sync-recovery.md).
+_Avoid_: sync error, warning dialog
+
+**Conflict review**:
+The Settings > Sync queue of values a merge discarded. The current winner stays
+applied, the losing value is kept until resolution or 30-day expiry, and
+resolving one publishes a normal synced operation so every device converges.
+_Avoid_: conflict modal, merge prompt
+
+**Sync attention**:
+The Settings entry dot and the transition toast that show sync needs review
+outside Settings. They appear only while sync is on and a condition is open.
+_Avoid_: sync badge, warning banner
+
 ## Search
 
 **In-book search**:
