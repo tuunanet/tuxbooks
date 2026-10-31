@@ -101,8 +101,10 @@ parses an issue key.
   has to be fixed or removed in the sync folder.
 - Copy details covers duplicate bindings and a missing or invalid forgotten-book
   snapshot.
-- Dismiss stays for informational rows only, currently an unknown dirty kind
-  that is cleared as it is reported.
+- Dismiss is the primary action only for an unknown dirty kind that is cleared
+  as it is reported. Copy details is informational too, so rows with either
+  action can be dismissed from the UI; dismissal is separate from the primary
+  action.
 
 A status refresh closes rows whose condition is gone: the duplicate binding
 disappeared, the operation applied cleanly or its file is gone, the missing

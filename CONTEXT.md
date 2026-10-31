@@ -228,9 +228,11 @@ only an informational row can be dismissed. See
 _Avoid_: sync error, warning dialog
 
 **Conflict review**:
-The Settings > Sync queue of values a merge discarded. The current winner stays
-applied, the losing value is kept until resolution or 30-day expiry, and
-resolving one publishes a normal synced operation so every device converges.
+The Settings > Sync queue of reviewable conflicts: the values a merge discarded,
+excluding progress. The current winner stays applied and the losing value is
+kept until resolution or 30-day expiry. Applying the loser publishes a normal
+synced operation so every device converges; keeping the winner only settles the
+review row.
 _Avoid_: conflict modal, merge prompt
 
 **Sync attention**:

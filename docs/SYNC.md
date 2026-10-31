@@ -396,8 +396,9 @@ Failures become rows in `sync_issues`:
 - a missing cover blob (the metadata edit is applied without the cover and the
   issue records it);
 - a book that could not be projected;
-- a conflict where one side had to be discarded; the losing value is held for
-  [Conflict review](#conflict-review) rather than listed as a sync issue;
+- a conflict where one side had to be discarded; its `sync_issues` row is
+  excluded from the issue list and the status count, and the losing value is
+  held for [Conflict review](#conflict-review);
 - two local files bound to the same book identity, naming both paths;
 - a queued reprojection that failed;
 - a forgotten-book snapshot that could not be published or read back, so
@@ -476,10 +477,8 @@ gone:
 - a retry closes its own row when the work shows the condition is gone;
 - a successful pass closes the `sync_failed` row.
 
-Conflicts are never in this list. They are counted and shown by
-[Conflict review](#conflict-review), which owns them until the user settles
-them. They are excluded from the Sync issues list and from its status count, so
-a Dismiss button can never hide a conflict without resolving it.
+Conflict review owns conflicts until the user settles them or the 30-day window
+expires, so a Dismiss button can never hide one without resolving it.
 
 ### Copy diagnostics
 
