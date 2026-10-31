@@ -48,8 +48,8 @@ instrument.
 Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`, the
 ticket that set the floor in the sync recovery epic (`tuxbooks-c6g`). The
 recovery decisions are in [ADR 0015](adr/0015-sync-recovery.md).
-`just coverage` reports 98.3% for the module, but that is llvm-cov's whole-file
-summary and it includes inline test lines. Production-only coverage (segments
+At the final epic gate, `just coverage` reports 97.9% for the module, but that is
+llvm-cov's whole-file summary and it includes inline test lines. Production-only coverage (segments
 before `#[cfg(test)]`, the measurement the review uses) is 92.3% for the
 module: capture 93.7%, identity 88.0%, merge 93.4%, and waiting 90.7%. The
 module clears the 92% floor on that count. Two files do not: identity and
