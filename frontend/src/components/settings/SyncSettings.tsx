@@ -88,12 +88,12 @@ export function SyncSettings() {
   const [mismatch, setMismatch] = useState<MismatchPrompt | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  const [deviceName, setDeviceName] = useState("");
+  // Only whether the editor is open lives here. The dialog owns its draft, so
+  // status refreshes (poll and sync events) cannot overwrite what is typed.
   const [editingDevice, setEditingDevice] = useState(false);
 
   const applyStatus = useCallback((next: SyncStatus) => {
     setStatus(next);
-    setDeviceName(next.deviceName ?? "");
   }, []);
 
   const loadLists = useCallback(async () => {
@@ -308,18 +308,21 @@ export function SyncSettings() {
     }
   }, [applyStatus]);
 
-  const saveDeviceName = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      applyStatus(await setSyncDeviceName(deviceName));
-      setEditingDevice(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [applyStatus, deviceName]);
+  const saveDeviceName = useCallback(
+    async (name: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        applyStatus(await setSyncDeviceName(name));
+        setEditingDevice(false);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus],
+  );
 
   const dismiss = useCallback(
     async (id: number) => {
@@ -492,10 +495,7 @@ export function SyncSettings() {
         notice={notice}
         waitingBooks={waitingBooks}
         onConnect={() => void connect()}
-        onEditDevice={(name) => {
-          setDeviceName(name);
-          setEditingDevice(true);
-        }}
+        onEditDevice={() => setEditingDevice(true)}
         onSyncNow={() => void now()}
         onDisconnect={() => setConfirmDisconnect(true)}
         onLocate={(bookUid) => void locateWaiting(bookUid)}
@@ -538,12 +538,11 @@ export function SyncSettings() {
 
       <DeviceNameDialog
         open={editingDevice}
-        deviceName={deviceName}
+        initialName={status?.deviceName ?? ""}
         busy={busy}
         onOpenChange={setEditingDevice}
-        onNameChange={setDeviceName}
         onCancel={() => setEditingDevice(false)}
-        onSave={() => void saveDeviceName()}
+        onSave={(name) => void saveDeviceName(name)}
       />
     </div>
   );
@@ -616,7 +615,7 @@ type CloudFolderSectionProps = {
   notice: string | null;
   waitingBooks: WaitingBook[];
   onConnect: () => void;
-  onEditDevice: (deviceName: string) => void;
+  onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
   onLocate: (bookUid: string) => void;
@@ -735,7 +734,7 @@ type ConnectedSyncPanelProps = {
   status: SyncStatus;
   busy: boolean;
   waitingBooks: WaitingBook[];
-  onEditDevice: (deviceName: string) => void;
+  onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
   onLocate: (bookUid: string) => void;
@@ -774,7 +773,7 @@ function ConnectedSyncPanel({
         <dt className="text-muted-foreground">Device</dt>
         <dd className="flex items-center gap-2">
           <span data-testid="sync-device-name">{status.deviceName ?? "This device"}</span>
-          <Button size="sm" variant="ghost" onClick={() => onEditDevice(status.deviceName ?? "")}>
+          <Button size="sm" variant="ghost" onClick={onEditDevice}>
             Edit
           </Button>
         </dd>
@@ -918,55 +917,75 @@ function DisconnectDialog({
 
 type DeviceNameDialogProps = {
   open: boolean;
-  deviceName: string;
+  initialName: string;
   busy: boolean;
   onOpenChange: (open: boolean) => void;
-  onNameChange: (name: string) => void;
   onCancel: () => void;
-  onSave: () => void;
+  onSave: (name: string) => void;
 };
 
 function DeviceNameDialog({
   open,
-  deviceName,
+  initialName,
   busy,
   onOpenChange,
-  onNameChange,
   onCancel,
   onSave,
 }: DeviceNameDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="sync-device-dialog">
-        <DialogHeader>
-          <DialogTitle>Device name</DialogTitle>
-          <DialogDescription>
-            Shown in this app so you can tell machines apart. It is not sent to the cloud provider.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="sync-device-input">Name</Label>
-          <Input
-            id="sync-device-input"
-            value={deviceName}
-            maxLength={80}
-            onChange={(event) => onNameChange(event.target.value)}
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            data-testid="sync-save-device"
-            onClick={onSave}
-            disabled={busy || deviceName.trim().length === 0}
-          >
-            Save
-          </Button>
-        </DialogFooter>
+        <DeviceNameForm initialName={initialName} busy={busy} onCancel={onCancel} onSave={onSave} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+type DeviceNameFormProps = {
+  initialName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (name: string) => void;
+};
+
+/**
+ * Owns the draft so a status refresh in the parent cannot overwrite the field.
+ * Radix unmounts the dialog content when it closes, so each open reseeds from
+ * the stored name.
+ */
+function DeviceNameForm({ initialName, busy, onCancel, onSave }: DeviceNameFormProps) {
+  const [name, setName] = useState(initialName);
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Device name</DialogTitle>
+        <DialogDescription>
+          Shown in this app so you can tell machines apart. It is not sent to the cloud provider.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="sync-device-input">Name</Label>
+        <Input
+          id="sync-device-input"
+          value={name}
+          maxLength={80}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          data-testid="sync-save-device"
+          onClick={() => onSave(name)}
+          disabled={busy || name.trim().length === 0}
+        >
+          Save
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
