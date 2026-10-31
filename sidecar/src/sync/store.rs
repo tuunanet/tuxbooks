@@ -23,6 +23,9 @@ use super::model::{
 pub const SYNC_DIR_NAME: &str = "TuxBooks";
 const LIBRARY_FILE: &str = "library.json";
 const COVER_BLOB_DIR: &str = "blobs/covers";
+/// The marker is a three-field document. A much larger file is not a marker we
+/// wrote, so diagnostics refuses to read it.
+const MAX_LIBRARY_MARKER_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryFile {
@@ -71,17 +74,42 @@ pub fn resolve_root(folder: &Path) -> Result<PathBuf, AppError> {
             "sync folder is not available".into(),
         ));
     }
+    let root = root_path(folder);
+    fs::create_dir_all(&root)?;
+    fs::canonicalize(&root).map_err(AppError::Io)
+}
+
+/// The TuxBooks child a chosen folder maps to, without touching the disk. A
+/// folder already named `TuxBooks` is its own root.
+fn root_path(folder: &Path) -> PathBuf {
     let named_tuxbooks = folder
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name == SYNC_DIR_NAME);
-    let root = if named_tuxbooks {
+    if named_tuxbooks {
         folder.to_path_buf()
     } else {
         folder.join(SYNC_DIR_NAME)
-    };
-    fs::create_dir_all(&root)?;
-    fs::canonicalize(&root).map_err(AppError::Io)
+    }
+}
+
+/// Schema of the sync folder's library marker, or `None` when the folder is
+/// not an absolute directory, or the marker is missing, unreadable, oversized,
+/// or not a regular file. Diagnostics must never fail or create a folder just
+/// because the sync folder went away.
+pub fn library_schema(folder: &Path) -> Option<u32> {
+    if !folder.is_absolute() || !folder.is_dir() {
+        return None;
+    }
+    let path = root_path(folder).join(LIBRARY_FILE);
+    let metadata = fs::metadata(&path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_LIBRARY_MARKER_BYTES {
+        return None;
+    }
+    let bytes = fs::read(&path).ok()?;
+    serde_json::from_slice::<LibraryFile>(&bytes)
+        .ok()
+        .map(|library| library.schema)
 }
 
 /// Move an existing sync library aside so the chosen folder can host a new
@@ -862,6 +890,45 @@ mod tests {
         assert!(resolve_root(Path::new("relative/path")).is_err());
         let tmp = tempfile::tempdir().unwrap();
         assert!(resolve_root(&tmp.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn library_schema_is_bounded_and_requires_a_regular_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("sync");
+        fs::create_dir_all(&folder).unwrap();
+
+        assert!(library_schema(Path::new("relative/path")).is_none());
+        assert!(library_schema(&tmp.path().join("missing")).is_none());
+        assert!(library_schema(&folder).is_none(), "no marker yet");
+
+        let root = resolve_root(&folder).unwrap();
+        write_json_atomic(
+            &root.join(LIBRARY_FILE),
+            &json!({
+                "schema": OP_SCHEMA,
+                "library_id": "a".repeat(32),
+                "created_at": "2026-10-29T00:00:00.000Z",
+            }),
+        )
+        .unwrap();
+        assert_eq!(library_schema(&folder), Some(OP_SCHEMA));
+        // A folder already named TuxBooks is its own root.
+        assert_eq!(library_schema(&root), Some(OP_SCHEMA));
+
+        fs::write(root.join(LIBRARY_FILE), b"{not json").unwrap();
+        assert!(library_schema(&folder).is_none(), "invalid JSON");
+
+        fs::write(
+            root.join(LIBRARY_FILE),
+            vec![b' '; MAX_LIBRARY_MARKER_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(library_schema(&folder).is_none(), "oversized");
+
+        fs::remove_file(root.join(LIBRARY_FILE)).unwrap();
+        fs::create_dir(root.join(LIBRARY_FILE)).unwrap();
+        assert!(library_schema(&folder).is_none(), "not a regular file");
     }
 
     #[test]

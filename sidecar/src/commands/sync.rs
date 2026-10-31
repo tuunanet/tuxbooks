@@ -3,6 +3,7 @@
 
 use crate::error::AppError;
 use crate::sync::conflict::SyncConflict;
+use crate::sync::diagnostics::SyncDiagnostics;
 use crate::sync::engine::{SyncConnectResult, SyncIssue, SyncService, SyncStatus, SyncTrashEntry};
 use crate::sync::waiting::WaitingBook;
 use crate::AppState;
@@ -108,4 +109,16 @@ pub async fn resolve_conflict(
 
 pub async fn set_device_name(state: &AppState, name: String) -> Result<SyncStatus, AppError> {
     service(state)?.set_device_name(&name).await
+}
+
+/// The support snapshot. It uses the live engine status for enabled, state,
+/// and counts, so a running pass reports "syncing". When the service is
+/// missing or sync is off, the snapshot is disabled with zero counts, and the
+/// local hash failures and versions still answer.
+pub async fn diagnostics(state: &AppState) -> Result<SyncDiagnostics, AppError> {
+    let status = match state.sync.as_deref() {
+        Some(service) => Some(service.status().await?),
+        None => None,
+    };
+    crate::sync::diagnostics::collect(&state.db, status.as_ref()).await
 }

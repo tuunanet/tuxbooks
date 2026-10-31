@@ -13,6 +13,7 @@ import {
   copyDataPath,
   copyLibraryLocationPath,
   getStorageReport,
+  getSyncDiagnostics,
   openDataFolder,
   openLibraryLocation,
   type StorageEntryKind,
@@ -31,6 +32,13 @@ const KIND_LABEL: Record<StorageEntryKind, string> = {
 const COPY_FEEDBACK_MS = 1500;
 
 type CopyFeedback = "copied" | "error";
+
+/** One label for every copy control, so no call site re-encodes the states. */
+function feedbackLabel(feedback: CopyFeedback | undefined, idle: string): string {
+  if (feedback === "copied") return "Copied";
+  if (feedback === "error") return "Copy failed";
+  return idle;
+}
 
 const CATALOG_ROWS = [
   ["books", "Books"],
@@ -53,6 +61,7 @@ export function DataSettings() {
   const [clearing, setClearing] = useState(false);
   const [freed, setFreed] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const [copyingDiagnostics, setCopyingDiagnostics] = useState(false);
   const copyTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(
@@ -117,6 +126,21 @@ export function DataSettings() {
     );
   }, []);
 
+  /** Drop an old result (and its timer) before a retry starts. */
+  const clearCopyFeedback = useCallback((key: string) => {
+    const timer = copyTimers.current.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      copyTimers.current.delete(key);
+    }
+    setCopyFeedback((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
   const copyRootPath = useCallback(
     (rootId: StorageRootId) => {
       const key = `root:${rootId}`;
@@ -141,12 +165,27 @@ export function DataSettings() {
     [flashCopied],
   );
 
-  const copyLabel = (key: string): string => {
-    const feedback = copyFeedback[key];
-    if (feedback === "copied") return "Copied";
-    if (feedback === "error") return "Copy failed";
-    return "Copy path";
-  };
+  /**
+   * Collect the support snapshot only on click, then write it to the same
+   * renderer clipboard the sync tab uses. Sync may be off or disconnected;
+   * the backend still answers with the local parts of the report.
+   */
+  const copyDiagnostics = useCallback(async () => {
+    if (copyingDiagnostics) return;
+    clearCopyFeedback("diagnostics");
+    setCopyingDiagnostics(true);
+    try {
+      const payload = await getSyncDiagnostics();
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      flashCopied("diagnostics");
+    } catch {
+      setCopyFeedback((current) => ({ ...current, diagnostics: "error" }));
+    } finally {
+      setCopyingDiagnostics(false);
+    }
+  }, [clearCopyFeedback, copyingDiagnostics, flashCopied]);
+
+  const copyLabel = (key: string): string => feedbackLabel(copyFeedback[key], "Copy path");
 
   if (failed) {
     return (
@@ -333,6 +372,32 @@ export function DataSettings() {
             </li>
           ))}
         </ul>
+      </div>
+
+      <div data-testid="storage-diagnostics" className="rounded-lg border p-4">
+        <p className="text-sm font-medium">Diagnostics</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Copies sync status, hash failures, conflicts, merges, and schema versions for support. It
+          never includes book contents or notes.
+        </p>
+        <div className="mt-3 flex items-center gap-3">
+          <Button
+            data-testid="copy-diagnostics"
+            variant="outline"
+            size="sm"
+            disabled={copyingDiagnostics}
+            onClick={() => void copyDiagnostics()}
+          >
+            {copyingDiagnostics ? "Copying..." : "Copy diagnostics"}
+          </Button>
+          <span
+            data-testid="copy-diagnostics-result"
+            role="status"
+            className="text-xs text-muted-foreground"
+          >
+            {feedbackLabel(copyFeedback.diagnostics, "")}
+          </span>
+        </div>
       </div>
 
       <p data-testid="storage-reassurance" className="text-xs text-muted-foreground">

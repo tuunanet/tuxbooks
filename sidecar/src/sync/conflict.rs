@@ -30,7 +30,8 @@ const LIST_LIMIT: i64 = 100;
 
 /// The durable book a conflict belongs to. A `book` conflict keys on the
 /// entity uid itself; every other kind reads the mirror row.
-const BOOK_UID_EXPR: &str = "COALESCE(CASE WHEN c.kind = 'book' THEN c.entity_uid END, e.book_uid)";
+pub(crate) const BOOK_UID_EXPR: &str =
+    "COALESCE(CASE WHEN c.kind = 'book' THEN c.entity_uid END, e.book_uid)";
 
 /// An issue has no live conflict behind it. Shared by the reconcile and expiry
 /// sweep and the single-key settlement path so the key join lives in one place.

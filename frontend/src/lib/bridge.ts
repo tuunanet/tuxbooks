@@ -94,6 +94,52 @@ export interface SyncIssue {
   updatedAt: string;
 }
 
+/**
+ * The user-initiated support snapshot from `sync_diagnostics`. It carries no
+ * book contents, annotation text, or conflict values (docs/SYNC.md, "Copy
+ * diagnostics").
+ */
+export interface SyncDiagnostics {
+  generatedAt: string;
+  sync: {
+    enabled: boolean;
+    state: SyncState;
+    folder: string | null;
+    lastSyncAt: string | null;
+    lastError: string | null;
+    counts: {
+      pendingLocal: number;
+      waitingBooks: number;
+      issues: number;
+      trash: number;
+      conflicts: number;
+    };
+  };
+  hashFailed: Array<{
+    bookId: number;
+    title: string;
+    path: string;
+    attempts: number;
+    retryAt: string | null;
+  }>;
+  openConflicts: Array<{
+    id: number;
+    kind: string;
+    field: string;
+    bookTitle: string | null;
+    createdAt: string;
+  }>;
+  recentMerges: {
+    books: Array<{ loser: string; winner: string }>;
+    entities: Array<{ kind: string; loser: string; winner: string }>;
+  };
+  versions: {
+    libraryMarker: number | null;
+    opSchema: number;
+    dbMigration: number;
+  };
+}
+
 /** What the Sync issues row offers; computed by the sidecar from the kind. */
 export type SyncIssueAction = "retry" | "open_folder" | "copy_details" | "dismiss";
 
@@ -539,6 +585,11 @@ export function pickSyncFolder(): Promise<string | null> {
 
 export function getSyncStatus(): Promise<SyncStatus> {
   return invoke("sync_status");
+}
+
+/** Collect the support snapshot. Runs only when the user asks; never polled. */
+export function getSyncDiagnostics(): Promise<SyncDiagnostics> {
+  return invoke("sync_diagnostics");
 }
 
 /**
