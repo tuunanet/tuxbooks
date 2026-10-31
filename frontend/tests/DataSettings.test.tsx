@@ -128,7 +128,7 @@ const DIAGNOSTICS: SyncDiagnostics = {
   versions: { libraryMarker: 1, opSchema: 1, dbMigration: 28 },
 };
 
-const clipboardWrite = vi.fn(async (_text: string) => {});
+const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 /**
  * user-event installs its own clipboard stub on `navigator` at setup, so the

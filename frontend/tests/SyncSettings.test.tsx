@@ -52,7 +52,7 @@ const LOCAL_DEVICE = ENABLED.deviceId ?? "";
 const OTHER_DEVICE = "11111111111111111111111111111111";
 const CONFLICT_TIME = Date.parse("2026-10-28T10:00:00.000Z");
 
-const clipboardWrite = vi.fn(async (_text: string) => {});
+const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 function issue(overrides: Partial<SyncIssue> = {}): SyncIssue {
   return {

@@ -689,6 +689,10 @@ export function SyncIssuesSection({
   );
 }
 
+function blockedReasonFor(conflict: SyncConflict): string {
+  return conflict.applyLoserBlockedReason ?? "The other value cannot be applied.";
+}
+
 function ConflictRow({
   conflict,
   deviceId,
@@ -712,9 +716,6 @@ function ConflictRow({
   const editFieldCount = isTombstone ? objectFieldCount(conflict.loser) : null;
   const editLabel = isRestore ? "Restored" : "Edited";
   const blocked = !conflict.canApplyLoser;
-  const thisDisabled = busy || (blocked && choices.thisDevice === "apply_loser");
-  const otherDisabled = busy || (blocked && choices.other === "apply_loser");
-  const blockedReason = conflict.applyLoserBlockedReason ?? "The other value cannot be applied.";
   const blockedId = `sync-conflict-${idPrefix}-${conflict.id}-blocked`;
 
   return (
@@ -726,79 +727,26 @@ function ConflictRow({
             {conflict.kind.replaceAll("_", " ")}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid={`sync-conflict-${conflict.id}-this-device`}
-            onClick={() => onResolve(conflict.id, choices.thisDevice)}
-            disabled={thisDisabled}
-            aria-describedby={
-              blocked && choices.thisDevice === "apply_loser" ? blockedId : undefined
-            }
-          >
-            {choices.thisLabel}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid={`sync-conflict-${conflict.id}-other`}
-            onClick={() => onResolve(conflict.id, choices.other)}
-            disabled={otherDisabled}
-            title={otherDisabled && blocked ? blockedReason : undefined}
-            aria-describedby={blocked && choices.other === "apply_loser" ? blockedId : undefined}
-          >
-            {choices.otherLabel}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            data-testid={`sync-conflict-${conflict.id}-later`}
-            onClick={() => onLater(conflict.id)}
-            disabled={busy}
-          >
-            Decide later
-          </Button>
-        </div>
+        <ConflictActions
+          conflict={conflict}
+          choices={choices}
+          blocked={blocked}
+          busy={busy}
+          blockedId={blockedId}
+          onResolve={onResolve}
+          onLater={onLater}
+        />
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div
-          data-testid={`sync-conflict-${conflict.id}-kept`}
-          title={fullValue(conflict.winner)}
-          className="rounded-md bg-muted/40 p-2"
-        >
-          <p className="text-xs font-medium text-muted-foreground">Currently kept</p>
-          {conflict.winner === "deleted" ? (
-            <p className="mt-1 break-words">Deleted</p>
-          ) : (
-            <ConflictValue value={conflict.winner} />
-          )}
-          <p className="mt-1 break-words text-xs text-muted-foreground">
-            {deviceLabel(conflict.winnerDeviceName, conflict.winnerDeviceId, deviceId)} ·{" "}
-            {formatSyncWall(conflict.winnerWall)}
-          </p>
-        </div>
-        <div
-          data-testid={`sync-conflict-${conflict.id}-discarded`}
-          title={fullValue(conflict.loser)}
-          className="rounded-md border p-2"
-        >
-          <p className="text-xs font-medium text-muted-foreground">Discarded</p>
-          {isTombstone ? (
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              {editLabel}
-              {editFieldCount === null
-                ? ""
-                : ` · ${editFieldCount} ${editFieldCount === 1 ? "field" : "fields"}`}
-            </p>
-          ) : null}
-          <ConflictValue value={conflict.loser} />
-          <p className="mt-1 break-words text-xs text-muted-foreground">
-            {deviceLabel(conflict.loserDeviceName, conflict.loserDeviceId, deviceId)} ·{" "}
-            {formatSyncWall(conflict.loserWall)}
-          </p>
-        </div>
+        <ConflictKeptPanel conflict={conflict} deviceId={deviceId} />
+        <ConflictDiscardedPanel
+          conflict={conflict}
+          deviceId={deviceId}
+          isTombstone={isTombstone}
+          editLabel={editLabel}
+          editFieldCount={editFieldCount}
+        />
       </div>
 
       {blocked ? (
@@ -807,10 +755,129 @@ function ConflictRow({
           data-testid={`sync-conflict-${conflict.id}-blocked`}
           className="mt-2 text-xs text-muted-foreground"
         >
-          {blockedReason}
+          {blockedReasonFor(conflict)}
         </p>
       ) : null}
     </li>
+  );
+}
+
+function ConflictActions({
+  conflict,
+  choices,
+  blocked,
+  busy,
+  blockedId,
+  onResolve,
+  onLater,
+}: {
+  conflict: SyncConflict;
+  choices: ConflictChoice;
+  blocked: boolean;
+  busy: boolean;
+  blockedId: string;
+  onResolve: (id: number, resolution: SyncConflictResolution) => void;
+  onLater: (id: number) => void;
+}) {
+  const thisDisabled = busy || (blocked && choices.thisDevice === "apply_loser");
+  const otherDisabled = busy || (blocked && choices.other === "apply_loser");
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid={`sync-conflict-${conflict.id}-this-device`}
+        onClick={() => onResolve(conflict.id, choices.thisDevice)}
+        disabled={thisDisabled}
+        aria-describedby={blocked && choices.thisDevice === "apply_loser" ? blockedId : undefined}
+      >
+        {choices.thisLabel}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid={`sync-conflict-${conflict.id}-other`}
+        onClick={() => onResolve(conflict.id, choices.other)}
+        disabled={otherDisabled}
+        title={otherDisabled && blocked ? blockedReasonFor(conflict) : undefined}
+        aria-describedby={blocked && choices.other === "apply_loser" ? blockedId : undefined}
+      >
+        {choices.otherLabel}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        data-testid={`sync-conflict-${conflict.id}-later`}
+        onClick={() => onLater(conflict.id)}
+        disabled={busy}
+      >
+        Decide later
+      </Button>
+    </div>
+  );
+}
+
+function ConflictKeptPanel({
+  conflict,
+  deviceId,
+}: {
+  conflict: SyncConflict;
+  deviceId: string | null;
+}) {
+  return (
+    <div
+      data-testid={`sync-conflict-${conflict.id}-kept`}
+      title={fullValue(conflict.winner)}
+      className="rounded-md bg-muted/40 p-2"
+    >
+      <p className="text-xs font-medium text-muted-foreground">Currently kept</p>
+      {conflict.winner === "deleted" ? (
+        <p className="mt-1 break-words">Deleted</p>
+      ) : (
+        <ConflictValue value={conflict.winner} />
+      )}
+      <p className="mt-1 break-words text-xs text-muted-foreground">
+        {deviceLabel(conflict.winnerDeviceName, conflict.winnerDeviceId, deviceId)} ·{" "}
+        {formatSyncWall(conflict.winnerWall)}
+      </p>
+    </div>
+  );
+}
+
+function ConflictDiscardedPanel({
+  conflict,
+  deviceId,
+  isTombstone,
+  editLabel,
+  editFieldCount,
+}: {
+  conflict: SyncConflict;
+  deviceId: string | null;
+  isTombstone: boolean;
+  editLabel: string;
+  editFieldCount: number | null;
+}) {
+  return (
+    <div
+      data-testid={`sync-conflict-${conflict.id}-discarded`}
+      title={fullValue(conflict.loser)}
+      className="rounded-md border p-2"
+    >
+      <p className="text-xs font-medium text-muted-foreground">Discarded</p>
+      {isTombstone ? (
+        <p className="mt-1 text-xs font-medium text-muted-foreground">
+          {editLabel}
+          {editFieldCount === null
+            ? ""
+            : ` · ${editFieldCount} ${editFieldCount === 1 ? "field" : "fields"}`}
+        </p>
+      ) : null}
+      <ConflictValue value={conflict.loser} />
+      <p className="mt-1 break-words text-xs text-muted-foreground">
+        {deviceLabel(conflict.loserDeviceName, conflict.loserDeviceId, deviceId)} ·{" "}
+        {formatSyncWall(conflict.loserWall)}
+      </p>
+    </div>
   );
 }
 
