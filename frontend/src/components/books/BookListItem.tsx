@@ -6,6 +6,7 @@ import type { Book } from "@/types/domain";
 import type { InteractiveBookProps } from "./BookCard";
 import { BookContextMenu } from "./BookContextMenu";
 import { BookCover } from "./BookCover";
+import { IndexingBadge } from "./IndexingBadge";
 import { bookSelectionClass } from "./selection";
 
 interface BookListItemProps extends InteractiveBookProps {
@@ -98,6 +99,7 @@ export function BookListItem({
             <Badge variant="secondary">{book.format.toUpperCase()}</Badge>
           </div>
           {!book.available && <Badge variant="destructive">Missing</Badge>}
+          {book.hashState === "failed" && <IndexingBadge />}
           <div className="w-[72px] shrink-0 text-right text-xs text-muted-foreground">
             {percent === null || percent <= 0 ? (
               <span className="whitespace-nowrap">Not started</span>

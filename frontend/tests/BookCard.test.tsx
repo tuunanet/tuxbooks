@@ -182,6 +182,18 @@ describe("BookCard", () => {
     expect(onRemove).toHaveBeenCalledWith(1);
   });
 
+  it("marks a book that could not be indexed", () => {
+    const { rerender } = render(
+      <BookCard book={makeBook({ hashState: "failed" })} collections={[]} />,
+    );
+    const badge = screen.getByTestId("book-indexing");
+    expect(badge).toHaveAccessibleName("Not indexed");
+    expect(badge).toHaveTextContent("Not indexed");
+
+    rerender(<BookCard book={makeBook({ hashState: "hashed" })} collections={[]} />);
+    expect(screen.queryByTestId("book-indexing")).not.toBeInTheDocument();
+  });
+
   it("shows missing-file state with recovery actions for unavailable books", async () => {
     const onLocate = vi.fn();
     const onRemove = vi.fn();

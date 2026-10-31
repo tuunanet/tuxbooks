@@ -21,7 +21,7 @@ const MODULES = {
   pdf: 80,
   services: 80,
   repository: 80,
-  sync: 80,
+  sync: 92,
   db: 80,
   domain: 80,
 };

@@ -25,7 +25,7 @@ touching a Rust module's behavior or tests.
 | PDF parser          | `sidecar/src/pdf/`                            | 80%      | n/a         |
 | Services            | `sidecar/src/services/`                       | 80%      | n/a         |
 | Repository          | `sidecar/src/repository/`                     | 80%      | n/a         |
-| Cloud sync          | `sidecar/src/sync/`                           | 80%      | n/a         |
+| Cloud sync          | `sidecar/src/sync/`                           | 92%      | n/a         |
 | Database            | `sidecar/src/db/`                             | 80%      | n/a         |
 | Domain models       | `sidecar/src/domain/`                         | 80%      | n/a         |
 | Library view        | `frontend/src/components/library/`            | 80%      | 91.05%      |
@@ -44,6 +44,22 @@ The v5 baseline column (2026-10-22) was taken by the vite-plus migration,
 which moved the frontend to vitest 5. It records the first run on the new
 instrument; Rust rows are n/a because that change did not touch the Rust
 instrument.
+
+Cloud sync moved from 80% to 92% on 2026-10-30 for `tuxbooks-c6g.3`, the
+ticket that set the floor in the sync recovery epic (`tuxbooks-c6g`). The
+recovery decisions are in [ADR 0015](adr/0015-sync-recovery.md).
+At the final epic gate, `just coverage` reports 97.9% for the module, but that is
+llvm-cov's whole-file summary and it includes inline test lines. Production-only coverage (segments
+before `#[cfg(test)]`, the measurement the review uses) is 92.3% for the
+module: capture 93.7%, identity 88.0%, merge 93.4%, and waiting 90.7%. The
+module clears the 92% floor on that count. Two files do not: identity and
+waiting stop at 88.0% and 90.7% because their remaining uncovered entries are
+branch bodies no caller can produce or the uncovered error edge of a
+multi-line `await`, not lines that failed to execute. `capture.rs:67` and
+`capture.rs:449` (`Captured::PendingIdentity`) are also unreachable:
+`capture_membership` always resolves or mints the collection uid, and
+`resolve_local_uid` returns `None` only for a deleted marker. The exact lines
+and reasons are in the PR for `tuxbooks-c6g.3`.
 
 Automatically adjust Required percentage for a category **lower** if the percentage is too tight
 and would result in writing non-meaningful tests.

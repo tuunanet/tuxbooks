@@ -19,6 +19,7 @@ import type {
   EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
+  IndexingRetry,
   LibraryChange,
   LibraryStats,
   MetadataFields,
@@ -44,6 +45,7 @@ export type {
   EditionLinkOutcome,
   ForgetOutcome,
   ImportReport,
+  IndexingRetry,
   LibraryChange,
   LibraryStats,
   MetadataFields,
@@ -86,9 +88,60 @@ export interface SyncIssue {
   kind: string;
   detail: string;
   fileName: string | null;
+  action: SyncIssueAction;
+  target: string;
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * The user-initiated support snapshot from `sync_diagnostics`. It carries no
+ * book contents, annotation text, or conflict values (docs/SYNC.md, "Copy
+ * diagnostics").
+ */
+export interface SyncDiagnostics {
+  generatedAt: string;
+  sync: {
+    enabled: boolean;
+    state: SyncState;
+    folder: string | null;
+    lastSyncAt: string | null;
+    lastError: string | null;
+    counts: {
+      pendingLocal: number;
+      waitingBooks: number;
+      issues: number;
+      trash: number;
+      conflicts: number;
+    };
+  };
+  hashFailed: Array<{
+    bookId: number;
+    title: string;
+    path: string;
+    attempts: number;
+    retryAt: string | null;
+  }>;
+  openConflicts: Array<{
+    id: number;
+    kind: string;
+    field: string;
+    bookTitle: string | null;
+    createdAt: string;
+  }>;
+  recentMerges: {
+    books: Array<{ loser: string; winner: string }>;
+    entities: Array<{ kind: string; loser: string; winner: string }>;
+  };
+  versions: {
+    libraryMarker: number | null;
+    opSchema: number;
+    dbMigration: number;
+  };
+}
+
+/** What the Sync issues row offers; computed by the sidecar from the kind. */
+export type SyncIssueAction = "retry" | "open_folder" | "copy_details" | "dismiss";
 
 export interface SyncTrashEntry {
   id: number;
@@ -98,25 +151,33 @@ export interface SyncTrashEntry {
   expiresAt: string;
 }
 
-/** Durable progress of the background content-hash pass (ADR 0014). */
-export interface HashBackfillStatus {
-  total: number;
-  hashed: number;
-  pending: number;
-  failed: number;
-  waiting: number;
+/** One losing value the merge kept, waiting for a keep/apply choice. */
+export interface SyncConflict {
+  id: number;
+  kind: string;
+  entityUid: string;
+  bookUid: string | null;
+  bookTitle: string | null;
+  bookAuthor: string | null;
+  field: string;
+  /** Readable name for `__entity__`, `__deleted__`, and `__restore__`. */
+  fieldLabel: string | null;
+  winner: unknown;
+  loser: unknown;
+  winnerDeviceId: string;
+  winnerDeviceName: string;
+  winnerWall: number;
+  winnerCounter: number;
+  loserDeviceId: string;
+  loserDeviceName: string;
+  loserWall: number;
+  loserCounter: number;
+  createdAt: string;
+  canApplyLoser: boolean;
+  applyLoserBlockedReason: string | null;
 }
 
-/** An identity merge or a book that needs a relink after the upgrade. */
-export interface MigrationIssue {
-  id: number;
-  issueKey: string;
-  kind: string;
-  detail: string;
-  bookUid: string | null;
-  createdAt: string;
-  resolvedAt: string | null;
-}
+export type SyncConflictResolution = "keep_winner" | "apply_loser";
 
 export interface SyncMismatch {
   localLibraryId: string;
@@ -160,6 +221,7 @@ export interface TuxbooksApi {
   storageReport(): Promise<StorageReport>;
   openDataFolder(rootId: StorageRootId): Promise<void>;
   openLibraryLocation(locationId: number): Promise<void>;
+  openSyncFolder(): Promise<void>;
   copyDataPath(rootId: StorageRootId): Promise<void>;
   copyLibraryLocationPath(locationId: number): Promise<void>;
   clearCache(): Promise<number>;
@@ -336,6 +398,15 @@ export function removeBookFile(bookId: number, fileId: number): Promise<boolean>
  */
 export function resetBookReadingData(bookId: number): Promise<boolean> {
   return invoke("reset_book_reading_data", { bookId });
+}
+
+/**
+ * Retry the content-hash pass for one book now instead of waiting for its
+ * automatic backoff. Resolves with the state afterwards, so the caller keeps
+ * the warning when the file is still unreadable.
+ */
+export function retryIndexing(bookId: number): Promise<IndexingRetry> {
+  return invoke("retry_indexing", { bookId });
 }
 
 /**
@@ -516,6 +587,11 @@ export function getSyncStatus(): Promise<SyncStatus> {
   return invoke("sync_status");
 }
 
+/** Collect the support snapshot. Runs only when the user asks; never polled. */
+export function getSyncDiagnostics(): Promise<SyncDiagnostics> {
+  return invoke("sync_diagnostics");
+}
+
 /**
  * Connect a sync folder. A `mismatch` result is expected when the folder
  * belongs to another library; call again with `confirmLibraryId` to merge this
@@ -548,6 +624,12 @@ export function forgetAllWaitingBooks(): Promise<number> {
   return invoke("forget_all_waiting_books");
 }
 
+/** Attach a waiting book to the file the user located. The sidecar verifies
+ * the bytes; a mismatch rejects and leaves the book waiting. */
+export function attachWaitingBook(bookUid: string, path: string): Promise<Book> {
+  return invoke("attach_waiting_book", { bookUid, path });
+}
+
 export function dismissAllSyncIssues(): Promise<number> {
   return invoke("dismiss_all_sync_issues");
 }
@@ -560,25 +642,9 @@ export function dismissSyncIssue(id: number): Promise<boolean> {
   return invoke("sync_dismiss_issue", { id });
 }
 
-/** Progress of the background book-identity hash pass. */
-export function getIdentityBackfillStatus(): Promise<HashBackfillStatus> {
-  return invoke("identity_backfill_status");
-}
-
-/** Live progress updates from the background hash pass. */
-export function onIdentityBackfill(
-  callback: (status: HashBackfillStatus) => void,
-): Promise<() => void> {
-  const unlisten = onEvent<HashBackfillStatus>("identity-backfill", callback);
-  return Promise.resolve(unlisten);
-}
-
-export function listMigrationIssues(): Promise<MigrationIssue[]> {
-  return invoke("migration_issues");
-}
-
-export function dismissMigrationIssue(id: number): Promise<boolean> {
-  return invoke("migration_dismiss_issue", { id });
+/** Run the retry path behind an actionable issue; resolves when the row closed. */
+export function retrySyncIssue(id: number): Promise<boolean> {
+  return invoke("sync_retry_issue", { id });
 }
 
 export function listSyncTrash(): Promise<SyncTrashEntry[]> {
@@ -587,6 +653,18 @@ export function listSyncTrash(): Promise<SyncTrashEntry[]> {
 
 export function restoreSyncTrash(id: number): Promise<boolean> {
   return invoke("sync_restore", { id });
+}
+
+export function listSyncConflicts(): Promise<SyncConflict[]> {
+  return invoke("sync_conflicts");
+}
+
+/** `apply_loser` republishes the losing value; every device converges on it. */
+export function resolveSyncConflict(
+  id: number,
+  resolution: SyncConflictResolution,
+): Promise<boolean> {
+  return invoke("sync_resolve_conflict", { id, resolution });
 }
 
 export function setSyncDeviceName(name: string): Promise<SyncStatus> {
@@ -635,6 +713,11 @@ export function openDataFolder(rootId: StorageRootId): Promise<void> {
 /** Open one watched library location in the system file manager (by id). */
 export function openLibraryLocation(locationId: number): Promise<void> {
   return tuxbooks().openLibraryLocation(locationId);
+}
+
+/** Open the connected cloud-sync folder; the renderer passes no path. */
+export function openSyncFolder(): Promise<void> {
+  return tuxbooks().openSyncFolder();
 }
 
 /** Copy one app-owned storage root's path to the native clipboard (by root id). */

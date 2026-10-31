@@ -86,6 +86,7 @@ const ISSUED_PATH_METHODS = new Set([
   "scan_library",
   "reconnect_book",
   "relink_book",
+  "attach_waiting_book",
   "set_book_cover",
   "sync_connect",
 ]);
@@ -96,6 +97,7 @@ const BOOK_ID_METHODS = new Set([
   "list_book_files",
   "list_book_editions",
   "reset_book_reading_data",
+  "retry_indexing",
   "forget_book",
   "get_book_metadata",
   "reset_book_metadata",
@@ -151,6 +153,14 @@ function validateIssuedPaths(
   }
   if (method === "reconnect_book" || method === "relink_book") {
     requireBookId(record);
+    requireLibraryPath(record.path, "path");
+    requireIssued(issued, "book-file", record.path, "path");
+    return;
+  }
+  if (method === "attach_waiting_book") {
+    // The waiting book is named by its shared uid, not a local row id; the
+    // picked file must be the one the dialog handed back.
+    requireBookUid(record.bookUid);
     requireLibraryPath(record.path, "path");
     requireIssued(issued, "book-file", record.path, "path");
     return;
@@ -255,6 +265,16 @@ function validateSyncId(record: Record<string, unknown>): void {
   requirePositiveId(record.id, "sync id");
 }
 
+const CONFLICT_RESOLUTIONS = new Set(["keep_winner", "apply_loser"]);
+
+function validateSyncConflictResolution(record: Record<string, unknown>): void {
+  requirePositiveId(record.id, "sync conflict id");
+  const resolution = record.resolution;
+  if (typeof resolution !== "string" || !CONFLICT_RESOLUTIONS.has(resolution)) {
+    throw policyError("invalid conflict resolution");
+  }
+}
+
 function validateSyncDeviceName(record: Record<string, unknown>): void {
   const name = record.name;
   if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
@@ -288,10 +308,6 @@ function requireNonEmptyString(value: unknown, label: string, maxLength: number)
   if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
     throw policyError(`invalid ${label}`);
   }
-}
-
-function validateMigrationId(record: Record<string, unknown>): void {
-  requirePositiveId(record.id, "migration issue id");
 }
 
 function validateBookUidRecord(record: Record<string, unknown>): void {
@@ -350,11 +366,12 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["forget_books", validateForgetBooks],
   ["restore_book", validateRestoreBook],
   ["sync_dismiss_issue", validateSyncId],
+  ["sync_retry_issue", validateSyncId],
   ["sync_restore", validateSyncId],
+  ["sync_resolve_conflict", validateSyncConflictResolution],
   ["sync_set_device_name", validateSyncDeviceName],
   ["remove_book_file", validateBookFile],
   ["link_book_edition", validateEditionLink],
-  ["migration_dismiss_issue", validateMigrationId],
   ["forget_waiting_book", validateBookUidRecord],
   ["list_provider_links", validateBookUidRecord],
   ["link_provider_book", validateProviderLink],

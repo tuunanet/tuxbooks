@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::Book;
-use tuxbooks_lib::repository::{books, library_locations, metadata as metadata_repo, migration};
+use tuxbooks_lib::repository::{books, library_locations, metadata as metadata_repo};
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::{PathChange, Reconciler};
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
@@ -381,10 +381,10 @@ async fn remove_waits_for_a_pending_hash_before_dropping_the_file() {
     assert_eq!(env.progress_percent(again.id).await, Some(20.0));
 }
 
-/// An unreadable file cannot produce a hash. Remove proceeds, records a
-/// visible relink issue, and keeps the durable state.
+/// An unreadable file cannot produce a hash. Remove proceeds, keeps the durable
+/// state, and does not write the retired relink row.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_failed_hash_marks_a_relink_and_does_not_block_removal() {
+async fn a_failed_hash_does_not_block_removal_and_writes_no_relink_row() {
     let env = setup().await;
     env.write_book("book.epub");
     env.scan().await;
@@ -408,11 +408,14 @@ async fn a_failed_hash_marks_a_relink_and_does_not_block_removal() {
     assert_eq!(env.progress_percent(book.id).await, Some(12.0));
     assert_eq!(env.annotation_count(book.id).await, 1);
 
-    let issues = migration::list_open(&env.pool).await.unwrap();
-    assert!(
-        issues.iter().any(|issue| issue.kind == "hash_failed"
-            && issue.book_uid.as_deref() == book.book_uid.as_deref()),
-        "the failed hash is visible as needing a relink: {issues:?}"
+    let relink_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM migration_issues WHERE kind = 'hash_failed'")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        relink_rows, 0,
+        "a failed hash no longer writes a relink issue: the book carries it"
     );
     assert!(
         library_locations::list_locations(&env.pool)

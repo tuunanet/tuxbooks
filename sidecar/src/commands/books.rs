@@ -1,6 +1,7 @@
 use crate::domain::{
     Book, BookFile, BookTrashEntry, BulkForgetOutcome, EditionBook, EditionLinkOutcome,
-    ForgetOutcome, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus, SearchHit,
+    ForgetOutcome, IndexingRetry, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus,
+    SearchHit,
 };
 use crate::error::AppError;
 use crate::repository::{books, collections, editions, lifecycle};
@@ -59,6 +60,24 @@ pub async fn link_book_edition(
     Ok(outcome)
 }
 
+/// Retry the content-hash pass for one book now. The row is reset to pending
+/// with a clean backoff and hashed immediately. Unavailable locations are
+/// skipped, so a missing copy does not gain a failed attempt. The result
+/// reports the aggregate state afterwards, so the client keeps the book warning
+/// when a location is still unreadable. A fully hashed book clears the sync
+/// issue for the old failure.
+pub async fn retry_indexing(
+    state: &AppState,
+    events: &EventEmitter,
+    book_id: i64,
+) -> Result<IndexingRetry, AppError> {
+    let outcome = crate::services::hash_backfill::retry_book(&state.db, book_id).await?;
+    if let Some(book) = books::get_book(&state.db, book_id).await? {
+        crate::commands::emit_changed_book(events, book);
+    }
+    Ok(outcome)
+}
+
 /// Reading history: durable books with no file rows, newest activity first.
 /// `query` is optional user text; when present, the same FTS5 index and
 /// sanitizer as library search apply with the opposite membership filter.
@@ -67,24 +86,6 @@ pub async fn list_reading_history(
     query: Option<String>,
 ) -> Result<Vec<crate::domain::ReadingHistoryBook>, AppError> {
     crate::services::search::list_reading_history(&state.db, query.as_deref()).await
-}
-
-/// Durable progress of the background content-hash pass (ADR 0014 D8).
-pub async fn identity_backfill_status(
-    state: &AppState,
-) -> Result<crate::services::hash_backfill::HashBackfillStatus, AppError> {
-    crate::services::hash_backfill::status(&state.db).await
-}
-
-/// Open upgrade issues: identity merges and books that need a relink.
-pub async fn migration_issues(
-    state: &AppState,
-) -> Result<Vec<crate::repository::migration::MigrationIssue>, AppError> {
-    crate::repository::migration::list_open(&state.db).await
-}
-
-pub async fn dismiss_migration_issue(state: &AppState, id: i64) -> Result<bool, AppError> {
-    crate::repository::migration::dismiss(&state.db, id).await
 }
 
 /// Full-text library search behind the global search box (Ctrl/Cmd+K).

@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { DataSettings } from "@/components/settings/DataSettings";
 import { SettingsShell } from "@/components/settings/SettingsShell";
-import type { StorageReport } from "@/lib/bridge";
+import type { StorageReport, SyncDiagnostics } from "@/lib/bridge";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
@@ -12,6 +12,7 @@ import {
   clearCacheMock,
   copyDataPathMock,
   copyLibraryLocationPathMock,
+  invokeMock,
   mockInvoke,
   openDataFolderMock,
   openLibraryLocationMock,
@@ -86,8 +87,71 @@ function renderDataSettings() {
   render(<DataSettings />);
 }
 
+const DIAGNOSTICS: SyncDiagnostics = {
+  generatedAt: "2026-10-31T10:00:00.000Z",
+  sync: {
+    enabled: true,
+    state: "idle",
+    folder: "/home/u/Dropbox/TuxBooks",
+    lastSyncAt: "2026-10-31T09:59:00.000Z",
+    lastError: null,
+    counts: {
+      pendingLocal: 2,
+      waitingBooks: 1,
+      issues: 1,
+      trash: 0,
+      conflicts: 1,
+    },
+  },
+  hashFailed: [
+    {
+      bookId: 42,
+      title: "Example",
+      path: "/home/u/Books/example.epub",
+      attempts: 2,
+      retryAt: "2026-10-31T11:00:00.000Z",
+    },
+  ],
+  openConflicts: [
+    {
+      id: 7,
+      kind: "annotation",
+      field: "note",
+      bookTitle: "Example",
+      createdAt: "2026-10-31T09:00:00.000Z",
+    },
+  ],
+  recentMerges: {
+    books: [{ loser: "a".repeat(32), winner: "b".repeat(32) }],
+    entities: [{ kind: "collection", loser: "c".repeat(32), winner: "d".repeat(32) }],
+  },
+  versions: { libraryMarker: 1, opSchema: 1, dbMigration: 28 },
+};
+
+const clipboardWrite = vi.fn(async (_text: string) => {});
+
+/**
+ * user-event installs its own clipboard stub on `navigator` at setup, so the
+ * test's writeText fake has to be re-applied after that.
+ */
+function setupUser() {
+  const user = userEvent.setup();
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: clipboardWrite },
+    configurable: true,
+  });
+  return user;
+}
+
+function routeDiagnostics(payload: SyncDiagnostics = DIAGNOSTICS) {
+  invokeMock.mockImplementation((method: string) =>
+    method === "sync_diagnostics" ? Promise.resolve(payload) : Promise.reject(new Error(method)),
+  );
+}
+
 describe("DataSettings", () => {
   beforeEach(() => {
+    invokeMock.mockReset();
     storageReportMock.mockReset();
     storageReportMock.mockResolvedValue(REPORT);
     openDataFolderMock.mockReset();
@@ -98,6 +162,7 @@ describe("DataSettings", () => {
     copyLibraryLocationPathMock.mockResolvedValue(undefined);
     clearCacheMock.mockReset();
     clearCacheMock.mockResolvedValue(0);
+    clipboardWrite.mockReset();
   });
 
   it("shows the total footprint, both roots, and the reassurance", async () => {
@@ -122,6 +187,8 @@ describe("DataSettings", () => {
     expect(screen.getByTestId("storage-reassurance")).toHaveTextContent(
       "read in place and never copied",
     );
+    // Identity merges are automatic; the old index card is gone.
+    expect(screen.queryByTestId("identity-backfill")).not.toBeInTheDocument();
   });
 
   it("lists watched locations and catalog counts", async () => {
@@ -157,43 +224,8 @@ describe("DataSettings", () => {
     );
   });
 
-  it("shows identity backfill progress and lets the user dismiss a merge issue", async () => {
-    const user = userEvent.setup();
-    mockInvoke({
-      identity_backfill_status: {
-        total: 12,
-        hashed: 8,
-        pending: 3,
-        failed: 1,
-        waiting: 0,
-      },
-      migration_issues: [
-        {
-          id: 7,
-          issueKey: "identity-merged:a:b",
-          kind: "identity_merged",
-          detail: "Two file rows turned out to be the same book.",
-          bookUid: "b",
-          createdAt: "2026-01-01T00:00:00.000Z",
-          resolvedAt: null,
-        },
-      ],
-      migration_dismiss_issue: true,
-    });
-    renderDataSettings();
-
-    const card = await screen.findByTestId("identity-backfill");
-    expect(card).toHaveTextContent("8 of 12 books indexed");
-    expect(card).toHaveTextContent("3 to go");
-    expect(card).toHaveTextContent("1 need a relink");
-    expect(screen.getByTestId("identity-issues")).toHaveTextContent("same book");
-
-    await user.click(screen.getByTestId("identity-dismiss-7"));
-    await waitFor(() => expect(screen.queryByTestId("identity-issues")).not.toBeInTheDocument());
-  });
-
   it("opens a root by id and copies its path through the bridge", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderDataSettings();
     await screen.findByTestId("storage-total");
 
@@ -208,7 +240,7 @@ describe("DataSettings", () => {
   });
 
   it("copies a watched location by id through the bridge", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderDataSettings();
     await screen.findByTestId("storage-total");
 
@@ -223,7 +255,7 @@ describe("DataSettings", () => {
   });
 
   it("shows an error state when a path copy rejects", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     copyDataPathMock.mockRejectedValue(new Error("denied"));
     renderDataSettings();
     await screen.findByTestId("storage-total");
@@ -258,7 +290,7 @@ describe("DataSettings", () => {
   });
 
   it("shows the cache total on the clear button and confirms what goes and stays", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderDataSettings();
     await screen.findByTestId("storage-total");
 
@@ -276,7 +308,7 @@ describe("DataSettings", () => {
   });
 
   it("cancel closes the confirmation without clearing", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderDataSettings();
     await screen.findByTestId("storage-total");
 
@@ -289,7 +321,7 @@ describe("DataSettings", () => {
   });
 
   it("clears after confirmation, shows the freed amount, and refreshes the sizes", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const after: StorageReport = { ...REPORT, cacheBytes: 0, appDataBytes: 3 * 1024 * 1024 };
     storageReportMock.mockResolvedValueOnce(REPORT);
     storageReportMock.mockResolvedValueOnce(after);
@@ -319,8 +351,151 @@ describe("DataSettings", () => {
     expect(screen.getAllByTestId("clear-cache-button")).toHaveLength(1);
   });
 
+  it("copies diagnostics JSON on click and shows Copied", async () => {
+    const user = setupUser();
+    routeDiagnostics();
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    const card = screen.getByTestId("storage-diagnostics");
+    expect(card).toHaveTextContent(
+      "sync status, hash failures, conflicts, merges, and schema versions",
+    );
+    expect(card).toHaveTextContent("never includes book contents or notes");
+
+    await user.click(screen.getByTestId("copy-diagnostics"));
+
+    expect(invokeMock).toHaveBeenCalledWith("sync_diagnostics");
+    await waitFor(() =>
+      expect(screen.getByTestId("copy-diagnostics-result")).toHaveTextContent("Copied"),
+    );
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
+    const copied = JSON.parse(String(clipboardWrite.mock.calls[0]?.[0])) as SyncDiagnostics;
+    expect(Object.keys(copied)).toEqual(
+      expect.arrayContaining([
+        "generatedAt",
+        "sync",
+        "hashFailed",
+        "openConflicts",
+        "recentMerges",
+        "versions",
+      ]),
+    );
+    expect(copied.sync.counts.conflicts).toBe(1);
+    expect(copied.hashFailed[0]?.bookId).toBe(42);
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copied");
+  });
+
+  it("still copies when sync is off, with empty sync lists and versions present", async () => {
+    const user = setupUser();
+    routeDiagnostics({
+      ...DIAGNOSTICS,
+      sync: {
+        enabled: false,
+        state: "disabled",
+        folder: null,
+        lastSyncAt: null,
+        lastError: null,
+        counts: {
+          pendingLocal: 0,
+          waitingBooks: 0,
+          issues: 0,
+          trash: 0,
+          conflicts: 0,
+        },
+      },
+      openConflicts: [],
+      recentMerges: { books: [], entities: [] },
+      versions: { libraryMarker: null, opSchema: 1, dbMigration: 28 },
+    });
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("copy-diagnostics"));
+
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
+    const copied = JSON.parse(String(clipboardWrite.mock.calls[0]?.[0])) as SyncDiagnostics;
+    expect(copied.sync.enabled).toBe(false);
+    expect(copied.openConflicts).toEqual([]);
+    expect(copied.versions.dbMigration).toBe(28);
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copied");
+  });
+
+  it("shows Copy failed when the diagnostics command rejects", async () => {
+    const user = setupUser();
+    invokeMock.mockRejectedValue(new Error("sidecar unavailable"));
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("copy-diagnostics"));
+
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copy failed");
+    expect(clipboardWrite).not.toHaveBeenCalled();
+    expect(screen.getByTestId("copy-diagnostics")).toBeInTheDocument();
+  });
+
+  it("shows Copy failed when the clipboard write rejects", async () => {
+    const user = setupUser();
+    routeDiagnostics();
+    clipboardWrite.mockRejectedValueOnce(new Error("clipboard denied"));
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("copy-diagnostics"));
+
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copy failed");
+  });
+
+  it("clears a stale copy error when a retry starts", async () => {
+    const user = setupUser();
+    routeDiagnostics();
+    invokeMock.mockRejectedValueOnce(new Error("offline"));
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    await user.click(screen.getByTestId("copy-diagnostics"));
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copy failed");
+
+    let resolve!: (payload: SyncDiagnostics) => void;
+    invokeMock.mockImplementation(
+      (method: string) =>
+        new Promise<SyncDiagnostics>((next) => {
+          if (method === "sync_diagnostics") resolve = next;
+        }),
+    );
+    await user.click(screen.getByTestId("copy-diagnostics"));
+
+    await waitFor(() => expect(screen.getByTestId("copy-diagnostics")).toBeDisabled());
+    expect(screen.getByTestId("copy-diagnostics-result")).toBeEmptyDOMElement();
+
+    resolve(DIAGNOSTICS);
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copied");
+  });
+
+  it("disables the diagnostics button while the copy is in flight", async () => {
+    const user = setupUser();
+    let resolve!: (payload: SyncDiagnostics) => void;
+    invokeMock.mockImplementation(
+      (method: string) =>
+        new Promise<SyncDiagnostics>((next) => {
+          if (method === "sync_diagnostics") resolve = next;
+        }),
+    );
+    renderDataSettings();
+    await screen.findByTestId("storage-total");
+
+    const button = screen.getByTestId("copy-diagnostics");
+    await user.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(button).toHaveTextContent("Copying...");
+
+    resolve(DIAGNOSTICS);
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copied");
+  });
+
   it("is reachable from the Settings navigation", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     mockInvoke({
       get_library_stats: { bookCount: 0, collectionCount: 0 },
       list_books: [],

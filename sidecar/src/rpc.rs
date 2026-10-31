@@ -121,6 +121,15 @@ struct IdArgs {
     id: i64,
 }
 
+/// One conflict resolution: the row id and either `keep_winner` or
+/// `apply_loser`. The enum itself is validated in the service.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncResolveConflictArgs {
+    id: i64,
+    resolution: String,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BookIdArgs {
@@ -145,6 +154,13 @@ struct EditionLinkArgs {
 #[serde(rename_all = "camelCase")]
 struct BookUidArgs {
     book_uid: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachWaitingBookArgs {
+    book_uid: String,
+    path: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -356,12 +372,6 @@ async fn dispatch(
                 p.progress_percent
             )))
         }
-        "identity_backfill_status" => Ok(call!(commands::books::identity_backfill_status(state))),
-        "migration_issues" => Ok(call!(commands::books::migration_issues(state))),
-        "migration_dismiss_issue" => {
-            let p: IdArgs = parse_params(params)?;
-            Ok(call!(commands::books::dismiss_migration_issue(state, p.id)))
-        }
         "search_books" => {
             let p: QueryArgs = parse_params(params)?;
             Ok(call!(commands::books::search_books(state, p.query)))
@@ -375,6 +385,12 @@ async fn dispatch(
         "reset_book_reading_data" => {
             let p: BookIdArgs = parse_params(params)?;
             Ok(call!(commands::books::reset_book_reading_data(
+                state, events, p.book_id
+            )))
+        }
+        "retry_indexing" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(call!(commands::books::retry_indexing(
                 state, events, p.book_id
             )))
         }
@@ -595,21 +611,41 @@ async fn dispatch(
             )))
         }
         "forget_all_waiting_books" => Ok(call!(commands::sync::forget_all_waiting_books(state))),
+        "attach_waiting_book" => {
+            let p: AttachWaitingBookArgs = parse_params(params)?;
+            Ok(call!(commands::sync::attach_waiting_book(
+                state, events, p.book_uid, p.path
+            )))
+        }
         "sync_issues" => Ok(call!(commands::sync::issues(state))),
         "dismiss_all_sync_issues" => Ok(call!(commands::sync::dismiss_all_issues(state))),
         "sync_dismiss_issue" => {
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::sync::dismiss_issue(state, p.id)))
         }
+        "sync_retry_issue" => {
+            let p: IdArgs = parse_params(params)?;
+            Ok(call!(commands::sync::retry_issue(state, p.id)))
+        }
         "sync_trash" => Ok(call!(commands::sync::trash(state))),
         "sync_restore" => {
             let p: IdArgs = parse_params(params)?;
             Ok(call!(commands::sync::restore(state, p.id)))
         }
+        "sync_conflicts" => Ok(call!(commands::sync::conflicts(state))),
+        "sync_resolve_conflict" => {
+            let p: SyncResolveConflictArgs = parse_params(params)?;
+            Ok(call!(commands::sync::resolve_conflict(
+                state,
+                p.id,
+                p.resolution
+            )))
+        }
         "sync_set_device_name" => {
             let p: SyncDeviceNameArgs = parse_params(params)?;
             Ok(call!(commands::sync::set_device_name(state, p.name)))
         }
+        "sync_diagnostics" => Ok(call!(commands::sync::diagnostics(state))),
         other => Err(RpcError::method_not_found(other)),
     }
 }

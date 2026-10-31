@@ -11,8 +11,10 @@ lock-free. Files can arrive late, out of order, duplicated as cloud conflict
 copies, or partially. Nothing in the folder is ever overwritten in place.
 
 Status: implemented in `sidecar/src/sync/` and covered by
-`sidecar/tests/cloud_sync.rs`. The decision record is
-[ADR 0013](adr/0013-cloud-folder-sync.md).
+`sidecar/tests/cloud_sync.rs`. The decision records are
+[ADR 0013](adr/0013-cloud-folder-sync.md) for the transport and
+[ADR 0015](adr/0015-sync-recovery.md) for recovery, issue actions, and
+conflict review.
 
 ## What syncs
 
@@ -109,11 +111,20 @@ an alias:
 - if two machines independently imported the same bytes before meeting, both
   publish an alias for the same hash. Every device resolves the aliases to the
   lexicographically smallest uuid and re-keys the losing state. The resolution
-  is deterministic, so replay order cannot produce different winners.
+  is deterministic, so replay order cannot produce different winners. An
+  identity merge is silent: the losing state moves to the winner, the merge is
+  kept in `sync_book_merges` for diagnostics, and no Settings entry asks the
+  user to interpret a uuid.
 
 Hashing is lazy and bounded: the sweep hashes books that have no binding or
 whose size/mtime changed, for a few seconds per pass. Imports never wait for a
-hash. A book whose file is unavailable keeps its binding and state.
+hash. A book whose file is unavailable keeps its binding and state. A failed
+background hash retries automatically with bounded backoff (1 minute, 5
+minutes, 15 minutes, 1 hour, 6 hours, then 24 hours as the cap), and a snapshot
+change or relink returns it to pending. With sync on, the failure opens one
+`hash_failed` Sync issue per book (not per location) with **Retry indexing**;
+with sync off, the book itself shows the warning and the same action. The book
+is failed when any of its locations failed.
 
 ## Folder layout
 
@@ -191,9 +202,9 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   devices would create a position neither device had. Membership add/remove is
   also one value, so a later add can undo an earlier remove.
 - **Delete wins** for annotations and collections. A tombstone is permanent. A
-  concurrent edit that loses is stored in `sync_conflicts` and shown in Sync
-  issues; it does not resurrect the entity. The explicit trash restore is the
-  only way back.
+  concurrent edit that loses is stored in `sync_conflicts` and shown in
+  [Conflict review](#conflict-review); it does not resurrect the entity. The
+  explicit trash restore is the only way back.
 - **Absent books** do not delete state. Unwatching a folder, a missing file, or
   deleting a local book row never emits a shared delete. State waits under its
   book uuid and is projected when the same content is imported again.
@@ -208,9 +219,67 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   different copy of the book does not fight over source-derived authors or
   subjects.
 
-Losing field values are written to `sync_conflicts` and surfaced as a Sync
-issue with both the kept and discarded values. The current state always has a
-winner, but the loser is inspectable and can be dismissed once read.
+Losing field values are written to `sync_conflicts` and surfaced in
+Settings > Sync's [Conflict review](#conflict-review), with the kept and
+discarded values. The current state always has a winner, but the loser stays
+inspectable until the conflict is resolved. Settling a conflict is described
+under [Conflict review](#conflict-review).
+
+## Conflict review
+
+A discarded value stays in `sync_conflicts` until the user resolves it or the
+30-day window expires. The merge result does not wait for that decision: the
+winner is applied immediately and stays applied. The decisions are recorded in
+[ADR 0015](adr/0015-sync-recovery.md).
+
+Each open row carries the kind, entity uid, field, both JSON values, both
+hybrid clocks with the writing device, and the time the conflict was recorded.
+The `sync_conflicts` sidecar command returns open rows newest first with the
+book title and author, the field, both values, and the device names. Settings >
+Sync lists them under Conflicts to review, grouped by book with delete and edit
+rows first, then whole-entity rows, then single fields. Each row shows the kept
+and the discarded value, both devices, and both times. A special field name is
+labelled: `__entity__` is a whole-entity record, `__deleted__` is an edit that
+lost to a delete, and `__restore__` is a restore that lost to a newer delete.
+Several losing writes for one field share one issue; the issue closes only when
+the last conflict with that key is resolved.
+
+Two resolutions are offered:
+
+- **Keep winner** stamps `resolved_at`. The applied state does not change.
+- **Apply loser** republishes the discarded value as an ordinary operation with
+  a fresh hybrid clock, so every device replays it and converges. A field
+  conflict writes one field, a whole-entity conflict writes the whole record,
+  and a delete/edit or lost-restore conflict writes the explicit restore
+  operation. Resolution never deletes the losing value from the row, and a
+  restore also closes the local Recently deleted entry on every device.
+
+Settings > Sync offers Keep this device and Keep other when one side of the
+conflict is this device. Those labels choose between the applied winner and the
+discarded value, whichever device wrote each one. When neither side is this
+device, the buttons read Keep winner and Apply other. When replaying the loser
+is unsafe, that choice is disabled and the reason is shown. Decide later sets
+the row aside for this session without closing it. A bulk Keep current winner
+closes the rows shown with the applied value. The winner stays applied until you
+choose. When the backend reports more open rows than it loaded, the section says
+"Showing first N of M" and the bulk action covers only the loaded rows.
+
+The queue is reconciled against the mirror on every status refresh and before
+a list. A row closes once its winner no longer matches the current value and
+clock, so a device that replays another device's resolution stops showing a
+stale choice and its issue closes with it. Book identity merges are
+deterministic and can only be kept; replaying the losing uuid would resurrect
+an identity every device already collapsed.
+
+Progress never prompts. Progress conflicts are kept in the table for
+diagnostics, but they are left out of the review list and the status count, and
+they never open an issue.
+
+Unresolved conflicts older than 30 days are removed on the next status refresh
+or list, and their issue closes when nothing else shares the key. The status
+count only includes open, unexpired rows. The folder is not required to read
+the queue: when sync is off or the folder is unavailable, device names fall
+back to the stored device ids.
 
 ## Local capture and projection
 
@@ -287,13 +356,33 @@ with whatever metadata the folder carries, the progress percentage, the
 annotation count, and a sample annotation when no metadata is available.
 
 Settings shows the first five and a **View all** dialog with search by title or
-book uid. **Forget on this device** hides one waiting book here and removes it
-from the count; **Forget all on this device** hides every waiting book. The
+book uid. **Locate file** opens a file picker and attaches the book to the
+chosen file. **Forget on this device** hides one waiting book here and removes
+it from the count; **Forget all on this device** hides every waiting book. The
 shared copies stay in the folder, so importing the exact bytes can still attach
 the state later, and other devices are not affected. There is no shared-delete
 action for a waiting book; starting a new library is the way to leave the old
 library's waiting state behind, and the app archives the old library instead of
 deleting it.
+
+Locate file is a shortcut for "these are the bytes", not a new merge rule. The
+sidecar hashes the picked file and looks up the content-hash aliases. The alias
+must already exist and must resolve to the waiting uid. If the alias is missing
+or names a different book, the command refuses with an error that the bytes
+differ, adds nothing to the library, and leaves the row waiting. A different
+edition therefore never inherits another book's annotations or progress. On a
+match the sidecar creates the durable record for the waiting uid when this
+machine never had one, attaches the file to that identity, and projects the
+mirror state: progress, annotations, metadata overrides, collection membership,
+and last-opened. The book leaves the waiting list and appears in the library.
+
+Ignored waiting books never appear in the list, so their row has no Locate file
+action. The command also rejects an ignored uid if it is reached; importing the
+exact bytes through the normal import path still binds them after a local hide.
+A path that is not a readable book, a file already in the library, a hash read
+failure, or a byte mismatch leaves the waiting row in place. When the attempt
+created a durable record for the uid, a rejected file removes that record
+again, so a failed attach adds nothing to Reading history.
 
 ## Errors and status
 
@@ -307,8 +396,9 @@ Failures become rows in `sync_issues`:
 - a missing cover blob (the metadata edit is applied without the cover and the
   issue records it);
 - a book that could not be projected;
-- a conflict where one side had to be discarded (both values are in the
-  detail);
+- a conflict where one side had to be discarded; its `sync_issues` row is
+  excluded from the issue list and the status count, and the losing value is
+  held for [Conflict review](#conflict-review);
 - two local files bound to the same book identity, naming both paths;
 - a queued reprojection that failed;
 - a forgotten-book snapshot that could not be published or read back, so
@@ -320,6 +410,107 @@ attention`), last sync, pending local items, books waiting for their file,
 issues, conflicts, and recently deleted items. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
+
+The sidebar's Settings entry shows a small dot when sync is on and the engine
+reports an error, an open issue, or a conflict to review. The dot is visible
+wherever the sidebar is, including while Settings is open. It follows the same
+rule as Settings > Sync: with sync off, leftover counts stay hidden because the
+Settings lists are hidden too. A toast appears once when the state changes into
+attention, not on the first load and not on every status update. It sits
+bottom-center, is hidden in the reader, and does not sit over the import status
+or block reading or library interaction. Resolving the condition clears both; a
+dismissed toast stays hidden until attention clears and later returns. The toast
+does not auto-dismiss.
+
+### Sync issues and actions
+
+Each row carries a kind, a short target label, and one action the sidecar
+computes from the kind. The renderer never parses an issue key. The action
+contract and the self-clearing rules are recorded in
+[ADR 0015](adr/0015-sync-recovery.md).
+
+| Kinds                                                                                                                                                                            | Action       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed`, `hash_failed` | Retry        |
+| `operation_rejected`                                                                                                                                                             | Open folder  |
+| `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                               | Copy details |
+| `invalid_dirty_kind`                                                                                                                                                             | Dismiss      |
+
+Retry does the work the kind needs, not just another background wake-up:
+
+- a projection or reprojection failure projects the shared state for that book;
+- an identity failure hashes and binds the book, then projects it;
+- a lifecycle failure replays the mirror's Forget, restore, or discard;
+- a failed pass runs one pass now;
+- an operation retrying has its failure cache cleared so the next pass reads
+  the file again;
+- a missing cover is applied to its book from the sync folder when the blob has
+  arrived;
+- a cover publish failure is tried again from the local cover cache;
+- a failed hash runs the index pass for every available location of that book,
+  starting from a clean backoff. Indexing is local work, so it does not need
+  the folder connected.
+
+Open folder is for a rejected operation: the file passed the retry limit, so it
+has to be fixed or removed in the sync folder. The renderer passes no path;
+the main process opens the folder the sidecar reports.
+
+Dismiss stays for informational rows only. An actionable row cannot be
+dismissed, and Dismiss all closes only the informational rows; Retry and Open
+folder rows stay listed until their condition clears.
+
+### What closes an issue by itself
+
+A status refresh also sweeps open rows and closes the ones whose condition is
+gone:
+
+- the last duplicate binding for a book disappears;
+- an operation's current cache row says it applied cleanly (processed with no
+  failures), or the file no longer exists in the folder;
+- the missing cover is applied to the book, not merely present in the folder;
+- a later identity pass binds and projects the book, or the reprojection
+  queue succeeds; an open projection issue makes the next pass project even
+  when the binding did not change;
+- the book behind a projection, identity, reprojection, or lifecycle row is
+  gone;
+- a hash succeeds, whether the automatic backoff picked it up or Retry ran it;
+- a retry closes its own row when the work shows the condition is gone;
+- a successful pass closes the `sync_failed` row.
+
+Conflict review owns conflicts until the user settles them or the 30-day window
+expires, so a Dismiss button can never hide one without resolving it.
+
+### Copy diagnostics
+
+Application Data has a **Copy diagnostics** button for support. Nothing is
+collected in the background and nothing is written to disk: the
+`sync_diagnostics` command runs only when the button is clicked, then the
+renderer writes the JSON to the clipboard.
+
+The document carries:
+
+- sync on or off, the live sync state (including a pass that is running),
+  the folder, last sync, last error, and counts for pending local items,
+  waiting books, open issues, trash, and conflicts;
+- up to 20 of the newest books whose content hash failed, with the book id,
+  title, path, attempt count, and next retry time;
+- up to 20 open conflicts with the id, kind, field, book title, and creation
+  time;
+- up to 20 recent book-identity merges and up to 20 recent entity merges,
+  naming the losing and winning uids and the entity kind. The merge tables
+  carry no timestamp, so "recent" means insertion order;
+- the sync folder's `library.json` schema, the operation schema, and the
+  database migration version.
+
+It deliberately leaves out book contents, annotation text, notes, conflict
+winner and loser values, cover bytes, tokens, and every other secret. Folder
+paths and book paths are included because Settings already shows them and
+support needs them to recognise a report.
+
+With sync off or no folder selected the command still succeeds: it reports
+sync as disabled, returns empty sync counts and lists, and keeps the local
+hash failures and schema versions. A missing or unreadable `library.json`
+reports a null library marker instead of failing the copy.
 
 ## Security and privacy
 
@@ -344,6 +535,7 @@ state unrecoverable, so it is not bolted on silently.
 - progress is coalesced by the dirty-marker upsert, so a page turn does not
   create one file per event;
 - trash is offered for 30 days;
+- an unresolved conflict is kept for 30 days, then expires unread;
 - an operation is at most 1 MiB; a cover blob is at most 16 MiB;
 - a forgotten-book snapshot is capped at 512 KiB inside the operation. A larger
   snapshot still sends the delete (so every machine forgets) and records an
@@ -374,6 +566,11 @@ folder. It covers:
 - progress replacing the whole locator;
 - collections and membership;
 - unwatching without a shared delete, then re-import restoring state;
+- a waiting book hidden locally and still attachable later, and Locate file
+  attaching the exact bytes with progress, annotations, metadata, last-opened,
+  and collection membership while a mismatch, an ignored book, a bad path, a
+  parse failure, and a projection failure each leave no phantom book and
+  repair against the attached file;
 - duplicate and corrupt operation files;
 - delete, trash, and restore;
 - metadata title, authors, subjects, and a cover blob;
@@ -381,13 +578,28 @@ folder. It covers:
 - library mismatch confirmation;
 - same-name collection merge;
 - concurrent note edits converging with the loser kept;
+- conflict review: listing values, devices and clocks, keep winner, applying
+  the loser for a field and a whole entity, delete/edit and lost-restore
+  recovery with trash closing on both devices, settlement after another
+  device resolves, one shared issue across two losers, 30-day expiry, and the
+  device-id fallback;
 - duplicate copies sharing one uuid, the duplicate issue, and state moving to
   the remaining copy when the canonical row is deleted;
+- issue actions and targets, retry for projection, identity, reprojection,
+  lifecycle, and a failed pass, auto-resolution when the condition clears,
+  dismissal refused for actionable rows, and conflicts excluded from the issue
+  list and count;
 - a pending rehash surviving a missed snapshot update, as in a crash between
   the rewrite and the snapshot write.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
-trash actions, and the IPC policy for the sync folder.
+trash actions, the primary action per issue kind, Copy details, opening the sync
+folder without a renderer path, Locate file for a waiting book and its
+cancel/mismatch paths, conflict grouping and device-relative choices,
+the bulk keep, the session set-aside, the sidebar attention dot, the toast
+transition and dismissal, the always-mounted live region, the reader hide, the
+stale status-read race, unsubscribing on unmount, and the IPC policy for the
+sync folder.
 
 ## Out of scope
 

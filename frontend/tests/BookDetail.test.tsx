@@ -855,4 +855,115 @@ describe("BookDetail", () => {
       expect(invokeMock).toHaveBeenCalledWith("forget_book", { bookId: 1 });
     });
   });
+
+  it("warns about a book that could not be indexed and retries from the detail", async () => {
+    let hashState: "failed" | "hashed" = "failed";
+    invokeMock.mockImplementation((method: string) => {
+      switch (method) {
+        case "get_library_stats":
+          return Promise.resolve({ bookCount: 1, collectionCount: 0 });
+        case "list_books":
+          return Promise.resolve([makeBook({ hashState })]);
+        case "retry_indexing":
+          hashState = "hashed";
+          return Promise.resolve({ bookId: 1, hashState: "hashed" });
+        case "get_book_metadata":
+          return Promise.resolve(null);
+        default:
+          return Promise.resolve([]);
+      }
+    });
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByTestId("detail-indexing-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("detail-retry-indexing")).toHaveTextContent("Retry indexing");
+
+    await userEvent.click(screen.getByTestId("detail-retry-indexing"));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("retry_indexing", { bookId: 1 });
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("detail-indexing-warning")).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the warning and shows the error when the retry stays failed", async () => {
+    renderDetail({}, [makeBook({ hashState: "failed" })], [makeBookFile()], {
+      retry_indexing: { bookId: 1, hashState: "failed" },
+    });
+
+    expect(await screen.findByTestId("detail-indexing-warning")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("detail-retry-indexing"));
+    expect(await screen.findByTestId("detail-indexing-error")).toHaveTextContent(
+      "still could not index",
+    );
+    expect(screen.getByTestId("detail-indexing-warning")).toBeInTheDocument();
+  });
+
+  it("disables Retry indexing while a retry is in flight", async () => {
+    let resolveRetry: ((value: { bookId: number; hashState: "failed" }) => void) | undefined;
+    invokeMock.mockImplementation((method: string) => {
+      switch (method) {
+        case "get_library_stats":
+          return Promise.resolve({ bookCount: 1, collectionCount: 0 });
+        case "list_books":
+          return Promise.resolve([makeBook({ hashState: "failed" })]);
+        case "get_book_metadata":
+          return Promise.resolve(null);
+        case "retry_indexing":
+          return new Promise((resolve) => {
+            resolveRetry = resolve;
+          });
+        default:
+          return Promise.resolve([]);
+      }
+    });
+    render(
+      <AppStateProvider
+        initialState={{
+          view: "detail",
+          section: { kind: "smart", id: "all-books" },
+          selectedBookId: 1,
+          libraryQuery: "",
+        }}
+      >
+        <LibraryDataProvider>
+          <BookDetail />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    const button = await screen.findByTestId("detail-retry-indexing");
+    await userEvent.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    await userEvent.click(button);
+    expect(invokeMock.mock.calls.filter(([method]) => method === "retry_indexing")).toHaveLength(1);
+
+    resolveRetry?.({ bookId: 1, hashState: "failed" });
+    await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
+  it("does not warn for a hashed or pending book", async () => {
+    const hashed = renderDetail({}, [makeBook({ hashState: "hashed" })]);
+    await screen.findByTestId("detail-title");
+    expect(screen.queryByTestId("detail-indexing-warning")).not.toBeInTheDocument();
+    hashed.unmount();
+
+    renderDetail({}, [makeBook({ hashState: "pending" })]);
+    await screen.findByTestId("detail-title");
+    expect(screen.queryByTestId("detail-indexing-warning")).not.toBeInTheDocument();
+  });
 });

@@ -168,10 +168,14 @@ Existing books get a `book_uid` immediately. Books that already share a uuid
 collapse into one durable book; books that discover the same content hash later
 merge with newest progress winning, annotations and collection membership
 unioned, metadata overrides newest winning, and a migration issue recording the
-merge. State that the sync mirror still holds for books unwatched before the
-upgrade is recovered best-effort; metadata may be missing and the record is
-labelled waiting for its file. State already cascaded away with sync off cannot
-be recovered.
+merge. That last part is revised: merges are silent now. The losing state still
+moves to the winner, but no migration issue is recorded; `sync_book_merges`
+keeps the audit trail, and migration 0026 resolves the informational rows older
+versions left open. The recovery rules built on this model, including conflict
+review, are in [ADR 0015](0015-sync-recovery.md). State that the sync mirror
+still holds for books unwatched before the upgrade is recovered best-effort;
+metadata may be missing and the record is labelled waiting for its file. State
+already cascaded away with sync off cannot be recovered.
 
 ### D11. Provider links hang off the book
 
@@ -247,5 +251,5 @@ on.
 - `sidecar/src/repository/books.rs` for the delete cascade.
 - `sidecar/src/sync/` for identity, capture, merge, and the mirror.
 - `docs/DATABASE.md`, `docs/SYNC.md`, `docs/TESTING.md`.
-- ADR 0008, ADR 0013.
+- ADR 0008, ADR 0013, ADR 0015.
 - Issues #280 and #281 for the provider contract.

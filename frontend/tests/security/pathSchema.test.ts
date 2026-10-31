@@ -321,9 +321,6 @@ describe("boundary configuration tables (T-5)", () => {
       "get_epub_session",
       "embed_book_metadata",
       "get_startup_recovery",
-      "identity_backfill_status",
-      "migration_issues",
-      "migration_dismiss_issue",
       "list_provider_links",
       "link_provider_book",
       "unlink_provider_book",
@@ -331,10 +328,15 @@ describe("boundary configuration tables (T-5)", () => {
       "sync_connect",
       "sync_status",
       "sync_restore",
+      "sync_conflicts",
+      "sync_resolve_conflict",
+      "sync_diagnostics",
       "list_waiting_books",
       "forget_waiting_book",
+      "attach_waiting_book",
       "forget_all_waiting_books",
       "dismiss_all_sync_issues",
+      "sync_retry_issue",
     ]) {
       expect(SIDECAR_METHODS.has(method), `missing method ${method}`).toBe(true);
     }
@@ -350,6 +352,7 @@ describe("boundary configuration tables (T-5)", () => {
       storageReport: "tuxbooks:storage-report",
       openDataFolder: "tuxbooks:open-data-folder",
       openLibraryLocation: "tuxbooks:open-library-location",
+      openSyncFolder: "tuxbooks:open-sync-folder",
       copyDataPath: "tuxbooks:copy-data-path",
       copyLibraryLocationPath: "tuxbooks:copy-library-location-path",
       clearCache: "tuxbooks:clear-cache",

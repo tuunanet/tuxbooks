@@ -156,6 +156,10 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
 
     it("validates the sync id and device name methods", () => {
       expect(() => validateInvokeParams("sync_restore", { id: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("sync_retry_issue", { id: 2 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("sync_retry_issue", { id: 0 }, issued())).toThrow(
+        /invalid sync id/,
+      );
       expect(() => validateInvokeParams("sync_restore", { id: 0 }, issued())).toThrow(
         /invalid sync id/,
       );
@@ -167,7 +171,40 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       );
     });
 
+    it("validates the conflict id and resolution choice", () => {
+      for (const resolution of ["keep_winner", "apply_loser"]) {
+        expect(() =>
+          validateInvokeParams("sync_resolve_conflict", { id: 3, resolution }, issued()),
+        ).not.toThrow();
+      }
+      expect(() =>
+        validateInvokeParams(
+          "sync_resolve_conflict",
+          { id: 0, resolution: "keep_winner" },
+          issued(),
+        ),
+      ).toThrow(/sync conflict id/);
+      expect(() =>
+        validateInvokeParams(
+          "sync_resolve_conflict",
+          { id: 3, resolution: "apply_winner" },
+          issued(),
+        ),
+      ).toThrow(/conflict resolution/);
+      expect(() => validateInvokeParams("sync_resolve_conflict", { id: 3 }, issued())).toThrow(
+        /conflict resolution/,
+      );
+    });
+
+    it("accepts the no-parameter diagnostics command", () => {
+      expect(() => validateInvokeParams("sync_diagnostics", {}, issued())).not.toThrow();
+    });
+
     it("validates Reset, Forget, and restore parameters", () => {
+      expect(() => validateInvokeParams("retry_indexing", { bookId: 1 }, issued())).not.toThrow();
+      expect(() => validateInvokeParams("retry_indexing", { bookId: 0 }, issued())).toThrow(
+        /invalid bookId/,
+      );
       expect(() =>
         validateInvokeParams("reset_book_reading_data", { bookId: 1 }, issued()),
       ).not.toThrow();
@@ -292,6 +329,35 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     });
   });
 
+  describe("attach_waiting_book", () => {
+    it("accepts a dialog-issued file for a waiting book uid", () => {
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "a".repeat(32), path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).not.toThrow();
+    });
+
+    it("rejects an un-issued path and a malformed uid", () => {
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "a".repeat(32), path: "/etc/passwd" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/not issued/);
+      expect(() =>
+        validateInvokeParams(
+          "attach_waiting_book",
+          { bookUid: "not-a-uid", path: "/tmp/found.epub" },
+          issued({ "book-file": ["/tmp/found.epub"] }),
+        ),
+      ).toThrow(/invalid bookUid/);
+    });
+  });
+
   describe("set_book_cover", () => {
     it("requires a book id even with an issued image", () => {
       expect(() =>
@@ -385,17 +451,6 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
 
   describe("durable-state and provider methods", () => {
     const bookUid = "a".repeat(32);
-
-    it("allows backfill and migration status, and validates the dismiss id", () => {
-      expect(() => validateInvokeParams("identity_backfill_status", {}, issued())).not.toThrow();
-      expect(() => validateInvokeParams("migration_issues", {}, issued())).not.toThrow();
-      expect(() =>
-        validateInvokeParams("migration_dismiss_issue", { id: 1 }, issued()),
-      ).not.toThrow();
-      expect(() => validateInvokeParams("migration_dismiss_issue", { id: 0 }, issued())).toThrow(
-        /invalid migration issue id/,
-      );
-    });
 
     it("validates waiting-book actions by durable book uid", () => {
       expect(() => validateInvokeParams("list_waiting_books", {}, issued())).not.toThrow();

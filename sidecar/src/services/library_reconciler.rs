@@ -584,12 +584,19 @@ pub async fn reconnect_book(
 /// annotations, collections, metadata overrides, and last-opened stay keyed by
 /// the same `book_uid`. A hash failure keeps the file row and records a relink
 /// issue, exactly like an import.
+///
+/// `expected_uid` makes the check strict for a waiting-book attach: the bytes
+/// must already carry an alias that canonicalizes to that uid. The hash runs
+/// once here, so the caller does not repeat it. When it is `None`, the
+/// Reading-history behavior is unchanged: a known alias that names another
+/// book is refused, and a hash failure still lets the relink proceed.
 pub async fn relink_book(
     pool: &SqlitePool,
     book_id: i64,
     path: &Path,
     covers_dir: &Path,
     pdfium_dirs: &[PathBuf],
+    expected_uid: Option<&str>,
 ) -> Result<Book, AppError> {
     if !path.is_file() {
         return Err(AppError::InvalidInput(format!(
@@ -627,15 +634,46 @@ pub async fn relink_book(
 
     // Hash before writing the row: if these bytes already belong to another
     // durable book, binding them here would merge two identities by accident.
-    // A hash failure is not fatal — the relink proceeds and is marked failed.
-    let hashed = crate::sync::identity::hash_file(path).ok();
+    // A hash failure is not fatal for Reading history — the relink proceeds and
+    // is marked failed. An exact-bytes attach cannot prove anything without the
+    // hash, so it fails cleanly instead.
+    let hashed = match crate::sync::identity::hash_file(path) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            if expected_uid.is_some() {
+                return Err(AppError::InvalidInput(format!(
+                    "could not read that file: {err}"
+                )));
+            }
+            None
+        }
+    };
     if let Some((hash, _, _)) = &hashed {
-        if let Some(alias) = crate::sync::identity::alias_book_uid(pool, hash).await? {
-            let alias = crate::sync::identity::canonical_book_uid(pool, &alias).await?;
-            if alias != known.book_uid {
-                return Err(AppError::InvalidInput(
-                    "that file belongs to another book in the library".into(),
-                ));
+        let alias = crate::sync::identity::alias_book_uid(pool, hash).await?;
+        match expected_uid {
+            Some(expected) => {
+                let Some(alias) = alias else {
+                    return Err(AppError::InvalidInput(
+                        "those bytes do not match this book, so nothing was attached".into(),
+                    ));
+                };
+                let alias = crate::sync::identity::canonical_book_uid(pool, &alias).await?;
+                let expected = crate::sync::identity::canonical_book_uid(pool, expected).await?;
+                if alias != expected {
+                    return Err(AppError::InvalidInput(
+                        "those bytes belong to a different book, so nothing was attached".into(),
+                    ));
+                }
+            }
+            None => {
+                if let Some(alias) = alias {
+                    let alias = crate::sync::identity::canonical_book_uid(pool, &alias).await?;
+                    if alias != known.book_uid {
+                        return Err(AppError::InvalidInput(
+                            "that file belongs to another book in the library".into(),
+                        ));
+                    }
+                }
             }
         }
     }
@@ -646,7 +684,7 @@ pub async fn relink_book(
             crate::sync::identity::bind_hash(pool, file_id, &hash, size, mtime).await?;
         }
         None => {
-            crate::repository::identity_backfill::mark_hash_failed(pool, file_id).await?;
+            crate::services::hash_backfill::mark_failed(pool, file_id).await?;
         }
     }
     books::mark_metadata_available(pool, book_id).await?;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Unplug } from "lucide-react";
 import {
+  attachWaitingBook,
   connectSync,
   disconnectSync,
   dismissAllSyncIssues,
@@ -8,14 +9,21 @@ import {
   forgetAllWaitingBooks,
   forgetWaitingBook,
   getSyncStatus,
+  listSyncConflicts,
   listSyncIssues,
   listSyncTrash,
   listWaitingBooks,
+  openSyncFolder,
   onSyncStatus,
+  pickBookFile,
   pickSyncFolder,
+  resolveSyncConflict,
   restoreSyncTrash,
+  retrySyncIssue,
   setSyncDeviceName,
   syncNow,
+  type SyncConflict,
+  type SyncConflictResolution,
   type SyncIssue,
   type SyncMismatch,
   type SyncState,
@@ -36,7 +44,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { SyncIssuesSection, SyncTrashSection, WaitingBooksSection } from "./SyncLists";
+import {
+  SyncConflictsSection,
+  SyncIssuesSection,
+  SyncTrashSection,
+  WaitingBooksSection,
+  formatIssueDetails,
+} from "./SyncLists";
 import { formatSyncTime as formatTime } from "./syncFormat";
 
 const STATUS_LABEL: Record<SyncState, string> = {
@@ -68,6 +82,7 @@ export function SyncSettings() {
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [trash, setTrash] = useState<SyncTrashEntry[]>([]);
   const [waitingBooks, setWaitingBooks] = useState<WaitingBook[]>([]);
+  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mismatch, setMismatch] = useState<MismatchPrompt | null>(null);
@@ -83,14 +98,16 @@ export function SyncSettings() {
 
   const loadLists = useCallback(async () => {
     try {
-      const [nextIssues, nextTrash, nextWaiting] = await Promise.all([
+      const [nextIssues, nextTrash, nextWaiting, nextConflicts] = await Promise.all([
         listSyncIssues(),
         listSyncTrash(),
         listWaitingBooks(),
+        listSyncConflicts(),
       ]);
       setIssues(nextIssues);
       setTrash(nextTrash);
       setWaitingBooks(nextWaiting);
+      setConflicts(nextConflicts);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -100,6 +117,7 @@ export function SyncSettings() {
     setIssues([]);
     setTrash([]);
     setWaitingBooks([]);
+    setConflicts([]);
   }, []);
 
   useEffect(() => {
@@ -247,6 +265,32 @@ export function SyncSettings() {
     [applyStatus, loadLists],
   );
 
+  /**
+   * Locate the file behind a waiting book. The sidecar hashes the picked bytes
+   * and attaches only when they carry the waiting uid's alias, so a different
+   * edition is refused with a readable message and the row stays.
+   */
+  const locateWaiting = useCallback(
+    async (bookUid: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const path = await pickBookFile();
+        if (!path) return;
+        await attachWaitingBook(bookUid, path);
+        applyStatus(await getSyncStatus());
+        await loadLists();
+        setNotice("Attached the waiting book.");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
   const disconnect = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -256,6 +300,7 @@ export function SyncSettings() {
       setIssues([]);
       setTrash([]);
       setWaitingBooks([]);
+      setConflicts([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -289,6 +334,48 @@ export function SyncSettings() {
     [applyStatus, loadLists],
   );
 
+  /**
+   * Run the primary action the sidecar mapped for a row. Retry and dismiss
+   * reload status and lists for immediate feedback; the sync event reloads
+   * them again, which is cheap and keeps every list consistent.
+   */
+  const issueAction = useCallback(
+    async (issue: SyncIssue) => {
+      setError(null);
+      setNotice(null);
+      try {
+        if (issue.action === "retry") {
+          setBusy(true);
+          await retrySyncIssue(issue.id);
+          applyStatus(await getSyncStatus());
+          await loadLists();
+        } else if (issue.action === "open_folder") {
+          await openSyncFolder();
+        } else if (issue.action === "copy_details") {
+          await navigator.clipboard.writeText(formatIssueDetails(issue));
+          setNotice("Copied issue details.");
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
+  /** Secondary action on any row: copy the readable block to the clipboard. */
+  const copyIssueDetails = useCallback(async (issue: SyncIssue) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await navigator.clipboard.writeText(formatIssueDetails(issue));
+      setNotice("Copied issue details.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
   const dismissAllIssues = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -312,6 +399,63 @@ export function SyncSettings() {
         await loadLists();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
+  const resolveConflict = useCallback(
+    async (id: number, resolution: SyncConflictResolution) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await resolveSyncConflict(id, resolution);
+        applyStatus(await getSyncStatus());
+        await loadLists();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
+  const keepAllWinners = useCallback(
+    async (ids: number[]) => {
+      if (ids.length === 0) return;
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      let firstError: unknown = null;
+      let kept = 0;
+      try {
+        for (const id of ids) {
+          try {
+            if (await resolveSyncConflict(id, "keep_winner")) kept += 1;
+          } catch (cause) {
+            if (firstError === null) firstError = cause;
+          }
+        }
+      } catch (cause) {
+        if (firstError === null) firstError = cause;
+      } finally {
+        try {
+          applyStatus(await getSyncStatus());
+          await loadLists();
+        } catch (cause) {
+          if (firstError === null) firstError = cause;
+        }
+        if (firstError !== null) {
+          setError(firstError instanceof Error ? firstError.message : String(firstError));
+        } else if (kept === 0) {
+          setNotice("Those conflicts were already resolved.");
+        } else {
+          setNotice(
+            `Kept the current winner for ${kept} ${kept === 1 ? "conflict" : "conflicts"}.`,
+          );
+        }
+        setBusy(false);
       }
     },
     [applyStatus, loadLists],
@@ -474,6 +618,7 @@ export function SyncSettings() {
               books={waitingBooks}
               total={status.waitingBooks}
               busy={busy}
+              onLocate={(bookUid) => void locateWaiting(bookUid)}
               onForget={(bookUid) => void forgetWaiting(bookUid)}
               onForgetAll={() => void forgetAllWaiting()}
             />
@@ -505,8 +650,22 @@ export function SyncSettings() {
           issues={issues}
           total={status?.issues ?? 0}
           busy={busy}
+          onAction={(issue) => void issueAction(issue)}
+          onCopyDetails={(issue) => void copyIssueDetails(issue)}
           onDismiss={(id) => void dismiss(id)}
           onDismissAll={() => void dismissAllIssues()}
+        />
+      ) : null}
+
+      {enabled ? (
+        <SyncConflictsSection
+          key={`${status?.libraryId ?? ""}:${status?.folder ?? ""}:${status?.deviceId ?? ""}`}
+          conflicts={conflicts}
+          total={status?.conflicts ?? 0}
+          deviceId={status?.deviceId ?? null}
+          busy={busy}
+          onResolve={(id, resolution) => void resolveConflict(id, resolution)}
+          onKeepAll={(ids) => void keepAllWinners(ids)}
         />
       ) : null}
 

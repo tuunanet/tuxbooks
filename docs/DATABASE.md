@@ -14,28 +14,30 @@ and `foreign_keys` is forced ON for every connection.
 
 ### books
 
-| column           | type                                    | notes                                               |
-| ---------------- | --------------------------------------- | --------------------------------------------------- |
-| id               | INTEGER PK AUTOINCREMENT                |                                                     |
-| path             | TEXT NOT NULL UNIQUE                    | absolute file path                                  |
-| title            | TEXT NOT NULL, CHECK non-blank          | source title of this file                           |
-| subtitle         | TEXT                                    | source subtitle                                     |
-| author           | TEXT                                    | source display projection of the file's author list |
-| publisher        | TEXT                                    | source publisher                                    |
-| language         | TEXT                                    | source language                                     |
-| isbn             | TEXT                                    | source ISBN                                         |
-| description      | TEXT                                    | source description                                  |
-| cover_path       | TEXT                                    | extracted cover image file from this copy           |
-| added_at         | TEXT NOT NULL, DB default               | set by INSERT                                       |
-| modified_at      | TEXT NOT NULL, DB default               | bumped on UPDATE                                    |
-| available        | INTEGER NOT NULL DEFAULT 1              | 0 once the file disappears                          |
-| file_size        | INTEGER NOT NULL DEFAULT 0              | bytes at last import                                |
-| file_mtime       | INTEGER NOT NULL DEFAULT 0              | unix seconds at last import                         |
-| publication_date | TEXT                                    | source publication date                             |
-| series_id        | INTEGER, FK `series` ON DELETE SET NULL | source series membership                            |
-| series_index     | REAL                                    | source position inside the series                   |
-| book_uid         | TEXT                                    | durable book identity (see below)                   |
-| hash_state       | TEXT NOT NULL DEFAULT 'pending'         | `pending`, `hashed`, or `failed`                    |
+| column           | type                                    | notes                                                |
+| ---------------- | --------------------------------------- | ---------------------------------------------------- |
+| id               | INTEGER PK AUTOINCREMENT                |                                                      |
+| path             | TEXT NOT NULL UNIQUE                    | absolute file path                                   |
+| title            | TEXT NOT NULL, CHECK non-blank          | source title of this file                            |
+| subtitle         | TEXT                                    | source subtitle                                      |
+| author           | TEXT                                    | source display projection of the file's author list  |
+| publisher        | TEXT                                    | source publisher                                     |
+| language         | TEXT                                    | source language                                      |
+| isbn             | TEXT                                    | source ISBN                                          |
+| description      | TEXT                                    | source description                                   |
+| cover_path       | TEXT                                    | extracted cover image file from this copy            |
+| added_at         | TEXT NOT NULL, DB default               | set by INSERT                                        |
+| modified_at      | TEXT NOT NULL, DB default               | bumped on UPDATE                                     |
+| available        | INTEGER NOT NULL DEFAULT 1              | 0 once the file disappears                           |
+| file_size        | INTEGER NOT NULL DEFAULT 0              | bytes at last import                                 |
+| file_mtime       | INTEGER NOT NULL DEFAULT 0              | unix seconds at last import                          |
+| publication_date | TEXT                                    | source publication date                              |
+| series_id        | INTEGER, FK `series` ON DELETE SET NULL | source series membership                             |
+| series_index     | REAL                                    | source position inside the series                    |
+| book_uid         | TEXT                                    | durable book identity (see below)                    |
+| hash_state       | TEXT NOT NULL DEFAULT 'pending'         | `pending`, `hashed`, or `failed`                     |
+| hash_attempts    | INTEGER NOT NULL DEFAULT 0              | consecutive hash failures; drives the backoff        |
+| hash_retry_at    | TEXT                                    | when a failed hash is due again (NULL = immediately) |
 
 A `books` row is a **file** in the library. Its bibliographic columns are the
 source values from the last parse of that file; the durable book record holds
@@ -50,7 +52,14 @@ real modifications from duplicate events without re-parsing documents.
 
 `book_uid` names the durable book record this file belongs to (more than one
 file may share it). `hash_state` is the durable progress of the background
-content-hash pass: `pending`, `hashed`, or `failed`.
+content-hash pass: `pending`, `hashed`, or `failed`. A failed row keeps
+`hash_attempts` and `hash_retry_at`: the background pass retries it once the
+delay passes, using 1 minute, 5 minutes, 15 minutes, 1 hour, 6 hours, then 24
+hours as the cap. A file-snapshot change, a returning file, relink, or metadata
+rewrite returns the row to `pending` with a clear budget, and a successful hash
+clears both columns. The count is not capped; only the delay is. A `Book`
+payload reports the durable aggregate across its file rows: `failed` if any
+location failed, otherwise `pending` if any is pending, otherwise `hashed`.
 
 ## Durable book records (migrations 0017–0019)
 
@@ -77,19 +86,19 @@ resolves the active file from the durable book.
   imports hash before they are published; the background pass resumes the
   backfill after a restart. Remove and Unwatch finish any pending hash for
   the affected file rows first, so a re-import can reattach; a failed hash is
-  recorded as a relink issue and does not block the action.
-- `migration_issues` — visible merges and failures: two file rows that
-  shared a uuid, two hashes that turned out to be the same book, duplicate
-  progress/annotations/collections/metadata/last-opened that was unioned or
-  resolved newest-wins, and a book whose hash failed and now needs a relink.
-  The Application Data settings tab lists open issues and can dismiss them.
+  retried on the book's backoff and does not block the action.
+- `migration_issues` — historical upgrade notices, kept for their audit rows.
+  Migration 0026 resolves the informational identity rows and 0028 resolves
+  the old `hash_failed` relink rows. New hash failures never write here: they
+  live on the book and, when sync is on, in `sync_issues`.
 
 When duplicate file rows collapse into one durable book, migration 0019 and
 `sync::identity::merge_book_identity` agree on the rules: collection
 membership unions, annotations union, and the newest last-opened and metadata
 overrides win. Metadata overrides have no timestamp of their own, so the
-newest file row's `modified_at` is the ordering signal; a tie is recorded as
-an ambiguous `duplicate_state_merged` issue.
+newest file row's `modified_at` is the ordering signal; a tie keeps the
+current winner. Runtime identity merges keep their audit trail in
+`sync_book_merges`; upgrade-time unions keep the resolved rows above.
 
 The upgrade takes a **pre-migration backup** before applying pending
 migrations: `VACUUM INTO` writes `<db>.pre-migration-<timestamp>.bak` beside
@@ -388,13 +397,41 @@ the remote side:
   row. That is what stops `sync_book_aliases` and stale `sync_book_merges`
   edges from resurrecting the old identity.
 
+## Conflict review (migration 0027)
+
+`sync_conflicts` records the value a last-writer-wins merge discarded, with both
+JSON values, both hybrid clocks, and the devices that wrote them. Migration
+0027 adds `resolved_at` and an index on it. The applied winner is never rolled
+back by the row itself; the queue only records what was lost.
+
+- A resolved row keeps `resolved_at` for the audit trail and leaves the open
+  count. `keep_winner` only stamps it. `apply_loser` publishes the discarded
+  value as a normal operation with a fresh clock, so every device converges;
+  delete/edit (`__deleted__`) and lost restores (`__restore__`) republish the
+  explicit restore operation instead, which also closes the local trash entry
+  on every device that applies the restore.
+- An unresolved row older than 30 days is deleted during a status refresh or a
+  conflict list, matching the trash window. Its `sync_issues` row closes when
+  no other open conflict shares the key.
+- Each status refresh and list first reconciles open rows against the mirror.
+  A row closes once a newer write has moved the value or clock past its
+  winner, so every device that replays a resolution settles its own copy.
+- Several losing writes for one `(kind, entity_uid, field)` share one issue and
+  one key. The issue is resolved only after the last of them is settled.
+- Progress conflicts stay in the table for diagnostics but are left out of the
+  review list and the status count, and never open an issue.
+- Book identity conflicts are keep-only because identity merges are
+  deterministic.
+
 ## Cloud-folder sync (migration 0015)
 
 The sync engine keeps its bookkeeping in the same SQLite file. Reading
 progress, annotations, metadata overrides, collection membership, and
 last-opened are keyed by the durable book uid; a file row is only a
 location. Nothing here changes how imports, readers, or search work. The
-full contract is [SYNC.md](SYNC.md).
+full contract is [SYNC.md](SYNC.md). The recovery decisions for issues,
+conflicts, and hash retry are in
+[ADR 0015](adr/0015-sync-recovery.md).
 
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.
@@ -415,7 +452,10 @@ full contract is [SYNC.md](SYNC.md).
   operation id. `sync_remote_files` caches file size/mtime and retry counts so a
   pass only reads new or changed files.
 - `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
-  losing field values, and the 30-day delete restore list for single entities.
+  losing field values with their resolution and 30-day expiry, and the 30-day
+  delete restore list for single entities. Migration 0028 adds a partial unique
+  index so only one open row exists per issue key; a concurrent status refresh
+  can no longer duplicate one.
 - `sync_book_trash` — whole-book Forget snapshots, clocks, and the remote
   restore/discard state. Separate from per-entity `sync_trash` (migration 0023).
 - `sync_ignored_books` — local-only hiding of books whose shared state is

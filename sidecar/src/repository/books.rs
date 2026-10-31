@@ -21,7 +21,13 @@ use crate::repository::library_locations::{list_locations, location_index, ownin
 const BOOK_COLUMNS: &str = "br.id, br.uid AS book_uid, bf.id AS file_id, bf.path, br.title, \
      br.subtitle, br.author, br.publisher, br.language, br.isbn, br.description, \
      br.cover_path, bf.added_at, bf.modified_at, br.last_opened_at, bf.available, \
-     bf.file_size, bf.file_mtime, br.publication_date, br.series_id, br.series_index, \
+     bf.file_size, bf.file_mtime, \
+     CASE \
+         WHEN EXISTS (SELECT 1 FROM books bh WHERE bh.book_uid = br.uid AND bh.hash_state = 'failed') THEN 'failed' \
+         WHEN EXISTS (SELECT 1 FROM books bh WHERE bh.book_uid = br.uid AND bh.hash_state = 'pending') THEN 'pending' \
+         ELSE 'hashed' \
+     END AS hash_state, \
+     br.publication_date, br.series_id, br.series_index, \
      s.name AS series_name, rp.progress_percent AS progress_percent, \
      rp.updated_at AS progress_updated_at";
 /// Per-file-row variant of [`BOOK_COLUMNS`] for callers that need every
@@ -31,8 +37,8 @@ const BOOK_COLUMNS: &str = "br.id, br.uid AS book_uid, bf.id AS file_id, bf.path
 const FILE_ROW_COLUMNS: &str = "br.id, br.uid AS book_uid, b.id AS file_id, b.path, br.title, \
      br.subtitle, br.author, br.publisher, br.language, br.isbn, br.description, \
      br.cover_path, b.added_at, b.modified_at, br.last_opened_at, b.available, \
-     b.file_size, b.file_mtime, br.publication_date, br.series_id, br.series_index, \
-     s.name AS series_name, rp.progress_percent AS progress_percent, \
+     b.file_size, b.file_mtime, b.hash_state, br.publication_date, br.series_id, \
+     br.series_index, s.name AS series_name, rp.progress_percent AS progress_percent, \
      rp.updated_at AS progress_updated_at";
 const FILE_ROW_FROM: &str = " FROM books b \
      JOIN book_records br ON br.uid = b.book_uid \
@@ -152,8 +158,16 @@ pub async fn update_book_by_path(pool: &SqlitePool, book: &NewBook) -> Result<bo
         SET title = ?2, subtitle = ?3, author = ?4, publisher = ?5, language = ?6,
             isbn = ?7, description = ?8, cover_path = ?9,
             hash_state = CASE
-                WHEN file_size != ?10 OR file_mtime != ?11 THEN 'pending'
+                WHEN available = 0 OR file_size != ?10 OR file_mtime != ?11 THEN 'pending'
                 ELSE hash_state
+            END,
+            hash_attempts = CASE
+                WHEN available = 0 OR file_size != ?10 OR file_mtime != ?11 THEN 0
+                ELSE hash_attempts
+            END,
+            hash_retry_at = CASE
+                WHEN available = 0 OR file_size != ?10 OR file_mtime != ?11 THEN NULL
+                ELSE hash_retry_at
             END,
             file_size = ?10, file_mtime = ?11, available = 1,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -287,6 +301,55 @@ pub async fn get_book_by_path(pool: &SqlitePool, path: &str) -> Result<Option<Bo
 pub struct RelinkTarget {
     pub book_uid: String,
     pub cover_path: Option<String>,
+}
+
+/// Make sure a durable record exists for a shared identity that has no local
+/// file yet. A waiting book on a machine that never saw the file has mirror
+/// state but no `book_records` row; attaching its exact bytes needs that row
+/// first, so it is created under the same uid with no metadata.
+///
+/// Returns the record id and whether this call inserted it. The caller rolls a
+/// new record back when the attach fails, so a rejected file never leaves an
+/// untitled Reading-history row.
+pub async fn ensure_durable_record(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<(i64, bool), AppError> {
+    let inserted = sqlx::query(
+        "INSERT INTO book_records (uid, metadata_state) VALUES (?1, 'waiting_for_file')
+         ON CONFLICT(uid) DO NOTHING",
+    )
+    .bind(book_uid)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0;
+    let id: i64 = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok((id, inserted))
+}
+
+/// Remove a record a failed attach created, but only while nothing points at
+/// it. A file row or binding means the attach got far enough to keep the book.
+pub async fn discard_empty_durable_record(
+    pool: &SqlitePool,
+    durable_id: i64,
+    book_uid: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "DELETE FROM book_records
+         WHERE id = ?1 AND uid = ?2
+           AND NOT EXISTS (SELECT 1 FROM books WHERE book_uid = ?2)
+           AND NOT EXISTS (SELECT 1 FROM sync_book_bindings WHERE book_uid = ?2)",
+    )
+    .bind(durable_id)
+    .bind(book_uid)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// The durable record a relink will attach a file to, or `None` when the id
@@ -538,6 +601,8 @@ pub async fn update_book_by_id(
         SET path = ?2, title = ?3, subtitle = ?4, author = ?5, publisher = ?6,
             language = ?7, isbn = ?8, description = ?9, cover_path = ?10,
             hash_state = 'pending',
+            hash_attempts = 0,
+            hash_retry_at = NULL,
             file_size = ?11, file_mtime = ?12, available = 1,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
@@ -564,10 +629,13 @@ pub async fn update_book_by_id(
 /// The sync identity sweep treats this as a forced rehash, so a crash between
 /// a rewrite and the snapshot update cannot strand the book identity.
 pub async fn mark_rehash_pending(pool: &SqlitePool, file_id: i64) -> Result<(), AppError> {
-    sqlx::query("UPDATE books SET rehash_pending = 1, hash_state = 'pending' WHERE id = ?1")
-        .bind(file_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE books SET rehash_pending = 1, hash_state = 'pending',
+         hash_attempts = 0, hash_retry_at = NULL WHERE id = ?1",
+    )
+    .bind(file_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -589,7 +657,8 @@ pub async fn update_file_snapshot(
     file_mtime: i64,
 ) -> Result<(), AppError> {
     sqlx::query(
-        "UPDATE books SET file_size = ?2, file_mtime = ?3, hash_state = 'pending' WHERE id = ?1",
+        "UPDATE books SET file_size = ?2, file_mtime = ?3, hash_state = 'pending',
+         hash_attempts = 0, hash_retry_at = NULL WHERE id = ?1",
     )
     .bind(file_id)
     .bind(file_size)
@@ -614,6 +683,8 @@ pub async fn relink_book(
         UPDATE books
         SET path = ?2, file_size = ?3, file_mtime = ?4, available = 1,
             hash_state = 'pending',
+            hash_attempts = 0,
+            hash_retry_at = NULL,
             modified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?1
         "#,

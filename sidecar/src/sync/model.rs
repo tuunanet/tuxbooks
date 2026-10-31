@@ -217,6 +217,12 @@ pub fn changed_fields(previous: &State, current: &State) -> Map<String, Value> {
     changed
 }
 
+/// Stable issue key for one conflict. Several losing writes for the same field
+/// share the key, so the issue closes only when the last of them settles.
+pub fn conflict_issue_key(kind: EntityKind, entity_uid: &str, field: &str) -> String {
+    format!("conflict:{}:{entity_uid}:{field}", kind.as_str())
+}
+
 pub fn state_display(kind: EntityKind, state: &State) -> String {
     match kind {
         EntityKind::Annotation => state
@@ -317,5 +323,60 @@ mod tests {
         assert!(!is_safe_uid("../evil"));
         assert!(!is_safe_uid(".hidden"));
         assert!(!is_safe_uid(""));
+    }
+
+    #[test]
+    fn state_display_names_each_entity_kind_for_the_trash_list() {
+        let mut annotation = State::new();
+        annotation.insert("text".into(), json!("A highlighted passage"));
+        assert_eq!(
+            state_display(EntityKind::Annotation, &annotation),
+            "A highlighted passage"
+        );
+        let mut bookmark = State::new();
+        bookmark.insert("label".into(), json!("Chapter 3"));
+        assert_eq!(
+            state_display(EntityKind::Annotation, &bookmark),
+            "Chapter 3"
+        );
+        assert_eq!(
+            state_display(EntityKind::Annotation, &State::new()),
+            "annotation"
+        );
+
+        let mut collection = State::new();
+        collection.insert("name".into(), json!("Favorites"));
+        assert_eq!(
+            state_display(EntityKind::Collection, &collection),
+            "Favorites"
+        );
+        assert_eq!(
+            state_display(EntityKind::Collection, &State::new()),
+            "collection"
+        );
+        assert_eq!(
+            state_display(EntityKind::Metadata, &State::new()),
+            "metadata edit"
+        );
+        assert_eq!(
+            state_display(EntityKind::Progress, &State::new()),
+            "reading progress"
+        );
+        assert_eq!(
+            state_display(EntityKind::Opened, &State::new()),
+            "last opened"
+        );
+        assert_eq!(
+            state_display(EntityKind::Membership, &State::new()),
+            "collection membership"
+        );
+        assert_eq!(
+            state_display(EntityKind::BookIdentity, &State::new()),
+            "book identity"
+        );
+        assert_eq!(
+            state_display(EntityKind::Book, &State::new()),
+            "forgotten book"
+        );
     }
 }

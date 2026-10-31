@@ -7,6 +7,8 @@
 
 pub mod capture;
 pub mod clock;
+pub mod conflict;
+pub mod diagnostics;
 pub mod engine;
 pub mod identity;
 pub mod merge;

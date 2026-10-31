@@ -34,4 +34,16 @@ describe("BookListItem", () => {
     expect(screen.getByText("Finished")).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
+
+  it("marks a book that could not be indexed", () => {
+    const { rerender } = render(
+      <BookListItem book={makeBook({ hashState: "failed" })} collections={[]} />,
+    );
+    const badge = screen.getByTestId("book-indexing");
+    expect(badge).toHaveAccessibleName("Not indexed");
+    expect(badge).toHaveTextContent("Not indexed");
+
+    rerender(<BookListItem book={makeBook({ hashState: "pending" })} collections={[]} />);
+    expect(screen.queryByTestId("book-indexing")).not.toBeInTheDocument();
+  });
 });

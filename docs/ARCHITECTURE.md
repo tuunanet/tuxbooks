@@ -162,24 +162,32 @@ Each has bitten before (or is a known trap of the Electron stack):
 
 ## Rust module contract
 
-| Module                    | May depend on                                                                                         | Must never import             |
-| ------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `domain/`                 | std, serde, chrono, sqlx (row mapping only)                                                           | tauri, electron glue          |
-| `limits/`                 | std, thiserror                                                                                        | runtime crates, sqlx          |
-| `epub/` (worker-internal) | std, zip, quick-xml, limits                                                                           | tauri, sqlx, electron         |
-| `pdf/` (worker-internal)  | std, lopdf, pdfium-render, limits                                                                     | tauri, sqlx, electron         |
-| `worker/`                 | limits, epub, pdf, libc, serde, base64                                                                | sqlx, notify, tauri, electron |
-| `db/`                     | sqlx, migrations                                                                                      | tauri, electron               |
-| `repository/`             | sqlx, domain                                                                                          | tauri, epub, pdf              |
-| `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points) | tauri, electron               |
-| `sync/`                   | domain, repository, db, services (metadata projection + `LibraryChange`), store, `rpc::EventEmitter`  | tauri, electron, network      |
-| method table              | services, sync, domain                                                                                | sqlx details                  |
+| Module                    | May depend on                                                                                                                                                       | Must never import             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `domain/`                 | std, serde, chrono, sqlx (row mapping only)                                                                                                                         | tauri, electron glue          |
+| `limits/`                 | std, thiserror                                                                                                                                                      | runtime crates, sqlx          |
+| `epub/` (worker-internal) | std, zip, quick-xml, limits                                                                                                                                         | tauri, sqlx, electron         |
+| `pdf/` (worker-internal)  | std, lopdf, pdfium-render, limits                                                                                                                                   | tauri, sqlx, electron         |
+| `worker/`                 | limits, epub, pdf, libc, serde, base64                                                                                                                              | sqlx, notify, tauri, electron |
+| `db/`                     | sqlx, migrations                                                                                                                                                    | tauri, electron               |
+| `repository/`             | sqlx, domain                                                                                                                                                        | tauri, epub, pdf              |
+| `services/`               | domain, repository, worker, db, epub/pdf types + display projections (never their parse entry points), sync content-identity and hash primitives (`sync::identity`) | tauri, electron               |
+| `sync/`                   | domain, repository, db, services (metadata projection + `LibraryChange`), store, `rpc::EventEmitter`                                                                | tauri, electron, network      |
+| method table              | services, sync, domain                                                                                                                                              | sqlx details                  |
 
 The sync subsystem is the one storage engine outside `repository/`: its SQL,
 operation format, and on-disk folder contract change together, so splitting
 them would leave the merge rules and the queries that enforce them in
 different modules. Command and service code still never embed SQL; the
 exception is `sync/` only.
+
+Services may call the sync content-identity and hash primitives directly:
+`ensure_book_identity`, `hash_file`, `bind_hash`, `canonical_book_uid`, and
+`alias_book_uid`. Import, reconciliation, and the hash backfill must bind
+content identity without routing through the sync engine, and `sync/` already
+depends on services for metadata projection and `LibraryChange`. Those calls
+are a deliberate cycle for the primitives only. A service call into any other
+part of `sync/` is a design change, not a convenience.
 
 Wiring (sidecar startup, pool init, method registration, IPC channel)
 lives in the service binary's entry; `TEST_DATABASE_PATH` /

@@ -2,6 +2,8 @@
 //! translate the JSON-RPC surface.
 
 use crate::error::AppError;
+use crate::sync::conflict::SyncConflict;
+use crate::sync::diagnostics::SyncDiagnostics;
 use crate::sync::engine::{SyncConnectResult, SyncIssue, SyncService, SyncStatus, SyncTrashEntry};
 use crate::sync::waiting::WaitingBook;
 use crate::AppState;
@@ -49,6 +51,26 @@ pub async fn forget_all_waiting_books(state: &AppState) -> Result<usize, AppErro
     service(state)?.forget_all_waiting_books().await
 }
 
+/// Attach a waiting book to a file the user picked. The sidecar hashes the
+/// bytes and refuses a mismatch, so this only imports the exact content the
+/// waiting uid already describes.
+pub async fn attach_waiting_book(
+    state: &AppState,
+    events: &crate::rpc::EventEmitter,
+    book_uid: String,
+    path: String,
+) -> Result<crate::domain::Book, AppError> {
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidInput("book path is empty".into()));
+    }
+    let pdfium_dirs = crate::pdfium_library_dirs();
+    let book = service(state)?
+        .attach_waiting_book(&book_uid, std::path::Path::new(&path), &pdfium_dirs)
+        .await?;
+    crate::commands::emit_changed_book(events, book.clone());
+    Ok(book)
+}
+
 pub async fn dismiss_all_issues(state: &AppState) -> Result<usize, AppError> {
     service(state)?.dismiss_all_issues().await
 }
@@ -61,6 +83,10 @@ pub async fn dismiss_issue(state: &AppState, id: i64) -> Result<bool, AppError> 
     service(state)?.dismiss_issue(id).await
 }
 
+pub async fn retry_issue(state: &AppState, id: i64) -> Result<bool, AppError> {
+    service(state)?.retry_issue(id).await
+}
+
 pub async fn trash(state: &AppState) -> Result<Vec<SyncTrashEntry>, AppError> {
     service(state)?.trash().await
 }
@@ -69,6 +95,30 @@ pub async fn restore(state: &AppState, id: i64) -> Result<bool, AppError> {
     service(state)?.restore(id).await
 }
 
+pub async fn conflicts(state: &AppState) -> Result<Vec<SyncConflict>, AppError> {
+    service(state)?.list_conflicts().await
+}
+
+pub async fn resolve_conflict(
+    state: &AppState,
+    id: i64,
+    resolution: String,
+) -> Result<bool, AppError> {
+    service(state)?.resolve_conflict(id, &resolution).await
+}
+
 pub async fn set_device_name(state: &AppState, name: String) -> Result<SyncStatus, AppError> {
     service(state)?.set_device_name(&name).await
+}
+
+/// The support snapshot. It uses the live engine status for enabled, state,
+/// and counts, so a running pass reports "syncing". When the service is
+/// missing or sync is off, the snapshot is disabled with zero counts, and the
+/// local hash failures and versions still answer.
+pub async fn diagnostics(state: &AppState) -> Result<SyncDiagnostics, AppError> {
+    let status = match state.sync.as_deref() {
+        Some(service) => Some(service.status().await?),
+        None => None,
+    };
+    crate::sync::diagnostics::collect(&state.db, status.as_ref()).await
 }
