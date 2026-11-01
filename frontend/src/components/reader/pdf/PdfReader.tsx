@@ -425,7 +425,7 @@ export function PdfReader({
   onCreateHighlight,
   onSelectionChange,
 }: PdfReaderProps) {
-  const { position, setPosition, preferences } = useReader();
+  const { position, setPosition, preferences, effectiveTheme } = useReader();
   const {
     status,
     document: pdfDocument,
@@ -455,7 +455,7 @@ export function PdfReader({
   // pixel change, not a zoom change). The invalidation itself runs after
   // the render-bookkeeping state is declared, in the established
   // render-phase reset pattern.
-  const treatment = pdfThemeTreatment(preferences.theme);
+  const treatment = pdfThemeTreatment(effectiveTheme);
   const renderVariant = treatment.smart ? "smart" : "original";
 
   const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
@@ -1944,7 +1944,7 @@ export function PdfReader({
           pageBackground={treatment.pageBackground}
           highlights={{
             byPage: highlightsByPage,
-            family: readerThemeFamily(preferences.theme),
+            family: readerThemeFamily(effectiveTheme),
             overrides: preferences.highlightOverrides,
           }}
           themePaint={{ filter: treatment.filter, tint: treatment.tint }}
@@ -1980,7 +1980,7 @@ export function PdfReader({
           contentAreaRef={contentAreaRef}
           onRetryPage={retryPage}
           highlightsByPage={highlightsByPage}
-          highlightFamily={readerThemeFamily(preferences.theme)}
+          highlightFamily={readerThemeFamily(effectiveTheme)}
           highlightOverrides={preferences.highlightOverrides}
           themeFilter={treatment.filter}
           themeTint={treatment.tint}

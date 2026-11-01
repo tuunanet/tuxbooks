@@ -47,10 +47,9 @@ describe("filterBooksByFormat", () => {
 });
 
 describe("sectionTitle", () => {
-  it("names smart sections, collections, and settings", () => {
+  it("names smart sections and collections", () => {
     expect(sectionTitle({ kind: "smart", id: "recently-added" })).toBe("Recently Added");
     expect(sectionTitle({ kind: "collection", id: 4 })).toBe("Collection");
-    expect(sectionTitle({ kind: "settings" })).toBe("Settings");
   });
 
   it("has no outside-watched id or title", () => {

@@ -1,4 +1,4 @@
-import { BookOpen, Presentation, Search, TableOfContents } from "lucide-react";
+import { BookOpen, Presentation, Search, Settings, TableOfContents } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -36,6 +36,7 @@ interface ReaderHeaderProps {
   labelTarget: { bookmark: Annotation; hint: string } | null;
   onCloseLabel: () => void;
   onCommitLabel: (bookmarkId: number, label: string) => void;
+  onOpenSettings: () => void;
   onBack: () => void;
 }
 
@@ -61,6 +62,7 @@ export function ReaderHeader({
   labelTarget,
   onCloseLabel,
   onCommitLabel,
+  onOpenSettings,
   onBack,
 }: ReaderHeaderProps) {
   if (presentation) return null;
@@ -192,6 +194,22 @@ export function ReaderHeader({
         onCommitLabel={onCommitLabel}
         theme={theme}
       />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            data-testid="reader-settings"
+            aria-label="Settings"
+            aria-haspopup="dialog"
+            onClick={onOpenSettings}
+          >
+            <Settings />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Settings</TooltipContent>
+      </Tooltip>
     </header>
   );
 }

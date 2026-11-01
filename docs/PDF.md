@@ -537,7 +537,9 @@ and are not displayed for PDFs — the appearance menu offers exactly the
 theme, which for PDFs is really a set of **color modes**
 (`lib/pdf/theme.ts`, driven by the same stored reader theme as EPUB):
 
-- **Default / Light** — pages render as-is.
+- **Default** — follows the app theme: pages render as-is in a light app,
+  and use Smart dark in a dark app.
+- **Light** — pages render as-is, pinning original colors in a dark app.
 - **Paper** — multiply-tints the white pages to the theme's own paper color
   (a CSS filter cannot darken white).
 - **Dark = Smart dark** — category-level recoloring _inside the PDFium

@@ -252,7 +252,11 @@ describe("Sidebar (user-stored collection names)", () => {
     return render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={initialAppState.section} onSectionChange={vi.fn()} />
+          <Sidebar
+            active={initialAppState.section}
+            onSectionChange={vi.fn()}
+            onOpenSettings={vi.fn()}
+          />
         </LibraryDataProvider>
       </AppStateProvider>,
     );

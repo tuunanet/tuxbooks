@@ -17,6 +17,7 @@ describe("appStateReducer", () => {
         selectionAnchorId: 1,
         libraryQuery: "meridian",
         formatFilter: ["pdf"],
+        settingsOpen: false,
       },
       { type: "select-section", section: { kind: "smart", id: "recently-added" } },
     );
@@ -29,16 +30,21 @@ describe("appStateReducer", () => {
       libraryQuery: "",
       // The format filter composes with every section, so it is not cleared.
       formatFilter: ["pdf"],
+      settingsOpen: false,
     });
   });
 
-  it("selecting settings returns to the library view", () => {
-    const state = appStateReducer(initialAppState, {
-      type: "select-section",
-      section: { kind: "settings" },
-    });
-    expect(state.view).toBe("library");
-    expect(state.section).toEqual({ kind: "settings" });
+  it("opens and closes the settings window without changing the view", () => {
+    const opened = appStateReducer(initialAppState, { type: "open-settings" });
+    expect(opened.settingsOpen).toBe(true);
+    expect(opened.view).toBe("library");
+    expect(opened.section).toEqual(initialAppState.section);
+
+    const closed = appStateReducer(opened, { type: "close-settings" });
+    expect(closed.settingsOpen).toBe(false);
+    // Repeating either direction is a no-op that keeps the state object.
+    expect(appStateReducer(opened, { type: "open-settings" })).toBe(opened);
+    expect(appStateReducer(closed, { type: "close-settings" })).toBe(closed);
   });
 
   it("opening book detail keeps the section and selects the book", () => {
@@ -53,6 +59,7 @@ describe("appStateReducer", () => {
       readerTargetAnnotationId: null,
       libraryQuery: "",
       formatFilter: [],
+      settingsOpen: false,
     });
   });
 
@@ -104,6 +111,7 @@ describe("appStateReducer", () => {
         selectionAnchorId: 9,
         libraryQuery: "",
         formatFilter: [],
+        settingsOpen: false,
       },
       { type: "return-to-library" },
     );
@@ -115,6 +123,7 @@ describe("appStateReducer", () => {
       selectionAnchorId: 9,
       libraryQuery: "",
       formatFilter: [],
+      settingsOpen: false,
     });
   });
 
@@ -265,7 +274,9 @@ describe("sameSection", () => {
   });
 
   it("never matches across kinds", () => {
-    expect(sameSection({ kind: "smart", id: "all-books" }, { kind: "settings" })).toBe(false);
-    expect(sameSection({ kind: "collection", id: 1 }, { kind: "settings" })).toBe(false);
+    expect(sameSection({ kind: "smart", id: "all-books" }, { kind: "reading-history" })).toBe(
+      false,
+    );
+    expect(sameSection({ kind: "collection", id: 1 }, { kind: "reading-history" })).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   sanitizeReaderPreferences,
   writeReaderSettings,
 } from "@/lib/readerSettings";
+import { EPUB_THEME_NAMES } from "@/lib/epub/appearance";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 
 beforeEach(() => {
@@ -87,6 +88,14 @@ describe("readerSettings persistence", () => {
     expect(settings.layout).toBe(DEFAULT_READER_PREFERENCES.layout);
   });
 
+  it("accepts every palette theme plus the PDF-only invert preset", () => {
+    for (const theme of EPUB_THEME_NAMES) {
+      expect(sanitizeReaderPreferences({ theme }).theme).toBe(theme);
+    }
+    // Invert has no EPUB palette entry but is a valid stored PDF choice.
+    expect(sanitizeReaderPreferences({ theme: "invert" }).theme).toBe("invert");
+  });
+
   it("normalizes a valid foreground to lower case", () => {
     const settings = sanitizeReaderPreferences({ foreground: "#AABBCC" });
     expect(settings.foreground).toBe("#aabbcc");
@@ -114,6 +123,15 @@ describe("effectiveReaderPreferences", () => {
     const settings = {
       preferences: { ...DEFAULT_READER_PREFERENCES, theme: "paper" as const },
       themePinned: false,
+    };
+    expect(effectiveReaderPreferences(settings, "dark").theme).toBe("dark");
+    expect(effectiveReaderPreferences(settings, "light").theme).toBe("default");
+  });
+
+  it("makes an explicit Default follow the global theme", () => {
+    const settings = {
+      preferences: { ...DEFAULT_READER_PREFERENCES, theme: "default" as const },
+      themePinned: true,
     };
     expect(effectiveReaderPreferences(settings, "dark").theme).toBe("dark");
     expect(effectiveReaderPreferences(settings, "light").theme).toBe("default");

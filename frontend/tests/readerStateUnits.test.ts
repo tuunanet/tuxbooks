@@ -79,6 +79,6 @@ describe("sameSection", () => {
     expect(sameSection(collection(1), collection(1))).toBe(true);
     expect(sameSection(collection(1), collection(2))).toBe(false);
     expect(sameSection(smart("all-books"), collection(1))).toBe(false);
-    expect(sameSection({ kind: "settings" }, { kind: "settings" })).toBe(true);
+    expect(sameSection({ kind: "reading-history" }, { kind: "reading-history" })).toBe(true);
   });
 });

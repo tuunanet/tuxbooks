@@ -2,21 +2,26 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { readReaderSettings, writeReaderSettings } from "@/lib/readerSettings";
 import type { ResolvedTheme } from "@/lib/theme";
 import { ReaderProvider } from "@/state/ReaderProvider";
-import { autoReaderTheme, useReader } from "@/state/readerState";
+import { autoReaderTheme, DEFAULT_READER_PREFERENCES, useReader } from "@/state/readerState";
 
 function Probe() {
-  const { preferences, setPreferences } = useReader();
+  const { preferences, effectiveTheme, setPreferences } = useReader();
   return (
     <div>
       <span data-testid="theme">{preferences.theme}</span>
+      <span data-testid="effective-theme">{effectiveTheme}</span>
       <span data-testid="foreground">{preferences.foreground ?? "none"}</span>
       <button type="button" onClick={() => setPreferences({ theme: "paper" })}>
         pick-paper
       </button>
       <button type="button" onClick={() => setPreferences({ theme: "default" })}>
         pick-default
+      </button>
+      <button type="button" onClick={() => setPreferences({ theme: "light" })}>
+        pick-light
       </button>
       <button type="button" onClick={() => setPreferences({ theme: "contrast" })}>
         pick-contrast
@@ -60,25 +65,27 @@ describe("autoReaderTheme", () => {
 });
 
 describe("ReaderProvider global theme following", () => {
-  it("opens a dark surface when the global theme is dark", () => {
+  it("opens a dark surface from Default when the global theme is dark", () => {
     renderReader("dark");
-    expect(screen.getByTestId("theme")).toHaveTextContent("dark");
+    expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("dark");
   });
 
-  it("keeps publisher colors when the global theme is light", () => {
+  it("keeps publisher colors from Default when the global theme is light", () => {
     renderReader("light");
     expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
   });
 
   it("follows a live global flip while no theme is pinned", () => {
     const { rerenderWith } = renderReader("light");
-    expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
 
     rerenderWith("dark");
-    expect(screen.getByTestId("theme")).toHaveTextContent("dark");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("dark");
 
     rerenderWith("light");
-    expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
   });
 
   it("pins an explicit theme pick against further global flips", async () => {
@@ -87,14 +94,18 @@ describe("ReaderProvider global theme following", () => {
 
     rerenderWith("light");
     expect(screen.getByTestId("theme")).toHaveTextContent("paper");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("paper");
   });
 
-  it("lets an explicit Default pick hold publisher colors in global dark", async () => {
+  it("keeps Default following the app theme when explicitly pinned", async () => {
     const { rerenderWith } = renderReader("light");
     await userEvent.click(screen.getByRole("button", { name: "pick-default" }));
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
 
     rerenderWith("dark");
+    // The menu still shows Default, but the applied surface follows dark.
     expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("dark");
   });
 
   it("stays unpinned when a patch does not touch the theme", async () => {
@@ -102,18 +113,18 @@ describe("ReaderProvider global theme following", () => {
     await userEvent.click(screen.getByRole("button", { name: "patch-line-height" }));
 
     rerenderWith("dark");
-    expect(screen.getByTestId("theme")).toHaveTextContent("dark");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("dark");
   });
 
   it("drops a bright foreground override when the theme switches to a light surface", async () => {
     // UAT: global dark, override picked on the dark surface, then the user
-    // switches to Default (publisher white) — the bright ink must not
-    // color body text on the white page.
+    // switches to Light — the bright ink must not color body text on the
+    // white page.
     renderReader("dark");
     await userEvent.click(screen.getByRole("button", { name: "pick-parchment-ink" }));
     expect(screen.getByTestId("foreground")).toHaveTextContent("#f5efe0");
 
-    await userEvent.click(screen.getByRole("button", { name: "pick-default" }));
+    await userEvent.click(screen.getByRole("button", { name: "pick-light" }));
     expect(screen.getByTestId("foreground")).toHaveTextContent("none");
   });
 
@@ -133,5 +144,27 @@ describe("ReaderProvider global theme following", () => {
       </ReaderProvider>,
     );
     expect(screen.getByTestId("theme")).toHaveTextContent("default");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
+  });
+
+  it("adopts a theme written by Settings and never overwrites it with stale state", async () => {
+    renderReader("light");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("default");
+
+    // Settings edits the shared store directly while this reader is open.
+    act(() => {
+      writeReaderSettings({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "paper" },
+        themePinned: true,
+      });
+    });
+    expect(screen.getByTestId("theme")).toHaveTextContent("paper");
+    expect(screen.getByTestId("effective-theme")).toHaveTextContent("paper");
+
+    // A later reader edit starts from the stored theme, not the stale one.
+    await userEvent.click(screen.getByRole("button", { name: "patch-line-height" }));
+    const stored = readReaderSettings();
+    expect(stored.preferences.theme).toBe("paper");
+    expect(stored.preferences.lineHeight).toBe(1.5);
   });
 });
