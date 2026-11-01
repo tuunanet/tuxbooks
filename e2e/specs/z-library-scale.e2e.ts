@@ -24,6 +24,7 @@ import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { SCALE_CORPUS_SIZE, scaleCorpusDir } from "../setup/environment.js";
 import { seededLibraryBookCount } from "../setup/fixtures.js";
+import { ensureLibrary } from "./helpers.js";
 
 /** Grid window cap: PERF-15's budget, asserted live at scale. */
 const WINDOW_CAP = 120;
@@ -51,7 +52,9 @@ test.describe("library scale (issue #61)", () => {
 
   test.beforeEach(async ({ page }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId("library-view")).toBeVisible({ timeout: 30000 });
+    // The scale corpus runs after every other spec; leave any detail or
+    // reader view a previous spec kept open before asserting the library.
+    await ensureLibrary(page);
   });
 
   test("imports 1,500 books and keeps the library interactive", async ({ page }) => {
