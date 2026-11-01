@@ -160,6 +160,13 @@ catalog:
 overrides:
   vite@*: "catalog:"
   vitest@*: "catalog:"
+  # 2026-11-01: Readium packages pin exact transitive versions that drift
+  # from the direct set (navigator 2.11.1 still asks for decorator 1.2.4 and
+  # shared 2.6.0). Keep the family on one version so Publication types are
+  # one declaration, not two incompatible copies.
+  "@readium/decorator": "1.2.5"
+  "@readium/navigator-html-injectables": "2.8.5"
+  "@readium/shared": "2.7.0"
   # 2026-10-29: GHSA-3f7j-7jwc-fxfj, patched in 5.33.16. Exact pin so the
   # resolver does not fall back to the older mature 5.33.14. Dev-only via
   # shadcn's @dotenvx/dotenvx CLI; remove when 5.33.16 ages past the floor.
