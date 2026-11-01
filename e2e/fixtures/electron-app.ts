@@ -205,11 +205,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         .catch(() => {});
       // The Settings window floats over the shared page, so a test that left
       // it open would hide the sidebar from the next test's role queries.
-      // Close it before handing the page over.
-      const settingsClose = window.getByTestId("settings-close");
-      if ((await settingsClose.count()) > 0) {
-        await settingsClose.click();
-        await window.getByTestId("settings-window").waitFor({ state: "detached" });
+      // Escape dismisses any open Radix layer without racing its close
+      // animation; wait for the settings window to actually detach.
+      if ((await window.getByTestId("settings-window").count()) > 0) {
+        await window.keyboard.press("Escape").catch(() => {});
+        await window
+          .getByTestId("settings-window")
+          .waitFor({ state: "detached", timeout: 2000 })
+          .catch(() => {});
       }
       await use(window);
       // No explicit teardown: closing the app (worker teardown) closes its
