@@ -1,11 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "@/hooks/useAnnotations";
 import { useLibrary } from "@/hooks/useLibrary";
-import { epubSurfaceTheme, readerChromeVariables } from "@/lib/epub/appearance";
 import { highlightCss, readerThemeFamily } from "@/lib/highlightPalette";
-import { cn } from "@/lib/utils";
+import { readerThemeScope, ThemeScopeProvider, themeScopeStyle } from "@/lib/themeScope";
 import { useAppDispatch, useAppState } from "@/state/appState";
-import { useReader, type ReaderTheme } from "@/state/readerState";
+import { useReader } from "@/state/readerState";
 import type { Annotation } from "@/types/domain";
 import {
   jumpToAnnotation as annotationJumpTarget,
@@ -42,24 +41,6 @@ import { useReaderProgressSeek } from "./shell/useReaderProgressSeek";
 import { useReaderSearch } from "./shell/useReaderSearch";
 import { useAxisLockedWheel } from "./useAxisLockedWheel";
 
-// Reader chrome classes per theme. Named presets paint their own chrome so
-// the toolbar/drawer match the surface no matter what the app theme is
-// (hexes mirror EPUB_THEME_COLORS; Tailwind needs static class strings).
-// Only the neutral default follows the app tokens — publisher colors own
-// the content and the app owns the chrome.
-const THEME_CLASSES: Record<ReaderTheme, string> = {
-  default: "bg-background text-foreground",
-  light: "bg-[#ffffff] text-[#1f2328]",
-  paper: "bg-[#f6f0e4] text-[#3a332a]",
-  dark: "bg-zinc-950 text-zinc-100",
-  // PDF-only explicit inversion (issue #67): the same chrome the dark
-  // preset paints — the negative pages float over an equally dark surface.
-  invert: "bg-zinc-950 text-zinc-100",
-  contrast: "bg-black text-[#ffff00]",
-  "blue-contrast": "bg-[#181842] text-white",
-  "mint-contrast": "bg-[#c5e7cd] text-black",
-};
-
 /**
  * Full-window reading mode: no sidebar, its own visual language, and a
  * distinct visual language from the library. The shell owns the genuinely
@@ -78,6 +59,12 @@ export function ReaderShell() {
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
   const { preferences, position, setPosition, setPreferences } = useReader();
+
+  // One scope owns every token the reader chrome consumes. Portaled menus,
+  // tooltips, and the settings window opened from here read the same style,
+  // so an explicit reader theme cannot mix with the app's light/dark mode.
+  const themeScope = useMemo(() => readerThemeScope(preferences.theme), [preferences.theme]);
+  const themeStyle = useMemo(() => themeScopeStyle(themeScope), [themeScope]);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const bookId = book?.id ?? -1;
@@ -207,12 +194,15 @@ export function ReaderShell() {
 
   if (!book) {
     return (
-      <div
-        data-testid="reader-view"
-        className="flex h-screen flex-col items-center justify-center gap-3"
-      >
-        <ReaderUnavailable onBack={() => dispatch({ type: "return-to-library" })} />
-      </div>
+      <ThemeScopeProvider scope={themeScope} style={themeStyle}>
+        <div
+          data-testid="reader-view"
+          className="flex h-screen flex-col items-center justify-center gap-3 bg-background text-foreground"
+          style={themeStyle}
+        >
+          <ReaderUnavailable onBack={() => dispatch({ type: "return-to-library" })} />
+        </div>
+      </ThemeScopeProvider>
     );
   }
 
@@ -221,127 +211,129 @@ export function ReaderShell() {
   // of opening at the saved position first.
   if (waiting) {
     return (
-      <div
-        data-testid="reader-opening-highlight"
-        className="flex h-screen items-center justify-center text-sm text-muted-foreground"
-      >
-        <ReaderOpeningHighlight />
-      </div>
+      <ThemeScopeProvider scope={themeScope} style={themeStyle}>
+        <div
+          data-testid="reader-opening-highlight"
+          className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground"
+          style={themeStyle}
+        >
+          <ReaderOpeningHighlight />
+        </div>
+      </ThemeScopeProvider>
     );
   }
 
   return (
-    <div
-      ref={readerViewRef}
-      data-testid="reader-view"
-      data-theme={preferences.theme}
-      data-reader-position={Math.round(position)}
-      data-pdf-presentation={presentationFlag(isPdf, presentation.presentation)}
-      data-epub-presentation={presentationFlag(isEpub, presentation.presentation)}
-      className={cn(
-        "relative flex h-screen flex-col overflow-hidden",
-        THEME_CLASSES[preferences.theme],
-      )}
-      style={readerChromeVariables(epubSurfaceTheme(preferences.theme))}
-    >
-      <ReaderHeader
-        book={book}
-        isPdf={Boolean(isPdf)}
-        isEpub={Boolean(isEpub)}
-        theme={preferences.theme}
-        bookMode={preferences.bookMode}
-        presentation={presentation.presentation}
-        pdfSidebarOpen={panels.pdfSidebarOpen}
-        onTogglePdfSidebar={() => panels.setPdfSidebarOpen((open) => !open)}
-        onPdfControlsHost={panels.setPdfControlsHost}
-        onOpenNav={openNav}
-        onOpenSearch={() => search.setSearchOpen(true)}
-        onToggleBookMode={toggleBookMode}
-        onTogglePresentation={presentation.togglePresentation}
-        appearanceOpen={panels.appearanceOpen}
-        onAppearanceOpenChange={panels.setAppearanceOpen}
-        bookmarked={bookmarks.bookmarked}
-        onToggleBookmark={() => void bookmarks.toggleBookmark()}
-        labelTarget={bookmarks.labelTarget}
-        onCloseLabel={bookmarks.closeLabelPopover}
-        onCommitLabel={bookmarks.commitBookmarkLabel}
-        onOpenSettings={() => dispatch({ type: "open-settings" })}
-        onBack={() => dispatch({ type: "return-to-library" })}
-      />
+    <ThemeScopeProvider scope={themeScope} style={themeStyle}>
+      <div
+        ref={readerViewRef}
+        data-testid="reader-view"
+        data-theme={preferences.theme}
+        data-reader-position={Math.round(position)}
+        data-pdf-presentation={presentationFlag(isPdf, presentation.presentation)}
+        data-epub-presentation={presentationFlag(isEpub, presentation.presentation)}
+        className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground"
+        style={themeStyle}
+      >
+        <ReaderHeader
+          book={book}
+          isPdf={Boolean(isPdf)}
+          isEpub={Boolean(isEpub)}
+          theme={preferences.theme}
+          bookMode={preferences.bookMode}
+          presentation={presentation.presentation}
+          pdfSidebarOpen={panels.pdfSidebarOpen}
+          onTogglePdfSidebar={() => panels.setPdfSidebarOpen((open) => !open)}
+          onPdfControlsHost={panels.setPdfControlsHost}
+          onOpenNav={openNav}
+          onOpenSearch={() => search.setSearchOpen(true)}
+          onToggleBookMode={toggleBookMode}
+          onTogglePresentation={presentation.togglePresentation}
+          appearanceOpen={panels.appearanceOpen}
+          onAppearanceOpenChange={panels.setAppearanceOpen}
+          bookmarked={bookmarks.bookmarked}
+          onToggleBookmark={() => void bookmarks.toggleBookmark()}
+          labelTarget={bookmarks.labelTarget}
+          onCloseLabel={bookmarks.closeLabelPopover}
+          onCommitLabel={bookmarks.commitBookmarkLabel}
+          onOpenSettings={() => dispatch({ type: "open-settings" })}
+          onBack={() => dispatch({ type: "return-to-library" })}
+        />
 
-      <ReaderSurface
-        book={book}
-        presentation={presentation.presentation}
-        pdfSidebarOpen={panels.pdfSidebarOpen}
-        sidebarHost={panels.pdfSidebarHost}
-        controlsHost={panels.pdfControlsHost}
-        setSidebarHost={panels.setPdfSidebarHost}
-        contentRef={readerContentRef}
-        adapterRef={adapterRef}
-        bookTurnRef={bookTurnRef}
-        initialJump={initialJump}
-        highlights={highlights.highlights}
-        theme={preferences.theme}
-        onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
-        onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
-        onDocumentLoad={setPdfPageCount}
-        onPositionChange={(nextPosition) =>
-          setReportedPosition({ bookId: book.id, position: nextPosition })
-        }
-        onSearchGroup={search.appendSearchGroupFrom}
-        onSearchDone={search.finishSearchFrom}
-        onCreateHighlight={highlights.handleCreateHighlight}
-        onSelectionChange={(selection) => highlights.handleSelectionFrom(book.id, selection)}
-        onExitPresentation={presentation.exitPresentation}
-        onTogglePresentation={presentation.togglePresentation}
-      />
+        <ReaderSurface
+          book={book}
+          presentation={presentation.presentation}
+          pdfSidebarOpen={panels.pdfSidebarOpen}
+          sidebarHost={panels.pdfSidebarHost}
+          controlsHost={panels.pdfControlsHost}
+          setSidebarHost={panels.setPdfSidebarHost}
+          contentRef={readerContentRef}
+          adapterRef={adapterRef}
+          bookTurnRef={bookTurnRef}
+          initialJump={initialJump}
+          highlights={highlights.highlights}
+          theme={preferences.theme}
+          onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
+          onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
+          onDocumentLoad={setPdfPageCount}
+          onPositionChange={(nextPosition) =>
+            setReportedPosition({ bookId: book.id, position: nextPosition })
+          }
+          onSearchGroup={search.appendSearchGroupFrom}
+          onSearchDone={search.finishSearchFrom}
+          onCreateHighlight={highlights.handleCreateHighlight}
+          onSelectionChange={(selection) => highlights.handleSelectionFrom(book.id, selection)}
+          onExitPresentation={presentation.exitPresentation}
+          onTogglePresentation={presentation.togglePresentation}
+        />
 
-      <ReaderProgressFooter
-        presentation={presentation.presentation}
-        isEpub={Boolean(isEpub)}
-        position={position}
-        progressPreview={progress.preview}
-        onPreviewChange={progress.setPreview}
-        onCommit={setPosition}
-        label={progress.label}
-        onLabelClear={progress.clearLabel}
-        onReadLabel={progress.readLabel}
-        progressBarRef={progress.barRef}
-        onReleaseFocus={progress.releaseFocus}
-      />
+        <ReaderProgressFooter
+          presentation={presentation.presentation}
+          isEpub={Boolean(isEpub)}
+          position={position}
+          progressPreview={progress.preview}
+          onPreviewChange={progress.setPreview}
+          onCommit={setPosition}
+          label={progress.label}
+          onLabelClear={progress.clearLabel}
+          onReadLabel={progress.readLabel}
+          progressBarRef={progress.barRef}
+          onReleaseFocus={progress.releaseFocus}
+        />
 
-      <ReaderNavigation
-        open={panels.nav.open}
-        onOpenChange={panels.setNavOpen}
-        book={book}
-        onJump={jump}
-        epubToc={isEpub ? epubToc : null}
-        pdfOutline={isPdf ? pdfOutline : null}
-        annotations={annotations}
-        onAnnotationJump={jumpToAnnotation}
-        onDeleteAnnotation={(id) => void annotationsApi.remove(id)}
-        onUpdateAnnotation={(id, patch) => void annotationsApi.update(id, patch)}
-        tab={panels.nav.tab}
-        onTabChange={panels.selectNavTab}
-        colorFor={highlightColorFor}
-        theme={preferences.theme}
-      />
+        <ReaderNavigation
+          open={panels.nav.open}
+          onOpenChange={panels.setNavOpen}
+          book={book}
+          onJump={jump}
+          epubToc={isEpub ? epubToc : null}
+          pdfOutline={isPdf ? pdfOutline : null}
+          annotations={annotations}
+          onAnnotationJump={jumpToAnnotation}
+          onDeleteAnnotation={(id) => void annotationsApi.remove(id)}
+          onUpdateAnnotation={(id, patch) => void annotationsApi.update(id, patch)}
+          tab={panels.nav.tab}
+          onTabChange={panels.selectNavTab}
+          colorFor={highlightColorFor}
+          theme={preferences.theme}
+        />
 
-      <ReaderSearchOverlay
-        open={search.searchOpen}
-        onOpenChange={search.setSearchOpen}
-        search={search.activeSearch}
-        onSearch={search.runSearch}
-        onPickMatch={search.pickSearchMatch}
-        theme={preferences.theme}
-      />
+        <ReaderSearchOverlay
+          open={search.searchOpen}
+          onOpenChange={search.setSearchOpen}
+          search={search.activeSearch}
+          onSearch={search.runSearch}
+          onPickMatch={search.pickSearchMatch}
+          theme={preferences.theme}
+        />
 
-      <SelectionToolbar
-        selection={highlights.activeSelection}
-        onAction={highlights.handleHighlightAction}
-        onDismiss={highlights.handleDismissSelection}
-        colorFor={highlightColorFor}
-      />
-    </div>
+        <SelectionToolbar
+          selection={highlights.activeSelection}
+          onAction={highlights.handleHighlightAction}
+          onDismiss={highlights.handleDismissSelection}
+          colorFor={highlightColorFor}
+        />
+      </div>
+    </ThemeScopeProvider>
   );
 }

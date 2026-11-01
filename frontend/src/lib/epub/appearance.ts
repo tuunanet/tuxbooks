@@ -275,6 +275,32 @@ export interface EpubThemeColors {
   selectionText: string;
 }
 
+/** Presentation labels for every EPUB preset, in menu order. */
+export const EPUB_THEME_LABELS: Record<EpubThemeName, string> = {
+  default: "Default",
+  light: "Light",
+  paper: "Paper",
+  dark: "Dark",
+  contrast: "High contrast",
+  "blue-contrast": "Blue",
+  "mint-contrast": "Mint",
+};
+
+/**
+ * The light/dark family each preset belongs to. Explicit rather than derived
+ * from luminance so a future dark preset cannot silently inherit light-family
+ * tints, status inks, or `color-scheme` before its colors are reviewed.
+ */
+export const EPUB_THEME_COLOR_SCHEMES: Record<EpubThemeName, "light" | "dark"> = {
+  default: "light",
+  light: "light",
+  paper: "light",
+  dark: "dark",
+  contrast: "dark",
+  "blue-contrast": "dark",
+  "mint-contrast": "light",
+};
+
 /**
  * Theme presets. Light/Paper/Dark keep their established values, completed
  * with visited + selection colors. The contrast presets adapt the
@@ -335,6 +361,15 @@ export const EPUB_THEME_COLORS: Record<Exclude<EpubThemeName, "default">, EpubTh
 };
 
 /**
+ * Every EPUB preset in menu order. Derived from the palette so a new entry
+ * cannot be forgotten by the reader or the settings store.
+ */
+export const EPUB_THEME_NAMES: readonly EpubThemeName[] = [
+  "default",
+  ...(Object.keys(EPUB_THEME_COLORS) as Exclude<EpubThemeName, "default">[]),
+];
+
+/**
  * Colors a theme submits to the toolkit; null for the neutral default
  * (whose nulls actively clear a previously applied theme — the toolkit's
  * preference merging copies nulls and skips undefined).
@@ -389,15 +424,15 @@ export const EPUB_FOREGROUND_AA_RATIO = 4.5;
  * `color-scheme`, so section documents resolve UA-default colors (text is
  * CanvasText) from the OS preference — with a dark OS, publisher pages
  * whose text is unstyled render light-on-white (UAT). The surface is
- * therefore pinned per theme family: light for the light-family presets
- * and the neutral Default (publisher content is light-family by default —
- * the obvious exception to the app's own color-scheme), dark for the
- * dark-family presets whose palettes live on near-black surfaces. The
- * property inherits, so declaring it once on the reader container pins
- * every section iframe.
+ * therefore pinned per theme family from the explicit registry: light for
+ * the light-family presets and the neutral Default (publisher content is
+ * light-family by default — the obvious exception to the app's own
+ * color-scheme), dark for the dark-family presets whose palettes live on
+ * near-black surfaces. The property inherits, so declaring it once on the
+ * reader container pins every section iframe.
  */
 export function epubThemeColorScheme(theme: EpubThemeName): "light" | "dark" {
-  return theme === "dark" || theme === "contrast" || theme === "blue-contrast" ? "dark" : "light";
+  return EPUB_THEME_COLOR_SCHEMES[theme];
 }
 
 /**
@@ -473,65 +508,79 @@ export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
 }
 
 /**
- * CSS custom properties retinting shared chrome details (secondary text,
- * hairlines, chrome surfaces, progress track/fill) with the active theme's
- * own colors, applied on the reader root; consumers reference them with
- * app-token fallbacks. Undefined for the neutral default, where the app
- * tokens are correct. Without this, app-dark secondary text and an
- * app-light progress bar float over forced-light themed chrome when the
- * app runs dark (UAT). The surface is the theme's own background, for
- * chrome that overlays the document (the auto-hiding progress footer).
+ * The complete app-token set for one reader theme. This is the single
+ * mapping from a reader preset to everything its chrome consumes: shadcn
+ * primitives, portaled menus, form controls, status tints, and the reader's
+ * own progress bar. A new preset needs its `EpubThemeName` member, colors,
+ * label, and color-scheme family; every derived token follows from that
+ * background/text pair.
+ *
+ * The neutral default intentionally returns undefined: its chrome is the
+ * app chrome, so the active app theme's tokens are already correct.
  */
-export function readerChromeVariables(theme: EpubThemeName): Record<string, string> | undefined {
+export function readerThemeVariables(theme: EpubThemeName): Record<string, string> | undefined {
   const colors = epubThemeColors(theme);
   if (!colors) return undefined;
-  const muted = hexWithAlpha(colors.text, 0.6);
-  const hairline = hexWithAlpha(colors.text, 0.15);
-  const track = hexWithAlpha(colors.text, 0.2);
-  if (!muted || !hairline || !track) return undefined;
-  return {
-    "--reader-chrome-muted": muted,
-    "--reader-chrome-border": hairline,
-    "--reader-chrome-surface": colors.background,
-    "--reader-progress-fill": colors.text,
-    "--reader-progress-track": track,
-  };
-}
 
-/**
- * App token overrides scoping the appearance popover to the active theme.
- * Radix portals the popover to document.body — outside the reader root —
- * so the themed look is applied by redefining the app tokens its shadcn
- * controls (sliders, toggle groups, labels) consume. Undefined for the
- * neutral default: that popover keeps the app chrome (UAT: it should
- * follow the reader theme, not the app's light/dark mode).
- */
-export function readerPopoverVariables(theme: EpubThemeName): Record<string, string> | undefined {
-  const colors = epubThemeColors(theme);
-  if (!colors) return undefined;
-  const muted = hexWithAlpha(colors.text, 0.08);
-  const accent = hexWithAlpha(colors.text, 0.1);
-  const mutedForeground = hexWithAlpha(colors.text, 0.6);
-  const hairline = hexWithAlpha(colors.text, 0.2);
-  const edge = hexWithAlpha(colors.text, 0.25);
-  const focus = hexWithAlpha(colors.text, 0.4);
-  if (!muted || !accent || !mutedForeground || !hairline || !edge || !focus) return undefined;
+  const dark = epubThemeColorScheme(theme) === "dark";
+  const tint = (alpha: number): string => hexWithAlpha(colors.text, alpha)!;
+  const soft = (color: string, alpha: number): string => hexWithAlpha(color, alpha)!;
+  // Status and destructive hues stay semantic; the family only picks the
+  // light or dark ink that reads on the preset's surface.
+  const destructive = dark ? "#fca5a5" : "#b42318";
+  const status = dark
+    ? { info: "#93c5fd", warning: "#fcd34d", success: "#6ee7b7" }
+    : { info: "#1d4ed8", warning: "#b45309", success: "#047857" };
+
   return {
-    "--popover": colors.background,
-    "--popover-foreground": colors.text,
     "--background": colors.background,
     "--foreground": colors.text,
+    "--card": colors.background,
+    "--card-foreground": colors.text,
+    "--popover": colors.background,
+    "--popover-foreground": colors.text,
     "--primary": colors.text,
     "--primary-foreground": colors.background,
-    "--secondary": muted,
+    "--secondary": tint(dark ? 0.1 : 0.06),
     "--secondary-foreground": colors.text,
-    "--muted": muted,
-    "--muted-foreground": mutedForeground,
-    "--accent": accent,
+    "--muted": tint(dark ? 0.1 : 0.06),
+    "--muted-foreground": tint(0.6),
+    "--accent": tint(0.1),
     "--accent-foreground": colors.text,
-    "--border": hairline,
-    "--input": edge,
-    "--ring": focus,
+    "--destructive": destructive,
+    "--destructive-border": dark ? soft(destructive, 0.5) : destructive,
+    "--destructive-soft": soft(destructive, dark ? 0.2 : 0.1),
+    "--destructive-soft-hover": soft(destructive, dark ? 0.3 : 0.2),
+    "--destructive-ring": soft(destructive, dark ? 0.4 : 0.2),
+    "--border": tint(0.2),
+    "--input": tint(0.25),
+    "--ring": tint(0.4),
+    "--control": dark ? tint(0.08) : "transparent",
+    "--control-hover": tint(dark ? 0.12 : 0.06),
+    "--control-disabled": tint(dark ? 0.14 : 0.08),
+    "--control-border": tint(dark ? 0.25 : 0.18),
+    "--ghost-hover": tint(dark ? 0.1 : 0.06),
+    "--tab-fg": tint(0.6),
+    "--tab-active": dark ? tint(0.12) : colors.background,
+    "--tab-active-border": dark ? tint(0.2) : "transparent",
+    "--status-info": status.info,
+    "--status-info-soft": soft(status.info, dark ? 0.18 : 0.1),
+    "--status-info-border": soft(status.info, dark ? 0.35 : 0.3),
+    "--status-warning": status.warning,
+    "--status-warning-soft": soft(status.warning, dark ? 0.18 : 0.1),
+    "--status-warning-border": soft(status.warning, dark ? 0.35 : 0.3),
+    "--status-success": status.success,
+    "--status-success-soft": soft(status.success, dark ? 0.18 : 0.1),
+    "--status-success-border": soft(status.success, dark ? 0.35 : 0.3),
+    "--status-destructive": destructive,
+    "--status-destructive-soft": soft(destructive, dark ? 0.2 : 0.1),
+    "--status-destructive-border": soft(destructive, 0.3),
+    "--reader-chrome-muted": tint(0.6),
+    "--reader-chrome-border": tint(0.15),
+    "--reader-chrome-surface": colors.background,
+    "--reader-chrome-card": colors.text,
+    "--reader-progress-fill": colors.text,
+    "--reader-progress-track": tint(0.2),
   };
 }
 

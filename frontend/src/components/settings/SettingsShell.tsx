@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import {
   BookOpen,
   Database,
@@ -25,7 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useLibrary } from "@/hooks/useLibrary";
-import { epubForegroundFitsTheme, epubSurfaceTheme, isEpubHexColor } from "@/lib/epub/appearance";
+import { isEpubHexColor } from "@/lib/epub/appearance";
 import { FORMATS } from "@/lib/formats";
 import {
   HIGHLIGHT_COLOR_KEYS,
@@ -35,12 +35,12 @@ import {
   type HighlightThemeFamily,
 } from "@/lib/highlightPalette";
 import {
+  applyReaderSettingsPatch,
   clearReaderSettings,
-  defaultReaderSettings,
   effectiveReaderPreferences,
   readReaderSettings,
+  subscribeReaderSettings,
   writeReaderSettings,
-  type StoredReaderSettings,
 } from "@/lib/readerSettings";
 import {
   formatShortcutDisplay,
@@ -50,7 +50,7 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
-import { autoReaderTheme, type ReaderPreferences } from "@/state/readerState";
+import { type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 import type { BookFormat } from "@/types/domain";
 
@@ -80,38 +80,21 @@ const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
  * foreground override that stops fitting the new surface is dropped.
  */
 function useStoredReaderSettings(resolvedTheme: "light" | "dark") {
-  const [stored, setStored] = useState<StoredReaderSettings>(readReaderSettings);
+  const stored = useSyncExternalStore(
+    subscribeReaderSettings,
+    readReaderSettings,
+    readReaderSettings,
+  );
 
   const setPreferences = useCallback(
     (patch: Partial<ReaderPreferences>) => {
-      setStored((current) => {
-        const next: StoredReaderSettings = {
-          preferences: { ...current.preferences, ...patch },
-          themePinned: patch.theme !== undefined ? true : current.themePinned,
-        };
-        const currentEffectiveTheme = current.themePinned
-          ? current.preferences.theme
-          : autoReaderTheme(resolvedTheme);
-        if (
-          patch.theme !== undefined &&
-          patch.theme !== currentEffectiveTheme &&
-          !epubForegroundFitsTheme(
-            next.preferences.foreground,
-            epubSurfaceTheme(next.preferences.theme),
-          )
-        ) {
-          next.preferences.foreground = null;
-        }
-        writeReaderSettings(next);
-        return next;
-      });
+      writeReaderSettings(applyReaderSettingsPatch(readReaderSettings(), patch, resolvedTheme));
     },
     [resolvedTheme],
   );
 
   const reset = useCallback(() => {
     clearReaderSettings();
-    setStored(defaultReaderSettings());
   }, []);
 
   return { stored, setPreferences, reset };
@@ -258,7 +241,7 @@ function HighlightsSettingsCard({
         <HighlightFamilyRow
           family="dark"
           label="Dark themes"
-          themes="Dark · Invert · High contrast · Blue contrast"
+          themes="Dark · Invert · High contrast · Blue"
           overrides={overrides}
           onChange={onChange}
           onReset={onReset}

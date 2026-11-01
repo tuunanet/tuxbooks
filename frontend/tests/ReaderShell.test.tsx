@@ -29,6 +29,7 @@ import { ReaderNavigation } from "@/components/reader/ReaderNavigation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getPdfOutline, openPdfDocumentFromBook } from "@/lib/pdf/pdfEngine";
 import { READER_SETTINGS_STORAGE_KEY } from "@/lib/readerSettings";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { makeAnnotation, makeBook } from "./factories";
@@ -1626,14 +1627,14 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
 
-    // Light paints its own chrome (white) instead of following the app
-    // tokens — in a dark app the toolbar must still match the forced-white
-    // surface (UAT feedback).
+    // Light paints the whole chrome (not just the page) from its own token
+    // scope, so a dark app cannot leak through the toolbar or popovers.
     await userEvent.click(screen.getByRole("radio", { name: "Light" }));
     const lightView = screen.getByTestId("reader-view");
     expect(lightView).toHaveAttribute("data-theme", "light");
-    expect(lightView).toHaveClass("bg-[#ffffff]");
-    expect(lightView).not.toHaveClass("bg-background");
+    expect(lightView.style.getPropertyValue("--background")).toBe("#ffffff");
+    expect(lightView.style.getPropertyValue("--foreground")).toBe("#1f2328");
+    expect(lightView).toHaveStyle({ colorScheme: "light" });
 
     // Accessible presets apply like any other theme...
     await userEvent.click(screen.getByRole("radio", { name: "High contrast" }));
@@ -1643,9 +1644,12 @@ describe("ReaderAppearance", () => {
       colorScheme: "dark",
     });
 
-    // ...and Default restores the publisher-owned colors (neutral state).
+    // ...and Default restores the publisher-owned colors (neutral state),
+    // with no reader token overrides left on the root.
     await userEvent.click(within(themeGroup).getByRole("radio", { name: "Default" }));
-    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "default");
+    const defaultView = screen.getByTestId("reader-view");
+    expect(defaultView).toHaveAttribute("data-theme", "default");
+    expect(defaultView.style.getPropertyValue("--background")).toBe("");
 
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
@@ -2143,6 +2147,100 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pdf-reader")).not.toContainElement(
       screen.getByTestId("pdf-toolbar"),
     );
+  });
+});
+
+describe("Reader theme scope", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("themes settings from the reader that opened it, not the app theme", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "light" },
+        themePinned: true,
+      }),
+    );
+
+    renderReader();
+    const readerView = await screen.findByTestId("reader-view");
+    expect(readerView.style.getPropertyValue("--background")).toBe("#ffffff");
+
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const windowEl = await screen.findByTestId("settings-window");
+    expect(windowEl.style.getPropertyValue("--background")).toBe("#ffffff");
+    expect(windowEl.style.getPropertyValue("--foreground")).toBe("#1f2328");
+    expect(windowEl).toHaveStyle({ colorScheme: "light" });
+  });
+
+  it("repaints an unpinned settings window when the app theme flips", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const windowEl = await screen.findByTestId("settings-window");
+    expect(document.documentElement).toHaveClass("dark");
+    // The unpinned reader auto-maps dark to the dark preset, so Settings
+    // matches that surface rather than the app's slightly different tokens.
+    expect(windowEl.style.getPropertyValue("--background")).toBe("#101013");
+
+    await userEvent.click(screen.getByRole("radio", { name: "Light" }));
+
+    // The app flip re-maps the reader to Default; the still-open window
+    // follows it live back to the app scope.
+    expect(document.documentElement).not.toHaveClass("dark");
+    await waitFor(() => expect(windowEl.style.getPropertyValue("--background")).toBe(""));
+  });
+
+  it("repaints the open reader and window together when Viewer settings changes", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "light" },
+        themePinned: true,
+      }),
+    );
+
+    renderReader();
+    await screen.findByTestId("reader-view");
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const windowEl = await screen.findByTestId("settings-window");
+
+    await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
+
+    expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
+    expect(windowEl.style.getPropertyValue("--background")).toBe("#f6f0e4");
+  });
+
+  it("themes a reader tooltip through the same scope", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "light" },
+        themePinned: true,
+      }),
+    );
+
+    renderReader();
+    const back = await screen.findByTestId("reader-back");
+    await userEvent.hover(back);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.style.getPropertyValue("--background")).toBe("#ffffff");
+    expect(tooltip.style.getPropertyValue("--foreground")).toBe("#1f2328");
   });
 });
 

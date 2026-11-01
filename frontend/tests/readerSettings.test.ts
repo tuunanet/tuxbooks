@@ -9,6 +9,7 @@ import {
   sanitizeReaderPreferences,
   writeReaderSettings,
 } from "@/lib/readerSettings";
+import { EPUB_THEME_NAMES } from "@/lib/epub/appearance";
 import { DEFAULT_READER_PREFERENCES } from "@/state/readerState";
 
 beforeEach(() => {
@@ -85,6 +86,14 @@ describe("readerSettings persistence", () => {
     expect(settings.foreground).toBeNull();
     expect(settings.theme).toBe(DEFAULT_READER_PREFERENCES.theme);
     expect(settings.layout).toBe(DEFAULT_READER_PREFERENCES.layout);
+  });
+
+  it("accepts every palette theme plus the PDF-only invert preset", () => {
+    for (const theme of EPUB_THEME_NAMES) {
+      expect(sanitizeReaderPreferences({ theme }).theme).toBe(theme);
+    }
+    // Invert has no EPUB palette entry but is a valid stored PDF choice.
+    expect(sanitizeReaderPreferences({ theme: "invert" }).theme).toBe("invert");
   });
 
   it("normalizes a valid foreground to lower case", () => {

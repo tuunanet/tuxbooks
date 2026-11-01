@@ -25,27 +25,24 @@ function statusFor(location: StorageReport["bookLocations"][number]): {
     return {
       label: "Missing",
       className:
-        "border-destructive/30 bg-destructive/10 text-destructive dark:border-destructive/30 dark:bg-destructive/20",
+        "border-status-destructive-border bg-status-destructive-soft text-status-destructive",
     };
   }
   if (location.status === "importing") {
     return {
       label: "Importing",
-      className:
-        "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:border-blue-400/30 dark:bg-blue-400/20 dark:text-blue-300",
+      className: "border-status-info-border bg-status-info-soft text-status-info",
     };
   }
   if (location.status === "refreshing") {
     return {
       label: "Refreshing",
-      className:
-        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/20 dark:text-amber-300",
+      className: "border-status-warning-border bg-status-warning-soft text-status-warning",
     };
   }
   return {
     label: "Up to date",
-    className:
-      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/20 dark:text-emerald-300",
+    className: "border-status-success-border bg-status-success-soft text-status-success",
   };
 }
 

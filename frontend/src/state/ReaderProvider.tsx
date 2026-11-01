@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { autoReaderTheme, ReaderContext, type ReaderPreferences } from "./readerState";
-import { epubForegroundFitsTheme, epubSurfaceTheme } from "@/lib/epub/appearance";
-import { readReaderSettings, writeReaderSettings } from "@/lib/readerSettings";
+import {
+  applyReaderSettingsPatch,
+  readReaderSettings,
+  subscribeReaderSettings,
+  writeReaderSettings,
+} from "@/lib/readerSettings";
 import type { ResolvedTheme } from "@/lib/theme";
 
 interface ReaderProviderProps {
@@ -18,21 +22,20 @@ interface ReaderProviderProps {
 
 /**
  * Owns reader-session state: appearance preferences and reading position.
- * Everything resets when the reader unmounts; position is persisted through
- * the backend progress commands and annotations (bookmarks, highlights,
- * notes) through the annotations commands.
+ * Preferences come from the shared localStorage-backed store
+ * (`lib/readerSettings`), so Settings edits and reader edits cannot leave
+ * stale copies that overwrite each other. Position is persisted through the
+ * backend progress commands and annotations (bookmarks, highlights, notes)
+ * through the annotations commands.
  */
 export function ReaderProvider({ children, globalTheme = "light" }: ReaderProviderProps) {
-  // Seed from the persisted defaults once; the effect below writes every
-  // change back, so appearance picks apply to the next book too.
-  const [initial] = useState(readReaderSettings);
-  const [preferences, setPreferencesState] = useState<ReaderPreferences>(initial.preferences);
-  const [themePinned, setThemePinned] = useState(initial.themePinned);
+  const stored = useSyncExternalStore(
+    subscribeReaderSettings,
+    readReaderSettings,
+    readReaderSettings,
+  );
+  const { preferences, themePinned } = stored;
   const [position, setPositionState] = useState(0);
-
-  useEffect(() => {
-    writeReaderSettings({ preferences, themePinned });
-  }, [preferences, themePinned]);
 
   const setPosition = useCallback((percentage: number) => {
     setPositionState(Math.max(0, Math.min(100, percentage)));
@@ -42,31 +45,9 @@ export function ReaderProvider({ children, globalTheme = "light" }: ReaderProvid
 
   const setPreferences = useCallback(
     (patch: Partial<ReaderPreferences>) => {
-      setPreferencesState((current) => {
-        const next = { ...current, ...patch };
-        // A foreground override is judged against the theme it was picked
-        // on; switching to a theme whose surface it no longer fits (WCAG
-        // AA) drops it instead of coloring body text illegibly (UAT:
-        // bright ink from Dark surviving a switch to the white Default
-        // page). The comparison uses the effective surface — while
-        // unpinned that is the auto theme, not the stored one. OS flips
-        // while unpinned do not pass through here and keep the
-        // session-scoped override as-is.
-        const currentEffectiveTheme = themePinned ? current.theme : autoReaderTheme(globalTheme);
-        if (
-          patch.theme !== undefined &&
-          patch.theme !== currentEffectiveTheme &&
-          // The fit check uses the EPUB-facing surface of the theme (the
-          // PDF-only Invert preset degrades to dark — issue #67).
-          !epubForegroundFitsTheme(next.foreground, epubSurfaceTheme(next.theme))
-        ) {
-          next.foreground = null;
-        }
-        return next;
-      });
-      if (patch.theme !== undefined) setThemePinned(true);
+      writeReaderSettings(applyReaderSettingsPatch(readReaderSettings(), patch, globalTheme));
     },
-    [globalTheme, themePinned],
+    [globalTheme],
   );
 
   // While unpinned the surface tracks the global theme; derived rather than

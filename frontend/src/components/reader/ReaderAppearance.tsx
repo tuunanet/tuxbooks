@@ -19,6 +19,8 @@ import {
   EPUB_PAGE_GUTTER_SCALE_PX,
   EPUB_PARAGRAPH_SPACING_SCALE,
   EPUB_TEXT_ALIGNMENTS,
+  EPUB_THEME_LABELS,
+  EPUB_THEME_NAMES,
   EPUB_WORD_SPACING_SCALE,
   epubContrastRatio,
   epubForegroundReferenceBackground,
@@ -31,12 +33,12 @@ import {
   nearestEpubPageGutter,
   nearestEpubParagraphSpacing,
   nearestEpubWordSpacing,
-  readerPopoverVariables,
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
 import { PDF_THEME_MENU_OPTIONS } from "@/lib/pdf/theme";
 import { formatShortcutAria, READER_PANEL_SHORTCUTS } from "@/lib/readerShortcuts";
+import { readerThemeStyle } from "@/lib/themeScope";
 import { cn } from "@/lib/utils";
 import { ForegroundPicker } from "./ForegroundPicker";
 import {
@@ -46,15 +48,10 @@ import {
   type ReaderTheme,
 } from "@/state/readerState";
 
-const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
-  { value: "default", label: "Default" },
-  { value: "light", label: "Light" },
-  { value: "paper", label: "Paper" },
-  { value: "dark", label: "Dark" },
-  { value: "contrast", label: "High contrast" },
-  { value: "blue-contrast", label: "Blue" },
-  { value: "mint-contrast", label: "Mint" },
-];
+const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = EPUB_THEME_NAMES.map((value) => ({
+  value,
+  label: EPUB_THEME_LABELS[value],
+}));
 
 const LAYOUT_OPTIONS: { value: ReaderLayout; label: string }[] = [
   { value: "paginated", label: "Paginated" },
@@ -547,10 +544,10 @@ export function ReaderAppearance({
           // controls use the wider two-column shape that avoids scrollbars.
           isPdf ? "w-64" : "w-[30rem]",
         )}
-        // The popover is portaled outside the reader root; redefine the
-        // app tokens in its scope so it follows the reader theme instead
-        // of the global light/dark mode.
-        style={readerPopoverVariables(epubSurfaceTheme(preferences.theme))}
+        // The popover is portaled outside the reader root; carry the full
+        // reader token set so it follows the book's theme instead of the
+        // global light/dark mode.
+        style={readerThemeStyle(preferences.theme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <ReaderAppearanceControls

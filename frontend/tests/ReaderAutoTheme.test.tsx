@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { readReaderSettings, writeReaderSettings } from "@/lib/readerSettings";
 import type { ResolvedTheme } from "@/lib/theme";
 import { ReaderProvider } from "@/state/ReaderProvider";
-import { autoReaderTheme, useReader } from "@/state/readerState";
+import { autoReaderTheme, DEFAULT_READER_PREFERENCES, useReader } from "@/state/readerState";
 
 function Probe() {
   const { preferences, setPreferences } = useReader();
@@ -133,5 +134,25 @@ describe("ReaderProvider global theme following", () => {
       </ReaderProvider>,
     );
     expect(screen.getByTestId("theme")).toHaveTextContent("default");
+  });
+
+  it("adopts a theme written by Settings and never overwrites it with stale state", async () => {
+    renderReader("light");
+    expect(screen.getByTestId("theme")).toHaveTextContent("default");
+
+    // Settings edits the shared store directly while this reader is open.
+    act(() => {
+      writeReaderSettings({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "paper" },
+        themePinned: true,
+      });
+    });
+    expect(screen.getByTestId("theme")).toHaveTextContent("paper");
+
+    // A later reader edit starts from the stored theme, not the stale one.
+    await userEvent.click(screen.getByRole("button", { name: "patch-line-height" }));
+    const stored = readReaderSettings();
+    expect(stored.preferences.theme).toBe("paper");
+    expect(stored.preferences.lineHeight).toBe(1.5);
   });
 });

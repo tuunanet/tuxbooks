@@ -15,7 +15,10 @@
 import {
   clampEpubColumnCount,
   EPUB_FONT_FAMILIES,
+  EPUB_THEME_NAMES,
   EPUB_TEXT_ALIGNMENTS,
+  epubForegroundFitsTheme,
+  epubSurfaceTheme,
   isEpubHexColor,
   nearestEpubFontSize,
   nearestEpubLetterSpacing,
@@ -49,22 +52,17 @@ export interface StoredReaderSettings {
   themePinned: boolean;
 }
 
-const THEMES: readonly ReaderTheme[] = [
-  "default",
-  "light",
-  "paper",
-  "dark",
-  "contrast",
-  "invert",
-  "blue-contrast",
-  "mint-contrast",
-];
+// EPUB presets come from the palette; Invert is the PDF-only extra.
+const THEMES: readonly ReaderTheme[] = [...EPUB_THEME_NAMES, "invert"];
 
 const LAYOUTS: readonly ReaderLayout[] = ["paginated", "scrolling"];
 
 export function defaultReaderSettings(): StoredReaderSettings {
   return { preferences: DEFAULT_READER_PREFERENCES, themePinned: false };
 }
+
+/** Stable snapshot for the no-storage path `useSyncExternalStore` reads. */
+const NO_STORAGE_SETTINGS = defaultReaderSettings();
 
 function safeStorage(): Storage | null {
   try {
@@ -124,11 +122,14 @@ export function sanitizeReaderPreferences(raw: unknown): ReaderPreferences {
   };
 }
 
-/** Read the stored settings, defaulting on absence, corruption, or no storage. */
-export function readReaderSettings(): StoredReaderSettings {
-  const storage = safeStorage();
-  if (!storage) return defaultReaderSettings();
-  const raw = storage.getItem(READER_SETTINGS_STORAGE_KEY);
+/** Cached snapshot so `useSyncExternalStore` sees a stable object per value. */
+let cachedRaw: string | null | undefined;
+let cachedSettings: StoredReaderSettings | undefined;
+/** Session override for unavailable or full storage. */
+let sessionSettings: StoredReaderSettings | undefined;
+const listeners = new Set<() => void>();
+
+function parseStored(raw: string | null): StoredReaderSettings {
   if (!raw) return defaultReaderSettings();
   try {
     const parsed = JSON.parse(raw) as { preferences?: unknown; themePinned?: unknown };
@@ -141,24 +142,100 @@ export function readReaderSettings(): StoredReaderSettings {
   }
 }
 
+function emit(): void {
+  for (const listener of listeners) listener();
+}
+
+/**
+ * Subscribe to reader-setting writes. The reader and Settings both consume
+ * the same localStorage-backed store, so a change in one surface repaints the
+ * other instead of leaving a stale copy that can overwrite it later.
+ */
+export function subscribeReaderSettings(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** Read the stored settings, defaulting on absence, corruption, or no storage. */
+export function readReaderSettings(): StoredReaderSettings {
+  if (sessionSettings) return sessionSettings;
+  const storage = safeStorage();
+  if (!storage) return NO_STORAGE_SETTINGS;
+  const raw = storage.getItem(READER_SETTINGS_STORAGE_KEY);
+  if (raw === cachedRaw && cachedSettings) return cachedSettings;
+  cachedRaw = raw;
+  cachedSettings = parseStored(raw);
+  return cachedSettings;
+}
+
 export function writeReaderSettings(settings: StoredReaderSettings): void {
   const storage = safeStorage();
-  if (!storage) return;
+  if (!storage) {
+    sessionSettings = settings;
+    emit();
+    return;
+  }
   try {
-    storage.setItem(READER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    const raw = JSON.stringify(settings);
+    storage.setItem(READER_SETTINGS_STORAGE_KEY, raw);
+    sessionSettings = undefined;
+    cachedRaw = raw;
+    cachedSettings = parseStored(raw);
+    emit();
   } catch {
-    // Storage full or unavailable: preferences stay session-scoped.
+    // Storage full: preferences stay session-scoped instead of failing.
+    sessionSettings = settings;
+    emit();
   }
 }
 
 export function clearReaderSettings(): void {
+  sessionSettings = undefined;
   const storage = safeStorage();
-  if (!storage) return;
+  if (!storage) {
+    emit();
+    return;
+  }
   try {
     storage.removeItem(READER_SETTINGS_STORAGE_KEY);
+    cachedRaw = null;
+    cachedSettings = defaultReaderSettings();
+    emit();
   } catch {
     // Nothing to clear.
   }
+}
+
+/**
+ * Apply one appearance patch on top of the stored settings. An explicit
+ * theme pick pins the surface, and a foreground override that would fail AA
+ * on the new theme surface is dropped instead of coloring body text
+ * illegibly. Both the reader and Settings go through this one rule.
+ */
+export function applyReaderSettingsPatch(
+  current: StoredReaderSettings,
+  patch: Partial<ReaderPreferences>,
+  resolvedTheme: ResolvedTheme,
+): StoredReaderSettings {
+  const preferences = { ...current.preferences, ...patch };
+  const currentEffectiveTheme = current.themePinned
+    ? current.preferences.theme
+    : autoReaderTheme(resolvedTheme);
+  if (
+    patch.theme !== undefined &&
+    patch.theme !== currentEffectiveTheme &&
+    // The fit check uses the EPUB-facing surface of the theme (the
+    // PDF-only Invert preset degrades to dark — issue #67).
+    !epubForegroundFitsTheme(preferences.foreground, epubSurfaceTheme(preferences.theme))
+  ) {
+    preferences.foreground = null;
+  }
+  return {
+    preferences,
+    themePinned: patch.theme !== undefined ? true : current.themePinned,
+  };
 }
 
 /**

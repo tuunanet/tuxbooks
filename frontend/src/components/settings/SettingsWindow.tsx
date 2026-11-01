@@ -1,7 +1,26 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  effectiveReaderPreferences,
+  readReaderSettings,
+  subscribeReaderSettings,
+} from "@/lib/readerSettings";
+import {
+  appThemeScope,
+  readerThemeScope,
+  ThemeScopeProvider,
+  themeScopeStyle,
+} from "@/lib/themeScope";
 import { cn } from "@/lib/utils";
 import { useAppDispatch, useAppState } from "@/state/appState";
+import { useThemeState } from "@/state/themeState";
 import { SettingsShell } from "./SettingsShell";
 
 /** Keeps the window clear of the viewport edge while dragging. */
@@ -30,11 +49,30 @@ function clamp(value: number, min: number, max: number): number {
 export function SettingsWindow() {
   const app = useAppState();
   const dispatch = useAppDispatch();
+  const { resolvedTheme } = useThemeState();
   const open = app.settingsOpen;
+  const readerSettings = useSyncExternalStore(
+    subscribeReaderSettings,
+    readReaderSettings,
+    readReaderSettings,
+  );
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Opened over the reader, the window paints with the reader's live surface
+  // theme instead of the app theme underneath it. The scope derives from the
+  // same store the reader renders from, so a pinned theme, an auto theme
+  // following an app flip, and a Viewer-settings edit all stay in sync.
+  const themeScope = useMemo(
+    () =>
+      app.view === "reader"
+        ? readerThemeScope(effectiveReaderPreferences(readerSettings, resolvedTheme).theme)
+        : appThemeScope(),
+    [app.view, readerSettings, resolvedTheme],
+  );
+  const themeStyle = useMemo(() => themeScopeStyle(themeScope), [themeScope]);
 
   // Reopening starts centered again instead of wherever the last drag ended.
   const close = useCallback(() => {
@@ -91,39 +129,41 @@ export function SettingsWindow() {
   // they are Escape. Escape keeps bubbling to Radix's document listener so
   // the dialog closes, then stops there before the registry sees it.
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) close();
-      }}
-    >
-      <DialogContent
-        ref={contentRef}
-        data-testid="settings-window"
-        showCloseButton={false}
-        aria-describedby={undefined}
-        overlayClassName="bg-black/40 backdrop-blur-sm supports-backdrop-filter:backdrop-blur-sm"
-        onEscapeKeyDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") event.stopPropagation();
+    <ThemeScopeProvider scope={themeScope} style={themeStyle}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) close();
         }}
-        onPointerDown={startDrag}
-        onPointerMove={moveDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        style={{
-          left: `calc(50% + ${offset.x}px)`,
-          top: `calc(50% + ${offset.y}px)`,
-        }}
-        className={cn(
-          "block h-[min(680px,calc(100vh-2rem))] w-[min(920px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none",
-          "rounded-2xl shadow-2xl",
-          dragging && "cursor-grabbing select-none",
-        )}
       >
-        <DialogTitle className="sr-only">Settings</DialogTitle>
-        <SettingsShell onClose={close} />
-      </DialogContent>
-    </Dialog>
+        <DialogContent
+          ref={contentRef}
+          data-testid="settings-window"
+          showCloseButton={false}
+          aria-describedby={undefined}
+          overlayClassName="bg-black/40 backdrop-blur-sm supports-backdrop-filter:backdrop-blur-sm"
+          onEscapeKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") event.stopPropagation();
+          }}
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          style={{
+            left: `calc(50% + ${offset.x}px)`,
+            top: `calc(50% + ${offset.y}px)`,
+          }}
+          className={cn(
+            "block h-[min(680px,calc(100vh-2rem))] w-[min(920px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none",
+            "rounded-2xl shadow-2xl",
+            dragging && "cursor-grabbing select-none",
+          )}
+        >
+          <DialogTitle className="sr-only">Settings</DialogTitle>
+          <SettingsShell onClose={close} />
+        </DialogContent>
+      </Dialog>
+    </ThemeScopeProvider>
   );
 }

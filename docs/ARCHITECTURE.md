@@ -328,6 +328,7 @@ frontend/src/
     lib/bridge.ts         the only window.tuxbooks consumer (typed wrappers)
     lib/shortcuts.ts      centralized keyboard shortcut registry
     lib/theme.ts          global light/dark theme logic (parse/resolve/apply)
+    lib/themeScope.tsx    app/reader theme scopes and portaled token style
     lib/formats.ts        format -> engine registry (filter options + reader
                           dispatch)
     lib/readerSettings.ts persisted reader-appearance defaults (validated
@@ -379,10 +380,26 @@ The reading surface follows the global theme too (`autoReaderTheme` in
 `readerState.ts`: dark → `dark` preset / PDF invert, light → publisher
 default) until a theme is picked in the reader's appearance menu or in
 Settings, which pins it. Reader appearance preferences persist on device in
-`localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader
-writes them on every change and Settings → Viewer settings edits the same store,
-so defaults apply to every book. Values are re-validated and snapped onto the
+`localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader and
+Settings → Viewer settings both read and write one subscribed store, so an
+edit on either side cannot leave a stale copy that overwrites the other.
+Defaults apply to every book. Values are re-validated and snapped onto the
 supported scales on read, so stale storage can never reach an engine.
+
+Theme scopes (`lib/themeScope.tsx`) keep the reader and every portaled
+surface on one token model. An app scope uses the document's tokens; a reader
+scope redefines the same shadcn tokens from `EPUB_THEME_COLORS`
+(`readerThemeVariables`), so chrome, form controls, status tints, and
+progress all follow the book instead of the app's light/dark mode. Portaled
+primitives (dialog, popover, tooltip, sheet, menu, select) read the scope
+through `useThemeScopeStyle`, which covers surfaces mounted on
+`document.body`. The neutral reader `default` and the app shell resolve to
+the app scope. Settings opened over the reader derives the same scope from
+the shared reader settings and the resolved app theme, so it follows the book
+and live app flips without a second copy of the theme in app state. A new
+reader preset needs its `EpubThemeName` member, an `EPUB_THEME_COLORS` entry,
+a label, and a color-scheme family; derived tokens, menus, validation, and
+the token test follow from those entries.
 
 ## Testing layers
 

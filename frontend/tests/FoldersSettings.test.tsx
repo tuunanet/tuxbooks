@@ -99,9 +99,9 @@ describe("FoldersSettings", () => {
 
     await screen.findByTestId("folders-list");
     expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Missing");
-    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-destructive/10");
+    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-status-destructive-soft");
     expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Up to date");
-    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-emerald-500/10");
+    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-status-success-soft");
   });
 
   it("tags importing and refreshing folders in the status column", async () => {
@@ -117,9 +117,9 @@ describe("FoldersSettings", () => {
 
     await screen.findByTestId("folders-list");
     expect(screen.getByTestId("folder-status-1")).toHaveTextContent("Importing");
-    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-blue-500/10");
+    expect(screen.getByTestId("folder-status-1")).toHaveClass("bg-status-info-soft");
     expect(screen.getByTestId("folder-status-2")).toHaveTextContent("Refreshing");
-    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-amber-500/10");
+    expect(screen.getByTestId("folder-status-2")).toHaveClass("bg-status-warning-soft");
   });
 
   it("explains that a watched folder can be local, on a network path, or cloud-synced", async () => {

@@ -86,6 +86,16 @@ describe("SettingsShell", () => {
     await waitFor(() => expect(screen.queryByTestId("settings-window")).not.toBeInTheDocument());
   });
 
+  it("keeps the app theme when opened from the library", async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    renderSettings();
+
+    const windowEl = await screen.findByTestId("settings-window");
+    // No reader token overrides: the document's dark app tokens stay in force.
+    expect(document.documentElement).toHaveClass("dark");
+    expect(windowEl.style.getPropertyValue("--background")).toBe("");
+  });
+
   it("drags the window by its header", async () => {
     renderSettings();
 

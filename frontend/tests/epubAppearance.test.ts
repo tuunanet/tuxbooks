@@ -30,8 +30,7 @@ import {
   epubThemeColorScheme,
   epubForegroundReferenceBackground,
   EPUB_FOREGROUND_SWATCHES,
-  readerChromeVariables,
-  readerPopoverVariables,
+  readerThemeVariables,
   readerScrollbarColor,
   isEpubFontSizeStep,
   nearestEpubFontSize,
@@ -378,39 +377,48 @@ describe("readerScrollbarColor", () => {
   });
 });
 
-describe("readerChromeVariables", () => {
+describe("readerThemeVariables", () => {
   it("keeps app tokens for the neutral default", () => {
-    expect(readerChromeVariables("default")).toBeUndefined();
+    expect(readerThemeVariables("default")).toBeUndefined();
   });
 
-  it("derives chrome tints from the theme's own text color", () => {
-    // Secondary text, hairlines, and the progress bar must follow the
-    // active theme, not the app tokens — in a dark app they would float
-    // light-on-light over the Light/Paper chrome (UAT feedback). The
-    // surface is the theme's own background, for chrome that overlays the
-    // document (the auto-hiding footer).
-    expect(readerChromeVariables("light")).toEqual({
+  it("derives the full chrome and control set from the theme's text color", () => {
+    // Chrome tints, form controls, status cards, and the progress bar must
+    // follow the active theme, not the app tokens — in a dark app they would
+    // float light-on-light over the Light/Paper chrome (UAT feedback).
+    expect(readerThemeVariables("light")).toMatchObject({
+      "--background": "#ffffff",
+      "--foreground": "#1f2328",
+      "--popover": "#ffffff",
+      "--control": "transparent",
+      "--control-hover": "rgba(31, 35, 40, 0.06)",
       "--reader-chrome-muted": "rgba(31, 35, 40, 0.6)",
       "--reader-chrome-border": "rgba(31, 35, 40, 0.15)",
       "--reader-chrome-surface": "#ffffff",
       "--reader-progress-fill": "#1f2328",
       "--reader-progress-track": "rgba(31, 35, 40, 0.2)",
     });
-    expect(readerChromeVariables("dark")?.["--reader-progress-fill"]).toBe("#e4e4e7");
+    expect(readerThemeVariables("dark")).toMatchObject({
+      "--background": "#101013",
+      "--foreground": "#e4e4e7",
+      "--control": "rgba(228, 228, 231, 0.08)",
+      "--reader-progress-fill": "#e4e4e7",
+    });
+  });
+
+  it("gives portaled status and destructive state a themed pair", () => {
+    const light = readerThemeVariables("light");
+    const dark = readerThemeVariables("dark");
+    expect(light?.["--status-info"]).toBe("#1d4ed8");
+    expect(light?.["--destructive-soft"]).toBe("rgba(180, 35, 24, 0.1)");
+    expect(dark?.["--status-info"]).toBe("#93c5fd");
+    expect(dark?.["--destructive-soft"]).toBe("rgba(252, 165, 165, 0.2)");
   });
 });
 
-describe("readerPopoverVariables", () => {
-  it("keeps the app chrome for the neutral default", () => {
-    expect(readerPopoverVariables("default")).toBeUndefined();
-  });
-
-  it("redefines the popover's app tokens from the theme's own pair", () => {
-    // The popover is portaled outside the reader root, so it re-scopes
-    // the tokens its controls consume; every derived value tints from the
-    // theme's text color over its own background (UAT: the appearance
-    // popover follows the reader theme, not the global mode).
-    const vars = readerPopoverVariables("paper");
+describe("readerThemeVariables portaled tokens", () => {
+  it("uses the theme's own pair for popovers", () => {
+    const vars = readerThemeVariables("paper");
     expect(vars).toMatchObject({
       "--popover": "#f6f0e4",
       "--popover-foreground": "#3a332a",
@@ -419,7 +427,7 @@ describe("readerPopoverVariables", () => {
       "--muted-foreground": "rgba(58, 51, 42, 0.6)",
       "--border": "rgba(58, 51, 42, 0.2)",
     });
-    expect(readerPopoverVariables("dark")?.["--popover"]).toBe("#101013");
+    expect(readerThemeVariables("dark")?.["--popover"]).toBe("#101013");
   });
 });
 

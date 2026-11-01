@@ -16,6 +16,7 @@ import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { SyncAttentionProvider } from "@/state/SyncAttentionProvider";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { useThemeState } from "@/state/themeState";
 import { Sidebar } from "./Sidebar";
 import { SyncAttentionToast } from "./SyncAttentionToast";
@@ -113,20 +114,22 @@ export interface AppShellProps {
 
 export function AppShell({ initialState }: AppShellProps) {
   return (
-    <AppStateProvider initialState={initialState}>
-      <SyncAttentionProvider>
-        <ShortcutProvider>
-          <GlobalSearchShortcut />
-          <PdfEnginePrewarm />
-          <LibraryDataProvider>
-            <ImportProvider>
-              <Shell />
-              <SettingsWindow />
-            </ImportProvider>
-          </LibraryDataProvider>
-        </ShortcutProvider>
-        <SyncAttentionToast />
-      </SyncAttentionProvider>
-    </AppStateProvider>
+    <ThemeStateProvider>
+      <AppStateProvider initialState={initialState}>
+        <SyncAttentionProvider>
+          <ShortcutProvider>
+            <GlobalSearchShortcut />
+            <PdfEnginePrewarm />
+            <LibraryDataProvider>
+              <ImportProvider>
+                <Shell />
+                <SettingsWindow />
+              </ImportProvider>
+            </LibraryDataProvider>
+          </ShortcutProvider>
+          <SyncAttentionToast />
+        </SyncAttentionProvider>
+      </AppStateProvider>
+    </ThemeStateProvider>
   );
 }
