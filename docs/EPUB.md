@@ -150,10 +150,14 @@ else depends on its types and the seam's handle:
   stores the compiled properties so newly mounted spine frames inherit
   them. Themes (issue #46) are presets over the six color preferences
   (background/text/link/visited/selection pair) — the reading system has
-  no named-theme preference. The neutral `default` theme submits explicit
-  nulls so a previous theme is cleared and publisher colors (including
-  link and selection styling) stay intact; Light/Paper/Dark keep their
-  established palettes completed with visited + selection colors, and the
+  no named-theme preference. The `default` selection follows the app theme:
+  on a light app it submits explicit nulls so a previous theme is cleared
+  and publisher colors (including link and selection styling) stay intact,
+  while a dark app applies the Dark preset so the page stays dark under the
+  dark chrome. The menu keeps showing Default as the selection; the applied
+  preset is derived separately (`effectiveReaderTheme`). Light/Paper/Dark
+  keep their established palettes completed with visited + selection
+  colors, and the
   contrast presets (black/yellow, deep-blue/white, mint/black) adapt the
   reference implementation's accessibility set with WCAG-AA-readable
   pairs enforced by unit test. Theme colors are inert for fixed-layout

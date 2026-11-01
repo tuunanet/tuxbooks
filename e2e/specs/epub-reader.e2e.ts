@@ -316,14 +316,17 @@ test.describe("tuxbooks EPUB reader", () => {
         .evaluate((el) => el.style.getPropertyValue("--USER__colCount"));
 
     const columns = page.getByTestId("pref-columns");
-    // Exactly 1–4 are offered (Roman numerals; the stored value stays
-    // numeric), with the two-page spread preselected.
-    await expect(columns.getByText("I", { exact: true })).toBeVisible();
-    await expect(columns.getByText("IV", { exact: true })).toBeVisible();
-    await expect(columns.getByText("II", { exact: true })).toHaveAttribute("data-state", "on");
+    // Exactly 1–4 are offered as column icons; the stored value stays
+    // numeric, with the two-page spread preselected.
+    await expect(columns.getByRole("radio", { name: "One column" })).toBeVisible();
+    await expect(columns.getByRole("radio", { name: "4 columns" })).toBeVisible();
+    await expect(columns.getByRole("radio", { name: "2 columns" })).toHaveAttribute(
+      "data-state",
+      "on",
+    );
 
     const sectionBefore = await currentSection(page);
-    await columns.getByText("IV", { exact: true }).click();
+    await columns.getByRole("radio", { name: "4 columns" }).click();
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
     // The target passes through exactly when the viewport can fit it at the
     // toolkit's minimal readable line length; ReadiumCSS otherwise floors to
@@ -333,7 +336,7 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect.poll(colCountInFrame, { timeout: 30000 }).toMatch(/^[34]$/);
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
 
-    await columns.getByText("I", { exact: true }).click();
+    await columns.getByRole("radio", { name: "One column" }).click();
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
     await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
@@ -365,12 +368,11 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated", {
       timeout: 30000,
     });
-    // The stored target (I = 1, the last explicit choice) survives scrolling.
+    // The stored target (one column, the last explicit choice) survives scrolling.
     await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
-    await expect(page.getByTestId("pref-columns").getByText("I", { exact: true })).toHaveAttribute(
-      "data-state",
-      "on",
-    );
+    await expect(
+      page.getByTestId("pref-columns").getByRole("radio", { name: "One column" }),
+    ).toHaveAttribute("data-state", "on");
 
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });

@@ -14,7 +14,8 @@ import {
   READER_PANEL_SHORTCUTS,
 } from "@/lib/readerShortcuts";
 import { bookmarkLocationAndProgress } from "@/lib/annotationLocation";
-import { epubSurfaceTheme, readerPopoverVariables, type ReaderTheme } from "@/lib/epub/appearance";
+import { type ReaderTheme } from "@/lib/epub/appearance";
+import { readerThemeStyle } from "@/lib/themeScope";
 import type { EpubTocItem } from "@/lib/epub/readiumEngine";
 import type { PdfOutlineItem } from "@/lib/pdf/pdfEngine";
 import type { Annotation, AnnotationPatch } from "@/types/domain";
@@ -216,10 +217,10 @@ export function ReaderNavigation({
         // instead of being captured by the drawer's tabs. The modal focus
         // trap still reaches the tray on the next Tab.
         onOpenAutoFocus={(event) => event.preventDefault()}
-        // Portaled outside the reader root: redefine the app tokens in the
-        // sheet's scope so it follows the reader theme instead of the global
-        // light/dark mode (same treatment as the appearance popover).
-        style={readerPopoverVariables(epubSurfaceTheme(theme))}
+        // Portaled outside the reader root: carry the full reader token set
+        // so the sheet follows the book's theme, not the app's light/dark
+        // mode.
+        style={readerThemeStyle(theme)}
       >
         <SheetHeader className="border-b px-4 py-3">
           <SheetTitle>{book.title}</SheetTitle>

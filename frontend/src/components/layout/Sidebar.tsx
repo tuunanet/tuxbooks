@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import {
+  BookMarked,
+  BookOpen,
+  CheckCircle2,
+  Clock3,
+  Folder,
+  History,
+  Library,
+  Settings,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CollectionDialog } from "@/components/collections/CollectionDialog";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
@@ -11,15 +22,33 @@ import { useSyncAttention } from "@/state/syncAttentionState";
 interface SidebarProps {
   active: LibrarySection;
   onSectionChange: (section: LibrarySection) => void;
+  onOpenSettings: () => void;
 }
 
-const LIBRARY_ITEMS: { id: SmartSectionId; label: string }[] = [
-  { id: "all-books", label: "All Books" },
-  { id: "recently-added", label: "Recently Added" },
-  { id: "recently-read", label: "Recently Read" },
-  { id: "in-progress", label: "In Progress" },
-  { id: "finished", label: "Finished" },
+const LIBRARY_ITEMS: { id: SmartSectionId; label: string; icon: LucideIcon }[] = [
+  { id: "all-books", label: "All Books", icon: Library },
+  { id: "recently-added", label: "Recently Added", icon: Clock3 },
+  { id: "recently-read", label: "Recently Read", icon: BookOpen },
+  { id: "in-progress", label: "In Progress", icon: BookMarked },
+  { id: "finished", label: "Finished", icon: CheckCircle2 },
 ];
+
+function ItemLabel({
+  icon: Icon,
+  children,
+  testId,
+}: {
+  icon: LucideIcon;
+  children: string;
+  testId?: string;
+}) {
+  return (
+    <span data-testid={testId} className="flex min-w-0 items-center gap-2.5">
+      <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate">{children}</span>
+    </span>
+  );
+}
 
 function GroupLabel({ children }: { children: string }) {
   return (
@@ -35,18 +64,30 @@ interface ItemButtonProps {
   children: React.ReactNode;
   disabled?: boolean;
   trailing?: React.ReactNode;
+  testId?: string;
+  ariaHaspopup?: "dialog";
 }
 
-function ItemButton({ active, onClick, children, disabled, trailing }: ItemButtonProps) {
+function ItemButton({
+  active,
+  onClick,
+  children,
+  disabled,
+  trailing,
+  testId,
+  ariaHaspopup,
+}: ItemButtonProps) {
   return (
     <div className="group/item relative">
       <button
         type="button"
+        data-testid={testId}
         onClick={onClick}
         disabled={disabled}
         aria-current={active ? "true" : undefined}
+        aria-haspopup={ariaHaspopup}
         className={cn(
-          "w-full rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+          "flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
           trailing && "pr-7",
           active
             ? "bg-accent font-medium text-accent-foreground"
@@ -61,7 +102,7 @@ function ItemButton({ active, onClick, children, disabled, trailing }: ItemButto
   );
 }
 
-export function Sidebar({ active, onSectionChange }: SidebarProps) {
+export function Sidebar({ active, onSectionChange, onOpenSettings }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const { collections } = useLibrary();
   const { create, remove } = useCollectionActions();
@@ -97,7 +138,7 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
                   active={sameSection(section, active)}
                   onClick={() => onSectionChange(section)}
                 >
-                  {item.label}
+                  <ItemLabel icon={item.icon}>{item.label}</ItemLabel>
                 </ItemButton>
               );
             })}
@@ -105,7 +146,7 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
               active={active.kind === "reading-history"}
               onClick={() => onSectionChange({ kind: "reading-history" })}
             >
-              Reading history
+              <ItemLabel icon={History}>Reading history</ItemLabel>
             </ItemButton>
           </div>
         </div>
@@ -139,9 +180,9 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
                     </button>
                   }
                 >
-                  <span data-testid="collection-item" className="block truncate">
+                  <ItemLabel icon={Folder} testId="collection-item">
                     {collection.name}
-                  </span>
+                  </ItemLabel>
                 </ItemButton>
               );
             })}
@@ -164,22 +205,22 @@ export function Sidebar({ active, onSectionChange }: SidebarProps) {
 
       <div className="mt-4 border-t pt-3">
         <ItemButton
-          active={active.kind === "settings"}
-          onClick={() => onSectionChange({ kind: "settings" })}
+          active={false}
+          testId="sidebar-settings"
+          ariaHaspopup="dialog"
+          onClick={onOpenSettings}
         >
-          <span className="flex items-center gap-2">
-            <span>Settings</span>
-            {syncNeedsAttention ? (
-              <>
-                <span
-                  data-testid="settings-attention-dot"
-                  aria-hidden="true"
-                  className="size-2 shrink-0 rounded-full bg-destructive"
-                />
-                <span className="sr-only">Sync needs attention</span>
-              </>
-            ) : null}
-          </span>
+          <ItemLabel icon={Settings}>Settings</ItemLabel>
+          {syncNeedsAttention ? (
+            <>
+              <span
+                data-testid="settings-attention-dot"
+                aria-hidden="true"
+                className="ml-auto size-2 shrink-0 rounded-full bg-destructive"
+              />
+              <span className="sr-only">Sync needs attention</span>
+            </>
+          ) : null}
         </ItemButton>
       </div>
     </aside>

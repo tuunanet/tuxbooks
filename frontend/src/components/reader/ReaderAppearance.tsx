@@ -1,4 +1,38 @@
-import { RotateCcw, Type } from "lucide-react";
+import type { CSSProperties } from "react";
+import {
+  ALargeSmall,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
+  Baseline,
+  BookOpen,
+  CaseSensitive,
+  Columns2,
+  Columns3,
+  Columns4,
+  Contrast,
+  Droplets,
+  FileText,
+  FlipVertical2,
+  Frame,
+  LayoutTemplate,
+  Leaf,
+  Moon,
+  MoveVertical,
+  Palette,
+  Pilcrow,
+  RectangleVertical,
+  RotateCcw,
+  ScrollText,
+  Sun,
+  SunMoon,
+  SwatchBook,
+  TextAlignStart,
+  TextCursorInput,
+  Type,
+  WrapText,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
@@ -19,6 +53,8 @@ import {
   EPUB_PAGE_GUTTER_SCALE_PX,
   EPUB_PARAGRAPH_SPACING_SCALE,
   EPUB_TEXT_ALIGNMENTS,
+  EPUB_THEME_LABELS,
+  EPUB_THEME_NAMES,
   EPUB_WORD_SPACING_SCALE,
   epubContrastRatio,
   epubForegroundReferenceBackground,
@@ -31,12 +67,12 @@ import {
   nearestEpubPageGutter,
   nearestEpubParagraphSpacing,
   nearestEpubWordSpacing,
-  readerPopoverVariables,
   type EpubFontFamily,
   type EpubTextAlignment,
 } from "@/lib/epub/appearance";
 import { PDF_THEME_MENU_OPTIONS } from "@/lib/pdf/theme";
 import { formatShortcutAria, READER_PANEL_SHORTCUTS } from "@/lib/readerShortcuts";
+import { readerThemeStyle } from "@/lib/themeScope";
 import { cn } from "@/lib/utils";
 import { ForegroundPicker } from "./ForegroundPicker";
 import {
@@ -46,20 +82,56 @@ import {
   type ReaderTheme,
 } from "@/state/readerState";
 
-const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = [
-  { value: "default", label: "Default" },
-  { value: "light", label: "Light" },
-  { value: "paper", label: "Paper" },
-  { value: "dark", label: "Dark" },
-  { value: "contrast", label: "High contrast" },
-  { value: "blue-contrast", label: "Blue" },
-  { value: "mint-contrast", label: "Mint" },
+const THEME_OPTIONS: { value: ReaderTheme; label: string }[] = EPUB_THEME_NAMES.map((value) => ({
+  value,
+  label: EPUB_THEME_LABELS[value],
+}));
+
+/** Symbols are the visual key; the swatch underneath shows the palette. */
+const THEME_ICONS: Record<ReaderTheme, LucideIcon> = {
+  default: SunMoon,
+  light: Sun,
+  paper: FileText,
+  dark: Moon,
+  contrast: Contrast,
+  invert: FlipVertical2,
+  "blue-contrast": Droplets,
+  "mint-contrast": Leaf,
+};
+
+const LAYOUT_OPTIONS: { value: ReaderLayout; label: string; icon: LucideIcon }[] = [
+  { value: "paginated", label: "Paginated", icon: BookOpen },
+  { value: "scrolling", label: "Scrolling", icon: ScrollText },
 ];
 
-const LAYOUT_OPTIONS: { value: ReaderLayout; label: string }[] = [
-  { value: "paginated", label: "Paginated" },
-  { value: "scrolling", label: "Scrolling" },
-];
+const FONT_FAMILY_PREVIEW: Record<EpubFontFamily, string> = {
+  serif: "Georgia, 'Times New Roman', serif",
+  sans: "var(--RS__sansTf, system-ui, sans-serif)",
+  humanist: "var(--RS__humanistTf, Optima, Candara, sans-serif)",
+  "old-style": "var(--RS__oldStyleTf, Palatino, 'Palatino Linotype', serif)",
+  modern: "var(--RS__modernTf, Didot, 'Bodoni MT', serif)",
+  duospace: "'IA Writer Duospace', 'SF Mono', Consolas, monospace",
+  readable: "'AccessibleDfA', Verdana, Tahoma, 'Comic Sans MS', sans-serif",
+};
+
+const TEXT_ALIGN_ICONS: Record<EpubTextAlignment, LucideIcon> = {
+  auto: TextCursorInput,
+  left: AlignLeft,
+  justify: AlignJustify,
+  right: AlignRight,
+  start: TextAlignStart,
+};
+
+const COLUMN_COUNT_ICONS: Record<(typeof EPUB_COLUMN_COUNTS)[number], LucideIcon> = {
+  1: RectangleVertical,
+  2: Columns2,
+  3: Columns3,
+  4: Columns4,
+};
+
+function columnCountLabel(count: number): string {
+  return count === 1 ? "One column" : `${count} columns`;
+}
 
 const FONT_FAMILY_OPTIONS: { value: EpubFontFamily; label: string }[] = [
   { value: "serif", label: "Serif" },
@@ -79,8 +151,23 @@ const TEXT_ALIGN_LABELS: Record<EpubTextAlignment, string> = {
   start: "Start",
 };
 
-/** Column counts are labeled with Roman numerals; the stored value stays numeric. */
-const COLUMN_COUNT_LABELS: Record<number, string> = { 1: "I", 2: "II", 3: "III", 4: "IV" };
+function ControlLabel({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      {children}
+    </span>
+  );
+}
+
+function SectionLabel({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
+  return (
+    <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+      <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      {children}
+    </p>
+  );
+}
 
 /**
  * A discrete reading-system scale slider (issue #43/#45): 0 is always the
@@ -88,6 +175,7 @@ const COLUMN_COUNT_LABELS: Record<number, string> = { 1: "I", 2: "II", 3: "III",
  */
 function ScaleSliderRow(props: {
   label: string;
+  icon: LucideIcon;
   sliderTestId: string;
   scale: readonly number[];
   value: number;
@@ -100,8 +188,8 @@ function ScaleSliderRow(props: {
   const index = props.scale.indexOf(props.value);
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span>{props.label}</span>
+      <div className="mb-1.5 flex items-center justify-between text-sm">
+        <ControlLabel icon={props.icon}>{props.label}</ControlLabel>
         <span className="flex items-center gap-1">
           <span className="tabular-nums text-muted-foreground">
             {atDefault ? "Default" : props.value}
@@ -150,10 +238,13 @@ function ScaleSliderRow(props: {
  */
 export function ReaderAppearanceControls({
   preferences,
+  surfaceTheme = preferences.theme,
   setPreferences,
   format,
 }: {
   preferences: ReaderPreferences;
+  /** Applied theme when Default resolves to a concrete preset. */
+  surfaceTheme?: ReaderTheme;
   setPreferences: (patch: Partial<ReaderPreferences>) => void;
   format?: string;
 }) {
@@ -176,14 +267,12 @@ export function ReaderAppearanceControls({
 
   // Foreground override (issue #55): null = the active theme's (or
   // publisher's) text color. The readout judges the effective color — the
-  // override, or the theme's own — against the theme background (white as
-  // the reference on the neutral Default theme, whose background is
-  // publisher-defined). The palette lookup uses the EPUB-facing theme: a
-  // PDF-only Invert pick maps onto the dark preset's colors.
-  const themePalette = epubThemeColors(epubSurfaceTheme(preferences.theme));
-  const referenceBackground = epubForegroundReferenceBackground(
-    epubSurfaceTheme(preferences.theme),
-  );
+  // override, or the theme's own — against the surface actually applied
+  // (Default in a dark app resolves to the dark preset). The palette lookup
+  // uses the EPUB-facing theme: a PDF-only Invert pick maps onto the dark
+  // preset's colors.
+  const themePalette = epubThemeColors(epubSurfaceTheme(surfaceTheme));
+  const referenceBackground = epubForegroundReferenceBackground(epubSurfaceTheme(surfaceTheme));
   const effectiveForeground = preferences.foreground ?? themePalette?.text ?? null;
   const foregroundRatio =
     effectiveForeground !== null && isEpubHexColor(effectiveForeground)
@@ -195,26 +284,49 @@ export function ReaderAppearanceControls({
   // dark recolors in the worker, Invert is the explicit negative) — a
   // superset of the EPUB-faithful filter list.
   const themeOptions = isPdf ? PDF_THEME_MENU_OPTIONS : THEME_OPTIONS;
+  const themeSwatchStyle = (value: ReaderTheme): CSSProperties | undefined => {
+    const colors = epubThemeColors(epubSurfaceTheme(value));
+    return colors ? { backgroundColor: colors.background, color: colors.text } : undefined;
+  };
 
   const themeSection = (
     <div>
-      <p className="mb-2 text-sm">Theme</p>
+      <SectionLabel icon={Palette}>Theme</SectionLabel>
       <ToggleGroup
         data-testid="pref-theme"
         type="single"
         size="sm"
         variant="outline"
-        spacing={0}
-        className="flex-wrap"
+        spacing={2}
+        className="flex-wrap gap-1.5"
         value={preferences.theme}
         onValueChange={(value) => value && setPreferences({ theme: value as ReaderTheme })}
         aria-label="Theme"
       >
-        {themeOptions.map((option) => (
-          <ToggleGroupItem key={option.value} value={option.value}>
-            {option.label}
-          </ToggleGroupItem>
-        ))}
+        {themeOptions.map((option) => {
+          const Icon = THEME_ICONS[option.value];
+          return (
+            <ToggleGroupItem
+              key={option.value}
+              value={option.value}
+              aria-label={option.label}
+              title={option.label}
+              className="h-8 gap-1 rounded-md px-1.5 text-xs data-[state=on]:ring-2 data-[state=on]:ring-ring data-[state=on]:ring-offset-2 data-[state=on]:ring-offset-background"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "grid size-5 shrink-0 place-items-center rounded-[3px] border border-border/60",
+                  option.value === "default" && "border-border bg-muted text-foreground",
+                )}
+                style={themeSwatchStyle(option.value)}
+              >
+                <Icon className="size-3" />
+              </span>
+              {option.label}
+            </ToggleGroupItem>
+          );
+        })}
       </ToggleGroup>
     </div>
   );
@@ -230,10 +342,10 @@ export function ReaderAppearanceControls({
         themeSection
       ) : (
         <div className="grid grid-cols-2 gap-x-5">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             <div>
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span>Font size</span>
+              <div className="mb-1.5 flex items-center justify-between text-sm">
+                <ControlLabel icon={ALargeSmall}>Font size</ControlLabel>
                 <span className="flex items-center gap-1">
                   <span className="tabular-nums text-muted-foreground">{fontSize}%</span>
                   <Button
@@ -265,8 +377,8 @@ export function ReaderAppearanceControls({
             </div>
 
             <div>
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span>Line spacing</span>
+              <div className="mb-1.5 flex items-center justify-between text-sm">
+                <ControlLabel icon={MoveVertical}>Line spacing</ControlLabel>
                 <span className="flex items-center gap-1">
                   <span className="tabular-nums text-muted-foreground">
                     {atDefaultLineHeight ? "Default" : lineHeight}
@@ -304,6 +416,7 @@ export function ReaderAppearanceControls({
                 both paginated and scrolling flow. */}
             <ScaleSliderRow
               label="Word spacing"
+              icon={WrapText}
               sliderTestId="word-spacing"
               scale={EPUB_WORD_SPACING_SCALE}
               value={nearestEpubWordSpacing(preferences.wordSpacing)}
@@ -311,6 +424,7 @@ export function ReaderAppearanceControls({
             />
             <ScaleSliderRow
               label="Letter spacing"
+              icon={CaseSensitive}
               sliderTestId="letter-spacing"
               scale={EPUB_LETTER_SPACING_SCALE}
               value={nearestEpubLetterSpacing(preferences.letterSpacing)}
@@ -318,6 +432,7 @@ export function ReaderAppearanceControls({
             />
             <ScaleSliderRow
               label="Paragraph spacing"
+              icon={Pilcrow}
               sliderTestId="paragraph-spacing"
               scale={EPUB_PARAGRAPH_SPACING_SCALE}
               value={nearestEpubParagraphSpacing(preferences.paragraphSpacing)}
@@ -328,6 +443,7 @@ export function ReaderAppearanceControls({
             {preferences.layout === "paginated" && (
               <ScaleSliderRow
                 label="Page margins"
+                icon={Frame}
                 sliderTestId="page-gutter"
                 scale={EPUB_PAGE_GUTTER_SCALE_PX}
                 value={nearestEpubPageGutter(preferences.pageGutter)}
@@ -337,9 +453,9 @@ export function ReaderAppearanceControls({
             )}
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             <div>
-              <p className="mb-2 text-sm">Font</p>
+              <SectionLabel icon={Type}>Font</SectionLabel>
               <ToggleGroup
                 data-testid="pref-font-family"
                 type="single"
@@ -361,7 +477,11 @@ export function ReaderAppearanceControls({
                 aria-label="Font family"
               >
                 {FONT_FAMILY_OPTIONS.map((option) => (
-                  <ToggleGroupItem key={option.value} value={option.value}>
+                  <ToggleGroupItem
+                    key={option.value}
+                    value={option.value}
+                    style={{ fontFamily: FONT_FAMILY_PREVIEW[option.value] }}
+                  >
                     {option.label}
                   </ToggleGroupItem>
                 ))}
@@ -370,7 +490,7 @@ export function ReaderAppearanceControls({
             </div>
 
             <div>
-              <p className="mb-2 text-sm">Alignment</p>
+              <SectionLabel icon={TextAlignStart}>Alignment</SectionLabel>
               <ToggleGroup
                 data-testid="pref-text-align"
                 type="single"
@@ -384,11 +504,15 @@ export function ReaderAppearanceControls({
                 }
                 aria-label="Text alignment"
               >
-                {EPUB_TEXT_ALIGNMENTS.map((alignment) => (
-                  <ToggleGroupItem key={alignment} value={alignment}>
-                    {TEXT_ALIGN_LABELS[alignment]}
-                  </ToggleGroupItem>
-                ))}
+                {EPUB_TEXT_ALIGNMENTS.map((alignment) => {
+                  const Icon = TEXT_ALIGN_ICONS[alignment];
+                  return (
+                    <ToggleGroupItem key={alignment} value={alignment} className="gap-1">
+                      <Icon aria-hidden="true" className="size-3.5" />
+                      {TEXT_ALIGN_LABELS[alignment]}
+                    </ToggleGroupItem>
+                  );
+                })}
               </ToggleGroup>
             </div>
 
@@ -399,8 +523,8 @@ export function ReaderAppearanceControls({
                   colors (toolkit semantics). The readout never blocks a
                   choice — it only informs. */}
             <div>
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span>Foreground</span>
+              <div className="mb-1.5 flex items-center justify-between text-sm">
+                <ControlLabel icon={Baseline}>Foreground</ControlLabel>
                 <span className="flex items-center gap-1">
                   <span
                     data-testid="foreground-contrast"
@@ -453,7 +577,7 @@ export function ReaderAppearanceControls({
             </div>
 
             <div>
-              <p className="mb-2 text-sm">Layout</p>
+              <SectionLabel icon={LayoutTemplate}>Layout</SectionLabel>
               <ToggleGroup
                 data-testid="pref-layout"
                 type="single"
@@ -466,15 +590,19 @@ export function ReaderAppearanceControls({
                 }
                 aria-label="Layout"
               >
-                {LAYOUT_OPTIONS.map((option) => (
-                  <ToggleGroupItem key={option.value} value={option.value}>
-                    {option.label}
-                  </ToggleGroupItem>
-                ))}
+                {LAYOUT_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <ToggleGroupItem key={option.value} value={option.value} className="gap-1">
+                      <Icon aria-hidden="true" className="size-3.5" />
+                      {option.label}
+                    </ToggleGroupItem>
+                  );
+                })}
               </ToggleGroup>
               {preferences.layout === "paginated" && (
                 <div className="mt-3">
-                  <p className="mb-2 text-sm">Columns</p>
+                  <SectionLabel icon={Columns3}>Columns</SectionLabel>
                   <ToggleGroup
                     data-testid="pref-columns"
                     type="single"
@@ -487,11 +615,22 @@ export function ReaderAppearanceControls({
                     }
                     aria-label="Column count"
                   >
-                    {EPUB_COLUMN_COUNTS.map((count) => (
-                      <ToggleGroupItem key={count} value={String(count)}>
-                        {COLUMN_COUNT_LABELS[count]}
-                      </ToggleGroupItem>
-                    ))}
+                    {EPUB_COLUMN_COUNTS.map((count) => {
+                      const Icon = COLUMN_COUNT_ICONS[count];
+                      const label = columnCountLabel(count);
+                      return (
+                        <ToggleGroupItem
+                          key={count}
+                          value={String(count)}
+                          aria-label={label}
+                          title={label}
+                          className="gap-1"
+                        >
+                          <Icon aria-hidden="true" className="size-3.5" />
+                          {count}
+                        </ToggleGroupItem>
+                      );
+                    })}
                   </ToggleGroup>
                 </div>
               )}
@@ -518,7 +657,7 @@ export function ReaderAppearance({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { preferences, setPreferences } = useReader();
+  const { preferences, effectiveTheme, setPreferences } = useReader();
   const isPdf = format === "pdf";
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -542,22 +681,32 @@ export function ReaderAppearance({
         data-testid="appearance-content"
         align="end"
         className={cn(
-          "max-h-[85vh] overflow-y-auto",
+          "max-h-[85vh] flex-col gap-0 overflow-hidden p-0",
           // PDFs expose only the theme — a narrow popover; the EPUB reflow
           // controls use the wider two-column shape that avoids scrollbars.
-          isPdf ? "w-64" : "w-[30rem]",
+          isPdf ? "w-64" : "w-[min(32rem,calc(100vw-1rem))]",
         )}
-        // The popover is portaled outside the reader root; redefine the
-        // app tokens in its scope so it follows the reader theme instead
-        // of the global light/dark mode.
-        style={readerPopoverVariables(epubSurfaceTheme(preferences.theme))}
+        // The popover is portaled outside the reader root; carry the full
+        // reader token set so it follows the book's theme instead of the
+        // global light/dark mode.
+        style={readerThemeStyle(effectiveTheme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <ReaderAppearanceControls
-          preferences={preferences}
-          setPreferences={setPreferences}
-          format={format}
-        />
+        <div className="flex shrink-0 items-center gap-2 border-b bg-muted/30 px-3.5 py-2.5">
+          <SwatchBook aria-hidden="true" className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Appearance</span>
+          <span className="ml-auto text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            {isPdf ? "PDF" : "EPUB"}
+          </span>
+        </div>
+        <div className="min-h-0 overflow-y-auto p-3">
+          <ReaderAppearanceControls
+            preferences={preferences}
+            surfaceTheme={effectiveTheme}
+            setPreferences={setPreferences}
+            format={format}
+          />
+        </div>
       </PopoverContent>
     </Popover>
   );

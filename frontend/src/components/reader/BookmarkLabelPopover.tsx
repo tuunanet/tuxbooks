@@ -3,7 +3,8 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { PopoverContent } from "@/components/ui/popover";
 import { clampBookmarkLabel } from "@/lib/annotationLocation";
-import { epubSurfaceTheme, readerPopoverVariables, type ReaderTheme } from "@/lib/epub/appearance";
+import { type ReaderTheme } from "@/lib/epub/appearance";
+import { readerThemeStyle } from "@/lib/themeScope";
 
 /**
  * The label editor that drops out of the toolbar's bookmark button right
@@ -51,11 +52,9 @@ export function BookmarkLabelPopover({
       align="end"
       sideOffset={8}
       collisionPadding={8}
-      // Portaled outside the reader root: redefine the app tokens in this
-      // scope so the card follows the reader theme instead of the global
-      // light/dark mode (same treatment as the appearance popover and the
-      // nav drawer).
-      style={readerPopoverVariables(epubSurfaceTheme(theme))}
+      // Portaled outside the reader root: carry the full reader token set so
+      // the card follows the book's theme, not the app's light/dark mode.
+      style={readerThemeStyle(theme)}
       // Focus belongs in the input, not on the card.
       onOpenAutoFocus={(event) => event.preventDefault()}
       // Escape and outside clicks both mean "done": commit, then let the

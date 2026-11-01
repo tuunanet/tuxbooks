@@ -9,7 +9,10 @@ import { initialAppState, type LibrarySection } from "@/state/appState";
 import { makeBook } from "./factories";
 import { mockInvoke } from "./mocks/bridge";
 
-function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
+function renderSidebar(
+  onSectionChange: (section: LibrarySection) => void,
+  onOpenSettings: () => void = vi.fn(),
+) {
   mockInvoke({
     get_library_stats: { bookCount: 0, collectionCount: 0 },
     list_books: [],
@@ -18,7 +21,11 @@ function renderSidebar(onSectionChange: (section: LibrarySection) => void) {
   return render(
     <AppStateProvider>
       <LibraryDataProvider>
-        <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+        <Sidebar
+          active={initialAppState.section}
+          onSectionChange={onSectionChange}
+          onOpenSettings={onOpenSettings}
+        />
       </LibraryDataProvider>
     </AppStateProvider>,
   );
@@ -56,7 +63,11 @@ describe("Sidebar", () => {
     render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={initialAppState.section} onSectionChange={vi.fn()} />
+          <Sidebar
+            active={initialAppState.section}
+            onSectionChange={vi.fn()}
+            onOpenSettings={vi.fn()}
+          />
         </LibraryDataProvider>
       </AppStateProvider>,
     );
@@ -79,12 +90,14 @@ describe("Sidebar", () => {
     expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "recently-added" });
   });
 
-  it("navigates to settings", async () => {
+  it("opens settings without changing the active section", async () => {
     const onSectionChange = vi.fn();
-    renderSidebar(onSectionChange);
+    const onOpenSettings = vi.fn();
+    renderSidebar(onSectionChange, onOpenSettings);
 
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(onSectionChange).toHaveBeenCalledWith({ kind: "settings" });
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(onSectionChange).not.toHaveBeenCalled();
   });
 
   it("navigates to Reading history", async () => {
@@ -119,7 +132,11 @@ describe("Sidebar", () => {
     render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+          <Sidebar
+            active={initialAppState.section}
+            onSectionChange={onSectionChange}
+            onOpenSettings={vi.fn()}
+          />
         </LibraryDataProvider>
       </AppStateProvider>,
     );
@@ -146,7 +163,11 @@ describe("Sidebar", () => {
     render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={initialAppState.section} onSectionChange={onSectionChange} />
+          <Sidebar
+            active={initialAppState.section}
+            onSectionChange={onSectionChange}
+            onOpenSettings={vi.fn()}
+          />
         </LibraryDataProvider>
       </AppStateProvider>,
     );
@@ -176,7 +197,11 @@ describe("Sidebar", () => {
     render(
       <AppStateProvider>
         <LibraryDataProvider>
-          <Sidebar active={{ kind: "collection", id: 5 }} onSectionChange={onSectionChange} />
+          <Sidebar
+            active={{ kind: "collection", id: 5 }}
+            onSectionChange={onSectionChange}
+            onOpenSettings={vi.fn()}
+          />
         </LibraryDataProvider>
       </AppStateProvider>,
     );

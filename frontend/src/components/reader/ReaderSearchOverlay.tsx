@@ -10,12 +10,8 @@ import { LoaderCircle, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  epubSurfaceTheme,
-  readerPopoverVariables,
-  readerScrollbarColor,
-  type ReaderTheme,
-} from "@/lib/epub/appearance";
+import { epubSurfaceTheme, readerScrollbarColor, type ReaderTheme } from "@/lib/epub/appearance";
+import { readerThemeStyle } from "@/lib/themeScope";
 import type { ReaderSearchMatch, ReaderSearchState } from "./searchModel";
 
 /** Wait this long after the last keystroke before asking the book to search. */
@@ -69,10 +65,9 @@ export function ReaderSearchOverlay({
   theme,
 }: ReaderSearchOverlayProps) {
   const surfaceTheme = epubSurfaceTheme(theme);
-  const popoverVariables = readerPopoverVariables(surfaceTheme);
   const scrollbarColor = readerScrollbarColor(surfaceTheme);
   const style = {
-    ...(popoverVariables ?? {}),
+    ...readerThemeStyle(theme),
     ...(scrollbarColor === undefined ? {} : { "--reader-scrollbar-thumb": scrollbarColor }),
   } as CSSProperties;
 

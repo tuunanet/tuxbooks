@@ -125,7 +125,7 @@ export function EpubReader({
   onExitPresentation,
   turnAdapter = null,
 }: EpubReaderProps) {
-  const { preferences, position, setPosition } = useReader();
+  const { preferences, effectiveTheme, position, setPosition } = useReader();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const reportedFractionRef = useRef<number | null>(null);
   const currentSectionRef = useRef<EpubSectionProgress | null>(null);
@@ -376,7 +376,7 @@ export function EpubReader({
       pageGutter: preferences.pageGutter,
       textAlign: preferences.textAlign,
       foreground: preferences.foreground,
-      theme: epubSurfaceTheme(preferences.theme),
+      theme: epubSurfaceTheme(effectiveTheme),
     });
   }, [
     handle,
@@ -390,7 +390,7 @@ export function EpubReader({
     preferences.pageGutter,
     preferences.textAlign,
     preferences.foreground,
-    preferences.theme,
+    effectiveTheme,
     interactive,
   ]);
 
@@ -447,7 +447,7 @@ export function EpubReader({
   const drawnHighlightsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (!handle) return;
-    const family = readerThemeFamily(preferences.theme);
+    const family = readerThemeFamily(effectiveTheme);
     const next = new Map<string, string>();
     for (const highlight of highlights) {
       if (highlight.cfi !== null) {
@@ -466,7 +466,7 @@ export function EpubReader({
       if (!next.has(locator)) handle.removeHighlight(locator);
     }
     drawnHighlightsRef.current = next;
-  }, [handle, highlights, preferences.theme, preferences.highlightOverrides]);
+  }, [handle, highlights, effectiveTheme, preferences.highlightOverrides]);
 
   // The shell's selection toolbar drives highlight creation through this
   // controller; the reader owns the selection → locator translation.
@@ -572,11 +572,11 @@ export function EpubReader({
       data-epub-presentation={presentationMode}
       className="relative h-full"
       style={{
-        backgroundColor: epubThemeBackground(epubSurfaceTheme(preferences.theme)),
+        backgroundColor: epubThemeBackground(epubSurfaceTheme(effectiveTheme)),
         // Pin the section documents' UA-default colors to the theme family
         // instead of the OS/global scheme (color-scheme inherits into the
         // navigator's iframes).
-        colorScheme: epubThemeColorScheme(epubSurfaceTheme(preferences.theme)),
+        colorScheme: epubThemeColorScheme(epubSurfaceTheme(effectiveTheme)),
       }}
     >
       {presentationMode && (

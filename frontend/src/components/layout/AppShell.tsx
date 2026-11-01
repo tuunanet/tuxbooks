@@ -5,7 +5,7 @@ import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
 import { ReaderShell } from "@/components/reader/ReaderShell";
-import { SettingsShell } from "@/components/settings/SettingsShell";
+import { SettingsWindow } from "@/components/settings/SettingsWindow";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { prewarmPdfEngine } from "@/lib/pdf/pdfEngine";
 import { useShortcut } from "@/lib/shortcuts";
@@ -16,6 +16,7 @@ import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ReaderProvider } from "@/state/ReaderProvider";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 import { SyncAttentionProvider } from "@/state/SyncAttentionProvider";
+import { ThemeStateProvider } from "@/state/ThemeStateProvider";
 import { useThemeState } from "@/state/themeState";
 import { Sidebar } from "./Sidebar";
 import { SyncAttentionToast } from "./SyncAttentionToast";
@@ -87,13 +88,12 @@ function Shell() {
       <Sidebar
         active={app.section}
         onSectionChange={(section) => dispatch({ type: "select-section", section })}
+        onOpenSettings={() => dispatch({ type: "open-settings" })}
       />
       <main className="relative flex-1 overflow-y-auto p-8">
         <ImportStatus />
         {app.view === "detail" ? (
           <BookDetail />
-        ) : app.section.kind === "settings" ? (
-          <SettingsShell />
         ) : app.section.kind === "reading-history" ? (
           <ReadingHistoryView />
         ) : (
@@ -114,19 +114,22 @@ export interface AppShellProps {
 
 export function AppShell({ initialState }: AppShellProps) {
   return (
-    <AppStateProvider initialState={initialState}>
-      <SyncAttentionProvider>
-        <ShortcutProvider>
-          <GlobalSearchShortcut />
-          <PdfEnginePrewarm />
-          <LibraryDataProvider>
-            <ImportProvider>
-              <Shell />
-            </ImportProvider>
-          </LibraryDataProvider>
-        </ShortcutProvider>
-        <SyncAttentionToast />
-      </SyncAttentionProvider>
-    </AppStateProvider>
+    <ThemeStateProvider>
+      <AppStateProvider initialState={initialState}>
+        <SyncAttentionProvider>
+          <ShortcutProvider>
+            <GlobalSearchShortcut />
+            <PdfEnginePrewarm />
+            <LibraryDataProvider>
+              <ImportProvider>
+                <Shell />
+                <SettingsWindow />
+              </ImportProvider>
+            </LibraryDataProvider>
+          </ShortcutProvider>
+          <SyncAttentionToast />
+        </SyncAttentionProvider>
+      </AppStateProvider>
+    </ThemeStateProvider>
   );
 }

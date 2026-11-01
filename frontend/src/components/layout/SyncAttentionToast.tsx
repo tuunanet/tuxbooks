@@ -29,11 +29,7 @@ export function SyncAttentionToast() {
         >
           <p>{TOAST_MESSAGE}</p>
           <div className="flex justify-end gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => dispatch({ type: "select-section", section: { kind: "settings" } })}
-            >
+            <Button size="sm" variant="outline" onClick={() => dispatch({ type: "open-settings" })}>
               Open Settings
             </Button>
             <Button

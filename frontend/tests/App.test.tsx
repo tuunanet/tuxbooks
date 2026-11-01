@@ -63,7 +63,7 @@ describe("App", () => {
     expect(await screen.findByTestId("empty-library")).toBeInTheDocument();
   });
 
-  it("navigates to the settings view from the sidebar", async () => {
+  it("opens the settings window from the sidebar without leaving the library", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 0, collectionCount: 0 },
       list_books: [],
@@ -72,8 +72,11 @@ describe("App", () => {
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "Settings" }));
 
-    expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-current");
+    expect(await screen.findByTestId("settings-window")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-settings")).toHaveAttribute("aria-haspopup", "dialog");
+    // The library is still underneath the overlay.
+    expect(screen.getByTestId("empty-library")).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("get_library_stats");
   });
 
