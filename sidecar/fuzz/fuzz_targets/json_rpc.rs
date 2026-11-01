@@ -11,7 +11,7 @@ use tuxbooks_lib::repository::books::insert_book;
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::Reconciler;
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
-use tuxbooks_lib::AppState;
+use tuxbooks_lib::{AppState, ImportRegistry};
 
 struct FuzzEnv {
     library_dir: PathBuf,
@@ -69,6 +69,7 @@ async fn build_state(root: &Path, library_dir: &Path) -> AppState {
         watcher: Arc::new(watcher),
         startup_recovery: None,
         sync: None,
+        importing: ImportRegistry::default(),
     };
     let book = NewBook {
         path: library_dir.join("seed.epub").to_string_lossy().into_owned(),
