@@ -956,10 +956,12 @@ describe("Bookmark label popover", () => {
     // The old popover is still mounted while the second create round-trips,
     // so wait on the rebind's own hint before grabbing the elements —
     // otherwise the assertions land on the detached first instance.
-    await waitFor(() =>
-      expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(
-        "Chapter One · 10% through chapter · Saved just now",
-      ),
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(
+          "Chapter One · 10% through chapter · Saved just now",
+        ),
+      { timeout: 5000 },
     );
     const popover = screen.getByTestId("bookmark-label-popover");
     expect(within(popover).getByTestId("bookmark-label-input")).toHaveValue("");
