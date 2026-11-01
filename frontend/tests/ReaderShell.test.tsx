@@ -2200,6 +2200,29 @@ describe("Reader theme scope", () => {
     await waitFor(() => expect(windowEl.style.getPropertyValue("--background")).toBe(""));
   });
 
+  it("renders an explicitly selected Default as dark when the app is dark", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    window.localStorage.setItem(
+      READER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        preferences: { ...DEFAULT_READER_PREFERENCES, theme: "default" },
+        themePinned: true,
+      }),
+    );
+
+    renderReader();
+    const readerView = await screen.findByTestId("reader-view");
+    expect(readerView).toHaveAttribute("data-theme", "dark");
+    expect(readerView.style.getPropertyValue("--background")).toBe("#101013");
+    expect(screen.getByTestId("epub-reader")).toHaveStyle({ colorScheme: "dark" });
+
+    // Settings opened over that reader keeps the same dark scope.
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const windowEl = await screen.findByTestId("settings-window");
+    expect(windowEl.style.getPropertyValue("--background")).toBe("#101013");
+  });
+
   it("repaints the open reader and window together when Viewer settings changes", async () => {
     window.localStorage.clear();
     window.localStorage.setItem(THEME_STORAGE_KEY, "dark");

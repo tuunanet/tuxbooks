@@ -8,7 +8,7 @@ import {
 } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
-  effectiveReaderPreferences,
+  effectiveReaderTheme,
   readReaderSettings,
   subscribeReaderSettings,
 } from "@/lib/readerSettings";
@@ -68,7 +68,7 @@ export function SettingsWindow() {
   const themeScope = useMemo(
     () =>
       app.view === "reader"
-        ? readerThemeScope(effectiveReaderPreferences(readerSettings, resolvedTheme).theme)
+        ? readerThemeScope(effectiveReaderTheme(readerSettings, resolvedTheme))
         : appThemeScope(),
     [app.view, readerSettings, resolvedTheme],
   );

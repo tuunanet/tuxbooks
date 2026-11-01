@@ -378,8 +378,11 @@ and applies as a `.dark` class on `<html>`; the inline bootstrap in
 `index.html` mirrors that apply so startup never flashes the wrong theme.
 The reading surface follows the global theme too (`autoReaderTheme` in
 `readerState.ts`: dark → `dark` preset / PDF invert, light → publisher
-default) until a theme is picked in the reader's appearance menu or in
-Settings, which pins it. Reader appearance preferences persist on device in
+default). Picking an explicit preset pins it. Picking Default does not pin
+publisher colors against the app: Default keeps following the app theme, so
+a dark app renders the dark preset even when Default is selected; the menu
+shows the stored selection while `effectiveReaderTheme` supplies the preset
+the surfaces paint. Reader appearance preferences persist on device in
 `localStorage` (`tuxbooks.reader`, `lib/readerSettings.ts`): the reader and
 Settings → Viewer settings both read and write one subscribed store, so an
 edit on either side cannot leave a stale copy that overwrites the other.

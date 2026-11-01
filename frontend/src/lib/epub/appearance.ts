@@ -230,9 +230,10 @@ export function epubTextAlignPreference(
  * toolkit has no named-theme preference — themes are presets over the six
  * color preferences (background, text, link, visited, selection pair), the
  * same vocabulary the reference implementation maps in
- * `computeReadiumCssJsonMessage`. `default` is the neutral state: it
- * submits no colors at all, so publisher styling (including link and
- * selection colors) stays intact.
+ * `computeReadiumCssJsonMessage`. The `default` selection follows the app
+ * theme: on a light app it submits no colors, so publisher styling
+ * (including link and selection colors) stays intact; a dark app resolves
+ * it to the Dark preset before this vocabulary reaches an engine.
  */
 export type EpubThemeName =
   | "default"
@@ -262,7 +263,7 @@ export function epubSurfaceTheme(theme: ReaderTheme): EpubThemeName {
   return theme === "invert" ? "dark" : theme;
 }
 
-/** The default theme: neutral (no color override). */
+/** The default selection: follows the app theme instead of pinning a preset. */
 export const EPUB_DEFAULT_THEME: EpubThemeName = "default";
 
 /** Full color vocabulary a themed preset must provide (issue #46). */

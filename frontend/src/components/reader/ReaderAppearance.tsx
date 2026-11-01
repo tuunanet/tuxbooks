@@ -147,10 +147,13 @@ function ScaleSliderRow(props: {
  */
 export function ReaderAppearanceControls({
   preferences,
+  surfaceTheme = preferences.theme,
   setPreferences,
   format,
 }: {
   preferences: ReaderPreferences;
+  /** Applied theme when Default resolves to a concrete preset. */
+  surfaceTheme?: ReaderTheme;
   setPreferences: (patch: Partial<ReaderPreferences>) => void;
   format?: string;
 }) {
@@ -173,14 +176,12 @@ export function ReaderAppearanceControls({
 
   // Foreground override (issue #55): null = the active theme's (or
   // publisher's) text color. The readout judges the effective color — the
-  // override, or the theme's own — against the theme background (white as
-  // the reference on the neutral Default theme, whose background is
-  // publisher-defined). The palette lookup uses the EPUB-facing theme: a
-  // PDF-only Invert pick maps onto the dark preset's colors.
-  const themePalette = epubThemeColors(epubSurfaceTheme(preferences.theme));
-  const referenceBackground = epubForegroundReferenceBackground(
-    epubSurfaceTheme(preferences.theme),
-  );
+  // override, or the theme's own — against the surface actually applied
+  // (Default in a dark app resolves to the dark preset). The palette lookup
+  // uses the EPUB-facing theme: a PDF-only Invert pick maps onto the dark
+  // preset's colors.
+  const themePalette = epubThemeColors(epubSurfaceTheme(surfaceTheme));
+  const referenceBackground = epubForegroundReferenceBackground(epubSurfaceTheme(surfaceTheme));
   const effectiveForeground = preferences.foreground ?? themePalette?.text ?? null;
   const foregroundRatio =
     effectiveForeground !== null && isEpubHexColor(effectiveForeground)
@@ -515,7 +516,7 @@ export function ReaderAppearance({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { preferences, setPreferences } = useReader();
+  const { preferences, effectiveTheme, setPreferences } = useReader();
   const isPdf = format === "pdf";
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -547,11 +548,12 @@ export function ReaderAppearance({
         // The popover is portaled outside the reader root; carry the full
         // reader token set so it follows the book's theme instead of the
         // global light/dark mode.
-        style={readerThemeStyle(preferences.theme)}
+        style={readerThemeStyle(effectiveTheme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <ReaderAppearanceControls
           preferences={preferences}
+          surfaceTheme={effectiveTheme}
           setPreferences={setPreferences}
           format={format}
         />

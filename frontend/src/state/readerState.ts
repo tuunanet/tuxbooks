@@ -71,6 +71,11 @@ export type ReaderFontFamily = EpubFontFamily;
    * hue adapts to light and dark (lib/highlightPalette).
    */
   highlightOverrides: HighlightOverrides;
+  /**
+   * The appearance-menu selection. "Default" follows the app theme; every
+   * other preset pins the surface. `effectiveTheme` in `ReaderState` is the
+   * preset actually painted.
+   */
   theme: ReaderTheme;
   layout: ReaderLayout;
   /**
@@ -116,18 +121,24 @@ export function epubBookModeColumnCount(preferences: ReaderPreferences): EpubCol
 }
 
 /**
- * Reader surface theme while it follows the global app theme (the state
- * before any appearance-menu pick): dark global → "dark" (EPUB dark preset /
- * PDF Smart Dark recoloring, issue #67), light global → publisher colors.
- * Deliberately not "light": the neutral "default" keeps publisher styling on
- * a light OS, which is what a light global theme means.
+ * Reader surface theme while Default is selected, including an explicit
+ * Default pick: dark global → "dark" (EPUB dark preset / PDF Smart Dark
+ * recoloring, issue #67), light global → publisher colors. Deliberately not
+ * "light": the neutral "default" keeps publisher styling on a light OS,
+ * which is what a light global theme means.
  */
 export function autoReaderTheme(resolved: ResolvedTheme): ReaderTheme {
   return resolved === "dark" ? "dark" : EPUB_DEFAULT_THEME;
 }
 
 export interface ReaderState {
+  /** Stored selection; `theme` is what the appearance menu shows. */
   preferences: ReaderPreferences;
+  /**
+   * The theme the surface actually paints. Default follows the app theme,
+   * so `default` in `preferences.theme` can mean the dark preset here.
+   */
+  effectiveTheme: ReaderTheme;
   /** Reading position as a percentage, 0–100. */
   position: number;
   setPosition: (percentage: number) => void;

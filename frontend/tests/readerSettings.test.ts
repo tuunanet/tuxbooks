@@ -128,6 +128,15 @@ describe("effectiveReaderPreferences", () => {
     expect(effectiveReaderPreferences(settings, "light").theme).toBe("default");
   });
 
+  it("makes an explicit Default follow the global theme", () => {
+    const settings = {
+      preferences: { ...DEFAULT_READER_PREFERENCES, theme: "default" as const },
+      themePinned: true,
+    };
+    expect(effectiveReaderPreferences(settings, "dark").theme).toBe("dark");
+    expect(effectiveReaderPreferences(settings, "light").theme).toBe("default");
+  });
+
   it("keeps the explicit theme once pinned", () => {
     const settings = {
       preferences: { ...DEFAULT_READER_PREFERENCES, theme: "paper" as const },

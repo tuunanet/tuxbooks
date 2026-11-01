@@ -278,7 +278,7 @@ function ViewerSettingsSection() {
   const { resolvedTheme } = useThemeState();
   const { stored, setPreferences, reset } = useStoredReaderSettings(resolvedTheme);
   const [format, setFormat] = useState<BookFormat>("epub");
-  const preferences = effectiveReaderPreferences(stored, resolvedTheme);
+  const surfaceTheme = effectiveReaderPreferences(stored, resolvedTheme).theme;
   const formats = Object.keys(FORMATS) as BookFormat[];
 
   const setHighlightOverride = useCallback(
@@ -329,7 +329,8 @@ function ViewerSettingsSection() {
               </p>
               <div className="mt-4">
                 <ReaderAppearanceControls
-                  preferences={preferences}
+                  preferences={stored.preferences}
+                  surfaceTheme={surfaceTheme}
                   setPreferences={setPreferences}
                   format={id}
                 />

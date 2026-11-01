@@ -220,34 +220,46 @@ export function applyReaderSettingsPatch(
   resolvedTheme: ResolvedTheme,
 ): StoredReaderSettings {
   const preferences = { ...current.preferences, ...patch };
-  const currentEffectiveTheme = current.themePinned
-    ? current.preferences.theme
-    : autoReaderTheme(resolvedTheme);
-  if (
-    patch.theme !== undefined &&
-    patch.theme !== currentEffectiveTheme &&
-    // The fit check uses the EPUB-facing surface of the theme (the
-    // PDF-only Invert preset degrades to dark — issue #67).
-    !epubForegroundFitsTheme(preferences.foreground, epubSurfaceTheme(preferences.theme))
-  ) {
-    preferences.foreground = null;
-  }
-  return {
+  const next: StoredReaderSettings = {
     preferences,
     themePinned: patch.theme !== undefined ? true : current.themePinned,
   };
+  const currentEffective = effectiveReaderTheme(current, resolvedTheme);
+  const nextEffective = effectiveReaderTheme(next, resolvedTheme);
+  if (
+    patch.theme !== undefined &&
+    nextEffective !== currentEffective &&
+    // The fit check uses the EPUB-facing surface of the applied theme (the
+    // PDF-only Invert preset degrades to dark — issue #67).
+    !epubForegroundFitsTheme(preferences.foreground, epubSurfaceTheme(nextEffective))
+  ) {
+    preferences.foreground = null;
+  }
+  return next;
 }
 
 /**
- * The preferences the reader surface should actually apply: while the theme
- * is unpinned the surface follows the resolved global theme, otherwise the
- * stored explicit theme wins.
+ * The theme the reader actually paints. Default follows the app theme, so a
+ * dark app keeps the book dark unless an explicit preset overrides it; light
+ * apps keep publisher colors for Default.
+ */
+export function effectiveReaderTheme(
+  settings: StoredReaderSettings,
+  resolved: ResolvedTheme,
+): ReaderTheme {
+  return settings.themePinned && settings.preferences.theme !== "default"
+    ? settings.preferences.theme
+    : autoReaderTheme(resolved);
+}
+
+/**
+ * The preferences the reader surface should actually apply. The stored theme
+ * selection stays available for the appearance menu; only the applied theme
+ * is swapped for the auto value.
  */
 export function effectiveReaderPreferences(
   settings: StoredReaderSettings,
   resolved: ResolvedTheme,
 ): ReaderPreferences {
-  return settings.themePinned
-    ? settings.preferences
-    : { ...settings.preferences, theme: autoReaderTheme(resolved) };
+  return { ...settings.preferences, theme: effectiveReaderTheme(settings, resolved) };
 }

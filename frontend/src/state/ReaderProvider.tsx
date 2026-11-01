@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { autoReaderTheme, ReaderContext, type ReaderPreferences } from "./readerState";
+import { ReaderContext, type ReaderPreferences } from "./readerState";
 import {
   applyReaderSettingsPatch,
+  effectiveReaderTheme,
   readReaderSettings,
   subscribeReaderSettings,
   writeReaderSettings,
@@ -34,14 +35,13 @@ export function ReaderProvider({ children, globalTheme = "light" }: ReaderProvid
     readReaderSettings,
     readReaderSettings,
   );
-  const { preferences, themePinned } = stored;
+  const { preferences } = stored;
+  const effectiveTheme = effectiveReaderTheme(stored, globalTheme);
   const [position, setPositionState] = useState(0);
 
   const setPosition = useCallback((percentage: number) => {
     setPositionState(Math.max(0, Math.min(100, percentage)));
   }, []);
-
-  const effectiveTheme = themePinned ? preferences.theme : autoReaderTheme(globalTheme);
 
   const setPreferences = useCallback(
     (patch: Partial<ReaderPreferences>) => {
@@ -50,16 +50,12 @@ export function ReaderProvider({ children, globalTheme = "light" }: ReaderProvid
     [globalTheme],
   );
 
-  // While unpinned the surface tracks the global theme; derived rather than
-  // stored, so a live flip re-maps it without effects or subscriptions.
-  const effectivePreferences = useMemo(
-    () => (themePinned ? preferences : { ...preferences, theme: effectiveTheme }),
-    [preferences, themePinned, effectiveTheme],
-  );
-
+  // `preferences` keeps the menu selection (Default included); the surface
+  // theme is applied separately so Default can follow the app theme without
+  // changing what the appearance menu shows as selected.
   const value = useMemo(
-    () => ({ preferences: effectivePreferences, position, setPosition, setPreferences }),
-    [effectivePreferences, position, setPosition, setPreferences],
+    () => ({ preferences, effectiveTheme, position, setPosition, setPreferences }),
+    [preferences, effectiveTheme, position, setPosition, setPreferences],
   );
 
   return <ReaderContext.Provider value={value}>{children}</ReaderContext.Provider>;

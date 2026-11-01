@@ -58,12 +58,12 @@ export function ReaderShell() {
   const { selectedBookId, readerTargetAnnotationId } = useAppState();
   const { books } = useLibrary();
   const dispatch = useAppDispatch();
-  const { preferences, position, setPosition, setPreferences } = useReader();
+  const { preferences, effectiveTheme, position, setPosition, setPreferences } = useReader();
 
   // One scope owns every token the reader chrome consumes. Portaled menus,
   // tooltips, and the settings window opened from here read the same style,
   // so an explicit reader theme cannot mix with the app's light/dark mode.
-  const themeScope = useMemo(() => readerThemeScope(preferences.theme), [preferences.theme]);
+  const themeScope = useMemo(() => readerThemeScope(effectiveTheme), [effectiveTheme]);
   const themeStyle = useMemo(() => themeScopeStyle(themeScope), [themeScope]);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
@@ -107,8 +107,8 @@ export function ReaderShell() {
   // annotations themselves (they persist slot keys).
   const highlightColorFor = useCallback(
     (color: string | null | undefined) =>
-      highlightCss(color, readerThemeFamily(preferences.theme), preferences.highlightOverrides),
-    [preferences.theme, preferences.highlightOverrides],
+      highlightCss(color, readerThemeFamily(effectiveTheme), preferences.highlightOverrides),
+    [effectiveTheme, preferences.highlightOverrides],
   );
 
   const annotationsApi = useAnnotations(book?.id ?? null);
@@ -228,7 +228,7 @@ export function ReaderShell() {
       <div
         ref={readerViewRef}
         data-testid="reader-view"
-        data-theme={preferences.theme}
+        data-theme={effectiveTheme}
         data-reader-position={Math.round(position)}
         data-pdf-presentation={presentationFlag(isPdf, presentation.presentation)}
         data-epub-presentation={presentationFlag(isEpub, presentation.presentation)}
@@ -239,7 +239,7 @@ export function ReaderShell() {
           book={book}
           isPdf={Boolean(isPdf)}
           isEpub={Boolean(isEpub)}
-          theme={preferences.theme}
+          theme={effectiveTheme}
           bookMode={preferences.bookMode}
           presentation={presentation.presentation}
           pdfSidebarOpen={panels.pdfSidebarOpen}
@@ -272,7 +272,7 @@ export function ReaderShell() {
           bookTurnRef={bookTurnRef}
           initialJump={initialJump}
           highlights={highlights.highlights}
-          theme={preferences.theme}
+          theme={effectiveTheme}
           onTocLoad={(toc) => setEpubTocState({ bookId: book.id, toc })}
           onOutlineLoad={(outline) => setPdfOutlineState({ bookId: book.id, outline })}
           onDocumentLoad={setPdfPageCount}
@@ -315,7 +315,7 @@ export function ReaderShell() {
           tab={panels.nav.tab}
           onTabChange={panels.selectNavTab}
           colorFor={highlightColorFor}
-          theme={preferences.theme}
+          theme={effectiveTheme}
         />
 
         <ReaderSearchOverlay
@@ -324,7 +324,7 @@ export function ReaderShell() {
           search={search.activeSearch}
           onSearch={search.runSearch}
           onPickMatch={search.pickSearchMatch}
-          theme={preferences.theme}
+          theme={effectiveTheme}
         />
 
         <SelectionToolbar
