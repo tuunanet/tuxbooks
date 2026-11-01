@@ -362,13 +362,34 @@ export const EPUB_THEME_COLORS: Record<Exclude<EpubThemeName, "default">, EpubTh
 };
 
 /**
+ * Appearance-menu order. Light and Dark sit together so the pair reads as
+ * one choice; presets missing here sort after the known ones, so a new
+ * palette entry still appears without another list to update.
+ */
+const EPUB_THEME_ORDER: Partial<Record<EpubThemeName, number>> = {
+  default: 0,
+  light: 1,
+  dark: 2,
+  paper: 3,
+  contrast: 4,
+  "blue-contrast": 5,
+  "mint-contrast": 6,
+};
+
+/**
  * Every EPUB preset in menu order. Derived from the palette so a new entry
  * cannot be forgotten by the reader or the settings store.
  */
-export const EPUB_THEME_NAMES: readonly EpubThemeName[] = [
-  "default",
-  ...(Object.keys(EPUB_THEME_COLORS) as Exclude<EpubThemeName, "default">[]),
-];
+export const EPUB_THEME_NAMES: readonly EpubThemeName[] = (
+  [
+    "default",
+    ...(Object.keys(EPUB_THEME_COLORS) as Exclude<EpubThemeName, "default">[]),
+  ] as EpubThemeName[]
+).sort(
+  (a, b) =>
+    (EPUB_THEME_ORDER[a] ?? Number.MAX_SAFE_INTEGER) -
+    (EPUB_THEME_ORDER[b] ?? Number.MAX_SAFE_INTEGER),
+);
 
 /**
  * Colors a theme submits to the toolkit; null for the neutral default

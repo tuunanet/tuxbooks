@@ -1615,14 +1615,14 @@ describe("ReaderAppearance", () => {
     expect(content).toBeInTheDocument();
 
     // Radix toggle groups inside the popover render radio semantics.
-    // Default (publisher colors) is the preselected neutral theme.
+    // Default follows the app theme; Light and Dark sit together.
     const themeGroup = screen.getByTestId("pref-theme");
     expect(within(themeGroup).getByRole("radio", { name: "Default" })).toBeChecked();
     expect(
       within(themeGroup)
         .getAllByRole("radio")
-        .map((radio) => radio.textContent),
-    ).toEqual(["Default", "Light", "Paper", "Dark", "High contrast", "Blue", "Mint"]);
+        .map((radio) => radio.getAttribute("aria-label")),
+    ).toEqual(["Default", "Light", "Dark", "Paper", "High contrast", "Blue", "Mint"]);
 
     await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
@@ -1835,24 +1835,24 @@ describe("ReaderAppearance", () => {
     await screen.findByTestId("appearance-content");
     const handle = lastFakeHandle();
 
-    // Paginated exposes exactly 1, 2, 3, and 4 as Roman numerals ("II"
-    // preselected by default); the stored value stays numeric.
+    // Paginated exposes exactly 1, 2, 3, and 4 as column icons ("Two
+    // columns" preselected by default); the stored value stays numeric.
     const columns = screen.getByTestId("pref-columns");
     expect(
       within(columns)
         .getAllByRole("radio")
-        .map((radio) => radio.textContent),
-    ).toEqual(["I", "II", "III", "IV"]);
-    expect(within(columns).getByRole("radio", { name: "II" })).toBeChecked();
+        .map((radio) => radio.getAttribute("aria-label")),
+    ).toEqual(["One column", "2 columns", "3 columns", "4 columns"]);
+    expect(within(columns).getByRole("radio", { name: "2 columns" })).toBeChecked();
 
     // Every value is submitted as an explicit numeric target (never auto-fit).
-    await userEvent.click(within(columns).getByRole("radio", { name: "IV" }));
+    await userEvent.click(within(columns).getByRole("radio", { name: "4 columns" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
         expect.objectContaining({ columnCount: 4 }),
       ),
     );
-    await userEvent.click(within(columns).getByRole("radio", { name: "I" }));
+    await userEvent.click(within(columns).getByRole("radio", { name: "One column" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
         expect.objectContaining({ columnCount: 1 }),
@@ -1868,7 +1868,7 @@ describe("ReaderAppearance", () => {
     // Back to paginated: I (1) is still the selected target.
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const columnsAgain = await screen.findByTestId("pref-columns");
-    expect(within(columnsAgain).getByRole("radio", { name: "I" })).toBeChecked();
+    expect(within(columnsAgain).getByRole("radio", { name: "One column" })).toBeChecked();
   });
 
   it("steps the text-layout spacing scales and resets each to publisher default", async () => {
@@ -2122,8 +2122,8 @@ describe("PDF appearance menu", () => {
     expect(
       within(theme)
         .getAllByRole("radio")
-        .map((radio) => radio.textContent),
-    ).toEqual(["Default", "Light", "Paper", "Smart dark", "Invert", "High contrast"]);
+        .map((radio) => radio.getAttribute("aria-label")),
+    ).toEqual(["Default", "Light", "Smart dark", "Paper", "Invert", "High contrast"]);
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
     await userEvent.click(within(theme).getByRole("radio", { name: "High contrast" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe(

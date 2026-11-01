@@ -93,8 +93,8 @@ export const PDF_THEME_CHOICES = [
 export const PDF_THEME_MENU_OPTIONS: { value: ReaderTheme; label: string }[] = [
   { value: "default", label: "Default" },
   { value: "light", label: "Light" },
-  { value: "paper", label: "Paper" },
   { value: "dark", label: "Smart dark" },
+  { value: "paper", label: "Paper" },
   { value: "invert", label: "Invert" },
   { value: "contrast", label: "High contrast" },
 ];
