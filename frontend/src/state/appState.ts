@@ -22,8 +22,7 @@ export type SmartSectionId =
 export type LibrarySection =
   | { kind: "smart"; id: SmartSectionId }
   | { kind: "collection"; id: number }
-  | { kind: "reading-history" }
-  | { kind: "settings" };
+  | { kind: "reading-history" };
 
 export interface AppState {
   view: AppView;
@@ -70,6 +69,12 @@ export interface AppState {
    * collection instead of scoping one.
    */
   formatFilter: BookFormat[];
+  /**
+   * Whether the Settings window is open. Settings floats above whatever is
+   * underneath, so it stays reachable from the library, a book detail, and
+   * the reader without changing the view.
+   */
+  settingsOpen: boolean;
 }
 
 export type AppAction =
@@ -87,7 +92,9 @@ export type AppAction =
   | { type: "return-to-library" }
   | { type: "select-detail-tab"; tab: DetailTab }
   | { type: "set-library-query"; query: string }
-  | { type: "set-format-filter"; formats: BookFormat[] };
+  | { type: "set-format-filter"; formats: BookFormat[] }
+  | { type: "open-settings" }
+  | { type: "close-settings" };
 
 export const initialAppState: AppState = {
   view: "library",
@@ -99,6 +106,7 @@ export const initialAppState: AppState = {
   readerTargetAnnotationId: null,
   libraryQuery: "",
   formatFilter: [],
+  settingsOpen: false,
 };
 
 export function appStateReducer(state: AppState, action: AppAction): AppState {
@@ -181,6 +189,10 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         current.length === next.length && current.every((format, index) => format === next[index]);
       return unchanged ? state : { ...state, formatFilter: next };
     }
+    case "open-settings":
+      return state.settingsOpen ? state : { ...state, settingsOpen: true };
+    case "close-settings":
+      return state.settingsOpen ? { ...state, settingsOpen: false } : state;
   }
 }
 

@@ -159,7 +159,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await page.getByRole("button", { name: "Watched folders" }).click();
     const list = page.getByTestId("folders-list");
     await expect(list.locator("li", { hasText: shelf })).toBeVisible();
-    await page.getByRole("button", { name: "All Books" }).click();
+    await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
 
     // A sibling dropped on disk afterwards appears without a second import.
@@ -236,7 +236,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(row).toHaveCount(0);
 
     // ...its book leaves the library view...
-    await page.getByRole("button", { name: "All Books" }).click();
+    await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
     await expect
       .poll(() => cardCount(page), {
@@ -307,7 +307,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
 
     // The book leaves the library and the file stays byte-for-byte, with no
     // ghost coming back through a watch nothing covers anymore.
-    await page.getByRole("button", { name: "All Books" }).click();
+    await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
     await expect
       .poll(() => cardCount(page), {

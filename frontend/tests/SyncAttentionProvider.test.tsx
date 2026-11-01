@@ -41,7 +41,8 @@ function Harness() {
       <span data-testid="attention">{attention ? "attention" : "clear"}</span>
       <span data-testid="toast-state">{toastVisible ? "visible" : "hidden"}</span>
       <span data-testid="section-kind">{app.section.kind}</span>
-      <Sidebar active={app.section} onSectionChange={() => {}} />
+      <span data-testid="settings-open">{app.settingsOpen ? "open" : "closed"}</span>
+      <Sidebar active={app.section} onSectionChange={() => {}} onOpenSettings={() => {}} />
     </div>
   );
 }
@@ -309,6 +310,6 @@ describe("SyncAttentionProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Open Settings" }));
 
-    expect(screen.getByTestId("section-kind")).toHaveTextContent("settings");
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("open");
   });
 });

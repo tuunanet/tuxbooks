@@ -23,11 +23,18 @@ test.describe("tuxbooks app shell", () => {
     await expect(page.getByTestId("library-view")).toHaveCount(0);
   });
 
-  test("navigates to settings and back to the library", async ({ page }) => {
+  test("opens settings over the library and closes it again", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-window")).toBeVisible();
     await expect(page.getByTestId("settings-view")).toBeVisible();
 
-    await page.getByRole("button", { name: "All Books" }).click();
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(page.getByTestId("settings-window")).toHaveCount(0);
     await expect(page.getByTestId("empty-library")).toBeVisible();
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-window")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("settings-window")).toHaveCount(0);
   });
 });

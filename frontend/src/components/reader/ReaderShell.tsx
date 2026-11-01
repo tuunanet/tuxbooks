@@ -265,6 +265,7 @@ export function ReaderShell() {
         labelTarget={bookmarks.labelTarget}
         onCloseLabel={bookmarks.closeLabelPopover}
         onCommitLabel={bookmarks.commitBookmarkLabel}
+        onOpenSettings={() => dispatch({ type: "open-settings" })}
         onBack={() => dispatch({ type: "return-to-library" })}
       />
 

@@ -1,5 +1,18 @@
 import { useCallback, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import {
+  BookOpen,
+  Database,
+  ExternalLink,
+  FolderOpen,
+  Info,
+  Keyboard,
+  Palette,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { HexColorInput, HexColorPicker } from "react-colorful";
 import { AboutSection } from "@/components/settings/AboutSection";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
@@ -8,8 +21,10 @@ import { FoldersSettings } from "@/components/settings/FoldersSettings";
 import { SyncSettings } from "@/components/settings/SyncSettings";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useLibrary } from "@/hooks/useLibrary";
 import { epubForegroundFitsTheme, epubSurfaceTheme, isEpubHexColor } from "@/lib/epub/appearance";
 import { FORMATS } from "@/lib/formats";
 import {
@@ -41,15 +56,17 @@ import type { BookFormat } from "@/types/domain";
 
 type SettingsSectionId = "general" | "viewer" | "shortcuts" | "folders" | "sync" | "data" | "about";
 
-const SECTIONS: { id: SettingsSectionId; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "viewer", label: "Viewer settings" },
-  { id: "shortcuts", label: "Keyboard Shortcuts" },
-  { id: "folders", label: "Watched folders" },
-  { id: "sync", label: "Sync" },
-  { id: "data", label: "Application Data" },
-  { id: "about", label: "About" },
+const SECTIONS: { id: SettingsSectionId; label: string; icon: LucideIcon }[] = [
+  { id: "general", label: "General", icon: Settings },
+  { id: "viewer", label: "Viewer settings", icon: Palette },
+  { id: "shortcuts", label: "Keyboard Shortcuts", icon: Keyboard },
+  { id: "folders", label: "Watched folders", icon: FolderOpen },
+  { id: "sync", label: "Sync", icon: RefreshCw },
+  { id: "data", label: "Application Data", icon: Database },
+  { id: "about", label: "About", icon: Info },
 ];
+
+const RELEASES_URL = "https://github.com/tuunanet/tuxbooks/releases";
 
 const APP_THEME_OPTIONS: { value: AppThemePreference; label: string }[] = [
   { value: "system", label: "System" },
@@ -441,14 +458,59 @@ function AppThemeRow() {
 }
 
 /**
- * General holds the app theme. Library contents are managed in the Watched
+ * General holds the app theme, the version/release entry point, and a
+ * read-only library summary. Library contents are managed in the Watched
  * folders tab; importing also runs from the header menu and by drag-and-drop.
  */
 function GeneralSection() {
+  const { stats } = useLibrary();
   return (
-    <dl data-testid="settings-rows" className="mt-6 divide-y">
-      <AppThemeRow />
-    </dl>
+    <div data-testid="settings-rows" className="flex flex-col gap-5">
+      <section className="flex items-start gap-3 rounded-xl border p-4">
+        <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <BookOpen aria-hidden="true" className="size-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">TuxBooks {__TUXBOOKS_VERSION__}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            See what changed in each release on GitHub.
+          </p>
+        </div>
+        <Button size="sm" asChild>
+          <a href={RELEASES_URL} target="_blank" rel="noreferrer">
+            View releases
+            <ExternalLink data-icon="inline-end" />
+          </a>
+        </Button>
+      </section>
+
+      <section className="rounded-xl border p-4">
+        <p className="text-sm font-medium">Appearance</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Sets the app chrome. Reader themes stay per book and per format.
+        </p>
+        <dl className="mt-3 divide-y">
+          <AppThemeRow />
+        </dl>
+      </section>
+
+      <section className="rounded-xl border p-4">
+        <p className="text-sm font-medium">Library</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Books are read from disk and indexed locally.
+        </p>
+        <dl className="mt-3 grid grid-cols-2 gap-3">
+          <div className="rounded-lg bg-muted/50 px-3 py-2">
+            <dt className="text-xs text-muted-foreground">Books</dt>
+            <dd className="text-lg font-semibold tabular-nums">{stats?.bookCount ?? 0}</dd>
+          </div>
+          <div className="rounded-lg bg-muted/50 px-3 py-2">
+            <dt className="text-xs text-muted-foreground">Collections</dt>
+            <dd className="text-lg font-semibold tabular-nums">{stats?.collectionCount ?? 0}</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
   );
 }
 
@@ -460,66 +522,107 @@ function SettingsNavigation({
   onSectionChange: (section: SettingsSectionId) => void;
 }) {
   return (
-    <nav
-      aria-label="Settings sections"
-      className="flex flex-row flex-wrap gap-1 lg:w-48 lg:shrink-0 lg:flex-col"
-    >
-      <div className="flex flex-row flex-wrap gap-1 lg:flex-col lg:gap-0.5">
-        {SECTIONS.map((section) => (
+    <nav aria-label="Settings sections" className="flex flex-col gap-0.5">
+      {SECTIONS.map((section) => {
+        const Icon = section.icon;
+        return (
           <button
             key={section.id}
             type="button"
             aria-current={active === section.id ? "true" : undefined}
             onClick={() => onSectionChange(section.id)}
             className={cn(
-              "rounded-md px-3 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+              "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
               active === section.id
                 ? "bg-accent font-medium text-accent-foreground"
                 : "text-foreground hover:bg-accent/60",
             )}
           >
-            {section.label}
+            <Icon
+              aria-hidden="true"
+              className={cn(
+                "size-4 shrink-0",
+                active === section.id ? "text-foreground" : "text-muted-foreground",
+              )}
+            />
+            <span className="truncate">{section.label}</span>
           </button>
-        ))}
-      </div>
+        );
+      })}
     </nav>
   );
 }
 
 /**
- * Settings screen. General holds the app theme; Viewer settings holds the
- * persisted default appearance, one tab per format, plus the highlight colors
- * shared by every reader; Watched folders lists each watched location with its
- * counts; Application Data shows the app-owned storage roots; Keyboard
- * Shortcuts describes the bindings; About shows the app version, creator
- * credit, and contributor doc links.
+ * Settings panel. General holds the app theme, version entry point, and a
+ * library summary; Viewer settings holds the persisted default appearance,
+ * one tab per format, plus the highlight colors shared by every reader;
+ * Watched folders lists each watched location with its counts; Application
+ * Data shows the app-owned storage roots; Keyboard Shortcuts describes the
+ * bindings; About shows the app version, creator credit, and contributor doc
+ * links.
+ *
+ * Rendered inside the draggable Settings window, but the panel itself also
+ * works standalone (tests render it directly), so closing is optional.
  */
-export function SettingsShell() {
+export function SettingsShell({ onClose }: { onClose?: () => void } = {}) {
   const [active, setActive] = useState<SettingsSectionId>("general");
+  const label = SECTIONS.find((section) => section.id === active)?.label;
 
   return (
-    <section data-testid="settings-view" className="flex flex-col gap-6 lg:flex-row lg:gap-10">
-      <SettingsNavigation active={active} onSectionChange={setActive} />
-      <div className="min-w-0 max-w-xl flex-1">
-        <h2 className="text-2xl font-semibold">
-          {SECTIONS.find((section) => section.id === active)?.label}
-        </h2>
-        {active === "general" ? (
-          <GeneralSection />
-        ) : active === "viewer" ? (
-          <ViewerSettingsSection />
-        ) : active === "data" ? (
-          <DataSettings />
-        ) : active === "folders" ? (
-          <FoldersSettings />
-        ) : active === "sync" ? (
-          <SyncSettings />
-        ) : active === "about" ? (
-          <AboutSection />
-        ) : (
-          <ShortcutReference />
-        )}
+    <div data-testid="settings-view" className="flex h-full min-h-0 w-full">
+      <aside className="flex w-52 shrink-0 flex-col border-r bg-muted/30">
+        <div
+          data-settings-drag-handle
+          className="flex h-14 shrink-0 cursor-grab touch-none items-center gap-2 px-4 select-none"
+        >
+          <Settings aria-hidden="true" className="size-4 text-muted-foreground" />
+          <span className="text-sm font-semibold">Settings</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <SettingsNavigation active={active} onSectionChange={setActive} />
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header
+          data-settings-drag-handle
+          className="flex h-14 shrink-0 cursor-grab touch-none items-center justify-between gap-3 border-b px-6 select-none"
+        >
+          <h2 className="text-base font-semibold">{label}</h2>
+          {onClose ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              data-testid="settings-close"
+              aria-label="Close settings"
+              title="Close settings (Esc)"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          ) : null}
+        </header>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="max-w-2xl px-6 pt-5 pb-8">
+            {active === "general" ? (
+              <GeneralSection />
+            ) : active === "viewer" ? (
+              <ViewerSettingsSection />
+            ) : active === "data" ? (
+              <DataSettings />
+            ) : active === "folders" ? (
+              <FoldersSettings />
+            ) : active === "sync" ? (
+              <SyncSettings />
+            ) : active === "about" ? (
+              <AboutSection />
+            ) : (
+              <ShortcutReference />
+            )}
+          </div>
+        </ScrollArea>
       </div>
-    </section>
+    </div>
   );
 }

@@ -5,7 +5,7 @@ import { LibraryView } from "@/components/library/LibraryView";
 import { DropZoneOverlay } from "@/components/library/DropZoneOverlay";
 import { ImportStatus } from "@/components/library/ImportStatus";
 import { ReaderShell } from "@/components/reader/ReaderShell";
-import { SettingsShell } from "@/components/settings/SettingsShell";
+import { SettingsWindow } from "@/components/settings/SettingsWindow";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { prewarmPdfEngine } from "@/lib/pdf/pdfEngine";
 import { useShortcut } from "@/lib/shortcuts";
@@ -87,13 +87,12 @@ function Shell() {
       <Sidebar
         active={app.section}
         onSectionChange={(section) => dispatch({ type: "select-section", section })}
+        onOpenSettings={() => dispatch({ type: "open-settings" })}
       />
       <main className="relative flex-1 overflow-y-auto p-8">
         <ImportStatus />
         {app.view === "detail" ? (
           <BookDetail />
-        ) : app.section.kind === "settings" ? (
-          <SettingsShell />
         ) : app.section.kind === "reading-history" ? (
           <ReadingHistoryView />
         ) : (
@@ -122,6 +121,7 @@ export function AppShell({ initialState }: AppShellProps) {
           <LibraryDataProvider>
             <ImportProvider>
               <Shell />
+              <SettingsWindow />
             </ImportProvider>
           </LibraryDataProvider>
         </ShortcutProvider>

@@ -378,6 +378,17 @@ describe("ReaderShell chrome", () => {
     expect(screen.queryByTestId("reader-view")).not.toBeInTheDocument();
   });
 
+  it("opens settings from the toolbar without leaving the reader", async () => {
+    renderReader();
+    await screen.findByTestId("reader-view");
+
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByTestId("settings-window")).toBeInTheDocument();
+    // The reader stays mounted under the overlay.
+    expect(screen.getByTestId("reader-view")).toBeInTheDocument();
+  });
+
   it("stamps last opened once when a reading session starts", async () => {
     renderReader();
 
@@ -1257,13 +1268,14 @@ describe("ReaderNavigation", () => {
     expect(order.indexOf("reader-sidebar-toggle")).toBe(order.indexOf("pdf-header-controls") + 1);
 
     // The trailing group starts with Contents, then search, the book mode
-    // toggle, appearance, and bookmark.
+    // toggle, appearance, bookmark, and settings.
     expect(order.slice(order.indexOf("reader-title") + 1)).toEqual([
       "reader-nav-trigger",
       "reader-search",
       "reader-book-mode",
       "appearance-trigger",
       "reader-bookmark",
+      "reader-settings",
     ]);
   });
 

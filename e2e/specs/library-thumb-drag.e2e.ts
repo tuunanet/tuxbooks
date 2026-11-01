@@ -525,7 +525,7 @@ test.describe.serial("10,000-book scrollbar thumb drag (tuxbooks-y9s)", () => {
     // virtualizer's measurement cache starts empty — jumping to the bottom
     // then leaves every unmounted row above the viewport unmeasured, which
     // is the upward drag's correction territory.
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Reading history", exact: true }).click();
     await page.waitForTimeout(300);
     await page.getByRole("button", { name: "All Books", exact: true }).click();
     await expect(page.getByTestId("book-grid")).toBeVisible({ timeout: 30_000 });

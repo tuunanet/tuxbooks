@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AppShell } from "@/components/layout/AppShell";
@@ -24,7 +24,7 @@ function renderSettings() {
           <AppShell
             initialState={{
               view: "library",
-              section: { kind: "settings" },
+              settingsOpen: true,
               selectedBookId: null,
               libraryQuery: "",
             }}
@@ -68,6 +68,59 @@ describe("SettingsShell", () => {
     }
   });
 
+  it("closes the window from the close button", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-window");
+    await userEvent.click(screen.getByRole("button", { name: "Close settings" }));
+
+    await waitFor(() => expect(screen.queryByTestId("settings-window")).not.toBeInTheDocument());
+  });
+
+  it("closes the window with Escape", async () => {
+    renderSettings();
+
+    await screen.findByTestId("settings-window");
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByTestId("settings-window")).not.toBeInTheDocument());
+  });
+
+  it("drags the window by its header", async () => {
+    renderSettings();
+
+    const windowEl = await screen.findByTestId("settings-window");
+    const handle = windowEl.querySelector<HTMLElement>("[data-settings-drag-handle]");
+    expect(handle).not.toBeNull();
+
+    fireEvent.pointerDown(handle!, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 200,
+      clientY: 100,
+    });
+    fireEvent.pointerMove(windowEl, {
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 260,
+      clientY: 130,
+    });
+
+    expect(windowEl.style.left).toBe("calc(50% + 60px)");
+    expect(windowEl.style.top).toBe("calc(50% + 30px)");
+  });
+
+  it("keeps window-level shortcuts from firing behind the window", async () => {
+    renderSettings();
+
+    const windowEl = await screen.findByTestId("settings-window");
+    const search = screen.getByTestId("global-search");
+    fireEvent.keyDown(windowEl, { key: "k", ctrlKey: true });
+
+    expect(search).not.toHaveFocus();
+  });
+
   it("lists About last in the section navigation", async () => {
     renderSettings();
 
@@ -97,6 +150,13 @@ describe("SettingsShell", () => {
     // Guards against re-adding import UI to General: the Folders tab owns
     // watched folders, and the header menu owns importing.
     const rows = screen.getByTestId("settings-rows");
+    expect(rows).toHaveTextContent(`TuxBooks ${__TUXBOOKS_VERSION__}`);
+    expect(within(rows).getByRole("link", { name: /View releases/ })).toHaveAttribute(
+      "href",
+      "https://github.com/tuunanet/tuxbooks/releases",
+    );
+    expect(within(rows).getByText("Books")).toBeInTheDocument();
+    expect(within(rows).getByText("Collections")).toBeInTheDocument();
     expect(rows).not.toHaveTextContent("Add library folder");
     expect(rows).not.toHaveTextContent("Import books");
     expect(rows).not.toHaveTextContent("Importing a file or folder watches its folder");
