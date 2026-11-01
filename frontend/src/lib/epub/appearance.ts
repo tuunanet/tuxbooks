@@ -540,19 +540,83 @@ export function readerScrollbarColor(theme: EpubThemeName): string | undefined {
  * The neutral default intentionally returns undefined: its chrome is the
  * app chrome, so the active app theme's tokens are already correct.
  */
+// Status and destructive hues stay semantic; the family only picks the light
+// or dark ink that reads on the preset's surface.
+const READER_SEMANTIC_INKS = {
+  light: { destructive: "#b42318", info: "#1d4ed8", warning: "#b45309", success: "#047857" },
+  dark: { destructive: "#fca5a5", info: "#93c5fd", warning: "#fcd34d", success: "#6ee7b7" },
+} as const;
+
+function tintColor(text: string, alpha: number): string {
+  return hexWithAlpha(text, alpha)!;
+}
+
+function softColor(color: string, alpha: number): string {
+  return hexWithAlpha(color, alpha)!;
+}
+
+function readerControlVariables(
+  colors: EpubThemeColors,
+  dark: boolean,
+  destructive: string,
+): Record<string, string> {
+  const tint = (alpha: number) => tintColor(colors.text, alpha);
+  return {
+    "--destructive": destructive,
+    "--destructive-border": dark ? softColor(destructive, 0.5) : destructive,
+    "--destructive-soft": softColor(destructive, dark ? 0.2 : 0.1),
+    "--destructive-soft-hover": softColor(destructive, dark ? 0.3 : 0.2),
+    "--destructive-ring": softColor(destructive, dark ? 0.4 : 0.2),
+    "--control": dark ? tint(0.08) : "transparent",
+    "--control-hover": tint(dark ? 0.12 : 0.06),
+    "--control-disabled": tint(dark ? 0.14 : 0.08),
+    "--control-border": tint(dark ? 0.25 : 0.18),
+    "--ghost-hover": tint(dark ? 0.1 : 0.06),
+    "--tab-fg": tint(0.6),
+    "--tab-active": dark ? tint(0.12) : colors.background,
+    "--tab-active-border": dark ? tint(0.2) : "transparent",
+  };
+}
+
+function readerStatusVariables(dark: boolean): Record<string, string> {
+  const ink = dark ? READER_SEMANTIC_INKS.dark : READER_SEMANTIC_INKS.light;
+  const soft = (color: string, lightAlpha: number, darkAlpha: number) =>
+    softColor(color, dark ? darkAlpha : lightAlpha);
+  return {
+    "--status-info": ink.info,
+    "--status-info-soft": soft(ink.info, 0.1, 0.18),
+    "--status-info-border": soft(ink.info, 0.3, 0.35),
+    "--status-warning": ink.warning,
+    "--status-warning-soft": soft(ink.warning, 0.1, 0.18),
+    "--status-warning-border": soft(ink.warning, 0.3, 0.35),
+    "--status-success": ink.success,
+    "--status-success-soft": soft(ink.success, 0.1, 0.18),
+    "--status-success-border": soft(ink.success, 0.3, 0.35),
+    "--status-destructive": ink.destructive,
+    "--status-destructive-soft": soft(ink.destructive, 0.1, 0.2),
+    "--status-destructive-border": softColor(ink.destructive, 0.3),
+  };
+}
+
+/**
+ * The complete app-token set for one reader theme. This is the single
+ * mapping from a reader preset to everything its chrome consumes: shadcn
+ * primitives, portaled menus, form controls, status tints, and the reader's
+ * own progress bar. A new preset needs its `EpubThemeName` member, colors,
+ * label, and color-scheme family; every derived token follows from that
+ * background/text pair.
+ *
+ * The neutral default intentionally returns undefined: its chrome is the
+ * app chrome, so the active app theme's tokens are already correct.
+ */
 export function readerThemeVariables(theme: EpubThemeName): Record<string, string> | undefined {
   const colors = epubThemeColors(theme);
   if (!colors) return undefined;
 
   const dark = epubThemeColorScheme(theme) === "dark";
-  const tint = (alpha: number): string => hexWithAlpha(colors.text, alpha)!;
-  const soft = (color: string, alpha: number): string => hexWithAlpha(color, alpha)!;
-  // Status and destructive hues stay semantic; the family only picks the
-  // light or dark ink that reads on the preset's surface.
-  const destructive = dark ? "#fca5a5" : "#b42318";
-  const status = dark
-    ? { info: "#93c5fd", warning: "#fcd34d", success: "#6ee7b7" }
-    : { info: "#1d4ed8", warning: "#b45309", success: "#047857" };
+  const tint = (alpha: number) => tintColor(colors.text, alpha);
+  const ink = dark ? READER_SEMANTIC_INKS.dark : READER_SEMANTIC_INKS.light;
+  const subtle = tint(dark ? 0.1 : 0.06);
 
   return {
     "--background": colors.background,
@@ -563,40 +627,17 @@ export function readerThemeVariables(theme: EpubThemeName): Record<string, strin
     "--popover-foreground": colors.text,
     "--primary": colors.text,
     "--primary-foreground": colors.background,
-    "--secondary": tint(dark ? 0.1 : 0.06),
+    "--secondary": subtle,
     "--secondary-foreground": colors.text,
-    "--muted": tint(dark ? 0.1 : 0.06),
+    "--muted": subtle,
     "--muted-foreground": tint(0.6),
     "--accent": tint(0.1),
     "--accent-foreground": colors.text,
-    "--destructive": destructive,
-    "--destructive-border": dark ? soft(destructive, 0.5) : destructive,
-    "--destructive-soft": soft(destructive, dark ? 0.2 : 0.1),
-    "--destructive-soft-hover": soft(destructive, dark ? 0.3 : 0.2),
-    "--destructive-ring": soft(destructive, dark ? 0.4 : 0.2),
     "--border": tint(0.2),
     "--input": tint(0.25),
     "--ring": tint(0.4),
-    "--control": dark ? tint(0.08) : "transparent",
-    "--control-hover": tint(dark ? 0.12 : 0.06),
-    "--control-disabled": tint(dark ? 0.14 : 0.08),
-    "--control-border": tint(dark ? 0.25 : 0.18),
-    "--ghost-hover": tint(dark ? 0.1 : 0.06),
-    "--tab-fg": tint(0.6),
-    "--tab-active": dark ? tint(0.12) : colors.background,
-    "--tab-active-border": dark ? tint(0.2) : "transparent",
-    "--status-info": status.info,
-    "--status-info-soft": soft(status.info, dark ? 0.18 : 0.1),
-    "--status-info-border": soft(status.info, dark ? 0.35 : 0.3),
-    "--status-warning": status.warning,
-    "--status-warning-soft": soft(status.warning, dark ? 0.18 : 0.1),
-    "--status-warning-border": soft(status.warning, dark ? 0.35 : 0.3),
-    "--status-success": status.success,
-    "--status-success-soft": soft(status.success, dark ? 0.18 : 0.1),
-    "--status-success-border": soft(status.success, dark ? 0.35 : 0.3),
-    "--status-destructive": destructive,
-    "--status-destructive-soft": soft(destructive, dark ? 0.2 : 0.1),
-    "--status-destructive-border": soft(destructive, 0.3),
+    ...readerControlVariables(colors, dark, ink.destructive),
+    ...readerStatusVariables(dark),
     "--reader-chrome-muted": tint(0.6),
     "--reader-chrome-border": tint(0.15),
     "--reader-chrome-surface": colors.background,

@@ -109,20 +109,42 @@ export const initialAppState: AppState = {
   settingsOpen: false,
 };
 
-export function appStateReducer(state: AppState, action: AppAction): AppState {
+type SettingsAction = Extract<AppAction, { type: "open-settings" | "close-settings" }>;
+type LibrarySelectionAction = Extract<
+  AppAction,
+  {
+    type:
+      | "library-select"
+      | "library-context-select"
+      | "library-toggle-select"
+      | "library-range-select"
+      | "clear-library-selection";
+  }
+>;
+
+function isSettingsAction(action: AppAction): action is SettingsAction {
+  return action.type === "open-settings" || action.type === "close-settings";
+}
+
+function reduceSettings(state: AppState, action: SettingsAction): AppState {
+  if (action.type === "open-settings") {
+    return state.settingsOpen ? state : { ...state, settingsOpen: true };
+  }
+  return state.settingsOpen ? { ...state, settingsOpen: false } : state;
+}
+
+function isLibrarySelectionAction(action: AppAction): action is LibrarySelectionAction {
+  return (
+    action.type === "library-select" ||
+    action.type === "library-context-select" ||
+    action.type === "library-toggle-select" ||
+    action.type === "library-range-select" ||
+    action.type === "clear-library-selection"
+  );
+}
+
+function reduceLibrarySelection(state: AppState, action: LibrarySelectionAction): AppState {
   switch (action.type) {
-    case "select-section":
-      // Choosing a sidebar section always returns to the library view and
-      // clears the section-scoped search; the format filter is orthogonal, so
-      // it stays.
-      return {
-        ...state,
-        view: "library",
-        section: action.section,
-        libraryQuery: "",
-        selectedBookIds: [],
-        selectionAnchorId: null,
-      };
     case "library-select":
       return { ...state, selectedBookIds: [action.bookId], selectionAnchorId: action.bookId };
     case "library-context-select":
@@ -154,10 +176,29 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       const end = Math.max(anchorIndex, targetIndex);
       return { ...state, selectedBookIds: action.visibleIds.slice(start, end + 1) };
     }
-    case "clear-library-selection": {
+    case "clear-library-selection":
       if (state.selectedBookIds.length === 0 && state.selectionAnchorId === null) return state;
       return { ...state, selectedBookIds: [], selectionAnchorId: null };
-    }
+  }
+}
+
+export function appStateReducer(state: AppState, action: AppAction): AppState {
+  if (isSettingsAction(action)) return reduceSettings(state, action);
+  if (isLibrarySelectionAction(action)) return reduceLibrarySelection(state, action);
+
+  switch (action.type) {
+    case "select-section":
+      // Choosing a sidebar section always returns to the library view and
+      // clears the section-scoped search; the format filter is orthogonal, so
+      // it stays.
+      return {
+        ...state,
+        view: "library",
+        section: action.section,
+        libraryQuery: "",
+        selectedBookIds: [],
+        selectionAnchorId: null,
+      };
     case "open-book-detail":
       return {
         ...state,
@@ -189,10 +230,6 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         current.length === next.length && current.every((format, index) => format === next[index]);
       return unchanged ? state : { ...state, formatFilter: next };
     }
-    case "open-settings":
-      return state.settingsOpen ? state : { ...state, settingsOpen: true };
-    case "close-settings":
-      return state.settingsOpen ? { ...state, settingsOpen: false } : state;
   }
 }
 
