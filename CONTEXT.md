@@ -38,6 +38,49 @@ The view of books with no current library membership. It shows their durable
 state and lets the user relink or forget them.
 _Avoid_: archive, trash (the 30-day restore list is the trash)
 
+**Library place**:
+A destination in the sidebar: a smart section, Reading History, or a collection
+place. Selecting a place replaces the current place; places do not stack.
+_Avoid_: view (when it means a place), filter
+
+**Smart section**:
+A built-in library place defined by a rule over current library membership: All
+Books, Recently Added, Recently Read, In Progress, or Finished. It is not a
+collection and cannot be pinned, renamed, or reordered. Reading History is a
+separate place because it shows books with no current library membership.
+_Avoid_: special collection, smart collection, system collection
+
+**Collection**:
+A user-managed named set of books. Membership is user state and travels through
+sync. A collection is not a library place until it is selected.
+_Avoid_: shelf, folder, tag, playlist, smart collection
+
+**Collection membership**:
+The relation between a book and a collection, carrying its own added date. It is
+separate from library membership and survives the book leaving the library.
+_Avoid_: collection entry, tag
+
+**Collection place**:
+A library place formed by one or more selected collections. Multiple selected
+collections combine as a union. The place is named by one or two collection
+names, or by a count for three or more.
+_Avoid_: collection filter, collection scope
+
+**Pinned collection**:
+A collection the user keeps at the top of the sidebar. Pinning affects sidebar
+placement only; it is per-device UI state, not shared collection state.
+_Avoid_: favorite (unless it means pinned), starred
+
+**Added to collection**:
+The date a book joined a collection, stored on the membership and used to order
+a collection place. Distinct from Date added.
+_Avoid_: date added (when the collection membership date is meant)
+
+**Date added**:
+The date a book entered the library. It orders All Books and is distinct from
+Added to collection.
+_Avoid_: recently added (that is the smart section)
+
 **Reset reading data**:
 Clearing a book's user state while keeping its identity and current file.
 _Avoid_: delete book, clear library
@@ -241,6 +284,16 @@ outside Settings. They appear only while sync is on and a condition is open.
 _Avoid_: sync badge, warning banner
 
 ## Search
+
+**Command palette**:
+The sidebar search surface that finds books and collections and jumps to them.
+It is not a view filter.
+_Avoid_: search box, global search (when the palette is meant)
+
+**View filter**:
+The library header search that narrows the current library place. It is not the
+command palette.
+_Avoid_: search (bare), global search (when the view filter is meant)
 
 **In-book search**:
 A query over the text of the open book, returning matches in document order
