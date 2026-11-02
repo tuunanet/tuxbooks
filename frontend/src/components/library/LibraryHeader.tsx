@@ -19,9 +19,10 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FORMAT_FILTER_OPTIONS, formatFilterLabel, toggleFormatFilter } from "@/lib/formats";
 import { pickBookFiles, pickDirectory } from "@/lib/bridge";
+import type { BookSortId } from "@/state/appState";
 import { useImport } from "@/state/importState";
 import type { BookFormat } from "@/types/domain";
-import { BOOK_SORT_OPTIONS, type BookSortId, type BookViewMode } from "./sections";
+import { BOOK_SORT_OPTIONS, type BookViewMode } from "./sections";
 
 interface LibraryHeaderProps {
   title: string;

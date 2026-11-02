@@ -7,10 +7,11 @@ import {
   filterBooksByQuery,
   filterBooksBySection,
   sectionTitle,
+  selectVisibleBooks,
   sortBooks,
 } from "@/components/library/sections";
 import type { LibrarySection } from "@/state/appState";
-import { makeBook } from "./factories";
+import { makeBook, makeCollection } from "./factories";
 
 const epub = () =>
   makeBook({
@@ -146,12 +147,24 @@ describe("filterBooksByCollection", () => {
 });
 
 describe("BOOK_SORT_OPTIONS", () => {
-  it("offers recently added as the first (default) option", () => {
-    expect(BOOK_SORT_OPTIONS[0]).toEqual({ id: "recently-added", label: "Recently Added" });
+  it("offers section order as the first (default) option", () => {
+    expect(BOOK_SORT_OPTIONS[0]).toEqual({ id: "section-order", label: "Section order" });
+  });
+
+  it("lists the five choices without the recently added and recently read shortcuts", () => {
+    expect(BOOK_SORT_OPTIONS).toEqual([
+      { id: "section-order", label: "Section order" },
+      { id: "date-added", label: "Date added" },
+      { id: "last-read", label: "Last read" },
+      { id: "title", label: "Title" },
+      { id: "author", label: "Author" },
+    ]);
   });
 });
 
 describe("sortBooks", () => {
+  const allBooks: LibrarySection = { kind: "smart", id: "all-books" };
+  const collection: LibrarySection = { kind: "collection", id: 7 };
   const titled = [
     makeBook({
       id: 1,
@@ -174,20 +187,20 @@ describe("sortBooks", () => {
     }),
   ];
 
-  it("sorts recently added newest first without mutating the input", () => {
+  it("sorts by date added newest first without mutating the input", () => {
     const input = [...titled];
-    const result = sortBooks(input, "recently-added");
+    const result = sortBooks(input, "date-added", allBooks);
     expect(result.map((b) => b.id)).toEqual([2, 3, 1]);
     expect(input.map((b) => b.id)).toEqual([1, 2, 3]);
   });
 
-  it("sorts recently read with never-opened books last", () => {
-    const result = sortBooks(titled, "recently-read");
+  it("sorts by last read with never-opened books last", () => {
+    const result = sortBooks(titled, "last-read", allBooks);
     expect(result.map((b) => b.id)).toEqual([3, 1, 2]);
   });
 
   it("sorts by title", () => {
-    expect(sortBooks(titled, "title").map((b) => b.title)).toEqual([
+    expect(sortBooks(titled, "title", allBooks).map((b) => b.title)).toEqual([
       "Archipelago",
       "Cartography",
       "Magnetism",
@@ -195,7 +208,126 @@ describe("sortBooks", () => {
   });
 
   it("sorts by author with missing authors last", () => {
-    expect(sortBooks(titled, "author").map((b) => b.id)).toEqual([2, 1, 3]);
+    expect(sortBooks(titled, "author", allBooks).map((b) => b.id)).toEqual([2, 1, 3]);
+  });
+
+  it("uses date added for All Books under Section order", () => {
+    expect(sortBooks(titled, "section-order", allBooks).map((b) => b.id)).toEqual([2, 3, 1]);
+  });
+
+  it("uses date added for a collection under Section order", () => {
+    expect(sortBooks(titled, "section-order", collection).map((b) => b.id)).toEqual([2, 3, 1]);
+  });
+});
+
+describe("selectVisibleBooks", () => {
+  const books = [epub(), pdf(), neverOpened()];
+  const base = {
+    books,
+    collections: [],
+    formatFilter: [],
+    query: "",
+  };
+  const collection = makeCollection({ id: 7, bookIds: [1, 3] });
+
+  it("uses date added for All Books under Section order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      section: { kind: "smart", id: "all-books" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([3, 2, 1]);
+  });
+
+  it("uses date added for a collection place under Section order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      collections: [collection],
+      section: { kind: "collection", id: 7 },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([3, 1]);
+  });
+
+  it("keeps Recently Added in library added order under Section order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      section: { kind: "smart", id: "recently-added" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([3, 2, 1]);
+  });
+
+  it("keeps Recently Read in last-opened order under Section order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      section: { kind: "smart", id: "recently-read" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([2, 1]);
+  });
+
+  it("keeps In Progress in progress-updated order under Section order", () => {
+    const inProgress = [
+      makeBook({
+        id: 10,
+        progressPercent: 55,
+        progressUpdatedAt: "2026-08-01T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 11,
+        progressPercent: 5,
+        progressUpdatedAt: "2026-08-09T00:00:00.000Z",
+      }),
+    ];
+    const result = selectVisibleBooks({
+      ...base,
+      books: inProgress,
+      section: { kind: "smart", id: "in-progress" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([11, 10]);
+  });
+
+  it("keeps Finished in progress-updated order under Section order", () => {
+    const finished = [
+      makeBook({
+        id: 20,
+        progressPercent: 100,
+        progressUpdatedAt: "2026-08-02T00:00:00.000Z",
+      }),
+      makeBook({
+        id: 21,
+        progressPercent: 100,
+        progressUpdatedAt: "2026-08-08T00:00:00.000Z",
+      }),
+    ];
+    const result = selectVisibleBooks({
+      ...base,
+      books: finished,
+      section: { kind: "smart", id: "finished" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([21, 20]);
+  });
+
+  it("applies an explicit sort over a smart section's natural order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      section: { kind: "smart", id: "recently-read" },
+      sort: "title",
+    });
+    expect(result.map((b) => b.title)).toEqual(["A Minimal Book", "PDF Book"]);
+  });
+
+  it("composes the format filter with Section order", () => {
+    const result = selectVisibleBooks({
+      ...base,
+      formatFilter: ["pdf"],
+      section: { kind: "smart", id: "all-books" },
+      sort: "section-order",
+    });
+    expect(result.map((b) => b.id)).toEqual([2]);
   });
 });
 

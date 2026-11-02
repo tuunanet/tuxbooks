@@ -17,6 +17,7 @@ describe("appStateReducer", () => {
         selectionAnchorId: 1,
         libraryQuery: "meridian",
         formatFilter: ["pdf"],
+        sort: "section-order",
         settingsOpen: false,
       },
       { type: "select-section", section: { kind: "smart", id: "recently-added" } },
@@ -30,8 +31,28 @@ describe("appStateReducer", () => {
       libraryQuery: "",
       // The format filter composes with every section, so it is not cleared.
       formatFilter: ["pdf"],
+      sort: "section-order",
       settingsOpen: false,
     });
+  });
+
+  it("starts with Section order", () => {
+    expect(initialAppState.sort).toBe("section-order");
+  });
+
+  it("keeps the sort choice when the place changes", () => {
+    const sorted = { ...initialAppState, sort: "author" as const };
+    const state = appStateReducer(sorted, {
+      type: "select-section",
+      section: { kind: "collection", id: 3 },
+    });
+    expect(state.sort).toBe("author");
+  });
+
+  it("set-library-sort stores the choice and is a no-op when unchanged", () => {
+    const sorted = appStateReducer(initialAppState, { type: "set-library-sort", sort: "author" });
+    expect(sorted.sort).toBe("author");
+    expect(appStateReducer(sorted, { type: "set-library-sort", sort: "author" })).toBe(sorted);
   });
 
   it("opens and closes the settings window without changing the view", () => {
@@ -59,6 +80,7 @@ describe("appStateReducer", () => {
       readerTargetAnnotationId: null,
       libraryQuery: "",
       formatFilter: [],
+      sort: "section-order",
       settingsOpen: false,
     });
   });
@@ -111,6 +133,7 @@ describe("appStateReducer", () => {
         selectionAnchorId: 9,
         libraryQuery: "",
         formatFilter: [],
+        sort: "section-order",
         settingsOpen: false,
       },
       { type: "return-to-library" },
@@ -123,6 +146,7 @@ describe("appStateReducer", () => {
       selectionAnchorId: 9,
       libraryQuery: "",
       formatFilter: [],
+      sort: "section-order",
       settingsOpen: false,
     });
   });

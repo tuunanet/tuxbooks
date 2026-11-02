@@ -1,4 +1,4 @@
-import type { LibrarySection, SmartSectionId } from "@/state/appState";
+import type { BookSortId, LibrarySection, SmartSectionId } from "@/state/appState";
 import type { Book, BookFormat, CollectionSummary } from "@/types/domain";
 
 export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
@@ -62,8 +62,14 @@ export function selectVisibleBooks({
         )
       : filterBooksBySection(books, section);
   const filtered = filterBooksByFormat(scoped, formatFilter);
-  return filterBooksByQuery(sortBooks(filtered, sort), query);
+  return filterBooksByQuery(sortBooks(filtered, sort, section), query);
 }
+
+const byDateAddedDesc = (a: Book, b: Book) => b.addedAt.localeCompare(a.addedAt);
+const byLastReadDesc = (a: Book, b: Book) =>
+  (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "");
+const byProgressUpdatedDesc = (a: Book, b: Book) =>
+  (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? "");
 
 /**
  * Client-side filtering over the full `list_books` payload.
@@ -74,21 +80,19 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
     case "all-books":
       return books;
     case "recently-added":
-      return [...books].sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+      return [...books].sort(byDateAddedDesc);
     case "recently-read":
-      return books
-        .filter((book) => book.lastOpenedAt !== null)
-        .sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+      return books.filter((book) => book.lastOpenedAt !== null).sort(byLastReadDesc);
     case "in-progress":
       // Started but not finished: a saved position below 100 (milestone 10).
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent < 100)
-        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
+        .sort(byProgressUpdatedDesc);
     case "finished":
       // Explicitly marked finished (progress 100) or completed while reading.
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
-        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
+        .sort(byProgressUpdatedDesc);
   }
 }
 
@@ -112,29 +116,54 @@ export function filterBooksByCollection(books: Book[], bookIds: number[]): Book[
 }
 
 /** Sort orders offered by the library header select. */
-export type BookSortId = "recently-added" | "recently-read" | "title" | "author";
-
 export const BOOK_SORT_OPTIONS: { id: BookSortId; label: string }[] = [
-  { id: "recently-added", label: "Recently Added" },
-  { id: "recently-read", label: "Recently Read" },
+  { id: "section-order", label: "Section order" },
+  { id: "date-added", label: "Date added" },
+  { id: "last-read", label: "Last read" },
   { id: "title", label: "Title" },
   { id: "author", label: "Author" },
 ];
+
+/** The concrete field a sort id resolves to; only Section order picks by place. */
+type BookSortField = "date-added" | "last-read" | "progress-updated" | "title" | "author";
+
+/**
+ * A place's natural order. All Books and collections use library date added;
+ * the smart sections keep the timestamp that already defines them.
+ */
+function sectionOrderField(section: LibrarySection): BookSortField {
+  if (section.kind === "collection") return "date-added";
+  if (section.kind === "reading-history") return "last-read";
+  switch (section.id) {
+    case "all-books":
+    case "recently-added":
+      return "date-added";
+    case "recently-read":
+      return "last-read";
+    case "in-progress":
+    case "finished":
+      return "progress-updated";
+  }
+}
 
 export type BookViewMode = "grid" | "list";
 
 /** Sorts above every real author, pushing missing authors to the end. */
 const MISSING_AUTHOR_SORT_KEY = "\uffff";
 
-export function sortBooks(books: Book[], sort: BookSortId): Book[] {
+export function sortBooks(books: Book[], sort: BookSortId, section: LibrarySection): Book[] {
   const sorted = [...books];
-  switch (sort) {
-    case "recently-added":
-      sorted.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+  const field: BookSortField = sort === "section-order" ? sectionOrderField(section) : sort;
+  switch (field) {
+    case "date-added":
+      sorted.sort(byDateAddedDesc);
       break;
-    case "recently-read":
+    case "last-read":
       // Books never opened sort behind everything with a timestamp.
-      sorted.sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+      sorted.sort(byLastReadDesc);
+      break;
+    case "progress-updated":
+      sorted.sort(byProgressUpdatedDesc);
       break;
     case "title":
       sorted.sort((a, b) => a.title.localeCompare(b.title));

@@ -224,7 +224,7 @@ describe("LibraryView selection and opening", () => {
 });
 
 describe("LibraryView multi-selection", () => {
-  /** Recently Added shows them as Alpha, Gamma, Beta: ids out of order. */
+  /** Section order (Date added) shows them as Alpha, Gamma, Beta: ids out of order. */
   const outOfOrderBooks = () => [
     makeBook({ id: 1, title: "Alpha", addedAt: "2026-03-01T00:00:00.000Z" }),
     makeBook({ id: 2, title: "Beta", addedAt: "2026-01-01T00:00:00.000Z" }),
@@ -296,7 +296,7 @@ describe("LibraryView multi-selection", () => {
 
     renderLibrary();
     const cards = await screen.findAllByTestId("book-card");
-    // Recently Added puts the ids on screen as 1, 3, 2. The range has to
+    // Section order puts the ids on screen as 1, 3, 2. The range has to
     // follow that, not the ids' own order.
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
       "Alpha (EPUB)",
@@ -369,7 +369,7 @@ describe("LibraryView multi-selection", () => {
     });
 
     renderLibrary();
-    // Recently Added puts Beta first; it is the book that gets selected.
+    // Section order (Date added) puts Beta first; it is the book that gets selected.
     const cards = await screen.findAllByTestId("book-card");
     expect(item(cards, 0)).toHaveTextContent("Beta");
     fireEvent.click(item(cards, 0));
@@ -1152,6 +1152,25 @@ describe("LibraryView search", () => {
 });
 
 describe("LibraryView sorting", () => {
+  it("offers the five sort choices with Section order as the default", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+    });
+
+    renderLibrary();
+
+    const trigger = await screen.findByRole("combobox", { name: "Sort books" });
+    expect(trigger).toHaveTextContent("Section order");
+
+    await userEvent.click(trigger);
+    for (const label of ["Section order", "Date added", "Last read", "Title", "Author"]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Recently Added" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Recently Read" })).not.toBeInTheDocument();
+  });
+
   it("reorders books when the sort control changes", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
@@ -1160,7 +1179,7 @@ describe("LibraryView sorting", () => {
 
     renderLibrary();
 
-    // Default sort is Recently Added: beta (newer) first.
+    // Section order uses Date added for All Books: beta (newer) first.
     let cards = await screen.findAllByTestId("book-card");
     expect(cards[0]).toHaveTextContent("Beta");
 
@@ -1170,6 +1189,28 @@ describe("LibraryView sorting", () => {
     cards = screen.getAllByTestId("book-card");
     expect(cards[0]).toHaveTextContent("Alpha");
     expect(cards[1]).toHaveTextContent("Beta");
+  });
+
+  it("keeps the sort choice when the sidebar place changes", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+      list_collections: [],
+    });
+
+    renderShell();
+    await screen.findAllByTestId("book-card");
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort books" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Title" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Recently Added" }));
+    await screen.findByTestId("book-grid");
+
+    expect(screen.getByRole("combobox", { name: "Sort books" })).toHaveTextContent("Title");
+    const cards = screen.getAllByTestId("book-card");
+    expect(item(cards, 0)).toHaveTextContent("Alpha");
+    expect(item(cards, 1)).toHaveTextContent("Beta");
   });
 });
 

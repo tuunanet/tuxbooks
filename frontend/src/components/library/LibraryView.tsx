@@ -5,7 +5,12 @@ import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
-import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
+import {
+  useAppDispatch,
+  useAppState,
+  type BookSortId,
+  type LibrarySection,
+} from "@/state/appState";
 import { BulkRemoveDialog } from "./BulkRemoveDialog";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
@@ -15,13 +20,7 @@ import { LibraryEmptyState } from "./LibraryEmptyState";
 import { LibraryHeader } from "./LibraryHeader";
 import { LibraryScrollArea } from "./LibraryScrollArea";
 import { SelectionBar } from "./SelectionBar";
-import {
-  isCollectionEmpty,
-  libraryTitle,
-  selectVisibleBooks,
-  type BookSortId,
-  type BookViewMode,
-} from "./sections";
+import { isCollectionEmpty, libraryTitle, selectVisibleBooks, type BookViewMode } from "./sections";
 import { useLibraryBulkActions } from "./useLibraryBulkActions";
 import { useLibraryKeyboardNav } from "./useLibraryKeyboardNav";
 import { useLibrarySelection } from "./useLibrarySelection";
@@ -68,13 +67,13 @@ export function LibraryView({ section }: LibraryViewProps) {
   const [resetTarget, setResetTarget] = useState<Book | null>(null);
   const [forgetTarget, setForgetTarget] = useState<Book | null>(null);
 
-  // View mode and sort are presentation preferences. The search query is app
-  // state scoped to the section and cleared when the section changes; the
-  // format filter survives because it composes with every section.
+  // View mode is a presentation preference. The search query is app state
+  // scoped to the section and cleared when the section changes; the format
+  // filter and sort survive because they compose with every section.
   const [view, setView] = useState<BookViewMode>("grid");
-  const [sort, setSort] = useState<BookSortId>("recently-added");
   const query = app.libraryQuery;
   const formatFilter = app.formatFilter;
+  const sort = app.sort;
 
   const openDetail = useCallback(
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),
@@ -99,6 +98,10 @@ export function LibraryView({ section }: LibraryViewProps) {
   );
   const setFormatFilter = useCallback(
     (formats: BookFormat[]) => dispatch({ type: "set-format-filter", formats }),
+    [dispatch],
+  );
+  const setSort = useCallback(
+    (next: BookSortId) => dispatch({ type: "set-library-sort", sort: next }),
     [dispatch],
   );
   const handleReveal = useCallback((bookId: number) => {

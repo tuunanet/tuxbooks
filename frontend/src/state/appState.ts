@@ -14,6 +14,9 @@ export type SmartSectionId =
   | "in-progress"
   | "finished";
 
+/** Library sort orders. Section order defers to the active place's natural order. */
+export type BookSortId = "section-order" | "date-added" | "last-read" | "title" | "author";
+
 /**
  * What the sidebar has selected. Smart sections are built-in views; collection
  * sections will address user-created collections once a backend command
@@ -70,6 +73,11 @@ export interface AppState {
    */
   formatFilter: BookFormat[];
   /**
+   * Library sort order. It composes with every section and collection, so it
+   * survives place changes instead of being reset with the section.
+   */
+  sort: BookSortId;
+  /**
    * Whether the Settings window is open. Settings floats above whatever is
    * underneath, so it stays reachable from the library, a book detail, and
    * the reader without changing the view.
@@ -93,6 +101,7 @@ export type AppAction =
   | { type: "select-detail-tab"; tab: DetailTab }
   | { type: "set-library-query"; query: string }
   | { type: "set-format-filter"; formats: BookFormat[] }
+  | { type: "set-library-sort"; sort: BookSortId }
   | { type: "open-settings" }
   | { type: "close-settings" };
 
@@ -106,6 +115,7 @@ export const initialAppState: AppState = {
   readerTargetAnnotationId: null,
   libraryQuery: "",
   formatFilter: [],
+  sort: "section-order",
   settingsOpen: false,
 };
 
@@ -230,6 +240,8 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         current.length === next.length && current.every((format, index) => format === next[index]);
       return unchanged ? state : { ...state, formatFilter: next };
     }
+    case "set-library-sort":
+      return state.sort === action.sort ? state : { ...state, sort: action.sort };
   }
 }
 
