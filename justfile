@@ -40,7 +40,7 @@ _dev_home := justfile_directory() + "/.build/dev"
 
 # Launch the app in development mode: Vite dev server (hot reload for the
 # renderer), the Rust sidecar (debug build), and the Electron shell.
-dev:
+dev: fetch-pdfium
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{root}}"

@@ -17,7 +17,8 @@ any frontend precondition.
   never share a database. Delete `.build/dev/` to reset the dev library,
   settings, and caches. A stale dev server still holding port 1420 is
   reclaimed when the holder is this project's Vite; anything else on the
-  port is reported and left running.
+  port is reported and left running. `fetch-pdfium` runs first, so PDF
+  covers work on a fresh checkout instead of failing the probe.
 - `just build` — renderer bundle, Electron main/preload bundles, release
   sidecar binary built against the pinned glibc floor
   (`just sidecar-release`; needs docker or podman; see "Release sidecar
