@@ -37,6 +37,10 @@ pub enum LibraryChange {
     Changed { book: Box<Book> },
     /// The user removed the book; the frontend must drop it entirely.
     Removed { book_id: i64 },
+    /// Durable identities were re-keyed (sync merged a book into its shared
+    /// uuid), so public book ids may have changed. The frontend must refetch
+    /// the list instead of patching one id.
+    Reload,
 }
 
 /// One reconciled filesystem observation, after the watcher's batch
@@ -708,5 +712,8 @@ mod tests {
         assert_eq!(removed["kind"], "removed");
         assert_eq!(removed["bookId"], 7);
         assert!(removed.get("book_id").is_none());
+
+        let reload = serde_json::to_value(LibraryChange::Reload).unwrap();
+        assert_eq!(reload["kind"], "reload");
     }
 }

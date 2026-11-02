@@ -184,6 +184,75 @@ describe("useLibraryData library-changed synchronization", () => {
     expect(result.current.stats?.bookCount).toBe(1);
   });
 
+  it("refetches when a sync merge re-keys a book id", async () => {
+    const stale = makeBook({ id: 36, title: "Re-keyed Book", bookUid: "old-uid" });
+    mockInvoke({
+      ...emptyLibrary,
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [stale],
+    });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockInvoke({
+      ...emptyLibrary,
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 91, title: "Re-keyed Book", bookUid: "shared-uid" })],
+    });
+    act(() => {
+      emitBridgeEvent("library-changed", { kind: "reload" });
+    });
+
+    await waitFor(() =>
+      expect(result.current.books[0]).toMatchObject({ id: 91, bookUid: "shared-uid" }),
+    );
+    expect(result.current.books).toHaveLength(1);
+    expect(result.current.stats?.bookCount).toBe(1);
+  });
+
+  it("settles the loading state when a reload supersedes a refresh", async () => {
+    const stale = makeBook({ id: 36, title: "Old Id" });
+    mockInvoke({ ...emptyLibrary, list_books: [stale] });
+    const { result } = renderHook(() => useLibraryData());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resolveRefresh: (books: ReturnType<typeof makeBook>[]) => void = () => {};
+    const pending = new Promise<ReturnType<typeof makeBook>[]>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "list_books") return pending;
+      if (method === "get_library_stats") {
+        return Promise.resolve({ bookCount: 1, collectionCount: 0 });
+      }
+      if (method === "list_collections") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected invoke(${method})`));
+    });
+
+    act(() => {
+      void result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    mockInvoke({
+      ...emptyLibrary,
+      get_library_stats: { bookCount: 1, collectionCount: 0 },
+      list_books: [makeBook({ id: 91, title: "New Id" })],
+    });
+    act(() => {
+      emitBridgeEvent("library-changed", { kind: "reload" });
+    });
+
+    await waitFor(() => expect(result.current.books[0]?.id).toBe(91));
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      resolveRefresh([stale]);
+      await pending;
+    });
+    expect(result.current.books[0]?.id).toBe(91);
+  });
+
   it("reflects reading progress saved by the reader", async () => {
     // Regression (issue #10): progress saves used to leave the library
     // stale until a restart. The backend now pushes the updated book over
