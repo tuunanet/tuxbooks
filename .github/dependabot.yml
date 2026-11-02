@@ -77,14 +77,18 @@ updates:
       # above).
       - dependency-name: "@types/node"
         versions: [">=25"]
-      # 2026-10-31, GHSA-g3hv-75wg-m249 (moderate, glob DoS): the only
-      # patched version is minimatch 11.0.1 (2026-10-27), a new major no
-      # parent range admits (electron-builder 26, @ts-morph/common) and
-      # younger than the 30-day floor, so the weekly security-update run
-      # fails instead of opening a PR. Dev-only: minimatch expands globs
-      # in build tooling from first-party config, never user input, and
-      # nothing here ships in the packaged app. Revisit ~2026-11-26, when
-      # 11.0.1 ages out; take it with the regular train then.
+      # 2026-10-31, GHSA-g3hv-75wg-m249 / CVE-2026-118764 (moderate, glob
+      # DoS; alert #49): the only patched version is minimatch 11.0.1
+      # (2026-10-27), a new major no parent range admits and younger than
+      # the 30-day floor, so the weekly security-update run fails instead
+      # of opening a PR. Dev-only: minimatch expands globs in build tooling
+      # from first-party config, never user input, and nothing here ships
+      # in the packaged app. There is no regular-train bump to wait for:
+      # the latest app-builder-lib (26.18.1) still asks ^10.2.5,
+      # @electron/asar 4.3.1 ^10.0.1, and @ts-morph/common 0.27.0
+      # ^10.0.1, so clearing the alert means overriding 11.x across every
+      # parent. Revisit when electron-builder adopts minimatch 11
+      # upstream; the override is the last resort.
       - dependency-name: "minimatch"
     groups:
       minor-and-patch:
