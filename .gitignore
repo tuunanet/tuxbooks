@@ -82,6 +82,9 @@ tuxbooks-pdf-zoom-log.json
 .dolt/
 .beads-credential-key
 .beads/proxieddb/
+# bd's gate lock lands at the repo root, outside the nested `.beads/.gitignore`
+# (whose `*.gate.lock*` pattern only covers paths under `.beads/`).
+.beads.gate.lock
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
