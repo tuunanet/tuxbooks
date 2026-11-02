@@ -19,10 +19,10 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FORMAT_FILTER_OPTIONS, formatFilterLabel, toggleFormatFilter } from "@/lib/formats";
 import { pickBookFiles, pickDirectory } from "@/lib/bridge";
-import type { BookSortId } from "@/state/appState";
+import type { BookSortId, LibrarySection } from "@/state/appState";
 import { useImport } from "@/state/importState";
 import type { BookFormat } from "@/types/domain";
-import { BOOK_SORT_OPTIONS, type BookViewMode } from "./sections";
+import { BOOK_SORT_OPTIONS, bookSortLabel, type BookViewMode } from "./sections";
 
 interface LibraryHeaderProps {
   title: string;
@@ -31,6 +31,7 @@ interface LibraryHeaderProps {
   onQueryChange: (query: string) => void;
   formats: readonly BookFormat[];
   onFormatsChange: (formats: BookFormat[]) => void;
+  section: LibrarySection;
   sort: BookSortId;
   onSortChange: (sort: BookSortId) => void;
   view: BookViewMode;
@@ -44,6 +45,7 @@ export function LibraryHeader({
   onQueryChange,
   formats,
   onFormatsChange,
+  section,
   sort,
   onSortChange,
   view,
@@ -142,7 +144,7 @@ export function LibraryHeader({
           <SelectContent>
             {BOOK_SORT_OPTIONS.map((option) => (
               <SelectItem key={option.id} value={option.id}>
-                {option.label}
+                {bookSortLabel(option.id, section)}
               </SelectItem>
             ))}
           </SelectContent>

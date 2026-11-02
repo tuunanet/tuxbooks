@@ -107,6 +107,7 @@ export function makeCollection(overrides: Partial<CollectionSummary> = {}): Coll
     name: "Favorites",
     createdAt: "2026-01-01T00:00:00.000Z",
     bookIds: [],
+    memberships: [],
     ...overrides,
   };
 }

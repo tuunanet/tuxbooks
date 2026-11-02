@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 
 use crate::domain::Collection;
+use crate::domain::CollectionMembership;
 use crate::domain::CollectionSummary;
 use crate::error::AppError;
 
@@ -34,13 +35,13 @@ pub async fn list_collections(pool: &SqlitePool) -> Result<Vec<Collection>, AppE
 
 /// Every collection with its member book ids (milestone 10). Two plain
 /// queries joined in Rust: collections keep name order, memberships come
-/// back as one `(collection_id, book_id)` row each.
+/// back as one `(collection_id, book_id, added_at)` row each.
 pub async fn list_collection_summaries(
     pool: &SqlitePool,
 ) -> Result<Vec<CollectionSummary>, AppError> {
     let collections = list_collections(pool).await?;
-    let membership: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT bc.collection_id, br.id AS book_id \
+    let membership: Vec<(i64, i64, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT bc.collection_id, br.id AS book_id, bc.added_at \
          FROM book_collections bc \
          JOIN book_records br ON br.uid = bc.book_uid \
          ORDER BY bc.collection_id, br.id",
@@ -55,13 +56,17 @@ pub async fn list_collection_summaries(
             name: collection.name,
             created_at: collection.created_at,
             book_ids: Vec::new(),
+            memberships: Vec::new(),
         })
         .collect();
-    for (collection_id, book_id) in membership {
+    for (collection_id, book_id, added_at) in membership {
         if let Some(summary) = summaries.iter_mut().find(|s| s.id == collection_id) {
             // Duplicate copies share one durable book, so one entry per book.
             if !summary.book_ids.contains(&book_id) {
                 summary.book_ids.push(book_id);
+                summary
+                    .memberships
+                    .push(CollectionMembership { book_id, added_at });
             }
         }
     }
@@ -285,6 +290,55 @@ mod tests {
         let single = get_collection_summary(&pool, c).await.unwrap().unwrap();
         assert_eq!(single.book_ids.len(), 2);
         assert!(get_collection_summary(&pool, 999).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn summaries_carry_membership_timestamps() {
+        use chrono::{TimeZone, Utc};
+
+        let (_tmp, pool, book_id) = pool_with_book("A").await;
+        let other_id = insert_book_named(&pool, "B").await;
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+
+        add_book_to_collection(&pool, book_id, c).await.unwrap();
+        add_book_to_collection(&pool, other_id, c).await.unwrap();
+        // The add path stamps `now`; pin both times so the assertions measure
+        // the read path rather than how long the insert took.
+        for (id, added_at) in [
+            (book_id, "2026-02-03T04:05:06.000Z"),
+            (other_id, "2026-03-04T05:06:07.000Z"),
+        ] {
+            sqlx::query(
+                "UPDATE book_collections SET added_at = ?3 \
+                 WHERE collection_id = ?2 \
+                   AND book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+            )
+            .bind(id)
+            .bind(c)
+            .bind(added_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let summary = get_collection_summary(&pool, c).await.unwrap().unwrap();
+        assert_eq!(summary.book_ids, vec![book_id, other_id]);
+        assert_eq!(
+            summary.memberships,
+            vec![
+                CollectionMembership {
+                    book_id,
+                    added_at: Utc.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                },
+                CollectionMembership {
+                    book_id: other_id,
+                    added_at: Utc.with_ymd_and_hms(2026, 3, 4, 5, 6, 7).unwrap(),
+                },
+            ]
+        );
+
+        let all = list_collection_summaries(&pool).await.unwrap();
+        assert_eq!(all[0].memberships, summary.memberships);
     }
 
     #[tokio::test]

@@ -1212,6 +1212,34 @@ describe("LibraryView sorting", () => {
     expect(item(cards, 0)).toHaveTextContent("Alpha");
     expect(item(cards, 1)).toHaveTextContent("Beta");
   });
+
+  it("labels the date sort Added to collection and orders by membership inside a collection", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 1 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({
+          id: 7,
+          bookIds: [1, 2],
+          memberships: [
+            { bookId: 1, addedAt: "2026-01-05T00:00:00.000Z" },
+            { bookId: 2, addedAt: "2026-01-01T00:00:00.000Z" },
+          ],
+        }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", id: 7 });
+
+    // Library order puts Beta (February) first; membership puts Alpha first.
+    const cards = await screen.findAllByTestId("book-card");
+    expect(item(cards, 0)).toHaveTextContent("Alpha");
+    expect(item(cards, 1)).toHaveTextContent("Beta");
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort books" }));
+    expect(await screen.findByRole("option", { name: "Added to collection" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Date added" })).not.toBeInTheDocument();
+  });
 });
 
 describe("LibraryView view modes", () => {

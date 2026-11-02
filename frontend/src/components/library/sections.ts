@@ -62,7 +62,11 @@ export function selectVisibleBooks({
         )
       : filterBooksBySection(books, section);
   const filtered = filterBooksByFormat(scoped, formatFilter);
-  return filterBooksByQuery(sortBooks(filtered, sort, section), query);
+  const selectedCollections =
+    section.kind === "collection"
+      ? collections.filter((collection) => collection.id === section.id)
+      : [];
+  return filterBooksByQuery(sortBooks(filtered, sort, section, selectedCollections), query);
 }
 
 const byDateAddedDesc = (a: Book, b: Book) => b.addedAt.localeCompare(a.addedAt);
@@ -124,15 +128,33 @@ export const BOOK_SORT_OPTIONS: { id: BookSortId; label: string }[] = [
   { id: "author", label: "Author" },
 ];
 
+/**
+ * The date option names the place's own timestamp: a collection orders by
+ * when each book joined it, not when the book entered the library.
+ */
+export function bookSortLabel(id: BookSortId, section: LibrarySection): string {
+  if (id === "date-added") {
+    return section.kind === "collection" ? "Added to collection" : "Date added";
+  }
+  return BOOK_SORT_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
+
 /** The concrete field a sort id resolves to; only Section order picks by place. */
-type BookSortField = "date-added" | "last-read" | "progress-updated" | "title" | "author";
+type BookSortField =
+  | "date-added"
+  | "membership-date"
+  | "last-read"
+  | "progress-updated"
+  | "title"
+  | "author";
 
 /**
- * A place's natural order. All Books and collections use library date added;
- * the smart sections keep the timestamp that already defines them.
+ * A place's natural order. All Books uses the library added date; a
+ * collection uses the earliest membership date among its selected
+ * collections; the smart sections keep the timestamp that defines them.
  */
 function sectionOrderField(section: LibrarySection): BookSortField {
-  if (section.kind === "collection") return "date-added";
+  if (section.kind === "collection") return "membership-date";
   if (section.kind === "reading-history") return "last-read";
   switch (section.id) {
     case "all-books":
@@ -151,13 +173,51 @@ export type BookViewMode = "grid" | "list";
 /** Sorts above every real author, pushing missing authors to the end. */
 const MISSING_AUTHOR_SORT_KEY = "\uffff";
 
-export function sortBooks(books: Book[], sort: BookSortId, section: LibrarySection): Book[] {
+/** The field a chosen sort maps to for this place. */
+function sortFieldFor(sort: BookSortId, section: LibrarySection): BookSortField {
+  if (sort === "section-order") return sectionOrderField(section);
+  // Inside a collection place the date option is Added to collection.
+  if (sort === "date-added" && section.kind === "collection") return "membership-date";
+  return sort;
+}
+
+/**
+ * The earliest date a book joined any of the selected collections. A book in
+ * several selected collections keeps its oldest timestamp, so it does not
+ * look newly added every time it joins another one.
+ */
+function earliestMembershipDates(collections: CollectionSummary[]): Map<number, string> {
+  const dates = new Map<number, string>();
+  for (const collection of collections) {
+    for (const membership of collection.memberships) {
+      const current = dates.get(membership.bookId);
+      if (current === undefined || membership.addedAt.localeCompare(current) < 0) {
+        dates.set(membership.bookId, membership.addedAt);
+      }
+    }
+  }
+  return dates;
+}
+
+export function sortBooks(
+  books: Book[],
+  sort: BookSortId,
+  section: LibrarySection,
+  selectedCollections: CollectionSummary[] = [],
+): Book[] {
   const sorted = [...books];
-  const field: BookSortField = sort === "section-order" ? sectionOrderField(section) : sort;
+  const field = sortFieldFor(sort, section);
   switch (field) {
     case "date-added":
       sorted.sort(byDateAddedDesc);
       break;
+    case "membership-date": {
+      const dates = earliestMembershipDates(selectedCollections);
+      sorted.sort((a, b) =>
+        (dates.get(b.id) ?? b.addedAt).localeCompare(dates.get(a.id) ?? a.addedAt),
+      );
+      break;
+    }
     case "last-read":
       // Books never opened sort behind everything with a timestamp.
       sorted.sort(byLastReadDesc);

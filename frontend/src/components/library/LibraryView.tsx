@@ -226,6 +226,7 @@ export function LibraryView({ section }: LibraryViewProps) {
         onQueryChange={setQuery}
         formats={formatFilter}
         onFormatsChange={setFormatFilter}
+        section={section}
         sort={sort}
         onSortChange={setSort}
         view={view}

@@ -111,12 +111,19 @@ export interface EditionLinkOutcome {
   movedProviders: string[];
 }
 
+/** One book's place in a collection and when it joined (mirrors `CollectionMembership`). */
+export interface CollectionMembership {
+  bookId: number;
+  addedAt: string;
+}
+
 /** A user-defined collection with its member book ids (mirrors `domain::CollectionSummary`). */
 export interface CollectionSummary {
   id: number;
   name: string;
   createdAt: string;
   bookIds: number[];
+  memberships: CollectionMembership[];
 }
 
 /** One complete set of bibliographic metadata (mirrors `domain::MetadataFields`). */

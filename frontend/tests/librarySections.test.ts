@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BOOK_SORT_OPTIONS,
   SMART_SECTION_TITLES,
+  bookSortLabel,
   filterBooksByCollection,
   filterBooksByFormat,
   filterBooksByQuery,
@@ -162,9 +163,19 @@ describe("BOOK_SORT_OPTIONS", () => {
   });
 });
 
+describe("bookSortLabel", () => {
+  it("labels the date option Added to collection inside a collection place", () => {
+    expect(bookSortLabel("date-added", { kind: "smart", id: "all-books" })).toBe("Date added");
+    expect(bookSortLabel("date-added", { kind: "collection", id: 7 })).toBe("Added to collection");
+  });
+
+  it("leaves the other labels alone", () => {
+    expect(bookSortLabel("title", { kind: "collection", id: 7 })).toBe("Title");
+  });
+});
+
 describe("sortBooks", () => {
   const allBooks: LibrarySection = { kind: "smart", id: "all-books" };
-  const collection: LibrarySection = { kind: "collection", id: 7 };
   const titled = [
     makeBook({
       id: 1,
@@ -214,9 +225,59 @@ describe("sortBooks", () => {
   it("uses date added for All Books under Section order", () => {
     expect(sortBooks(titled, "section-order", allBooks).map((b) => b.id)).toEqual([2, 3, 1]);
   });
+});
 
-  it("uses date added for a collection under Section order", () => {
-    expect(sortBooks(titled, "section-order", collection).map((b) => b.id)).toEqual([2, 3, 1]);
+describe("sortBooks by collection membership", () => {
+  const allBooks: LibrarySection = { kind: "smart", id: "all-books" };
+  const collection: LibrarySection = { kind: "collection", id: 8 };
+  // Library order is [1, 2]: book 1 is newer. Membership says otherwise.
+  const books = [
+    makeBook({ id: 1, title: "Joined later", addedAt: "2026-06-01T00:00:00.000Z" }),
+    makeBook({ id: 2, title: "Joined earlier", addedAt: "2026-01-01T00:00:00.000Z" }),
+  ];
+  const first = makeCollection({
+    id: 7,
+    bookIds: [1, 2],
+    memberships: [
+      { bookId: 1, addedAt: "2026-05-01T00:00:00.000Z" },
+      { bookId: 2, addedAt: "2026-03-01T00:00:00.000Z" },
+    ],
+  });
+  const second = makeCollection({
+    id: 8,
+    bookIds: [1, 2],
+    memberships: [
+      { bookId: 1, addedAt: "2026-02-01T00:00:00.000Z" },
+      { bookId: 2, addedAt: "2026-04-01T00:00:00.000Z" },
+    ],
+  });
+
+  it("orders a single collection by when each book joined it", () => {
+    expect(sortBooks(books, "date-added", collection, [second]).map((b) => b.id)).toEqual([2, 1]);
+  });
+
+  it("treats membership order as the collection's Section order", () => {
+    expect(sortBooks(books, "section-order", collection, [second]).map((b) => b.id)).toEqual([
+      2, 1,
+    ]);
+  });
+
+  it("uses the earliest membership date across several selected collections", () => {
+    // Book 1 joined first in May, book 2 in March, so `first` alone is [1, 2].
+    // The second collection reverses that, and the earliest dates are Feb
+    // (book 1) and March (book 2): [2, 1] whichever order the list arrives in.
+    expect(sortBooks(books, "date-added", collection, [first]).map((b) => b.id)).toEqual([1, 2]);
+    expect(sortBooks(books, "date-added", collection, [first, second]).map((b) => b.id)).toEqual([
+      2, 1,
+    ]);
+    expect(sortBooks(books, "date-added", collection, [second, first]).map((b) => b.id)).toEqual([
+      2, 1,
+    ]);
+  });
+
+  it("keeps All Books on the library added date", () => {
+    expect(sortBooks(books, "date-added", allBooks).map((b) => b.id)).toEqual([1, 2]);
+    expect(sortBooks(books, "section-order", allBooks).map((b) => b.id)).toEqual([1, 2]);
   });
 });
 
@@ -228,7 +289,14 @@ describe("selectVisibleBooks", () => {
     formatFilter: [],
     query: "",
   };
-  const collection = makeCollection({ id: 7, bookIds: [1, 3] });
+  const collection = makeCollection({
+    id: 7,
+    bookIds: [1, 3],
+    memberships: [
+      { bookId: 1, addedAt: "2026-08-20T00:00:00.000Z" },
+      { bookId: 3, addedAt: "2026-08-02T00:00:00.000Z" },
+    ],
+  });
 
   it("uses date added for All Books under Section order", () => {
     const result = selectVisibleBooks({
@@ -239,14 +307,14 @@ describe("selectVisibleBooks", () => {
     expect(result.map((b) => b.id)).toEqual([3, 2, 1]);
   });
 
-  it("uses date added for a collection place under Section order", () => {
+  it("uses membership order for a collection place under Section order", () => {
     const result = selectVisibleBooks({
       ...base,
       collections: [collection],
       section: { kind: "collection", id: 7 },
       sort: "section-order",
     });
-    expect(result.map((b) => b.id)).toEqual([3, 1]);
+    expect(result.map((b) => b.id)).toEqual([1, 3]);
   });
 
   it("keeps Recently Added in library added order under Section order", () => {
