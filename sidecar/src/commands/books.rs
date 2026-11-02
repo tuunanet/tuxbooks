@@ -75,6 +75,9 @@ pub async fn retry_indexing(
     if let Some(book) = books::get_book(&state.db, book_id).await? {
         crate::commands::emit_changed_book(events, book);
     }
+    // Hashing can merge this book into a shared identity and delete the row
+    // the caller held, or delete another card that now shares its bytes.
+    events.emit("library-changed", &LibraryChange::Reload);
     Ok(outcome)
 }
 

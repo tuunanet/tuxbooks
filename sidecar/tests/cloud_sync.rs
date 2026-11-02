@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -391,6 +392,69 @@ async fn two_machines_that_import_the_same_book_before_meeting_converge() {
         annotation_count(&b, b_book).await,
         2,
         "B sees both bookmarks"
+    );
+}
+
+/// Joining an existing library re-keys this device's imported book to the
+/// shared uuid, which changes its public id. The renderer cannot patch that
+/// from a per-book upsert, so the engine must ask it to reload the list.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_identity_merge_asks_the_renderer_to_reload_the_library() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let bytes = b"a book already imported on both machines";
+    let _a_book = add_book(&a, "same.epub", bytes).await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    // Publish a canonical uuid smaller than either device's random one, so
+    // the merge deterministically replaces B's public id.
+    let low_uid = "00000000000000000000000000000001";
+    let hash = format!("{:x}", Sha256::digest(bytes));
+    write_manual_op(
+        sync_dir.path(),
+        REVIEW_DEVICE,
+        "identity.json",
+        &review_op(
+            REVIEW_WALL,
+            EntityKind::BookIdentity,
+            low_uid,
+            low_uid,
+            json!({ "content_hash": hash }),
+        ),
+    );
+
+    let _b_book = add_book(&b, "same.epub", bytes).await;
+    let before = book_id(&b, "same.epub").await;
+    b.events.lock().unwrap().clear();
+
+    connect(&b, sync_dir.path()).await;
+    run(&b).await;
+
+    let after = book_id(&b, "same.epub").await;
+    assert_ne!(before, after, "the merge must re-key the public book id");
+    assert_eq!(
+        books::list_books(&b.pool).await.unwrap().len(),
+        1,
+        "the shared identity collapses to one library entry"
+    );
+    let reloaded = b.events.lock().unwrap().iter().any(|(name, payload)| {
+        *name == "library-changed" && payload["kind"].as_str() == Some("reload")
+    });
+    assert!(
+        reloaded,
+        "the renderer must be told to refetch after an identity merge"
+    );
+    let marker: Option<String> =
+        sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'library_reload_pending'")
+            .fetch_optional(&b.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        marker.as_deref(),
+        Some("0"),
+        "the reload marker is cleared after it emits"
     );
 }
 

@@ -14,7 +14,7 @@ use sqlx::SqlitePool;
 use crate::error::AppError;
 use crate::repository::books;
 
-use super::clock::now_rfc3339;
+use super::clock::{now_rfc3339, META_LIBRARY_RELOAD};
 use super::model::{EntityKind, Hlc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -443,6 +443,16 @@ pub async fn merge_book_identity(
     }
 
     let mut tx = pool.begin().await?;
+    // A merge can move a visible file row to a different record id. Mark the
+    // reload as part of the merge transaction, so a later pass still repairs
+    // the renderer if this pass aborts before it can emit.
+    sqlx::query(
+        "INSERT INTO sync_meta (key, value) VALUES (?1, '1')
+         ON CONFLICT(key) DO UPDATE SET value = '1'",
+    )
+    .bind(META_LIBRARY_RELOAD)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         r#"
         INSERT INTO sync_book_merges (loser, winner) VALUES (?1, ?2)

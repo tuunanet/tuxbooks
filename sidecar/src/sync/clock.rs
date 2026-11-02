@@ -19,6 +19,9 @@ pub use crate::repository::sync_issues::META_ENABLED;
 pub const META_BASELINE_DONE: &str = "baseline_done";
 pub const META_LAST_SYNC: &str = "last_sync_at";
 pub const META_LAST_ERROR: &str = "last_error";
+/// A durable identity merge changed which record ids the renderer can see.
+/// The next sync pass emits one library reload and clears this marker.
+pub const META_LIBRARY_RELOAD: &str = "library_reload_pending";
 
 pub async fn get_meta(pool: &SqlitePool, key: &str) -> Result<Option<String>, AppError> {
     let value: Option<String> = sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = ?1")

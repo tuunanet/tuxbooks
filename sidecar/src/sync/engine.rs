@@ -22,6 +22,7 @@ use super::capture;
 use super::clock::{
     delete_meta, device_id, get_meta, now_rfc3339, set_meta, META_BASELINE_DONE, META_DEVICE_NAME,
     META_ENABLED, META_FOLDER, META_LAST_ERROR, META_LAST_SYNC, META_LIBRARY_ID,
+    META_LIBRARY_RELOAD,
 };
 use super::conflict;
 use super::identity::{ensure_book_identity, record_issue};
@@ -598,6 +599,7 @@ impl SyncService {
         if !status.enabled {
             return Ok(());
         }
+        self.flush_library_reload().await?;
         let Some(folder) = status.folder else {
             return Ok(());
         };
@@ -651,8 +653,33 @@ impl SyncService {
         )
         .await;
 
+        self.flush_library_reload().await?;
         set_meta(&self.inner.pool, META_LAST_SYNC, &now_rfc3339()).await?;
         Ok(())
+    }
+
+    /// Drain the marker a durable merge writes. The marker survives a failed
+    /// pass, so the next pass still tells the renderer to refetch.
+    async fn flush_library_reload(&self) -> Result<(), AppError> {
+        if get_meta(&self.inner.pool, META_LIBRARY_RELOAD)
+            .await?
+            .as_deref()
+            != Some("1")
+        {
+            return Ok(());
+        }
+        set_meta(&self.inner.pool, META_LIBRARY_RELOAD, "0").await?;
+        self.emit_library_reload();
+        Ok(())
+    }
+
+    /// An identity merge can delete the durable record the renderer holds and
+    /// create the shared one under a new public id. A per-book upsert cannot
+    /// express that, so ask the renderer for the settled list.
+    fn emit_library_reload(&self) {
+        self.inner
+            .events
+            .emit("library-changed", &LibraryChange::Reload);
     }
 
     async fn baseline_if_needed(&self) -> Result<(), AppError> {
@@ -714,10 +741,10 @@ impl SyncService {
         Ok(())
     }
 
-    async fn identity_sweep(&self, root: &Path) -> Result<usize, AppError> {
+    /// Bind hashed files to their shared identity.
+    async fn identity_sweep(&self, root: &Path) -> Result<(), AppError> {
         let deadline = Instant::now() + IDENTITY_BUDGET;
         let mut last_id = 0i64;
-        let mut bound = 0usize;
         loop {
             if Instant::now() >= deadline {
                 break;
@@ -761,9 +788,6 @@ impl SyncService {
                             || issue_key_open(&self.inner.pool, &format!("project-book:{book_id}"))
                                 .await?;
                         if needs_projection {
-                            if changed {
-                                bound += 1;
-                            }
                             match merge::project_book(
                                 &self.inner.pool,
                                 &identity.book_uid,
@@ -811,7 +835,7 @@ impl SyncService {
                 }
             }
         }
-        Ok(bound)
+        Ok(())
     }
 
     async fn sync_remote(&self, root: &Path) -> Result<(), AppError> {
@@ -1300,6 +1324,10 @@ impl SyncService {
             .await;
         match outcome {
             Ok(cleared) => {
+                // A retry can hash a file and merge its durable identity, even
+                // while sync is off; drain the merge marker here instead of
+                // waiting for the next pass.
+                self.flush_library_reload().await?;
                 // A pass may have closed the row itself (sync_failed). The
                 // retry path reports whether the condition is actually gone;
                 // never close on Ok alone.

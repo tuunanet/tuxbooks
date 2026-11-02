@@ -183,21 +183,46 @@ export function useLibraryData(): LibraryState {
     await fetchCollections();
   }, [fetchCollections]);
 
+  const loadLibrary = useCallback(
+    async (showLoading: boolean) => {
+      const seq = ++fetchSeqRef.current;
+      if (showLoading) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const next = await fetchLibrary();
+        if (seq !== fetchSeqRef.current) return;
+        setStats(next.stats);
+        applyFetched(next.books);
+        setError(null);
+      } catch (err) {
+        if (seq !== fetchSeqRef.current) return;
+        // A quiet reload keeps the library already on screen. Its failure
+        // belongs to the sync status, not a full-page error banner.
+        if (showLoading) setError(toMessage(err));
+        else console.error("library reload failed:", toMessage(err));
+      } finally {
+        // A quiet reload can supersede an in-flight initial load or refresh.
+        // The older fetch then skips its own cleanup, so this path must settle
+        // the skeleton too.
+        if (seq === fetchSeqRef.current) setLoading(false);
+      }
+    },
+    [applyFetched],
+  );
+
+  // A sync identity merge can replace the public book id, so per-id patches
+  // cannot reconcile the list. Refetch quietly instead of flashing the
+  // skeleton over a library the user is already looking at.
+  const reloadFromBackend = useCallback(async () => {
+    void fetchCollections();
+    await loadLibrary(false);
+  }, [fetchCollections, loadLibrary]);
+
   const refresh = useCallback(async () => {
-    const seq = ++fetchSeqRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await fetchLibrary();
-      if (seq !== fetchSeqRef.current) return;
-      setStats(next.stats);
-      applyFetched(next.books);
-    } catch (err) {
-      if (seq === fetchSeqRef.current) setError(toMessage(err));
-    } finally {
-      if (seq === fetchSeqRef.current) setLoading(false);
-    }
-  }, [applyFetched]);
+    await loadLibrary(true);
+  }, [loadLibrary]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,6 +284,12 @@ export function useLibraryData(): LibraryState {
     let unlisten: (() => void) | undefined;
     void onLibraryChanged((change) => {
       if (disposed) return;
+      if (change.kind === "reload") {
+        pendingRef.current = [];
+        cancelFlushTimer();
+        void reloadFromBackend();
+        return;
+      }
       pendingRef.current.push(
         change.kind === "changed"
           ? { kind: "upsert", book: change.book }
@@ -275,7 +306,7 @@ export function useLibraryData(): LibraryState {
       disposed = true;
       unlisten?.();
     };
-  }, [scheduleFlush]);
+  }, [scheduleFlush, cancelFlushTimer, reloadFromBackend]);
 
   return { stats, books, collections, loading, error, refresh, refreshCollections };
 }

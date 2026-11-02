@@ -170,7 +170,11 @@ export interface BookMetadata {
  * the remove/reconnect commands push every library mutation here so the UI
  * stays live without polling.
  */
-export type LibraryChange = { kind: "changed"; book: Book } | { kind: "removed"; bookId: number };
+export type LibraryChange =
+  | { kind: "changed"; book: Book }
+  | { kind: "removed"; bookId: number }
+  /** Durable ids changed after a sync identity merge; refetch the list. */
+  | { kind: "reload" };
 
 export interface LibraryStats {
   bookCount: number;
