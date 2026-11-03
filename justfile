@@ -247,6 +247,7 @@ test-e2e: build-debug
     just test-e2e-empty
     just test-e2e-shell
     just test-e2e-gpu
+    just test-e2e-collections
     just test-e2e-security
     just test-e2e-seeded
     just test-e2e-regressions
@@ -285,6 +286,14 @@ test-e2e-regressions: build-debug
 # different marker states. Seeded: the degraded-mode test opens the PDF.
 test-e2e-gpu: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=gpu E2E_SEED_LIBRARY=1 pnpm --filter e2e test:gpu
+
+# Collections redesign journey: create, pin/unpin, drag reorder within and
+# across the Pinned/Unpinned boundary, multi-select and union title, Added to
+# collection sorting, rename, confirmed delete, command-palette selection, and
+# a real app restart that proves the per-device pin order persists. Own phase
+# because the restart closes and relaunches the worker's app.
+test-e2e-collections: build-debug
+    {{_headless}} {{_e2e_timeout}} env E2E_PHASE=collections E2E_SEED_LIBRARY=1 pnpm --filter e2e test:collections
 
 # EPUB content fencing smoke (issue #82): runtime-generated hostile EPUBs
 # in an otherwise empty scratch library — a scripted book fails to open,

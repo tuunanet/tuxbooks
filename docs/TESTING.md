@@ -225,7 +225,7 @@ The app inherits the runner's environment, so `TEST_DATABASE_PATH` /
 `TEST_LIBRARY_PATH` must be set before the first Electron launch
 (globalSetup; the fixture re-asserts them) — keep that ordering.
 
-Five isolated invocations per run:
+Isolated invocations per run:
 
 1. **empty** (`test:empty`) — fresh scratch env; asserts the app shell,
    sidebar, window title, the empty-library state, and Settings navigation.
@@ -304,8 +304,17 @@ Five isolated invocations per run:
    once nothing is overridden) and `collections.e2e.ts` (create a
    collection from the sidebar, add and remove a book through the card
    context menu, mark a book finished, delete the collection).
+6. **collections** (`test:collections`, `E2E_SEED_LIBRARY=1`) — the
+   collections redesign journey (`collections-journey.e2e.ts`): create
+   collections, pin and unpin, drag reorder inside Pinned and across the
+   Pinned/Unpinned boundary, Ctrl/Shift multi-select and the union title,
+   Added to collection sorting, rename, confirmed delete, and command-palette
+   collection selection, then close and relaunch the app to prove the
+   per-device pin state and custom order persist. Own phase because the
+   restart closes and relaunches the worker's app, which must not share a
+   worker with the other seeded suites.
 
-Two more invocations exist beyond the default four:
+Additional invocations exist beyond the default set:
 
 - **hidpi** (`just test-e2e-hidpi`) — the seeded reader scenarios against
   an app forced to `devicePixelRatio` 2 (`E2E_DEVICE_SCALE_FACTOR` →

@@ -6,7 +6,7 @@ iterating; the full suite is expensive.
 
 ```sh
 just build-debug            # required once after changing app code
-just test-e2e-seeded        # one project (also: -empty, -security, -regressions, -gpu, -hidpi)
+just test-e2e-seeded        # one project (also: -empty, -security, -regressions, -gpu, -collections, -hidpi)
 just test-e2e               # all projects
 ```
 

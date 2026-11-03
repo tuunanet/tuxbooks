@@ -13,6 +13,9 @@
  *   gpu     — gpu-fallback.e2e.ts: the GPU-crash fallback policy
  *             (own phase: it relaunches the app with different marker
  *             states and must not share a worker with other suites)
+ *   collections — collections-journey.e2e.ts: the collections redesign
+ *             journey (own phase: the restart assertion closes and
+ *             relaunches the app, which must not share a worker)
  *   hidpi   — seeded reader scenarios at devicePixelRatio 2
  *   capture — the opt-in thumb-drag geometry capture (never CI; evidence
  *             for issue tuxbooks-x27.4, not an assertion suite)
@@ -42,6 +45,7 @@ const SEEDED_EXCLUDE = [
   "settings-sync.e2e.ts",
   "desktop-shell.e2e.ts",
   "gpu-fallback.e2e.ts",
+  "collections-journey.e2e.ts",
   "epub-content-security.e2e.ts",
   "app-hardening.e2e.ts",
   "hidpi.e2e.ts",
@@ -100,6 +104,7 @@ export default defineConfig({
     },
     { name: "shell", ...project(["desktop-shell.e2e.ts"]) },
     { name: "gpu", ...project(["gpu-fallback.e2e.ts"]) },
+    { name: "collections", ...project(["collections-journey.e2e.ts"]) },
     { name: "security", ...project(["epub-content-security.e2e.ts", "app-hardening.e2e.ts"]) },
     { name: "seeded", ...project(["*.e2e.ts"], SEEDED_EXCLUDE) },
     { name: "regressions", ...project(["epub-reader-regressions.e2e.ts"]) },
