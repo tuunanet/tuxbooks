@@ -582,9 +582,13 @@ export function Sidebar({
               if (!deleting) return;
               const deletedId = deleting.id;
               setDeleting(null);
-              save(forgetCollection(preferences, deletedId));
-              void remove(deletedId);
-              onCollectionDeleted(deletedId);
+              // Wait for the backend before touching device state: a failed
+              // delete must leave the row pinned and selected.
+              void remove(deletedId).then((result) => {
+                if (!result.ok) return;
+                save(forgetCollection(preferences, deletedId));
+                onCollectionDeleted(deletedId);
+              });
             }}
           />
         </div>

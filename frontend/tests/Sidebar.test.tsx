@@ -785,4 +785,45 @@ describe("Sidebar", () => {
 
     expect(onCollectionDeleted).toHaveBeenCalledWith(5);
   });
+
+  it("keeps the pin state and selection when the delete fails", async () => {
+    seedCollectionPreferences({ pinned: [5], pinnedOrder: [5], unpinnedOrder: [5] });
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 1 },
+      list_books: [],
+      list_collections: [makeCollection({ id: 5, name: "Vacation Reads" })],
+      delete_collection: new Error("delete failed"),
+    });
+    const onCollectionDeleted = vi.fn();
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar
+            active={{ kind: "collection", ids: [5] }}
+            onSectionChange={vi.fn()}
+            onCollectionSelect={vi.fn()}
+            onCollectionDeleted={onCollectionDeleted}
+            onOpenSettings={vi.fn()}
+          />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("collection-delete-5"));
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("delete_collection", { collectionId: 5 }),
+    );
+    expect(onCollectionDeleted).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Vacation Reads" })).toHaveAttribute("aria-current");
+    expect(collectionNames(screen.getByTestId("pinned-collections"))).toEqual(["Vacation Reads"]);
+    const stored = JSON.parse(
+      window.localStorage.getItem(COLLECTION_PREFERENCES_STORAGE_KEY)!,
+    ) as CollectionPreferences;
+    expect(stored.pinned).toEqual([5]);
+    expect(stored.pinnedOrder).toEqual([5]);
+    expect(stored.unpinnedOrder).toEqual([5]);
+  });
 });

@@ -54,12 +54,15 @@ export function useCollectionActions() {
   );
 
   const remove = useCallback(
-    async (collectionId: number) => {
+    async (collectionId: number): Promise<{ ok: boolean; error?: string }> => {
       try {
         await deleteCollection(collectionId);
         await refreshCollections();
+        return { ok: true };
       } catch (err) {
-        console.error("delete collection failed:", toMessage(err));
+        const message = toMessage(err);
+        console.error("delete collection failed:", message);
+        return { ok: false, error: message };
       }
     },
     [refreshCollections],
