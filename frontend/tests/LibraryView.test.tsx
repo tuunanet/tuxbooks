@@ -8,6 +8,10 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { LibrarySection } from "@/state/appState";
+import {
+  COLLECTION_PREFERENCES_STORAGE_KEY,
+  defaultCollectionPreferences,
+} from "@/lib/collectionPreferences";
 import { makeBook, makeCollection } from "./factories";
 import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 
@@ -84,6 +88,25 @@ describe("LibraryView header", () => {
       await screen.findByRole("heading", { name: "Favorites and Research" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("library-stats")).toHaveTextContent("2 books");
+  });
+
+  it("names two collections in the current pinned sidebar order", async () => {
+    window.localStorage.setItem(
+      COLLECTION_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ ...defaultCollectionPreferences(), pinned: [8], pinnedOrder: [8] }),
+    );
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Zebra", bookIds: [1] }),
+        makeCollection({ id: 8, name: "alpha", bookIds: [2] }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7, 8] });
+
+    expect(await screen.findByRole("heading", { name: "alpha and Zebra" })).toBeInTheDocument();
   });
 
   it("counts three or more collections", async () => {

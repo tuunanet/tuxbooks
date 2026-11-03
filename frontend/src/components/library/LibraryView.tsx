@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
+import { useCollectionPreferences } from "@/hooks/useCollectionPreferences";
 import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
+import { resolveCollectionGroups } from "@/lib/collectionPreferences";
 import {
   useAppDispatch,
   useAppState,
@@ -114,6 +116,22 @@ export function LibraryView({ section }: LibraryViewProps) {
   }, []);
 
   const collectionEmpty = collectionEmptyKind(section, collections);
+
+  // Pin, drag, and rename can reorder the sidebar after the place was
+  // selected. Re-derive the two-name title from the rows as they are now,
+  // rather than from the click-time order stored in the section.
+  const { preferences } = useCollectionPreferences(collections);
+  const titleSection = useMemo((): LibrarySection => {
+    if (section.kind !== "collection") return section;
+    const selected = new Set(section.ids);
+    const groups = resolveCollectionGroups(collections, preferences);
+    return {
+      kind: "collection",
+      ids: [...groups.pinned, ...groups.unpinned]
+        .map((collection) => collection.id)
+        .filter((id) => selected.has(id)),
+    };
+  }, [section, collections, preferences]);
 
   const visible = useMemo(
     () => selectVisibleBooks({ books, collections, section, formatFilter, sort, query }),
@@ -225,7 +243,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       onContextMenu={clearOnBackground}
     >
       <LibraryHeader
-        title={libraryTitle(section, collections)}
+        title={libraryTitle(titleSection, collections)}
         count={visible.length}
         query={query}
         onQueryChange={setQuery}

@@ -783,7 +783,7 @@ describe("Sidebar", () => {
     await userEvent.click(screen.getByTestId("collection-delete-5"));
     await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
 
-    expect(onCollectionDeleted).toHaveBeenCalledWith(5);
+    await waitFor(() => expect(onCollectionDeleted).toHaveBeenCalledWith(5));
   });
 
   it("keeps the pin state and selection when the delete fails", async () => {
@@ -817,7 +817,12 @@ describe("Sidebar", () => {
       expect(invokeMock).toHaveBeenCalledWith("delete_collection", { collectionId: 5 }),
     );
     expect(onCollectionDeleted).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Vacation Reads" })).toHaveAttribute("aria-current");
+    expect(await screen.findByTestId("delete-collection-error")).toHaveTextContent(
+      "Could not delete Vacation Reads: delete failed",
+    );
+    expect(screen.getByTestId("delete-collection-dialog")).toBeInTheDocument();
+    // The dialog is modal, so the row is aria-hidden while it stays open.
+    expect(collectionRow(5).querySelector('[aria-current="true"]')).not.toBeNull();
     expect(collectionNames(screen.getByTestId("pinned-collections"))).toEqual(["Vacation Reads"]);
     const stored = JSON.parse(
       window.localStorage.getItem(COLLECTION_PREFERENCES_STORAGE_KEY)!,

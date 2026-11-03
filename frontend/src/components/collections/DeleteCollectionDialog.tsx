@@ -11,6 +11,10 @@ import {
 interface DeleteCollectionDialogProps {
   open: boolean;
   name: string;
+  /** Backend failure text; the dialog stays open so the user can retry. */
+  error?: string | null;
+  /** A delete is in flight; both actions wait for it. */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -23,6 +27,8 @@ interface DeleteCollectionDialogProps {
 export function DeleteCollectionDialog({
   open,
   name,
+  error = null,
+  busy = false,
   onConfirm,
   onCancel,
 }: DeleteCollectionDialogProps) {
@@ -40,12 +46,22 @@ export function DeleteCollectionDialog({
             {`The collection ${name} is removed, but its books stay in the library with their reading progress and annotations.`}
           </DialogDescription>
         </DialogHeader>
+        {error && (
+          <p
+            role="alert"
+            data-testid="delete-collection-error"
+            className="text-sm text-destructive"
+          >
+            {`Could not delete ${name}: ${error}`}
+          </p>
+        )}
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
             size="sm"
             data-testid="delete-collection-cancel"
+            disabled={busy}
             onClick={onCancel}
           >
             Cancel
@@ -55,6 +71,7 @@ export function DeleteCollectionDialog({
             variant="destructive"
             size="sm"
             data-testid="delete-collection-confirm"
+            disabled={busy}
             onClick={onConfirm}
           >
             Delete Collection

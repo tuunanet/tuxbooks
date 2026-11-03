@@ -137,7 +137,9 @@ Join table, PK `(book_uid, collection_id)`. `book_uid` is FK
 `book_records` and `collection_id` is FK `collections`, both with
 `ON DELETE CASCADE`. Membership belongs to the durable book, so Remove and
 Unwatch never remove a shelf entry; deleting the book record (Forget) or the
-collection does.
+collection does. `added_at` records when the book joined the collection; it
+orders a collection place by Added to collection and is distinct from the
+library's own added date. It survives the sync projection.
 
 ### reading_progress
 

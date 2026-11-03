@@ -338,6 +338,8 @@ export function Sidebar({
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CollectionRef | null>(null);
   const [deleting, setDeleting] = useState<CollectionRef | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<CollectionDropTarget | null>(null);
   const { collections } = useLibrary();
@@ -429,7 +431,10 @@ export function Sidebar({
         dragging={drag?.collectionId === collection.id}
         onSelect={(event) => selectCollection(collection.id, event)}
         onRename={() => setEditing(collection)}
-        onDelete={() => setDeleting(collection)}
+        onDelete={() => {
+          setDeleteError(null);
+          setDeleting(collection);
+        }}
         onMove={(direction) =>
           save(moveCollection(preferences, collections, collection.id, direction))
         }
@@ -577,15 +582,27 @@ export function Sidebar({
           <DeleteCollectionDialog
             open={deleting !== null}
             name={deleting?.name ?? ""}
-            onCancel={() => setDeleting(null)}
-            onConfirm={() => {
-              if (!deleting) return;
-              const deletedId = deleting.id;
+            error={deleteError}
+            busy={deleteBusy}
+            onCancel={() => {
+              if (deleteBusy) return;
               setDeleting(null);
+              setDeleteError(null);
+            }}
+            onConfirm={() => {
+              if (!deleting || deleteBusy) return;
+              const deletedId = deleting.id;
+              setDeleteError(null);
+              setDeleteBusy(true);
               // Wait for the backend before touching device state: a failed
               // delete must leave the row pinned and selected.
               void remove(deletedId).then((result) => {
-                if (!result.ok) return;
+                setDeleteBusy(false);
+                if (!result.ok) {
+                  setDeleteError(result.error ?? "unknown error");
+                  return;
+                }
+                setDeleting(null);
                 save(forgetCollection(preferences, deletedId));
                 onCollectionDeleted(deletedId);
               });

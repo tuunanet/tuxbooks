@@ -216,7 +216,8 @@ describe("GlobalSearch collections", () => {
 
     render(<AppShell initialState={{ section: { kind: "collection", ids: [1, 2] } }} />);
 
-    expect(await screen.findByRole("heading", { name: "Research and Notes" })).toBeInTheDocument();
+    // Sidebar order is alphabetical: Favorites, Notes, Research.
+    expect(await screen.findByRole("heading", { name: "Notes and Research" })).toBeInTheDocument();
 
     const input = screen.getByTestId("global-search");
     await userEvent.type(input, "fav");

@@ -8,13 +8,14 @@ import {
   parseStoredCollectionPreferences,
   pinCollection,
   placeCollection,
-  readCollectionPreferences,
+  readCollectionPreferencesRaw,
   resolveCollectionGroups,
   sanitizeCollectionPreferences,
   setUnpinnedCollapsed,
   unpinCollection,
   writeCollectionPreferences,
   type CollectionPreferences,
+  type CollectionRef,
 } from "@/lib/collectionPreferences";
 import { makeCollection } from "./factories";
 
@@ -26,6 +27,10 @@ const collections = [
 
 function names(items: readonly { name: string }[]): string[] {
   return items.map((collection) => collection.name);
+}
+
+function readPreferences(collections: readonly CollectionRef[]): CollectionPreferences {
+  return parseStoredCollectionPreferences(readCollectionPreferencesRaw(), collections);
 }
 
 function withPrefs(overrides: Partial<CollectionPreferences>): CollectionPreferences {
@@ -208,7 +213,7 @@ describe("collapse", () => {
     const collapsed = setUnpinnedCollapsed(defaultCollectionPreferences(), true);
     expect(collapsed.unpinnedCollapsed).toBe(true);
     writeCollectionPreferences(collapsed);
-    expect(readCollectionPreferences(collections).unpinnedCollapsed).toBe(true);
+    expect(readPreferences(collections).unpinnedCollapsed).toBe(true);
 
     expect(
       sanitizeCollectionPreferences({ unpinnedCollapsed: "yes" }, collections).unpinnedCollapsed,
@@ -219,7 +224,7 @@ describe("collapse", () => {
 describe("storage sanitation", () => {
   it("falls back to defaults on corrupt JSON", () => {
     window.localStorage.setItem(COLLECTION_PREFERENCES_STORAGE_KEY, "{ not json");
-    expect(readCollectionPreferences(collections)).toEqual(defaultCollectionPreferences());
+    expect(readPreferences(collections)).toEqual(defaultCollectionPreferences());
   });
 
   it("drops stale ids and appends missing ids with the normal insert rule", () => {
@@ -233,7 +238,7 @@ describe("storage sanitation", () => {
       }),
     );
 
-    const prefs = readCollectionPreferences(collections);
+    const prefs = readPreferences(collections);
     // 99 is gone; 3 (Beta) stays pinned. Unpinned holds Zebra (1) and alpha
     // (2); the stored custom order starts with Zebra, so alpha appends.
     expect(prefs.pinned).toEqual([3]);
@@ -273,7 +278,7 @@ describe("storage sanitation", () => {
       JSON.stringify({ pinned: [99], pinnedOrder: [99], unpinnedOrder: [98] }),
     );
 
-    writeCollectionPreferences(readCollectionPreferences(collections));
+    writeCollectionPreferences(readPreferences(collections));
     const raw = window.localStorage.getItem(COLLECTION_PREFERENCES_STORAGE_KEY) ?? "";
     expect(raw).not.toContain("99");
     expect(raw).not.toContain("98");
@@ -308,7 +313,7 @@ describe("storage sanitation", () => {
       unpinnedCollapsed: true,
     });
     writeCollectionPreferences(stored);
-    expect(readCollectionPreferences(collections)).toEqual(stored);
+    expect(readPreferences(collections)).toEqual(stored);
   });
 
   it("sanitizes on read even when the stored object is a non-object", () => {

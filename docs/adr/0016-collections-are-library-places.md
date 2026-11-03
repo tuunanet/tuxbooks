@@ -44,8 +44,8 @@ an unrelated smart section.
    collections insert alphabetically while the target group is alphabetical,
    and append once it has custom order. Empty group labels are hidden. Unpinned
    is collapsible and the collapsed state is remembered per device. Collection
-   rows carry no per-collection book count; the Unpinned group label shows its
-   total.
+   rows carry no per-collection book count; the Unpinned group label shows how
+   many collections it holds, so a collapsed group still conveys its size.
 5. Sidebar selection uses the book-selection gestures: plain click replaces,
    Ctrl+click toggles, Shift+click ranges over visible rows and crosses the
    Pinned/Unpinned boundary. Modifiers on smart sections are ignored. Dragging

@@ -12,11 +12,16 @@ pub async fn count_collections(pool: &SqlitePool) -> Result<i64, AppError> {
     Ok(count)
 }
 
-pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, AppError> {
+fn collection_name(name: &str) -> Result<&str, AppError> {
     let name = name.trim();
     if name.is_empty() {
         return Err(AppError::InvalidInput("collection name is empty".into()));
     }
+    Ok(name)
+}
+
+pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, AppError> {
+    let name = collection_name(name)?;
     let id: i64 = sqlx::query_scalar("INSERT INTO collections (name) VALUES (?1) RETURNING id")
         .bind(name)
         .fetch_one(pool)
@@ -27,10 +32,7 @@ pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, App
 /// Rename a collection. Blank names are rejected and duplicates fail on the
 /// UNIQUE constraint. Returns false if no row matched.
 pub async fn rename_collection(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, AppError> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(AppError::InvalidInput("collection name is empty".into()));
-    }
+    let name = collection_name(name)?;
     let result = sqlx::query("UPDATE collections SET name = ?2 WHERE id = ?1")
         .bind(id)
         .bind(name)
@@ -48,9 +50,10 @@ pub async fn list_collections(pool: &SqlitePool) -> Result<Vec<Collection>, AppE
     Ok(collections)
 }
 
-/// Every collection with its member book ids (milestone 10). Two plain
-/// queries joined in Rust: collections keep name order, memberships come
-/// back as one `(collection_id, book_id, added_at)` row each.
+/// Every collection with its member book ids and membership timestamps
+/// (milestone 10). Two plain queries joined in Rust: collections keep name
+/// order, memberships come back as one `(collection_id, book_id, added_at)`
+/// row each.
 pub async fn list_collection_summaries(
     pool: &SqlitePool,
 ) -> Result<Vec<CollectionSummary>, AppError> {

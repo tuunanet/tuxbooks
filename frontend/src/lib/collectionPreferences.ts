@@ -339,13 +339,6 @@ export function parseStoredCollectionPreferences(
   }
 }
 
-/** Read and sanitize the current device's preferences. */
-export function readCollectionPreferences(
-  collections: readonly CollectionRef[],
-): CollectionPreferences {
-  return parseStoredCollectionPreferences(readCollectionPreferencesRaw(), collections);
-}
-
 const listeners = new Set<() => void>();
 /** Session fallback for unavailable or full storage. */
 let sessionRaw: string | null | undefined;
