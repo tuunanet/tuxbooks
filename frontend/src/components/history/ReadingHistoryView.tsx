@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookMarked, Link2, RotateCcw, Search, Trash2 } from "lucide-react";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
 import { BookCover } from "@/components/books/BookCover";
+import { useHistoryVirtualizer } from "@/components/history/useHistoryVirtualizer";
+import { VirtualRow } from "@/components/library/LibraryRow";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -77,7 +79,7 @@ function HistoryBookRow({
   }`;
 
   return (
-    <li
+    <div
       data-testid="reading-history-book"
       className="flex items-center gap-4 rounded-lg border bg-card p-3"
     >
@@ -140,7 +142,7 @@ function HistoryBookRow({
           {busy ? "Relinking…" : "Relink…"}
         </Button>
       </div>
-    </li>
+    </div>
   );
 }
 
@@ -249,13 +251,25 @@ export function ReadingHistoryView() {
   const requestRef = useRef(0);
   const queryRef = useRef("");
 
+  // Set membership: row selection checks run per rendered row, and an
+  // O(n) `includes` per row made every selection change quadratic.
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  // PERF-18: the DOM holds the visible window plus overscan, never one
+  // node per history book.
+  const { attachScroller, virtualizer, virtualRows, unvirtualized, fallbackRowCount } =
+    useHistoryVirtualizer(books?.length ?? 0, (index) => `history-${books?.[index]?.id ?? index}`);
+
   const load = useCallback(async (search: string) => {
     const request = ++requestRef.current;
     try {
       const found = await listReadingHistory(search);
       if (request === requestRef.current) {
         setBooks(found);
-        setSelected((current) => current.filter((id) => found.some((book) => book.id === id)));
+        // Set membership keeps this O(n); `found.some` made it O(n²) and
+        // froze large histories on every reload.
+        const foundIds = new Set(found.map((book) => book.id));
+        setSelected((current) => current.filter((id) => foundIds.has(id)));
         setError(null);
       }
     } catch (err) {
@@ -356,6 +370,10 @@ export function ReadingHistoryView() {
       await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
     } catch (err) {
       setError(toMessage(err));
+      // A chunked forget leaves earlier chunks forgotten; reload so the
+      // list, the pruned selection, and the trash show what actually
+      // happened instead of waiting for another event.
+      await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
     } finally {
       setBusyId(null);
     }
@@ -393,6 +411,18 @@ export function ReadingHistoryView() {
   const allSelected = books !== null && books.length > 0 && selected.length === books.length;
   const searching = query.trim() !== "";
   const count = books?.length ?? 0;
+
+  const renderHistoryRow = (book: ReadingHistoryBook) => (
+    <HistoryBookRow
+      book={book}
+      busy={busyId === book.id}
+      selected={selectedSet.has(book.id)}
+      onToggle={toggleSelected}
+      onRelink={(bookId) => void relink(bookId)}
+      onReset={(target) => setResetTarget(target)}
+      onForget={(target) => setForgetTargets([target.id])}
+    />
+  );
 
   return (
     <section data-testid="reading-history-view" className="flex h-full min-h-0 flex-col">
@@ -474,20 +504,38 @@ export function ReadingHistoryView() {
       ) : books.length === 0 ? (
         <EmptyReadingHistory searching={searching} />
       ) : (
-        <ul className="flex flex-col gap-2 overflow-y-auto">
-          {books.map((book) => (
-            <HistoryBookRow
-              key={book.id}
-              book={book}
-              busy={busyId === book.id}
-              selected={selected.includes(book.id)}
-              onToggle={toggleSelected}
-              onRelink={(bookId) => void relink(bookId)}
-              onReset={(target) => setResetTarget(target)}
-              onForget={(target) => setForgetTargets([target.id])}
-            />
-          ))}
-        </ul>
+        <div
+          ref={attachScroller}
+          data-testid="reading-history-scroller"
+          className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
+        >
+          {unvirtualized ? (
+            // No geometry yet (jsdom tests, SSR): a bounded static slice,
+            // never the shipped rendering.
+            <div className="flex flex-col gap-2">
+              {books.slice(0, fallbackRowCount).map((book) => (
+                <Fragment key={book.id}>{renderHistoryRow(book)}</Fragment>
+              ))}
+            </div>
+          ) : (
+            <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+              {virtualRows.map((virtualRow) => {
+                const book = books[virtualRow.index];
+                if (book === undefined) return null;
+                return (
+                  <VirtualRow
+                    key={virtualRow.key}
+                    index={virtualRow.index}
+                    start={virtualRow.start}
+                    measure={virtualizer.measureElement}
+                  >
+                    <div className="pb-2">{renderHistoryRow(book)}</div>
+                  </VirtualRow>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {trash.length > 0 ? (

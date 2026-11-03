@@ -30,6 +30,7 @@ import type {
   RestoreOutcome,
   SearchHit,
 } from "@/types/domain";
+import { MAX_BULK_BOOK_IDS } from "../../../electron/shared/pathSchema";
 import type { StorageRootId } from "../../../electron/shared/pathSchema";
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
@@ -417,9 +418,24 @@ export function forgetBook(bookId: number): Promise<ForgetOutcome> {
   return invoke("forget_book", { bookId });
 }
 
-/** Bulk Forget for Reading history. */
-export function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
-  return invoke("forget_books", { bookIds });
+/**
+ * Bulk Forget for Reading history. The main process rejects one invoke with
+ * more than MAX_BULK_BOOK_IDS ids, so a larger selection rides several
+ * sequential invokes whose outcomes merge into one. A failed chunk rejects
+ * and leaves the earlier chunks forgotten.
+ */
+export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
+  if (bookIds.length <= MAX_BULK_BOOK_IDS) {
+    return invoke("forget_books", { bookIds });
+  }
+  const outcome: BulkForgetOutcome = { forgotten: 0, trashIds: [] };
+  for (let start = 0; start < bookIds.length; start += MAX_BULK_BOOK_IDS) {
+    const chunk = bookIds.slice(start, start + MAX_BULK_BOOK_IDS);
+    const part = await invoke<BulkForgetOutcome>("forget_books", { bookIds: chunk });
+    outcome.forgotten += part.forgotten;
+    outcome.trashIds.push(...part.trashIds);
+  }
+  return outcome;
 }
 
 /** Forgotten books still restorable inside the 30-day window. */

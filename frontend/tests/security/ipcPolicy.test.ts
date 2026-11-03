@@ -215,6 +215,9 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       expect(() =>
         validateInvokeParams("forget_books", { bookIds: [1, 2] }, issued()),
       ).not.toThrow();
+      expect(() =>
+        validateInvokeParams("forget_books", { bookIds: Array(1001).fill(1) }, issued()),
+      ).toThrow(/invalid bookIds/);
       expect(() => validateInvokeParams("forget_books", { bookIds: "1" }, issued())).toThrow(
         /invalid bookIds/,
       );

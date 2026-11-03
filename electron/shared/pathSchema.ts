@@ -18,6 +18,13 @@ export const MAX_MEMBER_PATH_LENGTH = 1024;
 export const MAX_LIBRARY_PATH_LENGTH = 4096;
 export const MAX_IMPORT_PATHS = 1000;
 
+/**
+ * Largest book-id count one bulk Forget invoke may carry. The main process
+ * rejects bigger `forget_books` calls; the renderer chunks large selections
+ * to this size (frontend/src/lib/bridge.ts forgetBooks).
+ */
+export const MAX_BULK_BOOK_IDS = 1000;
+
 /** Cap on the JSON text of one renderer invoke's params. */
 export const MAX_IPC_PARAM_BYTES = 8 << 20;
 
