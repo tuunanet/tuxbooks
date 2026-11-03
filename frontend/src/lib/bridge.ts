@@ -535,6 +535,11 @@ export function createCollection(name: string): Promise<CollectionSummary> {
   return invoke("create_collection", { name });
 }
 
+/** Rename a collection; rejects blank or duplicate names. */
+export function renameCollection(collectionId: number, name: string): Promise<CollectionSummary> {
+  return invoke("rename_collection", { collectionId, name });
+}
+
 /** Delete a collection; member books are never touched. */
 export function deleteCollection(collectionId: number): Promise<boolean> {
   return invoke("delete_collection", { collectionId });

@@ -211,6 +211,13 @@ struct CollectionIdArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RenameCollectionArgs {
+    collection_id: i64,
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct QueryArgs {
     query: String,
 }
@@ -536,6 +543,14 @@ async fn dispatch(
             Ok(call!(commands::collections::delete_collection(
                 state,
                 p.collection_id
+            )))
+        }
+        "rename_collection" => {
+            let p: RenameCollectionArgs = parse_params(params)?;
+            Ok(call!(commands::collections::rename_collection(
+                state,
+                p.collection_id,
+                p.name
             )))
         }
         "add_book_to_collection" => {
@@ -1180,6 +1195,59 @@ mod tests {
         let malformed = dispatch(&state, &events, "delete_collection", json!({"id": id}))
             .await
             .unwrap_err();
+        assert_eq!(malformed.code, -32602);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rename_collection_returns_the_updated_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let events = test_events();
+        let created = dispatch(&state, &events, "create_collection", json!({"name": "Q"}))
+            .await
+            .unwrap();
+        let id = created["id"].as_i64().unwrap();
+        dispatch(
+            &state,
+            &events,
+            "create_collection",
+            json!({"name": "Other"}),
+        )
+        .await
+        .unwrap();
+
+        let renamed = dispatch(
+            &state,
+            &events,
+            "rename_collection",
+            json!({"collectionId": id, "name": "  Shelf  "}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(renamed["id"], json!(id));
+        assert_eq!(renamed["name"], json!("Shelf"));
+        assert_eq!(renamed["bookIds"], json!([]));
+
+        // A duplicate name reaches the UNIQUE constraint and comes back as an
+        // app error, which the dialog shows inline.
+        let duplicate = dispatch(
+            &state,
+            &events,
+            "rename_collection",
+            json!({"collectionId": id, "name": "Other"}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(duplicate.code, -32000);
+
+        let malformed = dispatch(
+            &state,
+            &events,
+            "rename_collection",
+            json!({"id": id, "name": "Shelf"}),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(malformed.code, -32602);
     }
 

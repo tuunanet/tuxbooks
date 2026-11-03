@@ -27,6 +27,7 @@ import {
   type CollectionRef,
 } from "@/lib/collectionPreferences";
 import { CollectionDialog } from "@/components/collections/CollectionDialog";
+import { DeleteCollectionDialog } from "@/components/collections/DeleteCollectionDialog";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import {
   DropdownMenu,
@@ -55,6 +56,8 @@ interface SidebarProps {
     mode: CollectionSelectMode,
     visibleIds: number[],
   ) => void;
+  /** A collection was deleted; prune it from the active collection place. */
+  onCollectionDeleted: (collectionId: number) => void;
   onOpenSettings: () => void;
 }
 
@@ -183,6 +186,7 @@ interface CollectionRowProps {
   canMoveDown: boolean;
   dragging: boolean;
   onSelect: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onRename: () => void;
   onDelete: () => void;
   onMove: (direction: -1 | 1) => void;
   onSetPinned: (pinned: boolean) => void;
@@ -195,8 +199,8 @@ interface CollectionRowProps {
 /**
  * A collection row: click to open its place, drag the left handle to reorder,
  * or use the actions menu (pointer right-click or keyboard) for Move up, Move
- * down, Pin, and Unpin. These actions always target this row, never the
- * collection multi-selection.
+ * down, Rename, Pin, and Unpin. These actions always target this row, never
+ * the collection multi-selection.
  */
 function CollectionRow({
   collection,
@@ -206,6 +210,7 @@ function CollectionRow({
   canMoveDown,
   dragging,
   onSelect,
+  onRename,
   onDelete,
   onMove,
   onSetPinned,
@@ -293,6 +298,10 @@ function CollectionRow({
           Move down
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        <DropdownMenuItem data-testid={`collection-rename-${collection.id}`} onSelect={onRename}>
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         {pinned ? (
           <DropdownMenuItem
             data-testid={`collection-unpin-${collection.id}`}
@@ -323,13 +332,16 @@ export function Sidebar({
   active,
   onSectionChange,
   onCollectionSelect,
+  onCollectionDeleted,
   onOpenSettings,
 }: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<CollectionRef | null>(null);
+  const [deleting, setDeleting] = useState<CollectionRef | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<CollectionDropTarget | null>(null);
   const { collections } = useLibrary();
-  const { create, remove } = useCollectionActions();
+  const { create, rename, remove } = useCollectionActions();
   const { preferences, save } = useCollectionPreferences(collections);
   const { attention: syncNeedsAttention } = useSyncAttention();
 
@@ -406,7 +418,6 @@ export function Sidebar({
     groupLength: number,
   ) => {
     const pinned = group === "pinned";
-    const section: LibrarySection = { kind: "collection", ids: [collection.id] };
     return (
       <CollectionRow
         key={collection.id}
@@ -417,13 +428,8 @@ export function Sidebar({
         canMoveDown={index < groupLength - 1}
         dragging={drag?.collectionId === collection.id}
         onSelect={(event) => selectCollection(collection.id, event)}
-        onDelete={() => {
-          save(forgetCollection(preferences, collection.id));
-          void remove(collection.id);
-          if (sameSection(section, active)) {
-            onSectionChange({ kind: "smart", id: "all-books" });
-          }
-        }}
+        onRename={() => setEditing(collection)}
+        onDelete={() => setDeleting(collection)}
         onMove={(direction) =>
           save(moveCollection(preferences, collections, collection.id, direction))
         }
@@ -546,7 +552,7 @@ export function Sidebar({
           <CollectionDialog
             open={createOpen}
             onOpenChange={setCreateOpen}
-            onCreate={async (name) => {
+            onSubmit={async (name) => {
               const result = await create(name);
               // A fresh collection is empty; land the user in its section
               // so the creation visibly did something.
@@ -554,6 +560,31 @@ export function Sidebar({
                 onSectionChange({ kind: "collection", ids: [result.collection.id] });
               }
               return result;
+            }}
+          />
+          {editing && (
+            <CollectionDialog
+              key={editing.id}
+              open
+              onOpenChange={(next) => {
+                if (!next) setEditing(null);
+              }}
+              collection={editing}
+              onSubmit={async (name) => rename(editing.id, name)}
+              trigger={false}
+            />
+          )}
+          <DeleteCollectionDialog
+            open={deleting !== null}
+            name={deleting?.name ?? ""}
+            onCancel={() => setDeleting(null)}
+            onConfirm={() => {
+              if (!deleting) return;
+              const deletedId = deleting.id;
+              setDeleting(null);
+              save(forgetCollection(preferences, deletedId));
+              void remove(deletedId);
+              onCollectionDeleted(deletedId);
             }}
           />
         </div>

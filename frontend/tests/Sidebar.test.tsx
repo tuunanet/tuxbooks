@@ -13,7 +13,7 @@ import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { initialAppState, type CollectionSelectMode, type LibrarySection } from "@/state/appState";
 import type { CollectionSummary } from "@/types/domain";
 import { makeBook, makeCollection } from "./factories";
-import { mockInvoke } from "./mocks/bridge";
+import { invokeMock, mockInvoke } from "./mocks/bridge";
 
 function renderSidebar(
   onSectionChange: (section: LibrarySection) => void,
@@ -36,6 +36,7 @@ function renderSidebar(
           active={initialAppState.section}
           onSectionChange={onSectionChange}
           onCollectionSelect={onCollectionSelect}
+          onCollectionDeleted={vi.fn()}
           onOpenSettings={onOpenSettings}
         />
       </LibraryDataProvider>
@@ -81,6 +82,7 @@ function renderCollectionSidebar(
     active = initialAppState.section,
     onSectionChange = vi.fn(),
     onCollectionSelect = vi.fn(),
+    onCollectionDeleted = vi.fn(),
   }: {
     active?: LibrarySection;
     onSectionChange?: (section: LibrarySection) => void;
@@ -89,6 +91,7 @@ function renderCollectionSidebar(
       mode: CollectionSelectMode,
       visibleIds: number[],
     ) => void;
+    onCollectionDeleted?: (collectionId: number) => void;
   } = {},
 ) {
   mockInvoke({
@@ -103,12 +106,13 @@ function renderCollectionSidebar(
           active={active}
           onSectionChange={onSectionChange}
           onCollectionSelect={onCollectionSelect}
+          onCollectionDeleted={onCollectionDeleted}
           onOpenSettings={vi.fn()}
         />
       </LibraryDataProvider>
     </AppStateProvider>,
   );
-  return { ...view, onSectionChange, onCollectionSelect };
+  return { ...view, onSectionChange, onCollectionSelect, onCollectionDeleted };
 }
 
 describe("Sidebar collection groups", () => {
@@ -275,8 +279,8 @@ describe("Sidebar collection groups", () => {
     expect(collectionNames(screen.getByTestId("unpinned-collections"))).toEqual(["Zebra"]);
   });
 
-  it("drops a deleted collection from the stored preferences", async () => {
-    seedCollectionPreferences({ pinned: [5], pinnedOrder: [5] });
+  it("drops a deleted collection from the stored preferences after confirmation", async () => {
+    seedCollectionPreferences({ pinned: [5], pinnedOrder: [5], unpinnedOrder: [5] });
     mockInvoke({
       get_library_stats: { bookCount: 0, collectionCount: 1 },
       list_books: [],
@@ -290,6 +294,7 @@ describe("Sidebar collection groups", () => {
             active={{ kind: "collection", ids: [5] }}
             onSectionChange={vi.fn()}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -299,11 +304,103 @@ describe("Sidebar collection groups", () => {
     expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("collection-delete-5"));
 
+    const dialog = await screen.findByTestId("delete-collection-dialog");
+    expect(dialog).toHaveTextContent("Delete Vacation Reads?");
+    expect(dialog).toHaveTextContent(/books stay in the library/i);
+    await userEvent.click(screen.getByTestId("delete-collection-confirm"));
+
     await waitFor(() => {
-      expect(
-        JSON.parse(window.localStorage.getItem(COLLECTION_PREFERENCES_STORAGE_KEY)!).pinned,
-      ).toEqual([]);
+      const stored = JSON.parse(
+        window.localStorage.getItem(COLLECTION_PREFERENCES_STORAGE_KEY)!,
+      ) as CollectionPreferences;
+      expect(stored.pinned).toEqual([]);
+      expect(stored.pinnedOrder).toEqual([]);
+      expect(stored.unpinnedOrder).toEqual([]);
     });
+    // The now-empty Pinned group label does not linger.
+    await waitFor(() => expect(screen.queryByTestId("pinned-collections")).not.toBeInTheDocument());
+  });
+
+  it("cancels a delete confirmation without touching the collection", async () => {
+    const { onCollectionDeleted } = renderCollectionSidebar([
+      makeCollection({ id: 5, name: "Vacation Reads" }),
+    ]);
+    await screen.findByText("Vacation Reads");
+
+    await userEvent.click(screen.getByTestId("collection-delete-5"));
+    await screen.findByTestId("delete-collection-dialog");
+    await userEvent.click(screen.getByTestId("delete-collection-cancel"));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("delete-collection-dialog")).not.toBeInTheDocument(),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("delete_collection", expect.anything());
+    expect(onCollectionDeleted).not.toHaveBeenCalled();
+  });
+
+  it("closes a delete confirmation with Escape", async () => {
+    const { onCollectionDeleted } = renderCollectionSidebar([
+      makeCollection({ id: 5, name: "Vacation Reads" }),
+    ]);
+    await screen.findByText("Vacation Reads");
+
+    await userEvent.click(screen.getByTestId("collection-delete-5"));
+    await screen.findByTestId("delete-collection-dialog");
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("delete-collection-dialog")).not.toBeInTheDocument(),
+    );
+    expect(onCollectionDeleted).not.toHaveBeenCalled();
+  });
+
+  it("renames a collection from the row actions menu in a multi-selection", async () => {
+    const responses: Record<string, unknown> = {
+      get_library_stats: { bookCount: 0, collectionCount: 2 },
+      list_books: [],
+      list_collections: [
+        makeCollection({ id: 5, name: "Favorites" }),
+        makeCollection({ id: 7, name: "Research" }),
+      ],
+      rename_collection: makeCollection({ id: 5, name: "Keepers" }),
+    };
+    mockInvoke(responses);
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar
+            active={{ kind: "collection", ids: [5, 7] }}
+            onSectionChange={vi.fn()}
+            onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
+            onOpenSettings={vi.fn()}
+          />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    await screen.findByText("Favorites");
+    await userEvent.click(screen.getByTestId("collection-actions-5"));
+    await userEvent.click(await screen.findByTestId("collection-rename-5"));
+
+    const input = await screen.findByTestId("collection-name");
+    expect(input).toHaveValue("Favorites");
+    responses.list_collections = [
+      makeCollection({ id: 5, name: "Keepers" }),
+      makeCollection({ id: 7, name: "Research" }),
+    ];
+    await userEvent.clear(input);
+    await userEvent.type(input, "Keepers{Enter}");
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("rename_collection", {
+        collectionId: 5,
+        name: "Keepers",
+      }),
+    );
+    expect(await screen.findByText("Keepers")).toBeInTheDocument();
+    expect(screen.getByText("Research")).toBeInTheDocument();
+    expect(screen.queryByTestId("collection-dialog")).not.toBeInTheDocument();
   });
 
   it("opens the row actions from a right-click", async () => {
@@ -457,6 +554,7 @@ describe("Sidebar", () => {
             active={initialAppState.section}
             onSectionChange={vi.fn()}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -525,6 +623,7 @@ describe("Sidebar", () => {
             active={initialAppState.section}
             onSectionChange={vi.fn()}
             onCollectionSelect={onCollectionSelect}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -553,6 +652,7 @@ describe("Sidebar", () => {
             active={{ kind: "collection", ids: [5, 7] }}
             onSectionChange={vi.fn()}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -583,6 +683,7 @@ describe("Sidebar", () => {
             active={{ kind: "collection", ids: [5] }}
             onSectionChange={vi.fn()}
             onCollectionSelect={onCollectionSelect}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -633,6 +734,7 @@ describe("Sidebar", () => {
             active={initialAppState.section}
             onSectionChange={onSectionChange}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -651,23 +753,25 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("collection-dialog")).not.toBeInTheDocument();
   });
 
-  it("deleting the active collection falls back to All Books", async () => {
+  it("reports the deleted collection so the selection is pruned", async () => {
     mockInvoke({
-      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      get_library_stats: { bookCount: 1, collectionCount: 2 },
       list_books: [],
       list_collections: [
         { id: 5, name: "Vacation Reads", createdAt: "2026-01-01T00:00:00.000Z", bookIds: [] },
+        { id: 7, name: "Research", createdAt: "2026-01-01T00:00:00.000Z", bookIds: [] },
       ],
       delete_collection: true,
     });
-    const onSectionChange = vi.fn();
+    const onCollectionDeleted = vi.fn();
     render(
       <AppStateProvider>
         <LibraryDataProvider>
           <Sidebar
-            active={{ kind: "collection", ids: [5] }}
-            onSectionChange={onSectionChange}
+            active={{ kind: "collection", ids: [5, 7] }}
+            onSectionChange={vi.fn()}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={onCollectionDeleted}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -677,8 +781,8 @@ describe("Sidebar", () => {
     expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("collection-delete-5"));
-    await waitFor(() => {
-      expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "all-books" });
-    });
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+
+    expect(onCollectionDeleted).toHaveBeenCalledWith(5);
   });
 });

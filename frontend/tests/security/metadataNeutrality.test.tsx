@@ -256,6 +256,7 @@ describe("Sidebar (user-stored collection names)", () => {
             active={initialAppState.section}
             onSectionChange={vi.fn()}
             onCollectionSelect={vi.fn()}
+            onCollectionDeleted={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>

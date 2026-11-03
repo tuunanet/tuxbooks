@@ -4,6 +4,7 @@ import {
   createCollection,
   deleteCollection,
   removeBookFromCollection,
+  renameCollection,
   type CollectionSummary,
 } from "@/lib/bridge";
 import { useLibrary } from "./useLibrary";
@@ -13,10 +14,10 @@ function toMessage(err: unknown): string {
 }
 
 /**
- * User-driven collection management (milestone 10): create and delete
- * collections, and move books in and out of them. Every mutation refreshes
- * the shared collection copy in `useLibraryData`, so the sidebar, the
- * collection sections, and the context menus stay in sync.
+ * User-driven collection management (milestone 10): create, rename, and
+ * delete collections, and move books in and out of them. Every mutation
+ * refreshes the shared collection copy in `useLibraryData`, so the sidebar,
+ * the collection sections, and the context menus stay in sync.
  */
 export function useCollectionActions() {
   const { refreshCollections } = useLibrary();
@@ -27,6 +28,22 @@ export function useCollectionActions() {
     ): Promise<{ ok: boolean; error?: string; collection?: CollectionSummary }> => {
       try {
         const collection = await createCollection(name);
+        await refreshCollections();
+        return { ok: true, collection };
+      } catch (err) {
+        return { ok: false, error: toMessage(err) };
+      }
+    },
+    [refreshCollections],
+  );
+
+  const rename = useCallback(
+    async (
+      collectionId: number,
+      name: string,
+    ): Promise<{ ok: boolean; error?: string; collection?: CollectionSummary }> => {
+      try {
+        const collection = await renameCollection(collectionId, name);
         await refreshCollections();
         return { ok: true, collection };
       } catch (err) {
@@ -109,5 +126,5 @@ export function useCollectionActions() {
     [refreshCollections],
   );
 
-  return { create, remove, addBook, removeBook, addMany, removeMany };
+  return { create, rename, remove, addBook, removeBook, addMany, removeMany };
 }

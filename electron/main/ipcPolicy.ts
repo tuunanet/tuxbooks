@@ -242,6 +242,11 @@ function validateCollectionName(record: Record<string, unknown>): void {
   if (typeof record.name !== "string") throw policyError("invalid name");
 }
 
+function validateCollectionRename(record: Record<string, unknown>): void {
+  requirePositiveId(record.collectionId, "collectionId");
+  if (typeof record.name !== "string") throw policyError("invalid name");
+}
+
 function validateForgetBooks(record: Record<string, unknown>): void {
   const ids = record.bookIds;
   if (
@@ -363,6 +368,7 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["search_books", validateSearchQuery],
   ["list_reading_history", validateOptionalSearchQuery],
   ["create_collection", validateCollectionName],
+  ["rename_collection", validateCollectionRename],
   ["forget_books", validateForgetBooks],
   ["restore_book", validateRestoreBook],
   ["sync_dismiss_issue", validateSyncId],

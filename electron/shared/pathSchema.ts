@@ -260,6 +260,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "get_book_resource",
   "list_collections",
   "create_collection",
+  "rename_collection",
   "delete_collection",
   "add_book_to_collection",
   "remove_book_from_collection",

@@ -444,6 +444,66 @@ describe("appStateReducer collection selection", () => {
   });
 });
 
+describe("appStateReducer collection deletion", () => {
+  it("removes only the deleted id from a multi-selection", () => {
+    const state = appStateReducer(
+      {
+        ...initialAppState,
+        section: { kind: "collection", ids: [5, 3, 8] },
+        collectionAnchorId: 5,
+        libraryQuery: "meridian",
+        selectedBookIds: [1],
+        selectionAnchorId: 1,
+      },
+      { type: "collection-deleted", collectionId: 3 },
+    );
+    expect(state.section).toEqual({ kind: "collection", ids: [5, 8] });
+    expect(state.collectionAnchorId).toBe(5);
+    // A place change clears the section-scoped search and book selection.
+    expect(state.libraryQuery).toBe("");
+    expect(state.selectedBookIds).toEqual([]);
+    expect(state.selectionAnchorId).toBeNull();
+  });
+
+  it("falls back to All Books when the last selected collection is deleted", () => {
+    const state = appStateReducer(
+      {
+        ...initialAppState,
+        section: { kind: "collection", ids: [5] },
+        collectionAnchorId: 5,
+      },
+      { type: "collection-deleted", collectionId: 5 },
+    );
+    expect(state.section).toEqual({ kind: "smart", id: "all-books" });
+    expect(state.collectionAnchorId).toBeNull();
+  });
+
+  it("moves the anchor to the last remaining collection when it was deleted", () => {
+    const state = appStateReducer(
+      {
+        ...initialAppState,
+        section: { kind: "collection", ids: [5, 3, 8] },
+        collectionAnchorId: 3,
+      },
+      { type: "collection-deleted", collectionId: 3 },
+    );
+    expect(state.section).toEqual({ kind: "collection", ids: [5, 8] });
+    expect(state.collectionAnchorId).toBe(8);
+  });
+
+  it("leaves the selection untouched when an unselected collection is deleted", () => {
+    const before: AppState = {
+      ...initialAppState,
+      section: { kind: "collection", ids: [5, 3] },
+      collectionAnchorId: 5,
+    };
+    expect(appStateReducer(before, { type: "collection-deleted", collectionId: 8 })).toBe(before);
+    expect(appStateReducer(initialAppState, { type: "collection-deleted", collectionId: 8 })).toBe(
+      initialAppState,
+    );
+  });
+});
+
 describe("sameSection", () => {
   it("matches smart sections by id", () => {
     expect(

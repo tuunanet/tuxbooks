@@ -110,6 +110,8 @@ export type AppAction =
   /** `visibleIds` is the on-screen order, after search and sort. */
   | { type: "library-range-select"; bookId: number; visibleIds: number[] }
   | { type: "clear-library-selection" }
+  /** A collection was deleted; prune it from the active collection place. */
+  | { type: "collection-deleted"; collectionId: number }
   | { type: "open-book-detail"; bookId: number; tab?: DetailTab }
   | { type: "open-reader"; bookId: number; annotationId?: number }
   | { type: "reader-target-consumed" }
@@ -293,10 +295,32 @@ function reduceCollectionSelection(
   return enterPlace(state, collectionPlace(ids), anchorId);
 }
 
+/**
+ * Deleting a collection prunes it from the active place. The other selected
+ * collections stay in order, and the last deletion falls back to All Books;
+ * deleting an unselected collection returns the same state.
+ */
+function reduceCollectionDeleted(
+  state: AppState,
+  action: Extract<AppAction, { type: "collection-deleted" }>,
+): AppState {
+  if (state.section.kind !== "collection") return state;
+  const ids = state.section.ids.filter((id) => id !== action.collectionId);
+  if (ids.length === state.section.ids.length) return state;
+  const anchorId =
+    state.collectionAnchorId === action.collectionId
+      ? (ids[ids.length - 1] ?? null)
+      : state.collectionAnchorId;
+  // The place changed shape, so the section-scoped search and book selection
+  // reset the same way they do for any other place change.
+  return enterPlace(state, collectionPlace(ids), anchorId);
+}
+
 export function appStateReducer(state: AppState, action: AppAction): AppState {
   if (isSettingsAction(action)) return reduceSettings(state, action);
   if (isLibrarySelectionAction(action)) return reduceLibrarySelection(state, action);
   if (action.type === "select-collection") return reduceCollectionSelection(state, action);
+  if (action.type === "collection-deleted") return reduceCollectionDeleted(state, action);
 
   switch (action.type) {
     case "select-section": {

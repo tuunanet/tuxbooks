@@ -1524,6 +1524,55 @@ describe("LibraryView empty states", () => {
   });
 });
 
+describe("LibraryView collection management", () => {
+  it("renames the active collection and updates the library title", async () => {
+    const responses: Record<string, unknown> = {
+      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      list_books: [alpha()],
+      list_collections: [makeCollection({ id: 7, name: "Favorites", bookIds: [1] })],
+      rename_collection: makeCollection({ id: 7, name: "Keepers", bookIds: [1] }),
+    };
+    mockInvoke(responses);
+
+    renderShell({ kind: "collection", ids: [7] });
+    expect(await screen.findByRole("heading", { name: "Favorites" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-actions-7"));
+    await userEvent.click(await screen.findByTestId("collection-rename-7"));
+    const input = await screen.findByTestId("collection-name");
+    responses.list_collections = [makeCollection({ id: 7, name: "Keepers", bookIds: [1] })];
+    await userEvent.clear(input);
+    await userEvent.type(input, "Keepers{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "Keepers" })).toBeInTheDocument();
+  });
+
+  it("prunes a deleted collection from the selection and falls back to All Books", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites", bookIds: [1] }),
+        makeCollection({ id: 8, name: "Research", bookIds: [2] }),
+      ],
+      delete_collection: true,
+    });
+
+    renderShell({ kind: "collection", ids: [7, 8] });
+    expect(
+      await screen.findByRole("heading", { name: "Favorites and Research" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-delete-7"));
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+    expect(await screen.findByRole("heading", { name: "Research" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-delete-8"));
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+    expect(await screen.findByRole("heading", { name: "All Books" })).toBeInTheDocument();
+  });
+});
+
 describe("LibraryView section explainer", () => {
   it("shows no explainer under the managed sections", async () => {
     mockInvoke({

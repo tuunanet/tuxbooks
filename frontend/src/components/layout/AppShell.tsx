@@ -91,6 +91,9 @@ function Shell() {
         onCollectionSelect={(collectionId, mode, visibleIds) =>
           dispatch({ type: "select-collection", collectionId, mode, visibleIds })
         }
+        onCollectionDeleted={(collectionId) =>
+          dispatch({ type: "collection-deleted", collectionId })
+        }
         onOpenSettings={() => dispatch({ type: "open-settings" })}
       />
       <main className="relative flex-1 overflow-y-auto p-8">

@@ -46,6 +46,7 @@ function Harness() {
         active={app.section}
         onSectionChange={() => {}}
         onCollectionSelect={() => {}}
+        onCollectionDeleted={() => {}}
         onOpenSettings={() => {}}
       />
     </div>

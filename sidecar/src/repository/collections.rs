@@ -24,6 +24,21 @@ pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, App
     Ok(id)
 }
 
+/// Rename a collection. Blank names are rejected and duplicates fail on the
+/// UNIQUE constraint. Returns false if no row matched.
+pub async fn rename_collection(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, AppError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::InvalidInput("collection name is empty".into()));
+    }
+    let result = sqlx::query("UPDATE collections SET name = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn list_collections(pool: &SqlitePool) -> Result<Vec<Collection>, AppError> {
     let collections = sqlx::query_as::<_, Collection>(
         "SELECT id, name, created_at FROM collections ORDER BY name COLLATE NOCASE",
@@ -339,6 +354,68 @@ mod tests {
 
         let all = list_collection_summaries(&pool).await.unwrap();
         assert_eq!(all[0].memberships, summary.memberships);
+    }
+
+    #[tokio::test]
+    async fn rename_updates_the_name_and_keeps_memberships() {
+        let (_tmp, pool, book_id) = pool_with_book("A").await;
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+        add_book_to_collection(&pool, book_id, c).await.unwrap();
+
+        assert!(rename_collection(&pool, c, "  Favorites  ").await.unwrap());
+
+        let summary = get_collection_summary(&pool, c).await.unwrap().unwrap();
+        assert_eq!(summary.name, "Favorites");
+        assert_eq!(summary.book_ids, vec![book_id]);
+    }
+
+    #[tokio::test]
+    async fn rename_rejects_blank_and_duplicate_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let c = create_collection(&pool, "Favorites").await.unwrap();
+        create_collection(&pool, "To Read").await.unwrap();
+
+        let blank = rename_collection(&pool, c, "   ").await.unwrap_err();
+        assert!(matches!(blank, AppError::InvalidInput(_)));
+
+        let duplicate = rename_collection(&pool, c, "To Read").await.unwrap_err();
+        assert!(matches!(duplicate, AppError::Database(_)));
+    }
+
+    #[tokio::test]
+    async fn rename_unknown_collection_reports_no_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        assert!(!rename_collection(&pool, 999, "Shelf").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn rename_queues_the_collection_sync_marker() {
+        // The AFTER UPDATE trigger is the sync path; renaming must ride it
+        // without a new field, entity kind, or migration.
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+
+        rename_collection(&pool, c, "Renamed").await.unwrap();
+
+        let marker: String = sqlx::query_scalar(
+            "SELECT new_json FROM sync_dirty WHERE kind = 'collection' AND entity_key = ?1",
+        )
+        .bind(c.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&marker).unwrap();
+        assert_eq!(marker["name"], "Renamed");
     }
 
     #[tokio::test]
