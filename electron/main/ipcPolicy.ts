@@ -1,4 +1,5 @@
 import {
+  MAX_BULK_BOOK_IDS,
   MAX_IMPORT_PATHS,
   MAX_IPC_PARAM_BYTES,
   SIDECAR_METHODS,
@@ -200,9 +201,6 @@ function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPath
     throw policyError("choose either join or start new");
   }
 }
-
-/** Bulk Forget is a selection from loaded rows; bound it like a batch. */
-const MAX_BULK_BOOK_IDS = 1000;
 
 type ShapeCheck = (record: Record<string, unknown>) => void;
 
