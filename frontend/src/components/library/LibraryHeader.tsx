@@ -90,8 +90,8 @@ export function LibraryHeader({
             type="search"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search"
-            aria-label="Search books"
+            placeholder="Filter this view"
+            aria-label="Filter this view"
             className="w-44 pl-8"
           />
         </div>
