@@ -72,7 +72,7 @@ describe("jumpToSearchMatch", () => {
 
 describe("sameSection", () => {
   const smart = (id: SmartSectionId): LibrarySection => ({ kind: "smart", id });
-  const collection = (id: number): LibrarySection => ({ kind: "collection", id });
+  const collection = (id: number): LibrarySection => ({ kind: "collection", ids: [id] });
   it("distinguishes kinds and smart/collection identities", () => {
     expect(sameSection(smart("all-books"), smart("all-books"))).toBe(true);
     expect(sameSection(smart("all-books"), smart("finished"))).toBe(false);

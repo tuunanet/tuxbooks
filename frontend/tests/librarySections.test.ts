@@ -3,10 +3,12 @@ import {
   BOOK_SORT_OPTIONS,
   SMART_SECTION_TITLES,
   bookSortLabel,
+  collectionEmptyKind,
   filterBooksByCollection,
   filterBooksByFormat,
   filterBooksByQuery,
   filterBooksBySection,
+  libraryTitle,
   sectionTitle,
   selectVisibleBooks,
   sortBooks,
@@ -51,12 +53,54 @@ describe("filterBooksByFormat", () => {
 describe("sectionTitle", () => {
   it("names smart sections and collections", () => {
     expect(sectionTitle({ kind: "smart", id: "recently-added" })).toBe("Recently Added");
-    expect(sectionTitle({ kind: "collection", id: 4 })).toBe("Collection");
+    expect(sectionTitle({ kind: "collection", ids: [4] })).toBe("Collection");
   });
 
   it("has no outside-watched id or title", () => {
     expect(Object.keys(SMART_SECTION_TITLES)).not.toContain("outside-watched");
     expect(Object.values(SMART_SECTION_TITLES)).not.toContain("Loose Books");
+  });
+});
+
+describe("libraryTitle", () => {
+  const collections = [
+    makeCollection({ id: 5, name: "Favorites" }),
+    makeCollection({ id: 3, name: "Sci-Fi" }),
+    makeCollection({ id: 8, name: "Research" }),
+  ];
+
+  it("names a single collection", () => {
+    expect(libraryTitle({ kind: "collection", ids: [5] }, collections)).toBe("Favorites");
+  });
+
+  it("joins two names in sidebar order, not click order", () => {
+    expect(libraryTitle({ kind: "collection", ids: [3, 5] }, collections)).toBe(
+      "Sci-Fi and Favorites",
+    );
+  });
+
+  it("counts three or more collections", () => {
+    expect(libraryTitle({ kind: "collection", ids: [5, 3, 8] }, collections)).toBe("3 collections");
+  });
+});
+
+describe("collectionEmptyKind", () => {
+  const populated = makeCollection({ id: 5, name: "Favorites", bookIds: [1] });
+  const empty = makeCollection({ id: 3, name: "Sci-Fi", bookIds: [] });
+
+  it("distinguishes a single empty collection from an empty union", () => {
+    expect(collectionEmptyKind({ kind: "collection", ids: [3] }, [empty])).toBe("empty");
+    expect(collectionEmptyKind({ kind: "collection", ids: [3, 9] }, [empty])).toBe("empty-multi");
+  });
+
+  it("treats any selected collection with members as populated", () => {
+    expect(collectionEmptyKind({ kind: "collection", ids: [3, 5] }, [empty, populated])).toBe(
+      "none",
+    );
+  });
+
+  it("ignores smart sections", () => {
+    expect(collectionEmptyKind({ kind: "smart", id: "all-books" }, [empty])).toBe("none");
   });
 });
 
@@ -166,11 +210,13 @@ describe("BOOK_SORT_OPTIONS", () => {
 describe("bookSortLabel", () => {
   it("labels the date option Added to collection inside a collection place", () => {
     expect(bookSortLabel("date-added", { kind: "smart", id: "all-books" })).toBe("Date added");
-    expect(bookSortLabel("date-added", { kind: "collection", id: 7 })).toBe("Added to collection");
+    expect(bookSortLabel("date-added", { kind: "collection", ids: [7] })).toBe(
+      "Added to collection",
+    );
   });
 
   it("leaves the other labels alone", () => {
-    expect(bookSortLabel("title", { kind: "collection", id: 7 })).toBe("Title");
+    expect(bookSortLabel("title", { kind: "collection", ids: [7] })).toBe("Title");
   });
 });
 
@@ -229,7 +275,7 @@ describe("sortBooks", () => {
 
 describe("sortBooks by collection membership", () => {
   const allBooks: LibrarySection = { kind: "smart", id: "all-books" };
-  const collection: LibrarySection = { kind: "collection", id: 8 };
+  const collection: LibrarySection = { kind: "collection", ids: [8] };
   // Library order is [1, 2]: book 1 is newer. Membership says otherwise.
   const books = [
     makeBook({ id: 1, title: "Joined later", addedAt: "2026-06-01T00:00:00.000Z" }),
@@ -311,10 +357,38 @@ describe("selectVisibleBooks", () => {
     const result = selectVisibleBooks({
       ...base,
       collections: [collection],
-      section: { kind: "collection", id: 7 },
+      section: { kind: "collection", ids: [7] },
       sort: "section-order",
     });
     expect(result.map((b) => b.id)).toEqual([1, 3]);
+  });
+
+  it("shows the deduped union of selected collections in membership order", () => {
+    const first = makeCollection({
+      id: 7,
+      bookIds: [1, 2],
+      memberships: [
+        { bookId: 1, addedAt: "2026-08-20T00:00:00.000Z" },
+        { bookId: 2, addedAt: "2026-08-10T00:00:00.000Z" },
+      ],
+    });
+    const second = makeCollection({
+      id: 8,
+      bookIds: [2, 3],
+      memberships: [
+        { bookId: 2, addedAt: "2026-08-01T00:00:00.000Z" },
+        { bookId: 3, addedAt: "2026-08-05T00:00:00.000Z" },
+      ],
+    });
+    const result = selectVisibleBooks({
+      ...base,
+      collections: [first, second],
+      section: { kind: "collection", ids: [7, 8] },
+      sort: "section-order",
+    });
+    // Book 2 is in both collections and appears once. It keeps its earliest
+    // membership date (August 1), so the union orders 1, 3, 2.
+    expect(result.map((b) => b.id)).toEqual([1, 3, 2]);
   });
 
   it("keeps Recently Added in library added order under Section order", () => {

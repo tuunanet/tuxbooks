@@ -238,7 +238,10 @@ export function useLibraryVirtualizer({
   // (callback refs get null) before layout cleanups run, which silently
   // dropped every save; `scrollElRef` is never nulled and the onScroll
   // write keeps the map current regardless of teardown order.
-  const sectionKey = `${section.kind}:${"id" in section ? section.id : ""}`;
+  const sectionKey =
+    section.kind === "collection"
+      ? `collection:${section.ids.join(",")}`
+      : `${section.kind}:${"id" in section ? section.id : ""}`;
   const sectionKeyRef = useRef(sectionKey);
   sectionKeyRef.current = sectionKey;
   useLayoutEffect(() => {

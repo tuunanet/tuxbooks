@@ -88,6 +88,9 @@ function Shell() {
       <Sidebar
         active={app.section}
         onSectionChange={(section) => dispatch({ type: "select-section", section })}
+        onCollectionSelect={(collectionId, mode, visibleIds) =>
+          dispatch({ type: "select-collection", collectionId, mode, visibleIds })
+        }
         onOpenSettings={() => dispatch({ type: "open-settings" })}
       />
       <main className="relative flex-1 overflow-y-auto p-8">

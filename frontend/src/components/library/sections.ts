@@ -20,20 +20,49 @@ export function sectionTitle(section: LibrarySection): string {
   }
 }
 
-/** The header title: a collection's own name, otherwise the section title. */
-export function libraryTitle(section: LibrarySection, collections: CollectionSummary[]): string {
-  if (section.kind !== "collection") return sectionTitle(section);
-  return collections.find((collection) => collection.id === section.id)?.name ?? "Collection";
-}
-
-/** True when the selected collection exists but holds no books. */
-export function isCollectionEmpty(
+/** The collections a place selects, in sidebar order. */
+export function selectedCollections(
   section: LibrarySection,
   collections: CollectionSummary[],
-): boolean {
-  if (section.kind !== "collection") return false;
-  const collection = collections.find((entry) => entry.id === section.id);
-  return (collection?.bookIds.length ?? 0) === 0;
+): CollectionSummary[] {
+  if (section.kind !== "collection") return [];
+  const byId = new Map(collections.map((collection) => [collection.id, collection]));
+  return section.ids.flatMap((id) => {
+    const collection = byId.get(id);
+    return collection ? [collection] : [];
+  });
+}
+
+/**
+ * The header title. One collection keeps its name; two are joined in sidebar
+ * order; three or more count instead of listing every name.
+ */
+export function libraryTitle(section: LibrarySection, collections: CollectionSummary[]): string {
+  if (section.kind !== "collection") return sectionTitle(section);
+  const names = selectedCollections(section, collections).map((collection) => collection.name);
+  if (section.ids.length >= 3) return `${section.ids.length} collections`;
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return names[0] ?? "Collection";
+}
+
+/** Why a collection place shows no books. */
+export type CollectionEmptyKind = "none" | "empty" | "empty-multi";
+
+/**
+ * Distinguishes a single empty collection from a union whose collections all
+ * hold no books. A place whose members exist but filters hide them is not
+ * empty and is handled by the view's filter-aware state.
+ */
+export function collectionEmptyKind(
+  section: LibrarySection,
+  collections: CollectionSummary[],
+): CollectionEmptyKind {
+  if (section.kind !== "collection") return "none";
+  const hasMembers = selectedCollections(section, collections).some(
+    (collection) => collection.bookIds.length > 0,
+  );
+  if (hasMembers) return "none";
+  return section.ids.length > 1 ? "empty-multi" : "empty";
 }
 
 interface SelectVisibleBooksInput {
@@ -54,19 +83,18 @@ export function selectVisibleBooks({
   sort,
   query,
 }: SelectVisibleBooksInput): Book[] {
+  const placeCollections = selectedCollections(section, collections);
+  // A multi-collection place shows the union of its members; the Set inside
+  // filterBooksByCollection dedupes a book that belongs to several of them.
   const scoped =
     section.kind === "collection"
       ? filterBooksByCollection(
           books,
-          collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
+          placeCollections.flatMap((collection) => collection.bookIds),
         )
       : filterBooksBySection(books, section);
   const filtered = filterBooksByFormat(scoped, formatFilter);
-  const selectedCollections =
-    section.kind === "collection"
-      ? collections.filter((collection) => collection.id === section.id)
-      : [];
-  return filterBooksByQuery(sortBooks(filtered, sort, section, selectedCollections), query);
+  return filterBooksByQuery(sortBooks(filtered, sort, section, placeCollections), query);
 }
 
 const byDateAddedDesc = (a: Book, b: Book) => b.addedAt.localeCompare(a.addedAt);

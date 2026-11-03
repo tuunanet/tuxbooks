@@ -20,7 +20,12 @@ import { LibraryEmptyState } from "./LibraryEmptyState";
 import { LibraryHeader } from "./LibraryHeader";
 import { LibraryScrollArea } from "./LibraryScrollArea";
 import { SelectionBar } from "./SelectionBar";
-import { isCollectionEmpty, libraryTitle, selectVisibleBooks, type BookViewMode } from "./sections";
+import {
+  collectionEmptyKind,
+  libraryTitle,
+  selectVisibleBooks,
+  type BookViewMode,
+} from "./sections";
 import { useLibraryBulkActions } from "./useLibraryBulkActions";
 import { useLibraryKeyboardNav } from "./useLibraryKeyboardNav";
 import { useLibrarySelection } from "./useLibrarySelection";
@@ -108,7 +113,7 @@ export function LibraryView({ section }: LibraryViewProps) {
     void revealBook(bookId);
   }, []);
 
-  const collectionIsEmpty = isCollectionEmpty(section, collections);
+  const collectionEmpty = collectionEmptyKind(section, collections);
 
   const visible = useMemo(
     () => selectVisibleBooks({ books, collections, section, formatFilter, sort, query }),
@@ -268,9 +273,13 @@ export function LibraryView({ section }: LibraryViewProps) {
         <LibraryEmptyState
           query={query}
           formats={formatFilter}
-          collectionIsEmpty={collectionIsEmpty}
+          section={section}
+          collectionEmpty={collectionEmpty}
           onClearSearch={() => setQuery("")}
           onClearFormats={() => setFormatFilter([])}
+          onShowAllBooks={() =>
+            dispatch({ type: "select-section", section: { kind: "smart", id: "all-books" } })
+          }
         />
       ) : (
         <LibraryScrollArea

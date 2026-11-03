@@ -1,17 +1,22 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
-import { initialAppState, type LibrarySection } from "@/state/appState";
-import { makeBook } from "./factories";
+import { initialAppState, type CollectionSelectMode, type LibrarySection } from "@/state/appState";
+import { makeBook, makeCollection } from "./factories";
 import { mockInvoke } from "./mocks/bridge";
 
 function renderSidebar(
   onSectionChange: (section: LibrarySection) => void,
   onOpenSettings: () => void = vi.fn(),
+  onCollectionSelect: (
+    collectionId: number,
+    mode: CollectionSelectMode,
+    visibleIds: number[],
+  ) => void = vi.fn(),
 ) {
   mockInvoke({
     get_library_stats: { bookCount: 0, collectionCount: 0 },
@@ -24,6 +29,7 @@ function renderSidebar(
         <Sidebar
           active={initialAppState.section}
           onSectionChange={onSectionChange}
+          onCollectionSelect={onCollectionSelect}
           onOpenSettings={onOpenSettings}
         />
       </LibraryDataProvider>
@@ -66,6 +72,7 @@ describe("Sidebar", () => {
           <Sidebar
             active={initialAppState.section}
             onSectionChange={vi.fn()}
+            onCollectionSelect={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -120,21 +127,20 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("collection-create")).toBeDisabled();
   });
 
-  it("lists collections as clickable sections", async () => {
+  it("lists collections as clickable places", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 1 },
       list_books: [],
-      list_collections: [
-        { id: 5, name: "Vacation Reads", createdAt: "2026-01-01T00:00:00.000Z", bookIds: [] },
-      ],
+      list_collections: [makeCollection({ id: 5, name: "Vacation Reads" })],
     });
-    const onSectionChange = vi.fn();
+    const onCollectionSelect = vi.fn();
     render(
       <AppStateProvider>
         <LibraryDataProvider>
           <Sidebar
             active={initialAppState.section}
-            onSectionChange={onSectionChange}
+            onSectionChange={vi.fn()}
+            onCollectionSelect={onCollectionSelect}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -144,7 +150,83 @@ describe("Sidebar", () => {
     expect(await screen.findByText("Vacation Reads")).toBeInTheDocument();
 
     await userEvent.click(screen.getByText("Vacation Reads"));
-    expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", id: 5 });
+    expect(onCollectionSelect).toHaveBeenCalledWith(5, "replace", [5]);
+  });
+
+  it("marks every selected collection row active", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [],
+      list_collections: [
+        makeCollection({ id: 5, name: "Favorites" }),
+        makeCollection({ id: 7, name: "Research" }),
+      ],
+    });
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar
+            active={{ kind: "collection", ids: [5, 7] }}
+            onSectionChange={vi.fn()}
+            onCollectionSelect={vi.fn()}
+            onOpenSettings={vi.fn()}
+          />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Favorites" })).toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("button", { name: "Research" })).toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "All Books" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("passes plain, toggle, and range gestures with the sidebar order", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [],
+      list_collections: [
+        makeCollection({ id: 5, name: "Favorites" }),
+        makeCollection({ id: 7, name: "Research" }),
+      ],
+    });
+    const onCollectionSelect = vi.fn();
+    render(
+      <AppStateProvider>
+        <LibraryDataProvider>
+          <Sidebar
+            active={{ kind: "collection", ids: [5] }}
+            onSectionChange={vi.fn()}
+            onCollectionSelect={onCollectionSelect}
+            onOpenSettings={vi.fn()}
+          />
+        </LibraryDataProvider>
+      </AppStateProvider>,
+    );
+
+    const research = await screen.findByRole("button", { name: "Research" });
+    await userEvent.click(research);
+    fireEvent.click(research, { ctrlKey: true });
+    fireEvent.click(research, { shiftKey: true });
+
+    expect(onCollectionSelect).toHaveBeenNthCalledWith(1, 7, "replace", [5, 7]);
+    expect(onCollectionSelect).toHaveBeenNthCalledWith(2, 7, "toggle", [5, 7]);
+    expect(onCollectionSelect).toHaveBeenNthCalledWith(3, 7, "range", [5, 7]);
+  });
+
+  it("ignores modifiers on smart sections", async () => {
+    const onSectionChange = vi.fn();
+    const onCollectionSelect = vi.fn();
+    renderSidebar(onSectionChange, vi.fn(), onCollectionSelect);
+
+    fireEvent.click(screen.getByRole("button", { name: "Recently Added" }), {
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    expect(onSectionChange).toHaveBeenCalledWith({ kind: "smart", id: "recently-added" });
+    expect(onCollectionSelect).not.toHaveBeenCalled();
   });
 
   it("creates a collection and lands in its section", async () => {
@@ -166,6 +248,7 @@ describe("Sidebar", () => {
           <Sidebar
             active={initialAppState.section}
             onSectionChange={onSectionChange}
+            onCollectionSelect={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>
@@ -179,7 +262,7 @@ describe("Sidebar", () => {
     // Saving refreshes the shared collection list and navigates to the
     // fresh collection's (empty) section.
     await waitFor(() => {
-      expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", id: 7 });
+      expect(onSectionChange).toHaveBeenCalledWith({ kind: "collection", ids: [7] });
     });
     expect(screen.queryByTestId("collection-dialog")).not.toBeInTheDocument();
   });
@@ -198,8 +281,9 @@ describe("Sidebar", () => {
       <AppStateProvider>
         <LibraryDataProvider>
           <Sidebar
-            active={{ kind: "collection", id: 5 }}
+            active={{ kind: "collection", ids: [5] }}
             onSectionChange={onSectionChange}
+            onCollectionSelect={vi.fn()}
             onOpenSettings={vi.fn()}
           />
         </LibraryDataProvider>

@@ -16,12 +16,23 @@ import { CollectionDialog } from "@/components/collections/CollectionDialog";
 import { GlobalSearch } from "@/components/search/GlobalSearch";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useLibrary } from "@/hooks/useLibrary";
-import { sameSection, type LibrarySection, type SmartSectionId } from "@/state/appState";
+import {
+  sameSection,
+  type CollectionSelectMode,
+  type LibrarySection,
+  type SmartSectionId,
+} from "@/state/appState";
 import { useSyncAttention } from "@/state/syncAttentionState";
 
 interface SidebarProps {
   active: LibrarySection;
   onSectionChange: (section: LibrarySection) => void;
+  /** A collection row click; `visibleIds` is the current sidebar order. */
+  onCollectionSelect: (
+    collectionId: number,
+    mode: CollectionSelectMode,
+    visibleIds: number[],
+  ) => void;
   onOpenSettings: () => void;
 }
 
@@ -60,7 +71,7 @@ function GroupLabel({ children }: { children: string }) {
 
 interface ItemButtonProps {
   active: boolean;
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
   disabled?: boolean;
   trailing?: React.ReactNode;
@@ -102,11 +113,20 @@ function ItemButton({
   );
 }
 
-export function Sidebar({ active, onSectionChange, onOpenSettings }: SidebarProps) {
+export function Sidebar({
+  active,
+  onSectionChange,
+  onCollectionSelect,
+  onOpenSettings,
+}: SidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const { collections } = useLibrary();
   const { create, remove } = useCollectionActions();
   const { attention: syncNeedsAttention } = useSyncAttention();
+  // Ticket 4 replaces this with the grouped order; the reducer already takes
+  // the visible list as an argument.
+  const visibleCollectionIds = collections.map((collection) => collection.id);
+  const activeCollectionIds = active.kind === "collection" ? active.ids : [];
 
   return (
     <aside
@@ -155,12 +175,19 @@ export function Sidebar({ active, onSectionChange, onOpenSettings }: SidebarProp
           <GroupLabel>Collections</GroupLabel>
           <div className="flex flex-col gap-0.5">
             {collections.map((collection) => {
-              const section: LibrarySection = { kind: "collection", id: collection.id };
+              const section: LibrarySection = { kind: "collection", ids: [collection.id] };
               return (
                 <ItemButton
                   key={collection.id}
-                  active={sameSection(section, active)}
-                  onClick={() => onSectionChange(section)}
+                  active={activeCollectionIds.includes(collection.id)}
+                  onClick={(event) => {
+                    const mode: CollectionSelectMode = event.shiftKey
+                      ? "range"
+                      : event.ctrlKey || event.metaKey
+                        ? "toggle"
+                        : "replace";
+                    onCollectionSelect(collection.id, mode, visibleCollectionIds);
+                  }}
                   trailing={
                     <button
                       type="button"
@@ -194,7 +221,7 @@ export function Sidebar({ active, onSectionChange, onOpenSettings }: SidebarProp
                 // A fresh collection is empty; land the user in its section
                 // so the creation visibly did something.
                 if (result.ok && result.collection) {
-                  onSectionChange({ kind: "collection", id: result.collection.id });
+                  onSectionChange({ kind: "collection", ids: [result.collection.id] });
                 }
                 return result;
               }}

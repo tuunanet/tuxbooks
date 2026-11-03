@@ -42,7 +42,12 @@ function Harness() {
       <span data-testid="toast-state">{toastVisible ? "visible" : "hidden"}</span>
       <span data-testid="section-kind">{app.section.kind}</span>
       <span data-testid="settings-open">{app.settingsOpen ? "open" : "closed"}</span>
-      <Sidebar active={app.section} onSectionChange={() => {}} onOpenSettings={() => {}} />
+      <Sidebar
+        active={app.section}
+        onSectionChange={() => {}}
+        onCollectionSelect={() => {}}
+        onOpenSettings={() => {}}
+      />
     </div>
   );
 }
