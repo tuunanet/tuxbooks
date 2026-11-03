@@ -293,7 +293,7 @@ describe("appStateReducer library selection", () => {
 });
 
 describe("appStateReducer collection selection", () => {
-  /** Sidebar order; ticket 4 will supply the grouped order here. */
+  /** Sidebar order (Pinned Collections, then Unpinned Collections). */
   const visibleIds = [5, 3, 8, 2];
 
   it("a plain click replaces the place with that collection and anchors it", () => {

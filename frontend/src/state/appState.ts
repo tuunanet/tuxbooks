@@ -236,9 +236,9 @@ function enterPlace(
 }
 
 /**
- * Orders a selection by the visible sidebar rows (ticket 4 will supply the
- * grouped order). Collections the caller did not list stay after the visible
- * ones, keeping their relative click order.
+ * Orders a selection by the visible sidebar rows (Pinned Collections, then
+ * Unpinned Collections). Collections the caller did not list stay after the
+ * visible ones, keeping their relative click order.
  */
 function inSidebarOrder(ids: number[], visibleIds: number[]): number[] {
   const selected = new Set(ids);
