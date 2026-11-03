@@ -23,6 +23,21 @@ pub async fn create_collection(
         .ok_or_else(|| AppError::InvalidInput("collection vanished after creation".into()))
 }
 
+/// Rename a collection. The response is the stored summary, matching create,
+/// so the sidebar and library title pick up the new name from one refresh.
+pub async fn rename_collection(
+    state: &AppState,
+    collection_id: i64,
+    name: String,
+) -> Result<CollectionSummary, AppError> {
+    if !collections::rename_collection(&state.db, collection_id, &name).await? {
+        return Err(AppError::NotFound);
+    }
+    collections::get_collection_summary(&state.db, collection_id)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
 /// Delete a collection. Books and their reading state are never touched;
 /// only the grouping (and its membership rows) goes away.
 pub async fn delete_collection(state: &AppState, collection_id: i64) -> Result<bool, AppError> {

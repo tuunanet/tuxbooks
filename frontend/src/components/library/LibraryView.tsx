@@ -3,9 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBookActions } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
+import { useCollectionPreferences } from "@/hooks/useCollectionPreferences";
 import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
-import { useAppDispatch, useAppState, type LibrarySection } from "@/state/appState";
+import { resolveCollectionGroups } from "@/lib/collectionPreferences";
+import {
+  useAppDispatch,
+  useAppState,
+  type BookSortId,
+  type LibrarySection,
+} from "@/state/appState";
 import { BulkRemoveDialog } from "./BulkRemoveDialog";
 import { EmptyLibraryState } from "./EmptyLibraryState";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
@@ -16,10 +23,9 @@ import { LibraryHeader } from "./LibraryHeader";
 import { LibraryScrollArea } from "./LibraryScrollArea";
 import { SelectionBar } from "./SelectionBar";
 import {
-  isCollectionEmpty,
+  collectionEmptyKind,
   libraryTitle,
   selectVisibleBooks,
-  type BookSortId,
   type BookViewMode,
 } from "./sections";
 import { useLibraryBulkActions } from "./useLibraryBulkActions";
@@ -68,13 +74,13 @@ export function LibraryView({ section }: LibraryViewProps) {
   const [resetTarget, setResetTarget] = useState<Book | null>(null);
   const [forgetTarget, setForgetTarget] = useState<Book | null>(null);
 
-  // View mode and sort are presentation preferences. The search query is app
-  // state scoped to the section and cleared when the section changes; the
-  // format filter survives because it composes with every section.
+  // View mode is a presentation preference. The search query is app state
+  // scoped to the section and cleared when the section changes; the format
+  // filter and sort survive because they compose with every section.
   const [view, setView] = useState<BookViewMode>("grid");
-  const [sort, setSort] = useState<BookSortId>("recently-added");
   const query = app.libraryQuery;
   const formatFilter = app.formatFilter;
+  const sort = app.sort;
 
   const openDetail = useCallback(
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),
@@ -101,11 +107,31 @@ export function LibraryView({ section }: LibraryViewProps) {
     (formats: BookFormat[]) => dispatch({ type: "set-format-filter", formats }),
     [dispatch],
   );
+  const setSort = useCallback(
+    (next: BookSortId) => dispatch({ type: "set-library-sort", sort: next }),
+    [dispatch],
+  );
   const handleReveal = useCallback((bookId: number) => {
     void revealBook(bookId);
   }, []);
 
-  const collectionIsEmpty = isCollectionEmpty(section, collections);
+  const collectionEmpty = collectionEmptyKind(section, collections);
+
+  // Pin, drag, and rename can reorder the sidebar after the place was
+  // selected. Re-derive the two-name title from the rows as they are now,
+  // rather than from the click-time order stored in the section.
+  const { preferences } = useCollectionPreferences(collections);
+  const titleSection = useMemo((): LibrarySection => {
+    if (section.kind !== "collection") return section;
+    const selected = new Set(section.ids);
+    const groups = resolveCollectionGroups(collections, preferences);
+    return {
+      kind: "collection",
+      ids: [...groups.pinned, ...groups.unpinned]
+        .map((collection) => collection.id)
+        .filter((id) => selected.has(id)),
+    };
+  }, [section, collections, preferences]);
 
   const visible = useMemo(
     () => selectVisibleBooks({ books, collections, section, formatFilter, sort, query }),
@@ -217,12 +243,13 @@ export function LibraryView({ section }: LibraryViewProps) {
       onContextMenu={clearOnBackground}
     >
       <LibraryHeader
-        title={libraryTitle(section, collections)}
+        title={libraryTitle(titleSection, collections)}
         count={visible.length}
         query={query}
         onQueryChange={setQuery}
         formats={formatFilter}
         onFormatsChange={setFormatFilter}
+        section={section}
         sort={sort}
         onSortChange={setSort}
         view={view}
@@ -264,9 +291,13 @@ export function LibraryView({ section }: LibraryViewProps) {
         <LibraryEmptyState
           query={query}
           formats={formatFilter}
-          collectionIsEmpty={collectionIsEmpty}
+          section={section}
+          collectionEmpty={collectionEmpty}
           onClearSearch={() => setQuery("")}
           onClearFormats={() => setFormatFilter([])}
+          onShowAllBooks={() =>
+            dispatch({ type: "select-section", section: { kind: "smart", id: "all-books" } })
+          }
         />
       ) : (
         <LibraryScrollArea

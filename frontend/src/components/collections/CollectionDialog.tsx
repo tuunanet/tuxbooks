@@ -11,9 +11,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import type { CollectionRef } from "@/lib/collectionPreferences";
 import type { CollectionSummary } from "@/types/domain";
 
-export interface CreateResult {
+export interface CollectionSaveResult {
   ok: boolean;
   error?: string;
   collection?: CollectionSummary;
@@ -22,24 +23,28 @@ export interface CreateResult {
 interface CollectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Performs the backend creation; returns the outcome (or an error message). */
-  onCreate: (name: string) => Promise<CreateResult>;
+  /** Performs the backend save; returns the outcome (or an error message). */
+  onSubmit: (name: string) => Promise<CollectionSaveResult>;
+  /** Set to edit this collection; omit to create a new one. */
+  collection?: CollectionRef | null;
   trigger?: boolean;
 }
 
 /**
- * Create-collection dialog (milestone 10): saves through the
- * `create_collection` command via the sidebar's collection actions and
- * surfaces backend rejections (blank or duplicate names) inline instead of
- * faking a save.
+ * Collection dialog (milestone 10): creates a collection, or renames one
+ * when `collection` is set. Saves through the sidebar's collection actions
+ * and surfaces backend rejections (blank or duplicate names) inline instead
+ * of faking a save.
  */
 export function CollectionDialog({
   open,
   onOpenChange,
-  onCreate,
+  onSubmit,
+  collection,
   trigger = true,
 }: CollectionDialogProps) {
-  const [name, setName] = useState("");
+  const renaming = collection != null;
+  const [name, setName] = useState(collection?.name ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -48,13 +53,13 @@ export function CollectionDialog({
     if (saving) return;
     setSaving(true);
     setError(null);
-    const result = await onCreate(name);
+    const result = await onSubmit(name);
     setSaving(false);
     if (result.ok) {
       setName("");
       onOpenChange(false);
     } else {
-      setError(result.error ?? "Could not create the collection");
+      setError(result.error ?? `Could not ${renaming ? "rename" : "create"} the collection`);
     }
   };
 
@@ -76,10 +81,11 @@ export function CollectionDialog({
       <DialogContent data-testid="collection-dialog" className="sm:max-w-sm">
         <form onSubmit={(event) => void submit(event)} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>New Collection</DialogTitle>
+            <DialogTitle>{renaming ? "Rename Collection" : "New Collection"}</DialogTitle>
             <DialogDescription>
-              Group books into named collections. Books stay in the library; a collection is only a
-              view over them.
+              {renaming
+                ? `Rename ${collection.name}. Books stay in the library; a collection is only a view over them.`
+                : "Group books into named collections. Books stay in the library; a collection is only a view over them."}
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -102,10 +108,10 @@ export function CollectionDialog({
             <Button
               type="submit"
               size="sm"
-              data-testid="collection-create"
+              data-testid={renaming ? "collection-rename" : "collection-create"}
               disabled={name.trim() === "" || saving}
             >
-              Create
+              {renaming ? "Rename" : "Create"}
             </Button>
           </DialogFooter>
         </form>

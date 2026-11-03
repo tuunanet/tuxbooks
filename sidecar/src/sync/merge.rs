@@ -1486,11 +1486,19 @@ async fn project_membership(
         return Ok(());
     };
     if present {
+        // The op carries the timestamp from the device that added the book.
+        // Keep it: the local default only covers a legacy payload with no
+        // added_at, and an existing row keeps its time rather than moving to
+        // this device's clock.
         sqlx::query(
-            "INSERT OR IGNORE INTO book_collections (book_uid, collection_id) VALUES (?1, ?2)",
+            "INSERT INTO book_collections (book_uid, collection_id, added_at) \
+             VALUES (?1, ?2, COALESCE(?3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))) \
+             ON CONFLICT(book_uid, collection_id) DO UPDATE SET \
+                 added_at = COALESCE(?3, book_collections.added_at)",
         )
         .bind(book_uid)
         .bind(collection_id)
+        .bind(string_or_none(state, "added_at"))
         .execute(pool)
         .await?;
     } else {

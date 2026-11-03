@@ -1,4 +1,4 @@
-import type { LibrarySection, SmartSectionId } from "@/state/appState";
+import type { BookSortId, LibrarySection, SmartSectionId } from "@/state/appState";
 import type { Book, BookFormat, CollectionSummary } from "@/types/domain";
 
 export const SMART_SECTION_TITLES: Record<SmartSectionId, string> = {
@@ -20,20 +20,49 @@ export function sectionTitle(section: LibrarySection): string {
   }
 }
 
-/** The header title: a collection's own name, otherwise the section title. */
-export function libraryTitle(section: LibrarySection, collections: CollectionSummary[]): string {
-  if (section.kind !== "collection") return sectionTitle(section);
-  return collections.find((collection) => collection.id === section.id)?.name ?? "Collection";
-}
-
-/** True when the selected collection exists but holds no books. */
-export function isCollectionEmpty(
+/** The collections a place selects, in sidebar order. */
+export function selectedCollections(
   section: LibrarySection,
   collections: CollectionSummary[],
-): boolean {
-  if (section.kind !== "collection") return false;
-  const collection = collections.find((entry) => entry.id === section.id);
-  return (collection?.bookIds.length ?? 0) === 0;
+): CollectionSummary[] {
+  if (section.kind !== "collection") return [];
+  const byId = new Map(collections.map((collection) => [collection.id, collection]));
+  return section.ids.flatMap((id) => {
+    const collection = byId.get(id);
+    return collection ? [collection] : [];
+  });
+}
+
+/**
+ * The header title. One collection keeps its name; two are joined in sidebar
+ * order; three or more count instead of listing every name.
+ */
+export function libraryTitle(section: LibrarySection, collections: CollectionSummary[]): string {
+  if (section.kind !== "collection") return sectionTitle(section);
+  const names = selectedCollections(section, collections).map((collection) => collection.name);
+  if (section.ids.length >= 3) return `${section.ids.length} collections`;
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return names[0] ?? "Collection";
+}
+
+/** Why a collection place shows no books. */
+export type CollectionEmptyKind = "none" | "empty" | "empty-multi";
+
+/**
+ * Distinguishes a single empty collection from a union whose collections all
+ * hold no books. A place whose members exist but filters hide them is not
+ * empty and is handled by the view's filter-aware state.
+ */
+export function collectionEmptyKind(
+  section: LibrarySection,
+  collections: CollectionSummary[],
+): CollectionEmptyKind {
+  if (section.kind !== "collection") return "none";
+  const hasMembers = selectedCollections(section, collections).some(
+    (collection) => collection.bookIds.length > 0,
+  );
+  if (hasMembers) return "none";
+  return section.ids.length > 1 ? "empty-multi" : "empty";
 }
 
 interface SelectVisibleBooksInput {
@@ -54,16 +83,25 @@ export function selectVisibleBooks({
   sort,
   query,
 }: SelectVisibleBooksInput): Book[] {
+  const placeCollections = selectedCollections(section, collections);
+  // A multi-collection place shows the union of its members; the Set inside
+  // filterBooksByCollection dedupes a book that belongs to several of them.
   const scoped =
     section.kind === "collection"
       ? filterBooksByCollection(
           books,
-          collections.find((collection) => collection.id === section.id)?.bookIds ?? [],
+          placeCollections.flatMap((collection) => collection.bookIds),
         )
       : filterBooksBySection(books, section);
   const filtered = filterBooksByFormat(scoped, formatFilter);
-  return filterBooksByQuery(sortBooks(filtered, sort), query);
+  return filterBooksByQuery(sortBooks(filtered, sort, section, placeCollections), query);
 }
+
+const byDateAddedDesc = (a: Book, b: Book) => b.addedAt.localeCompare(a.addedAt);
+const byLastReadDesc = (a: Book, b: Book) =>
+  (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "");
+const byProgressUpdatedDesc = (a: Book, b: Book) =>
+  (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? "");
 
 /**
  * Client-side filtering over the full `list_books` payload.
@@ -74,21 +112,19 @@ export function filterBooksBySection(books: Book[], section: LibrarySection): Bo
     case "all-books":
       return books;
     case "recently-added":
-      return [...books].sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+      return [...books].sort(byDateAddedDesc);
     case "recently-read":
-      return books
-        .filter((book) => book.lastOpenedAt !== null)
-        .sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+      return books.filter((book) => book.lastOpenedAt !== null).sort(byLastReadDesc);
     case "in-progress":
       // Started but not finished: a saved position below 100 (milestone 10).
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent < 100)
-        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
+        .sort(byProgressUpdatedDesc);
     case "finished":
       // Explicitly marked finished (progress 100) or completed while reading.
       return books
         .filter((book) => book.progressPercent !== null && book.progressPercent >= 100)
-        .sort((a, b) => (b.progressUpdatedAt ?? "").localeCompare(a.progressUpdatedAt ?? ""));
+        .sort(byProgressUpdatedDesc);
   }
 }
 
@@ -112,29 +148,110 @@ export function filterBooksByCollection(books: Book[], bookIds: number[]): Book[
 }
 
 /** Sort orders offered by the library header select. */
-export type BookSortId = "recently-added" | "recently-read" | "title" | "author";
-
 export const BOOK_SORT_OPTIONS: { id: BookSortId; label: string }[] = [
-  { id: "recently-added", label: "Recently Added" },
-  { id: "recently-read", label: "Recently Read" },
+  { id: "section-order", label: "Section order" },
+  { id: "date-added", label: "Date added" },
+  { id: "last-read", label: "Last read" },
   { id: "title", label: "Title" },
   { id: "author", label: "Author" },
 ];
+
+/**
+ * The date option names the place's own timestamp: a collection orders by
+ * when each book joined it, not when the book entered the library.
+ */
+export function bookSortLabel(id: BookSortId, section: LibrarySection): string {
+  if (id === "date-added") {
+    return section.kind === "collection" ? "Added to collection" : "Date added";
+  }
+  return BOOK_SORT_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
+
+/** The concrete field a sort id resolves to; only Section order picks by place. */
+type BookSortField =
+  | "date-added"
+  | "membership-date"
+  | "last-read"
+  | "progress-updated"
+  | "title"
+  | "author";
+
+/**
+ * A place's natural order. All Books uses the library added date; a
+ * collection uses the earliest membership date among its selected
+ * collections; the smart sections keep the timestamp that defines them.
+ */
+function sectionOrderField(section: LibrarySection): BookSortField {
+  if (section.kind === "collection") return "membership-date";
+  if (section.kind === "reading-history") return "last-read";
+  switch (section.id) {
+    case "all-books":
+    case "recently-added":
+      return "date-added";
+    case "recently-read":
+      return "last-read";
+    case "in-progress":
+    case "finished":
+      return "progress-updated";
+  }
+}
 
 export type BookViewMode = "grid" | "list";
 
 /** Sorts above every real author, pushing missing authors to the end. */
 const MISSING_AUTHOR_SORT_KEY = "\uffff";
 
-export function sortBooks(books: Book[], sort: BookSortId): Book[] {
+/** The field a chosen sort maps to for this place. */
+function sortFieldFor(sort: BookSortId, section: LibrarySection): BookSortField {
+  if (sort === "section-order") return sectionOrderField(section);
+  // Inside a collection place the date option is Added to collection.
+  if (sort === "date-added" && section.kind === "collection") return "membership-date";
+  return sort;
+}
+
+/**
+ * The earliest date a book joined any of the selected collections. A book in
+ * several selected collections keeps its oldest timestamp, so it does not
+ * look newly added every time it joins another one.
+ */
+function earliestMembershipDates(collections: CollectionSummary[]): Map<number, string> {
+  const dates = new Map<number, string>();
+  for (const collection of collections) {
+    for (const membership of collection.memberships) {
+      const current = dates.get(membership.bookId);
+      if (current === undefined || membership.addedAt.localeCompare(current) < 0) {
+        dates.set(membership.bookId, membership.addedAt);
+      }
+    }
+  }
+  return dates;
+}
+
+export function sortBooks(
+  books: Book[],
+  sort: BookSortId,
+  section: LibrarySection,
+  selectedCollections: CollectionSummary[] = [],
+): Book[] {
   const sorted = [...books];
-  switch (sort) {
-    case "recently-added":
-      sorted.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+  const field = sortFieldFor(sort, section);
+  switch (field) {
+    case "date-added":
+      sorted.sort(byDateAddedDesc);
       break;
-    case "recently-read":
+    case "membership-date": {
+      const dates = earliestMembershipDates(selectedCollections);
+      sorted.sort((a, b) =>
+        (dates.get(b.id) ?? b.addedAt).localeCompare(dates.get(a.id) ?? a.addedAt),
+      );
+      break;
+    }
+    case "last-read":
       // Books never opened sort behind everything with a timestamp.
-      sorted.sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+      sorted.sort(byLastReadDesc);
+      break;
+    case "progress-updated":
+      sorted.sort(byProgressUpdatedDesc);
       break;
     case "title":
       sorted.sort((a, b) => a.title.localeCompare(b.title));

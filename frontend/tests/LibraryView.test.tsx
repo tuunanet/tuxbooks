@@ -8,6 +8,10 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import type { LibrarySection } from "@/state/appState";
+import {
+  COLLECTION_PREFERENCES_STORAGE_KEY,
+  defaultCollectionPreferences,
+} from "@/lib/collectionPreferences";
 import { makeBook, makeCollection } from "./factories";
 import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 
@@ -66,6 +70,93 @@ describe("LibraryView header", () => {
     expect(await screen.findByTestId("library-header")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "All Books" })).toBeInTheDocument();
     expect(screen.getByTestId("library-stats")).toHaveTextContent("2 books");
+  });
+
+  it("names two collections in sidebar order", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites", bookIds: [1] }),
+        makeCollection({ id: 8, name: "Research", bookIds: [2] }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7, 8] });
+
+    expect(
+      await screen.findByRole("heading", { name: "Favorites and Research" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("library-stats")).toHaveTextContent("2 books");
+  });
+
+  it("names two collections in the current pinned sidebar order", async () => {
+    window.localStorage.setItem(
+      COLLECTION_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ ...defaultCollectionPreferences(), pinned: [8], pinnedOrder: [8] }),
+    );
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Zebra", bookIds: [1] }),
+        makeCollection({ id: 8, name: "alpha", bookIds: [2] }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7, 8] });
+
+    expect(await screen.findByRole("heading", { name: "alpha and Zebra" })).toBeInTheDocument();
+  });
+
+  it("counts three or more collections", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 3 },
+      list_books: [alpha()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites" }),
+        makeCollection({ id: 8, name: "Research" }),
+        makeCollection({ id: 9, name: "Later" }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7, 8, 9] });
+
+    expect(await screen.findByRole("heading", { name: "3 collections" })).toBeInTheDocument();
+  });
+
+  it("ctrl+click combines two collections into one union place", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 3, collectionCount: 2 },
+      list_books: [
+        alpha(),
+        beta(),
+        makeBook({ id: 3, title: "Gamma", addedAt: "2026-03-01T00:00:00.000Z" }),
+      ],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites", bookIds: [1] }),
+        makeCollection({ id: 8, name: "Research", bookIds: [2] }),
+      ],
+    });
+
+    renderShell();
+    await screen.findByTestId("book-grid");
+
+    await userEvent.click(screen.getByRole("button", { name: "Favorites" }));
+    fireEvent.click(screen.getByRole("button", { name: "Research" }), { ctrlKey: true });
+
+    expect(
+      await screen.findByRole("heading", { name: "Favorites and Research" }),
+    ).toBeInTheDocument();
+    const cards = screen.getAllByTestId("book-card");
+    expect(cards).toHaveLength(2);
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.queryByText("Gamma")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "All Books" }));
+    expect(await screen.findByRole("heading", { name: "All Books" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("book-card")).toHaveLength(3);
   });
 
   it("defaults to the grid view", async () => {
@@ -224,7 +315,7 @@ describe("LibraryView selection and opening", () => {
 });
 
 describe("LibraryView multi-selection", () => {
-  /** Recently Added shows them as Alpha, Gamma, Beta: ids out of order. */
+  /** Section order (Date added) shows them as Alpha, Gamma, Beta: ids out of order. */
   const outOfOrderBooks = () => [
     makeBook({ id: 1, title: "Alpha", addedAt: "2026-03-01T00:00:00.000Z" }),
     makeBook({ id: 2, title: "Beta", addedAt: "2026-01-01T00:00:00.000Z" }),
@@ -296,7 +387,7 @@ describe("LibraryView multi-selection", () => {
 
     renderLibrary();
     const cards = await screen.findAllByTestId("book-card");
-    // Recently Added puts the ids on screen as 1, 3, 2. The range has to
+    // Section order puts the ids on screen as 1, 3, 2. The range has to
     // follow that, not the ids' own order.
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
       "Alpha (EPUB)",
@@ -369,7 +460,7 @@ describe("LibraryView multi-selection", () => {
     });
 
     renderLibrary();
-    // Recently Added puts Beta first; it is the book that gets selected.
+    // Section order (Date added) puts Beta first; it is the book that gets selected.
     const cards = await screen.findAllByTestId("book-card");
     expect(item(cards, 0)).toHaveTextContent("Beta");
     fireEvent.click(item(cards, 0));
@@ -1152,6 +1243,25 @@ describe("LibraryView search", () => {
 });
 
 describe("LibraryView sorting", () => {
+  it("offers the five sort choices with Section order as the default", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+    });
+
+    renderLibrary();
+
+    const trigger = await screen.findByRole("combobox", { name: "Sort books" });
+    expect(trigger).toHaveTextContent("Section order");
+
+    await userEvent.click(trigger);
+    for (const label of ["Section order", "Date added", "Last read", "Title", "Author"]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Recently Added" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Recently Read" })).not.toBeInTheDocument();
+  });
+
   it("reorders books when the sort control changes", async () => {
     mockInvoke({
       get_library_stats: { bookCount: 2, collectionCount: 0 },
@@ -1160,7 +1270,7 @@ describe("LibraryView sorting", () => {
 
     renderLibrary();
 
-    // Default sort is Recently Added: beta (newer) first.
+    // Section order uses Date added for All Books: beta (newer) first.
     let cards = await screen.findAllByTestId("book-card");
     expect(cards[0]).toHaveTextContent("Beta");
 
@@ -1170,6 +1280,56 @@ describe("LibraryView sorting", () => {
     cards = screen.getAllByTestId("book-card");
     expect(cards[0]).toHaveTextContent("Alpha");
     expect(cards[1]).toHaveTextContent("Beta");
+  });
+
+  it("keeps the sort choice when the sidebar place changes", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 0 },
+      list_books: [alpha(), beta()],
+      list_collections: [],
+    });
+
+    renderShell();
+    await screen.findAllByTestId("book-card");
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort books" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Title" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Recently Added" }));
+    await screen.findByTestId("book-grid");
+
+    expect(screen.getByRole("combobox", { name: "Sort books" })).toHaveTextContent("Title");
+    const cards = screen.getAllByTestId("book-card");
+    expect(item(cards, 0)).toHaveTextContent("Alpha");
+    expect(item(cards, 1)).toHaveTextContent("Beta");
+  });
+
+  it("labels the date sort Added to collection and orders by membership inside a collection", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 1 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({
+          id: 7,
+          bookIds: [1, 2],
+          memberships: [
+            { bookId: 1, addedAt: "2026-01-05T00:00:00.000Z" },
+            { bookId: 2, addedAt: "2026-01-01T00:00:00.000Z" },
+          ],
+        }),
+      ],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7] });
+
+    // Library order puts Beta (February) first; membership puts Alpha first.
+    const cards = await screen.findAllByTestId("book-card");
+    expect(item(cards, 0)).toHaveTextContent("Alpha");
+    expect(item(cards, 1)).toHaveTextContent("Beta");
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Sort books" }));
+    expect(await screen.findByRole("option", { name: "Added to collection" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Date added" })).not.toBeInTheDocument();
   });
 });
 
@@ -1320,7 +1480,7 @@ describe("LibraryView empty states", () => {
       list_books: [],
     });
 
-    renderLibrary({ kind: "collection", id: 1 });
+    renderLibrary({ kind: "collection", ids: [1] });
 
     await userEvent.click(await screen.findByTestId("library-format-filter"));
     await userEvent.click(screen.getByTestId("format-filter-pdf"));
@@ -1336,9 +1496,103 @@ describe("LibraryView empty states", () => {
       list_books: [],
     });
 
-    renderLibrary({ kind: "collection", id: 1 });
+    renderLibrary({ kind: "collection", ids: [1] });
 
     expect(await screen.findByTestId("empty-collection")).toBeInTheDocument();
+  });
+
+  it("offers All Books when a union of collections has no members", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 2 },
+      list_books: [],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites" }),
+        makeCollection({ id: 8, name: "Research" }),
+      ],
+    });
+
+    renderShell({ kind: "collection", ids: [7, 8] });
+
+    expect(await screen.findByTestId("empty-multi-collection")).toBeInTheDocument();
+    expect(screen.getByText("No books in these collections")).toBeInTheDocument();
+    expect(screen.queryByTestId("empty-collection")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      within(screen.getByTestId("empty-multi-collection")).getByRole("button", {
+        name: "All Books",
+      }),
+    );
+    expect(await screen.findByTestId("empty-library")).toBeInTheDocument();
+  });
+
+  it("names the filter when a collection's members are hidden", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      list_books: [alpha()],
+      list_collections: [makeCollection({ id: 7, name: "Favorites", bookIds: [1] })],
+    });
+
+    renderLibrary({ kind: "collection", ids: [7] });
+
+    await userEvent.click(await screen.findByTestId("library-format-filter"));
+    await userEvent.click(screen.getByTestId("format-filter-pdf"));
+    await userEvent.keyboard("{Escape}");
+
+    expect(await screen.findByTestId("empty-collection-filtered")).toBeInTheDocument();
+    expect(screen.getByText("No books match this filter")).toBeInTheDocument();
+    expect(screen.queryByTestId("empty-collection")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByTestId("book-card")).toBeInTheDocument();
+  });
+});
+
+describe("LibraryView collection management", () => {
+  it("renames the active collection and updates the library title", async () => {
+    const responses: Record<string, unknown> = {
+      get_library_stats: { bookCount: 1, collectionCount: 1 },
+      list_books: [alpha()],
+      list_collections: [makeCollection({ id: 7, name: "Favorites", bookIds: [1] })],
+      rename_collection: makeCollection({ id: 7, name: "Keepers", bookIds: [1] }),
+    };
+    mockInvoke(responses);
+
+    renderShell({ kind: "collection", ids: [7] });
+    expect(await screen.findByRole("heading", { name: "Favorites" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-actions-7"));
+    await userEvent.click(await screen.findByTestId("collection-rename-7"));
+    const input = await screen.findByTestId("collection-name");
+    responses.list_collections = [makeCollection({ id: 7, name: "Keepers", bookIds: [1] })];
+    await userEvent.clear(input);
+    await userEvent.type(input, "Keepers{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "Keepers" })).toBeInTheDocument();
+  });
+
+  it("prunes a deleted collection from the selection and falls back to All Books", async () => {
+    mockInvoke({
+      get_library_stats: { bookCount: 2, collectionCount: 2 },
+      list_books: [alpha(), beta()],
+      list_collections: [
+        makeCollection({ id: 7, name: "Favorites", bookIds: [1] }),
+        makeCollection({ id: 8, name: "Research", bookIds: [2] }),
+      ],
+      delete_collection: true,
+    });
+
+    renderShell({ kind: "collection", ids: [7, 8] });
+    expect(
+      await screen.findByRole("heading", { name: "Favorites and Research" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-delete-7"));
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+    expect(await screen.findByRole("heading", { name: "Research" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("collection-delete-8"));
+    await userEvent.click(await screen.findByTestId("delete-collection-confirm"));
+    expect(await screen.findByRole("heading", { name: "All Books" })).toBeInTheDocument();
   });
 });
 
@@ -1352,7 +1606,7 @@ describe("LibraryView section explainer", () => {
     for (const section of [
       { kind: "smart", id: "all-books" },
       { kind: "smart", id: "recently-added" },
-      { kind: "collection", id: 1 },
+      { kind: "collection", ids: [1] },
     ] as LibrarySection[]) {
       const { container, unmount } = renderLibrary(section);
       expect(await within(container).findByTestId("library-stats")).toBeInTheDocument();

@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 
 use crate::domain::Collection;
+use crate::domain::CollectionMembership;
 use crate::domain::CollectionSummary;
 use crate::error::AppError;
 
@@ -11,16 +12,33 @@ pub async fn count_collections(pool: &SqlitePool) -> Result<i64, AppError> {
     Ok(count)
 }
 
-pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, AppError> {
+fn collection_name(name: &str) -> Result<&str, AppError> {
     let name = name.trim();
     if name.is_empty() {
         return Err(AppError::InvalidInput("collection name is empty".into()));
     }
+    Ok(name)
+}
+
+pub async fn create_collection(pool: &SqlitePool, name: &str) -> Result<i64, AppError> {
+    let name = collection_name(name)?;
     let id: i64 = sqlx::query_scalar("INSERT INTO collections (name) VALUES (?1) RETURNING id")
         .bind(name)
         .fetch_one(pool)
         .await?;
     Ok(id)
+}
+
+/// Rename a collection. Blank names are rejected and duplicates fail on the
+/// UNIQUE constraint. Returns false if no row matched.
+pub async fn rename_collection(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, AppError> {
+    let name = collection_name(name)?;
+    let result = sqlx::query("UPDATE collections SET name = ?2 WHERE id = ?1")
+        .bind(id)
+        .bind(name)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn list_collections(pool: &SqlitePool) -> Result<Vec<Collection>, AppError> {
@@ -32,15 +50,16 @@ pub async fn list_collections(pool: &SqlitePool) -> Result<Vec<Collection>, AppE
     Ok(collections)
 }
 
-/// Every collection with its member book ids (milestone 10). Two plain
-/// queries joined in Rust: collections keep name order, memberships come
-/// back as one `(collection_id, book_id)` row each.
+/// Every collection with its member book ids and membership timestamps
+/// (milestone 10). Two plain queries joined in Rust: collections keep name
+/// order, memberships come back as one `(collection_id, book_id, added_at)`
+/// row each.
 pub async fn list_collection_summaries(
     pool: &SqlitePool,
 ) -> Result<Vec<CollectionSummary>, AppError> {
     let collections = list_collections(pool).await?;
-    let membership: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT bc.collection_id, br.id AS book_id \
+    let membership: Vec<(i64, i64, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT bc.collection_id, br.id AS book_id, bc.added_at \
          FROM book_collections bc \
          JOIN book_records br ON br.uid = bc.book_uid \
          ORDER BY bc.collection_id, br.id",
@@ -55,13 +74,17 @@ pub async fn list_collection_summaries(
             name: collection.name,
             created_at: collection.created_at,
             book_ids: Vec::new(),
+            memberships: Vec::new(),
         })
         .collect();
-    for (collection_id, book_id) in membership {
+    for (collection_id, book_id, added_at) in membership {
         if let Some(summary) = summaries.iter_mut().find(|s| s.id == collection_id) {
             // Duplicate copies share one durable book, so one entry per book.
             if !summary.book_ids.contains(&book_id) {
                 summary.book_ids.push(book_id);
+                summary
+                    .memberships
+                    .push(CollectionMembership { book_id, added_at });
             }
         }
     }
@@ -285,6 +308,117 @@ mod tests {
         let single = get_collection_summary(&pool, c).await.unwrap().unwrap();
         assert_eq!(single.book_ids.len(), 2);
         assert!(get_collection_summary(&pool, 999).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn summaries_carry_membership_timestamps() {
+        use chrono::{TimeZone, Utc};
+
+        let (_tmp, pool, book_id) = pool_with_book("A").await;
+        let other_id = insert_book_named(&pool, "B").await;
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+
+        add_book_to_collection(&pool, book_id, c).await.unwrap();
+        add_book_to_collection(&pool, other_id, c).await.unwrap();
+        // The add path stamps `now`; pin both times so the assertions measure
+        // the read path rather than how long the insert took.
+        for (id, added_at) in [
+            (book_id, "2026-02-03T04:05:06.000Z"),
+            (other_id, "2026-03-04T05:06:07.000Z"),
+        ] {
+            sqlx::query(
+                "UPDATE book_collections SET added_at = ?3 \
+                 WHERE collection_id = ?2 \
+                   AND book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+            )
+            .bind(id)
+            .bind(c)
+            .bind(added_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let summary = get_collection_summary(&pool, c).await.unwrap().unwrap();
+        assert_eq!(summary.book_ids, vec![book_id, other_id]);
+        assert_eq!(
+            summary.memberships,
+            vec![
+                CollectionMembership {
+                    book_id,
+                    added_at: Utc.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                },
+                CollectionMembership {
+                    book_id: other_id,
+                    added_at: Utc.with_ymd_and_hms(2026, 3, 4, 5, 6, 7).unwrap(),
+                },
+            ]
+        );
+
+        let all = list_collection_summaries(&pool).await.unwrap();
+        assert_eq!(all[0].memberships, summary.memberships);
+    }
+
+    #[tokio::test]
+    async fn rename_updates_the_name_and_keeps_memberships() {
+        let (_tmp, pool, book_id) = pool_with_book("A").await;
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+        add_book_to_collection(&pool, book_id, c).await.unwrap();
+
+        assert!(rename_collection(&pool, c, "  Favorites  ").await.unwrap());
+
+        let summary = get_collection_summary(&pool, c).await.unwrap().unwrap();
+        assert_eq!(summary.name, "Favorites");
+        assert_eq!(summary.book_ids, vec![book_id]);
+    }
+
+    #[tokio::test]
+    async fn rename_rejects_blank_and_duplicate_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let c = create_collection(&pool, "Favorites").await.unwrap();
+        create_collection(&pool, "To Read").await.unwrap();
+
+        let blank = rename_collection(&pool, c, "   ").await.unwrap_err();
+        assert!(matches!(blank, AppError::InvalidInput(_)));
+
+        let duplicate = rename_collection(&pool, c, "To Read").await.unwrap_err();
+        assert!(matches!(duplicate, AppError::Database(_)));
+    }
+
+    #[tokio::test]
+    async fn rename_unknown_collection_reports_no_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+
+        assert!(!rename_collection(&pool, 999, "Shelf").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn rename_queues_the_collection_sync_marker() {
+        // The AFTER UPDATE trigger is the sync path; renaming must ride it
+        // without a new field, entity kind, or migration.
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        let c = create_collection(&pool, "Shelf").await.unwrap();
+
+        rename_collection(&pool, c, "Renamed").await.unwrap();
+
+        let marker: String = sqlx::query_scalar(
+            "SELECT new_json FROM sync_dirty WHERE kind = 'collection' AND entity_key = ?1",
+        )
+        .bind(c.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&marker).unwrap();
+        assert_eq!(marker["name"], "Renamed");
     }
 
     #[tokio::test]

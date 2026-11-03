@@ -14,15 +14,21 @@ export type SmartSectionId =
   | "in-progress"
   | "finished";
 
+/** Library sort orders. Section order defers to the active place's natural order. */
+export type BookSortId = "section-order" | "date-added" | "last-read" | "title" | "author";
+
 /**
- * What the sidebar has selected. Smart sections are built-in views; collection
- * sections will address user-created collections once a backend command
- * exposes them.
+ * What the sidebar has selected. Smart sections are built-in views; a
+ * collection place holds one or more selected collections, kept in sidebar
+ * order so the title and union projection agree on their sequence.
  */
 export type LibrarySection =
   | { kind: "smart"; id: SmartSectionId }
-  | { kind: "collection"; id: number }
+  | { kind: "collection"; ids: number[] }
   | { kind: "reading-history" };
+
+/** How a sidebar collection click changes the collection place. */
+export type CollectionSelectMode = "replace" | "toggle" | "range";
 
 export interface AppState {
   view: AppView;
@@ -44,6 +50,12 @@ export interface AppState {
    * Shift-click and right-click never move it.
    */
   selectionAnchorId: number | null;
+  /**
+   * The collection anchor for Shift-click ranges in the sidebar, always the
+   * last plain or Ctrl clicked collection row. Shift-click never moves it;
+   * a smart section clears it.
+   */
+  collectionAnchorId: number | null;
   /**
    * Section shown inside the detail view (issue #58). Metadata is the
    * primary curation surface; Overview keeps the operational facts.
@@ -70,6 +82,11 @@ export interface AppState {
    */
   formatFilter: BookFormat[];
   /**
+   * Library sort order. It composes with every section and collection, so it
+   * survives place changes instead of being reset with the section.
+   */
+  sort: BookSortId;
+  /**
    * Whether the Settings window is open. Settings floats above whatever is
    * underneath, so it stays reachable from the library, a book detail, and
    * the reader without changing the view.
@@ -79,6 +96,13 @@ export interface AppState {
 
 export type AppAction =
   | { type: "select-section"; section: LibrarySection }
+  | {
+      type: "select-collection";
+      collectionId: number;
+      mode: CollectionSelectMode;
+      /** The collection rows on screen, in sidebar order. */
+      visibleIds: number[];
+    }
   | { type: "library-select"; bookId: number }
   /** Right-click takeover: the selection becomes this book, the anchor stays. */
   | { type: "library-context-select"; bookId: number }
@@ -86,6 +110,8 @@ export type AppAction =
   /** `visibleIds` is the on-screen order, after search and sort. */
   | { type: "library-range-select"; bookId: number; visibleIds: number[] }
   | { type: "clear-library-selection" }
+  /** A collection was deleted; prune it from the active collection place. */
+  | { type: "collection-deleted"; collectionId: number }
   | { type: "open-book-detail"; bookId: number; tab?: DetailTab }
   | { type: "open-reader"; bookId: number; annotationId?: number }
   | { type: "reader-target-consumed" }
@@ -93,6 +119,7 @@ export type AppAction =
   | { type: "select-detail-tab"; tab: DetailTab }
   | { type: "set-library-query"; query: string }
   | { type: "set-format-filter"; formats: BookFormat[] }
+  | { type: "set-library-sort"; sort: BookSortId }
   | { type: "open-settings" }
   | { type: "close-settings" };
 
@@ -102,10 +129,12 @@ export const initialAppState: AppState = {
   selectedBookId: null,
   selectedBookIds: [],
   selectionAnchorId: null,
+  collectionAnchorId: null,
   detailTab: "overview",
   readerTargetAnnotationId: null,
   libraryQuery: "",
   formatFilter: [],
+  sort: "section-order",
   settingsOpen: false,
 };
 
@@ -182,23 +211,127 @@ function reduceLibrarySelection(state: AppState, action: LibrarySelectionAction)
   }
 }
 
+/** The place a set of selected collections forms; empty means All Books. */
+function collectionPlace(ids: number[]): LibrarySection {
+  return ids.length === 0 ? { kind: "smart", id: "all-books" } : { kind: "collection", ids };
+}
+
+/**
+ * Entering a place returns to the library and clears the section-scoped
+ * search and book selection; the format filter and sort stay because they
+ * compose with every place.
+ */
+function enterPlace(
+  state: AppState,
+  section: LibrarySection,
+  collectionAnchorId: number | null,
+): AppState {
+  return {
+    ...state,
+    view: "library",
+    section,
+    collectionAnchorId,
+    libraryQuery: "",
+    selectedBookIds: [],
+    selectionAnchorId: null,
+  };
+}
+
+/**
+ * Orders a selection by the visible sidebar rows (Pinned Collections, then
+ * Unpinned Collections). Collections the caller did not list stay after the
+ * visible ones, keeping their relative click order.
+ */
+function inSidebarOrder(ids: number[], visibleIds: number[]): number[] {
+  const selected = new Set(ids);
+  const ordered = visibleIds.filter((id) => selected.has(id));
+  for (const id of ids) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered;
+}
+
+function reduceCollectionSelection(
+  state: AppState,
+  action: Extract<AppAction, { type: "select-collection" }>,
+): AppState {
+  const currentIds = state.section.kind === "collection" ? state.section.ids : [];
+  let ids: number[] = currentIds;
+  let anchorId = state.collectionAnchorId;
+
+  switch (action.mode) {
+    case "replace":
+      ids = [action.collectionId];
+      anchorId = action.collectionId;
+      break;
+    case "toggle": {
+      ids = currentIds.includes(action.collectionId)
+        ? currentIds.filter((id) => id !== action.collectionId)
+        : [...currentIds, action.collectionId];
+      // The anchor moves even when the click removes a collection, matching
+      // the book-selection gestures.
+      anchorId = action.collectionId;
+      break;
+    }
+    case "range": {
+      const anchorIndex = anchorId === null ? -1 : action.visibleIds.indexOf(anchorId);
+      const targetIndex = action.visibleIds.indexOf(action.collectionId);
+      // Without a visible anchor there is no range to take, so fall back to
+      // the target alone and leave the anchor where the last click put it.
+      ids =
+        anchorIndex < 0 || targetIndex < 0
+          ? [action.collectionId]
+          : action.visibleIds.slice(
+              Math.min(anchorIndex, targetIndex),
+              Math.max(anchorIndex, targetIndex) + 1,
+            );
+      break;
+    }
+  }
+
+  ids = inSidebarOrder(ids, action.visibleIds);
+  if (ids.length === 0) anchorId = null;
+
+  return enterPlace(state, collectionPlace(ids), anchorId);
+}
+
+/**
+ * Deleting a collection prunes it from the active place. The other selected
+ * collections stay in order, and the last deletion falls back to All Books;
+ * deleting an unselected collection returns the same state.
+ */
+function reduceCollectionDeleted(
+  state: AppState,
+  action: Extract<AppAction, { type: "collection-deleted" }>,
+): AppState {
+  if (state.section.kind !== "collection") return state;
+  const ids = state.section.ids.filter((id) => id !== action.collectionId);
+  if (ids.length === state.section.ids.length) return state;
+  const anchorId =
+    state.collectionAnchorId === action.collectionId
+      ? (ids[ids.length - 1] ?? null)
+      : state.collectionAnchorId;
+  // The place changed shape, so the section-scoped search and book selection
+  // reset the same way they do for any other place change.
+  return enterPlace(state, collectionPlace(ids), anchorId);
+}
+
 export function appStateReducer(state: AppState, action: AppAction): AppState {
   if (isSettingsAction(action)) return reduceSettings(state, action);
   if (isLibrarySelectionAction(action)) return reduceLibrarySelection(state, action);
+  if (action.type === "select-collection") return reduceCollectionSelection(state, action);
+  if (action.type === "collection-deleted") return reduceCollectionDeleted(state, action);
 
   switch (action.type) {
-    case "select-section":
-      // Choosing a sidebar section always returns to the library view and
-      // clears the section-scoped search; the format filter is orthogonal, so
-      // it stays.
-      return {
-        ...state,
-        view: "library",
-        section: action.section,
-        libraryQuery: "",
-        selectedBookIds: [],
-        selectionAnchorId: null,
-      };
+    case "select-section": {
+      // Collections reached through direct navigation (creating one) anchor
+      // their last id so a Shift+click has somewhere to start.
+      const anchorId =
+        action.section.kind === "collection"
+          ? (action.section.ids[action.section.ids.length - 1] ?? null)
+          : null;
+      return enterPlace(state, action.section, anchorId);
+    }
     case "open-book-detail":
       return {
         ...state,
@@ -230,13 +363,17 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         current.length === next.length && current.every((format, index) => format === next[index]);
       return unchanged ? state : { ...state, formatFilter: next };
     }
+    case "set-library-sort":
+      return state.sort === action.sort ? state : { ...state, sort: action.sort };
   }
 }
 
 export function sameSection(a: LibrarySection, b: LibrarySection): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "smart" && b.kind === "smart") return a.id === b.id;
-  if (a.kind === "collection" && b.kind === "collection") return a.id === b.id;
+  if (a.kind === "collection" && b.kind === "collection") {
+    return a.ids.length === b.ids.length && a.ids.every((id, index) => id === b.ids[index]);
+  }
   return true;
 }
 
