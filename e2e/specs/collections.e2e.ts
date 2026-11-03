@@ -46,10 +46,15 @@ test.describe("collections and reading sections (milestone 10)", () => {
       .getByTestId("context-add-to-collection")
       .waitFor({ state: "detached", timeout: 30000 });
 
-    // The collection section lists exactly the member book.
-    // The name matches both the sidebar nav item and the section header
-    // control — the sidebar nav item is the first match (WDIO semantics).
-    await page.getByRole("button", { name: "Reading Queue" }).first().click();
+    // The collection section lists exactly the member book. The row has
+    // hover-revealed drag and action buttons whose accessible names also
+    // contain the collection name, so click the row's label instead of
+    // resolving the first matching button.
+    await page
+      .locator("[data-collection-row]")
+      .filter({ hasText: "Reading Queue" })
+      .getByTestId("collection-item")
+      .click();
     await waitForLibraryView(page);
     await expect(page.getByTestId("book-card").first()).toBeVisible({ timeout: 30000 });
     const memberCards = await page.getByTestId("book-card").all();
@@ -125,17 +130,18 @@ test.describe("collections and reading sections (milestone 10)", () => {
     // Delete the collection: the grouping goes, the library stays. The
     // delete affordance is hover-revealed (opacity 0 until the row is
     // hovered), so the click goes through the DOM instead of a pointer.
-    await page.locator("[data-testid^=collection-delete-]").waitFor({
-      state: "attached",
-      timeout: 30000,
-    });
+    // Delete now asks for confirmation first.
+    const deleteButton = page.locator("[data-testid^=collection-delete-]");
+    await deleteButton.waitFor({ state: "attached", timeout: 30000 });
     await page.evaluate(() => {
       const button = document.querySelector<HTMLElement>("[data-testid^=collection-delete-]");
       button?.click();
     });
-    await page
-      .locator("[data-testid^=collection-delete-]")
-      .waitFor({ state: "detached", timeout: 30000 });
+    const deleteDialog = page.getByTestId("delete-collection-dialog");
+    await expect(deleteDialog).toBeVisible({ timeout: 30000 });
+    await expect(deleteDialog).toContainText("Delete Reading Queue?");
+    await page.getByTestId("delete-collection-confirm").click();
+    await expect(deleteButton).toHaveCount(0, { timeout: 30000 });
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const allCards = await page.getByTestId("book-card").all();
