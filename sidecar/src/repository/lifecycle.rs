@@ -653,7 +653,7 @@ async fn restore_replace(
     } else {
         None
     };
-    let restored_id: i64 = if id_taken.is_none() {
+    let restored_id: i64 = if snapshot.book_id > 0 && id_taken.is_none() {
         sqlx::query_scalar(
             "INSERT INTO book_records (
                 id, uid, created_at, title, subtitle, author, publisher, language,
