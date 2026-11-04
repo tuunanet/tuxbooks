@@ -3,11 +3,12 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ReadingHistoryView } from "@/components/history/ReadingHistoryView";
+import { EVENT_FLUSH_MS } from "@/hooks/useLibrary";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { makeReadingHistoryBook } from "./factories";
-import { mockInvoke } from "./mocks/bridge";
+import { emitBridgeEvent, invokeMock, mockInvoke } from "./mocks/bridge";
 import { fireResizeOn, stubElementRect } from "./mocks/resizeObserver";
 
 function renderHistory(books: ReturnType<typeof makeReadingHistoryBook>[]) {
@@ -79,5 +80,43 @@ describe("PERF-18: rendered Reading history rows are a bounded window", () => {
     expect(screen.getByTestId("reading-history-forget-selected")).toHaveTextContent(
       "Forget selected (10002)",
     );
+  });
+
+  it("coalesces a bulk forget's per-book events into one reload per flush window", async () => {
+    vi.useFakeTimers();
+    try {
+      const books = Array.from({ length: 1002 }, (_, index) =>
+        makeReadingHistoryBook({ id: index + 1, title: `History ${index + 1}` }),
+      );
+      renderHistory(books);
+
+      // Drain the debounced initial fetch (150 ms search debounce, then
+      // microtasks).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      const historyCalls = () =>
+        invokeMock.mock.calls.filter(([method]) => method === "list_reading_history").length;
+      const baseline = historyCalls();
+      expect(baseline).toBeGreaterThan(0);
+
+      // A 1,002-book Forget emits one library-changed event per book.
+      act(() => {
+        for (let index = 0; index < 50; index += 1) {
+          emitBridgeEvent("library-changed", { kind: "removed", bookId: index + 1 });
+        }
+      });
+      // Inside the flush window nothing has been queued yet.
+      expect(historyCalls()).toBe(baseline);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(EVENT_FLUSH_MS + 50);
+      });
+      // One buffered reload for the whole storm (plus scheduling slack), not
+      // fifty reloads each carrying two heavyweight list queries.
+      expect(historyCalls()).toBeLessThanOrEqual(baseline + 2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

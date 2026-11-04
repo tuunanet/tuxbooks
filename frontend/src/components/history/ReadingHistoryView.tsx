@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useLibrary } from "@/hooks/useLibrary";
+import { EVENT_FLUSH_MS, useLibrary } from "@/hooks/useLibrary";
 import { providerLinkLabel } from "@/lib/providers";
 import {
   forgetBook,
@@ -295,9 +295,14 @@ export function ReadingHistoryView() {
   }, [query, load, loadTrash]);
 
   // A book leaving the library arrives here; a relink or a re-import makes it
-  // leave this view. Keep the list and the trash live without polling.
+  // leave this view. Keep the list and the trash live without polling. Bulk
+  // Forget emits one event per book, so coalesce the reloads into at most
+  // one per flush window (PERF-16 buffers the same storm inside
+  // useLibraryData); 10,000 uncoalesced reload pairs would queue behind the
+  // sidecar's write loop and stall it.
   useEffect(() => {
     let disposed = false;
+    let reloadTimer: number | null = null;
     const unlisteners: (() => void)[] = [];
     const subscribe = (listen: Promise<() => void>) => {
       void listen
@@ -307,17 +312,22 @@ export function ReadingHistoryView() {
         })
         .catch((err) => console.error("reading-history subscription failed:", err));
     };
-    const reload = () => {
-      if (!disposed) {
-        void load(queryRef.current);
-        void loadTrash();
-      }
+    const scheduleReload = () => {
+      if (reloadTimer !== null) return;
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        if (!disposed) {
+          void load(queryRef.current);
+          void loadTrash();
+        }
+      }, EVENT_FLUSH_MS);
     };
-    subscribe(onLibraryChanged(reload));
-    subscribe(onImportProgress(reload));
+    subscribe(onLibraryChanged(scheduleReload));
+    subscribe(onImportProgress(scheduleReload));
     return () => {
       disposed = true;
       for (const unlisten of unlisteners) unlisten();
+      if (reloadTimer !== null) window.clearTimeout(reloadTimer);
     };
   }, [load, loadTrash]);
 

@@ -19,7 +19,8 @@ export class SidecarError extends Error {}
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
+  /** Re-armed by the idle check; null only between set() and the first arm. */
+  timer: NodeJS.Timeout | null;
 };
 
 /**
@@ -37,7 +38,15 @@ export class RpcFailure extends Error {
   }
 }
 
-const REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * How long one sidecar request may hear silence before main gives up on it.
+ * This is an idle deadline, not a total deadline: bulk operations (a large
+ * import, Forget of a big Reading history) legitimately run for minutes
+ * while streaming progress events, and any byte from the sidecar proves the
+ * call is alive and re-arms the timer. A sidecar that stops emitting lines
+ * for the full window is wedged, and that is what fails the call.
+ */
+const REQUEST_IDLE_TIMEOUT_MS = 60_000;
 const RESTART_BASE_MS = 500;
 const RESTART_MAX_MS = 8_000;
 
@@ -50,12 +59,16 @@ export class Sidecar {
   private stopped = false;
   private restartDelay = RESTART_BASE_MS;
   private startPromise: Promise<void> | null = null;
+  private lastActivityAt = Date.now();
+  private readonly idleTimeoutMs: number;
 
   constructor(
     private readonly binaryPath: string,
     events: (name: string, payload: unknown) => void,
+    options: { idleTimeoutMs?: number } = {},
   ) {
     this.events = events;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? REQUEST_IDLE_TIMEOUT_MS;
   }
 
   /** Spawn and health-check the service; safe to call repeatedly. */
@@ -103,6 +116,7 @@ export class Sidecar {
   }
 
   private onData(chunk: string): void {
+    this.lastActivityAt = Date.now();
     for (const line of this.lines.push(chunk)) {
       const trimmed = line.trim();
       if (trimmed) this.onLine(trimmed);
@@ -128,7 +142,7 @@ export class Sidecar {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      clearTimeout(pending.timer);
+      if (pending.timer !== null) clearTimeout(pending.timer);
       if (message.error) {
         pending.reject(new RpcFailure(message.error.message, message.error.code));
       } else {
@@ -149,7 +163,7 @@ export class Sidecar {
     this.child = null;
     const error = new SidecarError(`sidecar exited unexpectedly (code=${code} signal=${signal})`);
     for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
+      if (pending.timer !== null) clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.pending.clear();
@@ -179,14 +193,28 @@ export class Sidecar {
       return Promise.reject(new SidecarError((error as Error).message));
     }
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const pending: Pending = { resolve, reject, timer: null };
+      const check = () => {
+        const idleFor = Date.now() - this.lastActivityAt;
+        const remaining = this.idleTimeoutMs - idleFor;
+        if (remaining > 0) {
+          // The sidecar streamed something (events from a bulk run, another
+          // call's response) within the window; it is alive, so re-arm for
+          // the remainder instead of failing healthy work.
+          pending.timer = setTimeout(check, remaining);
+          return;
+        }
         this.pending.delete(id);
+        // Per-request wedging is not detectable here: any sidecar output
+        // (including another call's) counts as liveness, by design. A dead
+        // process fails every pending call through the exit handler below.
         reject(new RpcFailure(`sidecar call timed out: ${method}`));
-      }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      };
+      pending.timer = setTimeout(check, this.idleTimeoutMs);
+      this.pending.set(id, pending);
       child.stdin!.write(request + "\n", (err) => {
         if (err) {
-          clearTimeout(timer);
+          if (pending.timer !== null) clearTimeout(pending.timer);
           this.pending.delete(id);
           reject(new SidecarError(`failed to write request: ${err.message}`));
         }
@@ -201,7 +229,7 @@ export class Sidecar {
     this.child = null;
     if (!child) return;
     for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
+      if (pending.timer !== null) clearTimeout(pending.timer);
       pending.reject(new SidecarError("sidecar stopped"));
     }
     this.pending.clear();

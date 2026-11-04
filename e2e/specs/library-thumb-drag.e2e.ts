@@ -76,11 +76,13 @@ const GRAB_MAX_JUMP_PX = 20_000;
 const GRAB_MIN_MOVE_PX = 50;
 
 /**
- * import_paths is one sidecar RPC with a 60 s runaway guard
- * (electron/main/sidecar.ts REQUEST_TIMEOUT_MS); the corpus generator
- * partitions the thumb corpus for exactly this reason — see the
- * generateLibraryThumbCorpus rationale in setup/environment.ts. Each part
- * imports as one folder call, the shape the app's own folder flow uses.
+ * import_paths is one sidecar RPC guarded by main's idle timeout
+ * (electron/main/sidecar.ts REQUEST_IDLE_TIMEOUT_MS): with the UI live the
+ * call streams progress events, each of which re-arms the guard, so a big
+ * corpus import runs past the old 60 s total cap. The corpus generator
+ * still partitions the thumb corpus — see the generateLibraryThumbCorpus
+ * rationale in setup/environment.ts. Each part imports as one folder call,
+ * the shape the app's own folder flow uses.
  */
 
 type Geometry = {
