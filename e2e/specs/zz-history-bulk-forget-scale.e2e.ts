@@ -72,26 +72,34 @@ test.describe("Reading history bulk Forget at scale", () => {
     }
     expect(corpus.length).toBeGreaterThanOrEqual(SCALE_CORPUS_SIZE);
 
+    // The seeded phase shares one app, so earlier specs may leave durable
+    // books behind: derive every expected count from the backend instead of
+    // assuming a clean history.
+    const preHistory = (await invoke<Book[]>(page, "list_reading_history", {})).length;
+
     // End every corpus book's library membership: each becomes a durable
     // Reading history row, exactly the state a user's stale fixture folder
     // leaves behind.
     for (const book of corpus) {
       await invoke(page, "remove_book", { bookId: book.id });
     }
+    const startCount = preHistory + corpus.length;
+    const countText = (n: number) => `${n} ${n === 1 ? "book" : "books"}`;
 
     await page.getByRole("button", { name: "Reading history" }).click();
     await expect(page.getByTestId("reading-history-view")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("reading-history-count")).toHaveText(
-      `${SCALE_CORPUS_SIZE} books`,
-      { timeout: 30_000 },
-    );
+    await expect(page.getByTestId("reading-history-count")).toHaveText(countText(startCount), {
+      timeout: 30_000,
+    });
 
     await page.getByTestId("reading-history-select-all").click();
     await page.getByTestId("reading-history-forget-selected").click();
     await page.getByTestId("forget-book-confirm").click();
 
-    // The run may take minutes; the banner must never appear and the count
-    // must reach zero, which only happens when every chunk completed.
+    // The run may take minutes; the banner must never appear. Select all
+    // grabs every row — corpus books and any durable strays earlier specs
+    // left behind — so the count must settle at zero, which only happens
+    // when every chunk completed.
     let banner = "";
     const deadline = Date.now() + 200_000;
     while (Date.now() < deadline) {
