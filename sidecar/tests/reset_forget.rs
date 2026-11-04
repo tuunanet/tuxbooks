@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::{Connection, SqlitePool};
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::Book;
@@ -646,4 +646,62 @@ async fn bulk_forget_rebinds_every_selected_library_book() {
     }
     assert_eq!(env.trash().await.len(), 2);
     assert_eq!(env.durable_count().await, 2);
+}
+
+/// Bulk Forget rides through a writer that holds the database past the
+/// pool's busy timeout: the sync engine's drain behaves exactly like this
+/// while a large Reading history is being forgotten (tuxbooks-nj2). One
+/// busy error must not abort the run.
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_forget_survives_writer_contention() {
+    let env = setup().await;
+    env.write_book("minimal.epub", &minimal_epub());
+    env.write_book("navigation.epub", &navigation_epub());
+    env.scan().await;
+    let before = env.books().await;
+    assert_eq!(before.len(), 2);
+    for book in &before {
+        env.save_progress(book.id, 40.0).await;
+    }
+
+    // Hold the write lock for 6 s: past the pool's 5 s busy timeout, so the
+    // first book's forget returns busy and must be retried, then the lock
+    // releases while the run continues.
+    let db_path = env.db_path.clone();
+    let holder = tokio::spawn(async move {
+        let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
+            .await
+            .unwrap();
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        sqlx::query("COMMIT").execute(&mut conn).await.unwrap();
+        let _ = conn.close().await;
+    });
+
+    let started = std::time::Instant::now();
+    let result = env
+        .rpc(
+            "forget_books",
+            json!({ "bookIds": before.iter().map(|book| book.id).collect::<Vec<_>>() }),
+        )
+        .await;
+    let elapsed = started.elapsed();
+
+    holder.await.unwrap();
+    assert_eq!(
+        result["forgotten"].as_i64(),
+        Some(2),
+        "both books land despite the contended write"
+    );
+    assert_eq!(result["trashIds"].as_array().unwrap().len(), 2);
+    assert!(
+        elapsed >= std::time::Duration::from_secs(5),
+        "the run must have waited on the contended write: {:?}",
+        elapsed
+    );
+    assert!(env.history().await.is_empty());
+    assert_eq!(env.trash().await.len(), 2);
 }
