@@ -8,6 +8,15 @@ use crate::repository::{books, collections, editions, lifecycle};
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 use crate::AppState;
+use std::time::Duration;
+
+/// How hard one book fights transient write contention before a bulk run
+/// gives up on it. A bulk run shares the database with the sync engine's
+/// drain (one transaction per dirty row; WAL writers serialize), so a busy
+/// write is a "try again in a moment", not a reason to abort a 1,000-book
+/// run halfway (tuxbooks-nj2).
+const BULK_BUSY_RETRIES: usize = 5;
+const BULK_BUSY_BACKOFF_MS: u64 = 400;
 
 /// Aggregate library counts for the frontend header/empty states.
 pub async fn get_library_stats(state: &AppState) -> Result<LibraryStats, AppError> {
@@ -219,26 +228,70 @@ pub async fn forget_book(
     Ok(outcome)
 }
 
+/// SQLITE_BUSY (5) and SQLITE_LOCKED (6): another writer held the database.
+/// sqlx's code() reports the EXTENDED code, so busy variants like
+/// SQLITE_BUSY_SNAPSHOT (517) do not match the primary codes above; their
+/// message is "database is locked", which the fallback catches. Each book's
+/// destructive forget writes run in one transaction, so a busy failure there
+/// rolled back cleanly and retrying that book is safe; the surrounding
+/// snapshot reads are side-effect free and the pre-commit provider unlink is
+/// idempotent.
+fn is_transient_contention(err: &AppError) -> bool {
+    let AppError::Database(sqlx::Error::Database(db)) = err else {
+        return false;
+    };
+    if matches!(db.code().as_deref(), Some("5") | Some("6")) {
+        return true;
+    }
+    let text = db.to_string().to_ascii_lowercase();
+    text.contains("busy") || text.contains("locked")
+}
+
 /// Bulk Forget for Reading history. Each book gets the same atomic treatment
-/// as the single command; the result counts what landed.
+/// as the single command; the result counts what landed. Transient write
+/// contention (the sync engine drains its queue in the same window) retries
+/// with backoff instead of aborting the whole run.
 pub async fn forget_books(
     state: &AppState,
     events: &EventEmitter,
     book_ids: Vec<i64>,
 ) -> Result<BulkForgetOutcome, AppError> {
     let mut trash_ids = Vec::new();
+    let mut forgotten_count: i64 = 0;
     for book_id in book_ids {
-        match forget_book_inner(state, book_id).await {
-            Ok(outcome) => {
-                emit_forget(state, events, &outcome).await?;
-                trash_ids.push(outcome.trash_id);
+        let mut outcome: Option<ForgetOutcome> = None;
+        let mut saw_transient = false;
+        for attempt in 0..=BULK_BUSY_RETRIES {
+            match forget_book_inner(state, book_id).await {
+                Ok(forgotten) => {
+                    outcome = Some(forgotten);
+                    break;
+                }
+                Err(AppError::NotFound) => break,
+                Err(err) if attempt < BULK_BUSY_RETRIES && is_transient_contention(&err) => {
+                    saw_transient = true;
+                    tokio::time::sleep(Duration::from_millis(
+                        BULK_BUSY_BACKOFF_MS * (attempt as u64 + 1),
+                    ))
+                    .await;
+                }
+                Err(err) => return Err(err),
             }
-            Err(AppError::NotFound) => {}
-            Err(err) => return Err(err),
+        }
+        if let Some(outcome) = outcome {
+            emit_forget(state, events, &outcome).await?;
+            trash_ids.push(outcome.trash_id);
+            forgotten_count += 1;
+        } else if saw_transient {
+            // The book was forgotten on an earlier attempt whose post-commit
+            // bookkeeping lost a contention race: state is committed and the
+            // view reloads the real lists afterwards, so skip the event and
+            // the trash id rather than fail the run.
+            forgotten_count += 1;
         }
     }
     Ok(BulkForgetOutcome {
-        forgotten: trash_ids.len() as i64,
+        forgotten: forgotten_count,
         trash_ids,
     })
 }
