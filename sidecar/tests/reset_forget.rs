@@ -11,7 +11,7 @@ use sqlx::{Connection, SqlitePool};
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::Book;
-use tuxbooks_lib::repository::{books, metadata as metadata_repo};
+use tuxbooks_lib::repository::{books, lifecycle, metadata as metadata_repo};
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::Reconciler;
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
@@ -704,4 +704,104 @@ async fn bulk_forget_survives_writer_contention() {
     );
     assert!(env.history().await.is_empty());
     assert_eq!(env.trash().await.len(), 2);
+}
+
+/// A shared Forget replayed onto an already-forgotten durable book rebuilds
+/// the local trash snapshot with book_id 0 (the record was absent at apply
+/// time). Restoring that snapshot used to bind the 0 and insert rowid 0,
+/// which the id policy rejects and which every later sync-replayed restore
+/// collides against (tuxbooks-kcm). Restore must allocate a fresh id.
+#[tokio::test(flavor = "multi_thread")]
+async fn restored_sync_snapshot_allocates_a_fresh_record_id() {
+    let env = setup().await;
+    env.write_book("minimal.epub", &minimal_epub());
+    env.scan().await;
+    let book = &env.books().await[0];
+    let uid = book
+        .book_uid
+        .clone()
+        .expect("the imported book carries a durable uid");
+
+    // Forget the durable identity: the record goes away (the file stays in
+    // the library under a fresh one), a trash row carries the snapshot, and
+    // the shared forget op lands in the sync folder.
+    env.rpc("forget_book", json!({ "bookId": book.id })).await;
+    let old_record: Option<(i64,)> = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&uid)
+        .fetch_optional(&env.pool)
+        .await
+        .unwrap();
+    assert!(old_record.is_none(), "the forget deletes the old record");
+
+    // The other device's forget op replays onto the already-forgotten book:
+    // applying it rebuilds the local snapshot with book_id forced to 0.
+    let shared_snapshot = json!({
+        "book_id": 7,
+        "book": {
+            "uid": uid,
+            "created_at": "2026-11-04T00:00:00.000Z",
+            "title": "Sync Restored Zero",
+            "subtitle": null,
+            "author": "A. Author",
+            "publisher": null,
+            "language": null,
+            "isbn": null,
+            "description": null,
+            "publication_date": null,
+            "series": null,
+            "series_index": null,
+            "cover_path": null,
+            "last_opened_at": null,
+            "progress_percent": null,
+            "annotation_count": 0,
+            "metadata_state": "available"
+        },
+        "progress": null,
+        "annotations": [],
+        "collections": [],
+        "overrides": null,
+        "authors": [],
+        "subjects": [],
+        "providers": [],
+        "aliases": []
+    });
+    lifecycle::apply_remote_forget(
+        &env.pool,
+        &uid,
+        None,
+        Some(shared_snapshot.to_string().as_str()),
+    )
+    .await
+    .unwrap();
+
+    // The rebuilt trash snapshot carries the poisoned book_id 0.
+    let trash_json: String = sqlx::query_scalar(
+        "SELECT snapshot_json FROM book_trash WHERE book_uid = ?1 AND restored_at IS NULL",
+    )
+    .bind(&uid)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert!(trash_json.contains("\"book_id\":0"));
+
+    let trash = env.rpc("list_book_trash", json!({})).await;
+    let trash_id = trash[0]["id"].as_i64().unwrap();
+    let outcome = env
+        .rpc("restore_book", json!({ "trashId": trash_id }))
+        .await;
+    assert_eq!(outcome["status"], json!("restored"));
+
+    let restored_id = outcome["bookId"]
+        .as_i64()
+        .expect("restore returns the book id");
+    assert!(
+        restored_id > 0,
+        "the restored record must have a real id, got {restored_id}"
+    );
+    let row: (i64,) = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&uid)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, restored_id, "the record carries the allocated id");
 }
