@@ -741,6 +741,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(open_trash_uids, vec![b1_uid], "the prefix stayed forgotten");
+        // No uid in the message: a failure message is a log write, and
+        // CodeQL flags a uid reaching one (cleartext-logging). The flags are
+        // in seed order, so the printed vector still says which survivor
+        // lost its record.
+        let mut kept = Vec::new();
         for uid in [b2_uid.as_str(), b3_uid.as_str()] {
             let survivors: Option<(i64,)> =
                 sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
@@ -748,8 +753,9 @@ mod tests {
                     .fetch_optional(&state.db)
                     .await
                     .unwrap();
-            assert!(survivors.is_some(), "{uid} keeps its record");
+            kept.push(survivors.is_some());
         }
+        assert_eq!(kept, vec![true, true], "both survivors keep their records");
         let durable: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records")
             .fetch_one(&state.db)
             .await

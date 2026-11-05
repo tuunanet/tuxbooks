@@ -1273,7 +1273,9 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
     assert!(replayed, "the poisoned projection still replays");
     let ids = uid_record_ids(&env, &uid).await;
     assert_eq!(ids.len(), 1);
-    assert!(ids[0] > 0, "retry keeps a real id, got {}", ids[0]);
+    // The message stays id-free: a failure message is a log write, and
+    // CodeQL flags a uid-derived value reaching one (cleartext-logging).
+    assert!(ids[0] > 0, "retry keeps a real id");
     assert_no_nonpositive_ids(&env).await;
     // The replay reads the mirror and applies it; it never rewrites the
     // mirror row, which stays the record of the last transition.
