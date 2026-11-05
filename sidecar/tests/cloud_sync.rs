@@ -2904,6 +2904,102 @@ async fn upgrade_preserves_mirror_clocks_and_does_not_rebaseline() {
     assert_eq!(baseline, "1", "running the engine does not re-baseline");
 }
 
+/// Migration 0029 heals the id-0 book_records row a sync-replayed restore
+/// created on the affected install (tuxbooks-kcm): rows with id <= 0 re-id
+/// to MAX(id)+1, the row keeps its identity and state, and a healthy row is
+/// untouched. Built with the migrator-through pattern (tuxbooks-qsj), so
+/// the next data-heal migration can copy this test as-is.
+#[tokio::test(flavor = "multi_thread")]
+async fn migration_0029_reids_a_zero_book_record_row() {
+    const POISONED_UID: &str = "e7717c6fb2b0a9c7d1e4a5b6c8d9e0f1";
+    const HEALTHY_UID: &str = "f8828d7fc3c1b0d8e2f5b6c7d9e0f1a2";
+
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let old = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 28)
+        .await
+        .run(&old)
+        .await
+        .unwrap();
+
+    // The poisoned row as the affected install held it, next to a healthy
+    // row the heal must leave alone.
+    sqlx::query(
+        "INSERT INTO book_records
+            (id, uid, created_at, title, progress_percent, annotation_count, metadata_state)
+         VALUES (0, ?1, '2026-10-01T00:00:00.000Z', 'Poisoned Restore', 37.5, 2, 'available')",
+    )
+    .bind(POISONED_UID)
+    .execute(&old)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO book_records
+            (id, uid, created_at, title, annotation_count, metadata_state)
+         VALUES (7, ?1, '2026-09-01T00:00:00.000Z', 'Healthy Neighbor', 0, 'available')",
+    )
+    .bind(HEALTHY_UID)
+    .execute(&old)
+    .await
+    .unwrap();
+    old.close().await;
+
+    // Re-opening runs the full migration set, which applies 0029.
+    let upgraded = init_pool(&db_path).await.unwrap();
+
+    // The poisoned row now carries MAX(id)+1 and nothing else moved.
+    let healed: (i64, String, String, Option<f64>, i64) = sqlx::query_as(
+        "SELECT id, created_at, title, progress_percent, annotation_count
+         FROM book_records WHERE uid = ?1",
+    )
+    .bind(POISONED_UID)
+    .fetch_one(&upgraded)
+    .await
+    .unwrap();
+    assert_eq!(
+        healed,
+        (
+            8,
+            "2026-10-01T00:00:00.000Z".into(),
+            "Poisoned Restore".into(),
+            Some(37.5),
+            2
+        ),
+        "the id-0 row re-ids to MAX+1 and keeps its identity"
+    );
+
+    let healthy: (i64, String, String) =
+        sqlx::query_as("SELECT id, created_at, title FROM book_records WHERE uid = ?1")
+            .bind(HEALTHY_UID)
+            .fetch_one(&upgraded)
+            .await
+            .unwrap();
+    assert_eq!(
+        healthy,
+        (
+            7,
+            "2026-09-01T00:00:00.000Z".into(),
+            "Healthy Neighbor".into()
+        ),
+        "the healthy row is untouched"
+    );
+
+    let zeros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE id <= 0")
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+    assert_eq!(zeros, 0, "no rowid 0 survives the heal");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_alias_or_edit_cannot_resurrect_a_forgotten_identity() {
     let sync_dir = tempfile::tempdir().unwrap();
