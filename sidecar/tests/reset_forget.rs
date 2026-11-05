@@ -93,6 +93,17 @@ impl Env {
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Value {
+        let response = self.rpc_raw(method, params).await;
+        assert!(
+            response.get("error").is_none(),
+            "{method} failed: {response}"
+        );
+        response["result"].clone()
+    }
+
+    /// Like `rpc`, but hands back the whole response: for the tests that
+    /// pin the error surface itself.
+    async fn rpc_raw(&self, method: &str, params: Value) -> Value {
         let request = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -101,14 +112,7 @@ impl Env {
         });
         let state = self.state();
         match handle_request_line(&state, &self.emitter, &request.to_string()).await {
-            RequestLineOutcome::Response(line) => {
-                let response: Value = serde_json::from_str(line.trim()).unwrap();
-                assert!(
-                    response.get("error").is_none(),
-                    "{method} failed: {response}"
-                );
-                response["result"].clone()
-            }
+            RequestLineOutcome::Response(line) => serde_json::from_str(line.trim()).unwrap(),
             RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
         }
     }
@@ -917,6 +921,68 @@ async fn bulk_forget_survives_a_live_sync_drain() {
             "every entry carries a fresh identity"
         );
     }
+}
+
+/// Single-book Forget keeps its pre-nj2 scope: it aborts on transient
+/// contention instead of retrying like the bulk run. Only Reading
+/// history's bulk action rides through a busy database; the per-book
+/// command surfaces the error to the renderer immediately, and whether to
+/// retry is the user's decision. Pinning that so widening the scope later
+/// is a deliberate choice (tuxbooks-nj2, ticket tuxbooks-ewu).
+#[tokio::test(flavor = "multi_thread")]
+async fn single_forget_aborts_on_transient_contention() {
+    let env = setup().await;
+    env.write_book("book.epub", &minimal_epub());
+    env.scan().await;
+    let book = imported_book(&env).await;
+    env.save_progress(book.id, 30.0).await;
+
+    // Hold the write lock for 6 s, past the pool's 5 s busy timeout, so
+    // the forget's write fails busy.
+    let db_path = env.db_path.clone();
+    let holder = tokio::spawn(async move {
+        let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
+            .await
+            .unwrap();
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        sqlx::query("COMMIT").execute(&mut conn).await.unwrap();
+        let _ = conn.close().await;
+    });
+
+    let started = std::time::Instant::now();
+    let response = env
+        .rpc_raw("forget_book", json!({ "bookId": book.id }))
+        .await;
+    let elapsed = started.elapsed();
+    holder.await.unwrap();
+
+    let error = response
+        .get("error")
+        .unwrap_or_else(|| panic!("the forget must surface the contention: {response}"));
+    let message = error["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        message.contains("lock") || message.contains("busy"),
+        "the error names the contention: {message}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "bounded, not a hang: {elapsed:?}"
+    );
+
+    // Nothing moved: the book, its state, and the trash are exactly as the
+    // user left them.
+    assert_eq!(env.books().await.len(), 1);
+    assert_eq!(env.books().await[0].id, book.id);
+    assert_eq!(env.progress_percent(book.id).await, Some(30.0));
+    assert_eq!(env.trash().await.len(), 0);
+    assert_eq!(env.durable_count().await, 1);
 }
 
 /// A shared Forget replayed onto an already-forgotten durable book rebuilds
