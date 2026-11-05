@@ -190,4 +190,70 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.len(), 32);
     }
+
+    /// A system clock stepped backward (NTP correction) leaves the stored
+    /// HLC ahead of the wall. The next stamp must stay at or above the
+    /// stored value rather than follow the wall back, so captured ops keep
+    /// their order (tuxbooks-e2j).
+    #[tokio::test]
+    async fn next_hlc_does_not_regress_when_the_system_clock_steps_back() {
+        let (_tmp, pool) = pool().await;
+        let first = next_hlc(&pool).await.unwrap();
+        // One hour ahead of any wall this test will see: the stored value
+        // is now ahead of local time, exactly as after a backward step.
+        let stepped = first.wall + 3_600_000;
+        set_meta(&pool, META_HLC, &format!("{stepped}:0"))
+            .await
+            .unwrap();
+
+        let next = next_hlc(&pool).await.unwrap();
+        assert!(
+            next.wall == stepped && next.counter == 1,
+            "the wall stays put and the counter bumps, got {next:?}"
+        );
+    }
+
+    /// A stale peer message must not rewind local time: observing an HLC
+    /// behind the stored one leaves the clock alone (tuxbooks-e2j).
+    #[tokio::test]
+    async fn observing_a_stale_clock_does_not_rewind_local_time() {
+        let (_tmp, pool) = pool().await;
+        let first = next_hlc(&pool).await.unwrap();
+        let stale = Hlc {
+            wall: first.wall.saturating_sub(10_000),
+            counter: 0,
+            device: "stale-peer".into(),
+        };
+        observe_hlc(&pool, &stale).await.unwrap();
+
+        let next = next_hlc(&pool).await.unwrap();
+        assert!(
+            next >= first,
+            "the stale peer moved nothing: {next:?} must stay at or past {first:?}"
+        );
+        assert!(next.wall > stale.wall, "and nowhere near the stale value");
+    }
+
+    /// The later-write-wins contract across devices: a far-ahead peer
+    /// orders after a local stamp regardless of real time, and observing
+    /// it pushes the local clock past the peer so the next local write
+    /// wins again (tuxbooks-e2j).
+    #[tokio::test]
+    async fn a_far_ahead_peer_wins_once_and_local_catches_up_after() {
+        let (_tmp, pool) = pool().await;
+        let local = next_hlc(&pool).await.unwrap();
+        let peer = Hlc {
+            wall: 9_999_999_999_999,
+            counter: 0,
+            device: "far-peer".into(),
+        };
+        assert!(peer > local, "the far-ahead peer orders first on merge");
+
+        observe_hlc(&pool, &peer).await.unwrap();
+        let after = next_hlc(&pool).await.unwrap();
+        assert!(
+            after > peer,
+            "the local clock catches up and passes the peer: {after:?}"
+        );
+    }
 }
