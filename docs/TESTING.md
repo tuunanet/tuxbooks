@@ -165,6 +165,10 @@ watchdog arms).
   fixture counts that other tests already exercise. When a test guards
   real behavior but asserts it clumsily, slim it: keep the behavior
   assertion, drop the internals.
+- New sync journey tests go in their own file under `sidecar/tests/`
+  instead of appending to `reset_forget.rs` or `cloud_sync.rs`: parallel
+  branches editing one hot test file collide (the five-ticket sync test
+  batch paid that conflict twice).
 - The coverage gate (`docs/COVERAGE.md`) is part of the contract:
   frontend floors bind every `just check`/`just test` run (the frontend
   test recipe runs with `--coverage`) and CI's coverage job; Rust floors

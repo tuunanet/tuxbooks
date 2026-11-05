@@ -103,6 +103,7 @@ skip it when `graft` already answers the question.
 - Test layers, fixtures, E2E: `docs/TESTING.md`.
 - Build flavors and packaging: `docs/BUILD.md`, `docs/RELEASE.md`.
 - Module boundaries and process model: `docs/ARCHITECTURE.md`.
+- Sync issue kinds, their close conditions, and the Retry flow: `docs/SYNC_ISSUES.md`.
 - Coding standards: `docs/STANDARDS.md`; coverage floors: `docs/COVERAGE.md`.
 - Dependency and SBOM policy: `docs/SUPPLY_CHAIN.md`; project overview: `docs/ABOUT.md`.
 - Domain model and decisions: `CONTEXT.md` plus `docs/adr/` (conventions: `docs/agents/domain.md`).
