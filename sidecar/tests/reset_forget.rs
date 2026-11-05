@@ -3,19 +3,22 @@
 //! the app uses, not the private tables, except where the acceptance criterion
 //! is explicitly about aliases and identities.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use sqlx::{Connection, SqlitePool};
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
-use tuxbooks_lib::domain::Book;
-use tuxbooks_lib::repository::{books, lifecycle, metadata as metadata_repo};
+use tuxbooks_lib::domain::{Book, NewBook, ProgressUpdate};
+use tuxbooks_lib::repository::{books, lifecycle, metadata as metadata_repo, reading_progress};
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::Reconciler;
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
 use tuxbooks_lib::services::metadata;
+use tuxbooks_lib::sync::engine::{SyncService, SyncState};
 use tuxbooks_lib::{AppState, ImportRegistry};
 
 fn minimal_epub() -> PathBuf {
@@ -35,6 +38,7 @@ struct Env {
     watcher: Arc<LibraryWatcher>,
     emitter: EventEmitter,
     importing: ImportRegistry,
+    sync: Option<Arc<SyncService>>,
 }
 
 async fn setup() -> Env {
@@ -66,6 +70,7 @@ async fn setup() -> Env {
         watcher,
         emitter,
         importing: ImportRegistry::default(),
+        sync: None,
     }
 }
 
@@ -76,7 +81,7 @@ impl Env {
             db_path: self.db_path.clone(),
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
-            sync: None,
+            sync: self.sync.clone(),
             importing: self.importing.clone(),
         })
     }
@@ -278,6 +283,65 @@ impl Env {
             .fetch_one(&self.pool)
             .await
             .unwrap()
+    }
+
+    /// Seed one durable file-backed book through the repository path the
+    /// import pipeline lands on, skipping the parser. Unique bytes per book
+    /// keep every identity separate.
+    async fn add_durable_book(&self, name: &str, tag: &str) -> i64 {
+        let path = self.library.join(name);
+        std::fs::write(&path, format!("durable bytes for {tag}\n")).unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mtime = metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let upserted = books::upsert_file(
+            &self.pool,
+            &NewBook {
+                path: path.to_string_lossy().into_owned(),
+                title: name.trim_end_matches(".epub").to_string(),
+                subtitle: None,
+                author: Some("Author".into()),
+                authors: vec!["Author".into()],
+                subjects: Vec::new(),
+                publisher: None,
+                language: None,
+                isbn: None,
+                description: None,
+                publication_date: None,
+                series: None,
+                series_index: None,
+                cover_path: None,
+                file_size: metadata.len() as i64,
+                file_mtime: mtime,
+            },
+        )
+        .await
+        .unwrap();
+        tuxbooks_lib::sync::identity::ensure_book_identity(&self.pool, upserted.file_id)
+            .await
+            .unwrap();
+        books::durable_id_for_file(&self.pool, upserted.file_id)
+            .await
+            .unwrap()
+            .expect("seeded book is durable")
+    }
+
+    /// Mirror state on a durable book, which is what feeds `sync_dirty`.
+    async fn seed_progress(&self, book_id: i64, percent: f64) {
+        reading_progress::upsert_progress(
+            &self.pool,
+            book_id,
+            &ProgressUpdate {
+                progress_percent: Some(percent),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     }
 }
 
@@ -704,6 +768,155 @@ async fn bulk_forget_survives_writer_contention() {
     );
     assert!(env.history().await.is_empty());
     assert_eq!(env.trash().await.len(), 2);
+}
+
+/// Entity uids of the book-delete ops in the sync folder: one fsync'd file
+/// per forgotten book, written by the engine's capture drain under
+/// `ops/{device_id}/`.
+fn book_tombstones(folder: &Path, device_id: &str) -> Vec<String> {
+    let ops_dir = folder.join("TuxBooks").join("ops").join(device_id);
+    std::fs::read_dir(&ops_dir)
+        .unwrap_or_else(|err| panic!("ops dir {} is missing: {err}", ops_dir.display()))
+        .filter_map(|entry| {
+            let raw = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let op: Value = serde_json::from_str(&raw).unwrap();
+            (op["kind"] == json!("book") && op["deleted"] == json!(true)).then(|| {
+                op["entity_uid"]
+                    .as_str()
+                    .expect("a tombstone names its book")
+                    .to_string()
+            })
+        })
+        .collect()
+}
+
+/// Bulk Forget rides through the engine draining its real queue mid-run,
+/// not a synthetic lock: the pass loop captures the seeded progress backlog
+/// plus the forgets' own dirty rows (one transaction per op) while
+/// forget_books writes per book, which is the contention shape of the
+/// reported install (tuxbooks-nj2, ticket tuxbooks-cd0). This test reaches
+/// past the rpc seam for its acceptance facts only: the drained queue and
+/// settled state come from the service's own status, the tombstones from
+/// the ops folder, the trash from the command the renderer calls.
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_forget_survives_a_live_sync_drain() {
+    let mut env = setup().await;
+    const BOOKS: i64 = 100;
+    let mut ids = Vec::new();
+    for i in 0..BOOKS {
+        let id = env
+            .add_durable_book(&format!("book-{i:03}.epub"), &format!("tag-{i:03}"))
+            .await;
+        env.seed_progress(id, 25.0 + (i % 50) as f64).await;
+        ids.push(id);
+    }
+    assert_eq!(env.durable_count().await, BOOKS);
+
+    // Real sync against a real folder, with the pass loop running in the
+    // background: it drains `sync_dirty` while the forget run writes.
+    let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&events);
+    let emitter = EventEmitter::new(move |name: &'static str, payload: Value| {
+        sink.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((name.to_string(), payload));
+    });
+    let sync_dir = tempfile::tempdir().unwrap();
+    let service = Arc::new(
+        SyncService::new(env.pool.clone(), &env.db_path, emitter)
+            .await
+            .unwrap(),
+    );
+    env.sync = Some(Arc::clone(&service));
+    let connected = service
+        .connect(sync_dir.path().to_str().unwrap(), None, None, false)
+        .await
+        .unwrap();
+    assert!(connected.mismatch.is_none());
+    service.start();
+
+    // Hold the run until the loop is mid-pass on the seeded backlog, so the
+    // forgets below contend with live drains and not just with the poll.
+    let waited = Instant::now();
+    loop {
+        let passing = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .any(|(name, payload)| name == "sync-status" && payload["state"] == json!("syncing"));
+        if passing {
+            break;
+        }
+        assert!(
+            waited.elapsed() < Duration::from_secs(15),
+            "the engine never started a pass"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let result = env.rpc("forget_books", json!({ "bookIds": ids })).await;
+    assert_eq!(
+        result["forgotten"].as_i64(),
+        Some(BOOKS),
+        "every book lands despite the engine draining concurrently"
+    );
+    assert_eq!(
+        result["trashIds"].as_array().map(Vec::len),
+        Some(BOOKS as usize)
+    );
+
+    // The queue must settle with nothing left for the renderer to see.
+    // `pending_local` is the engine's own `COUNT(*) FROM sync_dirty`, so
+    // this covers the drain the ticket asks for. A pass that loses a write
+    // race mid-run records a `sync_failed` issue and an error status by
+    // design; the loop's next pass clears both, so only the settled state
+    // proves the run ended clean. `Idle` is part of the settle because a
+    // pass still in flight reports a clean status while it works. Poll
+    // rather than sleep: while dirty rows remain, the loop passes every
+    // couple of seconds.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        let status = service.status().await.unwrap();
+        if status.pending_local == 0
+            && status.state == SyncState::Idle
+            && status.last_error.is_none()
+            && status.issues == 0
+        {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "sync never settled: state {:?}, pending {}, last_error {:?}, issues {}",
+            status.state,
+            status.pending_local,
+            status.last_error,
+            status.issues
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+
+    let device_id = status.device_id.expect("a connected device id");
+    let tombstones = book_tombstones(sync_dir.path(), &device_id);
+    assert_eq!(
+        tombstones.len(),
+        BOOKS as usize,
+        "one tombstone op per forgotten book in the folder"
+    );
+    assert_eq!(
+        tombstones.iter().collect::<HashSet<_>>().len(),
+        BOOKS as usize,
+        "every tombstone names a different book"
+    );
+
+    assert_eq!(env.trash().await.len(), BOOKS as usize);
+    let after = env.books().await;
+    assert_eq!(after.len(), BOOKS as usize, "library entries survive");
+    for book in &after {
+        assert!(
+            !ids.contains(&book.id),
+            "every entry carries a fresh identity"
+        );
+    }
 }
 
 /// A shared Forget replayed onto an already-forgotten durable book rebuilds
