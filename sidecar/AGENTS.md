@@ -13,5 +13,9 @@ cargo test --manifest-path sidecar/Cargo.toml <test-name>
 cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
 ```
 
+First build in a fresh worktree: run `cargo build` once so the
+`tuxbooks-worker` bin exists. `cargo test --lib` alone does not build it,
+and every parse test then fails with `tuxbooks-worker binary not found`.
+
 The first build fetches PDFium (`just fetch-pdfium`); `just test-rust` handles
 that automatically.
