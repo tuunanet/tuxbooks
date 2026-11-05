@@ -98,6 +98,11 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
     css: false,
+    // Instrumented render-heavy cases pass at the 5s default on a quiet
+    // machine but need headroom under parallel load. The value lives here
+    // so every invocation agrees, including the CI coverage job, which
+    // calls vp test directly and bypasses the frontend:test task.
+    testTimeout: 15000,
     coverage: {
       provider: "v8",
       include: ["src/**"],

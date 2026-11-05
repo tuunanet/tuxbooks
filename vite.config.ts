@@ -51,8 +51,7 @@ export default defineConfig({
         },
       },
       "frontend:test": {
-        command:
-          "pnpm --filter frontend exec vp test run --coverage --testTimeout=15000 --maxWorkers=6",
+        command: "pnpm --filter frontend exec vp test run --coverage --maxWorkers=6",
         cache: {
           // The coverage tooling both reads and writes under
           // frontend/coverage/ within a single run (a random-named remap

@@ -205,10 +205,11 @@ test-rust: fetch-pdfium
     {{_test_timeout}} cargo test --manifest-path sidecar/Cargo.toml
 
 # Frontend unit tests, through the cached Vite Task (frontend:test in the
-# root vite.config.ts): --coverage binds the docs/COVERAGE.md floors;
-# --testTimeout=15000 (default 5000) because instrumented tests under this
-# recipe's parallel load (rust + lint + tsc alongside) push render-heavy
-# cases past the default — the suite passes standalone at 5s. --maxWorkers=6
+# root vite.config.ts): --coverage binds the docs/COVERAGE.md floors. The
+# 15 s per-test timeout lives in frontend/vite.config.ts so this task and
+# CI's coverage job (vp test directly, not this task) agree — instrumented
+# render-heavy cases pass standalone at 5 s but need headroom under this
+# recipe's parallel load (rust + lint + tsc alongside). --maxWorkers=6
 # caps vitest's CPU appetite so the concurrent rust stream keeps cores (the
 # deadline-sensitive worker test flakes without it, bd tuxbooks-6r2); the
 # cap costs no wall time on a 16-core box. Unchanged inputs replay from the
