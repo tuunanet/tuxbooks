@@ -3,19 +3,24 @@
 //! the app uses, not the private tables, except where the acceptance criterion
 //! is explicitly about aliases and identities.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use sqlx::{Connection, SqlitePool};
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
-use tuxbooks_lib::domain::Book;
-use tuxbooks_lib::repository::{books, lifecycle, metadata as metadata_repo};
+use tuxbooks_lib::domain::{Book, NewBook, ProgressUpdate};
+use tuxbooks_lib::repository::{books, lifecycle, metadata as metadata_repo, reading_progress};
 use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::Reconciler;
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
 use tuxbooks_lib::services::metadata;
+use tuxbooks_lib::sync::engine::{SyncService, SyncState};
+use tuxbooks_lib::sync::identity::record_issue;
+use tuxbooks_lib::sync::merge::retry_book_lifecycle;
 use tuxbooks_lib::{AppState, ImportRegistry};
 
 fn minimal_epub() -> PathBuf {
@@ -35,6 +40,7 @@ struct Env {
     watcher: Arc<LibraryWatcher>,
     emitter: EventEmitter,
     importing: ImportRegistry,
+    sync: Option<Arc<SyncService>>,
 }
 
 async fn setup() -> Env {
@@ -66,6 +72,7 @@ async fn setup() -> Env {
         watcher,
         emitter,
         importing: ImportRegistry::default(),
+        sync: None,
     }
 }
 
@@ -76,7 +83,7 @@ impl Env {
             db_path: self.db_path.clone(),
             watcher: Arc::clone(&self.watcher),
             startup_recovery: None,
-            sync: None,
+            sync: self.sync.clone(),
             importing: self.importing.clone(),
         })
     }
@@ -88,6 +95,17 @@ impl Env {
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Value {
+        let response = self.rpc_raw(method, params).await;
+        assert!(
+            response.get("error").is_none(),
+            "{method} failed: {response}"
+        );
+        response["result"].clone()
+    }
+
+    /// Like `rpc`, but hands back the whole response: for the tests that
+    /// pin the error surface itself.
+    async fn rpc_raw(&self, method: &str, params: Value) -> Value {
         let request = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -96,14 +114,7 @@ impl Env {
         });
         let state = self.state();
         match handle_request_line(&state, &self.emitter, &request.to_string()).await {
-            RequestLineOutcome::Response(line) => {
-                let response: Value = serde_json::from_str(line.trim()).unwrap();
-                assert!(
-                    response.get("error").is_none(),
-                    "{method} failed: {response}"
-                );
-                response["result"].clone()
-            }
+            RequestLineOutcome::Response(line) => serde_json::from_str(line.trim()).unwrap(),
             RequestLineOutcome::Malformed(err) => panic!("request was rejected: {err}"),
         }
     }
@@ -278,6 +289,65 @@ impl Env {
             .fetch_one(&self.pool)
             .await
             .unwrap()
+    }
+
+    /// Seed one durable file-backed book through the repository path the
+    /// import pipeline lands on, skipping the parser. Unique bytes per book
+    /// keep every identity separate.
+    async fn add_durable_book(&self, name: &str, tag: &str) -> i64 {
+        let path = self.library.join(name);
+        std::fs::write(&path, format!("durable bytes for {tag}\n")).unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        let mtime = metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let upserted = books::upsert_file(
+            &self.pool,
+            &NewBook {
+                path: path.to_string_lossy().into_owned(),
+                title: name.trim_end_matches(".epub").to_string(),
+                subtitle: None,
+                author: Some("Author".into()),
+                authors: vec!["Author".into()],
+                subjects: Vec::new(),
+                publisher: None,
+                language: None,
+                isbn: None,
+                description: None,
+                publication_date: None,
+                series: None,
+                series_index: None,
+                cover_path: None,
+                file_size: metadata.len() as i64,
+                file_mtime: mtime,
+            },
+        )
+        .await
+        .unwrap();
+        tuxbooks_lib::sync::identity::ensure_book_identity(&self.pool, upserted.file_id)
+            .await
+            .unwrap();
+        books::durable_id_for_file(&self.pool, upserted.file_id)
+            .await
+            .unwrap()
+            .expect("seeded book is durable")
+    }
+
+    /// Mirror state on a durable book, which is what feeds `sync_dirty`.
+    async fn seed_progress(&self, book_id: i64, percent: f64) {
+        reading_progress::upsert_progress(
+            &self.pool,
+            book_id,
+            &ProgressUpdate {
+                progress_percent: Some(percent),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     }
 }
 
@@ -706,6 +776,217 @@ async fn bulk_forget_survives_writer_contention() {
     assert_eq!(env.trash().await.len(), 2);
 }
 
+/// Entity uids of the book-delete ops in the sync folder: one fsync'd file
+/// per forgotten book, written by the engine's capture drain under
+/// `ops/{device_id}/`.
+fn book_tombstones(folder: &Path, device_id: &str) -> Vec<String> {
+    let ops_dir = folder.join("TuxBooks").join("ops").join(device_id);
+    std::fs::read_dir(&ops_dir)
+        .unwrap_or_else(|err| panic!("ops dir {} is missing: {err}", ops_dir.display()))
+        .filter_map(|entry| {
+            let raw = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let op: Value = serde_json::from_str(&raw).unwrap();
+            (op["kind"] == json!("book") && op["deleted"] == json!(true)).then(|| {
+                op["entity_uid"]
+                    .as_str()
+                    .expect("a tombstone names its book")
+                    .to_string()
+            })
+        })
+        .collect()
+}
+
+/// Bulk Forget rides through the engine draining its real queue mid-run,
+/// not a synthetic lock: the pass loop captures the seeded progress backlog
+/// plus the forgets' own dirty rows (one transaction per op) while
+/// forget_books writes per book, which is the contention shape of the
+/// reported install (tuxbooks-nj2, ticket tuxbooks-cd0). This test reaches
+/// past the rpc seam for its acceptance facts only: the drained queue and
+/// settled state come from the service's own status, the tombstones from
+/// the ops folder, the trash from the command the renderer calls.
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_forget_survives_a_live_sync_drain() {
+    let mut env = setup().await;
+    const BOOKS: i64 = 100;
+    let mut ids = Vec::new();
+    for i in 0..BOOKS {
+        let id = env
+            .add_durable_book(&format!("book-{i:03}.epub"), &format!("tag-{i:03}"))
+            .await;
+        env.seed_progress(id, 25.0 + (i % 50) as f64).await;
+        ids.push(id);
+    }
+    assert_eq!(env.durable_count().await, BOOKS);
+
+    // Real sync against a real folder, with the pass loop running in the
+    // background: it drains `sync_dirty` while the forget run writes.
+    let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&events);
+    let emitter = EventEmitter::new(move |name: &'static str, payload: Value| {
+        sink.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((name.to_string(), payload));
+    });
+    let sync_dir = tempfile::tempdir().unwrap();
+    let service = Arc::new(
+        SyncService::new(env.pool.clone(), &env.db_path, emitter)
+            .await
+            .unwrap(),
+    );
+    env.sync = Some(Arc::clone(&service));
+    let connected = service
+        .connect(sync_dir.path().to_str().unwrap(), None, None, false)
+        .await
+        .unwrap();
+    assert!(connected.mismatch.is_none());
+    service.start();
+
+    // Hold the run until the loop is mid-pass on the seeded backlog, so the
+    // forgets below contend with live drains and not just with the poll.
+    let waited = Instant::now();
+    loop {
+        let passing = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .any(|(name, payload)| name == "sync-status" && payload["state"] == json!("syncing"));
+        if passing {
+            break;
+        }
+        assert!(
+            waited.elapsed() < Duration::from_secs(15),
+            "the engine never started a pass"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let result = env.rpc("forget_books", json!({ "bookIds": ids })).await;
+    assert_eq!(
+        result["forgotten"].as_i64(),
+        Some(BOOKS),
+        "every book lands despite the engine draining concurrently"
+    );
+    assert_eq!(
+        result["trashIds"].as_array().map(Vec::len),
+        Some(BOOKS as usize)
+    );
+
+    // The queue must settle with nothing left for the renderer to see.
+    // `pending_local` is the engine's own `COUNT(*) FROM sync_dirty`, so
+    // this covers the drain the ticket asks for. A pass that loses a write
+    // race mid-run records a `sync_failed` issue and an error status by
+    // design; the loop's next pass clears both, so only the settled state
+    // proves the run ended clean. `Idle` is part of the settle because a
+    // pass still in flight reports a clean status while it works. Poll
+    // rather than sleep: while dirty rows remain, the loop passes every
+    // couple of seconds.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        let status = service.status().await.unwrap();
+        if status.pending_local == 0
+            && status.state == SyncState::Idle
+            && status.last_error.is_none()
+            && status.issues == 0
+        {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "sync never settled: state {:?}, pending {}, last_error {:?}, issues {}",
+            status.state,
+            status.pending_local,
+            status.last_error,
+            status.issues
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+
+    let device_id = status.device_id.expect("a connected device id");
+    let tombstones = book_tombstones(sync_dir.path(), &device_id);
+    assert_eq!(
+        tombstones.len(),
+        BOOKS as usize,
+        "one tombstone op per forgotten book in the folder"
+    );
+    assert_eq!(
+        tombstones.iter().collect::<HashSet<_>>().len(),
+        BOOKS as usize,
+        "every tombstone names a different book"
+    );
+
+    assert_eq!(env.trash().await.len(), BOOKS as usize);
+    let after = env.books().await;
+    assert_eq!(after.len(), BOOKS as usize, "library entries survive");
+    for book in &after {
+        assert!(
+            !ids.contains(&book.id),
+            "every entry carries a fresh identity"
+        );
+    }
+}
+
+/// Single-book Forget keeps its pre-nj2 scope: it aborts on transient
+/// contention instead of retrying like the bulk run. Only Reading
+/// history's bulk action rides through a busy database; the per-book
+/// command surfaces the error to the renderer immediately, and whether to
+/// retry is the user's decision. Pinning that so widening the scope later
+/// is a deliberate choice (tuxbooks-nj2, ticket tuxbooks-ewu).
+#[tokio::test(flavor = "multi_thread")]
+async fn single_forget_aborts_on_transient_contention() {
+    let env = setup().await;
+    env.write_book("book.epub", &minimal_epub());
+    env.scan().await;
+    let book = imported_book(&env).await;
+    env.save_progress(book.id, 30.0).await;
+
+    // Hold the write lock for 6 s, past the pool's 5 s busy timeout, so
+    // the forget's write fails busy.
+    let db_path = env.db_path.clone();
+    let holder = tokio::spawn(async move {
+        let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
+            .await
+            .unwrap();
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        sqlx::query("COMMIT").execute(&mut conn).await.unwrap();
+        let _ = conn.close().await;
+    });
+
+    let started = std::time::Instant::now();
+    let response = env
+        .rpc_raw("forget_book", json!({ "bookId": book.id }))
+        .await;
+    let elapsed = started.elapsed();
+    holder.await.unwrap();
+
+    let error = response
+        .get("error")
+        .unwrap_or_else(|| panic!("the forget must surface the contention: {response}"));
+    let message = error["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        message.contains("lock") || message.contains("busy"),
+        "the error names the contention: {message}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "bounded, not a hang: {elapsed:?}"
+    );
+
+    // Nothing moved: the book, its state, and the trash are exactly as the
+    // user left them.
+    assert_eq!(env.books().await.len(), 1);
+    assert_eq!(env.books().await[0].id, book.id);
+    assert_eq!(env.progress_percent(book.id).await, Some(30.0));
+    assert_eq!(env.trash().await.len(), 0);
+    assert_eq!(env.durable_count().await, 1);
+}
+
 /// A shared Forget replayed onto an already-forgotten durable book rebuilds
 /// the local trash snapshot with book_id 0 (the record was absent at apply
 /// time). Restoring that snapshot used to bind the 0 and insert rowid 0,
@@ -804,4 +1085,244 @@ async fn restored_sync_snapshot_allocates_a_fresh_record_id() {
         .await
         .unwrap();
     assert_eq!(row.0, restored_id, "the record carries the allocated id");
+}
+
+/// Record ids at or below zero after a lifecycle step, the poisoned shape
+/// this whole class of wedge produced (tuxbooks-kcm).
+async fn assert_no_nonpositive_ids(env: &Env) {
+    let zeros: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE id <= 0")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(zeros, 0, "no record may carry id 0 or less");
+}
+
+/// The open local trash row for one uid: (id, snapshot_json).
+async fn open_trash_row(env: &Env, uid: &str) -> (i64, String) {
+    sqlx::query_as(
+        "SELECT id, snapshot_json FROM book_trash WHERE book_uid = ?1 AND restored_at IS NULL",
+    )
+    .bind(uid)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap()
+}
+
+/// Every record for one uid, ordered, so a step can prove the identity is
+/// gone, alive once, or replaced under a fresh id.
+async fn uid_record_ids(env: &Env, uid: &str) -> Vec<i64> {
+    sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1 ORDER BY id")
+        .bind(uid)
+        .fetch_all(&env.pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(id,)| id)
+        .collect()
+}
+
+/// The tuxbooks-kcm wedge class, replayed in full: shared lifecycle
+/// projections applied onto books whose local state moved on, with the
+/// poisoned snapshot shape (book_id 0) that `local_snapshot_json` rebuilds
+/// when the record is absent. Forget and restore alternate through both
+/// surfaces the app uses, the renderer command and the shared replay
+/// (ticket tuxbooks-yf5). After every step every `book_records` id is
+/// above zero, no UNIQUE collision fires, and the trash matches the last
+/// transition; a poisoned shared mirror row still replays through Retry.
+#[tokio::test(flavor = "multi_thread")]
+async fn lifecycle_projection_survives_restore_and_forget_churn() {
+    let env = setup().await;
+    env.write_book("book.epub", &minimal_epub());
+    env.scan().await;
+    let book = &env.books().await[0];
+    let uid = book
+        .book_uid
+        .clone()
+        .expect("the imported book carries a durable uid");
+    let mut cur = book.id;
+
+    let shared = json!({
+        "book_id": 0,
+        "book": {
+            "uid": uid,
+            "created_at": "2026-11-04T00:00:00.000Z",
+            "title": "Churn Survivor",
+            "subtitle": null,
+            "author": "A. Author",
+            "publisher": null,
+            "language": null,
+            "isbn": null,
+            "description": null,
+            "publication_date": null,
+            "series": null,
+            "series_index": null,
+            "cover_path": null,
+            "last_opened_at": null,
+            "progress_percent": null,
+            "annotation_count": 0,
+            "metadata_state": "available"
+        },
+        "progress": null,
+        "annotations": [],
+        "collections": [],
+        "overrides": null,
+        "authors": [],
+        "subjects": [],
+        "providers": [],
+        "aliases": []
+    })
+    .to_string();
+
+    for _round in 0..3 {
+        // The local forget: the record leaves and the trash opens.
+        env.rpc("forget_book", json!({ "bookId": cur })).await;
+        assert!(uid_record_ids(&env, &uid).await.is_empty());
+        assert_no_nonpositive_ids(&env).await;
+
+        // The other device's shared forget replays onto the
+        // already-forgotten book and rewrites the open trash snapshot with
+        // the poisoned book_id 0.
+        lifecycle::apply_remote_forget(&env.pool, &uid, None, Some(shared.as_str()))
+            .await
+            .unwrap();
+        let (trash_id, trash_json) = open_trash_row(&env, &uid).await;
+        assert!(
+            trash_json.contains("\"book_id\":0"),
+            "the replay poisons the open snapshot: {trash_json}"
+        );
+        assert!(uid_record_ids(&env, &uid).await.is_empty());
+        assert_no_nonpositive_ids(&env).await;
+
+        // The renderer restores the poisoned entry: the id must be
+        // allocated, never bound to the snapshot's 0.
+        let restored = env
+            .rpc("restore_book", json!({ "trashId": trash_id }))
+            .await;
+        assert_eq!(restored["status"], json!("restored"));
+        cur = restored["bookId"].as_i64().expect("restored book id");
+        assert_eq!(uid_record_ids(&env, &uid).await, vec![cur]);
+        assert!(cur > 0, "restored under a real id, got {cur}");
+        assert_no_nonpositive_ids(&env).await;
+
+        // The shared restore replays onto the book whose local state moved
+        // on: the record is replaced under another fresh id and the trash
+        // stays closed.
+        let replayed = lifecycle::apply_remote_restore(&env.pool, &uid, Some(shared.as_str()))
+            .await
+            .unwrap()
+            .expect("the shared restore recreates the book");
+        assert!(
+            replayed > 0,
+            "replayed restore under a real id, got {replayed}"
+        );
+        assert_ne!(replayed, cur, "the replay replaces the record");
+        cur = replayed;
+        assert_eq!(uid_record_ids(&env, &uid).await, vec![cur]);
+        let open: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM book_trash WHERE restored_at IS NULL")
+                .fetch_one(&env.pool)
+                .await
+                .unwrap();
+        assert_eq!(open, 0, "the restore closes the trash");
+        assert_no_nonpositive_ids(&env).await;
+
+        // Sync is off during the churn, so the capture markers the replays
+        // fired would pile up and later replay as stale deletes; with sync
+        // on, the engine drains them as they fire. The projection layer is
+        // this test's subject, so drop the pile-up here.
+        sqlx::query("DELETE FROM sync_dirty")
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+
+    assert!(
+        env.trash().await.is_empty(),
+        "the last transition was a restore"
+    );
+
+    // The wedge's recorded issue, and the poisoned shared mirror row a
+    // Retry replays: the snapshot carries book_id 0 and the transition says
+    // restored. Retry must return true, keep the book under a real id, and
+    // resolve the issue row.
+    record_issue(
+        &env.pool,
+        &format!("book-lifecycle:{uid}"),
+        "book_lifecycle_failed",
+        "could not apply the shared change for forgotten book {uid}",
+        None,
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_book_trash
+            (book_uid, replacement_book_uid, snapshot_json, deleted_wall, deleted_count,
+             deleted_dev, deleted_at, expires_at, restored_at)
+         VALUES (?1, NULL, ?2, 1, 0, 'other-device', ?3, ?4, ?3)",
+    )
+    .bind(&uid)
+    .bind(&shared)
+    .bind("2026-11-04T00:00:00.000Z")
+    // Far-future expiry: the entry must not age out mid-test.
+    .bind("2999-01-01T00:00:00.000Z")
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    let replayed = retry_book_lifecycle(&env.pool, &uid).await.unwrap();
+    assert!(replayed, "the poisoned projection still replays");
+    let ids = uid_record_ids(&env, &uid).await;
+    assert_eq!(ids.len(), 1);
+    assert!(ids[0] > 0, "retry keeps a real id, got {}", ids[0]);
+    assert_no_nonpositive_ids(&env).await;
+    // The replay reads the mirror and applies it; it never rewrites the
+    // mirror row, which stays the record of the last transition.
+    let mirror: (Option<String>, i64) =
+        sqlx::query_as("SELECT restored_at, discarded FROM sync_book_trash WHERE book_uid = ?1")
+            .bind(&uid)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        mirror,
+        (Some("2026-11-04T00:00:00.000Z".into()), 0),
+        "the mirror still says restored"
+    );
+
+    // The Retry action runs against a connected device, so connect a real
+    // service to a real folder: replaying the poisoned projection also runs
+    // a pass, exactly as it does in the app.
+    let sync_dir = tempfile::tempdir().unwrap();
+    let service = SyncService::new(
+        env.pool.clone(),
+        &env.db_path,
+        EventEmitter::new(|_: &'static str, _: Value| {}),
+    )
+    .await
+    .unwrap();
+    let connected = service
+        .connect(sync_dir.path().to_str().unwrap(), None, None, false)
+        .await
+        .unwrap();
+    assert!(connected.mismatch.is_none());
+    let issue_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL",
+    )
+    .bind(format!("book-lifecycle:{uid}"))
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let cleared = service.retry_issue(issue_id).await.unwrap();
+    assert!(cleared, "the Retry action repairs the poisoned projection");
+    let resolved: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM sync_issues WHERE id = ?1 AND resolved_at IS NOT NULL")
+            .bind(issue_id)
+            .fetch_optional(&env.pool)
+            .await
+            .unwrap();
+    assert!(resolved.is_some(), "the issue row closes");
+    let ids = uid_record_ids(&env, &uid).await;
+    assert_eq!(ids.len(), 1);
+    assert!(ids[0] > 0);
+    assert_no_nonpositive_ids(&env).await;
 }
