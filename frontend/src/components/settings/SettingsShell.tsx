@@ -588,7 +588,9 @@ export function SettingsShell({ onClose }: { onClose?: () => void } = {}) {
           ) : null}
         </header>
         <ScrollArea className="min-h-0 flex-1">
-          <div className="max-w-2xl px-6 pt-5 pb-8">
+          {/* Fills the pane; the panel's 1440px ceiling in SettingsWindow.tsx
+              is what bounds this at ~1184px on wide windows. */}
+          <div className="px-6 pt-5 pb-8">
             {active === "general" ? (
               <GeneralSection />
             ) : active === "viewer" ? (

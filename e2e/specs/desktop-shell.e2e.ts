@@ -11,8 +11,9 @@ import { appEntryPoint } from "../setup/fixtures.js";
 /**
  * Desktop-shell regression suite (docs/fix-electron-main-window-behaviour.md
  * §17): branding, deterministic startup geometry, min-size clamping,
- * resize-after-maximize/restore, icon resolution, and the repeated-launch
- * policy — the window-lifecycle behaviors that must never regress.
+ * Settings-window scaling, resize-after-maximize/restore, icon resolution,
+ * and the repeated-launch policy — the window-lifecycle behaviors that must
+ * never regress.
  *
  * Its own Playwright phase ("shell", e2e/package.json test:shell): the
  * relaunch scenario closes and relaunches the app, which only works when
@@ -150,6 +151,55 @@ test.describe("TuxBooks desktop shell", () => {
     const { bounds } = await snapshot(electronApp);
     expect(bounds.width).toBeLessThanOrEqual(900 + FRAME_TOLERANCE_PX);
     expect(bounds.height).toBeLessThanOrEqual(600 + FRAME_TOLERANCE_PX);
+    // Leave the default geometry for the following tests.
+    await setBounds(electronApp, { width: 1280, height: 820 });
+  });
+
+  // Settings-window scaling: the panel tracks the app window instead of
+  // staying at one fixed size (it used to be 920x680 at any window size).
+  // A bigger window grows it substantially, and it stays a floating panel
+  // with a visible gutter rather than going full-bleed. The thresholds are
+  // loose bounds on that contract, not the sizing formula.
+  test("scales the Settings window with the app window", async ({ electronApp, page }) => {
+    // Playwright reports no viewport for Electron pages; the renderer's own
+    // inner dimensions are what vw/vh resolve against.
+    const viewport = () =>
+      page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    // The layout box, not boundingBox(): that reports the compositor's
+    // visual box, which lags behind layout during the open animation and
+    // right after a window resize (surface scaling).
+    const panel = () =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('[data-testid="settings-window"]');
+        return el ? { width: el.offsetWidth, height: el.offsetHeight } : null;
+      });
+
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
+    await setBounds(electronApp, { width: 1280, height: 820 });
+    await expect.poll(async () => (await viewport()).width).toBe(1280);
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-window")).toBeVisible();
+    const atDefault = (await panel())!;
+
+    await setBounds(electronApp, { width: 1800, height: 1000 });
+    await expect.poll(async () => (await viewport()).width).toBe(1800);
+    await expect.poll(async () => (await viewport()).height).toBe(1000);
+    // The renderer's layout can lag the viewport read right after a resize;
+    // poll until the panel's layout reflects it (and fail here if the panel
+    // never scales).
+    await expect
+      .poll(async () => (await panel())?.width ?? 0)
+      .toBeGreaterThan(atDefault.width + 200);
+    const atLarge = (await panel())!;
+
+    expect(atLarge.height).toBeGreaterThan(atDefault.height + 50);
+    const vp = await viewport();
+    expect(vp.width - atLarge.width).toBeGreaterThanOrEqual(100);
+    expect(vp.height - atLarge.height).toBeGreaterThanOrEqual(100);
+
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(page.getByTestId("settings-window")).toHaveCount(0);
     // Leave the default geometry for the following tests.
     await setBounds(electronApp, { width: 1280, height: 820 });
   });

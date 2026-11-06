@@ -154,8 +154,13 @@ export function SettingsWindow() {
             left: `calc(50% + ${offset.x}px)`,
             top: `calc(50% + ${offset.y}px)`,
           }}
+          // Sized against the app window, not fixed: a percentage of the
+          // viewport scales live with resizes; the floor keeps small windows
+          // from shrinking the panel below its former fixed size, the ceiling
+          // keeps it a window rather than a sheet on huge monitors, and the
+          // 2rem gutter keeps it clear of the viewport edge.
           className={cn(
-            "block h-[min(680px,calc(100vh-2rem))] w-[min(920px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none",
+            "block h-[min(max(680px,78vh),960px,calc(100vh-2rem))] w-[min(max(920px,72vw),1440px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none",
             "rounded-2xl shadow-2xl",
             dragging && "cursor-grabbing select-none",
           )}
