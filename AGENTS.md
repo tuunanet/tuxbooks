@@ -6,12 +6,10 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-never build on `main`. After creating a worktree, run `vp install` at its root
-before running tests; `just check` assumes installed dependencies.
+After creating a worktree, run `vp install` at its root before running tests.
 
-Work is tracked in bd (Beads), the repo's issue tracker; see
-`docs/agents/issue-tracker.md` for the workflow. Triage uses the five
-canonical roles as bd labels (`docs/agents/triage-labels.md`).
+Work is tracked in bd (Beads), see `docs/agents/issue-tracker.md` for the workflow.
+Triage uses the five canonical roles as bd labels (`docs/agents/triage-labels.md`).
 
 ## Completing a task
 
@@ -56,9 +54,9 @@ canonical roles as bd labels (`docs/agents/triage-labels.md`).
 - If a conflict can't be resolved confidently, stop and report instead of
   guessing.
 
-## Route the task, then work
+## Repository exploration and context guidelines
 
-Choose the cheapest path that fits. Do not explore "just in case".
+Route the task, then work: Choose the cheapest path that fits. Do not explore "just in case".
 
 | Task                                        | First move                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -74,14 +72,31 @@ Exploration rules:
 - Never run the same search with reworded queries. If 2-3 searches have not found it, stop and launch `explore`.
 - For structural questions (who calls what, where a behavior lives), use `graft` before grep or a file read.
 
-## Graft: repo context graph
+`graft/` is a prebuilt graph of this repo, kept in sync with the code. Use the **graft CLI**; most tasks need one call.
+Refer to the `graft` skill for the full guide. Trust the answer and act; do not re-open/re-grep a file to double-check a span graft already gave.
 
-`graft/` is a prebuilt graph of this repo, kept in sync with the code. Use the
-**graft CLI** (the MCP server is off by design); most tasks need one call.
-The CLI is a devDependency, so `vp install` provides it; like vp, bare `graft`
-uses a global install when one exists, and without a global prefix `pnpm exec`.
+## Commands and verification
+
+The frontend stack is vite-plus (`vp`); load the `vite-plus` skill before running vp commands,
+running package-manager commands (vp or pnpm install/update/dedupe/audit), or touching the toolchain config.
 
 ```sh
+# frontend (React + vitest via vite-plus)
+vp -C frontend test run <file-or-pattern>
+vp -C frontend run typecheck && vp lint
+
+# rust sidecar
+cargo test --manifest-path sidecar/Cargo.toml <target>
+cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
+
+# electron (main + preload; not a vp project, pnpm exec just resolves tsc)
+pnpm exec tsc -p electron --noEmit
+
+# full gate, once before you declare done (docs-only changes skip it)
+just check          # format + lint + typecheck + unit tests, parallel streams
+just format         # only if you touched formatting-sensitive code
+
+# graft
 graft ask "<question>" --source   # one question per call; inlines the code crux
 graft skeleton <file>             # a file's API in ~200 tokens
 graft grep "<pattern>"            # exhaustive, ranked by coupling
@@ -89,8 +104,23 @@ graft callers <symbol> --depth 2  # blast radius before a rename or refactor
 graft map                         # orientation in an unfamiliar area
 ```
 
-Load the `graft` skill for the full guide. Trust the answer and act; do not
-re-open or re-grep a file to double-check a span graft already gave you.
+Do not run `just check`, `just test`, or `just test-e2e` after every edit.
+Iterate with the single narrowest command, then run the full gate once on
+code changes.
+
+## Writing for humans
+
+Invoke the `unslop` skill over anything a person will read before you commit,
+post, or send it: commit messages, the PR title and body, README and doc edits,
+code comments, and the closing reply. Apply it to text you wrote or changed,
+not to prose you did not touch.
+
+## External knowledge
+
+Only for library, API, or dependency questions, not routine repo work: Context7
+for current library docs, GitHits for dependency internals, Firecrawl
+(`firecrawl-search`) for the public web. Cross-check when more than one applies.
+Full policy: `docs/RESEARCH.md`.
 
 ## Lazy documentation
 
@@ -107,57 +137,3 @@ skip it when `graft` already answers the question.
 - Coding standards: `docs/STANDARDS.md`; coverage floors: `docs/COVERAGE.md`.
 - Dependency and SBOM policy: `docs/SUPPLY_CHAIN.md`; project overview: `docs/ABOUT.md`.
 - Domain model and decisions: `CONTEXT.md` plus `docs/adr/` (conventions: `docs/agents/domain.md`).
-
-## Commands and verification
-
-Use the narrowest command first. Run the full gate once, near the end, not
-during iteration. The frontend stack is vite-plus (`vp`); load the
-`vite-plus` skill before running vp commands, running package-manager
-commands (vp or pnpm install/update/dedupe/audit), or touching the
-toolchain config. Task handovers and agent notes may point at skills but
-never narrow that list.
-
-```sh
-# frontend (React + vitest via vite-plus)
-vp -C frontend test run <file-or-pattern>
-vp -C frontend run typecheck && vp lint
-
-# bare vp uses the global CLI when one is installed and delegates to
-# this repo's pinned toolchain; the justfile calls it bare and CI
-# installs it (voidzero-dev/setup-vp). Without a global (containers),
-# prefix pnpm exec. vp check is the JS slice only (fmt, lint, types);
-# just check below is the full polyglot gate.
-
-# rust sidecar
-cargo test --manifest-path sidecar/Cargo.toml <target>
-cargo clippy --manifest-path sidecar/Cargo.toml --all-targets --all-features -- -D warnings
-
-# electron (main + preload; not a vp project, pnpm exec just resolves tsc)
-pnpm exec tsc -p electron --noEmit
-
-# full gate, once before you declare done (docs-only changes skip it)
-just check          # format + lint + typecheck + unit tests, parallel streams
-just format         # only if you touched formatting-sensitive code
-```
-
-Do not run `just check`, `just test`, or `just test-e2e` after every edit.
-Iterate with the single narrowest command, then run the full gate once on
-code changes; docs-only changes skip it per "Completing a task" step 2.
-Area-specific layout and commands live in the nearest `AGENTS.md`
-(`frontend/`, `sidecar/`, `electron/`, `e2e/`) and load automatically in that subtree.
-
-## Writing for humans
-
-Invoke the `unslop` skill over anything a person will read before you commit,
-post, or send it: commit messages, the PR title and body, README and doc edits,
-code comments, and the closing reply. It strips AI tells (em dashes, filler,
-hedging, chatbot phrases, puffery, bold-label lists), swaps fancy words for
-plain ones and passive voice for active. Apply it to text you wrote or changed,
-not to prose you did not touch.
-
-## External knowledge
-
-Only for library, API, or dependency questions, not routine repo work: Context7
-for current library docs, GitHits for dependency internals, Firecrawl
-(`firecrawl-search`) for the public web. Cross-check when more than one applies.
-Full policy: `docs/RESEARCH.md`.
