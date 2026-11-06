@@ -117,8 +117,10 @@ describe("SettingsShell", () => {
       clientY: 130,
     });
 
-    expect(windowEl.style.left).toBe("calc(50% + 60px)");
-    expect(windowEl.style.top).toBe("calc(50% + 30px)");
+    // The offset is applied inside the visibility clamp, which the browser
+    // re-evaluates against the viewport on every resize.
+    expect(windowEl.style.left).toContain("calc(50% + 60px)");
+    expect(windowEl.style.top).toContain("calc(50% + 30px)");
   });
 
   it("keeps window-level shortcuts from firing behind the window", async () => {
