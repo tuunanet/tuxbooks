@@ -44,30 +44,47 @@ fi
 # generated lockfiles such as sidecar/Cargo.lock, which nobody hand-splits.
 tuxbooks_max_lines=500
 tuxbooks_agents_max_lines=145
-tuxbooks_zero=0000000000000000000000000000000000000000
 tuxbooks_report=""
+# Prints "  <label> (<n> lines, limit <limit>)" when the blob at $1 runs
+# longer than $2 lines, nothing when it fits or cannot be read.
+tuxbooks_over_limit() {
+  tuxbooks_n=$(git cat-file blob "$1" 2>/dev/null | awk 'END { print NR }')
+  if [ -n "$tuxbooks_n" ] && [ "$tuxbooks_n" -gt "$2" ]; then
+    printf '  %s (%s lines, limit %s)\n' "$3" "$tuxbooks_n" "$2"
+  fi
+}
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -n "$local_sha" ] || continue
-  [ "$local_sha" = "$tuxbooks_zero" ] && continue # deleting the remote branch ships no files
-  if [ "$remote_sha" != "$tuxbooks_zero" ]; then
-    tuxbooks_base=$remote_sha
-  else
-    tuxbooks_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
-    tuxbooks_base=$(git merge-base "$tuxbooks_default" "$local_sha" 2>/dev/null || true)
-    if [ -z "$tuxbooks_base" ]; then
-      echo >&2 "tuxbooks: pre-push blocked: no merge base with $tuxbooks_default for $local_ref; fetch before pushing"
-      exit 1
-    fi
+  case "$local_sha" in
+    *[!0]*) ;; # a real object id, SHA-1 or SHA-256
+    *) continue ;; # all zeros: this push deletes the remote branch
+  esac
+  case "$remote_sha" in
+    *[!0]*) tuxbooks_base=$remote_sha ;;
+    *)
+      tuxbooks_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+      tuxbooks_base=$(git merge-base "$tuxbooks_default" "$local_sha" 2>/dev/null || true)
+      if [ -z "$tuxbooks_base" ]; then
+        echo >&2 "tuxbooks: pre-push blocked: no merge base with $tuxbooks_default for $local_ref; fetch before pushing"
+        exit 1
+      fi
+      ;;
+  esac
+  # A changed file name containing a newline would split into two paths
+  # below and slip past the count, so refuse the push instead of guessing.
+  tuxbooks_n_names=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" | tr -cd '\000' | wc -c)
+  tuxbooks_n_lines=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" | tr '\000' '\n' | wc -l)
+  if [ $((tuxbooks_n_names)) -ne $((tuxbooks_n_lines)) ]; then
+    echo >&2 "tuxbooks: pre-push blocked: a changed file name contains a newline, rename the file first"
+    exit 1
   fi
   tuxbooks_violations=""
-  if git cat-file -e "$local_sha:AGENTS.md" 2>/dev/null; then
-    tuxbooks_agents_lines=$(git cat-file blob "$local_sha:AGENTS.md" | awk 'END { print NR }')
-    if [ "$tuxbooks_agents_lines" -gt "$tuxbooks_agents_max_lines" ]; then
-      tuxbooks_violations="  AGENTS.md ($tuxbooks_agents_lines lines, limit $tuxbooks_agents_max_lines)
+  tuxbooks_agents_line=$(tuxbooks_over_limit "$local_sha:AGENTS.md" "$tuxbooks_agents_max_lines" "AGENTS.md")
+  if [ -n "$tuxbooks_agents_line" ]; then
+    tuxbooks_violations="${tuxbooks_agents_line}
 "
-    fi
   fi
-  tuxbooks_files=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" |
+  tuxbooks_file_violations=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" |
     tr '\000' '\n' |
     while IFS= read -r tuxbooks_path; do
       [ -n "$tuxbooks_path" ] || continue
@@ -78,19 +95,18 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       case "$tuxbooks_path" in
         */pnpm-lock.yaml|*/Cargo.lock) continue ;;
       esac
-      git cat-file -e "$local_sha:$tuxbooks_path" 2>/dev/null || continue
       # git numstat reports binary files as "-", and their bytes would
       # otherwise count as lines. The literal pathspec keeps glob
       # metacharacters in real file names from matching other files.
       tuxbooks_added=$(git diff --numstat "$tuxbooks_base" "$local_sha" -- ":(literal)$tuxbooks_path" | awk -F'\t' 'NR == 1 { print $1 }')
       case "$tuxbooks_added" in ''|-) continue ;; esac
-      tuxbooks_lines=$(git cat-file blob "$local_sha:$tuxbooks_path" | awk 'END { print NR }')
-      if [ "$tuxbooks_lines" -gt "$tuxbooks_max_lines" ]; then
-        printf '  %s (%s lines, limit %s)\n' "$tuxbooks_path" "$tuxbooks_lines" "$tuxbooks_max_lines"
+      tuxbooks_line=$(tuxbooks_over_limit "$local_sha:$tuxbooks_path" "$tuxbooks_max_lines" "$tuxbooks_path")
+      if [ -n "$tuxbooks_line" ]; then
+        printf '%s\n' "$tuxbooks_line"
       fi
     done)
-  if [ -n "$tuxbooks_files" ]; then
-    tuxbooks_violations="${tuxbooks_violations}${tuxbooks_files}
+  if [ -n "$tuxbooks_file_violations" ]; then
+    tuxbooks_violations="${tuxbooks_violations}${tuxbooks_file_violations}
 "
   fi
   if [ -n "$tuxbooks_violations" ]; then
