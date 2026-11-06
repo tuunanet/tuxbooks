@@ -11,8 +11,9 @@ import { appEntryPoint } from "../setup/fixtures.js";
 /**
  * Desktop-shell regression suite (docs/fix-electron-main-window-behaviour.md
  * §17): branding, deterministic startup geometry, min-size clamping,
- * resize-after-maximize/restore, icon resolution, and the repeated-launch
- * policy — the window-lifecycle behaviors that must never regress.
+ * Settings-window scaling and visibility, resize-after-maximize/restore,
+ * icon resolution, and the repeated-launch policy — the window-lifecycle
+ * behaviors that must never regress.
  *
  * Its own Playwright phase ("shell", e2e/package.json test:shell): the
  * relaunch scenario closes and relaunches the app, which only works when
@@ -150,6 +151,111 @@ test.describe("TuxBooks desktop shell", () => {
     const { bounds } = await snapshot(electronApp);
     expect(bounds.width).toBeLessThanOrEqual(900 + FRAME_TOLERANCE_PX);
     expect(bounds.height).toBeLessThanOrEqual(600 + FRAME_TOLERANCE_PX);
+    // Leave the default geometry for the following tests.
+    await setBounds(electronApp, { width: 1280, height: 820 });
+  });
+
+  // Settings-window scaling: the panel tracks the app window instead of
+  // staying at one fixed size (it used to be 920x680 at any window size).
+  // A bigger window grows it substantially, and it stays a floating panel
+  // with a visible gutter rather than going full-bleed. The thresholds are
+  // loose bounds on that contract, not the sizing formula.
+  test("scales the Settings window with the app window", async ({ electronApp, page }) => {
+    // Playwright reports no viewport for Electron pages; the renderer's own
+    // inner dimensions are what vw/vh resolve against.
+    const viewport = () =>
+      page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    // The layout box, not boundingBox(): that reports the compositor's
+    // visual box, which lags behind layout during the open animation and
+    // right after a window resize (surface scaling).
+    const panel = () =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('[data-testid="settings-window"]');
+        return el ? { width: el.offsetWidth, height: el.offsetHeight } : null;
+      });
+
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
+    await setBounds(electronApp, { width: 1280, height: 820 });
+    await expect.poll(async () => (await viewport()).width).toBe(1280);
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-window")).toBeVisible();
+    const atDefault = (await panel())!;
+
+    await setBounds(electronApp, { width: 1800, height: 1000 });
+    await expect.poll(async () => (await viewport()).width).toBe(1800);
+    await expect.poll(async () => (await viewport()).height).toBe(1000);
+    // The renderer's layout can lag the viewport read right after a resize;
+    // poll until the panel's layout reflects it (and fail here if the panel
+    // never scales).
+    await expect
+      .poll(async () => (await panel())?.width ?? 0)
+      .toBeGreaterThan(atDefault.width + 200);
+    const atLarge = (await panel())!;
+
+    expect(atLarge.height).toBeGreaterThan(atDefault.height + 50);
+    const vp = await viewport();
+    expect(vp.width - atLarge.width).toBeGreaterThanOrEqual(100);
+    expect(vp.height - atLarge.height).toBeGreaterThanOrEqual(100);
+
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(page.getByTestId("settings-window")).toHaveCount(0);
+    // Leave the default geometry for the following tests.
+    await setBounds(electronApp, { width: 1280, height: 820 });
+  });
+
+  // The drag offset is stored in pixels and was only clamped when a drag
+  // started, so a shrinking window (maximize, drag to a corner, restore)
+  // could push the panel out of view entirely. The rendered position must
+  // stay clamped inside whatever viewport the app window currently has.
+  test("keeps the Settings window in view after the app window shrinks", async ({
+    electronApp,
+    page,
+  }) => {
+    const viewport = () =>
+      page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    const panelBox = () => page.getByTestId("settings-window").boundingBox();
+
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
+    await setBounds(electronApp, { width: 1800, height: 1000 });
+    await expect.poll(async () => (await viewport()).width).toBe(1800);
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-window")).toBeVisible();
+
+    // Drag the panel into the top-left corner of the big window. The poll
+    // after the drag proves the pointer actually moved the panel, so the
+    // assertions below cannot pass vacuously on a missed drag.
+    const before = (await panelBox())!;
+    await page.mouse.move(before.x + before.width / 2, before.y + 24);
+    await page.mouse.down();
+    await page.mouse.move(24, 24, { steps: 5 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await panelBox())?.x ?? Number.POSITIVE_INFINITY)
+      .toBeLessThan(before.x - 100);
+
+    // Shrink well below the size the drag offset was clamped for.
+    await setBounds(electronApp, { width: 900, height: 600 });
+    await expect.poll(async () => (await viewport()).width).toBe(900);
+    await expect.poll(async () => (await viewport()).height).toBe(600);
+
+    await expect
+      .poll(async () => {
+        const box = await panelBox();
+        if (!box) return false;
+        const vp = await viewport();
+        return (
+          box.x >= 0 &&
+          box.y >= 0 &&
+          box.x + box.width <= vp.width &&
+          box.y + box.height <= vp.height
+        );
+      })
+      .toBe(true);
+
+    await page.getByRole("button", { name: "Close settings" }).click();
+    await expect(page.getByTestId("settings-window")).toHaveCount(0);
     // Leave the default geometry for the following tests.
     await setBounds(electronApp, { width: 1280, height: 820 });
   });
