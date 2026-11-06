@@ -14,28 +14,30 @@ Triage uses the five canonical roles as bd labels (`docs/agents/triage-labels.md
 ## Completing a task
 
 1. Keep changes limited to the assigned task.
-2. Run the full gate once: `just check` (run `just format` first if needed).
+2. If changed file is over 500 lines long, remove most of the comments from the
+   involved code files before planning refactoring and code architecture improvements.
+3. Run the full gate once: `just check` (run `just format` first if needed).
    Skip it for docs-only changes, meaning the diff touches only `*.md` files
    or other non-code scopes; `.github/workflows/ci.yml`'s classify step
    defines that set and skips CI's heavy jobs for it. Proofread the diff
    instead.
-3. Review the branch with the `code-review` skill (Standards + Spec, fixed
+4. Review the branch with the `code-review` skill (Standards + Spec, fixed
    point `origin/main`) and fold findings in before pushing. Docs-only
    changes use one pass instead of both axes: check each factual claim
    against the doc it cites.
-4. Assemble the evidence captured along the way into before/after pairs.
-5. Commit with a clear message (conventional commits), rebase onto the latest
+5. Assemble the evidence captured along the way into before/after pairs.
+6. Commit with a clear message (conventional commits), rebase onto the latest
    `origin/main`, and rerun the gate (the docs-only skip in step 2 applies).
-6. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
+7. Push (`git push -u origin <branch>`; after rebasing a pushed branch,
    `--force-with-lease`). Open the PR with the `pr` skill's body template
    (summary, evidence, merge danger) and run the title and body through
    `unslop` before posting. E2E in CI is opt-in: add the `run-e2e` label
    when the diff touches app behavior (docs/TESTING.md).
-7. Tracker data rides Dolt, not git: `bd dolt pull` before tracker work in a
+8. Tracker data rides Dolt, not git: `bd dolt pull` before tracker work in a
    session, `bd dolt push` after it. Beads never adds files to a task PR
    (`.beads/*.jsonl` are local-only). Full rules live in
    `docs/agents/issue-tracker.md`.
-8. Remove the worktree after the PR merges.
+9. Remove the worktree after the PR merges.
 
 ## Multi-agent rules
 
