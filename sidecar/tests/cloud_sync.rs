@@ -1412,11 +1412,23 @@ async fn locate_file_projection_failure_retries_the_attached_book() {
     assert_eq!(waiting::list(&b.pool).await.unwrap().len(), 1);
 
     let path = place_file(&b, "projected.epub", &bytes);
-    sqlx::query(&format!(
+    // The uid reaches the trigger through a bound row, not the SQL text:
+    // CodeQL reads an interpolated CREATE TRIGGER as cleartext storage of
+    // it. The WHEN clause keeps failing only this book's projection.
+    sqlx::query("CREATE TABLE fail_projection_target (uid TEXT NOT NULL)")
+        .execute(&b.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO fail_projection_target (uid) VALUES (?1)")
+        .bind(&uid)
+        .execute(&b.pool)
+        .await
+        .unwrap();
+    sqlx::query(
         "CREATE TRIGGER fail_projection BEFORE INSERT ON reading_progress
-         WHEN NEW.book_uid = '{uid}'
-         BEGIN SELECT RAISE(ABORT, 'forced projection failure'); END"
-    ))
+         WHEN NEW.book_uid = (SELECT uid FROM fail_projection_target)
+         BEGIN SELECT RAISE(ABORT, 'forced projection failure'); END",
+    )
     .execute(&b.pool)
     .await
     .unwrap();
@@ -1426,6 +1438,10 @@ async fn locate_file_projection_failure_retries_the_attached_book() {
         .await
         .unwrap();
     sqlx::query("DROP TRIGGER fail_projection")
+        .execute(&b.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP TABLE fail_projection_target")
         .execute(&b.pool)
         .await
         .unwrap();
