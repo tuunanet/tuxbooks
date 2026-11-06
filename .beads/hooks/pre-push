@@ -36,10 +36,14 @@ fi
 # Deterministic line-count gate: every file this push changes must be at most
 # tuxbooks_max_lines lines, counted in the blob the push ships, not in the
 # working tree. "Changed" is the diff between the pushed tip and the remote
-# branch tip, or against the default branch for a new branch. Binary files are
-# skipped: their byte stream reads as thousands of fake lines. So are the
-# generated lockfiles pnpm-lock.yaml and Cargo.lock, which nobody hand-splits.
+# branch tip, or against the default branch for a new branch. Repository-root
+# files are exempt: they hold project meta and config, not code to split.
+# Root AGENTS.md is the exception: every push checks it against
+# tuxbooks_agents_max_lines, whether or not the push touches it. Binary files
+# are skipped: their byte stream reads as thousands of fake lines. So are
+# generated lockfiles such as sidecar/Cargo.lock, which nobody hand-splits.
 tuxbooks_max_lines=500
+tuxbooks_agents_max_lines=145
 tuxbooks_zero=0000000000000000000000000000000000000000
 tuxbooks_report=""
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -55,12 +59,24 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       exit 1
     fi
   fi
-  tuxbooks_violations=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" |
+  tuxbooks_violations=""
+  if git cat-file -e "$local_sha:AGENTS.md" 2>/dev/null; then
+    tuxbooks_agents_lines=$(git cat-file blob "$local_sha:AGENTS.md" | awk 'END { print NR }')
+    if [ "$tuxbooks_agents_lines" -gt "$tuxbooks_agents_max_lines" ]; then
+      tuxbooks_violations="  AGENTS.md ($tuxbooks_agents_lines lines, limit $tuxbooks_agents_max_lines)
+"
+    fi
+  fi
+  tuxbooks_files=$(git diff --name-only --diff-filter=ACMRT -z "$tuxbooks_base" "$local_sha" |
     tr '\000' '\n' |
     while IFS= read -r tuxbooks_path; do
       [ -n "$tuxbooks_path" ] || continue
       case "$tuxbooks_path" in
-        pnpm-lock.yaml|Cargo.lock|*/pnpm-lock.yaml|*/Cargo.lock) continue ;;
+        */*) ;; # not the repository root; keep checking
+        *) continue ;;  # repository root: project meta and config
+      esac
+      case "$tuxbooks_path" in
+        */pnpm-lock.yaml|*/Cargo.lock) continue ;;
       esac
       git cat-file -e "$local_sha:$tuxbooks_path" 2>/dev/null || continue
       # git numstat reports binary files as "-", and their bytes would
@@ -70,16 +86,19 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       case "$tuxbooks_added" in ''|-) continue ;; esac
       tuxbooks_lines=$(git cat-file blob "$local_sha:$tuxbooks_path" | awk 'END { print NR }')
       if [ "$tuxbooks_lines" -gt "$tuxbooks_max_lines" ]; then
-        printf '  %s (%s lines)\n' "$tuxbooks_path" "$tuxbooks_lines"
+        printf '  %s (%s lines, limit %s)\n' "$tuxbooks_path" "$tuxbooks_lines" "$tuxbooks_max_lines"
       fi
     done)
-  if [ -n "$tuxbooks_violations" ]; then
-    tuxbooks_report="${tuxbooks_report}${tuxbooks_violations}
+  if [ -n "$tuxbooks_files" ]; then
+    tuxbooks_violations="${tuxbooks_violations}${tuxbooks_files}
 "
+  fi
+  if [ -n "$tuxbooks_violations" ]; then
+    tuxbooks_report="${tuxbooks_report}${tuxbooks_violations}"
   fi
 done
 if [ -n "$tuxbooks_report" ]; then
-  echo >&2 "tuxbooks: pre-push blocked: these changed files exceed $tuxbooks_max_lines lines, split them first:"
+  echo >&2 "tuxbooks: pre-push blocked: files over their line limit:"
   printf '%s' "$tuxbooks_report" >&2
   exit 1
 fi
