@@ -11,11 +11,11 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 
-use super::clock::{next_hlc, now_rfc3339};
+use super::clock::{device_id, next_hlc, now_rfc3339};
 use super::identity::{canonical_book_uid, canonical_entity_uid, record_issue};
 use super::merge;
 use super::model::{
-    canonical_from_snapshot, changed_fields, is_safe_uid, EntityKind, Op, State, OP_SCHEMA,
+    canonical_from_snapshot, changed_fields, is_safe_uid, EntityKind, Hlc, Op, State, OP_SCHEMA,
 };
 use super::store;
 
@@ -31,6 +31,10 @@ struct DirtyRow {
     op: String,
     old_json: Option<String>,
     new_json: Option<String>,
+    /// The clock the write transaction minted (migration 0030, ADR 0017 D3).
+    /// `None` only for rows written before that migration or inserted by hand.
+    hlc_wall: Option<i64>,
+    hlc_counter: Option<i64>,
 }
 
 enum Captured {
@@ -39,7 +43,29 @@ enum Captured {
     Skipped,
 }
 
-type DirtyRowTuple = (String, String, String, Option<String>, Option<String>);
+type DirtyRowTuple = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+);
+
+/// The write-time clock of a dirty row, when it carries one. `Hlc::device`
+/// is a placeholder here; `build_op` stamps the local device id before the
+/// op is published.
+fn stored_clock(row: &DirtyRow) -> Option<Hlc> {
+    match (row.hlc_wall, row.hlc_counter) {
+        (Some(wall), Some(counter)) => Some(Hlc {
+            wall,
+            counter: u32::try_from(counter).expect("counter slot is a small non-negative count"),
+            device: String::new(),
+        }),
+        _ => None,
+    }
+}
 
 pub async fn drain(
     pool: &SqlitePool,
@@ -48,19 +74,22 @@ pub async fn drain(
     limit: i64,
 ) -> Result<CaptureReport, AppError> {
     let rows: Vec<DirtyRowTuple> = sqlx::query_as(
-        "SELECT kind, entity_key, op, old_json, new_json FROM sync_dirty ORDER BY rowid LIMIT ?1",
+        "SELECT kind, entity_key, op, old_json, new_json, hlc_wall, hlc_counter
+         FROM sync_dirty ORDER BY rowid LIMIT ?1",
     )
     .bind(limit)
     .fetch_all(pool)
     .await?;
     let mut report = CaptureReport::default();
-    for (kind, entity_key, op, old_json, new_json) in rows {
+    for (kind, entity_key, op, old_json, new_json, hlc_wall, hlc_counter) in rows {
         let row = DirtyRow {
             kind,
             entity_key,
             op,
             old_json,
             new_json,
+            hlc_wall,
+            hlc_counter,
         };
         match capture_one(pool, root, covers_dir, &row).await? {
             Captured::Written => report.written += 1,
@@ -130,6 +159,7 @@ async fn capture_identity(
         false,
         fields,
         None,
+        stored_clock(row),
     )
     .await?;
     write_and_apply(pool, root, &op).await?;
@@ -187,6 +217,7 @@ async fn capture_annotation(
         Some(&book_uid),
         row.op == "delete",
         false,
+        stored_clock(row),
         state,
     )
     .await?;
@@ -229,6 +260,7 @@ async fn capture_collection(
         None,
         row.op == "delete",
         false,
+        stored_clock(row),
         state,
     )
     .await?;
@@ -287,6 +319,7 @@ async fn capture_book_state(
         Some(&uid),
         row.op == "delete",
         false,
+        stored_clock(row),
         state,
     )
     .await?;
@@ -386,6 +419,7 @@ async fn capture_book(
             false,
             Map::new(),
             Some(prior),
+            stored_clock(row),
         )
         .await?;
         write_and_apply(pool, root, &op).await?;
@@ -414,6 +448,7 @@ async fn capture_book(
             true,
             fields,
             None,
+            stored_clock(row),
         )
         .await?;
         write_and_apply(pool, root, &op).await?;
@@ -471,6 +506,7 @@ async fn capture_membership(
         Some(&book_uid),
         false,
         false,
+        stored_clock(row),
         state,
     )
     .await?;
@@ -489,6 +525,7 @@ async fn emit_state(
     book_uid: Option<&str>,
     deleted: bool,
     restore: bool,
+    clock: Option<Hlc>,
     state: State,
 ) -> Result<(), AppError> {
     let (previous, was_deleted) = merge::load_state(pool, kind, entity_uid).await?;
@@ -506,6 +543,7 @@ async fn emit_state(
             false,
             Map::new(),
             Some(prior),
+            clock,
         )
         .await?;
         write_and_apply(pool, root, &op).await?;
@@ -527,7 +565,7 @@ async fn emit_state(
         changed
     };
     let op = build_op(
-        pool, kind, entity_uid, book_uid, false, restore, fields, None,
+        pool, kind, entity_uid, book_uid, false, restore, fields, None, clock,
     )
     .await?;
     write_and_apply(pool, root, &op).await?;
@@ -536,7 +574,8 @@ async fn emit_state(
 
 /// Publish a normal state operation with a fresh clock. Conflict resolution
 /// reuses this so a re-applied losing value is an ordinary write every device
-/// converges on, not a local-only patch the next pass would undo.
+/// converges on, not a local-only patch the next pass would undo. The write
+/// happens now, so minting now is its write time.
 pub async fn write_fields(
     pool: &SqlitePool,
     root: &std::path::Path,
@@ -545,13 +584,17 @@ pub async fn write_fields(
     book_uid: Option<&str>,
     fields: Map<String, Value>,
 ) -> Result<(), AppError> {
-    let op = build_op(pool, kind, entity_uid, book_uid, false, false, fields, None).await?;
+    let op = build_op(
+        pool, kind, entity_uid, book_uid, false, false, fields, None, None,
+    )
+    .await?;
     write_and_apply(pool, root, &op).await
 }
 
 /// Explicitly restore a tombstoned entity from the trash payload. This is the
 /// only path that sets `restore`, which is what keeps a concurrent edit from
-/// resurrecting a delete.
+/// resurrecting a delete. The restore happens now, so a fresh mint is its
+/// write time.
 pub async fn write_restore(
     pool: &SqlitePool,
     root: &std::path::Path,
@@ -570,6 +613,7 @@ pub async fn write_restore(
         true,
         state.into_iter().collect(),
         None,
+        None,
     )
     .await?;
     write_and_apply(pool, root, &op).await
@@ -585,8 +629,19 @@ async fn build_op(
     restore: bool,
     fields: Map<String, Value>,
     prior: Option<Map<String, Value>>,
+    clock: Option<Hlc>,
 ) -> Result<Op, AppError> {
-    let hlc = next_hlc(pool).await?;
+    // ADR 0017 D3: the op dates the write, not the drain. Dirty rows carry
+    // the clock their write transaction minted; a clockless row only means
+    // it was written before migration 0030 (or inserted by hand), and the
+    // old publish-time mint is kept as the fallback for exactly that case.
+    let hlc = match clock {
+        Some(clock) => Hlc {
+            device: device_id(pool).await?,
+            ..clock
+        },
+        None => next_hlc(pool).await?,
+    };
     let op_id: String = sqlx::query_scalar("SELECT lower(hex(randomblob(16)))")
         .fetch_one(pool)
         .await?;
@@ -1669,5 +1724,134 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// The dirty row carries the clock its write transaction minted
+    /// (migration 0030, ADR 0017 D3), and the capture pass must publish
+    /// exactly that clock even when the stored clock has moved on.
+    #[tokio::test]
+    async fn a_dirty_row_publishes_the_clock_its_write_minted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+        let annotation_uid = "ab".repeat(16);
+        // The local write: the trigger chain stamps the dirty row inside the
+        // same transaction.
+        sqlx::query(
+            "INSERT INTO annotations (book_uid, sync_uid, kind, text)
+             VALUES (?1, ?2, 'bookmark', 'written while offline')",
+        )
+        .bind(&book_uid)
+        .bind(&annotation_uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (wall, counter): (i64, i64) = sqlx::query_as(
+            "SELECT hlc_wall, hlc_counter FROM sync_dirty WHERE kind = 'annotation'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            wall > 0,
+            "the write minted a clock, got ({wall}, {counter})"
+        );
+
+        // The pass drains much later and the stored clock has moved on; the
+        // published op must still carry the write-time clock.
+        crate::sync::clock::set_meta(&pool, crate::sync::clock::META_HLC, "9999999999999:0")
+            .await
+            .unwrap();
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(report.written, 1);
+        let published: (i64, i64) =
+            sqlx::query_as("SELECT hlc_wall, hlc_counter FROM sync_ops WHERE entity_uid = ?1")
+                .bind(&annotation_uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            published,
+            (wall, counter),
+            "the op carries the write-time clock, not a publish-time mint"
+        );
+        assert_eq!(dirty_count(&pool).await, 0);
+    }
+
+    /// A row written before migration 0030 has no clock (simulated by
+    /// clearing it). Those keep the old behavior: the op mints at publish.
+    #[tokio::test]
+    async fn a_clockless_legacy_row_still_mints_at_publish() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        let (book_uid, _) = durable_book(&pool, &tmp.path().join("book.epub")).await;
+        let annotation_uid = "cd".repeat(16);
+        insert_dirty(
+            &pool,
+            "annotation",
+            "1",
+            "upsert",
+            None,
+            Some(&format!(
+                r#"{{"book_uid":"{book_uid}","sync_uid":"{annotation_uid}","kind":"bookmark"}}"#
+            )),
+        )
+        .await;
+        sqlx::query("UPDATE sync_dirty SET hlc_wall = NULL, hlc_counter = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        crate::sync::clock::set_meta(&pool, crate::sync::clock::META_HLC, "9999999999999:0")
+            .await
+            .unwrap();
+
+        let root = store::resolve_root(tmp.path()).unwrap();
+        let report = drain(&pool, &root, &tmp.path().join("covers"), 10)
+            .await
+            .unwrap();
+        assert_eq!(report.written, 1);
+        let (wall, counter): (i64, i64) =
+            sqlx::query_as("SELECT hlc_wall, hlc_counter FROM sync_ops WHERE entity_uid = ?1")
+                .bind(&annotation_uid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            wall, 9_999_999_999_999,
+            "minted at publish, after the stored clock"
+        );
+        assert_eq!(counter, 1);
+    }
+
+    /// Two writes that land in one millisecond must not share a clock: the
+    /// trigger mints once per row, so the counter keeps the rows apart.
+    #[tokio::test]
+    async fn two_dirty_writes_in_one_millisecond_never_share_a_clock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = pool_in(tmp.path()).await;
+        // A frozen wall forces every mint into the same millisecond, which is
+        // the only case where two clocks could collide.
+        crate::sync::clock::set_meta(&pool, crate::sync::clock::META_HLC, "9999999999999:0")
+            .await
+            .unwrap();
+        insert_dirty(&pool, "progress", "1", "upsert", None, Some("{}")).await;
+        insert_dirty(&pool, "progress", "2", "upsert", None, Some("{}")).await;
+
+        let mut clocks: Vec<(i64, i64)> =
+            sqlx::query_as("SELECT hlc_wall, hlc_counter FROM sync_dirty ORDER BY entity_key")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        clocks.sort();
+        assert_eq!(clocks[0].0, 9_999_999_999_999, "the frozen wall is kept");
+        assert_ne!(clocks[0], clocks[1], "the counter separates the two writes");
+        assert_eq!(
+            clocks[1].1,
+            clocks[0].1 + 1,
+            "the second write follows the first"
+        );
     }
 }

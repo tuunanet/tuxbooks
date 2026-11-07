@@ -510,6 +510,89 @@ async fn progress_moves_as_one_locator_and_the_later_write_wins() {
     assert_eq!(progress.chapter_href.as_deref(), Some("c2.xhtml"));
 }
 
+/// The ADR 0017 D3 acceptance case: A edits at T1 while offline, B edits at
+/// T2 (T1 < T2) while A is still offline, and A only publishes on reconnect.
+/// A's op must carry its write-time clock, so B's newer write wins even
+/// though A published last.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_written_offline_loses_to_a_write_that_happened_while_it_was_offline() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let a_book = add_book(&a, "same.epub", b"offline clock book").await;
+
+    seed_progress(&a, a_book, 10.0).await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+
+    connect(&b, sync_dir.path()).await;
+    let _b_book = add_book(&b, "same.epub", b"offline clock book").await;
+    run(&b).await;
+    run(&b).await;
+    let b_book = book_id(&b, "same.epub").await;
+    assert_eq!(progress_percent(&b, b_book).await, Some(10.0));
+
+    // A goes offline and edits. The dirty row now carries the clock of this
+    // write transaction, not the time the capture pass eventually runs.
+    reading_progress::upsert_progress(
+        &a.pool,
+        a_book,
+        &ProgressUpdate {
+            progress_percent: Some(20.0),
+            ..ProgressUpdate::default()
+        },
+    )
+    .await
+    .unwrap();
+    let (t1_wall, t1_counter): (i64, i64) =
+        sqlx::query_as("SELECT hlc_wall, hlc_counter FROM sync_dirty WHERE kind = 'progress'")
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert!(t1_wall > 0, "the write minted its clock");
+
+    // B writes at T2, strictly after T1: its clock starts a minute past it.
+    clock::set_meta(&b.pool, clock::META_HLC, &format!("{}:0", t1_wall + 60_000))
+        .await
+        .unwrap();
+    reading_progress::upsert_progress(
+        &b.pool,
+        b_book,
+        &ProgressUpdate {
+            progress_percent: Some(55.0),
+            ..ProgressUpdate::default()
+        },
+    )
+    .await
+    .unwrap();
+    run(&b).await;
+    assert_eq!(progress_percent(&b, b_book).await, Some(55.0));
+
+    // A reconnects much later and only now publishes the T1 edit.
+    run(&a).await;
+    run(&a).await;
+
+    // The op A published is the one its write transaction minted.
+    let published: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT hlc_wall, hlc_counter FROM sync_ops
+         WHERE kind = 'progress' AND hlc_wall = ?1 AND hlc_counter = ?2",
+    )
+    .bind(t1_wall)
+    .bind(t1_counter)
+    .fetch_optional(&a.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        published,
+        Some((t1_wall, t1_counter)),
+        "the op carries the write-time clock despite the late publish"
+    );
+
+    // And B wins: its write happened after A's, whatever the publish order.
+    let a_book = book_id(&a, "same.epub").await;
+    assert_eq!(progress_percent(&a, a_book).await, Some(55.0));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn collection_and_membership_survive_the_trip() {
     let sync_dir = tempfile::tempdir().unwrap();
@@ -1648,11 +1731,22 @@ async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
         .clone();
     assert_eq!(a_note, b_note, "both devices converge");
     assert!(a_note.as_deref() == Some("A's note") || a_note.as_deref() == Some("B's note"));
-    let conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
+    // The loser is kept as diagnostics on whichever device applied the losing
+    // op first; with write-time clocks the true write order decides, so the
+    // row can land on either side, but exactly one value is discarded.
+    let a_conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
         .fetch_one(&a.pool)
         .await
         .unwrap();
-    assert!(conflicts >= 1, "the losing note is kept as a conflict");
+    let b_conflicts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts")
+        .fetch_one(&b.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        a_conflicts + b_conflicts,
+        1,
+        "one raced field, one discarded value"
+    );
 }
 
 // Conflict review tests use manual operations with a clock far ahead of the
@@ -3316,6 +3410,75 @@ async fn migration_0029_reids_a_zero_book_record_row() {
         .await
         .unwrap();
     assert_eq!(zeros, 0, "no rowid 0 survives the heal");
+}
+
+/// Migration 0030 stamps pending dirty rows that predate it. changed_at is
+/// the write time the old triggers recorded, so a month-old offline edit
+/// keeps its month-old clock and still loses to writes that happened while
+/// it was offline (ADR 0017 D3). Built with the migrator-through pattern.
+#[tokio::test(flavor = "multi_thread")]
+async fn migration_0030_dates_legacy_dirty_rows_by_when_they_were_written() {
+    const OLD_UID: &str = "cccccccccccccccccccccccccccccccc";
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("tuxbooks.db");
+    let old = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    migrator_through(tmp.path(), 29)
+        .await
+        .run(&old)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO book_records (uid, title) VALUES (?1, 'Offline')")
+        .bind(OLD_UID)
+        .execute(&old)
+        .await
+        .unwrap();
+    // A pending edit written at a known moment, never drained.
+    sqlx::query(
+        "INSERT INTO sync_dirty (kind, entity_key, op, old_json, changed_at)
+         VALUES ('progress', ?1, 'upsert', '{}', '2026-10-01T12:00:00.000Z')",
+    )
+    .bind(OLD_UID)
+    .execute(&old)
+    .await
+    .unwrap();
+    old.close().await;
+
+    let upgraded = init_pool(&db_path).await.unwrap();
+    let (wall, counter): (i64, i64) =
+        sqlx::query_as("SELECT hlc_wall, hlc_counter FROM sync_dirty WHERE entity_key = ?1")
+            .bind(OLD_UID)
+            .fetch_one(&upgraded)
+            .await
+            .unwrap();
+    // Dated from changed_at (the write), not from the upgrade run.
+    assert_eq!(wall, 1_790_856_000_000, "the write time is the clock");
+    assert_eq!(counter, 1, "the first legacy slot");
+    let stored: String = sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'hlc'")
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored, "1790856000000:1",
+        "the clock settled past the batch"
+    );
+
+    // Later mints continue after the legacy slots and never collide with one.
+    let first = clock::next_hlc(&upgraded).await.unwrap();
+    let second = clock::next_hlc(&upgraded).await.unwrap();
+    assert!(
+        second > first,
+        "mints stay ordered: {second:?} after {first:?}"
+    );
+    assert_ne!((first.wall, first.counter as i64), (wall, counter));
+    assert_ne!((second.wall, second.counter as i64), (wall, counter));
 }
 
 #[tokio::test(flavor = "multi_thread")]

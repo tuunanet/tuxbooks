@@ -185,8 +185,11 @@ entry without recreating the old identity.
 
 Clocks are hybrid logical clocks. Ordering is `(wall, counter, device id)`.
 `next_hlc` is a single SQLite upsert, so concurrent callers cannot receive the
-same value. Receiving a remote clock moves the local clock forward. A device
-with a badly skewed wall clock can win conflicts until real time catches up;
+same value. Receiving a remote clock moves the local clock forward. A clock is
+minted when the local write happens, inside its write transaction (ADR 0017
+D3): an edit made offline carries its own time, so publishing it later cannot
+outrank a write that happened after it. A device with a badly skewed wall
+clock can win conflicts until real time catches up;
 this is documented LWW behavior, not silent data loss, because the losing value
 is kept.
 

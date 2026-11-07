@@ -68,6 +68,8 @@ pub async fn device_id(pool: &SqlitePool) -> Result<String, AppError> {
 
 /// Take the next clock value. The CASE reads the row it is updating, so the
 /// counter only increments when the wall clock did not advance.
+/// Keep in sync: migration 0030's sync_dirty clock triggers mirror this mint
+/// in SQL — the four HLC sites change together.
 pub async fn next_hlc(pool: &SqlitePool) -> Result<Hlc, AppError> {
     let device = device_id(pool).await?;
     let value: String = sqlx::query_scalar(
@@ -95,6 +97,8 @@ pub async fn next_hlc(pool: &SqlitePool) -> Result<Hlc, AppError> {
 
 /// Move the local clock forward when a remote writer is ahead. The local
 /// device id stays local; only the physical/counter components are observed.
+/// Keep in sync: migration 0030's sync_dirty clock triggers mirror this
+/// advance in SQL — the four HLC sites change together.
 pub async fn observe_hlc(pool: &SqlitePool, remote: &Hlc) -> Result<(), AppError> {
     let incoming = format!("{}:{}", remote.wall, remote.counter);
     sqlx::query(

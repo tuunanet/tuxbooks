@@ -438,8 +438,10 @@ conflicts, and hash retry are in
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.
 - `sync_dirty` — one row per entity with a pending local change. Triggers write
-  the canonical snapshot at change time (`old_json`/`new_json`); the capture
-  pass drains it. Progress, metadata, last-opened, and book lifecycle key on
+  the canonical snapshot at change time (`old_json`/`new_json`) and stamp the
+  hybrid clock of that write transaction (migration 0030, ADR 0017 D3); the
+  capture pass drains the row and publishes its clock with the operation.
+  Progress, metadata, last-opened, and book lifecycle key on
   `book_uid`; annotations carry `book_uid` directly; membership keys on
   `book_uid:collection_id`. Triggers skip a vanished collection's cascade (a
   local deletion, not a shared delete).
