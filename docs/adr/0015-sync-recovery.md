@@ -164,7 +164,9 @@ instead.
 
 Settings > Application Data offers Copy diagnostics. Nothing is collected in the
 background and nothing is written to disk; the command runs only when the button
-is clicked and the renderer writes the JSON to the clipboard. The report carries
+is clicked and the JSON is handed to the main process, which writes it to the
+clipboard (the renderer's own clipboard write is denied by the permission
+policy, X-4). The report carries
 sync state and counts, up to 20 failed hashes, up to 20 open conflicts, up to 20
 recent book-identity merges, up to 20 recent entity merges, and the schema and
 migration versions. It deliberately leaves out book contents, annotation text,
@@ -229,8 +231,8 @@ never receives partial epic work.
 
 ## References
 
-- `docs/SYNC.md` for the protocol, issue actions, conflict review, and test
-  inventory.
+- `docs/SYNC.md` for the protocol, conflict review, and test inventory.
+- `docs/SYNC_ISSUES.md` for issue actions and what closes an issue on its own.
 - `docs/DATABASE.md` for `sync_issues`, `sync_conflicts`, `sync_book_merges`,
   and the hash retry columns.
 - `docs/COVERAGE.md` for the 92% floor and the production-only measurement.

@@ -8,7 +8,7 @@ import { GPU_FALLBACK_MARKER } from "../../../electron/main/gpuFallback";
 import { registerIpcHandlers, type IpcHandler } from "../../../electron/main/ipcHandlers";
 import { IssuedPaths } from "../../../electron/main/ipcPolicy";
 import type { StorageDirs } from "../../../electron/main/storageSizing";
-import { IPC_CHANNELS } from "../../../electron/shared/pathSchema";
+import { IPC_CHANNELS, MAX_CLIPBOARD_TEXT_BYTES } from "../../../electron/shared/pathSchema";
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
 const ALLOWED = "app://bundle/index.html";
@@ -45,6 +45,7 @@ const ALL_CHANNELS = [
   IPC_CHANNELS.openSyncFolder,
   IPC_CHANNELS.copyDataPath,
   IPC_CHANNELS.copyLibraryLocationPath,
+  IPC_CHANNELS.copyText,
   IPC_CHANNELS.clearCache,
 ];
 
@@ -61,6 +62,7 @@ function argsFor(channel: string): unknown[] {
   if (channel === IPC_CHANNELS.openSyncFolder) return [];
   if (channel === IPC_CHANNELS.copyDataPath) return ["app-data"];
   if (channel === IPC_CHANNELS.copyLibraryLocationPath) return [1];
+  if (channel === IPC_CHANNELS.copyText) return ["support text"];
   if (channel === IPC_CHANNELS.clearCache) return [];
   return [3];
 }
@@ -297,6 +299,26 @@ describe("copy library location path channel (data-management spec)", () => {
     await expect(handler!(senderEvent(ALLOWED) as never, 99)).rejects.toThrow(
       /no library location 99/,
     );
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("copy text channel (X-4: renderer clipboard writes are denied)", () => {
+  it("writes a bounded string and rejects anything else", async () => {
+    const { handlers, clipboard } = harness();
+    const handler = handlers.get(IPC_CHANNELS.copyText);
+    expect(handler).toBeDefined();
+
+    await handler!(senderEvent(ALLOWED) as never, '{"generatedAt":"2026-10-31"}');
+    expect(clipboard.writeText).toHaveBeenCalledWith('{"generatedAt":"2026-10-31"}');
+
+    clipboard.writeText.mockClear();
+    await expect(handler!(senderEvent(ALLOWED) as never, "")).rejects.toThrow(/requires text/);
+    await expect(handler!(senderEvent(ALLOWED) as never, 42)).rejects.toThrow(/requires text/);
+    await expect(handler!(senderEvent(ALLOWED) as never, null)).rejects.toThrow(/requires text/);
+    await expect(
+      handler!(senderEvent(ALLOWED) as never, "x".repeat(MAX_CLIPBOARD_TEXT_BYTES + 1)),
+    ).rejects.toThrow(/too large/);
     expect(clipboard.writeText).not.toHaveBeenCalled();
   });
 });

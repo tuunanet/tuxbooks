@@ -28,6 +28,13 @@ export const MAX_BULK_BOOK_IDS = 1000;
 /** Cap on the JSON text of one renderer invoke's params. */
 export const MAX_IPC_PARAM_BYTES = 8 << 20;
 
+/**
+ * Cap on one renderer-supplied clipboard payload (`copyText`). The support
+ * snapshots are tens of kilobytes; 1 MiB bounds a runaway write without
+ * clipping a legal diagnostics report.
+ */
+export const MAX_CLIPBOARD_TEXT_BYTES = 1 << 20;
+
 /** Cap on the JSON text of one request line sent to the sidecar. */
 export const MAX_SIDECAR_REQUEST_BYTES = 8 << 20;
 
@@ -319,6 +326,7 @@ export const IPC_CHANNELS = {
   openSyncFolder: "tuxbooks:open-sync-folder",
   copyDataPath: "tuxbooks:copy-data-path",
   copyLibraryLocationPath: "tuxbooks:copy-library-location-path",
+  copyText: "tuxbooks:copy-text",
   clearCache: "tuxbooks:clear-cache",
   event: "tuxbooks:event",
 } as const;

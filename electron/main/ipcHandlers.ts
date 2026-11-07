@@ -1,5 +1,6 @@
 import {
   IPC_CHANNELS,
+  MAX_CLIPBOARD_TEXT_BYTES,
   isAllowedSenderUrl,
   isStorageRootId,
   isValidBookId,
@@ -240,5 +241,20 @@ export function registerIpcHandlers(
       throw new SidecarError(`no library location ${locationId}`);
     }
     clipboard.writeText(location.path);
+  });
+
+  register(IPC_CHANNELS.copyText, async (event, text: unknown) => {
+    requireAppSender(event);
+    // The renderer's own clipboard API is denied by the permission policy
+    // (X-4), so text copies (diagnostics JSON, sync issue details) ride this
+    // channel instead. Only a bounded string crosses: no path or id
+    // parameters — main writes exactly what the renderer formatted.
+    if (typeof text !== "string" || text.length === 0) {
+      throw new SidecarError("copy requires text");
+    }
+    if (Buffer.byteLength(text, "utf8") > MAX_CLIPBOARD_TEXT_BYTES) {
+      throw new SidecarError("copy text too large");
+    }
+    clipboard.writeText(text);
   });
 }

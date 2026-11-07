@@ -355,6 +355,7 @@ describe("boundary configuration tables (T-5)", () => {
       openSyncFolder: "tuxbooks:open-sync-folder",
       copyDataPath: "tuxbooks:copy-data-path",
       copyLibraryLocationPath: "tuxbooks:copy-library-location-path",
+      copyText: "tuxbooks:copy-text",
       clearCache: "tuxbooks:clear-cache",
       event: "tuxbooks:event",
     });

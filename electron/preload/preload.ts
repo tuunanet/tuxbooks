@@ -113,6 +113,18 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.copyLibraryLocationPath, locationId);
   },
 
+  /**
+   * Copy renderer-formatted text to the native clipboard. The renderer's
+   * own `navigator.clipboard` write is denied by the permission policy
+   * (X-4), so every text copy goes through main.
+   */
+  copyText(text: string): Promise<void> {
+    if (typeof text !== "string" || text.length === 0) {
+      return Promise.reject(new TypeError(`invalid clipboard text: ${String(text)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.copyText, text);
+  },
+
   /** Remove the regenerable browser caches and GPU marker; resolves bytes freed. */
   clearCache(): Promise<number> {
     return ipcRenderer.invoke(IPC_CHANNELS.clearCache) as Promise<number>;
