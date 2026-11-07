@@ -43,6 +43,11 @@ pub struct RestoreOutcome {
     /// The durable book now holding the restored or kept state.
     pub book_id: Option<i64>,
     pub book_uid: Option<String>,
+    /// Public ids this restore deleted: the fresh identity, and the old record
+    /// when it comes back under a new id. Internal to the command, which turns
+    /// them into `library-changed` removals; not part of the RPC result.
+    #[serde(skip)]
+    pub replaced_book_ids: Vec<i64>,
     pub conflict: Option<RestoreConflict>,
 }
 
