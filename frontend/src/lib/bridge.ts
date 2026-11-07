@@ -34,202 +34,19 @@ import { MAX_BULK_BOOK_IDS } from "../../../electron/shared/pathSchema";
 import type { StorageRootId } from "../../../electron/shared/pathSchema";
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
-export type {
-  Book,
-  BookFile,
-  BookFormat,
-  BookMetadata,
-  BookTrashEntry,
-  BulkForgetOutcome,
-  CollectionSummary,
-  EditionBook,
-  EditionLinkOutcome,
-  ForgetOutcome,
-  ImportReport,
-  IndexingRetry,
-  LibraryChange,
-  LibraryStats,
-  MetadataFields,
-  ReadingHistoryBook,
-  RestoreConflict,
-  RestoreMode,
-  RestoreOutcome,
-} from "@/types/domain";
-export type { StorageRootId } from "../../../electron/shared/pathSchema";
-export type {
-  LibraryLocationStat,
-  LibraryLocationStatus,
-  StorageEntry,
-  StorageEntryKind,
-  StorageReport,
-  StorageRoot,
-} from "../../../electron/shared/storageReport";
-
-export type SyncState = "disabled" | "idle" | "syncing" | "error";
-
-/** Snapshot of the cloud-folder sync engine (docs/SYNC.md). */
-export interface SyncStatus {
-  enabled: boolean;
-  folder: string | null;
-  libraryId: string | null;
-  deviceId: string | null;
-  deviceName: string | null;
-  state: SyncState;
-  lastSyncAt: string | null;
-  lastError: string | null;
-  pendingLocal: number;
-  waitingBooks: number;
-  issues: number;
-  trash: number;
-  conflicts: number;
-}
-
-export interface SyncIssue {
-  id: number;
-  kind: string;
-  detail: string;
-  fileName: string | null;
-  action: SyncIssueAction;
-  target: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * The user-initiated support snapshot from `sync_diagnostics`. It carries no
- * book contents, annotation text, or conflict values (docs/SYNC.md, "Copy
- * diagnostics").
- */
-export interface SyncDiagnostics {
-  generatedAt: string;
-  sync: {
-    enabled: boolean;
-    state: SyncState;
-    folder: string | null;
-    lastSyncAt: string | null;
-    lastError: string | null;
-    counts: {
-      pendingLocal: number;
-      waitingBooks: number;
-      issues: number;
-      trash: number;
-      conflicts: number;
-    };
-  };
-  hashFailed: Array<{
-    bookId: number;
-    title: string;
-    path: string;
-    attempts: number;
-    retryAt: string | null;
-  }>;
-  openConflicts: Array<{
-    id: number;
-    kind: string;
-    field: string;
-    bookTitle: string | null;
-    createdAt: string;
-  }>;
-  recentMerges: {
-    books: Array<{ loser: string; winner: string }>;
-    entities: Array<{ kind: string; loser: string; winner: string }>;
-  };
-  versions: {
-    libraryMarker: number | null;
-    opSchema: number;
-    dbMigration: number;
-  };
-}
-
-/** What the Sync issues row offers; computed by the sidecar from the kind. */
-export type SyncIssueAction = "retry" | "open_folder" | "copy_details" | "dismiss";
-
-export interface SyncTrashEntry {
-  id: number;
-  kind: string;
-  label: string;
-  deletedAt: string;
-  expiresAt: string;
-}
-
-/** One losing value the merge kept, waiting for a keep/apply choice. */
-export interface SyncConflict {
-  id: number;
-  kind: string;
-  entityUid: string;
-  bookUid: string | null;
-  bookTitle: string | null;
-  bookAuthor: string | null;
-  field: string;
-  /** Readable name for `__entity__`, `__deleted__`, and `__restore__`. */
-  fieldLabel: string | null;
-  winner: unknown;
-  loser: unknown;
-  winnerDeviceId: string;
-  winnerDeviceName: string;
-  winnerWall: number;
-  winnerCounter: number;
-  loserDeviceId: string;
-  loserDeviceName: string;
-  loserWall: number;
-  loserCounter: number;
-  createdAt: string;
-  canApplyLoser: boolean;
-  applyLoserBlockedReason: string | null;
-}
-
-export type SyncConflictResolution = "keep_winner" | "apply_loser";
-
-export interface SyncMismatch {
-  localLibraryId: string;
-  remoteLibraryId: string;
-}
-
-export interface SyncConnectResult {
-  status: SyncStatus;
-  mismatch: SyncMismatch | null;
-  /** Set when starting a new library moved the previous one aside. */
-  archivedLibraryPath: string | null;
-}
-
-export interface SyncConnectOptions {
-  deviceName?: string;
-  confirmLibraryId?: string;
-  startNew?: boolean;
-}
-
-/** Mirror state for a book whose file is not present on this machine. */
-export interface WaitingBook {
-  bookUid: string;
-  title: string | null;
-  author: string | null;
-  progressPercent: number | null;
-  annotationCount: number;
-  lastOpenedAt: string | null;
-  sampleAnnotation: string | null;
-}
-
-/** Shape of the sandboxed preload bridge (`electron/preload/preload.ts`). */
-export interface TuxbooksApi {
-  invoke(method: string, params?: Record<string, unknown>): Promise<unknown>;
-  onEvent(name: string, callback: (payload: unknown) => void): () => void;
-  pickDirectory(): Promise<string | null>;
-  pickSyncFolder(): Promise<string | null>;
-  pickBookFile(): Promise<string | null>;
-  pickBookFiles(): Promise<string[]>;
-  pickCoverImage(): Promise<string | null>;
-  revealBook(bookId: number): Promise<void>;
-  storageReport(): Promise<StorageReport>;
-  openDataFolder(rootId: StorageRootId): Promise<void>;
-  openLibraryLocation(locationId: number): Promise<void>;
-  openSyncFolder(): Promise<void>;
-  copyDataPath(rootId: StorageRootId): Promise<void>;
-  copyLibraryLocationPath(locationId: number): Promise<void>;
-  copyText(text: string): Promise<void>;
-  clearCache(): Promise<number>;
-  fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
-  pathForFile(file: File): string;
-}
+import type {
+  SyncConflict,
+  SyncConflictResolution,
+  SyncConnectOptions,
+  SyncConnectResult,
+  SyncDiagnostics,
+  SyncIssue,
+  SyncStatus,
+  SyncTrashEntry,
+  TuxbooksApi,
+  WaitingBook,
+} from "./bridgeTypes";
+export type * from "./bridgeTypes";
 
 /** The preload API; missing only when a test or non-Electron host forgot the mock. */
 export function tuxbooks(): TuxbooksApi {
@@ -273,7 +90,6 @@ export function listReadingHistory(query?: string): Promise<ReadingHistoryBook[]
   );
 }
 
-/** Full-text library search (FTS5 over titles, authors, publishers, and more). */
 export function searchLibrary(query: string): Promise<SearchHit[]> {
   return invoke("search_books", { query });
 }
@@ -282,12 +98,6 @@ export function scanLibrary(path: string): Promise<ImportReport> {
   return invoke("scan_library", { path });
 }
 
-/**
- * Import a mixed batch of files and/or folders. Both end up watched: a
- * folder is registered as a library location, and a plain file adopts its
- * parent folder the same way. The report lists every folder the run newly
- * watched; per-path failures come back in the report too.
- */
 export function importPaths(paths: string[]): Promise<ImportReport> {
   return invoke("import_paths", { paths });
 }
@@ -303,27 +113,16 @@ export function unwatchLocations(paths: string[]): Promise<number> {
   return invoke("unwatch_locations", { paths });
 }
 
-/** How many of an unwatch's promised books have left the catalog so far. */
 export interface UnwatchProgress {
   removed: number;
   total: number;
 }
 
-/**
- * Subscribe to watched-folder changes (a folder registered, collapsed into a
- * parent, or removed). The settings view reloads its folder list so a folder
- * appears while its import is still running, not only after it finishes.
- */
 export function onWatchedFoldersChanged(callback: () => void): Promise<() => void> {
   const unlisten = onEvent<null>("watched-folders-changed", () => callback());
   return Promise.resolve(unlisten);
 }
 
-/**
- * Subscribe to unwatch progress (the `unwatch-progress` backend event). The
- * sidecar batches counts while it purges the removed folders' books, so the
- * dialog can show a bar instead of looking frozen. Resolves an unlisten fn.
- */
 export function onUnwatchProgress(
   callback: (progress: UnwatchProgress) => void,
 ): Promise<() => void> {
@@ -331,12 +130,6 @@ export function onUnwatchProgress(
   return Promise.resolve(unlisten);
 }
 
-/**
- * Subscribe to import progress (the `import-progress` backend event). The
- * sidecar batches persisted books and emits them as arrays — the callback
- * receives each batch as it lands, so covers appear while a scan is still
- * running without one IPC event per book. Resolves an unlisten fn.
- */
 export function onImportProgress(
   callback: (batch: { books: Book[] }) => void,
 ): Promise<() => void> {
@@ -344,11 +137,6 @@ export function onImportProgress(
   return Promise.resolve(unlisten);
 }
 
-/**
- * Subscribe to live library synchronization (the `library-changed` backend
- * event). The filesystem watcher and the remove/reconnect methods push every
- * mutation here; see `LibraryChange` in types/domain.
- */
 export function onLibraryChanged(callback: (change: LibraryChange) => void): Promise<() => void> {
   const unlisten = onEvent<LibraryChange>("library-changed", callback);
   return Promise.resolve(unlisten);
@@ -359,25 +147,14 @@ export function removeBook(bookId: number): Promise<boolean> {
   return invoke("remove_book", { bookId });
 }
 
-/** Every file location of one durable book, in active-file order. */
 export function listBookFiles(bookId: number): Promise<BookFile[]> {
   return invoke("list_book_files", { bookId });
 }
 
-/**
- * Every durable book the user confirmed as another edition of this one.
- * Linked editions keep separate identities and annotations.
- */
 export function listBookEditions(bookId: number): Promise<EditionBook[]> {
   return invoke("list_book_editions", { bookId });
 }
 
-/**
- * Confirm that two durable books are editions of one work. The books stay
- * separate; the source percentage is copied without a locator, provider
- * links and status move to the current (target) edition, and annotations
- * stay with the source.
- */
 export function linkBookEdition(
   sourceBookId: number,
   targetBookId: number,
@@ -385,36 +162,18 @@ export function linkBookEdition(
   return invoke("link_book_edition", { sourceBookId, targetBookId });
 }
 
-/**
- * Remove one file copy from a book. The durable book and its reading state
- * stay while another copy remains; the file on disk is never touched.
- */
 export function removeBookFile(bookId: number, fileId: number): Promise<boolean> {
   return invoke("remove_book_file", { bookId, fileId });
 }
 
-/**
- * Reset reading data for one book: clear progress, annotations, collection
- * membership, metadata overrides, and provider links, but keep the durable
- * identity and the current file. The book stays in the library as unread.
- */
 export function resetBookReadingData(bookId: number): Promise<boolean> {
   return invoke("reset_book_reading_data", { bookId });
 }
 
-/**
- * Retry the content-hash pass for one book now instead of waiting for its
- * automatic backoff. Resolves with the state afterwards, so the caller keeps
- * the warning when the file is still unreadable.
- */
 export function retryIndexing(bookId: number): Promise<IndexingRetry> {
   return invoke("retry_indexing", { bookId });
 }
 
-/**
- * Forget one book: move its identity and state to the 30-day trash. When the
- * book has a file, the library entry stays and is rebound to a fresh identity.
- */
 export function forgetBook(bookId: number): Promise<ForgetOutcome> {
   return invoke("forget_book", { bookId });
 }
@@ -439,21 +198,14 @@ export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome>
   return outcome;
 }
 
-/** Forgotten books still restorable inside the 30-day window. */
 export function listBookTrash(): Promise<BookTrashEntry[]> {
   return invoke("list_book_trash");
 }
 
-/**
- * Restore a Forgotten book. With no mode, the backend restores silently when
- * the fresh identity has no new progress or annotations and returns
- * `status: "conflict"` when it does. Replace, Keep, and Merge resolve it.
- */
 export function restoreBook(trashId: number, mode?: RestoreMode): Promise<RestoreOutcome> {
   return invoke("restore_book", mode === undefined ? { trashId } : { trashId, mode });
 }
 
-/** Curation view of a book: effective metadata, source values, overridden flags. */
 export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
   return invoke("get_book_metadata", { bookId });
 }
@@ -463,12 +215,10 @@ export function resetBookMetadata(bookId: number): Promise<BookMetadata> {
   return invoke("reset_book_metadata", { bookId });
 }
 
-/** Replace the cover with a user-picked image (copied into the artwork cache). */
 export function setBookCover(bookId: number, imagePath: string): Promise<Book> {
   return invoke("set_book_cover", { bookId, imagePath });
 }
 
-/** Remove a cover override; the extracted (source) cover returns. */
 export function clearBookCoverOverride(bookId: number): Promise<Book> {
   return invoke("clear_book_cover_override", { bookId });
 }
@@ -483,22 +233,14 @@ export function embedBookMetadata(bookId: number, form: MetadataFields): Promise
   return invoke("embed_book_metadata", { bookId, form });
 }
 
-/** Native image picker for cover overrides; null when cancelled. */
 export function pickCoverImage(): Promise<string | null> {
   return tuxbooks().pickCoverImage();
 }
 
-/** Reconnect an unavailable book to a newly located file, keeping its identity. */
 export function reconnectBook(bookId: number, path: string): Promise<Book> {
   return invoke("reconnect_book", { bookId, path });
 }
 
-/**
- * Attach a picked file to a Reading-history book. The durable book returns to
- * the library with its progress, annotations, collections, metadata overrides,
- * and last-opened intact; the backend rejects bytes that already belong to a
- * different book.
- */
 export function relinkBook(bookId: number, path: string): Promise<Book> {
   return invoke("relink_book", { bookId, path });
 }
@@ -522,37 +264,30 @@ export function getEpubSession(bookId: number): Promise<{ manifest: unknown; pos
   return invoke("get_epub_session", { bookId });
 }
 
-/** Load the stored reading position for a book, if any. */
 export function getReadingProgress(bookId: number): Promise<ReadingProgressRecord | null> {
   return invoke("get_reading_progress", { bookId });
 }
 
-/** Persist (upsert) where the user stopped reading a book. */
 export function saveReadingProgress(bookId: number, progress: ReadingProgressInput): Promise<null> {
   return invoke("save_reading_progress", { bookId, progress });
 }
 
-/** Flag a book as finished (progress 100) without moving its saved position. */
 export function markBookFinished(bookId: number): Promise<null> {
   return invoke("mark_book_finished", { bookId });
 }
 
-/** Record that a reading session started (the book detail's "Last opened"). */
 export function markBookOpened(bookId: number): Promise<null> {
   return invoke("mark_book_opened", { bookId });
 }
 
-/** Every collection with its member book ids, in name order. */
 export function listCollections(): Promise<CollectionSummary[]> {
   return invoke("list_collections");
 }
 
-/** Create a named collection; rejects blank or duplicate names. */
 export function createCollection(name: string): Promise<CollectionSummary> {
   return invoke("create_collection", { name });
 }
 
-/** Rename a collection; rejects blank or duplicate names. */
 export function renameCollection(collectionId: number, name: string): Promise<CollectionSummary> {
   return invoke("rename_collection", { collectionId, name });
 }
@@ -562,22 +297,18 @@ export function deleteCollection(collectionId: number): Promise<boolean> {
   return invoke("delete_collection", { collectionId });
 }
 
-/** Add a book to a collection (idempotent). */
 export function addBookToCollection(bookId: number, collectionId: number): Promise<null> {
   return invoke("add_book_to_collection", { bookId, collectionId });
 }
 
-/** Remove a book from a collection; true when a membership was deleted. */
 export function removeBookFromCollection(bookId: number, collectionId: number): Promise<boolean> {
   return invoke("remove_book_from_collection", { bookId, collectionId });
 }
 
-/** Every annotation of one book (bookmarks + highlights), in document order. */
 export function listAnnotations(bookId: number): Promise<Annotation[]> {
   return invoke("list_annotations", { bookId });
 }
 
-/** Creates a bookmark or highlight and returns the stored row. */
 export function createAnnotation(bookId: number, annotation: AnnotationInput): Promise<Annotation> {
   return invoke("create_annotation", { bookId, annotation });
 }
@@ -590,17 +321,14 @@ export function updateAnnotation(id: number, patch: AnnotationPatch): Promise<An
   return invoke("update_annotation", { id, patch });
 }
 
-/** Deletes an annotation; true when a row was removed. */
 export function deleteAnnotation(id: number): Promise<boolean> {
   return invoke("delete_annotation", { id });
 }
 
-/** Native folder picker; resolves to null when the user cancels. */
 export function pickDirectory(): Promise<string | null> {
   return tuxbooks().pickDirectory();
 }
 
-/** Native picker for the sync folder: local, network, or cloud-synced. */
 export function pickSyncFolder(): Promise<string | null> {
   return tuxbooks().pickSyncFolder();
 }
@@ -664,7 +392,6 @@ export function dismissSyncIssue(id: number): Promise<boolean> {
   return invoke("sync_dismiss_issue", { id });
 }
 
-/** Run the retry path behind an actionable issue; resolves when the row closed. */
 export function retrySyncIssue(id: number): Promise<boolean> {
   return invoke("sync_retry_issue", { id });
 }
@@ -693,13 +420,11 @@ export function setSyncDeviceName(name: string): Promise<SyncStatus> {
   return invoke("sync_set_device_name", { name });
 }
 
-/** Live status updates from the engine (the `sync-status` event). */
 export function onSyncStatus(callback: (status: SyncStatus) => void): Promise<() => void> {
   const unlisten = onEvent<SyncStatus>("sync-status", callback);
   return Promise.resolve(unlisten);
 }
 
-/** Books whose annotations/progress changed in another app instance. */
 export function onSyncApplied(
   callback: (payload: { bookIds: number[] }) => void,
 ): Promise<() => void> {
@@ -707,32 +432,26 @@ export function onSyncApplied(
   return Promise.resolve(unlisten);
 }
 
-/** Native file picker for relocating a missing book; null when cancelled. */
 export function pickBookFile(): Promise<string | null> {
   return tuxbooks().pickBookFile();
 }
 
-/** Native multi-file picker for Import Files…; empty when cancelled. */
 export function pickBookFiles(): Promise<string[]> {
   return tuxbooks().pickBookFiles();
 }
 
-/** Reveal a stored book's file in the system file manager (by book id). */
 export function revealBook(bookId: number): Promise<void> {
   return tuxbooks().revealBook(bookId);
 }
 
-/** App-owned storage report: the data and config roots with their sizes. */
 export function getStorageReport(): Promise<StorageReport> {
   return tuxbooks().storageReport();
 }
 
-/** Open one app-owned storage root in the system file manager (by root id). */
 export function openDataFolder(rootId: StorageRootId): Promise<void> {
   return tuxbooks().openDataFolder(rootId);
 }
 
-/** Open one watched library location in the system file manager (by id). */
 export function openLibraryLocation(locationId: number): Promise<void> {
   return tuxbooks().openLibraryLocation(locationId);
 }
@@ -742,12 +461,10 @@ export function openSyncFolder(): Promise<void> {
   return tuxbooks().openSyncFolder();
 }
 
-/** Copy one app-owned storage root's path to the native clipboard (by root id). */
 export function copyDataPath(rootId: StorageRootId): Promise<void> {
   return tuxbooks().copyDataPath(rootId);
 }
 
-/** Copy one watched library location's path to the native clipboard (by id). */
 export function copyLibraryLocationPath(locationId: number): Promise<void> {
   return tuxbooks().copyLibraryLocationPath(locationId);
 }
@@ -761,15 +478,10 @@ export function copyText(text: string): Promise<void> {
   return tuxbooks().copyText(text);
 }
 
-/**
- * Clear the caches the app rebuilds by itself (browser caches and the GPU
- * fallback marker); resolves the bytes freed.
- */
 export function clearCache(): Promise<number> {
   return tuxbooks().clearCache();
 }
 
-/** Absolute filesystem path of a dropped File (sandboxed preload helper). */
 export function pathForFile(file: File): string {
   return tuxbooks().pathForFile(file);
 }
