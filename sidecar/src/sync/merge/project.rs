@@ -8,9 +8,9 @@ use crate::error::AppError;
 use crate::sync::identity;
 use crate::sync::model::{EntityKind, State};
 
-use super::Affected;
 use super::catalog;
 use super::state::load_state;
+use super::Affected;
 
 /// Project one entity's final mirror state into the local catalog. Collection
 /// name collisions are resolved here because the local schema makes the name
@@ -81,7 +81,10 @@ pub async fn project_book(
     folder_root: &std::path::Path,
     covers_dir: &std::path::Path,
 ) -> Result<Vec<i64>, AppError> {
-    if identity::forgotten_replacement(pool, book_uid).await?.is_some() {
+    if identity::forgotten_replacement(pool, book_uid)
+        .await?
+        .is_some()
+    {
         return Ok(Vec::new());
     }
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
@@ -104,7 +107,10 @@ pub async fn project_book(
 }
 
 /// The public numeric id of a durable book.
-pub(super) async fn durable_record_id(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+pub(super) async fn durable_record_id(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<Option<i64>, AppError> {
     let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
         .bind(book_uid)
         .fetch_optional(pool)
@@ -115,7 +121,10 @@ pub(super) async fn durable_record_id(pool: &SqlitePool, book_uid: &str) -> Resu
 /// Project a whole-book Forget, restore, or discard into the local durable
 /// tables. The book-level mirror row is authoritative; a projection failure
 /// becomes a visible Sync issue instead of silently dropping the snapshot.
-async fn project_book_lifecycle(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+async fn project_book_lifecycle(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<Option<i64>, AppError> {
     type LifecycleRow = (Option<String>, Option<String>, Option<String>, i64);
     let row: Option<LifecycleRow> = sqlx::query_as(
         "SELECT replacement_book_uid, snapshot_json, restored_at, discarded

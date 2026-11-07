@@ -31,12 +31,13 @@ pub(super) async fn apply_identity(pool: &SqlitePool, op: &Op) -> Result<Vec<Aff
             .fetch_optional(pool)
             .await?;
     let existing = match existing {
-        Some(existing) => match crate::sync::identity::forgotten_replacement(pool, &existing).await?
-        {
-            Some(Some(replacement)) => Some(replacement),
-            Some(None) => None,
-            None => Some(crate::sync::identity::canonical_book_uid(pool, &existing).await?),
-        },
+        Some(existing) => {
+            match crate::sync::identity::forgotten_replacement(pool, &existing).await? {
+                Some(Some(replacement)) => Some(replacement),
+                Some(None) => None,
+                None => Some(crate::sync::identity::canonical_book_uid(pool, &existing).await?),
+            }
+        }
         None => None,
     };
     let canonical = match existing {
@@ -419,8 +420,8 @@ mod tests {
     #[test]
     fn snapshot_aliases_keeps_only_full_hex_hashes() {
         let hash = "a".repeat(64);
-        let snapshot = serde_json::json!({"aliases": [hash.clone(), "short", 7, "A".repeat(64)]})
-            .to_string();
+        let snapshot =
+            serde_json::json!({"aliases": [hash.clone(), "short", 7, "A".repeat(64)]}).to_string();
         assert_eq!(snapshot_aliases(Some(&snapshot)), vec![hash]);
         assert!(snapshot_aliases(None).is_empty());
         assert!(snapshot_aliases(Some("{not json")).is_empty());

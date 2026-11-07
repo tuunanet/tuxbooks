@@ -125,11 +125,13 @@ async fn project_creates_updates_and_deletes_collections_by_uid_or_name() {
         .unwrap();
     assert_eq!(count, 0);
 
-    sqlx::query("UPDATE sync_state_entities SET deleted = 1 WHERE kind = 'collection' AND entity_uid = ?1")
-        .bind(&taken)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE sync_state_entities SET deleted = 1 WHERE kind = 'collection' AND entity_uid = ?1",
+    )
+    .bind(&taken)
+    .execute(&pool)
+    .await
+    .unwrap();
     project(&pool, dir.path(), &covers, &affected(&taken))
         .await
         .unwrap();
@@ -249,9 +251,14 @@ async fn project_adds_and_removes_memberships_and_skips_missing_parents() {
     )
     .await
     .unwrap();
-    project(&pool, tmp.path(), &covers, &item("no-colon", Some(&book_uid)))
-        .await
-        .unwrap();
+    project(
+        &pool,
+        tmp.path(),
+        &covers,
+        &item("no-colon", Some(&book_uid)),
+    )
+    .await
+    .unwrap();
     let members: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_collections")
         .fetch_one(&pool)
         .await

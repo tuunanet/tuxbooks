@@ -75,7 +75,11 @@ pub fn field_label(field: &str) -> Option<&'static str> {
     }
 }
 
-pub(super) fn device_name(root: Option<&Path>, cache: &mut HashMap<String, String>, id: &str) -> String {
+pub(super) fn device_name(
+    root: Option<&Path>,
+    cache: &mut HashMap<String, String>,
+    id: &str,
+) -> String {
     let Some(root) = root else {
         return id.to_string();
     };
@@ -90,6 +94,10 @@ pub(super) fn device_name(root: Option<&Path>, cache: &mut HashMap<String, Strin
 /// Open, unexpired conflicts newest first. Progress is diagnostic only and
 /// never reaches this list. Book titles and device names come from the local
 /// catalog and the sync folder; a missing folder only costs the names.
+///
+/// Intermediate state until 0b2.4 (ADR 0017 D2) removes this list and the
+/// sync-status conflict count: new silent-race diagnostics still show up in
+/// both, and reconcile keeps a __deleted__ row live until the tombstone moves.
 pub async fn list(pool: &SqlitePool, root: Option<&Path>) -> Result<Vec<SyncConflict>, AppError> {
     let rows: Vec<ConflictRow> = sqlx::query_as(&format!(
         r#"

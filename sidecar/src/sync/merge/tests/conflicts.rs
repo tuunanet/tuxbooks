@@ -1,7 +1,7 @@
 //! What the merge records when a write loses: the diagnostic rows and the
 //! review issues behind them.
 
-use serde_json::{json, Map};
+use serde_json::{json, Map, Value};
 
 use super::support::{create_book, op};
 use crate::sync::clock::device_id;
@@ -40,7 +40,68 @@ async fn older_field_does_not_overwrite_and_is_kept_as_conflict() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(conflicts, 1);
+    assert_eq!(conflicts, 1, "the loser is kept as a diagnostic");
+    let issues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(issues, 0, "a losing field never opens review");
+}
+
+#[tokio::test]
+async fn an_hlc_tie_breaks_by_device_id_and_keeps_the_loser_as_a_diagnostic() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+        .await
+        .unwrap();
+    let book = create_book(&pool).await;
+    let uid = "c5".repeat(16);
+    // Both writes carry the helper's clock (wall 100, counter 0), so the
+    // device id is the only part of the Hlc order that differs. Hlc orders
+    // by wall, then counter, then device, so the greater device id keeps its
+    // value and the tied write from the lesser device id is the pre-decided
+    // loser.
+    apply_op(
+        &pool,
+        &op(EntityKind::Annotation, &uid, &book, json!({"note": "kept"})),
+        "a.json",
+    )
+    .await
+    .unwrap();
+    let mut lesser = op(
+        EntityKind::Annotation,
+        &uid,
+        &book,
+        json!({"note": "discarded"}),
+    );
+    lesser.device_id = "a".repeat(32);
+    lesser.hlc.device = "a".repeat(32);
+    apply_op(&pool, &lesser, "b.json").await.unwrap();
+    let (state, _) = load_state(&pool, EntityKind::Annotation, &uid)
+        .await
+        .unwrap();
+    assert_eq!(state.get("note"), Some(&json!("kept")));
+    let row: (String, String, String, String) = sqlx::query_as(
+        "SELECT field, winner_dev, loser_dev, loser_json FROM sync_conflicts
+         WHERE entity_uid = ?1",
+    )
+    .bind(&uid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "note");
+    assert_eq!(row.1, "b".repeat(32), "the greater device id wins the tie");
+    assert_eq!(row.2, "a".repeat(32), "the lesser device id is the loser");
+    assert_eq!(
+        serde_json::from_str::<Value>(&row.3).unwrap(),
+        json!("discarded"),
+        "the losing value is kept as diagnostics"
+    );
+    let issues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(issues, 0, "a tie never opens review");
 }
 
 #[tokio::test]
@@ -79,6 +140,11 @@ async fn a_restore_older_than_the_tombstone_is_kept_as_a_conflict() {
     .await
     .unwrap();
     assert_eq!(conflicts, 1);
+    let issues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(issues, 0, "a lost restore resolves by clock, not review");
 }
 
 #[tokio::test]
@@ -121,7 +187,7 @@ async fn identical_older_values_and_repeated_conflicts_stay_quiet() {
             .unwrap();
     assert_eq!(conflicts, 0);
 
-    // Two losing edits share one open issue and keep both conflict rows.
+    // Two losing edits keep both diagnostic rows and never open an issue.
     let annotation = "f6".repeat(16);
     let mut newest = op(
         EntityKind::Annotation,
@@ -155,7 +221,7 @@ async fn identical_older_values_and_repeated_conflicts_stay_quiet() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(issues, 1, "one issue per field, refreshed in place");
+    assert_eq!(issues, 0, "repeated losers stay diagnostics, not review");
 }
 
 #[tokio::test]
@@ -224,4 +290,9 @@ async fn a_local_edit_after_a_tombstone_records_its_device_and_time() {
     assert_eq!(row.0, device_id(&pool).await.unwrap());
     assert!(row.1 > 0, "the losing edit has a real wall time");
     assert_eq!(row.2, 0);
+    let issues: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(issues, 0, "the tombstone wins silently");
 }
