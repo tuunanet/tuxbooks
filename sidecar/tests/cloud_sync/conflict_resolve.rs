@@ -319,7 +319,7 @@ async fn a_lost_restore_can_be_applied_as_the_loser() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn two_losing_edits_share_one_issue_until_the_last_is_resolved() {
+async fn two_losing_edits_stay_as_diagnostics_without_an_issue() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     let book = add_book(&a, "review.epub", b"shared issue bytes").await;
@@ -359,7 +359,7 @@ async fn two_losing_edits_share_one_issue_until_the_last_is_resolved() {
     }
 
     let conflicts = a.service.list_conflicts().await.unwrap();
-    assert_eq!(conflicts.len(), 2, "two losing edits");
+    assert_eq!(conflicts.len(), 2, "two losing edits, two diagnostics");
     let shared: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_issues
          WHERE kind = 'conflict' AND resolved_at IS NULL",
@@ -367,42 +367,27 @@ async fn two_losing_edits_share_one_issue_until_the_last_is_resolved() {
     .fetch_one(&a.pool)
     .await
     .unwrap();
-    assert_eq!(shared, 1, "they share one issue");
-    assert!(
-        a.service
-            .issues()
-            .await
-            .unwrap()
-            .iter()
-            .all(|issue| issue.kind != "conflict"),
-        "the review owns conflict rows"
-    );
+    assert_eq!(shared, 0, "races are diagnostics, never review rows");
 
     assert!(a
         .service
         .resolve_conflict(conflicts[0].id, "keep_winner")
         .await
         .unwrap());
-    let still_open: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sync_issues WHERE kind = 'conflict' AND resolved_at IS NULL",
-    )
-    .fetch_one(&a.pool)
-    .await
-    .unwrap();
-    assert_eq!(still_open, 1, "the shared issue stays open");
-
     assert!(a
         .service
         .resolve_conflict(conflicts[1].id, "keep_winner")
         .await
         .unwrap());
-    let open: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sync_issues WHERE kind = 'conflict' AND resolved_at IS NULL",
-    )
-    .fetch_one(&a.pool)
-    .await
-    .unwrap();
-    assert_eq!(open, 0, "the last resolution closes the issue");
+    assert!(a.service.list_conflicts().await.unwrap().is_empty());
+    let note = annotations::list_annotations(&a.pool, book).await.unwrap()[0]
+        .note
+        .clone();
+    assert_eq!(
+        note.as_deref(),
+        Some("kept note"),
+        "the winner stays applied"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
