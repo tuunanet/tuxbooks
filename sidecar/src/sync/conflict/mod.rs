@@ -1,5 +1,6 @@
-//! Conflict review: read the losing values the merge kept, and let the user
-//! settle one without changing the last-writer-wins rules.
+//! The losing values the merge kept, and the settlement that legacy rows —
+//! recorded before races went silent (ADR 0017 D1) — still offer in the
+//! review surface. New races write a `sync_conflicts` diagnostic row only.
 //!
 //! Resolving never patches only this machine. `apply_loser` publishes a normal
 //! operation with a fresh clock, so every device replays it and converges. The
@@ -8,8 +9,7 @@
 //!
 //! The queue is also reconciled against the mirror on every status refresh. A
 //! conflict whose winner has been overwritten is no longer a choice, so it
-//! closes on every device that replays the newer write. Progress conflicts are
-//! recorded for diagnostics but never reach the review list or an issue.
+//! closes on every device that replays the newer write.
 
 mod maintenance;
 mod review;

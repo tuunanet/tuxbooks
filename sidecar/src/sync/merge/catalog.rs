@@ -8,9 +8,9 @@ use crate::error::AppError;
 use crate::sync::model::{EntityKind, State};
 use crate::sync::store;
 
-use super::Affected;
 use super::project::durable_record_id;
 use super::state::load_state;
+use super::Affected;
 
 pub(super) async fn project_annotation(
     pool: &SqlitePool,
@@ -126,7 +126,11 @@ pub(super) async fn project_progress(
     Ok(())
 }
 
-pub(super) async fn project_opened(pool: &SqlitePool, book_id: i64, state: &State) -> Result<(), AppError> {
+pub(super) async fn project_opened(
+    pool: &SqlitePool,
+    book_id: i64,
+    state: &State,
+) -> Result<(), AppError> {
     sqlx::query("UPDATE book_records SET last_opened_at = ?2 WHERE id = ?1")
         .bind(book_id)
         .bind(string_or_none(state, "last_opened_at"))

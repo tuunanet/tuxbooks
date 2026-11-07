@@ -128,7 +128,12 @@ pub async fn apply_loser(
         }
     };
     capture::write_fields(
-        pool, root, conflict.kind, &conflict.entity_uid, book_uid, fields,
+        pool,
+        root,
+        conflict.kind,
+        &conflict.entity_uid,
+        book_uid,
+        fields,
     )
     .await?;
     Ok(Affected {

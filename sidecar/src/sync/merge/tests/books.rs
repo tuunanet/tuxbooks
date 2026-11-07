@@ -90,13 +90,12 @@ async fn a_book_forget_restore_and_discard_move_the_aliases_and_respect_older_cl
     );
     let affected = apply_op(&pool, &forget, "a.json").await.unwrap();
     assert_eq!(affected.len(), 1);
-    let (restored, discarded): (Option<String>, i64) = sqlx::query_as(
-        "SELECT restored_at, discarded FROM sync_book_trash WHERE book_uid = ?1",
-    )
-    .bind(&uid)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (restored, discarded): (Option<String>, i64) =
+        sqlx::query_as("SELECT restored_at, discarded FROM sync_book_trash WHERE book_uid = ?1")
+            .bind(&uid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(restored.is_none());
     assert_eq!(discarded, 0);
     let owner: String =

@@ -5,6 +5,7 @@ mod collections;
 mod common;
 mod conflict_resolve;
 mod conflict_review;
+mod conflict_silent;
 mod folder;
 mod identity;
 mod issue_close;

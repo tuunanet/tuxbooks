@@ -1,18 +1,10 @@
-//! Conflict recording: the rows the merge keeps for diagnostics and review.
+//! Conflict recording: the diagnostic rows the merge keeps for races.
 
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::AppError;
 use crate::sync::clock::device_id;
-use crate::sync::model::{conflict_issue_key, EntityKind, Hlc, State};
-
-pub(super) fn truncate(value: &str, max_chars: usize) -> String {
-    let mut text: String = value.chars().take(max_chars).collect();
-    if text.len() < value.len() {
-        text.push('…');
-    }
-    text
-}
+use crate::sync::model::{EntityKind, Hlc, State};
 
 /// Preserve a local edit that arrived after the entity was already deleted on
 /// another machine. The tombstone still wins, but the text is not lost.
@@ -36,7 +28,8 @@ pub async fn record_tombstone_conflict(
         tx.commit().await?;
         return Ok(());
     };
-    let loser = serde_json::Value::Object(loser.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    let loser =
+        serde_json::Value::Object(loser.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
     // The local edit is the loser here and has no operation clock of its own
     // yet. Record the writing device and a current wall time so the row
     // names who made it, without taking an HLC that would reorder the merge.
@@ -64,6 +57,9 @@ pub async fn record_tombstone_conflict(
     Ok(())
 }
 
+/// Record the losing value of a race. ADR 0017 D1: every race has a
+/// pre-decided winner, so this is a diagnostic, not a prompt — the row is
+/// kept for support, and no review issue opens, for any kind.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn record_conflict(
     tx: &mut Transaction<'_, Sqlite>,
@@ -78,43 +74,6 @@ pub(super) async fn record_conflict(
     // Do not record a conflict when both sides say the same thing.
     if winner == loser {
         return Ok(());
-    }
-    let winner_text = serde_json::to_string(winner).unwrap_or_else(|_| "null".into());
-    let loser_text = serde_json::to_string(loser).unwrap_or_else(|_| "null".into());
-    let issue_key = conflict_issue_key(kind, entity_uid, field);
-    let detail = format!(
-        "{} field {field}: kept {}, discarded {}",
-        kind.as_str(),
-        truncate(&winner_text, 1800),
-        truncate(&loser_text, 1800)
-    );
-    // Progress and other additive state never ask the user for a choice. Keep
-    // the row for diagnostics, but do not open a review issue for it.
-    if kind != EntityKind::Progress {
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM sync_issues WHERE issue_key = ?1 AND resolved_at IS NULL LIMIT 1",
-        )
-        .bind(&issue_key)
-        .fetch_optional(&mut **tx)
-        .await?;
-        if let Some(id) = existing {
-            sqlx::query(
-                "UPDATE sync_issues SET detail = ?2,
-                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
-            )
-            .bind(id)
-            .bind(&detail)
-            .execute(&mut **tx)
-            .await?;
-        } else {
-            sqlx::query(
-                "INSERT INTO sync_issues (issue_key, kind, detail) VALUES (?1, 'conflict', ?2)",
-            )
-            .bind(&issue_key)
-            .bind(&detail)
-            .execute(&mut **tx)
-            .await?;
-        }
     }
     sqlx::query(
         r#"
@@ -139,15 +98,4 @@ pub(super) async fn record_conflict(
     .execute(&mut **tx)
     .await?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::truncate;
-
-    #[test]
-    fn truncate_marks_a_shortened_value() {
-        assert_eq!(truncate("short", 10), "short");
-        assert_eq!(truncate("abcdef", 3), "abc…");
-    }
 }

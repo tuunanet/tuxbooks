@@ -12,8 +12,8 @@ use crate::sync::model::{
     canonical_from_snapshot, field_names, EntityKind, Hlc, MergeMode, Op, State, TRASH_DAYS,
 };
 
-use super::Affected;
 use super::conflict::record_conflict;
+use super::Affected;
 
 pub(super) async fn apply_state_op(
     tx: &mut Transaction<'_, Sqlite>,

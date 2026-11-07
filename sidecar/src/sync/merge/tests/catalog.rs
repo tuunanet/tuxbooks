@@ -41,12 +41,11 @@ async fn a_corrupt_shared_snapshot_becomes_a_lifecycle_issue() {
     .await
     .unwrap()
     .is_empty());
-    let issue: String = sqlx::query_scalar(
-        "SELECT detail FROM sync_issues WHERE kind = 'book_lifecycle_failed'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let issue: String =
+        sqlx::query_scalar("SELECT detail FROM sync_issues WHERE kind = 'book_lifecycle_failed'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(issue.contains(&uid), "{issue}");
 }
 

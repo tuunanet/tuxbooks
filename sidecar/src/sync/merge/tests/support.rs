@@ -79,7 +79,12 @@ pub(super) async fn durable_book(pool: &SqlitePool, path: &std::path::Path) -> (
         .unwrap()
 }
 
-pub(super) async fn put_state(pool: &SqlitePool, kind: EntityKind, uid: &str, fields: &[(&str, Value)]) {
+pub(super) async fn put_state(
+    pool: &SqlitePool,
+    kind: EntityKind,
+    uid: &str,
+    fields: &[(&str, Value)],
+) {
     sqlx::query(
         "INSERT INTO sync_state_entities (kind, entity_uid) VALUES (?1, ?2)
          ON CONFLICT(kind, entity_uid) DO NOTHING",

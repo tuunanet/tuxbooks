@@ -341,11 +341,10 @@ async fn reconcile_closes_a_field_conflict_once_the_value_moves() {
     .unwrap();
     assert_eq!(reconcile(&pool).await.unwrap(), 1);
     assert!(open(&pool, id).await.unwrap().is_none());
-    let issue: Option<String> =
-        sqlx::query_scalar("SELECT resolved_at FROM sync_issues LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let issue: Option<String> = sqlx::query_scalar("SELECT resolved_at FROM sync_issues LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert!(issue.is_some(), "the issue closes with the row");
 }
 
@@ -434,16 +433,15 @@ async fn a_tombstone_conflict_from_an_older_delete_cycle_is_not_live() {
         "the old delete cycle no longer wins"
     );
     assert!(open(&pool, id).await.unwrap().is_none());
-    let issue: Option<String> =
-        sqlx::query_scalar("SELECT resolved_at FROM sync_issues LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let issue: Option<String> = sqlx::query_scalar("SELECT resolved_at FROM sync_issues LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert!(issue.is_some(), "the stale issue closes too");
 }
 
 #[tokio::test]
-async fn progress_conflicts_keep_a_row_but_never_open_an_issue() {
+async fn conflicts_keep_a_row_but_never_open_an_issue() {
     let tmp = tempfile::tempdir().unwrap();
     let pool = pool_in(tmp.path()).await;
     let annotation_uid = "44".repeat(16);
@@ -484,12 +482,11 @@ async fn progress_conflicts_keep_a_row_but_never_open_an_issue() {
         .await
         .unwrap();
     assert_eq!(conflicts, 2, "both rows are kept for diagnostics");
-    let issues: Vec<String> = sqlx::query_scalar("SELECT issue_key FROM sync_issues")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        issues,
-        vec![format!("conflict:annotation:{annotation_uid}:__deleted__")]
-    );
+    let issues: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_issues WHERE kind = 'conflict' AND resolved_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(issues, 0, "races are diagnostics, never review rows");
 }
