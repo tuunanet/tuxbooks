@@ -71,8 +71,8 @@ export interface SyncIssue {
 
 /**
  * The user-initiated support snapshot from `sync_diagnostics`. It carries no
- * book contents, annotation text, or conflict values (docs/SYNC.md, "Copy
- * diagnostics").
+ * book contents, annotation text, or conflict values (docs/SYNC_ISSUES.md,
+ * "Copy diagnostics").
  */
 export interface SyncDiagnostics {
   generatedAt: string;
@@ -203,4 +203,15 @@ export interface TuxbooksApi {
   clearCache(): Promise<number>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
+}
+
+export interface UnwatchProgress {
+  removed: number;
+  total: number;
+}
+
+declare global {
+  interface Window {
+    tuxbooks?: TuxbooksApi;
+  }
 }

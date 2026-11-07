@@ -30,8 +30,8 @@ export function useSyncAttention(): SyncAttentionValue {
 /**
  * Attention means sync is on and the engine reports an error, at least one
  * open issue, or a conflict waiting for a decision. Conflicts are a separate
- * count from issues (docs/SYNC.md). Keeping `enabled` in the condition matches
- * Settings > Sync, which also hides leftover counts while sync is off.
+ * count from issues (docs/SYNC_ISSUES.md). Keeping `enabled` in the condition
+ * matches Settings > Sync, which also hides leftover counts while sync is off.
  */
 export function needsSyncAttention(status: SyncStatus | null): boolean {
   if (status === null || !status.enabled) return false;

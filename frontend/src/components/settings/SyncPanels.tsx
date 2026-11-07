@@ -25,16 +25,14 @@ import {
 } from "./SyncLists";
 import { formatSyncTime as formatTime } from "./syncFormat";
 
-export const STATUS_LABEL: Record<SyncState, string> = {
+const STATUS_LABEL: Record<SyncState, string> = {
   disabled: "Off",
   idle: "Up to date",
   syncing: "Syncing",
   error: "Needs attention",
 };
 
-export function statusVariant(
-  state: SyncState,
-): "default" | "secondary" | "destructive" | "outline" {
+function statusVariant(state: SyncState): "default" | "secondary" | "destructive" | "outline" {
   if (state === "error") return "destructive";
   if (state === "syncing") return "secondary";
   if (state === "disabled") return "outline";
@@ -234,7 +232,7 @@ type ConnectedSyncPanelProps = {
   onForgetAll: () => void;
 };
 
-export function ConnectedSyncPanel({
+function ConnectedSyncPanel({
   status,
   busy,
   waitingBooks,
@@ -313,7 +311,7 @@ export function ConnectedSyncPanel({
   );
 }
 
-export function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div
       className={cn(

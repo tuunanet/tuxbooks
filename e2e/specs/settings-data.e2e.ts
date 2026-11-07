@@ -40,19 +40,21 @@ test.describe("settings data tab", () => {
 
     const raw = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
     const copied = JSON.parse(raw || "null") as Record<string, unknown>;
-    // The whole support snapshot, in the pretty-printed form the button sends.
-    expect(Object.keys(copied)).toEqual(
-      expect.arrayContaining([
-        "generatedAt",
-        "sync",
-        "hashFailed",
-        "openConflicts",
-        "recentMerges",
-        "versions",
-      ]),
-    );
-    expect(raw).toContain("\n  ");
-    expect(copied.sync).toHaveProperty("enabled");
-    expect(copied.versions).toHaveProperty("dbMigration");
+
+    // The clipboard must hold exactly what the button sends: a fresh
+    // `sync_diagnostics` snapshot pretty-printed with an indent of two. Only
+    // `generatedAt` differs between the two calls, since it records when each
+    // snapshot was taken, so pin it from the clipboard before comparing.
+    const fresh = (await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          tuxbooks?: { invoke?: (method: string, params?: unknown) => unknown };
+        }
+      ).tuxbooks;
+      return api?.invoke?.("sync_diagnostics", {});
+    })) as Record<string, unknown>;
+    expect(fresh).toHaveProperty("versions");
+    fresh.generatedAt = copied.generatedAt;
+    expect(raw).toBe(JSON.stringify(fresh, null, 2));
   });
 });

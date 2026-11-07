@@ -231,8 +231,8 @@ never receives partial epic work.
 
 ## References
 
-- `docs/SYNC.md` for the protocol, issue actions, conflict review, and test
-  inventory.
+- `docs/SYNC.md` for the protocol, conflict review, and test inventory.
+- `docs/SYNC_ISSUES.md` for issue actions and what closes an issue on its own.
 - `docs/DATABASE.md` for `sync_issues`, `sync_conflicts`, `sync_book_merges`,
   and the hash retry columns.
 - `docs/COVERAGE.md` for the 92% floor and the production-only measurement.

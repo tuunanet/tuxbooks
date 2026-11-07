@@ -30,8 +30,7 @@ import type {
   RestoreOutcome,
   SearchHit,
 } from "@/types/domain";
-import { MAX_BULK_BOOK_IDS } from "../../../electron/shared/pathSchema";
-import type { StorageRootId } from "../../../electron/shared/pathSchema";
+import { MAX_BULK_BOOK_IDS, type StorageRootId } from "../../../electron/shared/pathSchema";
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
 import type {
@@ -44,6 +43,7 @@ import type {
   SyncStatus,
   SyncTrashEntry,
   TuxbooksApi,
+  UnwatchProgress,
   WaitingBook,
 } from "./bridgeTypes";
 export type * from "./bridgeTypes";
@@ -54,12 +54,6 @@ export function tuxbooks(): TuxbooksApi {
     throw new Error("tuxbooks preload bridge is unavailable outside the Electron app");
   }
   return window.tuxbooks;
-}
-
-declare global {
-  interface Window {
-    tuxbooks?: TuxbooksApi;
-  }
 }
 
 async function invoke<T>(method: string, params?: Record<string, unknown>): Promise<T> {
@@ -103,19 +97,13 @@ export function importPaths(paths: string[]): Promise<ImportReport> {
 }
 
 /**
- * Leave the watch list: the folders stop syncing and their library
- * memberships go away, while reading progress and annotations stay with the
- * durable book (ADR 0014) and return if the same bytes are imported again.
- * Files on disk are never touched. Returns how many folders were actually
+ * Leave the watch list: the folders stop syncing and their library memberships go away, while
+ * reading progress and annotations stay with the durable book (ADR 0014) and return if the same
+ * bytes are imported again. Files on disk are never touched. Returns how many folders were actually
  * listed.
  */
 export function unwatchLocations(paths: string[]): Promise<number> {
   return invoke("unwatch_locations", { paths });
-}
-
-export interface UnwatchProgress {
-  removed: number;
-  total: number;
 }
 
 export function onWatchedFoldersChanged(callback: () => void): Promise<() => void> {
@@ -162,6 +150,10 @@ export function linkBookEdition(
   return invoke("link_book_edition", { sourceBookId, targetBookId });
 }
 
+/**
+ * Remove one file copy; the durable book and its reading state stay while
+ * another copy remains, and the file on disk is never touched.
+ */
 export function removeBookFile(bookId: number, fileId: number): Promise<boolean> {
   return invoke("remove_book_file", { bookId, fileId });
 }
@@ -170,6 +162,10 @@ export function resetBookReadingData(bookId: number): Promise<boolean> {
   return invoke("reset_book_reading_data", { bookId });
 }
 
+/**
+ * Retry the content-hash pass now instead of waiting for its backoff;
+ * resolves with the state afterwards, so the caller keeps the warning.
+ */
 export function retryIndexing(bookId: number): Promise<IndexingRetry> {
   return invoke("retry_indexing", { bookId });
 }
@@ -179,10 +175,9 @@ export function forgetBook(bookId: number): Promise<ForgetOutcome> {
 }
 
 /**
- * Bulk Forget for Reading history. The main process rejects one invoke with
- * more than MAX_BULK_BOOK_IDS ids, so a larger selection rides several
- * sequential invokes whose outcomes merge into one. A failed chunk rejects
- * and leaves the earlier chunks forgotten.
+ * Bulk Forget for Reading history. The main process rejects one invoke with more than
+ * MAX_BULK_BOOK_IDS ids, so a larger selection rides several sequential invokes whose outcomes
+ * merge into one. A failed chunk rejects and leaves the earlier chunks forgotten.
  */
 export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
   if (bookIds.length <= MAX_BULK_BOOK_IDS) {
@@ -202,6 +197,11 @@ export function listBookTrash(): Promise<BookTrashEntry[]> {
   return invoke("list_book_trash");
 }
 
+/**
+ * Restore a Forgotten book. With no mode the backend restores silently when
+ * the fresh identity has no new progress, and returns `status: "conflict"`
+ * when it does; Replace, Keep, and Merge resolve it.
+ */
 export function restoreBook(trashId: number, mode?: RestoreMode): Promise<RestoreOutcome> {
   return invoke("restore_book", mode === undefined ? { trashId } : { trashId, mode });
 }
@@ -224,10 +224,9 @@ export function clearBookCoverOverride(bookId: number): Promise<Book> {
 }
 
 /**
- * Save the given metadata into the library and the book's source EPUB/PDF
- * file (a one-time `.bak` backup is kept). Fields the format cannot store
- * stay as library edits. The file is re-parsed, so storeable fields stop
- * being overrides. Covers are not embedded.
+ * Save the given metadata into the library and the book's source EPUB/PDF file (a one-time `.bak`
+ * backup is kept). Fields the format cannot store stay as library edits. The file is re-parsed, so
+ * storeable fields stop being overrides. Covers are not embedded.
  */
 export function embedBookMetadata(bookId: number, form: MetadataFields): Promise<BookMetadata> {
   return invoke("embed_book_metadata", { bookId, form });
@@ -241,24 +240,26 @@ export function reconnectBook(bookId: number, path: string): Promise<Book> {
   return invoke("reconnect_book", { bookId, path });
 }
 
+/**
+ * Attach a picked file to a Reading-history book; the backend rejects bytes
+ * that already belong to a different book.
+ */
 export function relinkBook(bookId: number, path: string): Promise<Book> {
   return invoke("relink_book", { bookId, path });
 }
 
 /**
- * Raw bytes of a stored book's source file, fetched over the `tuxbooks://`
- * protocol (range-capable; used whole here). Consumers wrap them in a Blob
- * for the reader engines.
+ * Raw bytes of a stored book's source file, fetched over the `tuxbooks://` protocol (range-capable;
+ * used whole here). Consumers wrap them in a Blob for the reader engines.
  */
 export function getBookBytes(bookId: number, format: BookFormat): Promise<ArrayBuffer> {
   return tuxbooks().fetchBookBytes(bookId, format);
 }
 
 /**
- * The Readium reading session for a stored EPUB, parsed server-side: the
- * webpub manifest and the positions list, both already deserialized JSON.
- * The navigator's document/image resources load over `tuxbooks://` per
- * resource afterwards.
+ * The Readium reading session for a stored EPUB, parsed server-side: the webpub manifest and the
+ * positions list, both already deserialized JSON. The navigator's document/image resources load
+ * over `tuxbooks://` per resource afterwards.
  */
 export function getEpubSession(bookId: number): Promise<{ manifest: unknown; positions: unknown }> {
   return invoke("get_epub_session", { bookId });
@@ -343,9 +344,8 @@ export function getSyncDiagnostics(): Promise<SyncDiagnostics> {
 }
 
 /**
- * Connect a sync folder. A `mismatch` result is expected when the folder
- * belongs to another library; call again with `confirmLibraryId` to merge this
- * machine's state into it.
+ * Connect a sync folder. A `mismatch` result is expected when the folder belongs to another
+ * library; call again with `confirmLibraryId` to merge this machine's state into it.
  */
 export function connectSync(
   path: string,
@@ -478,6 +478,8 @@ export function copyText(text: string): Promise<void> {
   return tuxbooks().copyText(text);
 }
 
+/** Clear the caches the app rebuilds by itself (browser caches and the GPU
+ * fallback marker); resolves the bytes freed. */
 export function clearCache(): Promise<number> {
   return tuxbooks().clearCache();
 }
@@ -487,10 +489,9 @@ export function pathForFile(file: File): string {
 }
 
 /**
- * `tuxbooks://cover/<name>` for an extracted cover image. Only the cover's
- * file name crosses the protocol boundary; main resolves it inside the
- * artwork cache, so the stored absolute path never round-trips through the
- * renderer (issue #84 T-1).
+ * `tuxbooks://cover/<name>` for an extracted cover image. Only the cover's file name crosses the
+ * protocol boundary; main resolves it inside the artwork cache, so the stored absolute path never
+ * round-trips through the renderer (issue #84 T-1).
  */
 export function coverFileUrl(coverPath: string): string {
   const lastSeparator = Math.max(coverPath.lastIndexOf("/"), coverPath.lastIndexOf("\\"));
