@@ -223,6 +223,11 @@ export interface RestoreOutcome {
   status: RestoreStatus;
   bookId: number | null;
   bookUid: string | null;
+  /**
+   * Public ids this restore deleted: the fresh identity, and the old record
+   * when it comes back under a new id. Their cards have to leave the grid.
+   */
+  replacedBookIds: number[];
   conflict: RestoreConflict | null;
 }
 
