@@ -12,6 +12,7 @@ import {
   clearCache,
   copyDataPath,
   copyLibraryLocationPath,
+  copyText,
   getStorageReport,
   getSyncDiagnostics,
   openDataFolder,
@@ -166,8 +167,9 @@ export function DataSettings() {
   );
 
   /**
-   * Collect the support snapshot only on click, then write it to the same
-   * renderer clipboard the sync tab uses. Sync may be off or disconnected;
+   * Collect the support snapshot only on click, then hand the JSON to the
+   * main-process clipboard: the renderer's own `navigator.clipboard` write is
+   * denied by the permission policy (X-4). Sync may be off or disconnected;
    * the backend still answers with the local parts of the report.
    */
   const copyDiagnostics = useCallback(async () => {
@@ -176,7 +178,7 @@ export function DataSettings() {
     setCopyingDiagnostics(true);
     try {
       const payload = await getSyncDiagnostics();
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      await copyText(JSON.stringify(payload, null, 2));
       flashCopied("diagnostics");
     } catch {
       setCopyFeedback((current) => ({ ...current, diagnostics: "error" }));

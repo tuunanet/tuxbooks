@@ -28,4 +28,31 @@ test.describe("settings data tab", () => {
       .poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe(expected);
   });
+
+  test("copies diagnostics to the clipboard", async ({ page, electronApp }) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByRole("button", { name: "Application Data" }).click();
+    await expect(page.getByTestId("storage-diagnostics")).toBeVisible();
+
+    await page.getByTestId("copy-diagnostics").click();
+    await expect(page.getByTestId("copy-diagnostics-result")).toHaveText("Copied");
+
+    const raw = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
+    const copied = JSON.parse(raw || "null") as Record<string, unknown>;
+    // The whole support snapshot, in the pretty-printed form the button sends.
+    expect(Object.keys(copied)).toEqual(
+      expect.arrayContaining([
+        "generatedAt",
+        "sync",
+        "hashFailed",
+        "openConflicts",
+        "recentMerges",
+        "versions",
+      ]),
+    );
+    expect(raw).toContain("\n  ");
+    expect(copied.sync).toHaveProperty("enabled");
+    expect(copied.versions).toHaveProperty("dbMigration");
+  });
 });

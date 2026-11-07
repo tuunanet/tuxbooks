@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { SyncSettings } from "@/components/settings/SyncSettings";
 import type { SyncConflict, SyncIssue, SyncStatus } from "@/lib/bridge";
 import {
+  copyTextMock,
   invokeMock,
   mockInvoke,
   openSyncFolderMock,
@@ -51,8 +52,6 @@ function renderSettings() {
 const LOCAL_DEVICE = ENABLED.deviceId ?? "";
 const OTHER_DEVICE = "11111111111111111111111111111111";
 const CONFLICT_TIME = Date.parse("2026-10-28T10:00:00.000Z");
-
-const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
 
 function issue(overrides: Partial<SyncIssue> = {}): SyncIssue {
   return {
@@ -107,11 +106,8 @@ beforeEach(() => {
   pickBookFileMock.mockResolvedValue(null);
   openSyncFolderMock.mockReset();
   openSyncFolderMock.mockResolvedValue(undefined);
-  clipboardWrite.mockReset();
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: clipboardWrite },
-    configurable: true,
-  });
+  copyTextMock.mockReset();
+  copyTextMock.mockResolvedValue(undefined);
 });
 
 describe("SyncSettings", () => {
@@ -1080,8 +1076,8 @@ describe("Sync issue actions", () => {
     expect(screen.getByTestId("sync-copy-details-7")).toHaveAccessibleName(
       "Copy details for copy-two.epub",
     );
-    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
-    const copied = String(clipboardWrite.mock.calls[0]?.[0]);
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledTimes(1));
+    const copied = String(copyTextMock.mock.calls[0]?.[0]);
     expect(copied).toContain("Sync issue: duplicate book");
     expect(copied).toContain("Target: copy-two.epub");
     expect(copied).toContain("File: ops/abc/broken.json");

@@ -225,6 +225,7 @@ export interface TuxbooksApi {
   openSyncFolder(): Promise<void>;
   copyDataPath(rootId: StorageRootId): Promise<void>;
   copyLibraryLocationPath(locationId: number): Promise<void>;
+  copyText(text: string): Promise<void>;
   clearCache(): Promise<number>;
   fetchBookBytes(bookId: number, format: string): Promise<ArrayBuffer>;
   pathForFile(file: File): string;
@@ -749,6 +750,15 @@ export function copyDataPath(rootId: StorageRootId): Promise<void> {
 /** Copy one watched library location's path to the native clipboard (by id). */
 export function copyLibraryLocationPath(locationId: number): Promise<void> {
   return tuxbooks().copyLibraryLocationPath(locationId);
+}
+
+/**
+ * Copy renderer-formatted text to the native clipboard. The renderer's own
+ * `navigator.clipboard` write is denied by the permission policy (X-4), so
+ * text copies (diagnostics JSON, sync issue details) go through main.
+ */
+export function copyText(text: string): Promise<void> {
+  return tuxbooks().copyText(text);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -12,6 +12,7 @@ import {
   clearCacheMock,
   copyDataPathMock,
   copyLibraryLocationPathMock,
+  copyTextMock,
   invokeMock,
   mockInvoke,
   openDataFolderMock,
@@ -128,19 +129,12 @@ const DIAGNOSTICS: SyncDiagnostics = {
   versions: { libraryMarker: 1, opSchema: 1, dbMigration: 28 },
 };
 
-const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
-
 /**
- * user-event installs its own clipboard stub on `navigator` at setup, so the
- * test's writeText fake has to be re-applied after that.
+ * Text copies ride the bridge's copyText channel, so no navigator.clipboard
+ * stub is needed; user-event installs its own on setup.
  */
 function setupUser() {
-  const user = userEvent.setup();
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: clipboardWrite },
-    configurable: true,
-  });
-  return user;
+  return userEvent.setup();
 }
 
 function routeDiagnostics(payload: SyncDiagnostics = DIAGNOSTICS) {
@@ -162,7 +156,8 @@ describe("DataSettings", () => {
     copyLibraryLocationPathMock.mockResolvedValue(undefined);
     clearCacheMock.mockReset();
     clearCacheMock.mockResolvedValue(0);
-    clipboardWrite.mockReset();
+    copyTextMock.mockReset();
+    copyTextMock.mockResolvedValue(undefined);
   });
 
   it("shows the total footprint, both roots, and the reassurance", async () => {
@@ -369,8 +364,8 @@ describe("DataSettings", () => {
     await waitFor(() =>
       expect(screen.getByTestId("copy-diagnostics-result")).toHaveTextContent("Copied"),
     );
-    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
-    const copied = JSON.parse(String(clipboardWrite.mock.calls[0]?.[0])) as SyncDiagnostics;
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledTimes(1));
+    const copied = JSON.parse(String(copyTextMock.mock.calls[0]?.[0])) as SyncDiagnostics;
     expect(Object.keys(copied)).toEqual(
       expect.arrayContaining([
         "generatedAt",
@@ -413,8 +408,8 @@ describe("DataSettings", () => {
 
     await user.click(screen.getByTestId("copy-diagnostics"));
 
-    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
-    const copied = JSON.parse(String(clipboardWrite.mock.calls[0]?.[0])) as SyncDiagnostics;
+    await waitFor(() => expect(copyTextMock).toHaveBeenCalledTimes(1));
+    const copied = JSON.parse(String(copyTextMock.mock.calls[0]?.[0])) as SyncDiagnostics;
     expect(copied.sync.enabled).toBe(false);
     expect(copied.openConflicts).toEqual([]);
     expect(copied.versions.dbMigration).toBe(28);
@@ -430,14 +425,14 @@ describe("DataSettings", () => {
     await user.click(screen.getByTestId("copy-diagnostics"));
 
     expect(await screen.findByTestId("copy-diagnostics-result")).toHaveTextContent("Copy failed");
-    expect(clipboardWrite).not.toHaveBeenCalled();
+    expect(copyTextMock).not.toHaveBeenCalled();
     expect(screen.getByTestId("copy-diagnostics")).toBeInTheDocument();
   });
 
   it("shows Copy failed when the clipboard write rejects", async () => {
     const user = setupUser();
     routeDiagnostics();
-    clipboardWrite.mockRejectedValueOnce(new Error("clipboard denied"));
+    copyTextMock.mockRejectedValueOnce(new Error("clipboard denied"));
     renderDataSettings();
     await screen.findByTestId("storage-total");
 

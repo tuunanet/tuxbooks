@@ -3,6 +3,7 @@ import { RefreshCw, Unplug } from "lucide-react";
 import {
   attachWaitingBook,
   connectSync,
+  copyText,
   disconnectSync,
   dismissAllSyncIssues,
   dismissSyncIssue,
@@ -355,7 +356,7 @@ export function SyncSettings() {
         } else if (issue.action === "open_folder") {
           await openSyncFolder();
         } else if (issue.action === "copy_details") {
-          await navigator.clipboard.writeText(formatIssueDetails(issue));
+          await copyText(formatIssueDetails(issue));
           setNotice("Copied issue details.");
         }
       } catch (cause) {
@@ -372,7 +373,7 @@ export function SyncSettings() {
     setError(null);
     setNotice(null);
     try {
-      await navigator.clipboard.writeText(formatIssueDetails(issue));
+      await copyText(formatIssueDetails(issue));
       setNotice("Copied issue details.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

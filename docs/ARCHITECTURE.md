@@ -122,17 +122,27 @@ Publication-derived and user-stored strings (metadata fields, annotation
 text/notes/locators, search hits, collection names, reader profile data) are
 rendered only through React text nodes and escaped attributes; the renderer
 has no `dangerouslySetInnerHTML`, no dynamic `href`, and no
-`document.title`/clipboard/notifications fed from publication-derived or
-user-stored strings. The Application Data tab copies app-owned filesystem
-paths (the data root and the watched-location paths) to the clipboard; those
-carry no publication data. The single URL-carrying
+`document.title`/notifications fed from publication-derived or user-stored
+strings. Clipboard writes are never ambient: they happen only when the user
+clicks a Copy control, and they ride the main-process channels (`copyDataPath`,
+`copyLibraryLocationPath`, `copyText`) because the renderer's own
+`navigator.clipboard` write is denied by the X-4 permission policy. The
+Application Data tab copies app-owned filesystem paths (the data root and the
+watched-location paths); those carry no publication data. The two support
+copies are the exception the user asks for by clicking: Copy diagnostics and
+the sync tab's Copy details carry book titles and paths, bounded by
+`MAX_CLIPBOARD_TEXT_BYTES`, and never book contents, annotation text, or
+notes (ADR 0015). The single URL-carrying
 sink is the stored cover path, which `lib/bridge.ts coverFileUrl` reduces to a
 percent-encoded file name under the fixed `tuxbooks://cover/` scheme. Reader
 profile values from localStorage are snapped back onto the supported scales on
 read (`lib/readerSettings.ts`). Attack side: parse-time caps bound the strings
 (`docs/RESOURCE_LIMITS.md`, including the attribute-derived calibre series
 values), and the hostile-fixture tests in
-`frontend/tests/security/metadataNeutrality.test.tsx` pin every sink above.
+`frontend/tests/security/metadataNeutrality.test.tsx` pin the render sinks
+above (`dangerouslySetInnerHTML`, `href`, `document.title`); the clipboard
+sinks are pinned by the `copyText` handler test in
+`frontend/tests/security/ipcHandlers.test.ts`.
 External navigation stays behind the X-5 `linkPolicy` gate.
 
 ### Document worker (issue #81, ADR 0001)

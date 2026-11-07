@@ -485,7 +485,8 @@ expires, so a Dismiss button can never hide one without resolving it.
 Application Data has a **Copy diagnostics** button for support. Nothing is
 collected in the background and nothing is written to disk: the
 `sync_diagnostics` command runs only when the button is clicked, then the
-renderer writes the JSON to the clipboard.
+JSON is handed to the main process, which writes it to the clipboard (the
+renderer's own clipboard write is denied by the permission policy, X-4).
 
 The document carries:
 
