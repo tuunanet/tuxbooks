@@ -28,7 +28,7 @@ import {
   type SyncTrashEntry,
   type WaitingBook,
 } from "@/lib/bridge";
-import { formatIssueDetails } from "./SyncLists";
+import { formatIssueDetails } from "./SyncIssues";
 import { SyncFolderSection, SyncSections } from "./SyncPanels";
 import { useSyncStatusRefresh } from "./useSyncStatusRefresh";
 import {

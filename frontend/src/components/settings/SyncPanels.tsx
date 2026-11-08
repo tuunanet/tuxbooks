@@ -17,12 +17,10 @@ import {
   type SyncTrashEntry,
   type WaitingBook,
 } from "@/lib/bridge";
-import {
-  SyncConflictsSection,
-  SyncIssuesSection,
-  SyncTrashSection,
-  WaitingBooksSection,
-} from "./SyncLists";
+import { SyncConflictsSection } from "./SyncConflicts";
+import { SyncIssuesSection } from "./SyncIssues";
+import { SyncTrashSection } from "./SyncTrash";
+import { WaitingBooksSection } from "./SyncWaiting";
 import { formatSyncTime as formatTime } from "./syncFormat";
 
 const STATUS_LABEL: Record<SyncState, string> = {
