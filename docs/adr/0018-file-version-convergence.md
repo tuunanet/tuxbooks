@@ -18,7 +18,7 @@ identity), `docs/SYNC.md`, `docs/SYNC_ISSUES.md`, `docs/DATABASE.md`
 User-authored state travels between machines; book files do not. Operations are
 capped at 1 MiB (`MAX_OP_FILE_BYTES` in `sidecar/src/sync/model.rs`) and carry
 field maps for user state, not bytes. The only blob grammar in the sync folder
-is cover-specific (`cover_file_name` in `sidecar/src/sync/store.rs`: 8 to 64
+is cover-specific (`cover_file_name` in `sidecar/src/sync/store/covers.rs`: 8 to 64
 hex digits plus an image extension, 16 MiB cap). A user edits a book's file
 outside TuxBooks, in Calibre or Sigil or by downloading a new edition. One
 machine changes. Every other machine stays on the old bytes. Annotations and
@@ -197,8 +197,9 @@ happens. Closed books adopt silently in the background.
 - ADR 0013 for the transport and the identity model this builds on; ADR 0014
   for durable books; ADR 0015 for issue actions; ADR 0017 for pre-decided
   winners and the retry sweep.
-- `sidecar/src/sync/store.rs` (`cover_file_name`, `store_cover_blob`,
-  `write_bytes_atomic`), `sidecar/src/sync/model.rs` (`MAX_OP_FILE_BYTES`),
+- `sidecar/src/sync/store/covers.rs` (`cover_file_name`, `store_cover_blob`),
+  `sidecar/src/sync/store/io.rs` (`write_bytes_atomic`),
+  `sidecar/src/sync/model.rs` (`MAX_OP_FILE_BYTES`),
   `sidecar/src/services/library_reconciler.rs` (`handle_modified`),
   `sidecar/src/services/book_importer.rs` (`import_file`, `finalize_import`),
   `sidecar/src/repository/books.rs` (`upsert_file`),

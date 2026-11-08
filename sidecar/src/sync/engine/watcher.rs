@@ -22,6 +22,8 @@ use tokio::sync::Notify;
 
 use crate::error::AppError;
 
+use crate::sync::store::is_op_file_name;
+
 use super::SyncService;
 
 /// Quiet period after the last matching event before the engine is woken.
@@ -182,15 +184,13 @@ impl WakeGate {
 /// wake the engine, or a busy folder would wake-storm it past the point of
 /// the 10 s pass interval the watcher exists to improve.
 ///
-/// The op rule mirrors `store::scan_ops` — the same flat-read rule: plain
-/// `*.json` names, no dot-prefixed temps. Any device directory passes here
-/// (scan_ops never validated the directory name; the pass's own grammar
-/// does). The blob rule stays local and permissive on purpose — the store
-/// re-validates every name it reads, so the watcher only decides whether a
-/// pass is worth running, and a hidden dotfile is noise under the same
-/// convention scan_ops already applies.
-///
-/// Shared-helper extraction is deferred to the planned store.rs split task (push gate).
+/// The op rule is `store::is_op_file_name` — the same flat-read rule
+/// scan_ops applies. Any device directory passes here (scan_ops never
+/// validated the directory name; the pass's own grammar does). The blob rule
+/// stays local and permissive on purpose — the store re-validates every name
+/// it reads, so the watcher only decides whether a pass is worth running,
+/// and a hidden dotfile is noise under the same convention scan_ops already
+/// applies.
 fn wakes_engine(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
@@ -204,7 +204,7 @@ fn wakes_engine(root: &Path, path: &Path) -> bool {
             (Some(Component::Normal(_device)), Some(Component::Normal(name)))
                 if components.next().is_none() =>
             {
-                is_op_file_name(name)
+                name.to_str().is_some_and(is_op_file_name)
             }
             _ => false,
         },
@@ -220,13 +220,6 @@ fn wakes_engine(root: &Path, path: &Path) -> bool {
         }
         _ => false,
     }
-}
-
-/// The operation file-name rule from `store::scan_ops`: `.json`, and not a
-/// dot-prefixed temp name.
-fn is_op_file_name(name: &OsStr) -> bool {
-    name.to_str()
-        .is_some_and(|name| name.ends_with(".json") && !name.starts_with('.'))
 }
 
 fn is_hidden(name: &OsStr) -> bool {
