@@ -119,13 +119,12 @@ annotation count when present. A record with no metadata is labelled
 
 `id`, `path` (UNIQUE), `added_at`. The filesystem roots registered by
 `import_paths` (a folder import, or the parent of a picked file), by
-`scan_library`, or by the test seeding; only these are watched and
-reconciled. Unwatching a folder deletes its row, which is what stops the
-sync, and ends the library membership of the file rows it owns. The durable
-book and its reading progress and annotations stay (ADR 0014 D4); files on
-disk are never touched. Books outside watched locations are never touched by
-reconciliation — a fresh database that predates milestone 3 stays unwatched
-until the next import.
+`scan_library`, or by the test seeding; only these are watched and reconciled.
+Unwatching a folder deletes its row, which is what stops the sync, and ends the
+library membership of the file rows it owns. The durable book and its reading
+progress and annotations stay (ADR 0014 D4); files on disk are never touched.
+Books outside watched locations are never touched by reconciliation — a fresh
+database that predates milestone 3 stays unwatched until the next import.
 
 ### collections
 
@@ -152,13 +151,12 @@ coarse shell position that backs the library's "In Progress" /
 "Finished" sections, and `mark_finished` (milestone 10) sets it to 100
 without disturbing the stored locators.
 
-Progress rows are user data and are migrated, never reset, when the
-rendering engine changes (foliate → Readium, see `docs/EPUB.md`). The migration is versioned and idempotent:
-a schema/engine version marks which rows have been converted, the original
-locator values are preserved until the new ones are validated, and a
-per-book completion marker prevents re-running. New columns for the
-migration are added by an embedded numbered migration, like any schema
-change.
+Progress rows are user data and are migrated, never reset, when the rendering
+engine changes (foliate → Readium, see `docs/EPUB.md`). The migration is
+versioned and idempotent: a schema/engine version marks which rows have been
+converted, the original locator values are preserved until the new ones are
+validated, and a per-book completion marker prevents re-running. Its new
+columns are added by an embedded numbered migration, like any schema change.
 
 ### annotations
 
@@ -380,15 +378,13 @@ into quoted prefix phrases ANDed together (`wind river` →
 
 ## Shared Forget (migration 0023)
 
-The local trash row is the durable record of a Forget; the sync mirror keeps
-the remote side:
+The local trash row is the durable record of a Forget; the sync mirror keeps the remote side:
 
 - `sync_book_trash` — one row per forgotten `book_uid`: the portable
-  `snapshot_json` (collection memberships by collection uid, provider links
-  omitted), `replacement_book_uid`, the delete clock, the 30-day window,
-  `restored_at`, `discarded`, and the restore clock. A missing snapshot is
-  allowed so a delete always propagates; the receiver records a Sync issue
-  instead of offering a fake restore.
+  `snapshot_json` (memberships by collection uid, provider links omitted),
+  `replacement_book_uid`, the delete clock, the 30-day window, `restored_at`,
+  `discarded`, and the restore clock. A missing snapshot still propagates the
+  delete; the receiver records a Sync issue instead of offering a fake restore.
 - A `book` entity in `sync_state_entities` carries the tombstone. It does not
   invent tombstones for annotations or progress: the book tombstone is the
   authority, and stale operations for a forgotten uuid are ignored.
@@ -406,12 +402,11 @@ JSON values, both hybrid clocks, and the devices that wrote them. Migration
 0027 adds `resolved_at` and an index on it. The applied winner is never rolled
 back by the row itself; the queue only records what was lost.
 
-- A resolved row keeps `resolved_at` for the audit trail and leaves the open
-  count. `keep_winner` only stamps it. `apply_loser` publishes the discarded
-  value as a normal operation with a fresh clock, so every device converges;
-  delete/edit (`__deleted__`) and lost restores (`__restore__`) republish the
-  explicit restore operation instead, which also closes the local trash entry
-  on every device that applies the restore.
+- A resolved row keeps `resolved_at` (audit trail) and the open count.
+  `keep_winner` only stamps it. `apply_loser` publishes the discarded value as a
+  normal operation with a fresh clock, so every device converges; delete/edit
+  (`__deleted__`) and lost restores (`__restore__`) republish the restore
+  operation instead, closing the local trash entry on each device applying it.
 - An unresolved row older than 30 days is deleted during a status refresh or a
   conflict list, matching the trash window. Its `sync_issues` row closes when
   no other open conflict shares the key.
@@ -427,22 +422,22 @@ back by the row itself; the queue only records what was lost.
 
 ## Cloud-folder sync (migration 0015)
 
-The sync engine keeps its bookkeeping in the same SQLite file. Reading
-progress, annotations, metadata overrides, collection membership, and
-last-opened are keyed by the durable book uid; a file row is only a
-location. Nothing here changes how imports, readers, or search work. The
-full contract is [SYNC.md](SYNC.md). The recovery decisions for issues,
-conflicts, and hash retry are in
+The sync engine keeps its bookkeeping in the same SQLite file. Reading progress,
+annotations, metadata overrides, collection membership, and last-opened are
+keyed by the durable book uid; a file row is only a location. Nothing here
+changes how imports, readers, or search work. The full contract is
+[SYNC.md](SYNC.md); recovery decisions live in
 [ADR 0015](adr/0015-sync-recovery.md).
 
 - `sync_meta` — device id/name, folder path, library id, enabled flag, baseline
   flag, last sync, last error, and the hybrid logical clock.
 - `sync_dirty` — one row per entity with a pending local change. Triggers write
-  the canonical snapshot at change time (`old_json`/`new_json`); the capture
-  pass drains it. Progress, metadata, last-opened, and book lifecycle key on
-  `book_uid`; annotations carry `book_uid` directly; membership keys on
-  `book_uid:collection_id`. Triggers skip a vanished collection's cascade (a
-  local deletion, not a shared delete).
+  the canonical snapshot (`old_json`/`new_json`) and stamp the write's hybrid
+  clock (migration 0030, ADR 0017 D3); the capture pass drains the row and
+  publishes that clock with the operation. Progress, metadata, last-opened, and
+  book lifecycle key on `book_uid`; annotations carry `book_uid` directly;
+  membership keys on `book_uid:collection_id`; a vanished collection's cascade
+  is skipped (a local deletion, not a shared delete).
 - `sync_state_entities` / `sync_state_fields` — the materialized shared state.
   Entities carry tombstones and entity-level clocks; fields carry one value and
   one clock each.
@@ -466,10 +461,9 @@ conflicts, and hash retry are in
 - `sync_reproject` — book uuids whose canonical local row was deleted. The
   engine projects the shared state onto the next bound row, so a duplicate
   copy does not look empty after the first copy is removed.
-- `books.rehash_pending` — set before a metadata embed rewrites the file and
+- `books.rehash_pending` — set before a metadata embed rewrites the file,
   cleared after the size/mtime snapshot is refreshed. The identity sweep treats
-  it as a forced rehash, which closes the crash window between the rewrite and
-  the snapshot update.
+  it as a forced rehash, closing the crash window between rewrite and snapshot.
 
 `annotations.sync_uid` and `collections.sync_uid` are the portable entity ids;
 existing rows are backfilled in the migration. The sync worker fills a null uid
@@ -480,11 +474,10 @@ on first use, so a row created while sync is off is never a constraint error.
 - All SQL lives in `repository/`; commands and services never embed SQL.
 - Queries use runtime `sqlx::query`/`query_as` (not `query!` macros), so
   builds do not need `DATABASE_URL` or `sqlx prepare`.
-- Imports upsert by `path`; a re-scan updates metadata instead of
-  duplicating rows. After the upsert, the importer records the fresh parse
-  in `book_source_metadata` for that file and re-merges the durable book's
-  effective view (`repository::metadata::record_imported_source`), so user
-  overrides survive file changes (milestone 7).
+- Imports upsert by `path`; a re-scan updates metadata instead of duplicating
+  rows and re-merges the durable book's effective view
+  (`repository::metadata::record_imported_source`) so user overrides survive
+  file changes (milestone 7); the fresh parse lands in `book_source_metadata`.
 - Tests always create the pool in a `tempfile` temp dir.
 
 ## Reconciliation rules (milestone 3)
@@ -496,13 +489,11 @@ that path, and rows whose files vanished have `available = 0`. Rules:
 - Removals never delete rows; they only flip availability (prefix-aware:
   removing a directory marks everything beneath it).
 - Renames/moves relink the existing row by id (`relink_book`), so reading
-  progress and collections survive. A rename whose destination path is
-  owned by another row resolves by fs truth (content import + old path
-  unavailable).
-- When the destination half of a rename event is lost (watch registered a
-  moment too late) the move is recovered during reconciliation sweeps by
-  relinking the book whose stored file vanished and whose name+size match
-  the unknown file — a copied file (source still on disk) is imported as a
-  new book instead.
+  progress and collections survive. A rename whose destination path is owned
+  by another row resolves by fs truth (content import + old path unavailable).
+- When the destination half of a rename event is lost (the watch registered a
+  moment too late), reconciliation sweeps recover the move by relinking the
+  book whose stored file vanished and whose name+size match the unknown file;
+  a copied file (source still on disk) imports as a new book instead.
 - Modification events re-parse only when the stored size/mtime snapshot
   differs; duplicate/touch events are no-ops.
