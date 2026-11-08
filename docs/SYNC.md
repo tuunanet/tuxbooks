@@ -76,7 +76,11 @@ only when its `library.json` id differs.
 
 ## Book files and backups
 
-Sync never moves, copies, or deletes a book file. A metadata embed is a file
+Sync never moves, copies, or deletes a book file. The one exception is
+adoption (ADR 0018 D3): a device whose copy is behind the book's winning
+`file_version` overwrites its local file's bytes with the verified staged
+copy, and nothing else — a vanished local file is never resurrected, and no
+sync path deletes a book file. A metadata embed is a file
 write: it changes the EPUB or PDF and leaves a one-time `<file>.bak` beside it
 (`book.epub.bak`, `book.pdf.bak`). If the book folder is cloud-synced, the
 client carries both files, and the other machine reimports the new bytes on its
@@ -205,6 +209,29 @@ fresh hash differs from the winning pointer (ADR 0018 D1) — the loop break
 that keeps adoption re-imports silent. A first import never mints, and a
 locally deleted file never propagates; the winner stays authoritative. The
 op carries hash and size under the minting entity clock.
+
+The consumer half is adoption (ADR 0018 D3): after each successful pass, every
+available copy whose binding hash differs from its book's winning pointer
+fetches `blobs/books/<winning hash>.<ext>`, verifies the size and SHA-256
+against the pointer, and replaces its local file's bytes atomically. A copy
+whose bytes already match the pointer is settled; a copy whose bytes moved
+without a rebind (an external edit in flight) is skipped, because overwriting
+it would race the user's own write. The swap refreshes the file snapshot, so
+the identity sweep rehashes once and rebinds onto the existing book uid —
+annotations, progress, and locators are untouched. Adoption never publishes a
+pointer: the re-import its own swap can trigger sees the winning hash and
+mints nothing. A missing blob is op-before-blob arrival and waits silently; a
+blob that fails verification records a `book_file_adopt_failed` issue and is
+retried on the next pass.
+
+Open-book deferral (ADR 0018 D5) is not implemented yet: the sidecar has no
+open-book registry, so there is no discoverable set of books to defer. Today
+every settled-copy check runs in the engine pass, and the library surfaces the
+not-yet-settled state as a per-book `newerVersionAvailable` flag on
+`list_books` (a small badge on the card and list rows). The registry, the
+swap-on-close, and deferring adoption while a reader session holds the file
+are a follow-up; until then a book left open during another device's edit can
+have its bytes swapped underneath the open reader.
 
 ## Merge rules
 
@@ -442,7 +469,13 @@ folder. It covers:
   dismissal refused for actionable rows, and conflicts excluded from the issue
   list and count;
 - a pending rehash surviving a missed snapshot update, as in a crash between
-  the rewrite and the snapshot write.
+  the rewrite and the snapshot write;
+- file-version adoption: a closed book adopting the winning bytes and
+  rebinding onto its existing identity with annotations and progress intact,
+  a pointer waiting silently for its blob and converging once it arrives, a
+  corrupted blob blocking adoption behind a visible issue until it verifies,
+  an adoption re-import minting nothing, an in-flight external edit left
+  alone until it wins the pointer, and a vanished file changing nothing.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, the primary action per issue kind, Copy details, opening the sync

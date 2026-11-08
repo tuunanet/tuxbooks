@@ -112,3 +112,50 @@ pub async fn file_path_for_hash(
     .await?;
     Ok(path)
 }
+
+/// One available file copy whose bytes are not the book's winning version:
+/// the candidate set for adoption (ADR 0018 D3) and the source of the
+/// library's "newer version available" state. A book can have several file
+/// rows; each copy settles on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsettledCopy {
+    pub book_uid: String,
+    pub book_id: i64,
+    pub path: String,
+    /// The hash this copy's binding last proved, from the identity sweep.
+    /// The file's actual bytes can differ — adoption re-hashes before it
+    /// touches anything.
+    pub binding_hash: String,
+}
+
+/// Every available copy behind its book's winning pointer. Excludes books
+/// without a pointer (nothing to adopt), settled copies, unavailable rows
+/// (a vanished file is not adoption's business), and tombstoned pointers.
+pub async fn unsettled_copies(pool: &SqlitePool) -> Result<Vec<UnsettledCopy>, AppError> {
+    let rows: Vec<UnsettledCopy> = sqlx::query_as(
+        r#"
+        SELECT s.book_uid, s.book_id, b.path, s.content_hash
+        FROM sync_book_bindings s
+        JOIN books b ON b.id = s.book_id AND b.available = 1
+        WHERE EXISTS (
+            SELECT 1 FROM sync_state_fields f
+            JOIN sync_state_entities e ON e.kind = f.kind AND e.entity_uid = f.entity_uid
+            WHERE f.kind = 'file_version' AND f.field = 'content_hash'
+              AND e.deleted = 0 AND e.entity_uid = s.book_uid
+              AND json_extract(f.value_json, '$') != s.content_hash
+        )
+        ORDER BY s.book_id
+        "#,
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(book_uid, book_id, path, binding_hash)| UnsettledCopy {
+        book_uid,
+        book_id,
+        path,
+        binding_hash,
+    })
+    .collect();
+    Ok(rows)
+}

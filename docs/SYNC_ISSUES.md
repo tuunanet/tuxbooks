@@ -52,6 +52,7 @@ without an `issue_cleared` arm never closes on its own.
 | `forget_membership_skipped`                      | `repository/lifecycle.rs`                                  | never; action is CopyDetails                                          | none; the snapshot named shelves this library does not have yet                            |
 | `restore_conflict`                               | `repository/lifecycle.rs`, `apply_remote_restore`          | never; action is CopyDetails                                          | none; the restore dialog carries the choice                                                |
 | `book_blob_oversize`                             | `capture/file_version.rs` (key `book-blob-oversize:<uid>`) | a binding under the cap carries the winning hash, or the book is gone | none; shrinking the file (or raising the cap) and re-importing closes it on the next sweep |
+| `book_file_adopt_failed`                         | `engine/adopt.rs` (key `book-file-adopt:<uid>`)            | a later pass adopts the winning version                               | none; adoption retries the blob on every pass and closes the row when it verifies          |
 
 Two invariants worth knowing before changing anything here:
 
@@ -116,7 +117,7 @@ contract and the self-clearing rules are recorded in
 | `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed`, `hash_failed` | Retry        |
 | `operation_rejected`                                                                                                                                                             | Open folder  |
 | `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                               | Copy details |
-| `book_blob_oversize`                                                                                                                                                             | Copy details |
+| `book_blob_oversize`, `book_file_adopt_failed`                                                                                                                                   | Copy details |
 | `invalid_dirty_kind`                                                                                                                                                             | Dismiss      |
 
 Retry does the work the kind needs, not just another background wake-up:

@@ -25,6 +25,7 @@ use super::conflict;
 use super::store;
 use super::waiting;
 
+mod adopt;
 mod attach;
 mod autoretry;
 mod clear;

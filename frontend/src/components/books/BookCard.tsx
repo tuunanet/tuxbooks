@@ -143,6 +143,15 @@ export function BookCard({
             {book.hashState === "failed" && (
               <IndexingBadge className="absolute bottom-1.5 left-1.5" />
             )}
+            {book.newerVersionAvailable && (
+              <Badge
+                variant="secondary"
+                className="absolute bottom-1.5 right-1.5"
+                data-testid="book-newer-version"
+              >
+                Newer version
+              </Badge>
+            )}
           </div>
           <div className="px-0.5 pt-2 pb-1">
             <p className="line-clamp-2 min-h-10 text-sm leading-snug font-medium">{book.title}</p>

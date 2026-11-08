@@ -31,7 +31,22 @@ pub async fn get_library_stats(state: &AppState) -> Result<LibraryStats, AppErro
 
 /// All books in the library, ordered by title.
 pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
-    books::list_books(&state.db).await
+    let mut all = books::list_books(&state.db).await?;
+    // Decorated here rather than in the repository because the repository
+    // module is over the push gate; the source of truth is the sync mirror
+    // (ADR 0018 D3), so the decoration is one extra query per list.
+    let unsettled: std::collections::HashSet<String> =
+        crate::sync::file_version::unsettled_copies(&state.db)
+            .await?
+            .into_iter()
+            .map(|copy| copy.book_uid)
+            .collect();
+    for book in &mut all {
+        if let Some(uid) = &book.book_uid {
+            book.newer_version_available = unsettled.contains(uid);
+        }
+    }
+    Ok(all)
 }
 
 /// Every file location of one durable book (ADR 0014 D7). The library still

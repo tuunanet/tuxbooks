@@ -245,6 +245,63 @@ async fn get_storage_stats_serves_the_missing_from_disk_flag() {
     assert_eq!(locations[1]["missingFromDisk"], json!(true));
 }
 
+/// The library payload carries the file-version state (ADR 0018 D3): a copy
+/// behind its book's winning pointer reports newerVersionAvailable, and the
+/// flag clears once the binding matches the pointer again.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_books_reports_a_newer_file_version_until_settled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path()).await;
+    let file_id = seed_book(&state, "Versioned").await;
+    let hash_v1 = "a".repeat(64);
+    let hash_v2 = "b".repeat(64);
+    crate::sync::identity::bind_hash(&state.db, file_id, &hash_v1, 100, 1)
+        .await
+        .unwrap()
+        .expect("bound");
+    let uid: String = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO sync_state_entities (kind, entity_uid, book_uid) VALUES ('file_version', ?1, ?1)")
+        .bind(&uid)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_fields (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('file_version', ?1, 'content_hash', ?2, 1, 0, 'remote'),
+                ('file_version', ?1, 'size', '2', 1, 0, 'remote')",
+    )
+    .bind(&uid)
+    .bind(format!("\"{hash_v2}\""))
+    .execute(&state.db)
+    .await
+    .unwrap();
+
+    let result = dispatch(&state, &test_events(), "list_books", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(result[0]["newerVersionAvailable"], json!(true));
+
+    // Settled: the pointer names the bytes the binding already proved.
+    sqlx::query(
+        "UPDATE sync_state_fields SET value_json = ?3
+         WHERE kind = 'file_version' AND entity_uid = ?1 AND field = 'content_hash'",
+    )
+    .bind(&uid)
+    .bind(&hash_v1)
+    .bind(format!("\"{hash_v1}\""))
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let result = dispatch(&state, &test_events(), "list_books", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(result[0]["newerVersionAvailable"], json!(false));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn get_startup_recovery_is_null_for_a_healthy_database() {
     let tmp = tempfile::tempdir().unwrap();

@@ -35,6 +35,7 @@ export function makeBook(overrides: Partial<Book> = {}): Book {
     seriesName: null,
     progressPercent: null,
     progressUpdatedAt: null,
+    newerVersionAvailable: false,
     providerLinks: [],
     ...overrides,
   };

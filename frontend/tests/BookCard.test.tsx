@@ -194,6 +194,16 @@ describe("BookCard", () => {
     expect(screen.queryByTestId("book-indexing")).not.toBeInTheDocument();
   });
 
+  it("flags a book whose shared file version is newer", () => {
+    const { rerender } = render(
+      <BookCard book={makeBook({ newerVersionAvailable: true })} collections={[]} />,
+    );
+    expect(screen.getByTestId("book-newer-version")).toHaveTextContent("Newer version");
+
+    rerender(<BookCard book={makeBook({ newerVersionAvailable: false })} collections={[]} />);
+    expect(screen.queryByTestId("book-newer-version")).not.toBeInTheDocument();
+  });
+
   it("shows missing-file state with recovery actions for unavailable books", async () => {
     const onLocate = vi.fn();
     const onRemove = vi.fn();
