@@ -40,6 +40,9 @@ impl super::SyncService {
             .task
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task);
+        // The watcher lives as long as the engine: if a folder
+        // is already connected, remote files now wake the loop directly.
+        self.restart_watcher();
     }
 
     /// Flush once with a deadline, then stop the loop. Called from `serve` on
@@ -58,6 +61,10 @@ impl super::SyncService {
         if let Some(task) = task {
             let _ = tokio::time::timeout(Duration::from_secs(3), task).await;
         }
+        // Stop the watcher last, after the loop it wakes is gone. Dropping
+        // the handle joins the debounce thread, so nothing outlives the
+        // engine.
+        self.stop_watcher();
     }
 
     pub fn wake(&self) {

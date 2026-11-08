@@ -82,6 +82,9 @@ impl super::SyncService {
         self.clear_error().await;
         self.refresh_status().await?;
         self.wake();
+        // The sync root is known (or has changed): (re)start the folder
+        // watcher against it.
+        self.restart_watcher();
         Ok(SyncConnectResult {
             status: self.status_snapshot(),
             mismatch: None,
@@ -124,6 +127,8 @@ impl super::SyncService {
         self.refresh_status().await?;
         self.set_state(super::SyncState::Disabled);
         self.emit_status();
+        // No folder to watch while disconnected.
+        self.stop_watcher();
         Ok(self.status_snapshot())
     }
 
