@@ -19,3 +19,4 @@ mod retry_ops;
 mod service;
 mod support;
 mod waiting;
+mod watcher;

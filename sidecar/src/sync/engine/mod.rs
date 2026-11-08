@@ -35,6 +35,7 @@ mod pass;
 mod remote;
 mod retry;
 mod trash;
+mod watcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -152,9 +153,13 @@ struct Inner {
     events: EventEmitter,
     status: RwLock<SyncStatus>,
     pass_lock: tokio::sync::Mutex<()>,
-    wake: Notify,
+    wake: Arc<Notify>,
     shutdown: watch::Sender<bool>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The sync-folder watcher (ADR 0018 D5), alive exactly as long as the
+    /// engine: started when sync starts or a folder connects, stopped at
+    /// shutdown and disconnect.
+    watcher: Mutex<Option<watcher::SyncFolderWatcher>>,
 }
 
 #[derive(Clone)]
@@ -204,9 +209,10 @@ impl SyncService {
                 events,
                 status: RwLock::new(status),
                 pass_lock: tokio::sync::Mutex::new(()),
-                wake: Notify::new(),
+                wake: Arc::new(Notify::new()),
                 shutdown,
                 task: Mutex::new(None),
+                watcher: Mutex::new(None),
             }),
         })
     }

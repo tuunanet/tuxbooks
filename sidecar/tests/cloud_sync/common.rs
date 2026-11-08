@@ -32,7 +32,9 @@ pub type EmittedEvents = Arc<Mutex<Vec<(&'static str, Value)>>>;
 pub struct Device {
     _dir: TempDir,
     pub pool: SqlitePool,
-    pub service: SyncService,
+    /// Behind an `Arc` because the pass loop and the sync-folder watcher
+    /// are spawned through `SyncService::start`.
+    pub service: Arc<SyncService>,
     pub db_path: PathBuf,
     pub events: EmittedEvents,
 }
@@ -52,7 +54,7 @@ pub async fn device() -> Device {
     Device {
         _dir: dir,
         pool,
-        service,
+        service: Arc::new(service),
         db_path,
         events,
     }
