@@ -85,7 +85,7 @@ rejected before write (`electron/main/sidecarTransport.ts`), and response
 lines beyond the largest legitimate book payload are discarded instead of
 buffered. Unknown JSON-RPC methods, malformed JSON, and malformed params
 are rejected by the sidecar with typed JSON-RPC errors and never crash it
-(pinned by `sidecar/src/rpc.rs` tests).
+(pinned by `sidecar/src/rpc/tests/dispatch.rs` tests).
 
 ### Window hardening (issue #85, invariants X-1..X-5)
 

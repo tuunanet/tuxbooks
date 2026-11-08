@@ -15,7 +15,7 @@ mod tests;
 
 pub use book::book_lifecycle_state;
 pub use conflict::record_tombstone_conflict;
-pub use project::{prior_from_state, project, project_book, retry_book_lifecycle};
+pub use project::{project, project_book, retry_book_lifecycle};
 pub use state::load_state;
 
 use crate::error::AppError;

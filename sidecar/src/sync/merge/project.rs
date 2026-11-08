@@ -1,12 +1,11 @@
 //! Projection orchestration: which affected entities are pushed into the
 //! local catalog, and the whole-book lifecycle projection.
 
-use serde_json::{Map, Value};
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::sync::identity;
-use crate::sync::model::{EntityKind, State};
+use crate::sync::model::EntityKind;
 
 use super::catalog;
 use super::state::load_state;
@@ -197,10 +196,4 @@ pub async fn retry_book_lifecycle(pool: &SqlitePool, book_uid: &str) -> Result<b
             .await?;
     }
     Ok(true)
-}
-
-/// Build a delete op from the current mirror state; used by trash restore's
-/// inverse and by tests.
-pub fn prior_from_state(state: &State) -> Map<String, Value> {
-    state.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
