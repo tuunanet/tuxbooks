@@ -51,6 +51,7 @@ without an `issue_cleared` arm never closes on its own.
 | `book_snapshot_missing`, `book_snapshot_invalid` | `repository/lifecycle.rs`, `capture.rs`, `merge.rs`      | never; action is CopyDetails                           | none; the delete applied, no local restore is available          |
 | `forget_membership_skipped`                      | `repository/lifecycle.rs`                                | never; action is CopyDetails                           | none; the snapshot named shelves this library does not have yet  |
 | `restore_conflict`                               | `repository/lifecycle.rs`, `apply_remote_restore`        | never; action is CopyDetails                           | none; the restore dialog carries the choice                      |
+| `book_blob_oversize`                             | `capture/file_version.rs` (key `book-blob-oversize:<uid>`) | a binding under the cap carries the winning hash, or the book is gone | none; shrinking the file (or raising the cap) and re-importing closes it on the next sweep |
 
 Two invariants worth knowing before changing anything here:
 
@@ -82,7 +83,9 @@ Failures become rows in `sync_issues`:
 - a queued reprojection that failed;
 - a forgotten-book snapshot that could not be published or read back, so
   another machine can apply the delete but cannot offer a restore;
-- a shared restore that had to replace newer local state on the fresh identity.
+- a shared restore that had to replace newer local state on the fresh identity;
+- a book file larger than the 256 MiB blob cap, named with its path so the
+  user knows which file to shrink.
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
@@ -113,6 +116,7 @@ contract and the self-clearing rules are recorded in
 | `projection_failed`, `identity_failed`, `reprojection_failed`, `book_lifecycle_failed`, `sync_failed`, `operation_retrying`, `cover_missing`, `cover_blob_failed`, `hash_failed` | Retry        |
 | `operation_rejected`                                                                                                                                                             | Open folder  |
 | `duplicate_book`, `book_snapshot_missing`, `book_snapshot_invalid`                                                                                                               | Copy details |
+| `book_blob_oversize`                                                                                                                                                             | Copy details |
 | `invalid_dirty_kind`                                                                                                                                                             | Dismiss      |
 
 Retry does the work the kind needs, not just another background wake-up:

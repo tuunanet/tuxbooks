@@ -27,8 +27,12 @@ Status: implemented in `sidecar/src/sync/` and covered by
 | Last opened at                                      | book uid                  | entity-level LWW                    |
 | Book identity aliases                               | content hash              | canonical uuid is the smallest seen |
 | Forget and restore (whole book)                     | book uid                  | delete wins, explicit restore       |
+| Book file version (content hash + size)             | book uid                  | entity-level LWW                    |
 
-Cover overrides travel as content-addressed blobs under `blobs/covers/`.
+Cover overrides travel as content-addressed blobs under `blobs/covers/`; a
+book file's bytes travel the same way on a published external edit (ADR 0018):
+`blobs/books/<64-hex>.<epub or pdf>`, capped at 256 MiB and staged before the
+`file_version` op.
 Everything else in the app data directory stays local:
 
 - book rows, absolute paths, and watched locations;
@@ -136,6 +140,7 @@ folder is already a TuxBooks sync folder:
   devices/<device id>/device.json
   ops/<device id>/<wall>-<counter>-<op id>.json
   blobs/covers/<cache name>
+  blobs/books/<64-hex>.<epub or pdf>
 ```
 
 `library.json` binds the folder to one library. Pointing a second, unrelated
@@ -192,7 +197,14 @@ clock can win conflicts until real time catches up;
 this is documented LWW behavior, not silent data loss, because the losing value
 is kept.
 
-Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
+Each operation file is capped at 1 MiB; cover blobs at 16 MiB; book blobs at 256 MiB.
+
+A book file version has one minter: the re-import path (`handle_modified` →
+`import_file`) on an upsert that updated an existing book, and only when the
+fresh hash differs from the winning pointer (ADR 0018 D1) — the loop break
+that keeps adoption re-imports silent. A first import never mints, and a
+locally deleted file never propagates; the winner stays authoritative. The
+op carries hash and size under the minting entity clock.
 
 ## Merge rules
 
@@ -359,8 +371,8 @@ The folder is untrusted input:
 - operation files are size-capped, schema-versioned, and type-checked per field;
 - unknown kinds, unknown fields, bad clocks, unsafe uids, and path-like strings
   are rejected;
-- cover names must be content-addressed cache names; no path crosses the sync
-  boundary;
+- cover and book blob names must be content-addressed; no path crosses the
+  sync boundary;
 - symlinks in the operation tree are skipped;
 - no operation causes code execution, a network call, or a source-file rewrite.
 
@@ -377,6 +389,8 @@ state unrecoverable, so it is not bolted on silently.
 - trash is offered for 30 days;
 - an unresolved conflict is kept for 30 days, then expires unread;
 - an operation is at most 1 MiB; a cover blob is at most 16 MiB;
+- a book blob is at most 256 MiB; a larger book records a `book_blob_oversize`
+  issue and publishes nothing until the file shrinks or the cap is raised;
 - a forgotten-book snapshot is capped at 512 KiB inside the operation. A larger
   snapshot still sends the delete (so every machine forgets) and records an
   issue instead of pretending the restore exists;

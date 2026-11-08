@@ -62,7 +62,12 @@ pub async fn project(
                 }
             }
             EntityKind::Membership => catalog::project_membership(pool, item, &state).await?,
-            EntityKind::Collection | EntityKind::BookIdentity | EntityKind::Book => {}
+            // The file version pointer is consumed by adoption (ADR 0018 D3);
+            // projection touches nothing local.
+            EntityKind::Collection
+            | EntityKind::BookIdentity
+            | EntityKind::Book
+            | EntityKind::FileVersion => {}
         }
         books.push(book_id);
     }

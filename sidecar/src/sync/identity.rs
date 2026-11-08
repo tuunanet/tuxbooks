@@ -700,6 +700,7 @@ pub async fn merge_book_identity(
         EntityKind::Progress,
         EntityKind::Metadata,
         EntityKind::Opened,
+        EntityKind::FileVersion,
     ] {
         merge_self_keyed(&mut tx, kind, &loser, &winner).await?;
     }

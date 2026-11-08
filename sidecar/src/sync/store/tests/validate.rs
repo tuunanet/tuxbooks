@@ -225,6 +225,29 @@ fn validate_field_values_rejects_bad_types_and_ranges() {
     );
     assert_field_rejected(EntityKind::Book, json!({"discarded": "yes"}));
     assert_field_rejected(EntityKind::Book, json!({"unknown": "x"}));
+
+    assert_field_rejected(EntityKind::FileVersion, json!({"content_hash": "short"}));
+    assert_field_rejected(EntityKind::FileVersion, json!({"size": -1}));
+    assert_field_rejected(EntityKind::FileVersion, json!({"size": "big"}));
+    assert_field_rejected(EntityKind::FileVersion, json!({"unknown": "x"}));
+}
+
+/// The file_version grammar (ADR 0018 D1): one hash-and-size pair, book
+/// scoped, never a delete.
+#[test]
+fn file_version_ops_carry_one_hash_size_pair_and_never_delete() {
+    let hash = "a".repeat(64);
+    validate_op(&op(
+        EntityKind::FileVersion,
+        json!({"content_hash": hash, "size": 12345}),
+    ))
+    .unwrap();
+
+    // Book-scoped: the envelope requires book_uid (already covered by the
+    // generic check), and a delete is never valid for this kind.
+    let mut deleted = op(EntityKind::FileVersion, json!({}));
+    deleted.deleted = true;
+    assert!(validate_op(&deleted).is_err());
 }
 
 #[test]

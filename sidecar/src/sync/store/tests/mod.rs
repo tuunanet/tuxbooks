@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::super::model::{EntityKind, Hlc, Op, OP_SCHEMA};
 use super::*;
 
+mod books;
 mod covers;
 mod op_io;
 mod root;

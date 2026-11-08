@@ -43,6 +43,17 @@ impl super::SyncService {
                     .is_some_and(|root| store::cover_blob_exists(root, name))),
                 None => Ok(false),
             },
+            // The file shrank (or the book left the library) and a re-import
+            // published a version the cap allows: the winning hash matches a
+            // binding under the cap, or no binding remains (ADR 0018 D2).
+            "book_blob_oversize" => match issue_key.strip_prefix("book-blob-oversize:") {
+                Some(uid) => match crate::sync::file_version::winning(&self.inner.pool, uid).await?
+                {
+                    Some(winning) => Ok(self.binding_under_cap(uid, &winning.content_hash).await?),
+                    None => Ok(self.binding_count(uid).await? == 0),
+                },
+                None => Ok(false),
+            },
             "projection_failed" => match issue_key.strip_prefix("project-book:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
@@ -132,6 +143,23 @@ impl super::SyncService {
                 .fetch_one(&self.inner.pool)
                 .await?,
         )
+    }
+
+    /// True when some available file of the book carries `hash` at a size the
+    /// 256 MiB blob cap allows — the condition behind an oversize issue.
+    async fn binding_under_cap(&self, book_uid: &str, hash: &str) -> Result<bool, AppError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_book_bindings s
+             JOIN books b ON b.id = s.book_id
+             WHERE s.book_uid = ?1 AND s.content_hash = ?2 AND b.available = 1
+               AND s.hashed_size <= ?3",
+        )
+        .bind(book_uid)
+        .bind(hash)
+        .bind(store::MAX_BOOK_BLOB_BYTES as i64)
+        .fetch_one(&self.inner.pool)
+        .await?;
+        Ok(count > 0)
     }
 
     async fn book_row_exists(&self, book_id: i64) -> Result<bool, AppError> {

@@ -281,6 +281,11 @@ pub async fn import_file(
     // view, so user metadata overrides survive file changes (milestone 7).
     crate::repository::metadata::record_imported_source(pool, upserted.file_id, &new_book).await?;
     let book = finalize_import(pool, upserted.file_id).await?;
+    // ADR 0018 D1: only the re-import path mints a file_version, and only
+    // when the hash changed. The guard lives in the mint.
+    if !upserted.inserted {
+        crate::sync::file_version::mint_after_reimport(pool, upserted.file_id).await?;
+    }
     Ok(Some(ImportOutcome {
         book,
         inserted: upserted.inserted,

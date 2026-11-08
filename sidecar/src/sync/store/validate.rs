@@ -55,6 +55,11 @@ pub fn validate_op(op: &Op) -> Result<(), String> {
     {
         return Err("book-scoped operation is missing book_uid".into());
     }
+    // A local file deletion never propagates (ADR 0018 D1): there is no
+    // file_version delete, so a hostile one cannot tombstone the pointer.
+    if op.kind == EntityKind::FileVersion && op.deleted {
+        return Err("file_version operations cannot be deletes".into());
+    }
     let allowed = field_names(op.kind);
     for (field, value) in &op.fields {
         if !allowed.contains(&field.as_str()) {
@@ -140,6 +145,12 @@ fn validate_field_value(kind: EntityKind, field: &str, value: &Value) -> Result<
             _ => Err("content_hash must be 64 lowercase hex characters".into()),
         },
         (EntityKind::BookIdentity, _) => Err(format!("unknown identity field {field}")),
+        (EntityKind::FileVersion, "content_hash") => match value.as_str() {
+            Some(hash) if is_hex_hash(hash) => Ok(()),
+            _ => Err("content_hash must be 64 lowercase hex characters".into()),
+        },
+        (EntityKind::FileVersion, "size") => non_negative_integer(value, field),
+        (EntityKind::FileVersion, _) => Err(format!("unknown file_version field {field}")),
         (EntityKind::Book, "snapshot") => bounded_string(value, field),
         (EntityKind::Book, "replacement_book_uid") => match value.as_str() {
             Some(uid) if is_safe_uid(uid) => Ok(()),

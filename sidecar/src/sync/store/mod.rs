@@ -9,12 +9,17 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+mod books;
 mod covers;
 mod io;
 mod op_io;
 mod root;
 mod validate;
 
+pub use books::{
+    book_blob_exists, book_blob_name, stage_book_blob, BookBlobStage, BOOK_BLOB_DIR,
+    MAX_BOOK_BLOB_BYTES,
+};
 pub use covers::{apply_cover_blob, cover_blob_exists, cover_file_name, store_cover_blob};
 pub use io::write_json_atomic;
 pub(crate) use op_io::is_op_file_name;

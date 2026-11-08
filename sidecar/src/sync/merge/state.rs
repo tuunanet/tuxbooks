@@ -25,6 +25,10 @@ pub(super) async fn apply_state_op(
     };
     let entity_uid = match op.kind {
         EntityKind::Collection => canonical_entity_uid_tx(tx, op.kind, &op.entity_uid).await?,
+        // The file version is keyed by the durable book (ADR 0018 D1), so a
+        // pointer written before an identity merge must land under the
+        // identity the book carries now, not the uid the sender minted.
+        EntityKind::FileVersion => canonical_book_uid_tx(tx, &op.entity_uid).await?,
         EntityKind::Membership => {
             let (collection, book) = op
                 .entity_uid

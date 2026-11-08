@@ -437,9 +437,9 @@ changes how imports, readers, or search work. The full contract is
   book lifecycle key on `book_uid`; annotations carry `book_uid` directly;
   membership keys on `book_uid:collection_id`; a vanished collection's cascade
   is skipped (a local deletion, not a shared delete).
-- `sync_state_entities` / `sync_state_fields` — the materialized shared state.
-  Entities carry tombstones and entity-level clocks; fields carry one value and
-  one clock each.
+- `sync_state_entities` / `sync_state_fields` — materialized shared state
+  (tombstones, entity clocks, one value+clock per field). `file_version`
+  (ADR 0018 D1, no migration) holds the book file's hash+size and clock.
 - `sync_book_aliases` / `sync_book_bindings` — content hash to shared uuid, and
   local book row to shared uuid with the hash snapshot used to detect rewrites.
 - `sync_book_merges` / `sync_entity_merges` — deterministic identity merges
