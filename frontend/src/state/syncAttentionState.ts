@@ -29,7 +29,9 @@ export function useSyncAttention(): SyncAttentionValue {
 
 /**
  * Attention means sync is on and the engine reports an error or at least one
- * open issue (docs/SYNC_ISSUES.md). Keeping `enabled` in the condition matches
+ * attention-worthy issue (docs/SYNC_ISSUES.md). The engine already leaves
+ * work in progress out of `issues`: a row the auto-retry sweep still retries
+ * never reaches this check. Keeping `enabled` in the condition matches
  * Settings > Sync, which also hides leftover counts while sync is off.
  */
 export function needsSyncAttention(status: SyncStatus | null): boolean {

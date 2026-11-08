@@ -6,6 +6,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { RefreshCw, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -89,6 +90,7 @@ type SyncFolderSectionProps = {
   onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
+  onAutoRetry: (enabled: boolean) => void;
   onLocate: (bookUid: string) => void;
   onForget: (bookUid: string) => void;
   onForgetAll: () => void;
@@ -105,6 +107,7 @@ export function SyncFolderSection({
   onEditDevice,
   onSyncNow,
   onDisconnect,
+  onAutoRetry,
   onLocate,
   onForget,
   onForgetAll,
@@ -172,6 +175,7 @@ export function SyncFolderSection({
           onEditDevice={onEditDevice}
           onSyncNow={onSyncNow}
           onDisconnect={onDisconnect}
+          onAutoRetry={onAutoRetry}
           onLocate={onLocate}
           onForget={onForget}
           onForgetAll={onForgetAll}
@@ -207,6 +211,7 @@ type ConnectedSyncPanelProps = {
   onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
+  onAutoRetry: (enabled: boolean) => void;
   onLocate: (bookUid: string) => void;
   onForget: (bookUid: string) => void;
   onForgetAll: () => void;
@@ -219,6 +224,7 @@ function ConnectedSyncPanel({
   onEditDevice,
   onSyncNow,
   onDisconnect,
+  onAutoRetry,
   onLocate,
   onForget,
   onForgetAll,
@@ -250,6 +256,22 @@ function ConnectedSyncPanel({
         <dt className="text-muted-foreground">Last sync</dt>
         <dd data-testid="sync-last-sync">{formatTime(status.lastSyncAt)}</dd>
       </dl>
+
+      <label className="flex items-start gap-2">
+        <Checkbox
+          data-testid="sync-auto-retry"
+          checked={status.autoRetry}
+          disabled={busy}
+          onCheckedChange={(checked) => onAutoRetry(checked === true)}
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">Automatic retry</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Retry fixable failures on a schedule, with a per-issue attempt cap. A row that keeps
+            failing stays listed and asks for attention only when the attempts run out.
+          </span>
+        </span>
+      </label>
 
       <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         <Stat label="Pending" value={status.pendingLocal} />

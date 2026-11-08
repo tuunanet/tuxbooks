@@ -27,6 +27,7 @@ fn enabled_status(folder: &Path) -> SyncStatus {
         waiting_books: 0,
         issues: 0,
         trash: 0,
+        auto_retry: true,
     }
 }
 
@@ -44,6 +45,7 @@ fn disabled_status() -> SyncStatus {
         waiting_books: 9,
         issues: 9,
         trash: 9,
+        auto_retry: false,
     }
 }
 
@@ -153,10 +155,23 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     .execute(&pool)
     .await
     .unwrap();
+    // An in-flight auto-retry row: the dump carries the attempts and the
+    // scheduled next try so support can read the budget from the report.
+    sqlx::query(
+        "INSERT INTO sync_issues (issue_key, kind, detail, file_name,
+                auto_attempts, next_auto_retry_at, created_at)
+         VALUES ('cover-missing:x.png', 'cover_missing',
+                 'cover publish failed (auto-retry 2/5)', 'x.png',
+                 2, '2026-11-08T12:00:00.000Z', '2026-11-08T11:00:00.000Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let report = collect(&pool, Some(&status)).await.unwrap();
     assert!(report.sync.enabled);
     assert_eq!(report.sync.state, SyncState::Idle);
+    assert!(report.sync.auto_retry, "the toggle state is on the report");
     assert_eq!(report.sync.counts.pending_local, 4);
     assert_eq!(report.sync.counts.waiting_books, 2);
     assert_eq!(report.sync.counts.issues, 3);
@@ -173,6 +188,18 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     assert_eq!(
         report.open_conflicts[0].book_title.as_deref(),
         Some("Example")
+    );
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].kind, "cover_missing");
+    assert_eq!(
+        report.issues[0].detail,
+        "cover publish failed (auto-retry 2/5)"
+    );
+    assert_eq!(report.issues[0].file_name.as_deref(), Some("x.png"));
+    assert_eq!(report.issues[0].auto_attempts, 2);
+    assert_eq!(
+        report.issues[0].next_auto_retry_at.as_deref(),
+        Some("2026-11-08T12:00:00.000Z")
     );
     assert_eq!(report.recent_merges.books.len(), 1);
     assert_eq!(report.recent_merges.books[0].loser, "c".repeat(32));
@@ -207,18 +234,30 @@ async fn disabled_sync_returns_zero_counts_and_local_version_data() {
     let tmp = tempfile::tempdir().unwrap();
     let pool = pool_in(tmp.path()).await;
     add_failed_book(&pool, "Dangling", "/books/dangling.epub", 1).await;
+    sqlx::query(
+        "INSERT INTO sync_issues (issue_key, kind, detail, auto_attempts)
+         VALUES ('cover-missing:y.png', 'cover_missing', 'test detail', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let status = disabled_status();
 
     let report = collect(&pool, Some(&status)).await.unwrap();
     assert!(!report.sync.enabled);
     assert_eq!(report.sync.state, SyncState::Disabled);
     assert!(report.sync.folder.is_none());
+    assert!(!report.sync.auto_retry);
     assert_eq!(report.sync.counts.pending_local, 0);
     assert_eq!(report.sync.counts.waiting_books, 0);
     assert_eq!(report.sync.counts.issues, 0);
     assert_eq!(report.sync.counts.trash, 0);
     assert_eq!(report.sync.counts.conflicts, 0);
     assert!(report.open_conflicts.is_empty());
+    assert!(
+        report.issues.is_empty(),
+        "issues are sync data: off means empty"
+    );
     assert!(report.recent_merges.books.is_empty());
     assert!(report.recent_merges.entities.is_empty());
     assert_eq!(report.hash_failed.len(), 1);

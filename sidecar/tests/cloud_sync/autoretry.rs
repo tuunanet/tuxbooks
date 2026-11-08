@@ -204,6 +204,16 @@ async fn a_disconnected_engine_skips_folder_dependent_rows_without_spending_budg
     assert_eq!(next.as_deref(), Some(DUE), "the backoff clock did not move");
     assert_eq!(detail, "test detail");
 
+    // The paused row stays in flight: enabled and under the cap, so it
+    // waits for the folder without driving attention.
+    let status = a.service.status().await.unwrap();
+    assert_eq!(status.issues, 0, "a paused row is not attention");
+    assert_eq!(
+        a.service.issues().await.unwrap().len(),
+        1,
+        "the list keeps the paused row visible"
+    );
+
     connect(&a, sync_dir.path()).await;
     run(&a).await;
     let (attempts, _, detail) = retry_state(&a, issue).await;
@@ -288,6 +298,123 @@ async fn a_manual_retry_grants_a_fresh_budget_and_revives_an_exhausted_row() {
     let (attempts, _, detail) = retry_state(&a, issue).await;
     assert_eq!(attempts, 1, "the exhausted row is back in the schedule");
     assert!(detail.contains("auto-retry 1/3"), "{detail}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_in_flight_row_is_work_in_progress_and_exhaustion_flips_attention() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "sweep-attention.epub", b"sweep attention bytes").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let uid = book_uid(&a, book).await;
+
+    // A stuck operation file keeps a human-required row open: the file
+    // exists, so no status sweep closes it, and the kind is not sweep-owned.
+    let stuck = sync_dir
+        .path()
+        .join("TuxBooks")
+        .join("ops")
+        .join("stuck.json");
+    std::fs::create_dir_all(stuck.parent().unwrap()).unwrap();
+    std::fs::write(&stuck, b"not an operation").unwrap();
+    insert_retry_row(
+        &a,
+        "file:ops/stuck.json",
+        "operation_rejected",
+        "test detail",
+        0,
+        None,
+    )
+    .await;
+
+    // An in-flight row: the sweep owns it and the budget is under the cap.
+    // Work in progress is not attention, whatever the timestamp says.
+    insert_retry_row(
+        &a,
+        &format!("book-lifecycle:{uid}"),
+        "book_lifecycle_failed",
+        "test detail",
+        1,
+        Some(DUE),
+    )
+    .await;
+
+    let status = a.service.status().await.unwrap();
+    assert!(status.auto_retry, "the toggle rides the status payload");
+    assert_eq!(status.issues, 1, "only the human-required row counts");
+
+    // The kill switch ends the exclusion at once: the machine is off, so
+    // even the mid-flight row becomes attention — the rows are the user's
+    // job now.
+    a.service.set_auto_retry(false).await.unwrap();
+    let status = a.service.status().await.unwrap();
+    assert!(!status.auto_retry);
+    assert_eq!(status.issues, 2, "with the sweep off every open row counts");
+
+    // Back on, the under-budget row returns to the sweep.
+    a.service.set_auto_retry(true).await.unwrap();
+    let status = a.service.status().await.unwrap();
+    assert_eq!(status.issues, 1, "the sweep resumes the in-flight row");
+
+    // Exhaust the sweep-owned row: the budget is spent, the machine gave
+    // up, and that is attention again.
+    sqlx::query(
+        "UPDATE sync_issues SET auto_attempts = 3, next_auto_retry_at = NULL
+         WHERE kind = 'book_lifecycle_failed' AND resolved_at IS NULL",
+    )
+    .execute(&a.pool)
+    .await
+    .unwrap();
+    let status = a.service.status().await.unwrap();
+    assert_eq!(status.issues, 2, "exhaustion is attention");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fresh_row_is_in_flight_while_enabled_and_attention_when_disabled() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "sweep-fresh.epub", b"sweep fresh bytes").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    let uid = book_uid(&a, book).await;
+
+    // Fresh: nothing spent, nothing scheduled. While the sweep owns the
+    // kind and the budget is under the cap the row is work in progress,
+    // not indefinite attention.
+    let issue = insert_retry_row(
+        &a,
+        &format!("book-lifecycle:{uid}"),
+        "book_lifecycle_failed",
+        "test detail",
+        0,
+        None,
+    )
+    .await;
+    let status = a.service.status().await.unwrap();
+    assert_eq!(status.issues, 0, "a fresh owned row is not attention");
+    assert_eq!(
+        a.service.issues().await.unwrap().len(),
+        1,
+        "the list keeps the in-flight row visible"
+    );
+
+    // Kill switch off: the exclusion ends at once and the row is attention.
+    a.service.set_auto_retry(false).await.unwrap();
+    let status = a.service.status().await.unwrap();
+    assert_eq!(
+        status.issues, 1,
+        "with the sweep off the row is the user's job"
+    );
+
+    // On again: back in flight, and the sweep spends the budget itself.
+    a.service.set_auto_retry(true).await.unwrap();
+    run(&a).await;
+    let (attempts, _, detail) = retry_state(&a, issue).await;
+    assert_eq!(attempts, 1, "the sweep resumed the fresh row");
+    assert!(detail.contains("auto-retry 1/3"), "{detail}");
+    let status = a.service.status().await.unwrap();
+    assert_eq!(status.issues, 0, "still under the cap after the attempt");
 }
 
 #[tokio::test(flavor = "multi_thread")]

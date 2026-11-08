@@ -18,22 +18,55 @@ use crate::sync::clock::{get_meta, now_rfc3339, set_meta, META_AUTO_RETRY};
 const DEFAULT_CAP: i64 = 5;
 const BOOK_LIFECYCLE_CAP: i64 = 3;
 
+/// The kinds the sweep owns, with the attempts each gets before it gives up
+/// (ADR 0017 D4). `hash_failed` is excluded: its backfill loop already is the
+/// schedule, and resetting its budget would defeat that. New Retry kinds stay
+/// manual until a decision adds them here.
+const AUTO_RETRY_CAPS: [(&str, i64); 8] = [
+    ("projection_failed", DEFAULT_CAP),
+    ("identity_failed", DEFAULT_CAP),
+    ("reprojection_failed", DEFAULT_CAP),
+    ("sync_failed", DEFAULT_CAP),
+    ("operation_retrying", DEFAULT_CAP),
+    ("cover_missing", DEFAULT_CAP),
+    ("cover_blob_failed", DEFAULT_CAP),
+    ("book_lifecycle_failed", BOOK_LIFECYCLE_CAP),
+];
+
 /// The per-kind attempt cap, or None when the sweep must not touch the kind.
-/// `hash_failed` is excluded: its backfill loop already is the schedule, and
-/// resetting its budget would defeat that. New Retry kinds stay manual until
-/// a decision adds them here.
 fn auto_retry_cap(kind: &str) -> Option<i64> {
-    match kind {
-        "projection_failed"
-        | "identity_failed"
-        | "reprojection_failed"
-        | "sync_failed"
-        | "operation_retrying"
-        | "cover_missing"
-        | "cover_blob_failed" => Some(DEFAULT_CAP),
-        "book_lifecycle_failed" => Some(BOOK_LIFECYCLE_CAP),
-        _ => None,
+    AUTO_RETRY_CAPS
+        .iter()
+        .find(|(swept, _)| *swept == kind)
+        .map(|(_, cap)| *cap)
+}
+
+/// SQL matching one open row with automatic work in flight: auto-retry is
+/// on, the sweep owns the kind, and the spent attempts are under the
+/// kind's cap. A fresh row (nothing spent yet) and a row paused for a
+/// missing folder are in flight too — a skip is not an attempt, so neither
+/// spends the budget. The status count excludes these rows so attention
+/// means the machine gave up, the kind needs a human, or the machine is
+/// off (ADR 0017 D4), never "a retry is scheduled". `enabled` is the same
+/// setting the status snapshot reads: flipping it off ends the exclusion
+/// at once, leaving every open row attention-worthy.
+pub(super) fn in_flight_where(enabled: bool) -> String {
+    if !enabled {
+        // `NOT (0)` matches every open row: the machine is off and the
+        // rows are the user's job.
+        return "0".to_string();
     }
+    let kinds = AUTO_RETRY_CAPS
+        .iter()
+        .map(|(kind, _)| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let caps = AUTO_RETRY_CAPS
+        .iter()
+        .map(|(kind, cap)| format!("WHEN '{kind}' THEN {cap}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("kind IN ({kinds}) AND auto_attempts < CASE kind {caps} ELSE 0 END")
 }
 
 /// Kinds whose repair needs a connected folder (ADR 0017 D4). While the

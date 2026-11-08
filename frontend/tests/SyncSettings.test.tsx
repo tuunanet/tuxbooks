@@ -357,6 +357,44 @@ describe("SyncSettings", () => {
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("dismiss_all_sync_issues"));
   });
 
+  it("toggles automatic retry through the bridge and adopts the stored value", async () => {
+    mockInvoke({
+      sync_status: ENABLED,
+      sync_issues: [],
+      sync_trash: [],
+      sync_set_auto_retry: { ...ENABLED, autoRetry: false },
+    });
+
+    renderSettings();
+    const toggle = await screen.findByTestId("sync-auto-retry");
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("sync_set_auto_retry", { enabled: false }),
+    );
+    expect(await screen.findByTestId("sync-auto-retry")).not.toBeChecked();
+  });
+
+  it("shows the next auto-retry attempt time on a scheduled row", async () => {
+    mockInvoke({
+      sync_status: { ...ENABLED, issues: 1 },
+      sync_issues: [
+        issue({
+          autoAttempts: 1,
+          nextAutoRetryAt: "2026-10-28T10:05:00.000Z",
+        }),
+      ],
+      sync_trash: [],
+    });
+
+    renderSettings();
+    const next = await screen.findByText(/Next retry/);
+    // Local rendering, not the raw ISO payload the bridge hands over.
+    expect(next).toHaveTextContent("2026");
+    expect(next).not.toHaveTextContent("T10:05");
+  });
+
   it("disconnects only after confirmation", async () => {
     mockInvoke({
       sync_status: ENABLED,

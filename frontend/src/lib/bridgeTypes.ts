@@ -55,6 +55,8 @@ export interface SyncStatus {
   waitingBooks: number;
   issues: number;
   trash: number;
+  /** Whether the auto-retry sweep retries due rows (ADR 0017 D4). */
+  autoRetry: boolean;
 }
 
 export interface SyncIssue {
@@ -66,6 +68,10 @@ export interface SyncIssue {
   target: string;
   createdAt: string;
   updatedAt: string;
+  /** Auto-retry attempts spent so far against the per-kind cap. */
+  autoAttempts: number;
+  /** When the sweep tries the row again; null means due now, or gave up. */
+  nextAutoRetryAt: string | null;
 }
 
 /**
@@ -81,6 +87,8 @@ export interface SyncDiagnostics {
     folder: string | null;
     lastSyncAt: string | null;
     lastError: string | null;
+    /** Whether the auto-retry sweep retries due rows (ADR 0017 D4). */
+    autoRetry: boolean;
     counts: {
       pendingLocal: number;
       waitingBooks: number;
@@ -89,6 +97,8 @@ export interface SyncDiagnostics {
       conflicts: number;
     };
   };
+  /** The open issues, with the sweep's per-row attempt state. */
+  issues: DiagnosticIssue[];
   hashFailed: Array<{
     bookId: number;
     title: string;
@@ -112,6 +122,16 @@ export interface SyncDiagnostics {
     opSchema: number;
     dbMigration: number;
   };
+}
+
+/** One open issue in the support snapshot (docs/SYNC_ISSUES.md). */
+export interface DiagnosticIssue {
+  kind: string;
+  detail: string;
+  fileName: string | null;
+  autoAttempts: number;
+  nextAutoRetryAt: string | null;
+  createdAt: string;
 }
 
 /** What the Sync issues row offers; computed by the sidecar from the kind. */

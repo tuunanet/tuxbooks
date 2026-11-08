@@ -406,6 +406,15 @@ export function setSyncDeviceName(name: string): Promise<SyncStatus> {
   return invoke("sync_set_device_name", { name });
 }
 
+/**
+ * The auto-retry kill switch (ADR 0017 D4): default-on, persisted in the
+ * library database. Returns the refreshed status so callers adopt the
+ * stored value.
+ */
+export function setSyncAutoRetry(enabled: boolean): Promise<SyncStatus> {
+  return invoke("sync_set_auto_retry", { enabled });
+}
+
 export function onSyncStatus(callback: (status: SyncStatus) => void): Promise<() => void> {
   const unlisten = onEvent<SyncStatus>("sync-status", callback);
   return Promise.resolve(unlisten);
