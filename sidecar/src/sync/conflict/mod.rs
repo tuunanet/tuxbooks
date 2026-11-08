@@ -1,8 +1,10 @@
 //! The losing values the merge kept, as invisible diagnostics (ADR 0017 D2).
-//! New races write a `sync_conflicts` row only: nothing counts it, lists it,
-//! or asks about it. The rows expire after 30 days, and a row whose winner no
-//! longer matches the mirror is closed with the paired legacy issue, so the
-//! diagnostics trail stays bounded without any interactive surface.
+//! New races write a `sync_conflicts` row only: nothing in the sync engine or
+//! on any user-facing surface counts, lists, or asks about it. The Copy
+//! diagnostics report alone keeps a sample and a count for support. The rows
+//! expire after 30 days, and a row whose winner no longer matches the mirror
+//! is closed with the paired legacy issue, so the diagnostics trail stays
+//! bounded without any interactive surface.
 
 mod maintenance;
 #[cfg(test)]

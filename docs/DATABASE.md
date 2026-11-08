@@ -401,7 +401,8 @@ The local trash row is the durable record of a Forget; the sync mirror keeps the
 JSON values, both hybrid clocks, and the devices that wrote them. Migration
 0027 adds `resolved_at` and an index on it. The applied winner is never rolled
 back by the row itself; the row only records what was lost. Rows are invisible
-diagnostics (ADR 0017 D2): nothing lists them, the live status carries no
+diagnostics (ADR 0017 D2): nothing in the app shows them; Copy diagnostics
+lists up to 20 for support without their values, the live status carries no
 conflict count, and a new race never opens an issue.
 
 - A resolved row keeps `resolved_at` (audit trail). New rows never resolve
