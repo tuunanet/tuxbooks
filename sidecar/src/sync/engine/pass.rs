@@ -21,7 +21,13 @@ const IDENTITY_BUDGET: Duration = Duration::from_secs(3);
 impl super::SyncService {
     pub async fn run_pass(&self) -> Result<(), AppError> {
         let _guard = self.inner.pass_lock.lock().await;
-        self.run_pass_locked().await
+        let result = self.run_pass_locked().await;
+        // The sweep reuses this call's lock (ADR 0017 D4). It runs after a
+        // failed pass too: its own backoff governs how often its retries
+        // burn, and the rows it retries may not be the ones this pass
+        // reported.
+        self.auto_retry_sweep().await;
+        result
     }
 
     /// Take the pass once. The caller must already hold `pass_lock`.

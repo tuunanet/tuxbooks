@@ -452,7 +452,8 @@ changes how imports, readers, or search work. The full contract is
   losing field values with their resolution and 30-day expiry, and the 30-day
   delete restore list for single entities. Migration 0028 adds a partial unique
   index so only one open row exists per issue key; a concurrent status refresh
-  can no longer duplicate one.
+  can no longer duplicate one. Migration 0031 adds the auto-retry sweep's
+  bookkeeping (ADR 0017 D4): attempts counted against a per-kind cap, a backoff clock, a gave-up detail at exhaustion, and a manual Retry that resets both columns.
 - `sync_book_trash` — whole-book Forget snapshots, clocks, and the remote
   restore/discard state. Separate from per-entity `sync_trash` (migration 0023).
 - `sync_ignored_books` — local-only hiding of books whose shared state is

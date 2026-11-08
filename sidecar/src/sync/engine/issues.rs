@@ -9,9 +9,20 @@ use crate::sync::clock::now_rfc3339;
 
 impl super::SyncService {
     pub async fn issues(&self) -> Result<Vec<SyncIssue>, AppError> {
-        type Row = (i64, String, String, String, Option<String>, String, String);
+        type Row = (
+            i64,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            i64,
+            Option<String>,
+        );
         let rows: Vec<Row> = sqlx::query_as(
-            "SELECT id, issue_key, kind, detail, file_name, created_at, updated_at
+            "SELECT id, issue_key, kind, detail, file_name, created_at, updated_at,
+                    auto_attempts, next_auto_retry_at
                  FROM sync_issues
                  WHERE resolved_at IS NULL AND kind <> 'conflict'
                  ORDER BY updated_at DESC, id DESC LIMIT 100",
@@ -19,7 +30,18 @@ impl super::SyncService {
         .fetch_all(&self.inner.pool)
         .await?;
         let mut issues = Vec::with_capacity(rows.len());
-        for (id, issue_key, kind, detail, file_name, created_at, updated_at) in rows {
+        for (
+            id,
+            issue_key,
+            kind,
+            detail,
+            file_name,
+            created_at,
+            updated_at,
+            auto_attempts,
+            next_auto_retry_at,
+        ) in rows
+        {
             let target =
                 issue_target(&self.inner.pool, &kind, &issue_key, file_name.as_deref()).await;
             issues.push(SyncIssue {
@@ -31,6 +53,8 @@ impl super::SyncService {
                 target,
                 created_at,
                 updated_at,
+                auto_attempts,
+                next_auto_retry_at,
             });
         }
         Ok(issues)

@@ -26,6 +26,7 @@ use super::store;
 use super::waiting;
 
 mod attach;
+mod autoretry;
 mod clear;
 mod conflicts;
 mod connect;
@@ -118,6 +119,12 @@ pub struct SyncIssue {
     pub target: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Automatic retry attempts spent so far against the per-kind cap
+    /// (ADR 0017 D4). Report only: attention semantics stay untouched.
+    pub auto_attempts: i64,
+    /// When the sweep will try this row again; None means due now, or given
+    /// up after exhausting the cap.
+    pub next_auto_retry_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
