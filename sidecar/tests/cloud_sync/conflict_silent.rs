@@ -1,6 +1,6 @@
 //! Silent race resolution (ADR 0017 D1): every race has a pre-decided winner,
-//! the loser becomes a diagnostic row, and no review issue opens. The legacy
-//! settle path still resolves rows recorded before races went silent.
+//! the loser becomes a diagnostic row, and no review issue opens. Legacy rows
+//! and their paired issues are retired by the lazy reconcile/expire sweep.
 
 use crate::common::*;
 use crate::support::*;
@@ -256,7 +256,7 @@ async fn a_local_edit_of_a_tombstoned_annotation_is_dropped_silently() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_legacy_conflict_row_with_its_issue_still_settles() {
+async fn a_legacy_conflict_row_and_its_issue_expire_together() {
     let a = device().await;
     let uid = "d".repeat(32);
     let id = insert_review_conflict(&a, "annotation", &uid, "note", &clock::now_rfc3339()).await;
@@ -267,14 +267,50 @@ async fn a_legacy_conflict_row_with_its_issue_still_settles() {
         1,
         "the legacy issue is open"
     );
-    assert_eq!(a.service.status().await.unwrap().conflicts, 1);
+    let stale = insert_review_conflict(
+        &a,
+        "annotation",
+        &"e".repeat(32),
+        "note",
+        "2000-01-01T00:00:00.000Z",
+    )
+    .await;
+    insert_review_state(&a, &"e".repeat(32)).await;
+    insert_issue(
+        &a,
+        &format!("conflict:annotation:{}:note", "e".repeat(32)),
+        "conflict",
+    )
+    .await;
 
-    assert!(a.service.resolve_conflict(id, "keep_winner").await.unwrap());
-    let listed = a.service.list_conflicts().await.unwrap();
-    assert!(listed.is_empty(), "the row is settled");
+    // No settle path exists anymore: the sweep is the only retirement, and a
+    // status refresh runs it. The fresh row and its issue stay; the stale pair
+    // is gone.
+    a.service.status().await.unwrap();
+    let fresh_open: Option<i64> = sqlx::query_scalar("SELECT id FROM sync_conflicts WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&a.pool)
+        .await
+        .unwrap();
+    assert!(fresh_open.is_some(), "the fresh diagnostic row survives");
+    let stale_open: Option<i64> = sqlx::query_scalar("SELECT id FROM sync_conflicts WHERE id = ?1")
+        .bind(stale)
+        .fetch_optional(&a.pool)
+        .await
+        .unwrap();
+    assert!(stale_open.is_none(), "the stale row expired");
+    let stale_issue: Option<String> = sqlx::query_scalar(
+        "SELECT resolved_at FROM sync_issues
+         WHERE issue_key = ?1",
+    )
+    .bind(format!("conflict:annotation:{}:note", "e".repeat(32)))
+    .fetch_optional(&a.pool)
+    .await
+    .unwrap();
+    assert!(stale_issue.is_some(), "the stale paired issue closed");
     assert_eq!(
         open_conflict_issues(&a).await,
-        0,
-        "the paired issue closes with it"
+        1,
+        "only the fresh row's issue remains"
     );
 }

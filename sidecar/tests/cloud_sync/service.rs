@@ -195,7 +195,7 @@ async fn a_pass_reports_syncing_then_idle_and_refreshes_aggregate_counts() {
         .fetch_one(&a.pool)
         .await
         .unwrap();
-    assert_eq!(status.conflicts, conflicts);
+    assert_eq!(conflicts, 0, "a clean pass records no conflicts");
 }
 
 #[tokio::test(flavor = "multi_thread")]

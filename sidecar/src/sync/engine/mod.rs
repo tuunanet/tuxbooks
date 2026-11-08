@@ -28,7 +28,6 @@ use super::waiting;
 mod attach;
 mod autoretry;
 mod clear;
-mod conflicts;
 mod connect;
 mod issues;
 mod lifecycle;
@@ -62,7 +61,6 @@ pub struct SyncStatus {
     pub waiting_books: i64,
     pub issues: i64,
     pub trash: i64,
-    pub conflicts: i64,
 }
 
 /// What the UI offers on one issue row. The action is computed from the kind
@@ -206,7 +204,6 @@ impl SyncService {
             waiting_books: 0,
             issues: 0,
             trash: 0,
-            conflicts: 0,
         };
         let (shutdown, _) = watch::channel(false);
         Ok(Self {
@@ -253,14 +250,15 @@ impl SyncService {
 
     async fn refresh_status(&self) -> Result<(), AppError> {
         let pool = &self.inner.pool;
-        // Settle conflicts whose winner has moved and expire unread rows first,
-        // so the count, the list, and the open issues always agree. Both are
-        // best effort: a busy database must not fail a status read.
+        // Retire the legacy diagnostics: close conflict rows whose winner has
+        // moved and expire rows past the 30-day window, closing the paired
+        // legacy issues. Best effort: a busy database must not fail a status
+        // read.
         if let Err(err) = conflict::reconcile(pool).await {
-            eprintln!("sync review: reconcile failed: {err}");
+            eprintln!("sync diagnostics: reconcile failed: {err}");
         }
         if let Err(err) = conflict::expire(pool).await {
-            eprintln!("sync review: expiry failed: {err}");
+            eprintln!("sync diagnostics: expiry failed: {err}");
         }
         // Close rows whose condition is gone before counting, so the count,
         // the list, and the open rows always agree. Best effort, like the
@@ -277,9 +275,9 @@ impl SyncService {
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;
-        // Conflicts live in the Conflict review section, which has its own
-        // count. Listing them here would offer a Dismiss button that hides a
-        // conflict without settling it.
+        // Conflict-kind rows are legacy review leftovers. They never reach the
+        // user: the reconcile/expire sweep closes each one once its diagnostic
+        // row is gone, so listing them here would show rows nothing can settle.
         let issues: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sync_issues
              WHERE resolved_at IS NULL AND kind <> 'conflict'",
@@ -291,12 +289,6 @@ impl SyncService {
              WHERE restored_at IS NULL AND expires_at > ?1",
         )
         .bind(now_rfc3339())
-        .fetch_one(pool)
-        .await?;
-        let conflicts: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sync_conflicts
-             WHERE resolved_at IS NULL AND kind <> 'progress'",
-        )
         .fetch_one(pool)
         .await?;
         let waiting_books = waiting::count(pool).await?;
@@ -326,7 +318,6 @@ impl SyncService {
         status.waiting_books = waiting_books;
         status.issues = issues;
         status.trash = trash;
-        status.conflicts = conflicts;
         status.state = if !enabled {
             SyncState::Disabled
         } else if status.state == SyncState::Syncing {

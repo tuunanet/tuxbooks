@@ -20,7 +20,6 @@ describe("SyncSettings", () => {
       sync_connect: { status: ENABLED, mismatch: null },
       sync_issues: [],
       sync_trash: [],
-      sync_conflicts: [],
     });
 
     renderSettings();
@@ -50,7 +49,6 @@ describe("SyncSettings", () => {
       sync_status: ENABLED,
       sync_issues: [],
       sync_trash: [],
-      sync_conflicts: [],
       sync_set_device_name: { ...ENABLED, deviceName: "Desk" },
     });
 
@@ -95,7 +93,6 @@ describe("SyncSettings", () => {
       ],
       sync_restore: true,
       sync_dismiss_issue: true,
-      sync_conflicts: [],
     });
 
     renderSettings();
@@ -122,12 +119,7 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (
-        method === "sync_issues" ||
-        method === "sync_trash" ||
-        method === "sync_conflicts" ||
-        method === "list_waiting_books"
-      ) {
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
         return Promise.resolve([]);
       }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
@@ -165,12 +157,7 @@ describe("SyncSettings", () => {
         }
         return Promise.resolve({ status: DISABLED, mismatch });
       }
-      if (
-        method === "sync_issues" ||
-        method === "sync_trash" ||
-        method === "sync_conflicts" ||
-        method === "list_waiting_books"
-      ) {
+      if (method === "sync_issues" || method === "sync_trash" || method === "list_waiting_books") {
         return Promise.resolve([]);
       }
       return Promise.reject(new Error(`unexpected invoke(${method})`));
@@ -206,7 +193,7 @@ describe("SyncSettings", () => {
       if (method === "sync_status") {
         return Promise.resolve({ ...ENABLED, waitingBooks: forgotten ? 0 : 1 });
       }
-      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+      if (method === "sync_issues" || method === "sync_trash") {
         return Promise.resolve([]);
       }
       if (method === "list_waiting_books") return Promise.resolve(forgotten ? [] : [waiting]);
@@ -251,7 +238,7 @@ describe("SyncSettings", () => {
       if (method === "sync_status") {
         return Promise.resolve({ ...ENABLED, waitingBooks: attached ? 0 : 1 });
       }
-      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+      if (method === "sync_issues" || method === "sync_trash") {
         return Promise.resolve([]);
       }
       if (method === "list_waiting_books") {
@@ -289,7 +276,6 @@ describe("SyncSettings", () => {
       sync_status: { ...ENABLED, waitingBooks: 1 },
       sync_issues: [],
       sync_trash: [],
-      sync_conflicts: [],
       list_waiting_books: [waiting],
     });
 
@@ -314,7 +300,7 @@ describe("SyncSettings", () => {
     pickBookFileMock.mockResolvedValue("/tmp/other-edition.epub");
     invokeMock.mockImplementation((method: string) => {
       if (method === "sync_status") return Promise.resolve({ ...ENABLED, waitingBooks: 1 });
-      if (method === "sync_issues" || method === "sync_trash" || method === "sync_conflicts") {
+      if (method === "sync_issues" || method === "sync_trash") {
         return Promise.resolve([]);
       }
       if (method === "list_waiting_books") return Promise.resolve([waiting]);
@@ -355,7 +341,6 @@ describe("SyncSettings", () => {
       }
       if (method === "sync_issues") return Promise.resolve([issueRow]);
       if (method === "sync_trash") return Promise.resolve([]);
-      if (method === "sync_conflicts") return Promise.resolve([]);
       if (method === "list_waiting_books") return Promise.resolve([waiting]);
       if (method === "forget_all_waiting_books") return Promise.resolve(1);
       if (method === "dismiss_all_sync_issues") return Promise.resolve(1);
@@ -377,7 +362,6 @@ describe("SyncSettings", () => {
       sync_status: ENABLED,
       sync_issues: [],
       sync_trash: [],
-      sync_conflicts: [],
       sync_disconnect: DISABLED,
     });
 

@@ -1,3 +1,7 @@
+//! Conflict diagnostics (ADR 0017 D2): a race keeps the losing value in
+//! `sync_conflicts`, nothing counts it or lists it to the user, and the lazy
+//! sweep expires the rows and their paired legacy issues.
+
 use crate::common::*;
 use crate::support::*;
 use serde_json::json;
@@ -80,7 +84,7 @@ async fn concurrent_note_edits_pick_one_winner_and_keep_the_loser() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn conflicts_list_the_book_values_devices_and_clocks() {
+async fn a_discarded_value_is_recorded_with_both_values_devices_and_clocks() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     let book = add_book(&a, "review.epub", b"conflict review bytes").await;
@@ -90,21 +94,6 @@ async fn conflicts_list_the_book_values_devices_and_clocks() {
     run(&a).await;
     let annotation_uid = annotation_sync_uid(&a, annotation).await;
 
-    // The writing device has a readable name in the folder.
-    let device_dir = sync_dir.path().join("TuxBooks/devices").join(REVIEW_DEVICE);
-    std::fs::create_dir_all(&device_dir).unwrap();
-    std::fs::write(
-        device_dir.join("device.json"),
-        serde_json::to_vec(&json!({
-            "schema": 1,
-            "device_id": REVIEW_DEVICE,
-            "name": "Other machine",
-            "created_at": "2026-10-30T00:00:00.000Z"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
     publish_op(
         sync_dir.path(),
         REVIEW_WALL + 20,
@@ -132,38 +121,37 @@ async fn conflicts_list_the_book_values_devices_and_clocks() {
     )
     .await;
 
-    let conflicts = a.service.list_conflicts().await.unwrap();
-    assert_eq!(conflicts.len(), 1, "one losing note: {conflicts:?}");
-    let review = &conflicts[0];
-    assert_eq!(review.kind, "annotation");
-    assert_eq!(review.entity_uid, annotation_uid);
-    assert_eq!(review.book_uid.as_deref(), Some(uid.as_str()));
-    assert_eq!(review.book_title.as_deref(), Some("review"));
-    assert_eq!(review.book_author.as_deref(), Some("Author"));
-    assert_eq!(review.field, "note");
-    assert_eq!(review.field_label, None);
-    assert_eq!(review.winner, json!("kept note"));
-    assert_eq!(review.loser, json!("discarded note"));
-    assert_eq!(review.winner_device_id, REVIEW_DEVICE);
-    assert_eq!(review.winner_device_name, "Other machine");
-    assert_eq!(review.loser_device_name, "Other machine");
+    let row: (String, String, String, i64, i64, String, i64, i64, String) = sqlx::query_as(
+        "SELECT kind, field, loser_json, winner_wall, winner_count, winner_dev,
+                loser_wall, loser_count, loser_dev
+         FROM sync_conflicts WHERE entity_uid = ?1",
+    )
+    .bind(&annotation_uid)
+    .fetch_one(&a.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "annotation");
+    assert_eq!(row.1, "note");
     assert_eq!(
-        (review.winner_wall, review.winner_counter),
-        (REVIEW_WALL + 20, 0)
+        serde_json::from_str::<Value>(&row.2).unwrap(),
+        json!("discarded note"),
+        "the losing value is kept for support"
     );
     assert_eq!(
-        (review.loser_wall, review.loser_counter),
-        (REVIEW_WALL + 10, 0)
+        (row.3, row.4, row.5.as_str()),
+        (REVIEW_WALL + 20, 0, REVIEW_DEVICE)
     );
-    assert!(review.can_apply_loser);
-    assert_eq!(a.service.status().await.unwrap().conflicts, 1);
+    assert_eq!(
+        (row.6, row.7, row.8.as_str()),
+        (REVIEW_WALL + 10, 0, REVIEW_DEVICE)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn keeping_the_winner_resolves_the_row_and_issue_without_touching_state() {
+async fn diagnostics_rows_never_reach_the_user_surfaces() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
-    let book = add_book(&a, "review.epub", b"keep winner bytes").await;
+    let book = add_book(&a, "review.epub", b"quiet bytes").await;
     let uid = book_uid(&a, book).await;
     let annotation = add_bookmark(&a, book, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "one").await;
     connect(&a, sync_dir.path()).await;
@@ -197,7 +185,19 @@ async fn keeping_the_winner_resolves_the_row_and_issue_without_touching_state() 
     )
     .await;
 
-    let conflict = a.service.list_conflicts().await.unwrap().remove(0);
+    let row: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_conflicts WHERE resolved_at IS NULL")
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(row, 1, "the diagnostic row is open");
+
+    let status = a.service.status().await.unwrap();
+    let payload = serde_json::to_value(&status).unwrap();
+    assert!(
+        payload.get("conflicts").is_none(),
+        "the status payload no longer carries a conflicts count: {payload}"
+    );
     assert!(
         a.service
             .issues()
@@ -205,86 +205,46 @@ async fn keeping_the_winner_resolves_the_row_and_issue_without_touching_state() 
             .unwrap()
             .iter()
             .all(|issue| issue.kind != "conflict"),
-        "conflicts stay in the review list, not Sync issues"
+        "no review row reaches Sync issues"
     );
-    assert_eq!(a.service.status().await.unwrap().conflicts, 1);
     assert_eq!(
-        a.service.status().await.unwrap().issues,
-        0,
-        "conflicts are counted by the review, not as Sync issues"
+        status.issues, 0,
+        "the diagnostic row is not counted as an issue"
     );
-    assert!(a
-        .service
-        .resolve_conflict(conflict.id, "keep_winner")
-        .await
-        .unwrap());
-    assert!(a.service.list_conflicts().await.unwrap().is_empty());
-    assert!(
-        a.service.issues().await.unwrap().is_empty(),
-        "the issue closes"
-    );
-    assert_eq!(a.service.status().await.unwrap().conflicts, 0);
-
-    let book_row = book_id(&a, "review.epub").await;
-    let note = annotations::list_annotations(&a.pool, book_row)
-        .await
-        .unwrap()[0]
-        .note
-        .clone();
-    assert_eq!(
-        note.as_deref(),
-        Some("kept note"),
-        "the winner stays applied"
-    );
-
-    assert!(
-        !a.service
-            .resolve_conflict(conflict.id, "keep_winner")
-            .await
-            .unwrap(),
-        "an already resolved conflict is not resolved twice"
-    );
-    assert!(matches!(
-        a.service
-            .resolve_conflict(conflict.id, "apply_winner")
-            .await,
-        Err(AppError::InvalidInput(_))
-    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn conflicts_still_list_with_device_ids_when_sync_is_off_or_the_folder_is_gone() {
-    let off = device().await;
-    let id = insert_review_conflict(
-        &off,
-        "annotation",
-        &"d".repeat(32),
-        "note",
-        &clock::now_rfc3339(),
-    )
-    .await;
-    insert_review_state(&off, &"d".repeat(32)).await;
-    let listed = off.service.list_conflicts().await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, id);
-    assert_eq!(listed[0].winner_device_name, "f".repeat(32));
-    assert_eq!(listed[0].loser_device_name, "f".repeat(32));
-
-    let sync_dir = tempfile::tempdir().unwrap();
+async fn unread_conflicts_expire_after_thirty_days() {
     let a = device().await;
-    connect(&a, sync_dir.path()).await;
-    let vanished = insert_review_conflict(
+    let old = insert_review_conflict(
         &a,
         "annotation",
-        &"e".repeat(32),
+        &"a".repeat(32),
         "note",
-        &clock::now_rfc3339(),
+        "2000-01-01T00:00:00.000Z",
     )
     .await;
-    insert_review_state(&a, &"e".repeat(32)).await;
-    std::fs::remove_dir_all(sync_dir.path()).unwrap();
-    let listed = a.service.list_conflicts().await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, vanished);
-    assert_eq!(listed[0].winner_device_name, "f".repeat(32));
+    insert_review_state(&a, &"a".repeat(32)).await;
+    insert_issue(
+        &a,
+        &format!("conflict:annotation:{}:note", "a".repeat(32)),
+        "conflict",
+    )
+    .await;
+
+    // A status refresh runs the reconcile/expire sweep: the expired row is
+    // deleted and its paired legacy issue closes with it.
+    a.service.status().await.unwrap();
+    let remaining: Option<i64> = sqlx::query_scalar("SELECT id FROM sync_conflicts WHERE id = ?1")
+        .bind(old)
+        .fetch_optional(&a.pool)
+        .await
+        .unwrap();
+    assert!(remaining.is_none(), "the expired row is gone");
+    let open_issues: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues WHERE resolved_at IS NULL")
+            .fetch_one(&a.pool)
+            .await
+            .unwrap();
+    assert_eq!(open_issues, 0, "its issue closes with it");
 }

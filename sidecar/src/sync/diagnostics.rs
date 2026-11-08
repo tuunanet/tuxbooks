@@ -134,7 +134,10 @@ pub async fn collect(
             waiting_books: status.waiting_books,
             issues: status.issues,
             trash: status.trash,
-            conflicts: status.conflicts,
+            // The conflict count is diagnostics-only (ADR 0017 D2): the live
+            // status payload no longer carries it, so the support report
+            // counts the rows itself.
+            conflicts: open_conflict_count(pool).await?,
         },
         _ => DiagnosticsCounts::default(),
     };
@@ -207,6 +210,16 @@ async fn hash_failed(pool: &SqlitePool) -> Result<Vec<HashFailedBook>, AppError>
 
 /// Conflict rows without `winner_json` or `loser_json`: support needs the
 /// shape of the queue, never the user's discarded text.
+async fn open_conflict_count(pool: &SqlitePool) -> Result<i64, AppError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sync_conflicts
+         WHERE resolved_at IS NULL AND kind <> 'progress'",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
 async fn open_conflicts(pool: &SqlitePool) -> Result<Vec<DiagnosticConflict>, AppError> {
     type Row = (i64, String, String, Option<String>, String);
     let rows: Vec<Row> = sqlx::query_as(&format!(

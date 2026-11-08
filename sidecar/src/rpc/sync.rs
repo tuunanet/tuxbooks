@@ -1,4 +1,4 @@
-//! Sync commands: connect, status, waiting books, issues, trash, conflicts.
+//! Sync commands: connect, status, waiting books, issues, trash.
 
 use serde_json::Value;
 
@@ -21,15 +21,6 @@ struct SyncConnectArgs {
 #[serde(rename_all = "camelCase")]
 struct SyncDeviceNameArgs {
     name: String,
-}
-
-/// One conflict resolution: the row id and either `keep_winner` or
-/// `apply_loser`. The enum itself is validated in the service.
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SyncResolveConflictArgs {
-    id: i64,
-    resolution: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -89,15 +80,6 @@ pub(super) async fn dispatch(
         "sync_restore" => {
             let p: IdArgs = parse_params(params)?;
             Ok(Some(call!(commands::sync::restore(state, p.id))))
-        }
-        "sync_conflicts" => Ok(Some(call!(commands::sync::conflicts(state)))),
-        "sync_resolve_conflict" => {
-            let p: SyncResolveConflictArgs = parse_params(params)?;
-            Ok(Some(call!(commands::sync::resolve_conflict(
-                state,
-                p.id,
-                p.resolution
-            ))))
         }
         "sync_set_device_name" => {
             let p: SyncDeviceNameArgs = parse_params(params)?;

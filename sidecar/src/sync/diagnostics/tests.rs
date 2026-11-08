@@ -27,7 +27,6 @@ fn enabled_status(folder: &Path) -> SyncStatus {
         waiting_books: 0,
         issues: 0,
         trash: 0,
-        conflicts: 0,
     }
 }
 
@@ -45,7 +44,6 @@ fn disabled_status() -> SyncStatus {
         waiting_books: 9,
         issues: 9,
         trash: 9,
-        conflicts: 9,
     }
 }
 
@@ -75,7 +73,6 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     status.waiting_books = 2;
     status.issues = 3;
     status.trash = 1;
-    status.conflicts = 5;
 
     let book_id = add_failed_book(&pool, "Example", "/books/example.epub", 2).await;
     sqlx::query("INSERT INTO book_records (uid, title) VALUES (?1, 'Example')")
@@ -91,12 +88,52 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     .execute(&pool)
     .await
     .unwrap();
+    // Five open diagnostic rows are counted from the table itself: the live
+    // status payload no longer carries a conflicts count. A resolved row and
+    // a progress row stay out of the count.
     sqlx::query(
         "INSERT INTO sync_conflicts
             (kind, entity_uid, field, winner_json, loser_json,
              winner_wall, winner_count, winner_dev,
              loser_wall, loser_count, loser_dev, created_at)
          VALUES ('annotation', 'e', 'note', '\"kept secret\"', '\"lost secret\"',
+                 2, 0, 'aaa', 1, 0, 'bbb', '2026-10-31T09:00:00.000Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for entity in ["e2", "e3", "e4", "e5"] {
+        sqlx::query(
+            "INSERT INTO sync_conflicts
+                (kind, entity_uid, field, winner_json, loser_json,
+                 winner_wall, winner_count, winner_dev,
+                 loser_wall, loser_count, loser_dev, created_at)
+             VALUES ('annotation', ?1, 'note', '\"kept secret\"', '\"lost secret\"',
+                     2, 0, 'aaa', 1, 0, 'bbb', '2026-10-30T09:00:00.000Z')",
+        )
+        .bind(entity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO sync_conflicts
+            (kind, entity_uid, field, winner_json, loser_json,
+             winner_wall, winner_count, winner_dev,
+             loser_wall, loser_count, loser_dev, created_at, resolved_at)
+         VALUES ('annotation', 'e-resolved', 'note', '\"w\"', '\"l\"',
+                 2, 0, 'aaa', 1, 0, 'bbb', '2026-10-31T09:00:00.000Z',
+                 '2026-10-31T09:30:00.000Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_conflicts
+            (kind, entity_uid, field, winner_json, loser_json,
+             winner_wall, winner_count, winner_dev,
+             loser_wall, loser_count, loser_dev, created_at)
+         VALUES ('progress', 'e-progress', '__entity__', '\"w\"', '\"l\"',
                  2, 0, 'aaa', 1, 0, 'bbb', '2026-10-31T09:00:00.000Z')",
     )
     .execute(&pool)
@@ -130,7 +167,7 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     assert_eq!(report.hash_failed[0].title, "Example");
     assert_eq!(report.hash_failed[0].path, "/books/example.epub");
     assert_eq!(report.hash_failed[0].attempts, 2);
-    assert_eq!(report.open_conflicts.len(), 1);
+    assert_eq!(report.open_conflicts.len(), 5);
     assert_eq!(report.open_conflicts[0].kind, "annotation");
     assert_eq!(report.open_conflicts[0].field, "note");
     assert_eq!(

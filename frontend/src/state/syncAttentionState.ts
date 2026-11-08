@@ -3,7 +3,7 @@ import type { SyncStatus } from "@/lib/bridge";
 
 /** What the sidebar dot and the transition toast read from the provider. */
 export interface SyncAttentionValue {
-  /** True while sync is on and reports an error, an issue, or a conflict. */
+  /** True while sync is on and reports an error or an open issue. */
   attention: boolean;
   /** True while the transition toast is on screen. */
   toastVisible: boolean;
@@ -28,12 +28,11 @@ export function useSyncAttention(): SyncAttentionValue {
 }
 
 /**
- * Attention means sync is on and the engine reports an error, at least one
- * open issue, or a conflict waiting for a decision. Conflicts are a separate
- * count from issues (docs/SYNC_ISSUES.md). Keeping `enabled` in the condition
- * matches Settings > Sync, which also hides leftover counts while sync is off.
+ * Attention means sync is on and the engine reports an error or at least one
+ * open issue (docs/SYNC_ISSUES.md). Keeping `enabled` in the condition matches
+ * Settings > Sync, which also hides leftover counts while sync is off.
  */
 export function needsSyncAttention(status: SyncStatus | null): boolean {
   if (status === null || !status.enabled) return false;
-  return status.state === "error" || status.issues > 0 || status.conflicts > 0;
+  return status.state === "error" || status.issues > 0;
 }

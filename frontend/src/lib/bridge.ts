@@ -34,8 +34,6 @@ import { MAX_BULK_BOOK_IDS, type StorageRootId } from "../../../electron/shared/
 import type { StorageReport } from "../../../electron/shared/storageReport";
 
 import type {
-  SyncConflict,
-  SyncConflictResolution,
   SyncConnectOptions,
   SyncConnectResult,
   SyncDiagnostics,
@@ -402,18 +400,6 @@ export function listSyncTrash(): Promise<SyncTrashEntry[]> {
 
 export function restoreSyncTrash(id: number): Promise<boolean> {
   return invoke("sync_restore", { id });
-}
-
-export function listSyncConflicts(): Promise<SyncConflict[]> {
-  return invoke("sync_conflicts");
-}
-
-/** `apply_loser` republishes the losing value; every device converges on it. */
-export function resolveSyncConflict(
-  id: number,
-  resolution: SyncConflictResolution,
-): Promise<boolean> {
-  return invoke("sync_resolve_conflict", { id, resolution });
 }
 
 export function setSyncDeviceName(name: string): Promise<SyncStatus> {

@@ -55,7 +55,6 @@ export interface SyncStatus {
   waitingBooks: number;
   issues: number;
   trash: number;
-  conflicts: number;
 }
 
 export interface SyncIssue {
@@ -125,34 +124,6 @@ export interface SyncTrashEntry {
   deletedAt: string;
   expiresAt: string;
 }
-
-/** One losing value the merge kept, waiting for a keep/apply choice. */
-export interface SyncConflict {
-  id: number;
-  kind: string;
-  entityUid: string;
-  bookUid: string | null;
-  bookTitle: string | null;
-  bookAuthor: string | null;
-  field: string;
-  /** Readable name for `__entity__`, `__deleted__`, and `__restore__`. */
-  fieldLabel: string | null;
-  winner: unknown;
-  loser: unknown;
-  winnerDeviceId: string;
-  winnerDeviceName: string;
-  winnerWall: number;
-  winnerCounter: number;
-  loserDeviceId: string;
-  loserDeviceName: string;
-  loserWall: number;
-  loserCounter: number;
-  createdAt: string;
-  canApplyLoser: boolean;
-  applyLoserBlockedReason: string | null;
-}
-
-export type SyncConflictResolution = "keep_winner" | "apply_loser";
 
 export interface SyncMismatch {
   localLibraryId: string;

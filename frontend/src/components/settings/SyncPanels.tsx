@@ -1,6 +1,6 @@
 /**
  * Presentational sections of Settings > Sync: the folder card, the connected
- * status panel, and the issue/conflict/trash lists behind it. State and the
+ * status panel, and the issue/trash lists behind it. State and the
  * actions they fire live in `SyncSettings`; this file only renders.
  */
 
@@ -9,15 +9,12 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  type SyncConflict,
-  type SyncConflictResolution,
   type SyncIssue,
   type SyncState,
   type SyncStatus,
   type SyncTrashEntry,
   type WaitingBook,
 } from "@/lib/bridge";
-import { SyncConflictsSection } from "./SyncConflicts";
 import { SyncIssuesSection } from "./SyncIssues";
 import { SyncTrashSection } from "./SyncTrash";
 import { WaitingBooksSection } from "./SyncWaiting";
@@ -41,14 +38,11 @@ type SyncSectionsProps = {
   status: SyncStatus;
   issues: SyncIssue[];
   trash: SyncTrashEntry[];
-  conflicts: SyncConflict[];
   busy: boolean;
   onIssueAction: (issue: SyncIssue) => void;
   onCopyIssueDetails: (issue: SyncIssue) => void;
   onDismissIssue: (id: number) => void;
   onDismissAllIssues: () => void;
-  onResolveConflict: (id: number, resolution: SyncConflictResolution) => void;
-  onKeepAllWinners: (ids: number[]) => void;
   onRestoreTrash: (id: number) => void;
 };
 
@@ -56,14 +50,11 @@ export function SyncSections({
   status,
   issues,
   trash,
-  conflicts,
   busy,
   onIssueAction,
   onCopyIssueDetails,
   onDismissIssue,
   onDismissAllIssues,
-  onResolveConflict,
-  onKeepAllWinners,
   onRestoreTrash,
 }: SyncSectionsProps) {
   return (
@@ -76,15 +67,6 @@ export function SyncSections({
         onCopyDetails={onCopyIssueDetails}
         onDismiss={onDismissIssue}
         onDismissAll={onDismissAllIssues}
-      />
-      <SyncConflictsSection
-        key={`${status.libraryId ?? ""}:${status.folder ?? ""}:${status.deviceId ?? ""}`}
-        conflicts={conflicts}
-        total={status.conflicts}
-        deviceId={status.deviceId}
-        busy={busy}
-        onResolve={onResolveConflict}
-        onKeepAll={onKeepAllWinners}
       />
       <SyncTrashSection
         entries={trash}
@@ -269,12 +251,11 @@ function ConnectedSyncPanel({
         <dd data-testid="sync-last-sync">{formatTime(status.lastSyncAt)}</dd>
       </dl>
 
-      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
         <Stat label="Pending" value={status.pendingLocal} />
         <Stat label="Waiting for books" value={status.waitingBooks} />
         <Stat label="Issues" value={status.issues} />
         <Stat label="Recently deleted" value={status.trash} />
-        <Stat label="Conflicts" value={status.conflicts} />
       </div>
 
       {status.lastError ? (

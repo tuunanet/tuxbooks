@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 
 import { SyncSettings } from "@/components/settings/SyncSettings";
-import type { SyncConflict, SyncIssue, SyncStatus } from "@/lib/bridge";
+import type { SyncIssue, SyncStatus } from "@/lib/bridge";
 import {
   copyTextMock,
   invokeMock,
@@ -28,7 +28,6 @@ export const DISABLED: SyncStatus = {
   waitingBooks: 0,
   issues: 0,
   trash: 0,
-  conflicts: 0,
 };
 
 export const ENABLED: SyncStatus = {
@@ -44,12 +43,7 @@ export const ENABLED: SyncStatus = {
   waitingBooks: 1,
   issues: 0,
   trash: 1,
-  conflicts: 0,
 };
-
-export const LOCAL_DEVICE = ENABLED.deviceId ?? "";
-export const OTHER_DEVICE = "11111111111111111111111111111111";
-export const CONFLICT_TIME = Date.parse("2026-10-28T10:00:00.000Z");
 
 export function renderSettings() {
   return render(<SyncSettings />);
@@ -65,33 +59,6 @@ export function issue(overrides: Partial<SyncIssue> = {}): SyncIssue {
     target: "ops/abc/broken.json",
     createdAt: "2026-10-28T10:00:00.000Z",
     updatedAt: "2026-10-28T10:01:00.000Z",
-    ...overrides,
-  };
-}
-
-export function conflict(overrides: Partial<SyncConflict> = {}): SyncConflict {
-  return {
-    id: 1,
-    kind: "annotation",
-    entityUid: "a".repeat(32),
-    bookUid: "b".repeat(32),
-    bookTitle: "The Book",
-    bookAuthor: "Ada Author",
-    field: "note",
-    fieldLabel: null,
-    winner: "Kept note",
-    loser: "Discarded note",
-    winnerDeviceId: LOCAL_DEVICE,
-    winnerDeviceName: "Laptop",
-    winnerWall: CONFLICT_TIME,
-    winnerCounter: 0,
-    loserDeviceId: OTHER_DEVICE,
-    loserDeviceName: "Desktop",
-    loserWall: CONFLICT_TIME - 60_000,
-    loserCounter: 0,
-    createdAt: "2026-10-28T10:05:00.000Z",
-    canApplyLoser: true,
-    applyLoserBlockedReason: null,
     ...overrides,
   };
 }
