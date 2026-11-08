@@ -1,5 +1,6 @@
 //! End-to-end tests for cloud-folder sync: two or three real databases
 //! sharing one folder, with the real trigger pipeline and engine.
+mod autoretry;
 mod basics;
 mod collections;
 mod common;

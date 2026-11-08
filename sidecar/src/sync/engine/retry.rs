@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::error::AppError;
 
+use super::autoretry::STRIP_AUTO_RETRY_STATE;
 use super::clear::read_sync_op;
 use super::SyncIssueAction;
 use crate::sync::clock::now_rfc3339;
@@ -34,6 +35,20 @@ impl super::SyncService {
         }
 
         let _guard = self.inner.pass_lock.lock().await;
+        // A human press grants a fresh budget (ADR 0017 D4): the auto-retry
+        // count resets and an exhausted row revives, its gave-up detail
+        // stripped so only live state stays on the row.
+        sqlx::query(&format!(
+            "UPDATE sync_issues SET
+                auto_attempts = 0,
+                next_auto_retry_at = NULL,
+                detail = {STRIP_AUTO_RETRY_STATE},
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1 AND resolved_at IS NULL"
+        ))
+        .bind(id)
+        .execute(&self.inner.pool)
+        .await?;
         let outcome = self
             .retry_locked(&kind, &issue_key, file_name.as_deref())
             .await;
@@ -84,9 +99,10 @@ impl super::SyncService {
         }
     }
 
-    /// Run the retry path for one kind. The caller holds `pass_lock`. Returns
-    /// true when the work itself proves the condition is gone.
-    async fn retry_locked(
+    /// Run the retry path for one kind. The caller holds `pass_lock` — either
+    /// the manual entry point above or the auto-retry sweep. Returns true
+    /// when the work itself proves the condition is gone.
+    pub(super) async fn retry_locked(
         &self,
         kind: &str,
         issue_key: &str,
