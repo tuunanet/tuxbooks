@@ -13,6 +13,7 @@ use super::model::{EntityKind, Hlc, Op, OP_SCHEMA};
 use super::store;
 
 mod drain;
+mod file_version;
 mod lifecycle;
 mod publish;
 

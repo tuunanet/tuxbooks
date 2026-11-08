@@ -75,6 +75,7 @@ async fn capture_one(
         }
         EntityKind::Membership => capture_membership(pool, root, row).await,
         EntityKind::Book => capture_book(pool, root, row).await,
+        EntityKind::FileVersion => super::file_version::capture_file_version(pool, root, row).await,
     }
 }
 

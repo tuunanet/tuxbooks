@@ -54,6 +54,9 @@ pub enum EntityKind {
     /// Whole-book Forget/restore lifecycle (ADR 0014 D5). `entity_uid` is the
     /// forgotten book uid.
     Book,
+    /// The book file's current version pointer (ADR 0018 D1): content hash and
+    /// byte size, keyed by book uid.
+    FileVersion,
 }
 
 impl EntityKind {
@@ -67,6 +70,7 @@ impl EntityKind {
             Self::Opened => "opened",
             Self::BookIdentity => "book_identity",
             Self::Book => "book",
+            Self::FileVersion => "file_version",
         }
     }
 
@@ -80,18 +84,23 @@ impl EntityKind {
             "opened" => Self::Opened,
             "book_identity" => Self::BookIdentity,
             "book" => Self::Book,
+            "file_version" => Self::FileVersion,
             _ => return None,
         })
     }
 
     /// Progress is one coherent locator: mixing fields from two devices would
-    /// create a position neither device ever had. Membership and opened are
-    /// single-value records, so the same rule is simpler and safe. Every other
-    /// kind merges per field, which is what lets one device edit a note while
-    /// another changes a highlight colour.
+    /// create a position neither device ever had. The file version is one
+    /// coherent hash-and-size pair (ADR 0018 D1): mixing the hash from one
+    /// device with the size from another is a version nobody wrote. Membership
+    /// and opened are single-value records, so the same rule is simpler and
+    /// safe. Every other kind merges per field, which is what lets one device
+    /// edit a note while another changes a highlight colour.
     pub fn merge_mode(self) -> MergeMode {
         match self {
-            Self::Progress | Self::Membership | Self::Opened | Self::Book => MergeMode::Entity,
+            Self::Progress | Self::Membership | Self::Opened | Self::Book | Self::FileVersion => {
+                MergeMode::Entity
+            }
             _ => MergeMode::Field,
         }
     }
@@ -185,6 +194,9 @@ pub fn field_names(kind: EntityKind) -> &'static [&'static str] {
         // The snapshot is a serialized portable book snapshot. `discarded`
         // closes the remote trash entry after a local Keep/Merge resolution.
         EntityKind::Book => &["snapshot", "replacement_book_uid", "discarded"],
+        // One version is one hash-and-size pair; the minting re-import's HLC
+        // is the entity clock (ADR 0018 D1).
+        EntityKind::FileVersion => &["content_hash", "size"],
     }
 }
 
@@ -244,6 +256,7 @@ pub fn state_display(kind: EntityKind, state: &State) -> String {
         EntityKind::Membership => "collection membership".to_string(),
         EntityKind::BookIdentity => "book identity".to_string(),
         EntityKind::Book => "forgotten book".to_string(),
+        EntityKind::FileVersion => "book file version".to_string(),
     }
 }
 
