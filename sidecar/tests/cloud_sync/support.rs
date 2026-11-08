@@ -1,10 +1,9 @@
-//! Conflict-review and sync-issue fixtures shared across test modules.
+//! Conflict-diagnostic and sync-issue fixtures shared across test modules.
 
 use crate::common::*;
 
-// Conflict review tests use manual operations with a clock far ahead of the
-// wall clock, so ordering is explicit and a resolution's fresh clock is still
-// newer than every seeded write.
+// Conflict tests use manual operations with a clock far ahead of the wall
+// clock, so ordering is explicit regardless of when the test runs.
 pub const REVIEW_WALL: i64 = 9_000_000_000_000;
 pub const REVIEW_DEVICE: &str = "cccccccccccccccccccccccccccccccc";
 
@@ -42,60 +41,6 @@ pub async fn publish_op(folder: &Path, wall: i64, op: &Op, devices: &[&Device]) 
     }
 }
 
-pub fn review_delete_op(
-    wall: i64,
-    kind: EntityKind,
-    entity_uid: &str,
-    book_uid: &str,
-    prior: Value,
-) -> Op {
-    Op {
-        schema: OP_SCHEMA,
-        op_id: format!("{wall:032x}"),
-        device_id: REVIEW_DEVICE.into(),
-        hlc: Hlc {
-            wall,
-            counter: 0,
-            device: REVIEW_DEVICE.into(),
-        },
-        kind,
-        entity_uid: entity_uid.into(),
-        book_uid: Some(book_uid.into()),
-        deleted: true,
-        restore: false,
-        fields: serde_json::Map::new(),
-        prior: prior.as_object().cloned(),
-        created_at: "2026-10-30T00:00:00.000Z".into(),
-    }
-}
-
-pub fn review_restore_op(
-    wall: i64,
-    kind: EntityKind,
-    entity_uid: &str,
-    book_uid: &str,
-    fields: Value,
-) -> Op {
-    Op {
-        schema: OP_SCHEMA,
-        op_id: format!("{wall:032x}"),
-        device_id: REVIEW_DEVICE.into(),
-        hlc: Hlc {
-            wall,
-            counter: 0,
-            device: REVIEW_DEVICE.into(),
-        },
-        kind,
-        entity_uid: entity_uid.into(),
-        book_uid: Some(book_uid.into()),
-        deleted: false,
-        restore: true,
-        fields: fields.as_object().cloned().unwrap(),
-        prior: None,
-        created_at: "2026-10-30T00:00:00.000Z".into(),
-    }
-}
-
 pub async fn open_trash(device: &Device) -> i64 {
     sqlx::query_scalar("SELECT COUNT(*) FROM sync_trash WHERE restored_at IS NULL")
         .fetch_one(&device.pool)
@@ -105,14 +50,6 @@ pub async fn open_trash(device: &Device) -> i64 {
 
 pub async fn annotation_sync_uid(device: &Device, id: i64) -> String {
     sqlx::query_scalar("SELECT sync_uid FROM annotations WHERE id = ?1")
-        .bind(id)
-        .fetch_one(&device.pool)
-        .await
-        .unwrap()
-}
-
-pub async fn collection_sync_uid(device: &Device, id: i64) -> String {
-    sqlx::query_scalar("SELECT sync_uid FROM collections WHERE id = ?1")
         .bind(id)
         .fetch_one(&device.pool)
         .await
@@ -142,25 +79,6 @@ pub async fn insert_review_conflict(
     .fetch_one(&device.pool)
     .await
     .unwrap()
-}
-
-/// Every kind resolved to its losing value, on any device that ran a pass.
-pub async fn assert_review_state(device: &Device) {
-    let book = book_id(device, "review.epub").await;
-    let note = annotations::list_annotations(&device.pool, book)
-        .await
-        .unwrap()[0]
-        .note
-        .clone();
-    assert_eq!(note.as_deref(), Some("Loser note"));
-    let row = books::get_book(&device.pool, book).await.unwrap().unwrap();
-    assert_eq!(row.title, "Loser title");
-    let shelves = collections::list_collection_summaries(&device.pool)
-        .await
-        .unwrap();
-    assert_eq!(shelves.len(), 1);
-    assert_eq!(shelves[0].name, "Loser shelf");
-    assert_eq!(progress_percent(device, book).await, Some(20.0));
 }
 
 pub async fn insert_review_state(device: &Device, entity_uid: &str) {

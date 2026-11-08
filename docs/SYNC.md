@@ -13,8 +13,7 @@ copies, or partially. Nothing in the folder is ever overwritten in place.
 Status: implemented in `sidecar/src/sync/` and covered by
 `sidecar/tests/cloud_sync.rs`. The decision records are
 [ADR 0013](adr/0013-cloud-folder-sync.md) for the transport and
-[ADR 0015](adr/0015-sync-recovery.md) for recovery, issue actions, and
-conflict review.
+[ADR 0015](adr/0015-sync-recovery.md) for recovery and issue actions.
 
 ## What syncs
 
@@ -205,9 +204,9 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   devices would create a position neither device had. Membership add/remove is
   also one value, so a later add can undo an earlier remove.
 - **Delete wins** for annotations and collections. A tombstone is permanent. A
-  concurrent edit that loses is stored in `sync_conflicts` and shown in
-  [Conflict review](#conflict-review); it does not resurrect the entity. The
-  explicit trash restore is the only way back.
+  concurrent edit that loses is kept in `sync_conflicts` as an invisible
+  diagnostic; it does not resurrect the entity. The explicit trash restore is
+  the only way back.
 - **Absent books** do not delete state. Unwatching a folder, a missing file, or
   deleting a local book row never emits a shared delete. State waits under its
   book uuid and is projected when the same content is imported again.
@@ -222,67 +221,33 @@ Each operation file is capped at 1 MiB. Cover blobs are capped at 16 MiB.
   different copy of the book does not fight over source-derived authors or
   subjects.
 
-Losing field values are written to `sync_conflicts` and surfaced in
-Settings > Sync's [Conflict review](#conflict-review), with the kept and
-discarded values. The current state always has a winner, but the loser stays
-inspectable until the conflict is resolved. Settling a conflict is described
-under [Conflict review](#conflict-review).
+Losing field values are written to `sync_conflicts` as invisible diagnostics
+(ADR 0017 D2). The winner is applied immediately and nothing asks the user to
+choose; the losing value is kept for support, not for review. Conflict
+diagnostics are described under [Conflict diagnostics](#conflict-diagnostics).
 
-## Conflict review
+## Conflict diagnostics
 
-A discarded value stays in `sync_conflicts` until the user resolves it or the
-30-day window expires. The merge result does not wait for that decision: the
-winner is applied immediately and stays applied. The decisions are recorded in
-[ADR 0015](adr/0015-sync-recovery.md).
+A discarded value stays in `sync_conflicts` until the 30-day window expires.
+The merge result does not wait: the winner is applied immediately and stays
+applied, and no surface asks the user to settle anything. The decision is
+recorded in [ADR 0017](adr/0017-conflict-free-sync-pre-decided-winners.md).
 
-Each open row carries the kind, entity uid, field, both JSON values, both
-hybrid clocks with the writing device, and the time the conflict was recorded.
-The `sync_conflicts` sidecar command returns open rows newest first with the
-book title and author, the field, both values, and the device names. Settings >
-Sync lists them under Conflicts to review, grouped by book with delete and edit
-rows first, then whole-entity rows, then single fields. Each row shows the kept
-and the discarded value, both devices, and both times. A special field name is
-labelled: `__entity__` is a whole-entity record, `__deleted__` is an edit that
-lost to a delete, and `__restore__` is a restore that lost to a newer delete.
-Several losing writes for one field share one issue; the issue closes only when
-the last conflict with that key is resolved.
+Each row carries the kind, entity uid, field, both JSON values, both hybrid
+clocks with the writing device, and the time the race was recorded. The rows
+have no interactive surface: nothing lists them in Settings > Sync, the live
+status payload carries no conflict count, and a new race never opens an issue.
+Support reads them through Copy diagnostics, which reports the row count and a
+sample of open rows without their values.
 
-Two resolutions are offered:
-
-- **Keep winner** stamps `resolved_at`. The applied state does not change.
-- **Apply loser** republishes the discarded value as an ordinary operation with
-  a fresh hybrid clock, so every device replays it and converges. A field
-  conflict writes one field, a whole-entity conflict writes the whole record,
-  and a delete/edit or lost-restore conflict writes the explicit restore
-  operation. Resolution never deletes the losing value from the row, and a
-  restore also closes the local Recently deleted entry on every device.
-
-Settings > Sync offers Keep this device and Keep other when one side of the
-conflict is this device. Those labels choose between the applied winner and the
-discarded value, whichever device wrote each one. When neither side is this
-device, the buttons read Keep winner and Apply other. When replaying the loser
-is unsafe, that choice is disabled and the reason is shown. Decide later sets
-the row aside for this session without closing it. A bulk Keep current winner
-closes the rows shown with the applied value. The winner stays applied until you
-choose. When the backend reports more open rows than it loaded, the section says
-"Showing first N of M" and the bulk action covers only the loaded rows.
-
-The queue is reconciled against the mirror on every status refresh and before
-a list. A row closes once its winner no longer matches the current value and
-clock, so a device that replays another device's resolution stops showing a
-stale choice and its issue closes with it. Book identity merges are
-deterministic and can only be kept; replaying the losing uuid would resurrect
-an identity every device already collapsed.
-
-Progress never prompts. Progress conflicts are kept in the table for
-diagnostics, but they are left out of the review list and the status count, and
-they never open an issue.
-
-Unresolved conflicts older than 30 days are removed on the next status refresh
-or list, and their issue closes when nothing else shares the key. The status
-count only includes open, unexpired rows. The folder is not required to read
-the queue: when sync is off or the folder is unavailable, device names fall
-back to the stored device ids.
+Rows recorded before races went silent (ADR 0017 D1) may still have a paired
+`sync_issues` row of kind `conflict`. Those legacy issues are excluded from the
+issue list and the status count and can never be dismissed; the maintenance
+sweep is the only thing that closes them. A status refresh first reconciles
+each open row against the mirror. A row closes once a newer write has moved
+the value or clock past its winner. The refresh then deletes rows older than
+30 days, closing each row's issue once no open row shares its key. Progress
+races are diagnostic only and never open an issue.
 
 ## Local capture and projection
 
@@ -453,11 +418,9 @@ folder. It covers:
 - library mismatch confirmation;
 - same-name collection merge;
 - concurrent note edits converging with the loser kept;
-- conflict review: listing values, devices and clocks, keep winner, applying
-  the loser for a field and a whole entity, delete/edit and lost-restore
-  recovery with trash closing on both devices, settlement after another
-  device resolves, one shared issue across two losers, 30-day expiry, and the
-  device-id fallback;
+- conflict diagnostics: a race recording both values, devices, and clocks;
+  no diagnostic row reaching the issue list or the status payload; legacy
+  rows and their paired issues expiring after 30 days;
 - duplicate copies sharing one uuid, the duplicate issue, and state moving to
   the remaining copy when the canonical row is deleted;
 - issue actions and targets, retry for projection, identity, reprojection,
@@ -470,8 +433,7 @@ folder. It covers:
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, the primary action per issue kind, Copy details, opening the sync
 folder without a renderer path, Locate file for a waiting book and its
-cancel/mismatch paths, conflict grouping and device-relative choices,
-the bulk keep, the session set-aside, the sidebar attention dot, the toast
+cancel/mismatch paths, the sidebar attention dot, the toast
 transition and dismissal, the always-mounted live region, the reader hide, the
 stale status-read race, unsubscribing on unmount, and the IPC policy for the
 sync folder.

@@ -2,7 +2,6 @@
 //! translate the JSON-RPC surface.
 
 use crate::error::AppError;
-use crate::sync::conflict::SyncConflict;
 use crate::sync::diagnostics::SyncDiagnostics;
 use crate::sync::engine::{SyncConnectResult, SyncIssue, SyncService, SyncStatus, SyncTrashEntry};
 use crate::sync::waiting::WaitingBook;
@@ -93,18 +92,6 @@ pub async fn trash(state: &AppState) -> Result<Vec<SyncTrashEntry>, AppError> {
 
 pub async fn restore(state: &AppState, id: i64) -> Result<bool, AppError> {
     service(state)?.restore(id).await
-}
-
-pub async fn conflicts(state: &AppState) -> Result<Vec<SyncConflict>, AppError> {
-    service(state)?.list_conflicts().await
-}
-
-pub async fn resolve_conflict(
-    state: &AppState,
-    id: i64,
-    resolution: String,
-) -> Result<bool, AppError> {
-    service(state)?.resolve_conflict(id, &resolution).await
 }
 
 pub async fn set_device_name(state: &AppState, name: String) -> Result<SyncStatus, AppError> {

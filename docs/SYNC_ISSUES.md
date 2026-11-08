@@ -3,9 +3,9 @@
 Every sync problem the renderer shows lives in the `sync_issues` table,
 one row per issue key. This is the map: who writes a row, when it closes
 on its own, what Retry does, and how the Settings and sidebar surfaces
-report it. Conflicts are the exception: they live in
-`sync_conflicts` and are settled in the review section, never through this
-flow.
+report it. Conflicts are the exception: races have pre-decided winners
+(ADR 0017), so a discarded value lands in `sync_conflicts` as invisible
+diagnostics and never enters this flow.
 
 ## Flow
 
@@ -50,7 +50,7 @@ without an `issue_cleared` arm never closes on its own.
 | `invalid_dirty_kind`                             | `capture.rs`                                             | never; action is Dismiss                               | none                                                             |
 | `book_snapshot_missing`, `book_snapshot_invalid` | `repository/lifecycle.rs`, `capture.rs`, `merge.rs`      | never; action is CopyDetails                           | none; the delete applied, no local restore is available          |
 | `forget_membership_skipped`                      | `repository/lifecycle.rs`                                | never; action is CopyDetails                           | none; the snapshot named shelves this library does not have yet  |
-| `restore_conflict`                               | `repository/lifecycle.rs`, `apply_remote_restore`        | never; action is CopyDetails                           | none; review carries the choice                                  |
+| `restore_conflict`                               | `repository/lifecycle.rs`, `apply_remote_restore`        | never; action is CopyDetails                           | none; the restore dialog carries the choice                      |
 
 Two invariants worth knowing before changing anything here:
 
@@ -73,9 +73,11 @@ Failures become rows in `sync_issues`:
 - a missing cover blob (the metadata edit is applied without the cover and the
   issue records it);
 - a book that could not be projected;
-- a conflict where one side had to be discarded; its `sync_issues` row is
-  excluded from the issue list and the status count, and the losing value is
-  held for [Conflict review](SYNC.md#conflict-review);
+- a race where one side had to be discarded; the losing value lands in
+  `sync_conflicts` as an invisible diagnostic
+  ([SYNC.md](SYNC.md#conflict-diagnostics)) and no issue opens. Legacy
+  `conflict` rows are excluded from the issue list and the status count until
+  the sweep retires them;
 - two local files bound to the same book identity, naming both paths;
 - a queued reprojection that failed;
 - a forgotten-book snapshot that could not be published or read back, so
@@ -84,12 +86,12 @@ Failures become rows in `sync_issues`:
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
-issues, conflicts, and recently deleted items. Invalid operation files are
+issues, and recently deleted items. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
 
 The sidebar's Settings entry shows a small dot when sync is on and the engine
-reports an error, an open issue, or a conflict to review. The dot is visible
+reports an error or an open issue. The dot is visible
 wherever the sidebar is, including while Settings is open. It follows the same
 rule as Settings > Sync: with sync off, leftover counts stay hidden because the
 Settings lists are hidden too. A toast appears once when the state changes into
@@ -154,8 +156,9 @@ gone:
 - a retry closes its own row when the work shows the condition is gone;
 - a successful pass closes the `sync_failed` row.
 
-Conflict review owns conflicts until the user settles them or the 30-day window
-expires, so a Dismiss button can never hide one without resolving it.
+Legacy `conflict` rows are never dismissible: the reconcile/expire sweep is
+the only thing that closes them, within the 30-day window
+([SYNC.md](SYNC.md#conflict-diagnostics)).
 
 ### Copy diagnostics
 

@@ -9,26 +9,22 @@ import {
   forgetAllWaitingBooks,
   forgetWaitingBook,
   getSyncStatus,
-  listSyncConflicts,
   listSyncIssues,
   listSyncTrash,
   listWaitingBooks,
   openSyncFolder,
   pickBookFile,
   pickSyncFolder,
-  resolveSyncConflict,
   restoreSyncTrash,
   retrySyncIssue,
   setSyncDeviceName,
   syncNow,
-  type SyncConflict,
-  type SyncConflictResolution,
   type SyncIssue,
   type SyncStatus,
   type SyncTrashEntry,
   type WaitingBook,
 } from "@/lib/bridge";
-import { formatIssueDetails } from "./SyncLists";
+import { formatIssueDetails } from "./SyncIssues";
 import { SyncFolderSection, SyncSections } from "./SyncPanels";
 import { useSyncStatusRefresh } from "./useSyncStatusRefresh";
 import {
@@ -48,7 +44,6 @@ export function SyncSettings() {
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [trash, setTrash] = useState<SyncTrashEntry[]>([]);
   const [waitingBooks, setWaitingBooks] = useState<WaitingBook[]>([]);
-  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mismatch, setMismatch] = useState<MismatchPrompt | null>(null);
@@ -64,16 +59,14 @@ export function SyncSettings() {
 
   const loadLists = useCallback(async () => {
     try {
-      const [nextIssues, nextTrash, nextWaiting, nextConflicts] = await Promise.all([
+      const [nextIssues, nextTrash, nextWaiting] = await Promise.all([
         listSyncIssues(),
         listSyncTrash(),
         listWaitingBooks(),
-        listSyncConflicts(),
       ]);
       setIssues(nextIssues);
       setTrash(nextTrash);
       setWaitingBooks(nextWaiting);
-      setConflicts(nextConflicts);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -83,7 +76,6 @@ export function SyncSettings() {
     setIssues([]);
     setTrash([]);
     setWaitingBooks([]);
-    setConflicts([]);
   }, []);
 
   useSyncStatusRefresh({ applyStatus, loadLists, clearLists, setError });
@@ -216,7 +208,6 @@ export function SyncSettings() {
       setIssues([]);
       setTrash([]);
       setWaitingBooks([]);
-      setConflicts([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -323,63 +314,6 @@ export function SyncSettings() {
     [applyStatus, loadLists],
   );
 
-  const resolveConflict = useCallback(
-    async (id: number, resolution: SyncConflictResolution) => {
-      setBusy(true);
-      setError(null);
-      try {
-        await resolveSyncConflict(id, resolution);
-        applyStatus(await getSyncStatus());
-        await loadLists();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [applyStatus, loadLists],
-  );
-
-  const keepAllWinners = useCallback(
-    async (ids: number[]) => {
-      if (ids.length === 0) return;
-      setBusy(true);
-      setError(null);
-      setNotice(null);
-      let firstError: unknown = null;
-      let kept = 0;
-      try {
-        for (const id of ids) {
-          try {
-            if (await resolveSyncConflict(id, "keep_winner")) kept += 1;
-          } catch (cause) {
-            if (firstError === null) firstError = cause;
-          }
-        }
-      } catch (cause) {
-        if (firstError === null) firstError = cause;
-      } finally {
-        try {
-          applyStatus(await getSyncStatus());
-          await loadLists();
-        } catch (cause) {
-          if (firstError === null) firstError = cause;
-        }
-        if (firstError !== null) {
-          setError(firstError instanceof Error ? firstError.message : String(firstError));
-        } else if (kept === 0) {
-          setNotice("Those conflicts were already resolved.");
-        } else {
-          setNotice(
-            `Kept the current winner for ${kept} ${kept === 1 ? "conflict" : "conflicts"}.`,
-          );
-        }
-        setBusy(false);
-      }
-    },
-    [applyStatus, loadLists],
-  );
-
   const forgetAllWaiting = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -424,14 +358,11 @@ export function SyncSettings() {
           status={status}
           issues={issues}
           trash={trash}
-          conflicts={conflicts}
           busy={busy}
           onIssueAction={(issue) => void issueAction(issue)}
           onCopyIssueDetails={(issue) => void copyIssueDetails(issue)}
           onDismissIssue={(id) => void dismiss(id)}
           onDismissAllIssues={() => void dismissAllIssues()}
-          onResolveConflict={(id, resolution) => void resolveConflict(id, resolution)}
-          onKeepAllWinners={(ids) => void keepAllWinners(ids)}
           onRestoreTrash={(id) => void restore(id)}
         />
       ) : null}

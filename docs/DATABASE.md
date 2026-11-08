@@ -395,30 +395,29 @@ The local trash row is the durable record of a Forget; the sync mirror keeps the
   row. That is what stops `sync_book_aliases` and stale `sync_book_merges`
   edges from resurrecting the old identity.
 
-## Conflict review (migration 0027)
+## Conflict diagnostics (migration 0027)
 
 `sync_conflicts` records the value a last-writer-wins merge discarded, with both
 JSON values, both hybrid clocks, and the devices that wrote them. Migration
 0027 adds `resolved_at` and an index on it. The applied winner is never rolled
-back by the row itself; the queue only records what was lost.
+back by the row itself; the row only records what was lost. Rows are invisible
+diagnostics (ADR 0017 D2): nothing in the app shows them; Copy diagnostics
+lists up to 20 for support without their values, the live status carries no
+conflict count, and a new race never opens an issue.
 
-- A resolved row keeps `resolved_at` (audit trail) and the open count.
-  `keep_winner` only stamps it. `apply_loser` publishes the discarded value as a
-  normal operation with a fresh clock, so every device converges; delete/edit
-  (`__deleted__`) and lost restores (`__restore__`) republish the restore
-  operation instead, closing the local trash entry on each device applying it.
-- An unresolved row older than 30 days is deleted during a status refresh or a
-  conflict list, matching the trash window. Its `sync_issues` row closes when
-  no other open conflict shares the key.
-- Each status refresh and list first reconciles open rows against the mirror.
-  A row closes once a newer write has moved the value or clock past its
-  winner, so every device that replays a resolution settles its own copy.
-- Several losing writes for one `(kind, entity_uid, field)` share one issue and
-  one key. The issue is resolved only after the last of them is settled.
-- Progress conflicts stay in the table for diagnostics but are left out of the
-  review list and the status count, and never open an issue.
-- Book identity conflicts are keep-only because identity merges are
-  deterministic.
+- A resolved row keeps `resolved_at` (audit trail). New rows never resolve
+  through a user action; resolution happens only through the maintenance sweep.
+- An unresolved row older than 30 days is deleted during a status refresh,
+  matching the trash window. Its `sync_issues` row closes when no other open
+  conflict shares the key.
+- Each status refresh first reconciles open rows against the mirror. A row
+  closes once a newer write has moved the value or clock past its winner.
+- Legacy rows (recorded before races went silent, ADR 0017 D1) may have a
+  paired `sync_issues` row of kind `conflict`. It is excluded from the issue
+  list and the status count, can never be dismissed, and closes only when the
+  sweep retires its row or no open row shares the key.
+- Progress conflicts stay in the table for diagnostics and never open an
+  issue.
 
 ## Cloud-folder sync (migration 0015)
 
@@ -449,8 +448,8 @@ changes how imports, readers, or search work. The full contract is
   operation id. `sync_remote_files` caches file size/mtime and retry counts so a
   pass only reads new or changed files.
 - `sync_issues` / `sync_conflicts` / `sync_trash` — user-visible failures,
-  losing field values with their resolution and 30-day expiry, and the 30-day
-  delete restore list for single entities. Migration 0028 adds a partial unique
+  losing field values kept as invisible diagnostics with 30-day expiry, and
+  the 30-day delete restore list for single entities. Migration 0028 adds a partial unique
   index so only one open row exists per issue key; a concurrent status refresh
   can no longer duplicate one. Migration 0031 adds the auto-retry sweep's
   bookkeeping (ADR 0017 D4): attempts counted against a per-kind cap, a backoff clock, a gave-up detail at exhaustion, and a manual Retry that resets both columns.

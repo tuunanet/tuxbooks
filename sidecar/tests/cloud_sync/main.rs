@@ -4,7 +4,6 @@ mod autoretry;
 mod basics;
 mod collections;
 mod common;
-mod conflict_resolve;
 mod conflict_review;
 mod conflict_silent;
 mod folder;

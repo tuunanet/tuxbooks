@@ -72,7 +72,9 @@ impl super::SyncService {
         let Some(kind) = kind else {
             return Ok(false);
         };
-        // Review owns conflicts. Dismissing one would hide it without settling it.
+        // Conflict-kind rows are invisible diagnostics; only the reconcile and
+        // expiry sweep closes them. Dismissing one would hide a legacy row
+        // nothing else can account for.
         if kind == "conflict" {
             return Ok(false);
         }

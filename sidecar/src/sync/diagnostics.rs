@@ -134,7 +134,10 @@ pub async fn collect(
             waiting_books: status.waiting_books,
             issues: status.issues,
             trash: status.trash,
-            conflicts: status.conflicts,
+            // The conflict count is diagnostics-only (ADR 0017 D2): the live
+            // status payload no longer carries it, so the support report
+            // counts the rows itself.
+            conflicts: open_conflict_count(pool).await?,
         },
         _ => DiagnosticsCounts::default(),
     };
@@ -205,6 +208,21 @@ async fn hash_failed(pool: &SqlitePool) -> Result<Vec<HashFailedBook>, AppError>
         .collect())
 }
 
+/// The rows the conflict diagnostics talk about: unresolved, never
+/// `progress`. Both queries share the fragment so the count and the sample
+/// cover the same set.
+const OPEN_CONFLICT_WHERE: &str = "c.resolved_at IS NULL AND c.kind <> 'progress'";
+
+/// The open-conflict total for support's report, matching the sample query.
+async fn open_conflict_count(pool: &SqlitePool) -> Result<i64, AppError> {
+    let count: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM sync_conflicts c WHERE {OPEN_CONFLICT_WHERE}"
+    ))
+    .fetch_one(pool)
+    .await?;
+    Ok(count)
+}
+
 /// Conflict rows without `winner_json` or `loser_json`: support needs the
 /// shape of the queue, never the user's discarded text.
 async fn open_conflicts(pool: &SqlitePool) -> Result<Vec<DiagnosticConflict>, AppError> {
@@ -216,7 +234,7 @@ async fn open_conflicts(pool: &SqlitePool) -> Result<Vec<DiagnosticConflict>, Ap
         LEFT JOIN sync_state_entities e
                ON e.kind = c.kind AND e.entity_uid = c.entity_uid
         LEFT JOIN book_records br ON br.uid = {BOOK_UID_EXPR}
-        WHERE c.resolved_at IS NULL AND c.kind <> 'progress'
+        WHERE {OPEN_CONFLICT_WHERE}
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ?1
         "#

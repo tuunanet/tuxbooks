@@ -12,7 +12,7 @@ describe("Sync issue actions", () => {
     invokeMock.mockImplementation((method: string) => {
       if (method === "sync_status") return Promise.resolve({ ...ENABLED, issues: 1 });
       if (method === "sync_issues") return Promise.resolve([target]);
-      if (method === "sync_trash" || method === "sync_conflicts") return Promise.resolve([]);
+      if (method === "sync_trash") return Promise.resolve([]);
       if (method === "list_waiting_books") return Promise.resolve([]);
       if (method in extra) {
         const response = extra[method];
@@ -33,7 +33,7 @@ describe("Sync issue actions", () => {
         resolved = true;
         return Promise.resolve(true);
       }
-      if (method === "sync_trash" || method === "sync_conflicts") return Promise.resolve([]);
+      if (method === "sync_trash") return Promise.resolve([]);
       if (method === "list_waiting_books") return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected invoke(${method})`));
     });

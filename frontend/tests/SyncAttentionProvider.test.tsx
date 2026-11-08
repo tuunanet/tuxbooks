@@ -26,12 +26,10 @@ const IDLE: SyncStatus = {
   waitingBooks: 0,
   issues: 0,
   trash: 0,
-  conflicts: 0,
 };
 
 const ERROR: SyncStatus = { ...IDLE, state: "error", lastError: "Folder disappeared" };
 const WITH_ISSUES: SyncStatus = { ...IDLE, issues: 2 };
-const WITH_CONFLICTS: SyncStatus = { ...IDLE, conflicts: 1 };
 
 function Harness() {
   const app = useAppState();
@@ -142,13 +140,6 @@ describe("SyncAttentionProvider", () => {
 
   it("shows the dot when issues are open", async () => {
     await renderWithInitialStatus(WITH_ISSUES);
-
-    expect(screen.getByTestId("settings-attention-dot")).toBeInTheDocument();
-    expect(screen.queryByTestId("sync-attention-toast")).not.toBeInTheDocument();
-  });
-
-  it("shows the dot when conflicts are waiting", async () => {
-    await renderWithInitialStatus(WITH_CONFLICTS);
 
     expect(screen.getByTestId("settings-attention-dot")).toBeInTheDocument();
     expect(screen.queryByTestId("sync-attention-toast")).not.toBeInTheDocument();
