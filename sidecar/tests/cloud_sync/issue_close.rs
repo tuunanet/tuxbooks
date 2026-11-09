@@ -124,7 +124,9 @@ async fn an_operation_issue_ignores_a_stale_applied_row() {
         vec!["operation_retrying".to_string()],
         "a stale applied-op row cannot hide the fresh failure"
     );
-    assert!(a.service.status().await.unwrap().issues >= 1);
+    // The row is the sweep's work in progress (ADR 0017 D4): listed above,
+    // but outside the attention count until the attempts run out.
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
 
     let second = review_op(
         41,

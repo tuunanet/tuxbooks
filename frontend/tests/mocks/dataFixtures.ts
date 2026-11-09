@@ -72,6 +72,7 @@ export const DIAGNOSTICS: SyncDiagnostics = {
     folder: "/home/u/Dropbox/TuxBooks",
     lastSyncAt: "2026-10-31T09:59:00.000Z",
     lastError: null,
+    autoRetry: true,
     counts: {
       pendingLocal: 2,
       waitingBooks: 1,
@@ -80,6 +81,16 @@ export const DIAGNOSTICS: SyncDiagnostics = {
       conflicts: 1,
     },
   },
+  issues: [
+    {
+      kind: "cover_missing",
+      detail: "cover publish failed (auto-retry 1/5)",
+      fileName: "ops/abc/cover.json",
+      autoAttempts: 1,
+      nextAutoRetryAt: "2026-10-31T10:59:00.000Z",
+      createdAt: "2026-10-31T09:58:00.000Z",
+    },
+  ],
   hashFailed: [
     {
       bookId: 42,

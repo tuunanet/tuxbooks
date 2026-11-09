@@ -291,6 +291,7 @@ describe("DataSettings", () => {
         folder: null,
         lastSyncAt: null,
         lastError: null,
+        autoRetry: false,
         counts: {
           pendingLocal: 0,
           waitingBooks: 0,
@@ -299,6 +300,7 @@ describe("DataSettings", () => {
           conflicts: 0,
         },
       },
+      issues: [],
       openConflicts: [],
       recentMerges: { books: [], entities: [] },
       versions: { libraryMarker: null, opSchema: 1, dbMigration: 28 },

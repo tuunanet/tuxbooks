@@ -2,8 +2,9 @@
 //!
 //! Collecting is read-only and happens only when the renderer asks: nothing is
 //! written to disk, no pass runs, and no state is repaired. The payload names
-//! the health of sync, the failed hashes, the open conflicts, the recent
-//! identity merges, and the schema versions support needs.
+//! the health of sync, the open issues with their auto-retry state, the failed
+//! hashes, the open conflicts, the recent identity merges, and the schema
+//! versions support needs.
 //!
 //! It deliberately never carries book contents, annotation text, notes, the
 //! kept or discarded values of a conflict, cover bytes, or device tokens.
@@ -34,6 +35,11 @@ pub struct SyncDiagnostics {
     pub sync: DiagnosticsSync,
     pub hash_failed: Vec<HashFailedBook>,
     pub open_conflicts: Vec<DiagnosticConflict>,
+    /// The open sync issues, newest first, with the auto-retry state the
+    /// sweep stamps on each row (ADR 0017 D4): support can tell an
+    /// auto-recovered condition from a user-fixed one, and a gave-up row's
+    /// spent budget is on the record.
+    pub issues: Vec<DiagnosticIssue>,
     pub recent_merges: RecentMerges,
     pub versions: DiagnosticVersions,
 }
@@ -46,6 +52,8 @@ pub struct DiagnosticsSync {
     pub folder: Option<String>,
     pub last_sync_at: Option<String>,
     pub last_error: Option<String>,
+    /// Whether the auto-retry sweep will retry due rows (ADR 0017 D4).
+    pub auto_retry: bool,
     pub counts: DiagnosticsCounts,
 }
 
@@ -76,6 +84,20 @@ pub struct DiagnosticConflict {
     pub kind: String,
     pub field: String,
     pub book_title: Option<String>,
+    pub created_at: String,
+}
+
+/// One open sync issue row. The detail text is verbatim what Settings shows
+/// (including the sweep's `auto-retry n/N` and gave-up markers), and the
+/// attempt fields are separate so a report states the budget in numbers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticIssue {
+    pub kind: String,
+    pub detail: String,
+    pub file_name: Option<String>,
+    pub auto_attempts: i64,
+    pub next_auto_retry_at: Option<String>,
     pub created_at: String,
 }
 
@@ -128,6 +150,7 @@ pub async fn collect(
     let folder = status.and_then(|status| status.folder.clone());
     let last_sync_at = status.and_then(|status| status.last_sync_at.clone());
     let last_error = status.and_then(|status| status.last_error.clone());
+    let auto_retry = status.is_some_and(|status| status.auto_retry);
     let counts = match status {
         Some(status) if enabled => DiagnosticsCounts {
             pending_local: status.pending_local,
@@ -145,6 +168,11 @@ pub async fn collect(
     let hash_failed = hash_failed(pool).await?;
     let open_conflicts = if enabled {
         open_conflicts(pool).await?
+    } else {
+        Vec::new()
+    };
+    let issues = if enabled {
+        open_issues(pool).await?
     } else {
         Vec::new()
     };
@@ -169,10 +197,12 @@ pub async fn collect(
             folder,
             last_sync_at,
             last_error,
+            auto_retry,
             counts,
         },
         hash_failed,
         open_conflicts,
+        issues,
         recent_merges,
         versions: DiagnosticVersions {
             library_marker,
@@ -251,6 +281,37 @@ async fn open_conflicts(pool: &SqlitePool) -> Result<Vec<DiagnosticConflict>, Ap
                 field,
                 book_title,
                 created_at,
+            },
+        )
+        .collect())
+}
+
+/// The open issue rows, newest first — the same order and conflict exclusion
+/// the Settings list uses, so a report matches what the user sees.
+async fn open_issues(pool: &SqlitePool) -> Result<Vec<DiagnosticIssue>, AppError> {
+    type Row = (String, String, Option<String>, i64, Option<String>, String);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT kind, detail, file_name, auto_attempts, next_auto_retry_at, created_at
+         FROM sync_issues
+         WHERE resolved_at IS NULL AND kind <> 'conflict'
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?1",
+    )
+    .bind(LIST_LIMIT)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(kind, detail, file_name, auto_attempts, next_auto_retry_at, created_at)| {
+                DiagnosticIssue {
+                    kind,
+                    detail,
+                    file_name,
+                    auto_attempts,
+                    next_auto_retry_at,
+                    created_at,
+                }
             },
         )
         .collect())

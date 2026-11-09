@@ -346,6 +346,66 @@ async fn delete_collection_takes_the_bridge_wire_param() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sync_set_auto_retry_persists_and_the_status_reflects_it() {
+    // The sync command module answers only when the engine exists, so this
+    // pins the arm plus the wrapper with a real service behind the state.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = test_state(tmp.path()).await;
+    let sync = crate::sync::engine::SyncService::new(base.db.clone(), &base.db_path, test_events())
+        .await
+        .unwrap();
+    let mut state = (*base).clone();
+    state.sync = Some(Arc::new(sync));
+    let state = Arc::new(state);
+
+    let status = dispatch(&state, &test_events(), "sync_status", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(
+        status["autoRetry"],
+        json!(true),
+        "a missing sync_meta key reads as on"
+    );
+
+    let off = dispatch(
+        &state,
+        &test_events(),
+        "sync_set_auto_retry",
+        json!({"enabled": false}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(off["autoRetry"], json!(false));
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'auto_retry'")
+            .fetch_optional(&state.db)
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), Some("0"), "the kill switch persists");
+
+    let on = dispatch(
+        &state,
+        &test_events(),
+        "sync_set_auto_retry",
+        json!({"enabled": true}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(on["autoRetry"], json!(true));
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = 'auto_retry'")
+            .fetch_optional(&state.db)
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), Some("1"));
+
+    let malformed = dispatch(&state, &test_events(), "sync_set_auto_retry", json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(malformed.code, -32602, "enabled is required");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rename_collection_returns_the_updated_summary() {
     let tmp = tempfile::tempdir().unwrap();
     let state = test_state(tmp.path()).await;

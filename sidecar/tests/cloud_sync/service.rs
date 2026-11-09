@@ -177,11 +177,19 @@ async fn a_pass_reports_syncing_then_idle_and_refreshes_aggregate_counts() {
     let status = a.service.status().await.unwrap();
     assert_eq!(status.state, SyncState::Idle);
     assert_eq!(status.pending_local, 0);
-    assert!(status.issues >= 1, "the corrupt file is counted");
+    // The corrupt file's row is the sweep's work in progress (ADR 0017 D4):
+    // it stays listed but outside the attention count until the attempts
+    // run out. The trash count is not the sweep's business.
+    assert_eq!(status.issues, 0, "a scheduled auto-retry is not attention");
     assert!(status.trash >= 1, "the deleted bookmark is counted");
-    assert_eq!(
-        status.issues as usize,
-        a.service.issues().await.unwrap().len()
+    assert!(
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .any(|issue| issue.kind == "operation_retrying"),
+        "the in-flight row stays listed"
     );
     assert_eq!(
         status.trash as usize,
@@ -234,7 +242,10 @@ async fn a_missing_or_corrupt_library_file_fails_the_pass_and_recovers() {
     let failed = a.service.status().await.unwrap();
     assert_eq!(failed.state, SyncState::Error);
     assert!(failed.last_error.is_some());
-    assert!(failed.issues >= 1);
+    // The sweep already picked the failed pass up (ADR 0017 D4), so the row
+    // is scheduled work, not attention: the failed pass itself keeps the
+    // state on error, and the row stays listed.
+    assert_eq!(failed.issues, 0);
     assert!(a
         .service
         .issues()
@@ -325,7 +336,9 @@ async fn sync_issues_can_be_dismissed_only_when_they_are_informational() {
     );
     let left = a.service.issues().await.unwrap();
     assert_eq!(left.len(), 2, "the retryable rows stay: {left:?}");
-    assert_eq!(a.service.status().await.unwrap().issues, 2);
+    // Both retryable rows are the sweep's scheduled work (ADR 0017 D4), so
+    // the attention count is empty while they retry.
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

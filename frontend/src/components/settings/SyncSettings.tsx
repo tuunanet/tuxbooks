@@ -17,6 +17,7 @@ import {
   pickSyncFolder,
   restoreSyncTrash,
   retrySyncIssue,
+  setSyncAutoRetry,
   setSyncDeviceName,
   syncNow,
   type SyncIssue,
@@ -231,6 +232,21 @@ export function SyncSettings() {
     [applyStatus],
   );
 
+  const setAutoRetry = useCallback(
+    async (enabled: boolean) => {
+      setBusy(true);
+      setError(null);
+      try {
+        applyStatus(await setSyncAutoRetry(enabled));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus],
+  );
+
   const dismiss = useCallback(
     async (id: number) => {
       try {
@@ -348,6 +364,7 @@ export function SyncSettings() {
         onEditDevice={() => setEditingDevice(true)}
         onSyncNow={() => void now()}
         onDisconnect={() => setConfirmDisconnect(true)}
+        onAutoRetry={(next) => void setAutoRetry(next)}
         onLocate={(bookUid) => void locateWaiting(bookUid)}
         onForget={(bookUid) => void forgetWaiting(bookUid)}
         onForgetAll={() => void forgetAllWaiting()}

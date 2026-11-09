@@ -98,6 +98,12 @@ pub async fn set_device_name(state: &AppState, name: String) -> Result<SyncStatu
     service(state)?.set_device_name(&name).await
 }
 
+/// The auto-retry kill switch (ADR 0017 D4). Persists in sync_meta and
+/// returns the refreshed status so the toggle can adopt the stored value.
+pub async fn set_auto_retry(state: &AppState, enabled: bool) -> Result<SyncStatus, AppError> {
+    service(state)?.set_auto_retry(enabled).await
+}
+
 /// The support snapshot. It uses the live engine status for enabled, state,
 /// and counts, so a running pass reports "syncing". When the service is
 /// missing or sync is off, the snapshot is disabled with zero counts, and the

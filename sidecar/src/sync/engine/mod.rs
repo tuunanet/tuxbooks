@@ -61,6 +61,9 @@ pub struct SyncStatus {
     pub waiting_books: i64,
     pub issues: i64,
     pub trash: i64,
+    /// Whether the auto-retry sweep will retry due rows (ADR 0017 D4).
+    /// Default-on; the Settings toggle flips the stored value.
+    pub auto_retry: bool,
 }
 
 /// What the UI offers on one issue row. The action is computed from the kind
@@ -118,7 +121,7 @@ pub struct SyncIssue {
     pub created_at: String,
     pub updated_at: String,
     /// Automatic retry attempts spent so far against the per-kind cap
-    /// (ADR 0017 D4). Report only: attention semantics stay untouched.
+    /// (ADR 0017 D4). Report only.
     pub auto_attempts: i64,
     /// When the sweep will try this row again; None means due now, or given
     /// up after exhausting the cap.
@@ -204,6 +207,7 @@ impl SyncService {
             waiting_books: 0,
             issues: 0,
             trash: 0,
+            auto_retry: autoretry::read_auto_retry_setting(&pool).await?,
         };
         let (shutdown, _) = watch::channel(false);
         Ok(Self {
@@ -278,10 +282,19 @@ impl SyncService {
         // Conflict-kind rows are legacy review leftovers. They never reach the
         // user: the reconcile/expire sweep closes each one once its diagnostic
         // row is gone, so listing them here would show rows nothing can settle.
-        let issues: i64 = sqlx::query_scalar(
+        // Attention-driving count (ADR 0017 D4): a row the sweep still owns
+        // — auto-retry on, its kind swept, the budget under the cap — is
+        // work in progress, not attention. Attention means the machine gave
+        // up or a human is required; with the sweep off every open row is
+        // the user's job. The list keeps every open row, so in-flight
+        // retries stay visible.
+        let auto_retry = autoretry::read_auto_retry_setting(pool).await?;
+        let in_flight = autoretry::in_flight_where(auto_retry);
+        let issues: i64 = sqlx::query_scalar(&format!(
             "SELECT COUNT(*) FROM sync_issues
-             WHERE resolved_at IS NULL AND kind <> 'conflict'",
-        )
+             WHERE resolved_at IS NULL AND kind <> 'conflict'
+               AND NOT ({in_flight})"
+        ))
         .fetch_one(pool)
         .await?;
         let trash: i64 = sqlx::query_scalar(
@@ -318,6 +331,7 @@ impl SyncService {
         status.waiting_books = waiting_books;
         status.issues = issues;
         status.trash = trash;
+        status.auto_retry = auto_retry;
         status.state = if !enabled {
             SyncState::Disabled
         } else if status.state == SyncState::Syncing {

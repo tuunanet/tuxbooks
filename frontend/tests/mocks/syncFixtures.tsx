@@ -28,6 +28,7 @@ export const DISABLED: SyncStatus = {
   waitingBooks: 0,
   issues: 0,
   trash: 0,
+  autoRetry: true,
 };
 
 export const ENABLED: SyncStatus = {
@@ -43,6 +44,7 @@ export const ENABLED: SyncStatus = {
   waitingBooks: 1,
   issues: 0,
   trash: 1,
+  autoRetry: true,
 };
 
 export function renderSettings() {
@@ -59,6 +61,8 @@ export function issue(overrides: Partial<SyncIssue> = {}): SyncIssue {
     target: "ops/abc/broken.json",
     createdAt: "2026-10-28T10:00:00.000Z",
     updatedAt: "2026-10-28T10:01:00.000Z",
+    autoAttempts: 0,
+    nextAutoRetryAt: null,
     ...overrides,
   };
 }

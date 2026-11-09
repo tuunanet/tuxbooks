@@ -25,6 +25,12 @@ struct SyncDeviceNameArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SyncAutoRetryArgs {
+    enabled: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AttachWaitingBookArgs {
     book_uid: String,
     path: String,
@@ -84,6 +90,12 @@ pub(super) async fn dispatch(
         "sync_set_device_name" => {
             let p: SyncDeviceNameArgs = parse_params(params)?;
             Ok(Some(call!(commands::sync::set_device_name(state, p.name))))
+        }
+        "sync_set_auto_retry" => {
+            let p: SyncAutoRetryArgs = parse_params(params)?;
+            Ok(Some(call!(commands::sync::set_auto_retry(
+                state, p.enabled
+            ))))
         }
         "sync_diagnostics" => Ok(Some(call!(commands::sync::diagnostics(state)))),
         _ => Ok(None),

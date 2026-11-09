@@ -17,11 +17,13 @@ diagnostics and never enters this flow.
    (`resolve_cleared_issues` calling `issue_cleared`). It runs after every
    pass and every status read, best effort: a busy database never fails a
    status read.
-3. The renderer lists open rows from `status().issues` / `issues()`. When
+3. The renderer lists open rows from `issues()`. When
    `SyncIssueAction::for_kind` maps the kind to `Retry`, the button runs
    `retry_issue(id)`, which takes the pass lock and dispatches through
    `retry_locked`. A successful replay closes the row; a failed one rewrites
-   the detail to `retry failed: ...` and keeps it open.
+   the detail to `retry failed: ...` and keeps it open. `status().issues`
+   counts only the attention-worthy rows — see Automatic retry and attention
+   below.
 
 Why Retry exists at all: the first failed attempt marks the operation
 applied, so another pass will not re-run it. The replay reads the mirror
@@ -93,8 +95,28 @@ issues, and recently deleted items. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
 
+### Automatic retry and attention
+
+Automatic retry (ADR 0017 D4) is on by default; the **Automatic retry** toggle
+in Settings > Sync turns the sweep off for this device. With it on, a row the
+sweep still owns — its kind is swept and its spent attempts sit under the
+kind's cap — is work in progress, whether it is fresh (nothing spent yet),
+between backoff attempts, or paused because the folder is away (a skip is not
+an attempt): it stays on the issues list with its `auto-retry n/N` marker and
+its next attempt time, but it does not drive attention. Attention means one of
+two things: the machine gave up (spent attempts reached the cap, so the row
+keeps its `gave up after N auto-retries` detail and schedules nothing
+further), or the kind needs a human (`operation_rejected`, `hash_failed`, and
+every informational row never enter the sweep). Turning the toggle off ends
+the exclusion immediately — every open row counts as attention, because the
+machine is off and the rows are the user's job — and turning it back on
+returns the under-budget rows to the sweep. A manual Retry resets the spent
+budget and puts an exhausted row back in play. The Settings > Sync count and
+the sidebar dot report only the attention-worthy rows, so they can read zero
+while the sweep works through its schedule.
+
 The sidebar's Settings entry shows a small dot when sync is on and the engine
-reports an error or an open issue. The dot is visible
+reports an error or an attention-worthy issue. The dot is visible
 wherever the sidebar is, including while Settings is open. It follows the same
 rule as Settings > Sync: with sync off, leftover counts stay hidden because the
 Settings lists are hidden too. A toast appears once when the state changes into
@@ -175,8 +197,14 @@ renderer's own clipboard write is denied by the permission policy, X-4).
 The document carries:
 
 - sync on or off, the live sync state (including a pass that is running),
-  the folder, last sync, last error, and counts for pending local items,
-  waiting books, open issues, trash, and conflicts;
+  the folder, last sync, last error, whether the automatic retry sweep is
+  on, and counts for pending local items, waiting books, open issues,
+  trash, and conflicts;
+- up to 20 of the newest open sync issues with the kind, the detail text
+  (including the sweep's `auto-retry n/N` and gave-up markers), the file
+  name, the spent auto-retry attempts, the next scheduled attempt, and the
+  creation time — so support can tell an auto-recovered condition from a
+  user-fixed one;
 - up to 20 of the newest books whose content hash failed, with the book id,
   title, path, attempt count, and next retry time;
 - up to 20 open conflicts with the id, kind, field, book title, and creation

@@ -104,6 +104,11 @@ function IssueRow({
           <p className="font-medium">{issue.kind.replaceAll("_", " ")}</p>
           {issue.target ? <p className="mt-1 break-words text-xs">{issue.target}</p> : null}
           <p className="mt-1 break-words text-muted-foreground">{issue.detail}</p>
+          {issue.nextAutoRetryAt ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Next retry {formatSyncTime(issue.nextAutoRetryAt)}
+            </p>
+          ) : null}
           {issue.fileName ? (
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
               {issue.fileName}
@@ -163,6 +168,11 @@ export function SyncIssuesSection({
   const [open, setOpen] = useState(false);
   const [confirmDismissAll, setConfirmDismissAll] = useState(false);
   const summary = issues.slice(0, SUMMARY_LIMIT);
+  // `total` is the engine's attention-worthy count (ADR 0017 D4): rows the
+  // sweep still owns — auto-retry on, budget under the cap — are work in
+  // progress and stay out of it. The list renders from the fetched rows, so
+  // an in-flight retry stays visible even while nothing here needs a human.
+  const hasRows = issues.length > 0;
   const hasInformational = issues.some((issue) => isInformational(issue.action));
   const groups = useMemo(() => {
     const map = new Map<string, SyncIssue[]>();
@@ -180,11 +190,9 @@ export function SyncIssuesSection({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-base font-medium">Sync issues</h3>
-          {total === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No sync issues.</p>
-          ) : null}
+          {!hasRows ? <p className="mt-2 text-sm text-muted-foreground">No sync issues.</p> : null}
         </div>
-        {total > 0 && hasInformational ? (
+        {hasInformational ? (
           <Button
             size="sm"
             variant="outline"
@@ -197,7 +205,7 @@ export function SyncIssuesSection({
         ) : null}
       </div>
 
-      {total > 0 ? (
+      {hasRows ? (
         <>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {issues.length > SUMMARY_LIMIT ? (

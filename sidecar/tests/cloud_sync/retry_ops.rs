@@ -340,20 +340,35 @@ async fn a_cover_issue_closes_only_after_the_cover_is_applied() {
 
     std::fs::write(blob_dir.join(name), b"not an image").unwrap();
     assert!(
-        a.service.status().await.unwrap().issues >= 1,
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .any(|issue| issue.kind == "cover_missing"),
         "corrupt blob cannot clear the row"
     );
 
     let oversized = std::fs::File::create(blob_dir.join(name)).unwrap();
     oversized.set_len(16 * 1024 * 1024 + 1).unwrap();
     assert!(
-        a.service.status().await.unwrap().issues >= 1,
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .any(|issue| issue.kind == "cover_missing"),
         "an oversized blob cannot clear the row"
     );
 
     std::fs::write(blob_dir.join(name), b"\x89PNG\r\n\x1a\ncover apply bytes").unwrap();
     assert!(
-        a.service.status().await.unwrap().issues >= 1,
+        a.service
+            .issues()
+            .await
+            .unwrap()
+            .iter()
+            .any(|issue| issue.kind == "cover_missing"),
         "a blob in the folder is not an applied cover"
     );
 

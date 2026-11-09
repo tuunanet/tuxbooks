@@ -26,6 +26,7 @@ const IDLE: SyncStatus = {
   waitingBooks: 0,
   issues: 0,
   trash: 0,
+  autoRetry: true,
 };
 
 const ERROR: SyncStatus = { ...IDLE, state: "error", lastError: "Folder disappeared" };
@@ -308,5 +309,15 @@ describe("SyncAttentionProvider", () => {
     await userEvent.click(screen.getByRole("button", { name: "Open Settings" }));
 
     expect(screen.getByTestId("settings-open")).toHaveTextContent("open");
+  });
+
+  it("does not treat the auto-retry toggle or a work-in-progress engine as attention", async () => {
+    // The kill switch and scheduled auto-retries never reach `issues` (ADR
+    // 0017 D4): the engine counts only rows a human must look at, so a
+    // status carrying either still reads clear here.
+    await renderWithInitialStatus({ ...IDLE, autoRetry: false });
+
+    expect(screen.getByTestId("attention")).toHaveTextContent("clear");
+    expect(screen.queryByTestId("settings-attention-dot")).not.toBeInTheDocument();
   });
 });
