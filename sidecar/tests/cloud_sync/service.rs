@@ -358,6 +358,14 @@ async fn a_pass_rejects_a_folder_that_belongs_to_another_library() {
     let err = a.service.run_pass().await.unwrap_err();
     assert!(err.to_string().contains("different library"), "got {err}");
     assert_eq!(a.service.status().await.unwrap().state, SyncState::Error);
+    // The UI repairs this failure by suffix-matching the stored last_error
+    // (frontend SyncPanels), so the AppError Display wrapper must stay a
+    // prefix of what the pass stores, with the stable message as its tail.
+    let stored = a.service.status().await.unwrap().last_error.unwrap();
+    assert!(
+        stored.ends_with("sync folder belongs to a different library; reconnect to confirm"),
+        "got {stored}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

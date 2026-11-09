@@ -7,7 +7,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { RefreshCw, Unplug } from "lucide-react";
+import { PlugZap, RefreshCw, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   type SyncIssue,
@@ -34,6 +34,17 @@ function statusVariant(state: SyncState): "default" | "secondary" | "destructive
   if (state === "disabled") return "outline";
   return "default";
 }
+
+/**
+ * The status payload carries `lastError` as a plain string with no structured
+ * kind. The sidecar stores the pass failure's Display form, so error wrappers
+ * prefix this message ("invalid input: " comes from AppError::InvalidInput);
+ * the suffix is the stable part, and endsWith is the contract for the one
+ * failure that can be repaired in place: the folder now belongs to another
+ * library, and reconnecting confirms or replaces it. Pinned from the sidecar
+ * by a_pass_rejects_a_folder_that_belongs_to_another_library.
+ */
+const LIBRARY_MISMATCH_ERROR = "sync folder belongs to a different library; reconnect to confirm";
 
 type SyncSectionsProps = {
   status: SyncStatus;
@@ -87,6 +98,7 @@ type SyncFolderSectionProps = {
   notice: string | null;
   waitingBooks: WaitingBook[];
   onConnect: () => void;
+  onReconnect: () => void;
   onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
@@ -104,6 +116,7 @@ export function SyncFolderSection({
   notice,
   waitingBooks,
   onConnect,
+  onReconnect,
   onEditDevice,
   onSyncNow,
   onDisconnect,
@@ -172,6 +185,7 @@ export function SyncFolderSection({
           status={status}
           busy={busy}
           waitingBooks={waitingBooks}
+          onReconnect={onReconnect}
           onEditDevice={onEditDevice}
           onSyncNow={onSyncNow}
           onDisconnect={onDisconnect}
@@ -208,6 +222,7 @@ type ConnectedSyncPanelProps = {
   status: SyncStatus;
   busy: boolean;
   waitingBooks: WaitingBook[];
+  onReconnect: () => void;
   onEditDevice: () => void;
   onSyncNow: () => void;
   onDisconnect: () => void;
@@ -221,6 +236,7 @@ function ConnectedSyncPanel({
   status,
   busy,
   waitingBooks,
+  onReconnect,
   onEditDevice,
   onSyncNow,
   onDisconnect,
@@ -229,6 +245,8 @@ function ConnectedSyncPanel({
   onForget,
   onForgetAll,
 }: ConnectedSyncPanelProps) {
+  const reconnectNeeded = status.lastError?.endsWith(LIBRARY_MISMATCH_ERROR) ?? false;
+
   return (
     <div className="mt-4 flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -291,6 +309,16 @@ function ConnectedSyncPanel({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
+        {reconnectNeeded ? (
+          <Button
+            data-testid="sync-reconnect"
+            onClick={onReconnect}
+            disabled={busy || status.state === "syncing"}
+          >
+            <PlugZap className="size-4" aria-hidden />
+            Reconnect
+          </Button>
+        ) : null}
         <Button data-testid="sync-now" onClick={onSyncNow} disabled={status.state === "syncing"}>
           Sync now
         </Button>

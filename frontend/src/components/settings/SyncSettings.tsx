@@ -81,29 +81,53 @@ export function SyncSettings() {
 
   useSyncStatusRefresh({ applyStatus, loadLists, clearLists, setError });
 
+  /**
+   * Connect to a folder and land the answer: a mismatch opens the
+   * confirmation dialog; otherwise the status lands, the archived-library
+   * notice (connect's start-new path) may fire, and the lists reload. First
+   * connect and reconnect differ only in where the folder comes from, so
+   * both run through here.
+   */
+  const runConnect = useCallback(
+    async (folder: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const result = await connectSync(folder);
+        if (result.mismatch) {
+          setMismatch({ path: folder, mismatch: result.mismatch });
+          return;
+        }
+        applyStatus(result.status);
+        if (result.archivedLibraryPath) {
+          setNotice(`The previous library was kept at ${result.archivedLibraryPath}.`);
+        }
+        await loadLists();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyStatus, loadLists],
+  );
+
   const connect = useCallback(async () => {
     setError(null);
     setNotice(null);
+    // Busy before the picker opens, so the button cannot re-open it.
     setBusy(true);
     try {
       const folder = await pickSyncFolder();
       if (!folder) return;
-      const result = await connectSync(folder);
-      if (result.mismatch) {
-        setMismatch({ path: folder, mismatch: result.mismatch });
-        return;
-      }
-      applyStatus(result.status);
-      if (result.archivedLibraryPath) {
-        setNotice(`The previous library was kept at ${result.archivedLibraryPath}.`);
-      }
-      await loadLists();
+      await runConnect(folder);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
-  }, [applyStatus, loadLists]);
+  }, [runConnect]);
 
   const confirmJoin = useCallback(async () => {
     if (!mismatch) return;
@@ -147,6 +171,19 @@ export function SyncSettings() {
       setBusy(false);
     }
   }, [applyStatus, loadLists, mismatch]);
+
+  /**
+   * Offered on the library-mismatch error: re-run connect against the folder
+   * the device is still pointed at. The sidecar answers with the mismatch
+   * payload again, which opens the same confirmation dialog as the first
+   * connect; confirming there resets the local sync state, merges into the
+   * folder's library, clears the error, and runs a pass. Cancelling changes
+   * nothing.
+   */
+  const reconnect = useCallback(async () => {
+    if (!status?.folder) return;
+    await runConnect(status.folder);
+  }, [runConnect, status]);
 
   const now = useCallback(async () => {
     setError(null);
@@ -361,6 +398,7 @@ export function SyncSettings() {
         notice={notice}
         waitingBooks={waitingBooks}
         onConnect={() => void connect()}
+        onReconnect={() => void reconnect()}
         onEditDevice={() => setEditingDevice(true)}
         onSyncNow={() => void now()}
         onDisconnect={() => setConfirmDisconnect(true)}

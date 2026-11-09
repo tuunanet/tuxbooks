@@ -147,9 +147,9 @@ folder is already a TuxBooks sync folder:
   blobs/books/<64-hex>.<epub or pdf>
 ```
 
-`library.json` binds the folder to one library. Pointing a second, unrelated
-library at it returns a mismatch; the UI must confirm before the local sync
-state is reset and merged into the folder's library.
+`library.json` binds the folder to one library. Pointing an unrelated library at it returns
+a mismatch; the UI must confirm before the local sync state is reset and merged into that
+library. A pass that finds another library's file fails; Reconnect opens the confirmation.
 
 Operation files are immutable. Each device writes its own stream temp file then
 rename; readers ignore non-`.json` files and dedupe by operation id. A cloud
