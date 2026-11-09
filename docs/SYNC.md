@@ -415,11 +415,11 @@ state unrecoverable, so it is not bolted on silently.
 - operations are kept forever in v1; there is no destructive compaction;
 - progress is coalesced by the dirty-marker upsert, so a page turn does not
   create one file per event;
-- trash is offered for 30 days;
-- an unresolved conflict is kept for 30 days, then expires unread;
+- trash is offered for 30 days; an unresolved conflict is kept 30 days, then expires unread;
 - an operation is at most 1 MiB; a cover blob is at most 16 MiB;
 - a book blob is at most 256 MiB; a larger book records a `book_blob_oversize`
   issue and publishes nothing until the file shrinks or the cap is raised;
+- the staging GC prunes superseded blobs after 90 days; the winning blob is kept forever;
 - a forgotten-book snapshot is capped at 512 KiB inside the operation. A larger
   snapshot still sends the delete (so every machine forgets) and records an
   issue instead of pretending the restore exists;

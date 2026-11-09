@@ -25,6 +25,9 @@ pub const META_LIBRARY_RELOAD: &str = "library_reload_pending";
 /// Whether the sync-issue auto-retry sweep runs (ADR 0017 D4). "1" or absent
 /// reads as on, "0" as off, so an upgrade keeps retrying.
 pub const META_AUTO_RETRY: &str = "auto_retry";
+/// The last time the staging-folder GC sweep ran (ADR 0018 D4), RFC3339.
+/// Absent or unreadable reads as due, so an upgrade sweeps on its next pass.
+pub const META_BLOB_GC: &str = "blob_gc_at";
 
 pub async fn get_meta(pool: &SqlitePool, key: &str) -> Result<Option<String>, AppError> {
     let value: Option<String> = sqlx::query_scalar("SELECT value FROM sync_meta WHERE key = ?1")
