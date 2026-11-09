@@ -68,8 +68,9 @@ channel. The name grammar is validated exactly like covers: only names matching
 the grammar cross the sync boundary. The grammar is also the traversal defense.
 A name like `../../etc/passwd` never matches, which the existing cover-blob
 test already pins (`cover_blob_storage_round_trips_and_rejects_bad_input`).
-Publication is atomic: write `<hash>.part`, then rename, the same
-temp-then-rename pattern operations and covers use. Consumers trust only
+Publication is atomic: write to a dot-prefixed temp file (`.<name>.<pid>.tmp`
+in the shipped writer), then rename, the same temp-then-rename pattern
+operations and covers use. Consumers trust only
 grammar-matching names and verify the SHA-256 on receipt regardless; content
 addressing makes verification free.
 

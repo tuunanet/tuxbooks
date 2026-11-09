@@ -33,6 +33,10 @@ impl super::SyncService {
         // while a newer local edit is still waiting to publish.
         if result.is_ok() {
             self.adopt_sweep().await;
+            // Blob GC (ADR 0018 D4) reads its winning set from the same
+            // mirror, so it waits for a healthy pass the same way, under
+            // the same lock; its hourly stamp throttles the folder listing.
+            self.blob_gc_sweep().await;
         }
         result
     }

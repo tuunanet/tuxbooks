@@ -2,6 +2,7 @@
 //! sharing one folder, with the real trigger pipeline and engine.
 mod autoretry;
 mod basics;
+mod blob_gc;
 mod collections;
 mod common;
 mod conflict_review;

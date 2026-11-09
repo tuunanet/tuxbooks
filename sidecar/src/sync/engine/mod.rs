@@ -32,6 +32,7 @@ mod autoretry;
 mod clear;
 mod connect;
 mod deferred;
+mod gc;
 mod issues;
 mod lifecycle;
 mod pass;
@@ -181,6 +182,10 @@ struct Inner {
     /// op-before-blob wait (ADR 0018 D2) eventually surfaces. In-memory
     /// only; see `deferred`.
     missing_blobs: Mutex<HashMap<String, deferred::MissingBlobPasses>>,
+    /// Whether the blob GC sweep (ADR 0018 D4) has done its once-per-process
+    /// startup run. In-memory only: the hourly cadence stamp persists in
+    /// `sync_meta`, but "sweep shortly after startup" is per process life.
+    blob_gc_boot: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Clone)]
@@ -236,6 +241,7 @@ impl SyncService {
                 watcher: Mutex::new(None),
                 deferred_books: Mutex::new(HashSet::new()),
                 missing_blobs: Mutex::new(HashMap::new()),
+                blob_gc_boot: std::sync::atomic::AtomicBool::new(false),
             }),
         })
     }
