@@ -62,6 +62,18 @@ pub(super) async fn dispatch(
                 state, events, p.book_id
             ))))
         }
+        "reader_opened" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(Some(call!(commands::reader::reader_opened(
+                state, p.book_id
+            ))))
+        }
+        "reader_closed" => {
+            let p: BookIdArgs = parse_params(params)?;
+            Ok(Some(call!(commands::reader::reader_closed(
+                state, p.book_id
+            ))))
+        }
         "get_book_bytes" => {
             let p: BookBytesArgs = parse_params(params)?;
             Ok(Some(call!(commands::reader::get_book_bytes(

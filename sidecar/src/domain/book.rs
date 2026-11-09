@@ -91,11 +91,17 @@ pub struct Book {
     /// for it.
     #[sqlx(skip)]
     pub provider_links: Vec<crate::domain::ProviderLink>,
+    /// The book's winning sync `file_version` names bytes this copy does not
+    /// have (ADR 0018 D3). True from the pointer's arrival until the
+    /// identity sweep rebinds the adopted bytes; drives the library's
+    /// "newer version available" badge. Filled after the book query.
+    #[sqlx(skip)]
+    pub newer_version_available: bool,
 }
 
 impl Serialize for Book {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Book", 26)?;
+        let mut state = serializer.serialize_struct("Book", 27)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("bookUid", &self.book_uid)?;
         state.serialize_field("path", &self.path)?;
@@ -127,6 +133,7 @@ impl Serialize for Book {
         state.serialize_field("progressPercent", &self.progress_percent)?;
         state.serialize_field("progressUpdatedAt", &self.progress_updated_at)?;
         state.serialize_field("providerLinks", &self.provider_links)?;
+        state.serialize_field("newerVersionAvailable", &self.newer_version_available)?;
         state.end()
     }
 }
@@ -279,6 +286,7 @@ mod tests {
             progress_percent: None,
             progress_updated_at: None,
             provider_links: Vec::new(),
+            newer_version_available: false,
         }
     }
 

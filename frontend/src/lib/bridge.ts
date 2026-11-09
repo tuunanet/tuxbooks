@@ -279,6 +279,19 @@ export function markBookOpened(bookId: number): Promise<null> {
   return invoke("mark_book_opened", { bookId });
 }
 
+/**
+ * Reader-session registry for open-book deferral (ADR 0018 D5): tell the sync engine a book's
+ * reader session opened, so file adoption defers while the bytes are on screen, and that it
+ * closed, so the next sync pass may adopt again. Best effort; callers swallow failures.
+ */
+export function readerOpened(bookId: number): Promise<null> {
+  return invoke("reader_opened", { bookId });
+}
+
+export function readerClosed(bookId: number): Promise<null> {
+  return invoke("reader_closed", { bookId });
+}
+
 export function listCollections(): Promise<CollectionSummary[]> {
   return invoke("list_collections");
 }

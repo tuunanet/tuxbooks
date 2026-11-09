@@ -101,6 +101,37 @@ async fn marking_opened_stamps_last_opened_and_emits_library_changed() {
     assert!(payload["book"]["lastOpenedAt"].as_str().is_some());
 }
 
+/// The reader-session registry arms (ADR 0018 D5): both route on the bookId
+/// wire shape, answer null, and persist nothing — the registry is in-memory
+/// engine state, unit-tested on `SyncService` itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn reader_opened_and_closed_answer_null_and_persist_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path()).await;
+    let id = seed_book(&state, "Deferred Book").await;
+
+    for method in ["reader_opened", "reader_closed"] {
+        let result = dispatch(&state, &test_events(), method, json!({"bookId": id}))
+            .await
+            .unwrap();
+        assert_eq!(result, Value::Null, "{method} answers null");
+    }
+    // Even a stale id routes: the arms are best-effort by contract.
+    dispatch(
+        &state,
+        &test_events(),
+        "reader_closed",
+        json!({"bookId": 987654}),
+    )
+    .await
+    .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "the registry arms record nothing");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn import_paths_streams_batched_progress_events() {
     let tmp = tempfile::tempdir().unwrap();
@@ -243,6 +274,63 @@ async fn get_storage_stats_serves_the_missing_from_disk_flag() {
     assert_eq!(locations[0]["missingFromDisk"], json!(false));
     assert_eq!(locations[1]["path"], json!(gone.to_str().unwrap()));
     assert_eq!(locations[1]["missingFromDisk"], json!(true));
+}
+
+/// The library payload carries the file-version state (ADR 0018 D3): a copy
+/// behind its book's winning pointer reports newerVersionAvailable, and the
+/// flag clears once the binding matches the pointer again.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_books_reports_a_newer_file_version_until_settled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path()).await;
+    let file_id = seed_book(&state, "Versioned").await;
+    let hash_v1 = "a".repeat(64);
+    let hash_v2 = "b".repeat(64);
+    crate::sync::identity::bind_hash(&state.db, file_id, &hash_v1, 100, 1)
+        .await
+        .unwrap()
+        .expect("bound");
+    let uid: String = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO sync_state_entities (kind, entity_uid, book_uid) VALUES ('file_version', ?1, ?1)")
+        .bind(&uid)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_fields (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('file_version', ?1, 'content_hash', ?2, 1, 0, 'remote'),
+                ('file_version', ?1, 'size', '2', 1, 0, 'remote')",
+    )
+    .bind(&uid)
+    .bind(format!("\"{hash_v2}\""))
+    .execute(&state.db)
+    .await
+    .unwrap();
+
+    let result = dispatch(&state, &test_events(), "list_books", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(result[0]["newerVersionAvailable"], json!(true));
+
+    // Settled: the pointer names the bytes the binding already proved.
+    sqlx::query(
+        "UPDATE sync_state_fields SET value_json = ?3
+         WHERE kind = 'file_version' AND entity_uid = ?1 AND field = 'content_hash'",
+    )
+    .bind(&uid)
+    .bind(&hash_v1)
+    .bind(format!("\"{hash_v1}\""))
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let result = dispatch(&state, &test_events(), "list_books", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(result[0]["newerVersionAvailable"], json!(false));
 }
 
 #[tokio::test(flavor = "multi_thread")]

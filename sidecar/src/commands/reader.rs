@@ -106,3 +106,31 @@ pub struct GetBookResourceResult {
     pub total: u64,
     pub media_type: String,
 }
+
+/// Open-book deferral (ADR 0018 D5): tell the sync engine a book's reader
+/// session opened, so file adoption defers while the bytes are on screen.
+/// The renderer's public id is converted to the book uid once — the
+/// identifier the adoption check compares against. Best effort: a stale id
+/// and a missing sync service (unit-test states) are silently accepted.
+pub async fn reader_opened(state: &AppState, book_id: i64) -> Result<(), AppError> {
+    if let (Some(sync), Some(book_uid)) = (
+        state.sync.as_ref(),
+        crate::repository::metadata::book_uid_for_id(&state.db, book_id).await?,
+    ) {
+        sync.reader_opened(book_uid);
+    }
+    Ok(())
+}
+
+/// The close half of open-book deferral: release the session so the next
+/// pass may adopt. A stale id is silently accepted — there is nothing to
+/// release.
+pub async fn reader_closed(state: &AppState, book_id: i64) -> Result<(), AppError> {
+    if let (Some(sync), Some(book_uid)) = (
+        state.sync.as_ref(),
+        crate::repository::metadata::book_uid_for_id(&state.db, book_id).await?,
+    ) {
+        sync.reader_closed(book_uid);
+    }
+    Ok(())
+}

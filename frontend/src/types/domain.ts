@@ -40,6 +40,8 @@ export interface Book {
   progressPercent: number | null;
   /** When the reading position was last saved. */
   progressUpdatedAt: string | null;
+  /** The shared file version names bytes this copy does not have (ADR 0018). */
+  newerVersionAvailable?: boolean;
   /** Third-party links owned by this durable book (ADR 0014 D11). */
   providerLinks?: ProviderLink[];
 }

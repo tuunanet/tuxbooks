@@ -27,6 +27,13 @@ impl super::SyncService {
         // burn, and the rows it retries may not be the ones this pass
         // reported.
         self.auto_retry_sweep().await;
+        // Adoption (ADR 0018 D3) also reuses this call's lock, but only
+        // after a successful pass: the mirror must already hold every
+        // remote op, or adoption could swap bytes toward a stale pointer
+        // while a newer local edit is still waiting to publish.
+        if result.is_ok() {
+            self.adopt_sweep().await;
+        }
         result
     }
 

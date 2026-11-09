@@ -100,6 +100,7 @@ export function BookListItem({
           </div>
           {!book.available && <Badge variant="destructive">Missing</Badge>}
           {book.hashState === "failed" && <IndexingBadge />}
+          {book.newerVersionAvailable && <Badge variant="secondary">Newer version</Badge>}
           <div className="w-[72px] shrink-0 text-right text-xs text-muted-foreground">
             {percent === null || percent <= 0 ? (
               <span className="whitespace-nowrap">Not started</span>

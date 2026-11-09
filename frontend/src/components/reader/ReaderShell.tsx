@@ -39,6 +39,7 @@ import { useReaderPanelShortcuts, useReaderPanels } from "./shell/useReaderPanel
 import { useReaderPresentation } from "./shell/useReaderPresentation";
 import { useReaderProgressSeek } from "./shell/useReaderProgressSeek";
 import { useReaderSearch } from "./shell/useReaderSearch";
+import { useReaderSessionRegistry } from "./shell/useReaderSessionRegistry";
 import { useAxisLockedWheel } from "./useAxisLockedWheel";
 
 /**
@@ -179,6 +180,9 @@ export function ReaderShell() {
     dispatch,
   });
   useMarkBookOpened(bookId);
+  // Open-book deferral (ADR 0018 D5): the sync engine must not swap this
+  // book's bytes while its reader session holds them.
+  useReaderSessionRegistry(bookId);
 
   const toggleBookMode = useCallback(
     () => setPreferences({ bookMode: !preferences.bookMode }),
