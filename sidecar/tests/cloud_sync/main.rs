@@ -8,6 +8,7 @@ mod conflict_review;
 mod conflict_silent;
 mod file_version;
 mod file_version_adopt;
+mod file_version_defer;
 mod folder;
 mod identity;
 mod issue_close;

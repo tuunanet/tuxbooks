@@ -12,21 +12,30 @@
 //! publish, so adoption waits for a healthy pass and retries on the next
 //! one.
 //!
-//! Tolerance rules: a missing blob is op-before-blob arrival (D2) — change
-//! nothing, no issue, retry next pass. A blob whose size or hash does not
-//! verify is recorded as `book_file_adopt_failed` and retried; the row
-//! closes when a later pass adopts. A local file whose bytes moved without
-//! a rebind (an external edit in flight) is skipped — the reconciler's
-//! re-import and the mint guard decide, never adoption. Adoption never
-//! deletes anything and never republishes: the swap's own re-import sees
-//! binding hash equal to the winning pointer and mints nothing (D1's loop
-//! break).
+//! Open-book deferral (D5): a book whose reader session is open on this
+//! device is deferred — `adopt_copy` skips it silently. The ranged reads of
+//! a live Readium/PDFium session re-open the file by path, so renamed-in
+//! bytes would resolve old offsets: torn pages and decode errors. The
+//! registry is in-memory engine state (`super::deferred`), registered by
+//! the renderer through `reader_opened`/`reader_closed`. No issue is
+//! recorded and the badge stays: it is derived from the unsettled window,
+//! which is exactly what an open reader wants to see. The next pass after
+//! the reader closes adopts as usual; a missed close self-heals on app
+//! exit, when the registry dies with the process.
 //!
-//! Open-book deferral (D5) is NOT implemented here: the sidecar has no
-//! open-book registry (no session table, no close signal), so there is no
-//! discoverable set of open books to defer. The library surfaces the
-//! unsettled state as "newer version available" through `list_books`; the
-//! registry, the close-time swap, and open-book deferral stay a follow-up.
+//! Tolerance rules: a missing blob is op-before-blob arrival (D2) — change
+//! nothing, no issue, retry next pass. But a blob the origin never staged
+//! (a device storing the book under an extension the origin's copy did not
+//! use) would wait forever with zero visibility, so consecutive missing
+//! passes surface a `book_file_adopt_failed` row naming the missing blob
+//! (informational, self-closing on adoption). A blob whose size or hash
+//! does not verify is recorded as `book_file_adopt_failed` and retried; the
+//! row closes when a later pass adopts. A local file whose bytes moved
+//! without a rebind (an external edit in flight) is skipped — the
+//! reconciler's re-import and the mint guard decide, never adoption.
+//! Adoption never deletes anything and never republishes: the swap's own
+//! re-import sees binding hash equal to the winning pointer and mints
+//! nothing (D1's loop break).
 
 use std::path::Path;
 
@@ -38,6 +47,7 @@ use crate::sync::identity;
 use crate::sync::store;
 
 use super::clear::resolve_issue_key;
+use super::deferred;
 
 /// The sync issue kind for a blob that is present but does not verify.
 const ADOPT_FAILED_KIND: &str = "book_file_adopt_failed";
@@ -68,9 +78,19 @@ impl super::SyncService {
     }
 
     /// Adopt one copy, or leave it exactly as it was. Every early return is
-    /// a "retry next pass" or a settle; only blob verification failures
-    /// record an issue.
+    /// a "retry next pass" or a settle; only blob verification failures and
+    /// the visibility threshold record an issue.
     async fn adopt_copy(&self, root: &Path, copy: &UnsettledCopy) -> Result<(), AppError> {
+        if self.is_deferred(&copy.book_uid) {
+            // Open-book deferral (ADR 0018 D5): the open session's next
+            // ranged reads re-open the file by path, so swapped bytes would
+            // resolve old offsets — torn pages and decode errors. Skip
+            // silently: no attempt, no issue. The badge is derived from the
+            // unsettled window and stays visible for deferred books, which
+            // is its purpose; the next pass re-checks, and closing the
+            // reader releases the deferral so adoption proceeds then.
+            return Ok(());
+        }
         let pool = &self.inner.pool;
         let Some(winning) = file_version::winning(pool, &copy.book_uid).await? else {
             return Ok(());
@@ -91,9 +111,18 @@ impl super::SyncService {
         };
         if !store::book_blob_exists(root, &blob_name) {
             // Op-before-blob arrival (ADR 0018 D2): the pointer is here, the
-            // bytes are still in flight. Silent, and retried every pass.
+            // bytes are still in flight. Silent — but a device that names a
+            // blob the origin never staged (its copy carries a different
+            // extension) waits forever, so after consecutive missing passes
+            // the wait surfaces as an informational row naming the blob.
+            if self.record_missing_blob_pass(&copy.book_uid, &winning.content_hash) {
+                self.record_missing_blob_issue(copy, &winning, &blob_name)
+                    .await?;
+            }
             return Ok(());
         }
+        // The blob is here: the wait is over, so stop counting against it.
+        self.clear_missing_blob(&copy.book_uid);
         let blob_path = root.join(store::BOOK_BLOB_DIR).join(&blob_name);
         let bytes = match read_verified_blob(&blob_path, &winning).await {
             Ok(bytes) => bytes,
@@ -149,7 +178,36 @@ impl super::SyncService {
             crate::repository::books::update_file_snapshot(pool, copy.book_id, size, mtime).await?;
         }
         resolve_issue_key(pool, &adopt_issue_key(&copy.book_uid)).await?;
+        // Settled: the missing-blob wait (if any was counted) is over.
+        self.clear_missing_blob(&copy.book_uid);
         Ok(())
+    }
+
+    /// Record the visibility row for a blob that is still missing after
+    /// consecutive passes: informational and self-closing — a later pass
+    /// that adopts (or the pointer moving on) resolves the key.
+    async fn record_missing_blob_issue(
+        &self,
+        copy: &UnsettledCopy,
+        winning: &file_version::WinningVersion,
+        blob_name: &str,
+    ) -> Result<(), AppError> {
+        let detail = format!(
+            "the shared update for this book's file has not arrived after {} \
+             passes: '{}' is missing from the sync folder (version {}). \
+             Waiting; the local file stays unchanged.",
+            deferred::MISSING_BLOB_ISSUE_THRESHOLD,
+            blob_name,
+            &winning.content_hash[..8.min(winning.content_hash.len())],
+        );
+        identity::record_issue(
+            &self.inner.pool,
+            &adopt_issue_key(&copy.book_uid),
+            ADOPT_FAILED_KIND,
+            &detail,
+            file_name(copy).as_deref(),
+        )
+        .await
     }
 
     /// Record a verification failure: visible, informational, and retried
@@ -165,10 +223,7 @@ impl super::SyncService {
              so the local file was left unchanged: {reason}. Retrying.",
             &winning.content_hash[..8.min(winning.content_hash.len())]
         );
-        let file_name = Path::new(&copy.path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned);
+        let file_name = file_name(copy);
         identity::record_issue(
             &self.inner.pool,
             &adopt_issue_key(&copy.book_uid),
@@ -228,6 +283,14 @@ fn file_stats(path: &Path) -> Option<(i64, i64)> {
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0);
     Some((metadata.len() as i64, mtime))
+}
+
+/// The copy's file name, for the issue row's label.
+fn file_name(copy: &UnsettledCopy) -> Option<String> {
+    Path::new(&copy.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
 }
 
 fn adopt_issue_key(book_uid: &str) -> String {

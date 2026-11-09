@@ -272,6 +272,8 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "get_book_bytes",
   "get_epub_session",
   "get_book_resource",
+  "reader_opened",
+  "reader_closed",
   "list_collections",
   "create_collection",
   "rename_collection",

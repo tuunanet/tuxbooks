@@ -222,16 +222,18 @@ annotations, progress, and locators are untouched. Adoption never publishes a
 pointer: the re-import its own swap can trigger sees the winning hash and
 mints nothing. A missing blob is op-before-blob arrival and waits silently; a
 blob that fails verification records a `book_file_adopt_failed` issue and is
-retried on the next pass.
+retried on the next pass. The wait stays silent only for a while: after
+`MISSING_BLOB_ISSUE_THRESHOLD` (5) consecutive missing passes the missing
+blob surfaces as a `book_file_adopt_failed` issue naming itself; the row
+self-closes when the blob arrives or the pointer moves.
 
-Open-book deferral (ADR 0018 D5) is not implemented yet: the sidecar has no
-open-book registry, so there is no discoverable set of books to defer. Today
-every settled-copy check runs in the engine pass, and the library surfaces the
-not-yet-settled state as a per-book `newerVersionAvailable` flag on
-`list_books` (a small badge on the card and list rows). The registry, the
-swap-on-close, and deferring adoption while a reader session holds the file
-are a follow-up; until then a book left open during another device's edit can
-have its bytes swapped underneath the open reader.
+Open-book deferral (ADR 0018 D5): the renderer registers each reader session
+(`reader_opened`/`reader_closed` over the bridge); the engine holds the open
+set in memory, and adoption skips those books silently, because a live
+Readium or PDFium session re-opens the file by path on every ranged read and
+swapped bytes would resolve old offsets. The set is in-memory: an app restart
+closes every reader; the badge stays visible for deferred books, and the swap
+happens on the first pass after the reader closes.
 
 ## Merge rules
 
@@ -475,7 +477,10 @@ folder. It covers:
   a pointer waiting silently for its blob and converging once it arrives, a
   corrupted blob blocking adoption behind a visible issue until it verifies,
   an adoption re-import minting nothing, an in-flight external edit left
-  alone until it wins the pointer, and a vanished file changing nothing.
+  alone until it wins the pointer, and a vanished file changing nothing;
+- deferral: an open reader session holding adoption off while the winning
+  bytes are already in the folder, and a never-arriving blob surfacing as an
+  issue after the missing-pass threshold, then self-closing once it converges.
 
 The frontend tests cover the Settings tab, mismatch confirmation, issue and
 trash actions, the primary action per issue kind, Copy details, opening the sync

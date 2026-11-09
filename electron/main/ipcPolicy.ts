@@ -110,6 +110,8 @@ const BOOK_ID_METHODS = new Set([
   "get_book_bytes",
   "get_epub_session",
   "get_book_resource",
+  "reader_opened",
+  "reader_closed",
   "list_annotations",
   "create_annotation",
 ]);

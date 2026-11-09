@@ -101,6 +101,37 @@ async fn marking_opened_stamps_last_opened_and_emits_library_changed() {
     assert!(payload["book"]["lastOpenedAt"].as_str().is_some());
 }
 
+/// The reader-session registry arms (ADR 0018 D5): both route on the bookId
+/// wire shape, answer null, and persist nothing — the registry is in-memory
+/// engine state, unit-tested on `SyncService` itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn reader_opened_and_closed_answer_null_and_persist_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path()).await;
+    let id = seed_book(&state, "Deferred Book").await;
+
+    for method in ["reader_opened", "reader_closed"] {
+        let result = dispatch(&state, &test_events(), method, json!({"bookId": id}))
+            .await
+            .unwrap();
+        assert_eq!(result, Value::Null, "{method} answers null");
+    }
+    // Even a stale id routes: the arms are best-effort by contract.
+    dispatch(
+        &state,
+        &test_events(),
+        "reader_closed",
+        json!({"bookId": 987654}),
+    )
+    .await
+    .unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_issues")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "the registry arms record nothing");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn import_paths_streams_batched_progress_events() {
     let tmp = tempfile::tempdir().unwrap();

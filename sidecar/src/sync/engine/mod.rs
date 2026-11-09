@@ -5,6 +5,7 @@
 //! are serialized, never block app startup, and report failures through the
 //! status/issue tables instead of crashing the sidecar.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -30,6 +31,7 @@ mod attach;
 mod autoretry;
 mod clear;
 mod connect;
+mod deferred;
 mod issues;
 mod lifecycle;
 mod pass;
@@ -37,6 +39,8 @@ mod remote;
 mod retry;
 mod trash;
 mod watcher;
+
+pub use deferred::MISSING_BLOB_ISSUE_THRESHOLD;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -166,6 +170,14 @@ struct Inner {
     /// engine: started when sync starts or a folder connects, stopped at
     /// shutdown and disconnect.
     watcher: Mutex<Option<watcher::SyncFolderWatcher>>,
+    /// Books whose reader session is open on this device (ADR 0018 D5):
+    /// adoption defers for these until the session closes. In-memory only;
+    /// the lifetime reasoning lives in `deferred`.
+    deferred_books: Mutex<HashSet<String>>,
+    /// Consecutive missing-blob passes per book uid, so the silent
+    /// op-before-blob wait (ADR 0018 D2) eventually surfaces. In-memory
+    /// only; see `deferred`.
+    missing_blobs: Mutex<HashMap<String, deferred::MissingBlobPasses>>,
 }
 
 #[derive(Clone)]
@@ -218,6 +230,8 @@ impl SyncService {
                 shutdown,
                 task: Mutex::new(None),
                 watcher: Mutex::new(None),
+                deferred_books: Mutex::new(HashSet::new()),
+                missing_blobs: Mutex::new(HashMap::new()),
             }),
         })
     }
