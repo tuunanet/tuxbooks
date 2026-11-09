@@ -110,6 +110,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Electron's postinstall downloads the runtime zip from GitHub
+      # releases, which has 504'd and failed `vp install` inside setup-vp
+      # (job 129012476756, PR #399). Restoring the cache first makes that
+      # download local on every run after the first; the key follows the
+      # lockfile and builder config that pin the version.
+      - name: Electron cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
       # Installs vp (the version pinned by the project catalog), its Node.js
       # runtime, and the frozen dependencies; cache: true caches the
       # package-manager store.
@@ -145,6 +160,19 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Electron cache (see the frontend job): vp install's electron
+      # postinstall fetches the runtime zip from GitHub releases, which has
+      # 504'd and failed this job (job 129012476756, PR #399).
+      - name: Electron cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
 
       # Installs vp (the version pinned by the project catalog), its Node.js
       # runtime, and the frozen dependencies; cache: true caches the
@@ -212,6 +240,17 @@ jobs:
         with:
           workspaces: sidecar
 
+      # GitHub releases 504s have failed this download (PR #399); cache the
+      # fetched library across runs. Exact key only — no restore-keys: the
+      # key follows fetch-pdfium.sh, which pins the build, and a stale entry
+      # from a different build would be silently accepted by the script's
+      # already-present check.
+      - name: PDFium cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: sidecar/pdfium
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-pdfium.sh') }}
+
       - name: Fetch PDFium (PDF cover tests)
         run: bash scripts/fetch-pdfium.sh
 
@@ -238,6 +277,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # electron-builder re-downloads Electron and its helper tooling on every
+      # run. Cache the downloads; the key follows the lockfile and builder
+      # config that pin the versions.
+      - name: Electron cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
       # Installs vp (the version pinned by the project catalog), its Node.js
       # runtime, pnpm, and the frozen dependencies (vp install runs frozen
       # under CI); cache: true caches the package-manager store. The justfile
@@ -257,21 +309,14 @@ jobs:
         with:
           workspaces: sidecar
 
+      # just comes from scripts/install-just.sh (the install-actionlint.sh
+      # house pattern: pinned + checksum-verified tarball, curl retry sized
+      # for GitHub-releases 504 brownouts). setup-just's ~24s of built-in
+      # retries were exhausted twice by those brownouts (PRs #399, #400).
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      # electron-builder re-downloads Electron and its helper tooling on every
-      # run. Cache the downloads; the key follows the lockfile and builder
-      # config that pin the versions.
-      - name: Electron cache
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/electron
-            ~/.cache/electron-builder
-          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-electron-
+        run: |
+          bash scripts/install-just.sh
+          echo "$GITHUB_WORKSPACE/.build/bin" >> "$GITHUB_PATH"
 
       # The pinned-glibc container sidecar exists so the packaging gate can
       # check the ABI floor on the deb. A change that cannot reach the deb

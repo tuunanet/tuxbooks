@@ -42,8 +42,14 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
 
+      # just comes from scripts/install-just.sh (the install-actionlint.sh
+      # house pattern: pinned + checksum-verified tarball, curl retry sized
+      # for GitHub-releases 504 brownouts, which exhausted setup-just's
+      # built-in retries twice — PRs #399, #400).
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        run: |
+          bash scripts/install-just.sh
+          echo "$GITHUB_WORKSPACE/.build/bin" >> "$GITHUB_PATH"
 
       - name: Fuzz (bounded, five minutes per target)
         run: just fuzz-ci

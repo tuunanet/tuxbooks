@@ -62,6 +62,22 @@ jobs:
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
 
+      # Electron cache (see ci.yml's frontend job): vp install's electron
+      # postinstall fetches the runtime zip from GitHub releases, which has
+      # 504'd and failed `vp install` inside setup-vp (PR #399). Restoring
+      # the cache first makes that download local on every run after the
+      # first; the key follows the lockfile and builder config that pin the
+      # version.
+      - name: Electron cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'electron-builder.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
       # Installs vp (the version pinned by the project catalog), its Node.js
       # runtime, pnpm, and the frozen dependencies (vp install runs frozen
       # under CI); cache: true caches the package-manager store. just
@@ -72,8 +88,14 @@ jobs:
           node-version: 24
           cache: true
 
+      # just comes from scripts/install-just.sh (the install-actionlint.sh
+      # house pattern: pinned + checksum-verified tarball, curl retry sized
+      # for GitHub-releases 504 brownouts, which exhausted setup-just's
+      # built-in retries twice — PRs #399, #400).
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        run: |
+          bash scripts/install-just.sh
+          echo "$GITHUB_WORKSPACE/.build/bin" >> "$GITHUB_PATH"
 
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
@@ -98,6 +120,17 @@ jobs:
           key: vite-task-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             vite-task-${{ runner.os }}-${{ runner.arch }}-
+
+      # Cache the fetched PDFium library across runs: the GitHub-releases
+      # download has 504'd here (PR #399). Exact key only — no restore-keys:
+      # the key follows fetch-pdfium.sh, which pins the build, and a stale
+      # entry from a different build would be silently accepted by the
+      # script's already-present check.
+      - name: PDFium cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: sidecar/pdfium
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-pdfium.sh') }}
 
       - name: E2E (headless)
         run: |
