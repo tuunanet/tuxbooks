@@ -3,7 +3,7 @@
 
 Downloads every book listed in the committed manifest.json from its source,
 verifies sha256 BEFORE the file becomes visible at its final path, and
-removes nothing else by default. See docs/free-ebook-fixtures.md.
+removes nothing else by default.
 
 Usage:
     fetch-ebook-fixtures.py            # fill mode: download missing/invalid files

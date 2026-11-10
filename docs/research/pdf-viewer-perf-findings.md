@@ -29,11 +29,7 @@ convention: ADR 0003, `docs/PDF-VIEW.md`, `docs/research/papers-scrolling.md`,
 
 ## Method
 
-- Bench conditions matching `docs/PERFORMANCE.md`'s recorded 2026-09-21
-  runs: maximized window on this host (2643x1405, dpr 1.453, no dpr
-  override), letter PDF at fit-width, current Electron/Chromium. The doc's
-  true reference conditions are maximized 3840x2160 at dpr 1.0 and 2.0;
-  this run is the "closest achievable" tier its PERF-2 row describes.
+- Bench conditions matching `docs/PERFORMANCE.md`'s recorded 2026-09-21 runs: maximized window on this host (2643x1405, dpr 1.453, no dpr override), letter PDF at fit-width, current Electron/Chromium. The doc's true reference conditions are maximized 3840x2160 at dpr 1.0 and 2.0; this run is the "closest achievable" tier its PERF-2 row describes.
 - Fixtures: the free ebook corpus (`just fetch-ebooks`, sha256 manifest,
   gitignored and absent on a fresh worktree, which skips the bench's
   missing-fixture scenarios). The bench seeds `GeoTopo.pdf` (image-heavy) as

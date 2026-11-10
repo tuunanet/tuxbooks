@@ -9,11 +9,10 @@ import {
 import { appEntryPoint } from "../setup/fixtures.js";
 
 /**
- * Desktop-shell regression suite (docs/fix-electron-main-window-behaviour.md
- * §17): branding, deterministic startup geometry, min-size clamping,
- * Settings-window scaling and visibility, resize-after-maximize/restore,
- * icon resolution, and the repeated-launch policy — the window-lifecycle
- * behaviors that must never regress.
+ * Desktop-shell regression suite: branding, deterministic startup geometry,
+ * min-size clamping, Settings-window scaling and visibility,
+ * resize-after-maximize/restore, icon resolution, and the repeated-launch
+ * policy — the window-lifecycle behaviors that must never regress.
  *
  * Its own Playwright phase ("shell", e2e/package.json test:shell): the
  * relaunch scenario closes and relaunches the app, which only works when

@@ -9,9 +9,6 @@ engine-agnostic (ADR 0003).
 Reference: `tuxbooks/papers` at commit `dd693ee`, upstream `GNOME/papers` v51.0.
 All symbol and line references below are Papers names.
 
-Where a rule in this document is marked **verify**, the Phase 0 spike confirms it
-against the native oracle before it becomes a contract.
-
 ## Where it lands
 
 | Concern                    | Papers source                                       | TuxBooks module                              |
@@ -210,12 +207,3 @@ Papers'. The comparison matters only for the oracle fixtures.
 - The kinetic-scroll gesture model and its scroll-fight helpers.
 - Papers' pixbuf cache sizing and preload counts, which conflict with the
   existing `docs/PERFORMANCE.md` budgets.
-
-## Open items for the Phase 0 spike
-
-- Whether `FPDF_RenderPageBitmapWithMatrix` covers region rendering faithfully
-  at every scale.
-- The comparison tolerance for the oracle.
-- Whether scale-and-swap can key off the existing bitmap cache variant field or
-  needs a new one. Resolved: it keys off a per-canvas last-presented bitmap, so
-  the scale-exact bitmap cache is untouched and no new cache field is needed.

@@ -542,9 +542,8 @@ export function PdfReader({
       `dpr:${dpr};w:${area?.clientWidth ?? 0};h:${window.innerHeight};scale:${Math.round(scale * 100) / 100}`,
     );
   }, [scale]);
-  // The WebKitGTK version rides in the UA string; paired with the Rust
-  // startup log of the GPU-stack env vars (lib.rs setup) this is the
-  // environment record docs/research/performance-4k.md calls for.
+  // Startup diagnostic: the runtime's UA string lands in the renderer
+  // console for environment identification.
   useEffect(() => {
     console.info(`[pdf] webview: ${navigator.userAgent}`);
   }, []);

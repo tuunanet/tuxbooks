@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): a GPU-process
+ * GPU-crash fallback policy (issue #13): a GPU-process
  * crash under an unstable driver stack (observed: Mesa/Wayland, Chromium's
  * `--type=gpu-process`) is recovered by Chromium itself, but a session that
  * accumulates repeated crashes means the graphics stack is broken — the next

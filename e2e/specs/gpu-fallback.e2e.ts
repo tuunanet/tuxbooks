@@ -11,7 +11,7 @@ import { databasePath } from "../setup/environment.js";
 import { canvasIsNonBlank, openInReader, returnToLibrary, waitForRendered } from "./helpers.js";
 
 /**
- * GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): after a
+ * GPU-crash fallback policy (issue #13): after a
  * session lost its GPU process repeatedly, the next launch runs
  * software-rendered, reading keeps working in that degraded mode, and a
  * stable hardware-accelerated session clears the fallback again.

@@ -1,8 +1,8 @@
 //! Integration test against the free ebook fixture corpus.
 //!
 //! The corpus is downloaded by `just fetch-ebooks`
-//! (scripts/fetch-ebook-fixtures.py, sha256-verified manifest — see
-//! docs/free-ebook-fixtures.md): it lives at `tests/fixtures/books/EBooks`
+//! (scripts/fetch-ebook-fixtures.py, sha256-verified manifest): it lives at
+//! `tests/fixtures/books/EBooks`
 //! (files gitignored) or wherever `REALISTIC_LIBRARY_PATH` points. The test
 //! skips with a notice when no book files are found, so CI and fresh clones
 //! stay green.

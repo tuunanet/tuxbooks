@@ -16,19 +16,11 @@ GTK4 framework claims cite `GNOME/gtk` `main`
 
 ## Questions
 
-1. Page surface lifecycle while scrolling: does Papers ever destroy or hide a
-   rendered page's surface because it left a virtualization window, and what
-   keeps painted pages on screen (cache structure, retention count, eviction,
-   memory bounds, owning file)?
-2. Render scheduling during scroll: paused or continuous, job queue priorities,
-   how superseded or stale jobs are cancelled or deprioritized, concurrency,
-   which thread runs rasters, what stops a scroll from queueing pointless work.
-3. Progressive quality: does a page paint at low resolution first and refine in
-   place, and how is the swap done without a blank frame?
-4. What the user sees while a page has not rendered yet (placeholder styling,
-   previous frame retention, blank-rect avoidance).
-5. Scroll-time compositing cost: how the view avoids re-rasterizing every frame
-   (snapshot, texture reuse, damage tracking).
+1. Page surface lifecycle while scrolling: does Papers ever destroy or hide a rendered page's surface because it left a virtualization window, and what keeps painted pages on screen (cache structure, retention count, eviction, memory bounds, owning file)?
+2. Render scheduling during scroll: paused or continuous, job queue priorities, how superseded or stale jobs are cancelled or deprioritized, concurrency, which thread runs rasters, what stops a scroll from queueing pointless work.
+3. Progressive quality: does a page paint at low resolution first and refine in place, and how is the swap done without a blank frame?
+4. What the user sees while a page has not rendered yet (placeholder styling, previous frame retention, blank-rect avoidance).
+5. Scroll-time compositing cost: how the view avoids re-rasterizing every frame (snapshot, texture reuse, damage tracking).
 
 ## Page surface lifecycle while scrolling
 
@@ -53,22 +45,8 @@ widgets are unparented only when the view itself is disposed
 **So: does a page ever get hidden or destroyed for leaving the window?**
 Partly, in two separate senses:
 
-- The widget is unmapped, not destroyed. In `pps_view_size_allocate` each page
-  widget's `child_visible` is set to whether its rect intersects the viewport
-  ([libview/pps-view.c:3496-3517](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
-  GTK maps `set_child_visible(FALSE)` to `gtk_widget_unmap`
-  ([gtkwidget.c:7052-7091](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)),
-  and an unmapped child is skipped by `gtk_widget_snapshot_child`
-  ([gtkwidget.c:12629-12648](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)).
-  The widget and the cache texture keyed by its page index both survive.
-- The texture is evicted only when the page falls outside
-  `[start_page - preload, end_page + preload]`. On a range change,
-  `move_one_job` carries each still-relevant slot (texture included) into the
-  new array and disposes only out-of-window slots, cancelling their jobs
-  ([libview/pps-pixbuf-cache.c:347-400](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c),
-  [libview/pps-pixbuf-cache.c:471-565](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
-  The comment at the entry point says it plainly: "We cull old pages
-  mercilessly" ([libview/pps-pixbuf-cache.c:838-840](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
+- The widget is unmapped, not destroyed. In `pps_view_size_allocate` each page widget's `child_visible` is set to whether its rect intersects the viewport ([libview/pps-view.c:3496-3517](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)). GTK maps `set_child_visible(FALSE)` to `gtk_widget_unmap` ([gtkwidget.c:7052-7091](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)), and an unmapped child is skipped by `gtk_widget_snapshot_child` ([gtkwidget.c:12629-12648](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)). The widget and the cache texture keyed by its page index both survive.
+- The texture is evicted only when the page falls outside `[start_page - preload, end_page + preload]`. On a range change, `move_one_job` carries each still-relevant slot (texture included) into the new array and disposes only out-of-window slots, cancelling their jobs ([libview/pps-pixbuf-cache.c:347-400](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c), [libview/pps-pixbuf-cache.c:471-565](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)). The comment at the entry point says it plainly: "We cull old pages mercilessly" ([libview/pps-pixbuf-cache.c:838-840](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
 
 **How much is retained.** Visible pages are kept unconditionally; the preload
 ring holds up to `MAX_PRELOADED_PAGES 3` pages before and after the visible
@@ -143,34 +121,11 @@ When a job completes, any pending job for that slot is promoted into the queue
 
 **What stops pointless work.** Five mechanisms, all in Papers:
 
-1. Range refresh is coalesced through allocation, not scroll events: the
-   adjustment's `value-changed` handler queues an allocate
-   ([libview/pps-view.c:827-832](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)),
-   and `pps_view_size_allocate` recomputes the visible range once per allocate
-   ([libview/pps-view.c:3463-3486](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
-2. `pps_pixbuf_cache_update_range` early-returns when the range and preload
-   size did not change
-   ([libview/pps-pixbuf-cache.c:490-493](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
-3. A slot that already has a job is left alone, and a texture that already
-   matches the required pixel size, device scale, and annotation flags never
-   gets a new job
-   ([libview/pps-pixbuf-cache.c:706-719](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
-4. Stale results are discarded at completion: a finished job whose page left
-   `[start - preload, end + preload]` is silently dropped and its texture never
-   installed ([libview/pps-pixbuf-cache.c:282-311](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
-   A zoom that changes the target size cancels now-invalid jobs
-   ([libview/pps-pixbuf-cache.c:316-342](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c),
-   [libview/pps-pixbuf-cache.c:599-613](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
-5. Cancellation is cooperative and cheap: the worker checks the cancellable
-   before starting a job
-   ([libview/pps-job-scheduler.c:66-77](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-job-scheduler.c)),
-   `pps_job_cancel` is documented as main-thread-only
-   ([libview/pps-job.c:174-203](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-job.c)),
-   and a render already running finishes its raster: the render job re-checks
-   the cancellable only after the page is rasterized, to free the thread ASAP
-   ([libview/pps-jobs.c:417-424](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-jobs.c)).
-   Nothing polls the cancellable inside the poppler render path (verified by
-   grep over `libdocument/`).
+1. Range refresh is coalesced through allocation, not scroll events: the adjustment's `value-changed` handler queues an allocate ([libview/pps-view.c:827-832](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)), and `pps_view_size_allocate` recomputes the visible range once per allocate ([libview/pps-view.c:3463-3486](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
+2. `pps_pixbuf_cache_update_range` early-returns when the range and preload size did not change ([libview/pps-pixbuf-cache.c:490-493](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
+3. A slot that already has a job is left alone, and a texture that already matches the required pixel size, device scale, and annotation flags never gets a new job ([libview/pps-pixbuf-cache.c:706-719](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
+4. Stale results are discarded at completion: a finished job whose page left `[start - preload, end + preload]` is silently dropped and its texture never installed ([libview/pps-pixbuf-cache.c:282-311](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)). A zoom that changes the target size cancels now-invalid jobs ([libview/pps-pixbuf-cache.c:316-342](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c), [libview/pps-pixbuf-cache.c:599-613](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)).
+5. Cancellation is cooperative and cheap: the worker checks the cancellable before starting a job ([libview/pps-job-scheduler.c:66-77](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-job-scheduler.c)), `pps_job_cancel` is documented as main-thread-only ([libview/pps-job.c:174-203](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-job.c)), and a render already running finishes its raster: the render job re-checks the cancellable only after the page is rasterized, to free the thread ASAP ([libview/pps-jobs.c:417-424](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-jobs.c)). Nothing polls the cancellable inside the poppler render path (verified by grep over `libdocument/`).
 
 **Completion hand-off.** A finished job posts its signal to the main loop with
 `g_idle_add_once`, and a cancelled job emits nothing
@@ -242,16 +197,8 @@ Textures therefore install only through the finished-idle path above.
 **A white (or black, when inverted) paper rect, never a hole.** Two facts
 combine:
 
-1. GTK4 paints the widget's CSS background and border _before_ calling the
-   widget's own `snapshot` vfunc: `gtk_widget_create_render_node` runs
-   `gtk_css_style_snapshot_background` and `gtk_css_style_snapshot_border`,
-   and only then `klass->snapshot`
-   ([gtkwidget.c:12146-12235](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c),
-   background at [gtkwidget.c:12217-12218](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)).
-2. The stylesheet gives the page node that background:
-   `pps-view .document-page { background-color: white; }` and
-   `pps-view .document-page.inverted { background-color: black; }`
-   ([shell/resources/papers.css:75-82](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/shell/resources/papers.css)).
+1. GTK4 paints the widget's CSS background and border _before_ calling the widget's own `snapshot` vfunc: `gtk_widget_create_render_node` runs `gtk_css_style_snapshot_background` and `gtk_css_style_snapshot_border`, and only then `klass->snapshot` ([gtkwidget.c:12146-12235](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c), background at [gtkwidget.c:12217-12218](https://raw.githubusercontent.com/GNOME/gtk/main/gtk/gtkwidget.c)).
+2. The stylesheet gives the page node that background: `pps-view .document-page { background-color: white; }` and `pps-view .document-page.inverted { background-color: black; }` ([shell/resources/papers.css:75-82](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/shell/resources/papers.css)).
 
 `pps_view_page_snapshot` returns early when the cache has no texture for the
 page, drawing no content and skipping its children
@@ -335,25 +282,9 @@ clamp, so it is uncapped by anything except pointer speed.
 Papers installs three scroll controllers on the view, and none of them does
 delta math for a plain wheel in continuous mode:
 
-1. A vertical `EventControllerScroll` whose handler is `scroll_to_zoom_cb`; it
-   acts only while Ctrl is held and returns `FALSE` otherwise, so plain wheel
-   events propagate
-   ([libview/pps-view.blp:24-27](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.blp),
-   [libview/pps-view.c:3547-3578](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
-2. A capture-phase `Gtk.EventControllerScroll` with `kinetic | both_axes` whose
-   handler is `page_scroll_cb`; it returns `GDK_EVENT_PROPAGATE` immediately
-   when the model is continuous, so in continuous mode it never touches the
-   adjustment. Its own stepping logic (accumulate deltas, require
-   `distance >= 1` after dividing surface-unit distances by 50) applies only to
-   the non-continuous page-by-page mode
-   ([libview/pps-view.blp:77-82](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.blp),
-   [libview/pps-view.c:5706-5787](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c),
-   propagate at [libview/pps-view.c:5724-5725](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c),
-   thresholds at [libview/pps-view.c:5737-5773](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
-3. The `GtkScrolledWindow` around the view does the actual scrolling; the view
-   is its scrollable child and its adjustments come from there
-   ([shell/resources/pps-document-view.blp:518-521](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/shell/resources/pps-document-view.blp),
-   adjustment wiring at [libview/pps-view.c:800-837](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
+1. A vertical `EventControllerScroll` whose handler is `scroll_to_zoom_cb`; it acts only while Ctrl is held and returns `FALSE` otherwise, so plain wheel events propagate ([libview/pps-view.blp:24-27](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.blp), [libview/pps-view.c:3547-3578](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
+2. A capture-phase `Gtk.EventControllerScroll` with `kinetic | both_axes` whose handler is `page_scroll_cb`; it returns `GDK_EVENT_PROPAGATE` immediately when the model is continuous, so in continuous mode it never touches the adjustment. Its own stepping logic (accumulate deltas, require `distance >= 1` after dividing surface-unit distances by 50) applies only to the non-continuous page-by-page mode ([libview/pps-view.blp:77-82](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.blp), [libview/pps-view.c:5706-5787](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c), propagate at [libview/pps-view.c:5724-5725](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c), thresholds at [libview/pps-view.c:5737-5773](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
+3. The `GtkScrolledWindow` around the view does the actual scrolling; the view is its scrollable child and its adjustments come from there ([shell/resources/pps-document-view.blp:518-521](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/shell/resources/pps-document-view.blp), adjustment wiring at [libview/pps-view.c:800-837](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-view.c)).
 
 The only Papers-side stepping code is keyboard/programmatic scrolling
 (`pps_view_scroll`, which moves by the adjustment's `step_increment`,
@@ -403,14 +334,8 @@ The wheel moves in quantized jumps of `pow(page_size, 2/3)` px times the
 device's per-event delta, so perceived velocity is `step x event rate`. Both
 factors sit below the application layer:
 
-- GDK X11 computes the delta linearly as `(valuator_value - last_value) /
-  increment` with no clamp
-  ([gdk/x11/gdkdevice-xi2.c:722-760](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/x11/gdkdevice-xi2.c)).
-- GDK compresses queued scroll events by summing their deltas into one event
-  per batch, which preserves total distance and therefore does not cap speed;
-  discrete-direction events break the merge run
-  ([gdk/gdkevents.c:608-724](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/gdkevents.c),
-  break at [gdk/gdkevents.c:630](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/gdkevents.c)).
+- GDK X11 computes the delta linearly as `(valuator_value - last_value) / increment` with no clamp ([gdk/x11/gdkdevice-xi2.c:722-760](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/x11/gdkdevice-xi2.c)).
+- GDK compresses queued scroll events by summing their deltas into one event per batch, which preserves total distance and therefore does not cap speed; discrete-direction events break the merge run ([gdk/gdkevents.c:608-724](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/gdkevents.c), break at [gdk/gdkevents.c:630](https://raw.githubusercontent.com/GNOME/gtk/main/gdk/gdkevents.c)).
 
 So hypothesis 1 as stated (an application-level velocity cap) is **not
 supported** by these sources. What is supported: motion is quantized into
@@ -464,44 +389,16 @@ questions that such a change would depend on).
 
 Items touched during research that are not stated as findings above:
 
-- GPU-side texture reuse: whether GDK uploads each `GdkTexture` to the GPU only
-  once and GSK reuses it across frames was not verified; GDK/GSK internals were
-  not read. The compositing claims above stop at the GTK widget layer.
-- Queue order among equal-priority `LOW` jobs: the scroll-direction preload
-  ordering ([libview/pps-pixbuf-cache.c:791-797](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c))
-  assumes `GThreadPool` preserves push order at equal priority. GLib docs were
-  not consulted, so FIFO among equals is assumed, not proven.
-- The reason for the 1-thread pool: only the in-code comment citing Papers
-  issue 107 was read; the issue itself was not fetched.
-- Evince: not consulted. Papers answered all five questions directly, so this
-  note makes no Evince claims at all.
-- The dead `page_ready` branch: confirmed dead at the pinned commit by grep;
-  whether it was live in earlier revisions was not investigated. The
-  suspicious `g_signal_emit(..., job_info->region)` in that same dead branch
-  ([libview/pps-pixbuf-cache.c:867-872](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c))
-  was not investigated further.
-- Mid-scroll style changes (color mode, theme) and their interaction with the
-  render-node reuse path were not traced end to end.
-- Wheel event details per backend: the exact `GdkScrollEvent` a mouse wheel
-  produces (direction, unit, delta magnitude per detent) was not verified.
-  `gdk_scroll_event_get_deltas` documents that deltas are zero unless the
-  direction is `GDK_SCROLL_SMOOTH` (`gdk/gdkevents.c:2539-2543`), while the
-  scrolled window multiplies by the wheel step only when the unit is
-  `GDK_SCROLL_UNIT_WHEEL`; how a backend reconciles the two (and what
-  `increment` X11 valuators use in `gdk/x11/gdkdevice-xi2.c:745`) was not
-  traced. The Wayland wheel path could not be located: the fetched
-  `gdk/wayland/gdkdevice-wayland.c` contains no scroll code, and the file that
-  does was not identified.
-- Whether the input layer rate-limits wheel events: not verified. The
-  "observed ceiling" explanation rests on the absence of any clamp in Papers
-  and GTK, plus the fixed per-notch step, not on a measured device-side rate
-  limit.
-- Whether a mouse wheel ever reaches GTK's kinetic deceleration path, and
-  whether GDK's scroll compression (`gdk/gdkevents.c:608`) applies to wheel
-  events, both depend on the unresolved direction question above.
-- The two observed behaviors (capped wheel speed with visible content, white
-  placeholders during drag) were reported by the user and not reproduced or
-  timed here; the verdicts in this note come from reading the sources.
+- GPU-side texture reuse: whether GDK uploads each `GdkTexture` to the GPU only once and GSK reuses it across frames was not verified; GDK/GSK internals were not read. The compositing claims above stop at the GTK widget layer.
+- Queue order among equal-priority `LOW` jobs: the scroll-direction preload ordering ([libview/pps-pixbuf-cache.c:791-797](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)) assumes `GThreadPool` preserves push order at equal priority. GLib docs were not consulted, so FIFO among equals is assumed, not proven.
+- The reason for the 1-thread pool: only the in-code comment citing Papers issue 107 was read; the issue itself was not fetched.
+- Evince: not consulted. Papers answered all five questions directly, so this note makes no Evince claims at all.
+- The dead `page_ready` branch: confirmed dead at the pinned commit by grep; whether it was live in earlier revisions was not investigated. The suspicious `g_signal_emit(..., job_info->region)` in that same dead branch ([libview/pps-pixbuf-cache.c:867-872](https://raw.githubusercontent.com/GNOME/papers/dd693ee21726fdc08b135183e104b67c0e59b332/libview/pps-pixbuf-cache.c)) was not investigated further.
+- Mid-scroll style changes (color mode, theme) and their interaction with the render-node reuse path were not traced end to end.
+- Wheel event details per backend: the exact `GdkScrollEvent` a mouse wheel produces (direction, unit, delta magnitude per detent) was not verified. `gdk_scroll_event_get_deltas` documents that deltas are zero unless the direction is `GDK_SCROLL_SMOOTH` (`gdk/gdkevents.c:2539-2543`), while the scrolled window multiplies by the wheel step only when the unit is `GDK_SCROLL_UNIT_WHEEL`; how a backend reconciles the two (and what `increment` X11 valuators use in `gdk/x11/gdkdevice-xi2.c:745`) was not traced. The Wayland wheel path could not be located: the fetched `gdk/wayland/gdkdevice-wayland.c` contains no scroll code, and the file that does was not identified.
+- Whether the input layer rate-limits wheel events: not verified. The "observed ceiling" explanation rests on the absence of any clamp in Papers and GTK, plus the fixed per-notch step, not on a measured device-side rate limit.
+- Whether a mouse wheel ever reaches GTK's kinetic deceleration path, and whether GDK's scroll compression (`gdk/gdkevents.c:608`) applies to wheel events, both depend on the unresolved direction question above.
+- The two observed behaviors (capped wheel speed with visible content, white placeholders during drag) were reported by the user and not reproduced or timed here; the verdicts in this note come from reading the sources.
 
 ## Recommendations for TuxBooks
 

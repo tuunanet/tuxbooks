@@ -21,9 +21,9 @@ check-epub-fixtures:
     python3 scripts/make-epub-fixtures.py --check
 
 # Download the free ebook fixture corpus (tests/fixtures/books/EBooks/, ~11 MB).
-# Idempotent: downloads only files missing from or failing the sha256 manifest
-# (docs/free-ebook-fixtures.md). Not part of `just check`/`just test` — needs
-# network; tests that use the corpus skip when it is absent.
+# Idempotent: downloads only files missing from or failing the sha256 manifest.
+# Not part of `just check`/`just test` — needs network; tests that use the
+# corpus skip when it is absent.
 fetch-ebooks:
     python3 scripts/fetch-ebook-fixtures.py
 
@@ -48,7 +48,7 @@ dev: fetch-pdfium
     # getaddrinfo and on IPv6-first machines lands on [::1] only — probing
     # 127.0.0.1 alone then never connects, and the wait loop below spun the
     # full 120x0.5s = 60s before Electron even launched (the reported ~30s
-    # "stuck" startup; docs/dev-startup-latency.md).
+    # "stuck" startup).
     port_open() {
         (exec 3<>/dev/tcp/127.0.0.1/1420) 2>/dev/null && { exec 3>&- 3<&-; return 0; }
         (exec 3<>/dev/tcp/::1/1420) 2>/dev/null && { exec 3>&- 3<&-; return 0; }
@@ -95,7 +95,7 @@ dev: fetch-pdfium
     # setsid makes Vite a process-group leader: cleanup kills the whole group
     # (pnpm + node + vite), not just the direct PID — descendants survive a
     # plain `kill $pid` and hold port 1420, which is what forced the old
-    # `fuser -k 1420/tcp` workaround (docs/dev-startup-latency.md §8).
+    # `fuser -k 1420/tcp` workaround.
     setsid pnpm --filter frontend dev &
     vite_pid=$!
     cleanup() {
@@ -256,8 +256,8 @@ test-e2e: build-debug
 test-e2e-empty:
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=empty E2E_SEED_LIBRARY= pnpm --filter e2e test:empty
 
-# Desktop-shell suite (docs/fix-electron-main-window-behaviour.md §17):
-# native window lifecycle, branding, and the repeated-launch policy. A
+# Desktop-shell suite: native window lifecycle, branding, and the
+# repeated-launch policy. A
 # 1920x1080 virtual screen gives the default 1280x820 window real centering
 # headroom (xvfb-run's 1280x1024 default would hug the left/right edges).
 # True maximize/restore needs a window manager — bare Xvfb has none, so
@@ -280,7 +280,7 @@ test-e2e-seeded:
 test-e2e-regressions: build-debug
     {{_headless}} {{_e2e_timeout}} env E2E_PHASE=regressions E2E_SEED_LIBRARY=1 pnpm --filter e2e test:regressions
 
-# GPU-crash fallback policy (docs/gpu-fallback.md, issue #13): the app boots
+# GPU-crash fallback policy (issue #13): the app boots
 # software-rendered when a previous session recorded repeated GPU-process
 # crashes, reading keeps working in that mode, and a stable session clears
 # the fallback again. Own phase because the scenarios relaunch the app with

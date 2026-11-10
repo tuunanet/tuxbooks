@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Coverage badge generator (docs/plans/coverage-badge-plan.md): reads the
+ * Coverage badge generator: reads the
  * vitest json-summary report and emits a shields.io endpoint JSON with the
  * gate's real number — the worst per-category lines coverage — plus the
  * overall percentage. Run after a `--coverage` run; CI publishes the output

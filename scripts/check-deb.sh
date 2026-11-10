@@ -53,7 +53,7 @@ esac
 # The install dir follows electron-builder productName (TuxBooks, human-
 # facing); the executable, desktop filename, icon name, and WM class stay
 # the stable technical identifier tuxbooks (executableName in
-# electron-builder.yml — docs/fix-electron-main-window-behaviour.md §4/§15).
+# electron-builder.yml).
 payload="$(mktemp -d)"
 trap 'rm -rf "$payload"' EXIT
 dpkg-deb -x "$deb" "$payload"
