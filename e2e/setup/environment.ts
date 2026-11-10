@@ -157,13 +157,13 @@ function generateLibraryBenchCorpus(): void {
 /**
  * Same corpus shape for the thumb-drag regression loop (tuxbooks-y9s), but
  * without covers: card geometry is CSS-fixed, and the cheaper import keeps
- * every batched import_paths call inside the sidecar RPC's 60 s guard.
+ * the regression loop quick.
  *
  * The books are partitioned into subdirectories afterwards: importing a
  * plain file makes its parent take the folder treatment (scan + watch,
  * ADR 0009), so N flat files in one directory cost N full directory
  * scans — quadratic. One directory import per part is the shape the app's
- * own folder flow uses, and each part lands well inside the RPC guard.
+ * own folder flow uses.
  */
 function generateLibraryThumbCorpus(): void {
   runEpubCorpusGenerator(libraryThumbCorpusDir, LIBRARY_CORPUS_BOOK_COUNT, false);
