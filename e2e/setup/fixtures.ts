@@ -152,8 +152,10 @@ export const LIBRARY_CORPUS_BOOK_COUNT = 10000;
 /**
  * Cover-less variant for the scrollbar thumb-drag regression loop
  * (tuxbooks-y9s): identical card geometry (BookCover reserves the 2:3 box
- * in CSS either way), a third of the sidecar import cost, which keeps each
- * import batch inside the sidecar RPC's 60 s runaway guard.
+ * in CSS either way), a third of the sidecar import cost, which keeps the
+ * regression loop quick. Bulk imports stream progress events that re-arm
+ * main's idle request guard, so no import batch needs a fixed total
+ * window.
  */
 export const libraryThumbCorpusDir = path.join(repoRoot, ".build", "fixtures", "library-thumb");
 
