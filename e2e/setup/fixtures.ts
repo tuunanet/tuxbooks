@@ -122,7 +122,6 @@ export const seededBookTitles = {
  * image-laden EPUB make render/turn latency measurement meaningful in a way
  * the synthetic fixtures deliberately are not. Never seeded by the CI phases;
  * verified against tests/fixtures/books/EBooks/manifest.json.
- * (docs/free-ebook-fixtures.md)
  */
 export const benchPdfFixture = path.join(
   repoRoot,

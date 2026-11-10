@@ -51,7 +51,7 @@ linux:
   synopsis: Local-first ebook library and reader
   # The human-facing name is TuxBooks; the executable (and with it the
   # /opt/tuxbooks install layout and desktop Exec path) stays the stable
-  # technical identifier (docs/fix-electron-main-window-behaviour.md §4).
+  # technical identifier.
   executableName: tuxbooks
   target:
     - deb

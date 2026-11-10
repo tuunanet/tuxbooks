@@ -15,8 +15,8 @@ import {
 } from "../../electron/main/gpuFallback";
 
 /**
- * Policy unit tests for the GPU-crash fallback (docs/gpu-fallback.md,
- * issue #13): the crash-count threshold arming, marker expiry, and the
+ * Policy unit tests for the GPU-crash fallback (issue #13): the
+ * crash-count threshold arming, marker expiry, and the
  * self-heal primitive. The marker-driven end-to-end behavior (boot decision,
  * degraded reading, clean-exit clearing) is pinned by the E2E gpu phase;
  * injecting real GPU-process crashes is not possible headlessly.

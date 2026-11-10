@@ -1169,7 +1169,7 @@ def build_valid():
     # pages or losing theming, per the licensed-corpus survey of 2026-09-17.
     # The toolkit strict-parses every manifest-XHTML item, so the reader's
     # fence must emit XML-safe output regardless of the transport content
-    # type or the declaration form. docs/superpowers/plans/ has the survey.
+    # type or the declaration form.
 
     g = "3.0"
 

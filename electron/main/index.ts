@@ -108,7 +108,7 @@ if (!cliHandled && !app.requestSingleInstanceLock()) {
 }
 
 /**
- * GPU-crash fallback (docs/gpu-fallback.md, issue #13): a session that lost
+ * GPU-crash fallback (issue #13): a session that lost
  * its GPU process repeatedly leaves a marker; the next launch then runs
  * software-rendered until a stable session clears the marker again. Must be
  * decided here, before app ready (disableHardwareAcceleration is legal only
@@ -122,8 +122,7 @@ if (activeGpuFallback) {
   console.warn(
     `[gpu-fallback] hardware acceleration disabled for this launch:` +
       ` ${activeGpuFallback.crashes} GPU-process crashes recorded` +
-      ` (last ${activeGpuFallback.lastCrashAt}, expires ${activeGpuFallback.expiresAt};` +
-      ` docs/gpu-fallback.md)`,
+      ` (last ${activeGpuFallback.lastCrashAt}, expires ${activeGpuFallback.expiresAt})`,
   );
 }
 // GPU-process crashes ("crashed", not the benign cleanExit/killed) seen in
@@ -146,7 +145,7 @@ protocol.registerSchemesAsPrivileged([...PRIVILEGED_SCHEMES]);
 /**
  * Mirror of the sidecar's database-path resolution (TEST_* overrides first,
  * then the XDG data home). The covers directory and the GPU-fallback marker
- * (docs/gpu-fallback.md) sit next to the database.
+ * sit next to the database.
  */
 function appDataDir(): string {
   const override = process.env.TEST_DATABASE_PATH;
@@ -266,8 +265,8 @@ function registerProtocol(sidecar: Sidecar): void {
 }
 
 /**
- * Deterministic startup geometry (docs/fix-electron-main-window-behaviour.md
- * §6): every launch is a centered, unmaximized, useful-size window. Nothing
+ * Deterministic startup geometry: every launch is a centered, unmaximized,
+ * useful-size window. Nothing
  * about the window is persisted between runs, so a maximized session can
  * never leak into the next startup.
  */
@@ -279,8 +278,7 @@ const WINDOW_DEFAULTS = {
 } as const;
 
 /**
- * The native window/taskbar icon (docs/fix-electron-main-window-behaviour.md
- * §13). `build/icons/` is the canonical source; dev and E2E resolve it from
+ * The native window/taskbar icon. `build/icons/` is the canonical source; dev and E2E resolve it from
  * the repo layout next to the electron bundle, packaged builds get it
  * copied to resources/icons by electron-builder's extraResources (the asar
  * itself carries only electron/dist + frontend/dist). The icon is decoded
@@ -595,7 +593,7 @@ app.on("window-all-closed", () => {
 });
 
 /**
- * Self-heal (docs/gpu-fallback.md): a hardware-accelerated session that ends
+ * Self-heal: a hardware-accelerated session that ends
  * cleanly without a single GPU crash proves the graphics stack works — clear
  * the fallback marker so the next launch tries hardware again. A
  * software-rendered session (fallback active) cannot prove anything about
@@ -616,7 +614,7 @@ app.on("will-quit", () => {
  * (versions, GPU feature status). Diagnostics only: a GPU-process exit is
  * recovered by Chromium itself; never reload() from these events.
  *
- * The one policy exception (docs/gpu-fallback.md): repeated GPU crashes in
+ * The one policy exception: repeated GPU crashes in
  * a hardware-accelerated session arm the next-launch software-rendering
  * fallback. No in-session action is possible (or needed) — Chromium already
  * restarted the process.
@@ -639,7 +637,7 @@ app.on("child-process-gone", (_event, details) => {
     if (marker) {
       console.warn(
         `[gpu-fallback] repeated GPU-process crashes (${gpuCrashCount});` +
-          ` the next launch runs software-rendered (docs/gpu-fallback.md)`,
+          ` the next launch runs software-rendered`,
       );
     }
   }

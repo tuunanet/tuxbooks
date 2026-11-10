@@ -51,8 +51,8 @@ pub struct PdfMetadata {
 | page 1     | `cover_path` (rasterized to PNG by `pdf/render.rs` at import; NULL |
 |            | when the PDFium library is unavailable — placeholder art then)     |
 
-Cover rasterization stays in Rust (PDFium). Decision recorded at migration
-phase 4: the renderer engine does not replace it — the renderer rasterizes
+Cover rasterization stays in Rust (PDFium). Decision recorded during the
+migration: the renderer engine does not replace it — the renderer rasterizes
 whole documents for the reading surface, while import-time covers need a
 per-file, no-UI rasterization in the sidecar; keeping native PDFium avoids
 loading every full document during a scan for identical quality.
@@ -125,75 +125,20 @@ environment, and a failed prewarm only means the next open starts cold.
 
 ### Continuous reader architecture (`frontend/src/components/reader/pdf/`)
 
-- `PdfReader.tsx` — composition root: zoom state, the initialization
-  sequence (document ready → layout ready → position restored →
-  interactive), and the render-set derivation.
-- `hooks/usePdfDocument` — opens the book through the range-backed engine
-  seam (`openPdfDocumentFromBook`); owns the document lifetime (destroy on
-  unmount/book switch). A switch also drops
-  the previous document from state in that render (render-phase reset), so
-  a closed document never serves a render while the next loads, and a load
-  that lands after its book was superseded is destroyed, never mounted.
-  Records the open-timeline anchor + `open=` segment for the telemetry
-  attributes below.
-- `hooks/usePdfGeometry` — reserves the whole document from an opening
-  sample (pages 1, 2, and the last page, median by area), then measures.
-  Documents up to 5000 pages are measured in full by a background sweep
-  that starts once the first page renders (pdf.js's viewer fetches all
-  pages at the same point; the sweep is what keeps slot heights — and the
-  native scrollbar thumb's mapping — stable during drags,
-  tuxbooks-x27.5). Larger documents fall back to on-approach correction
-  (`measurePages`; corrections are idempotent per document).
-- `hooks/usePdfVirtualization` — an IntersectionObserver pair over the slot
-  elements (visible: no margin; preload: a fixed ±1200 px ≈ one 1080p
-  viewport, bounded at any window size) feeds the visible/preload page sets.
-- `hooks/usePdfScrollTracking` — rAF-coalesced scroll sampling. Current
-  page = the page containing the reading anchor (viewport top + 25% of the
-  viewport height); also records the anchor's in-page fraction.
-- `hooks/usePdfScale` — layout scale from the zoom state (issue #65): the
-  fit modes recompute continuously from the measured content area and the
-  shell's scroll container (ResizeObserver pair + window resize), custom
-  mode is a fixed scale. Pure scale selection lives in
-  `pdfLayout.computePdfScale`; unmeasurable dimensions fall back to 1.
-- shared `components/reader/useReaderProgress` — debounced save +
-  restore-once (below); one persistence core for both formats, with PDF
-  page validation in `readerModel.parsePdfProgress`.
-- `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an
-  offset, clamping, scroll compensation, fit-width scale, thumbnail
-  geometry); unit-tested without a browser.
-- `pdfRenderPolicy.ts` — pure render-budget math: the effective render
-  ratio per page (devicePixelRatio capped by the backing-store budgets, CSS
-  upscales beyond), the byte cap over the live render window, and the
-  deep-zoom region switch (`needsRegionRender`/`regionRenderRatio`).
-- `pdfOutline.ts` — pure outline normalization: the engine's raw outline
-  resolves to a tree of `{ title, page (1-based | null), items }`;
-  unresolvable entries degrade to inert rows, never errors. Re-exported
-  through the engine seam so components never touch the engine's raw types.
-- `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` — one geometry slot
-  per page for the entire document; canvases only for the bounded render
-  set. Slots carry `data-pdf-slot` + `data-render-state` lifecycle
-  attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests
-  and diagnostics. Above the whole-page budget, a canvas rasterizes only the
-  page's visible region at device resolution (`usePdfViewport` +
-  `visiblePageRegion`, the `pdfiumWorker` clip) and positions itself in the
-  slot, so text stays sharp and no page-sized buffer is allocated; the
-  canvas carries `data-pdf-render-region` (`full` or the region rect).
-- `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`;
-  the Okular-style zoom combo — `−`, an editable percent input, a presets
-  dropdown (Fit Width / Fit Page / Auto Fit plus `ZOOM_PRESETS`), `+` — and
-  the presentation-mode toggle — issue #65), docked through a portal into a
-  header slot owned by ReaderShell — the same pattern as PdfSidebar, with
-  an inline fallback when no host is provided (standalone renders, e.g.
-  unit tests). The toolbar carries `data-pdf-zoom-mode` (the active mode)
-  for tests and diagnostics. Native `title` tooltips instead of Radix
-  Tooltip: the toolbar also renders standalone, where no TooltipProvider
-  exists. No control row renders above the document, so its vertical space
-  goes to the pages; the reader keeps owning the zoom and position state.
-- `PdfPresentationBar` — the floating in-presentation controls (prev/next,
-  page indicator, exit), fixed to the bottom edge of the document while
-  the shell's chrome is hidden (issue #65).
-- `PdfSidebar` — the thumbnails panel (below). Rendered through a React
-  portal into a host `<aside>` owned by ReaderShell's layout.
+- `PdfReader.tsx` — composition root: zoom state, the initialization sequence (document ready → layout ready → position restored → interactive), and the render-set derivation.
+- `hooks/usePdfDocument` — opens the book through the range-backed engine seam (`openPdfDocumentFromBook`); owns the document lifetime (destroy on unmount/book switch). A switch also drops the previous document from state in that render (render-phase reset), so a closed document never serves a render while the next loads, and a load that lands after its book was superseded is destroyed, never mounted. Records the open-timeline anchor + `open=` segment for the telemetry attributes below.
+- `hooks/usePdfGeometry` — reserves the whole document from an opening sample (pages 1, 2, and the last page, median by area), then measures. Documents up to 5000 pages are measured in full by a background sweep that starts once the first page renders (pdf.js's viewer fetches all pages at the same point; the sweep is what keeps slot heights — and the native scrollbar thumb's mapping — stable during drags, tuxbooks-x27.5). Larger documents fall back to on-approach correction (`measurePages`; corrections are idempotent per document).
+- `hooks/usePdfVirtualization` — an IntersectionObserver pair over the slot elements (visible: no margin; preload: a fixed ±1200 px ≈ one 1080p viewport, bounded at any window size) feeds the visible/preload page sets.
+- `hooks/usePdfScrollTracking` — rAF-coalesced scroll sampling. Current page = the page containing the reading anchor (viewport top + 25% of the viewport height); also records the anchor's in-page fraction.
+- `hooks/usePdfScale` — layout scale from the zoom state (issue #65): the fit modes recompute continuously from the measured content area and the shell's scroll container (ResizeObserver pair + window resize), custom mode is a fixed scale. Pure scale selection lives in `pdfLayout.computePdfScale`; unmeasurable dimensions fall back to 1.
+- shared `components/reader/useReaderProgress` — debounced save + restore-once (below); one persistence core for both formats, with PDF page validation in `readerModel.parsePdfProgress`.
+- `pdfLayout.ts` — pure layout math (slot stacking, page lookup at an offset, clamping, scroll compensation, fit-width scale, thumbnail geometry); unit-tested without a browser.
+- `pdfRenderPolicy.ts` — pure render-budget math: the effective render ratio per page (devicePixelRatio capped by the backing-store budgets, CSS upscales beyond), the byte cap over the live render window, and the deep-zoom region switch (`needsRegionRender`/`regionRenderRatio`).
+- `pdfOutline.ts` — pure outline normalization: the engine's raw outline resolves to a tree of `{ title, page (1-based | null), items }`; unresolvable entries degrade to inert rows, never errors. Re-exported through the engine seam so components never touch the engine's raw types.
+- `PdfDocumentView` / `PdfPageSlot` / `PdfPageCanvas` — one geometry slot per page for the entire document; canvases only for the bounded render set. Slots carry `data-pdf-slot` + `data-render-state` lifecycle attributes (`unloaded|queued|loading|rendering|rendered|error`) for tests and diagnostics. Above the whole-page budget, a canvas rasterizes only the page's visible region at device resolution (`usePdfViewport` + `visiblePageRegion`, the `pdfiumWorker` clip) and positions itself in the slot, so text stays sharp and no page-sized buffer is allocated; the canvas carries `data-pdf-render-region` (`full` or the region rect).
+- `PdfToolbar` — the document controls (page navigation `‹ Page X of Y ›`; the Okular-style zoom combo — `−`, an editable percent input, a presets dropdown (Fit Width / Fit Page / Auto Fit plus `ZOOM_PRESETS`), `+` — and the presentation-mode toggle — issue #65), docked through a portal into a header slot owned by ReaderShell — the same pattern as PdfSidebar, with an inline fallback when no host is provided (standalone renders, e.g. unit tests). The toolbar carries `data-pdf-zoom-mode` (the active mode) for tests and diagnostics. Native `title` tooltips instead of Radix Tooltip: the toolbar also renders standalone, where no TooltipProvider exists. No control row renders above the document, so its vertical space goes to the pages; the reader keeps owning the zoom and position state.
+- `PdfPresentationBar` — the floating in-presentation controls (prev/next, page indicator, exit), fixed to the bottom edge of the document while the shell's chrome is hidden (issue #65).
+- `PdfSidebar` — the thumbnails panel (below). Rendered through a React portal into a host `<aside>` owned by ReaderShell's layout.
 
 ### Zoom modes (issue #65)
 
@@ -268,86 +213,27 @@ navigation combos.
 
 ### Keyboard shortcuts
 
-The reader shares one shortcut registry (`lib/shortcuts`) and one label
-source (`lib/readerShortcuts`), where `mod` is Ctrl on Linux/Windows and Cmd
-on macOS, written `Ctrl/Cmd` below. The unmodified keys drive the reading
-surface. The panel keys are owned by the shell (`ReaderShell`) and toggle
-their panel; a drawer key pressed while the drawer is open closes it instead
-of switching tabs.
-
-Shared by PDF and EPUB:
-
-| Action                   | Keys                         |
-| ------------------------ | ---------------------------- |
-| Next page or section     | `Right`, `Space`, `PageDown` |
-| Previous page or section | `Left`, `PageUp`             |
-| First or last page       | `Home`, `End`                |
-| Search in book           | `Ctrl/Cmd+F`                 |
-| Bookmark page            | `Ctrl/Cmd+B`                 |
-| Presentation mode        | `Ctrl/Cmd+L`                 |
-| Leave presentation       | `Esc`                        |
-| Appearance               | `Ctrl/Cmd+Shift+A`           |
-| Contents drawer          | `Ctrl/Cmd+Shift+C`           |
-| Bookmarks tab            | `Ctrl/Cmd+Shift+B`           |
-| Highlights tab           | `Ctrl/Cmd+Shift+H`           |
-
-PDF only:
-
-| Action                            | Keys                                     |
-| --------------------------------- | ---------------------------------------- |
-| Page thumbnails sidebar           | `Ctrl/Cmd+Shift+T`                       |
-| Zoom in / out                     | `Ctrl/Cmd+Plus`, `Ctrl/Cmd+Minus`        |
-| Reset zoom to 100%                | `Ctrl/Cmd+0`                             |
-| Fit page / width / auto           | `Ctrl/Cmd+1`, `Ctrl/Cmd+2`, `Ctrl/Cmd+3` |
-| Reverse page flip in presentation | `Shift+Space`                            |
-
-The toolbar's editable page field also steps through the document while it
-has focus: `Up`/`Down` move one page.
+The reader shares the shell's shortcut registry and label source; the full
+key tables (shared reader keys and the PDF-only additions — thumbnails
+`Ctrl/Cmd+Shift+T`, zoom `Ctrl/Cmd+Plus`/`Minus`/`0`, fit modes
+`Ctrl/Cmd+1/2/3`, presentation reverse flip `Shift+Space`) are documented
+once in [EPUB.md](EPUB.md) ("Keyboard shortcuts"). Panel keys are owned by
+the shell (`ReaderShell`) and toggle their panel; a drawer key pressed
+while the drawer is open closes it instead of switching tabs. The toolbar's
+editable page field also steps through the document while it has focus:
+`Up`/`Down` move one page.
 
 ### Virtualization and rendering policy
 
 Never render a large PDF into the DOM at once; keep rasterization off the
 critical path.
 
-1. Up to `MAX_CONCURRENT_RENDERS` (2) renders run at a time; completions
-   and cancellations free their slot for the next priority page. The
-   reading anchor starts first, then visible pages (closest first).
-2. Exactly one prerender page beyond the viewport — and only while the
-   concurrency budget has room to spare.
-3. Only an input change (scale, geometry, colour mode, document) or an
-   unmount supersedes a render; the superseded generation is cancelled and
-   never blits. A scroll-driven region move or a render-budget (priority)
-   change is not supersession: the budget gates starting renders only, a
-   started raster always blits, and a region move re-targets the running
-   commitment, which renders the latest strip after each settle window
-   (issue tuxbooks-x27.2).
-4. Completed canvases stay mounted while their page stays inside the
-   virtualization window, bounded first by a byte budget
-   (256 MB, `MAX_ACTIVE_CANVAS_BYTES`) and then by the count fallback
-   (`MAX_ACTIVE_CANVASES`, 8): at 4K only the closest few page-sized
-   buffers fit, at smaller windows the byte budget is inert. Distant pages
-   keep geometry-only slots and report `data-render-state="unloaded"`. The
-   rendered/failed page sets reset with the document, so a switched book
-   can never inherit the previous book's render marks.
-5. Each page rasterizes into an offscreen buffer at the effective render
-   ratio (`pdfRenderPolicy.effectiveRenderRatio`), a two-tier ladder:
-   devicePixelRatio preferred, degrading to the soft budget, then to CSS
-   resolution (never blurrier than the layout while the hard budget
-   allows), and only under zoom into the hard per-dimension budget; the
-   canvas CSS size stays at the displayed size and CSS upscales beyond the
-   ratio. While the very first page of a freshly opened document is
-   pending, the anchor page renders **two-stage** (`preview`): a readable
-   preview at ratio ≤ 1 blits first and the full-ratio refinement replaces
-   it in the background — the visible canvas only ever receives complete
-   bitmaps (canvas carries `data-pdf-render-quality`
-   `preview|final`).
-6. On eviction the finished bitmap moves into a per-document LRU cache
-   (`pdfBitmapCache`, bounded by a 320 MB byte budget and entry count,
-   keyed by render scale and effective ratio, dropped on zoom and on
-   document switch). A page that re-enters the window blits its retained
-   bitmap in one synchronous draw — scrolling back across a heavy page
-   never re-pays the raster. Cache occupancy is exposed for diagnostics as
-   `data-pdf-bitmap-cache` (`entries:bytes`) on the reader element.
+1. Up to `MAX_CONCURRENT_RENDERS` (2) renders run at a time; completions and cancellations free their slot for the next priority page. The reading anchor starts first, then visible pages (closest first).
+2. Exactly one prerender page beyond the viewport — and only while the concurrency budget has room to spare.
+3. Only an input change (scale, geometry, colour mode, document) or an unmount supersedes a render; the superseded generation is cancelled and never blits. A scroll-driven region move or a render-budget (priority) change is not supersession: the budget gates starting renders only, a started raster always blits, and a region move re-targets the running commitment, which renders the latest strip after each settle window (issue tuxbooks-x27.2).
+4. Completed canvases stay mounted while their page stays inside the virtualization window, bounded first by a byte budget (256 MB, `MAX_ACTIVE_CANVAS_BYTES`) and then by the count fallback (`MAX_ACTIVE_CANVASES`, 8): at 4K only the closest few page-sized buffers fit, at smaller windows the byte budget is inert. Distant pages keep geometry-only slots and report `data-render-state="unloaded"`. The rendered/failed page sets reset with the document, so a switched book can never inherit the previous book's render marks.
+5. Each page rasterizes into an offscreen buffer at the effective render ratio (`pdfRenderPolicy.effectiveRenderRatio`), a two-tier ladder: devicePixelRatio preferred, degrading to the soft budget, then to CSS resolution (never blurrier than the layout while the hard budget allows), and only under zoom into the hard per-dimension budget; the canvas CSS size stays at the displayed size and CSS upscales beyond the ratio. While the very first page of a freshly opened document is pending, the anchor page renders **two-stage** (`preview`): a readable preview at ratio ≤ 1 blits first and the full-ratio refinement replaces it in the background — the visible canvas only ever receives complete bitmaps (canvas carries `data-pdf-render-quality` `preview|final`).
+6. On eviction the finished bitmap moves into a per-document LRU cache (`pdfBitmapCache`, bounded by a 320 MB byte budget and entry count, keyed by render scale and effective ratio, dropped on zoom and on document switch). A page that re-enters the window blits its retained bitmap in one synchronous draw — scrolling back across a heavy page never re-pays the raster. Cache occupancy is exposed for diagnostics as `data-pdf-bitmap-cache` (`entries:bytes`) on the reader element.
 
 Every render paints into a private offscreen buffer; the visible canvas is
 touched only by the atomic blit of a completed render (single-writer —

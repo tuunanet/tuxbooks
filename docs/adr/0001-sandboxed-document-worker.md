@@ -4,7 +4,6 @@ Status: accepted
 Date: 2026-09-16
 Decides: the four open decisions from #78/#81 (worker process model, document handoff, Linux sandbox layer, PDFium retention)
 Contracts this builds on: `sidecar/src/limits.rs` (#83), `electron/main/protocolSources.ts` + `electron/shared/pathSchema.ts` (#84), `frontend/src/lib/epub/contentPolicy.ts` (#82)
-Implementation plan: `docs/superpowers/plans/2026-09-16-issue-81-worker.md`
 
 ## Context
 

@@ -4,9 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * How far ahead of the viewport pages are preloaded: a fixed ~one-1080p
  * viewport on each side. Pixels, not viewport percentages — a relative
  * margin (±1 viewport height) grows to ±2160 px on a 4K window and sends
- * pages nobody is approaching through the render pipeline (PDF-4,
- * docs/research/performance-4k.md); a fixed bound keeps the same feel at
- * every window size.
+ * pages nobody is approaching through the render pipeline; a fixed bound
+ * keeps the same feel at every window size.
  */
 const PRELOAD_ROOT_MARGIN = "1200px 0px 1200px 0px";
 
