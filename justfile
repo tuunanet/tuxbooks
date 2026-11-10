@@ -370,11 +370,11 @@ bench-library WINDOW_SIZE="": build-debug
 # (tuxbooks-y9s): grabs the Grid's real native thumb through trusted input
 # and asserts it stays under the held cursor through a full-track drag.
 # Opt-in under Xvfb — never part of test-e2e or CI. E2E_PHASE=library-thumb
-# generates the loop's cover-less corpus (same card geometry, import cheap
-# enough for the sidecar RPC's 60 s runaway guard per batch); WINDOW_SIZE
-# pins the track geometry, default 1600x1000. The RELEASE sidecar keeps the
-# import inside that guard (the fix under test is renderer code, so the
-# release sidecar stays valid across loop iterations).
+# generates the loop's cover-less corpus (same card geometry, a third of
+# the sidecar import cost keeps the loop quick); WINDOW_SIZE
+# pins the track geometry, default 1600x1000. The fix under test is
+# renderer code, so the RELEASE sidecar stays valid across loop
+# iterations.
 test-e2e-library-thumb WINDOW_SIZE="1600x1000": build-debug
     cargo build --manifest-path sidecar/Cargo.toml --release
     {{_shell_headless}} {{_bench_timeout}} env E2E_PHASE=library-thumb E2E_SEED_LIBRARY= BENCH_WINDOW_SIZE="{{WINDOW_SIZE}}" TUXBOOKS_SIDECAR={{_release_sidecar}} pnpm --filter e2e test:library-thumb
