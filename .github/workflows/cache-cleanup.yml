@@ -1,0 +1,70 @@
+name: Cache cleanup
+
+# Keeps the GitHub Actions cache store under quota (tuxbooks-68l). The
+# store previously sat at 9.94/10 GB, where GitHub's LRU eviction
+# thrashes the hot set mid-build; this runs weekly to free quota
+# proactively. It only ever deletes regenerable caches, and never touches
+# default-branch (main) entries accessed within the last 3 days except
+# when the 8 GB quota valve fires. Rules and guardrails:
+# scripts/cleanup-action-caches.sh.
+# Durable semantics supersede the one-shot guardrail from the tuxbooks-68l claim: main entries older than 7 days are by definition not hot and age out; the valve may touch 24h-3d main entries only above 8 GiB; dead-ref caches die regardless of age because their refs can never run again.
+#
+# gh CLI only — zero third-party actions, not even checkout. The script
+# is fetched via the contents API, SHA-pinned to the exact commit this
+# run belongs to (the trigger commit), so there is no TOCTOU window
+# between fetch and run; gh is preinstalled and pre-authed with
+# GITHUB_TOKEN on runners. Manual dispatches default to a dry run; the
+# weekly schedule deletes for real.
+
+on:
+  schedule:
+    # Mondays 03:23 UTC: off the top of the hour (GitHub scheduling
+    # advice) and ~2h before the audit.yml weekly sweep (05:41) so the
+    # two scheduled runs don't interleave.
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report what would be deleted without deleting
+        type: boolean
+        default: true
+
+permissions:
+  actions: write # gh cache delete
+  pull-requests: read # list closed PRs (dead merge refs; closed includes merged)
+  contents: read # fetch the script; branch-existence checks
+
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete stale Actions caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # Dispatches honor the dry_run input; the schedule deletes for real.
+      # The script itself defaults to dry-run when DRY_RUN is unset, so a
+      # bare local invocation (DRY_RUN=1 to preview) deletes nothing.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+    steps:
+      - name: Fetch cleanup script at this commit (no checkout)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/contents/scripts/cleanup-action-caches.sh?ref=${{ github.sha }}" \
+            --jq .content | base64 -d > "$RUNNER_TEMP/cleanup-action-caches.sh"
+          # shell: bash gives the pipeline pipefail, so a failed gh api
+          # already fails the step; this guards the pass-through case
+          # (gh exited 0 but wrote nothing).
+          if [ ! -s "$RUNNER_TEMP/cleanup-action-caches.sh" ]; then
+            echo "::error::fetched cleanup-action-caches.sh is empty (gh api failed or file missing at ${{ github.sha }})" >&2
+            exit 1
+          fi
+
+      - name: Run cache cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/cleanup-action-caches.sh"
