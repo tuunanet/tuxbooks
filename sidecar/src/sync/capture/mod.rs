@@ -113,16 +113,28 @@ async fn build_op(
     })
 }
 
+/// Publish one captured write: the op file, its ledger row, then the mirror
+/// apply — that order is what keeps the folder and the ledger coherent. A
+/// failed apply leaves the op published and ledgered, so the row's
+/// recapture finds it and re-drives the recorded op instead of minting a
+/// twin file (tuxbooks-a3y); a failed ledger write compensates by removing
+/// the file, since nothing has consumed the write yet.
 async fn write_and_apply(
     pool: &SqlitePool,
     root: &std::path::Path,
     op: &Op,
 ) -> Result<(), AppError> {
+    if let Some((payload, file_name)) = published_write(pool, op).await? {
+        let prior: Op = serde_json::from_str(&payload).map_err(|err| {
+            AppError::InvalidInput(format!("recorded op is not valid JSON: {err}"))
+        })?;
+        return merge::apply_op(pool, &prior, &file_name).await.map(|_| ());
+    }
+
     let relative = store::write_op(root, op)?;
     let payload = serde_json::to_string(op)
         .map_err(|err| AppError::InvalidInput(format!("cannot serialize op: {err}")))?;
-    merge::apply_op(pool, op, &relative).await?;
-    sqlx::query(
+    if let Err(err) = sqlx::query(
         r#"
         INSERT INTO sync_ops
             (op_id, device_id, hlc_wall, hlc_counter, kind, entity_uid, book_uid,
@@ -139,11 +151,44 @@ async fn write_and_apply(
     .bind(&op.entity_uid)
     .bind(&op.book_uid)
     .bind(op.deleted)
-    .bind(payload)
-    .bind(relative)
+    .bind(&payload)
+    .bind(&relative)
     .execute(pool)
-    .await?;
+    .await
+    {
+        // Best effort: if even the unlink fails, or the process dies
+        // between the file and this row, an orphan survives the recapture
+        // cannot match and the next pass mints a twin. Bounding the window
+        // to one statement is the most this seam can do without a folder
+        // transaction (tuxbooks-a3y).
+        let _ = std::fs::remove_file(root.join(&relative));
+        return Err(err.into());
+    }
+    merge::apply_op(pool, op, &relative).await?;
     Ok(())
+}
+
+/// The ledger row of an earlier capture of the same write, keyed by the
+/// write's own identity: device, entity, and its minted clock. Remote ops
+/// never enter `sync_ops`, so a hit is always this device's prior capture.
+/// Two rows for one write exist only from a build that predates the
+/// twin-guard; both name the same write, so whichever `LIMIT 1` returns
+/// satisfies the reuse.
+async fn published_write(pool: &SqlitePool, op: &Op) -> Result<Option<(String, String)>, AppError> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT payload_json, file_name FROM sync_ops
+         WHERE device_id = ?1 AND kind = ?2 AND entity_uid = ?3
+           AND hlc_wall = ?4 AND hlc_counter = ?5
+         LIMIT 1",
+    )
+    .bind(&op.device_id)
+    .bind(op.kind.as_str())
+    .bind(&op.entity_uid)
+    .bind(op.hlc.wall)
+    .bind(op.hlc.counter as i64)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }
 
 async fn clear_row(pool: &SqlitePool, row: &DirtyRow) -> Result<(), AppError> {

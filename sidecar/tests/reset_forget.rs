@@ -18,9 +18,13 @@ use tuxbooks_lib::rpc::{handle_request_line, EventEmitter, RequestLineOutcome};
 use tuxbooks_lib::services::library_reconciler::Reconciler;
 use tuxbooks_lib::services::library_watcher::{LibraryWatcher, WatcherConfig};
 use tuxbooks_lib::services::metadata;
+use tuxbooks_lib::sync::capture;
+use tuxbooks_lib::sync::clock::device_id;
 use tuxbooks_lib::sync::engine::{SyncService, SyncState};
 use tuxbooks_lib::sync::identity::record_issue;
 use tuxbooks_lib::sync::merge::retry_book_lifecycle;
+use tuxbooks_lib::sync::model::EntityKind;
+use tuxbooks_lib::sync::store;
 use tuxbooks_lib::{AppState, ImportRegistry};
 
 fn minimal_epub() -> PathBuf {
@@ -778,21 +782,22 @@ async fn bulk_forget_survives_writer_contention() {
 
 /// Entity uids of the book-delete ops in the sync folder: one fsync'd file
 /// per forgotten book, written by the engine's capture drain under
-/// `ops/{device_id}/`.
+/// `ops/{device_id}/`. Counted through the engine's own op rule — `scan_ops`
+/// for the flat-read name filter, `read_op` for validation — so the count is
+/// what a remote device would pull, never what a raw `read_dir` happens to
+/// list (tuxbooks-a3y).
 fn book_tombstones(folder: &Path, device_id: &str) -> Vec<String> {
-    let ops_dir = folder.join("TuxBooks").join("ops").join(device_id);
-    std::fs::read_dir(&ops_dir)
-        .unwrap_or_else(|err| panic!("ops dir {} is missing: {err}", ops_dir.display()))
-        .filter_map(|entry| {
-            let raw = std::fs::read_to_string(entry.unwrap().path()).unwrap();
-            let op: Value = serde_json::from_str(&raw).unwrap();
-            (op["kind"] == json!("book") && op["deleted"] == json!(true)).then(|| {
-                op["entity_uid"]
-                    .as_str()
-                    .expect("a tombstone names its book")
-                    .to_string()
-            })
+    let prefix = format!("ops/{device_id}/");
+    let root = store::resolve_root(folder).expect("sync folder resolves");
+    let mut files = store::scan_ops(&root).expect("ops folder scans");
+    files.retain(|file| file.relative_path.starts_with(&prefix));
+    files
+        .into_iter()
+        .map(|file| {
+            store::read_op(&file.path)
+                .unwrap_or_else(|err| panic!("op {} is readable: {err}", file.relative_path))
         })
+        .filter_map(|op| (op.kind == EntityKind::Book && op.deleted).then_some(op.entity_uid))
         .collect()
 }
 
@@ -906,7 +911,7 @@ async fn bulk_forget_survives_a_live_sync_drain() {
     assert_eq!(
         tombstones.len(),
         BOOKS as usize,
-        "one tombstone op per forgotten book in the folder"
+        "one tombstone op per forgotten book in the folder; got {tombstones:?}"
     );
     assert_eq!(
         tombstones.iter().collect::<HashSet<_>>().len(),
@@ -925,6 +930,114 @@ async fn bulk_forget_survives_a_live_sync_drain() {
     }
 }
 
+/// A capture whose ledger write loses a transient contention race must not
+/// leave its op file behind. The folder may only hold ops the ledger owns:
+/// an orphan file makes the row's recapture mint a second op file for the
+/// same write, which is the flaky 101-vs-100 tombstone count CI saw under
+/// load (tuxbooks-a3y). The drain is driven directly because the engine loop
+/// can only reach this interleave by racing its own 2 s poll against the
+/// lock; here the lock is held before the one dirty row exists.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lost_ledger_write_leaves_no_orphan_tombstone() {
+    let env = setup().await;
+    env.write_book("book.epub", &minimal_epub());
+    env.scan().await;
+    let book = imported_book(&env).await;
+    // Drop the library entry's file rows so the forget produces no
+    // replacement identity: the dirty set is then the tombstone row alone,
+    // and the lock lands on its own capture.
+    sqlx::query("DELETE FROM books WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)")
+        .bind(book.id)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let result = env
+        .rpc("forget_books", json!({ "bookIds": [book.id] }))
+        .await;
+    assert_eq!(result["forgotten"].as_i64(), Some(1));
+    let forgotten_uid: String = sqlx::query_scalar("SELECT book_uid FROM book_trash LIMIT 1")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+
+    let sync_dir = tempfile::tempdir().unwrap();
+    let sync_root = store::resolve_root(sync_dir.path()).unwrap();
+    let covers = tempfile::tempdir().unwrap();
+
+    // Mint the device identity before the lock: the first capture under the
+    // lock must fail on its ledger write, not on minting the device id.
+    device_id(&env.pool).await.unwrap();
+
+    // Hold the write lock past the pool's 5 s busy timeout, so the drain
+    // publishes the op file and then fails on its ledger insert. The
+    // readiness gate pins the lock before the drain starts.
+    let (lock_ready, lock_held) = tokio::sync::oneshot::channel();
+    let holder = tokio::spawn(hold_write_lock(env.db_path.clone(), 6, lock_ready));
+    lock_held.await.unwrap();
+
+    let first = capture::drain(&env.pool, &sync_root, covers.path(), 10).await;
+    assert!(
+        first.is_err(),
+        "the locked ledger write must fail the drain"
+    );
+    holder.await.unwrap();
+
+    // The row survives the failed attempt; the next pass recaptures it and
+    // the folder must end with exactly one tombstone, no orphan.
+    capture::drain(&env.pool, &sync_root, covers.path(), 10)
+        .await
+        .unwrap();
+    let ops_device_id: String = sqlx::query_scalar("SELECT device_id FROM sync_ops LIMIT 1")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    let tombstones = book_tombstones(sync_dir.path(), &ops_device_id);
+    assert_eq!(
+        tombstones,
+        vec![forgotten_uid],
+        "exactly one tombstone per forgotten book, whatever the retries did"
+    );
+
+    // And the folder holds no unowned files: every published op is in the
+    // ledger, on this device's recapture or not.
+    let ledgered: HashSet<String> =
+        sqlx::query_as::<_, (String,)>("SELECT file_name FROM sync_ops")
+            .fetch_all(&env.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(name,)| name)
+            .collect();
+    let unowned: Vec<String> = store::scan_ops(&sync_root)
+        .unwrap()
+        .into_iter()
+        .map(|file| file.relative_path)
+        .filter(|path| !ledgered.contains(path))
+        .collect();
+    assert!(
+        unowned.is_empty(),
+        "every op file is ledgered; unowned: {unowned:?}"
+    );
+}
+
+/// Hold the library database's write lock for `secs` — past the pool's 5 s
+/// busy timeout, so writes issued while it is held fail busy — and report
+/// readiness once `BEGIN IMMEDIATE` has landed (tuxbooks-ewu's contention
+/// shape).
+async fn hold_write_lock(db_path: PathBuf, secs: u64, ready: tokio::sync::oneshot::Sender<()>) {
+    let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
+        .await
+        .unwrap();
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let _ = ready.send(());
+    tokio::time::sleep(Duration::from_secs(secs)).await;
+    sqlx::query("COMMIT").execute(&mut conn).await.unwrap();
+    let _ = conn.close().await;
+}
+
 /// Single-book Forget keeps its pre-nj2 scope: it aborts on transient
 /// contention instead of retrying like the bulk run. Only Reading
 /// history's bulk action rides through a busy database; the per-book
@@ -941,19 +1054,8 @@ async fn single_forget_aborts_on_transient_contention() {
 
     // Hold the write lock for 6 s, past the pool's 5 s busy timeout, so
     // the forget's write fails busy.
-    let db_path = env.db_path.clone();
-    let holder = tokio::spawn(async move {
-        let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
-            .await
-            .unwrap();
-        sqlx::query("BEGIN IMMEDIATE")
-            .execute(&mut conn)
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_secs(6)).await;
-        sqlx::query("COMMIT").execute(&mut conn).await.unwrap();
-        let _ = conn.close().await;
-    });
+    let (ready, _) = tokio::sync::oneshot::channel();
+    let holder = tokio::spawn(hold_write_lock(env.db_path.clone(), 6, ready));
 
     let started = std::time::Instant::now();
     let response = env
