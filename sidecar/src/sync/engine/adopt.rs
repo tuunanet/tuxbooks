@@ -71,7 +71,9 @@ impl super::SyncService {
         for copy in file_version::unsettled_copies(&self.inner.pool).await? {
             if let Err(err) = self.adopt_copy(&root, &copy).await {
                 // One book's failure must not stall the rest of the sweep.
-                eprintln!("sync adoption: book {} adopt failed: {err}", copy.book_uid);
+                // Name the book by its local id: the uid must not reach
+                // stderr (CodeQL rust/cleartext-logging).
+                eprintln!("sync adoption: book {} adopt failed: {err}", copy.book_id);
             }
         }
         Ok(())
