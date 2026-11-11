@@ -2,6 +2,10 @@
 
 1. Fork the repository and create a branch off `main`.
 2. Make your change. Keep each pull request to one task.
+   Optionally enable the repo's git hooks with `just setup-hooks` (format
+   staged files and typecheck on commit, line-count limits on push, plus
+   beads' own hooks). Fresh clones do not enable them automatically.
+
 3. Run the full gate before opening the PR:
 
    ```sh

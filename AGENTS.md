@@ -6,7 +6,8 @@ TypeScript frontend, a Rust sidecar, and Readium/PDFium reader layers.
 ## Preparing for a task
 
 Work happens in a fresh git worktree branched from `origin/main` under `.worktrees/`;
-After creating a worktree, run `vp install` at its root before running tests.
+After creating a worktree, run `vp install` at its root before running tests,
+and `just setup-hooks` once per clone to enable the git hooks.
 
 Work is tracked in bd (Beads), see `docs/agents/issue-tracker.md` for the workflow.
 Triage uses the five canonical roles as bd labels (`docs/agents/triage-labels.md`).
