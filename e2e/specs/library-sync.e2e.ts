@@ -21,6 +21,7 @@ import {
   seededLibraryBookCount,
 } from "../setup/fixtures.js";
 import { libraryDir, scratchDir } from "../setup/environment.js";
+import { ensureLibrary } from "./helpers.js";
 
 /**
  * Distinct EPUBs for files this spec creates. Copying the seeded
@@ -64,7 +65,9 @@ async function missingOverlays(page: Page): Promise<number> {
 test.describe("tuxbooks filesystem synchronization", () => {
   test.beforeEach(async ({ page }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId("library-view")).toBeVisible({ timeout: 30000 });
+    // File order matters: a previous spec may leave the app on a detail or
+    // reader view.
+    await ensureLibrary(page);
   });
 
   test("imports a book dropped into the watched library while the app runs", async ({ page }) => {
