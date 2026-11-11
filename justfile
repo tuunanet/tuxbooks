@@ -197,6 +197,12 @@ package TARGETS="deb rpm AppImage": build
 check-deb:
     bash scripts/check-deb.sh
 
+# AppImage packaging gate (docs/RELEASE.md "AppImage specifics"): pins the
+# static type2-runtime, verifies the payload, and self-mounts the image when
+# the host can mount.
+check-appimage:
+    bash scripts/check-appimage.sh
+
 # Draft the next release's GitHub notes into docs/release-notes/vX.Y.Z.md
 # (docs/RELEASE.md "Cutting a release"): groups the user-facing commits
 # since the last tag into New / Changed / Fixed, plus the install and
