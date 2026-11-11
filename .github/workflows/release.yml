@@ -4,18 +4,22 @@ name: Release
 # in all manifests on main, drafting the release notes for that version
 # (scripts/release-notes.sh) and committing them with the bump, letting CI
 # go green, then tagging that commit (e.g. `git tag -a v0.1.1 && git
-# push origin v0.1.1`). The workflow refuses to publish unless the tag
-# exactly matches the version bundled below and the committed notes file
-# exists, so a stale or reused version — or a forgotten New/Changed/Fixed
-# note — can never produce a release. See docs/RELEASE.md and the
-# versioning policy under Milestone 11 in ROADMAP.md.
+# push origin v0.1.1`). The workflow refuses a tag outside main, waits for
+# approval of the `release` environment, and refuses to publish unless the
+# tag exactly matches the version bundled below and the committed notes
+# file exists. A stale or reused version, or a forgotten New/Changed/Fixed
+# note, can never produce a release. See docs/RELEASE.md and the versioning
+# policy under Milestone 11 in ROADMAP.md.
 
 on:
   push:
     tags: ["v*"]
 
+# The release job publishes with a write token; everything before it only
+# reads. Publishing also waits on the `release` environment, which requires
+# a reviewer and only accepts `v*` tags.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -30,6 +34,21 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      # A tag can point at any commit. Refuse one outside main so a release
+      # can only be cut from the CI-gated line (docs/RELEASE.md "Cutting a
+      # release").
+      - name: Check tag commit is on main
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at $commit, which is not on main"
+            exit 1
+          fi
 
       # xvfb is the only OS-level dependency the headless E2E suite needs
       # (docs/TESTING.md): Playwright launches the local Electron binary,
@@ -116,6 +135,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: [verify]
+    environment: release
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -124,7 +146,7 @@ jobs:
       # builder config that pin the versions. Restored before setup-vp so
       # vp install's electron postinstall reads the warm cache too.
       - name: Cache Electron downloads
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cache/electron

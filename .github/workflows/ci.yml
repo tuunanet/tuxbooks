@@ -20,12 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 # A merged PR fires both its pull_request run (head SHA) and a push run on
-# the merge commit. When the branch was current, the merge commit has the
-# exact tree the PR run already verified — re-running the whole pipeline on
-# it is pure duplicate compute. Merged-PR pushes are therefore skipped: any
-# job runs unless this is a push of a web-UI merge commit. Squash merges
-# and direct pushes never match and always run (release.yml re-verifies
-# tags with the full gate regardless).
+# the merge commit. Branch protection requires the branch to be up to date
+# before merging, admins included, so the merge commit has the exact tree
+# the PR run already verified. Re-running the whole pipeline on it is pure duplicate compute.
+# Merged-PR pushes are therefore skipped: any job runs unless this is a push
+# of a web-UI merge commit. Squash merges and direct pushes never match and
+# always run. If branch protection ever stops requiring an up-to-date
+# branch, remove the skip: a stale PR's merge commit would then go
+# unverified.
 env:
   CARGO_TERM_COLOR: always
 
@@ -285,7 +287,7 @@ jobs:
       # run. Cache the downloads; the key follows the lockfile and builder
       # config that pin the versions.
       - name: Cache Electron downloads
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cache/electron
