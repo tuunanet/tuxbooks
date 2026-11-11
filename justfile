@@ -4,6 +4,40 @@ root := justfile_directory()
 
 default: check
 
+# Opt in to this clone's versioned git hooks. Fresh clones leave
+# core.hooksPath unset, so .beads/hooks/ stays inert until a contributor runs
+# this. Local config is shared with linked worktrees, and the relative path
+# survives moving the clone; `bd hooks install --beads` enables the same hooks
+# with an absolute path but also rewrites the tracked shims.
+setup-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    for hook in pre-commit pre-push post-checkout post-merge prepare-commit-msg; do
+        if [ ! -x ".beads/hooks/$hook" ]; then
+            echo >&2 "setup-hooks: .beads/hooks/$hook is missing or not executable"
+            echo >&2 "setup-hooks: check out the branch that ships it, then re-run"
+            exit 1
+        fi
+    done
+    root=$(pwd -P)
+    current=$(git config --local --get core.hooksPath || true)
+    if [ -n "$current" ] && [ "$current" != ".beads/hooks" ]; then
+        current_abs=$(cd "$current" 2>/dev/null && pwd -P || true)
+        if [ "$current_abs" != "$root/.beads/hooks" ]; then
+            echo >&2 "setup-hooks: core.hooksPath already set to '$current'"
+            echo >&2 "setup-hooks: refusing to replace it; to use this repo's hooks:"
+            echo >&2 "  git config --local core.hooksPath .beads/hooks"
+            exit 1
+        fi
+    fi
+    git config --local core.hooksPath .beads/hooks
+    echo "setup-hooks: enabled .beads/hooks"
+    echo "  pre-commit: format staged files and typecheck"
+    echo "  pre-push:   block changed files over the limits in .beads/hooks/pre-push"
+    echo "  also runs beads' post-checkout, post-merge, and prepare-commit-msg hooks"
+    echo "disable with: git config --local --unset core.hooksPath"
+
 # Regenerate the committed EPUB fixture corpus (tests/fixtures/epub/):
 # deterministic source trees + artifacts + manifest. Byte-identical per run.
 make-epub-fixtures:
