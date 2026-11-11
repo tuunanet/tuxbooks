@@ -11,4 +11,18 @@ ignore = [
   # and no RSA operation is reachable. Revisit when sqlx drops sqlx-mysql
   # from its dependency tree or an rsa fix ships.
   "RUSTSEC-2023-0071",
+
+  # 2026-11-11: RUSTSEC-2026-0459, bundled SQLite before 3.54.0 can expose
+  # page-cache memory when a database is opened with a sibling `-wal` whose
+  # page size differs (medium, fixed in libsqlite3-sys >=0.39.0). No sqlx
+  # release admits 0.39 yet, so the fix rides a later sqlx upgrade. The
+  # catalog defaults to the per-user
+  # `$XDG_DATA_HOME/com.tuxbooks.app/tuxbooks.db`; `TEST_DATABASE_PATH`
+  # overrides it for tests and boot probes, and an unset XDG_DATA_HOME and
+  # HOME fall back to the process cwd. Imported books are parsed as
+  # EPUB/PDF and never opened as SQLite. Reaching the vulnerable path needs
+  # write access to the directory holding the catalog, which already
+  # exposes that catalog to the writer. Revisit 2026-12-11, or when sqlx
+  # admits libsqlite3-sys 0.39.
+  "RUSTSEC-2026-0459",
 ]
