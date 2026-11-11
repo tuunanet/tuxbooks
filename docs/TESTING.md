@@ -17,22 +17,22 @@ the single required check for `main` in branch protection.
 A first job, `Detect changes`, classifies the diff into two flags. `code` is
 false when every changed file is non-code (markdown anywhere, `docs/`, `site/`,
 `.beads/`, `.agents/`, `.opencode/`, `graft/`, `oracle/`, `vendor/`,
-or `.gitignore`); the heavy jobs (`Frontend`, `Coverage`, `Rust`, `Release
-build`) then skip. `packaging` is true only when the diff touches a path that
-can reach the deb payload (`electron/`, `sidecar/`, the builder config, the
-packaging scripts). `CI gate` treats a skipped job as a pass, so a docs or
-site change merges on the cheap jobs alone, in about fifteen seconds — a
-workflow-level `paths-ignore` cannot express this (skipping the workflow
-leaves the required check pending and blocks the merge).
+or `.gitignore`); the heavy jobs (`Frontend`, `Frontend tests`, `Rust`,
+`Release build`) then skip. `packaging` is true only when the diff touches a
+path that can reach the deb payload (`electron/`, `sidecar/`, the builder
+config, the packaging scripts). `CI gate` treats a skipped job as a pass, so
+a docs or site change merges on the cheap jobs alone, in about fifteen
+seconds — a workflow-level `paths-ignore` cannot express this (skipping the
+workflow leaves the required check pending and blocks the merge).
 
 The `Release build` job needs only `Detect changes`, so it starts in parallel
 with the lint and test jobs. It always builds the renderer, the Electron
 bundles, and the sidecar; the deb packaging and its gate run only when
 `packaging` is true, and a non-packaging change compiles the sidecar on the
-host instead of in the pinned-glibc container. The `Coverage` job owns the
-frontend test run (the `Frontend` job runs lint, typecheck, and format), so
-the vitest suite runs once per push. Electron and electron-builder downloads
-and the sidecar container's BuildKit layers are cached across runs.
+host instead of in the pinned-glibc container. The `Frontend tests` job owns
+the frontend test run (the `Frontend` job runs format, lint, and typecheck),
+so the vitest suite runs once per push. Electron and electron-builder
+downloads and the sidecar container's BuildKit layers are cached across runs.
 
 `codeql.yml` is advisory and keeps `paths-ignore` over the same non-code set.
 `audit.yml` runs only when dependency manifests change, plus its weekly sweep.

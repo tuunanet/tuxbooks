@@ -68,7 +68,7 @@ jobs:
       # the cache first makes that download local on every run after the
       # first; the key follows the lockfile and builder config that pin the
       # version.
-      - name: Electron cache
+      - name: Cache Electron downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
@@ -83,7 +83,8 @@ jobs:
       # under CI); cache: true caches the package-manager store. just
       # recipes call bare vp and pnpm --filter internally, which works with
       # the managed pnpm.
-      - uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
+      - name: Install vp toolchain
+        uses: voidzero-dev/setup-vp@6a033122543ee100d01838245fe74a26a038da6d # v1.21.2
         with:
           node-version: 24
           cache: true
@@ -97,11 +98,12 @@ jobs:
           bash scripts/install-just.sh
           echo "$GITHUB_WORKSPACE/.build/bin" >> "$GITHUB_PATH"
 
-      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
 
-      - name: Rust cache
+      - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: sidecar
@@ -126,13 +128,13 @@ jobs:
       # the key follows fetch-pdfium.sh, which pins the build, and a stale
       # entry from a different build would be silently accepted by the
       # script's already-present check.
-      - name: PDFium cache
+      - name: Cache PDFium library
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: sidecar/pdfium
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-pdfium.sh') }}
 
-      - name: E2E (headless)
+      - name: Run headless E2E suite
         run: |
           bash scripts/fetch-pdfium.sh
           just test-e2e
