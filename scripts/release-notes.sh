@@ -135,12 +135,16 @@ EOF
 sudo apt install ./tuxbooks_${NEW}_amd64.deb
 \`\`\`
 
-Or run the portable AppImage:
+Or run the portable AppImage (no \`libfuse2\` install needed; the embedded
+runtime is statically linked):
 
 \`\`\`sh
 chmod +x tuxbooks-${NEW}.AppImage
 ./tuxbooks-${NEW}.AppImage
 \`\`\`
+
+On a system with no FUSE at all, run it with
+\`APPIMAGE_EXTRACT_AND_RUN=1\`.
 
 \`SHA256SUMS.txt\` verifies the downloads. The SBOM is published next to
 the installers.

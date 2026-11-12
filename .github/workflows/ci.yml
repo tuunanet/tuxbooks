@@ -74,13 +74,13 @@ jobs:
             exit 0
           fi
           # Packaging-relevant paths: anything that lands in, or configures,
-          # the deb payload the packaging gate inspects (Electron shell,
-          # sidecar, builder config). A frontend-only change cannot alter what
-          # check-deb.sh verifies, so the build job then skips the deb build
-          # and compiles the sidecar on the host instead of in the pinned
-          # container.
+          # the payload the packaging gates inspect (Electron shell, sidecar,
+          # builder config). A frontend-only change cannot alter what
+          # check-deb.sh or check-appimage.sh verifies, so the build job then
+          # skips the packaged builds and compiles the sidecar on the host
+          # instead of in the pinned container.
           if printf '%s\n' "$changed" \
-            | grep -qE '^(electron/|sidecar/|build/|scripts/(check-deb\.sh|build-sidecar-release\.sh|sidecar-build\.Dockerfile|build-electron\.mjs|fetch-pdfium\.sh)|electron-builder\.yml|package\.json|pnpm-lock\.yaml|justfile|\.github/workflows/release\.yml)'; then
+            | grep -qE '^(electron/|sidecar/|build/|scripts/(check-deb\.sh|check-appimage\.sh|build-sidecar-release\.sh|sidecar-build\.Dockerfile|build-electron\.mjs|fetch-pdfium\.sh)|electron-builder\.yml|package\.json|pnpm-lock\.yaml|justfile|\.github/workflows/release\.yml)'; then
             echo "packaging=true" >> "$GITHUB_OUTPUT"
           else
             echo "packaging=false" >> "$GITHUB_OUTPUT"
@@ -340,17 +340,17 @@ jobs:
           TUXBOOKS_SIDECAR_HOST_BUILD: ${{ needs.changes.outputs.packaging == 'true' && '0' || '1' }}
         run: just build
 
-      # Packaging gate (docs/RELEASE.md): a packaging regression fails the
-      # build like any other test. CI verifies the deb target, self-contained,
-      # with no rpmbuild needed (only the rpm target wants it, see justfile
-      # `package`); the rpm and AppImage are wired into the release workflow's
-      # full `just package` run. Skipped when the change cannot reach the deb
-      # payload.
-      - name: Package deb and verify payload
+      # Packaging gates (docs/RELEASE.md): a packaging regression fails the
+      # build like any other test. CI verifies the deb and AppImage targets,
+      # self-contained, with no rpmbuild needed (only the rpm target wants it,
+      # see justfile `package`); the rpm stays a local artifact. Skipped when
+      # the change cannot reach the packaged payload.
+      - name: Package deb and AppImage, verify payloads
         if: needs.changes.outputs.packaging == 'true'
         run: |
-          just package deb
+          just package "deb AppImage"
           just check-deb
+          just check-appimage
 
   # The single required branch-protection check. It runs on every PR and main
   # push (`if: always()`), and it fails if any job above failed or was

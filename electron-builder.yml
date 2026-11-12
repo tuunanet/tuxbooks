@@ -15,6 +15,15 @@ copyright: GPL-3.0-or-later
 appImage:
   artifactName: tuxbooks-${version}.${ext}
 
+# The AppImage runtime binary (docs/RELEASE.md "AppImage specifics"). 0.0.0,
+# the default, dlopen()s libfuse.so.2, which Ubuntu 22.04+ no longer installs
+# (24.04 renamed the package to libfuse2t64); 1.0.3 embeds AppImage's static
+# type2-runtime, so the host needs only the fusermount3 helper. 1.0.3 rather
+# than 1.0.2 also carries the electron-builder#9598 fix.
+# scripts/check-appimage.sh asserts the shipped runtime stays static.
+toolsets:
+  appimage: "1.0.3"
+
 directories:
   output: dist-packages
   buildResources: build

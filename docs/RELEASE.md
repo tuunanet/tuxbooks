@@ -10,13 +10,13 @@ are unchanged from the earlier releases.
 
 ## Artifacts
 
-| Artifact                           | Built by               | Purpose                                                               |
-| ---------------------------------- | ---------------------- | --------------------------------------------------------------------- |
-| `tuxbooks_<version>_amd64.deb`     | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`      |
-| `tuxbooks-<version>.AppImage`      | release workflow (tag) | Portable single-file build for other Linux setups, no installation    |
-| `SBOM-tuxbooks-<version>.cdx.json` | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md |
-| `SHA256SUMS.txt`                   | release workflow (tag) | Checksums for both artifacts and the SBOM                             |
-| deb + rpm + AppImage               | `just package` (local) | Local packaging verification; rpm is not published                    |
+| Artifact                           | Built by               | Purpose                                                                              |
+| ---------------------------------- | ---------------------- | ------------------------------------------------------------------------------------ |
+| `tuxbooks_<version>_amd64.deb`     | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`                     |
+| `tuxbooks-<version>.AppImage`      | release workflow (tag) | Portable single-file build for other Linux setups, no installation, no host libfuse2 |
+| `SBOM-tuxbooks-<version>.cdx.json` | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md                |
+| `SHA256SUMS.txt`                   | release workflow (tag) | Checksums for both artifacts and the SBOM                                            |
+| deb + rpm + AppImage               | `just package` (local) | Local packaging verification; rpm is not published                                   |
 
 Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
 hicolor icons, the Electron runtime, and the bundled sidecar binary plus
@@ -54,7 +54,7 @@ packaging gate asserts.
 
 ## Packaging and the hardening checks
 
-The packaged app is covered by two checks beyond the packaging gate
+The packaged app is covered by two checks beyond the packaging gates
 (issue #85, X-1..X-5):
 
 - The boot probe doubles as the packaged hardening smoke: run the
@@ -69,15 +69,20 @@ The packaged app is covered by two checks beyond the packaging gate
 
 ## The packaging gate
 
-`scripts/check-deb.sh` is the packaging gate: it verifies the built deb's
-control metadata (package name, exact version match, description, and no
-webkit dependency), the extracted payload (Electron binary + executable
-sidecar + PDFium resource + the runtime window icon), the glibc ABI floor
-for the sidecar and worker (<= 2.35; docs/BUILD.md "Release sidecar ABI
-floor"), the desktop entry (structure, `Name=TuxBooks`, `Icon=tuxbooks`,
-plus `desktop-file-validate` when installed), and hicolor icons. CI builds
-the deb target and runs the gate on every push; the release workflow builds
-the published deb + AppImage and runs the same gate before publishing.
+`scripts/check-deb.sh` verifies the built deb's control metadata (package
+name, exact version match, description, and no webkit dependency), the
+extracted payload (Electron binary + executable sidecar + PDFium resource +
+the runtime window icon), the glibc ABI floor for the sidecar and worker
+(<= 2.35; docs/BUILD.md "Release sidecar ABI floor"), the desktop entry
+(structure, `Name=TuxBooks`, `Icon=tuxbooks`, plus `desktop-file-validate`
+when installed), and hicolor icons.
+
+`scripts/check-appimage.sh` verifies the AppImage's embedded runtime and
+payload (see "AppImage specifics" below).
+
+CI builds the deb and AppImage targets and runs both gates on every
+packaging-relevant push; the release workflow builds the published artifacts
+and runs the same gates before publishing.
 
 ## Cutting a release
 
@@ -124,8 +129,29 @@ untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
 ## AppImage specifics
 
 Electron AppImages bundle the whole runtime (Electron + Chromium + Node).
-electron-builder creates them without FUSE; users need FUSE or an
-extract-run environment only to _execute_ the AppImage.
+The file also starts with the AppImage runtime, the binary that mounts the
+image before our code runs. `electron-builder.yml` selects AppImage's
+**static type2-runtime** (`toolsets.appimage: "1.0.3"`), which links FUSE
+into the runtime itself, so users do **not** need `libfuse2`/`libfuse2t64`:
+the legacy default `dlopen()`s `libfuse.so.2`, which Ubuntu 22.04+ no
+longer installs by default.
+
+Mounting still uses the `fusermount3` helper from the `fuse3` package, which
+stock Ubuntu, Fedora and Debian desktops ship. On a minimal system or in a
+container without it, run the image with `APPIMAGE_EXTRACT_AND_RUN=1` (or
+`--appimage-extract-and-run`) to extract and start it without mounting.
+
+Supported platforms: Ubuntu 22.04 and Debian 12 or newer. The static runtime
+is not the limit on older releases, but the bundled sidecar and document
+worker are built against the glibc 2.35 floor (docs/BUILD.md "Release sidecar
+ABI floor"), so on Ubuntu 20.04 or Debian 11 they fail at start with
+`GLIBC_2.35 not found`. The deb carries the same floor.
+
+`scripts/check-appimage.sh` (`just check-appimage`) guards this: it asserts
+the embedded runtime reports the type2-runtime, contains no `libfuse.so.2`
+reference, and is statically linked, then checks the payload and self-mounts
+the image when the host has a mount helper. CI and the release workflow run
+it after `just package`.
 
 ## Deliberate deferrals
 

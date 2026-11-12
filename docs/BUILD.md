@@ -28,7 +28,10 @@ any frontend precondition.
   over the `just build` artifacts; default targets deb + rpm + AppImage,
   output in `dist-packages/`. The rpm needs the `rpm` package (rpmbuild)
   installed; the deb and AppImage targets are self-contained.
-- `just check-deb` — the packaging gate (below).
+- `just check-deb` — the deb packaging gate (below).
+- `just check-appimage` — the AppImage packaging gate: static runtime,
+  payload, and a self-mount probe when the host can mount (docs/RELEASE.md
+  "AppImage specifics").
 - `just audit` — the dependency audits (issue #89): the npm audit gate plus
   RustSec `cargo audit` over the sidecar and fuzz lockfiles. Networked.
   The same gates run in CI (.github/workflows/audit.yml, with a weekly
@@ -100,14 +103,17 @@ the root `package.json` is the released version. Layout in every bundle:
   `build/icons/` (regenerate from `scripts/icon-source.png`, see
   brand/README.md).
 
-`scripts/check-deb.sh` is the packaging regression gate: it verifies the
+`scripts/check-deb.sh` is the deb packaging regression gate: it verifies the
 built deb's control metadata (package name, exact version match,
 non-empty description, **no webkit dependency**), the extracted payload
 (Electron binary + executable sidecar + PDFium resource), the desktop
 entry (structure plus `desktop-file-validate` when installed), and
-hicolor icons. `just check-deb` after `just package`; CI's build job runs
-the deb target + gate on every push, and the release workflow gates the
-published artifacts (docs/RELEASE.md).
+hicolor icons. `scripts/check-appimage.sh` covers the AppImage: static
+type2-runtime (no host `libfuse2`), payload, and a self-mount probe
+(docs/RELEASE.md "AppImage specifics"). Run `just check-deb` and
+`just check-appimage` after `just package`; CI's build job runs both
+targets and gates on every packaging-relevant push, and the release
+workflow gates the published artifacts.
 
 ## E2E runtime
 

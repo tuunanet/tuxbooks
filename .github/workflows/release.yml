@@ -202,8 +202,9 @@ jobs:
 
       # The rpm needs rpmbuild; the deb and AppImage targets are
       # self-contained. AppImage bundling runs FUSE-free via
-      # APPIMAGE_EXTRACT_AND_RUN — users need FUSE (or an extract-run
-      # environment) only to execute the AppImage.
+      # APPIMAGE_EXTRACT_AND_RUN. The published image embeds AppImage's
+      # static type2-runtime, so running it needs no host libfuse2, only a
+      # fusermount3 helper (or the extract-and-run fallback).
       - name: Install rpm tooling
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
 
@@ -226,8 +227,10 @@ jobs:
       - name: Generate SBOM
         run: just sbom
 
-      - name: Verify packaging payload
-        run: just check-deb
+      - name: Verify packaging payloads
+        run: |
+          just check-deb
+          just check-appimage
 
       - name: Write SHA256SUMS.txt
         run: |
