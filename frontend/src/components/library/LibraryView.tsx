@@ -8,6 +8,7 @@ import { useLibrary } from "@/hooks/useLibrary";
 import { revealBook } from "@/lib/bridge";
 import { resolveCollectionGroups } from "@/lib/collectionPreferences";
 import {
+  sortForPlace,
   useAppDispatch,
   useAppState,
   type BookSortId,
@@ -76,11 +77,11 @@ export function LibraryView({ section }: LibraryViewProps) {
 
   // View mode is a presentation preference. The search query is app state
   // scoped to the section and cleared when the section changes; the format
-  // filter and sort survive because they compose with every section.
+  // filter composes with every section, and sort is remembered per place.
   const [view, setView] = useState<BookViewMode>("grid");
   const query = app.libraryQuery;
   const formatFilter = app.formatFilter;
-  const sort = app.sort;
+  const sort = sortForPlace(section, app.sortByPlace);
 
   const openDetail = useCallback(
     (bookId: number) => dispatch({ type: "open-book-detail", bookId }),

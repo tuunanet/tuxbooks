@@ -14,8 +14,14 @@ export type SmartSectionId =
   | "in-progress"
   | "finished";
 
-/** Library sort orders. Section order defers to the active place's natural order. */
-export type BookSortId = "section-order" | "date-added" | "last-read" | "title" | "author";
+/**
+ * Library sort orders. Every option names a concrete field; a place's default
+ * is preselected rather than offered as a separate meta-choice.
+ */
+export type BookSortId = "date-added" | "last-read" | "progress-updated" | "title" | "author";
+
+/** Explicit sort choices, keyed by the place they were made in. */
+export type SortPreferences = Partial<Record<string, BookSortId>>;
 
 /**
  * What the sidebar has selected. Smart sections are built-in views; a
@@ -26,6 +32,41 @@ export type LibrarySection =
   | { kind: "smart"; id: SmartSectionId }
   | { kind: "collection"; ids: number[] }
   | { kind: "reading-history" };
+
+/** A stable key for remembering a place's sort across navigation. */
+export function sortPlaceKey(section: LibrarySection): string {
+  switch (section.kind) {
+    case "smart":
+      return `smart:${section.id}`;
+    case "collection":
+      // Each selected set is its own place; sorting the ids makes a reordered
+      // selection match the place it already is.
+      return `collection:${[...section.ids].sort((a, b) => a - b).join(",")}`;
+    case "reading-history":
+      return "reading-history";
+  }
+}
+
+/** The concrete order a place shows when the user has not chosen one. */
+export function defaultSortFor(section: LibrarySection): BookSortId {
+  if (section.kind === "collection") return "date-added";
+  if (section.kind === "reading-history") return "last-read";
+  switch (section.id) {
+    case "all-books":
+    case "recently-added":
+      return "date-added";
+    case "recently-read":
+      return "last-read";
+    case "in-progress":
+    case "finished":
+      return "progress-updated";
+  }
+}
+
+/** The sort the header shows and the view applies for this place. */
+export function sortForPlace(section: LibrarySection, sortByPlace: SortPreferences): BookSortId {
+  return sortByPlace[sortPlaceKey(section)] ?? defaultSortFor(section);
+}
 
 /** How a sidebar collection click changes the collection place. */
 export type CollectionSelectMode = "replace" | "toggle" | "range";
@@ -82,10 +123,11 @@ export interface AppState {
    */
   formatFilter: BookFormat[];
   /**
-   * Library sort order. It composes with every section and collection, so it
-   * survives place changes instead of being reset with the section.
+   * Sort choices remembered per place, keyed by `sortPlaceKey`. A place with
+   * no entry uses its default, so the header always shows the order the view
+   * is actually in.
    */
-  sort: BookSortId;
+  sortByPlace: SortPreferences;
   /**
    * Whether the Settings window is open. Settings floats above whatever is
    * underneath, so it stays reachable from the library, a book detail, and
@@ -134,7 +176,7 @@ export const initialAppState: AppState = {
   readerTargetAnnotationId: null,
   libraryQuery: "",
   formatFilter: [],
-  sort: "section-order",
+  sortByPlace: {},
   settingsOpen: false,
 };
 
@@ -218,8 +260,8 @@ function collectionPlace(ids: number[]): LibrarySection {
 
 /**
  * Entering a place returns to the library and clears the section-scoped
- * search and book selection; the format filter and sort stay because they
- * compose with every place.
+ * search and book selection. The format filter stays because it composes with
+ * every place; sort is remembered per place.
  */
 function enterPlace(
   state: AppState,
@@ -363,8 +405,13 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         current.length === next.length && current.every((format, index) => format === next[index]);
       return unchanged ? state : { ...state, formatFilter: next };
     }
-    case "set-library-sort":
-      return state.sort === action.sort ? state : { ...state, sort: action.sort };
+    case "set-library-sort": {
+      const key = sortPlaceKey(state.section);
+      // Record the explicit choice even when it matches the place default, so
+      // it survives a later change to what that default is.
+      if (state.sortByPlace[key] === action.sort) return state;
+      return { ...state, sortByPlace: { ...state.sortByPlace, [key]: action.sort } };
+    }
   }
 }
 

@@ -19,7 +19,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FORMAT_FILTER_OPTIONS, formatFilterLabel, toggleFormatFilter } from "@/lib/formats";
 import { pickBookFiles, pickDirectory } from "@/lib/bridge";
-import type { BookSortId, LibrarySection } from "@/state/appState";
+import { defaultSortFor, type BookSortId, type LibrarySection } from "@/state/appState";
 import { useImport } from "@/state/importState";
 import type { BookFormat } from "@/types/domain";
 import { BOOK_SORT_OPTIONS, bookSortLabel, type BookViewMode } from "./sections";
@@ -52,6 +52,7 @@ export function LibraryHeader({
   onViewChange,
 }: LibraryHeaderProps) {
   const { importPaths } = useImport();
+  const defaultSort = defaultSortFor(section);
 
   const importFolder = async () => {
     const dir = await pickDirectory();
@@ -145,6 +146,12 @@ export function LibraryHeader({
             {BOOK_SORT_OPTIONS.map((option) => (
               <SelectItem key={option.id} value={option.id}>
                 {bookSortLabel(option.id, section)}
+                {option.id === defaultSort && option.id !== sort ? (
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    {" "}
+                    (default)
+                  </span>
+                ) : null}
               </SelectItem>
             ))}
           </SelectContent>
