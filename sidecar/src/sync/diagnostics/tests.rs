@@ -90,9 +90,9 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     .execute(&pool)
     .await
     .unwrap();
-    // Five open diagnostic rows are counted from the table itself: the live
-    // status payload no longer carries a conflicts count. A resolved row and
-    // a progress row stay out of the count.
+    // Six open diagnostic rows are counted from the table itself: the live
+    // status payload no longer carries a conflicts count. A resolved row
+    // stays out of the count; a progress row counts like any other.
     sqlx::query(
         "INSERT INTO sync_conflicts
             (kind, entity_uid, field, winner_json, loser_json,
@@ -176,19 +176,20 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     assert_eq!(report.sync.counts.waiting_books, 2);
     assert_eq!(report.sync.counts.issues, 3);
     assert_eq!(report.sync.counts.trash, 1);
-    assert_eq!(report.sync.counts.conflicts, 5);
+    assert_eq!(report.sync.counts.conflicts, 6);
     assert_eq!(report.hash_failed.len(), 1);
     assert_eq!(report.hash_failed[0].book_id, book_id);
     assert_eq!(report.hash_failed[0].title, "Example");
     assert_eq!(report.hash_failed[0].path, "/books/example.epub");
     assert_eq!(report.hash_failed[0].attempts, 2);
-    assert_eq!(report.open_conflicts.len(), 5);
-    assert_eq!(report.open_conflicts[0].kind, "annotation");
-    assert_eq!(report.open_conflicts[0].field, "note");
-    assert_eq!(
-        report.open_conflicts[0].book_title.as_deref(),
-        Some("Example")
-    );
+    assert_eq!(report.open_conflicts.len(), 6);
+    let note_conflict = report
+        .open_conflicts
+        .iter()
+        .find(|conflict| conflict.field == "note")
+        .expect("the annotation rows are sampled");
+    assert_eq!(note_conflict.kind, "annotation");
+    assert_eq!(note_conflict.book_title.as_deref(), Some("Example"));
     assert_eq!(report.issues.len(), 1);
     assert_eq!(report.issues[0].kind, "cover_missing");
     assert_eq!(
@@ -214,6 +215,57 @@ async fn enabled_payload_reports_live_status_counts_lists_and_versions() {
     assert!(!json.contains("lost secret"));
     assert!(!json.contains("winnerJson"));
     assert!(!json.contains("loserJson"));
+}
+
+#[tokio::test]
+async fn progress_conflicts_are_counted_and_sampled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = pool_in(tmp.path()).await;
+    let folder = tmp.path().join("sync");
+    fs::create_dir_all(&folder).unwrap();
+    store::connect(&folder, "a".repeat(32).as_str(), "Laptop", "now").unwrap();
+    let status = enabled_status(&folder);
+
+    sqlx::query("INSERT INTO book_records (uid, title) VALUES (?1, 'Example')")
+        .bind("b".repeat(32))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_entities (kind, entity_uid, book_uid)
+         VALUES ('progress', 'e-progress', ?1)",
+    )
+    .bind("b".repeat(32))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let conflict_id: i64 = sqlx::query_scalar(
+        "INSERT INTO sync_conflicts
+            (kind, entity_uid, field, winner_json, loser_json,
+             winner_wall, winner_count, winner_dev,
+             loser_wall, loser_count, loser_dev, created_at)
+         VALUES ('progress', 'e-progress', 'progress_percent', '\"w\"', '\"l\"',
+                 2, 0, 'aaa', 1, 0, 'bbb', '2026-10-31T09:00:00.000Z')
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let report = collect(&pool, Some(&status)).await.unwrap();
+    assert_eq!(
+        report.sync.counts.conflicts, 1,
+        "SYNC_ISSUES.md counts every open conflict"
+    );
+    let conflict = report
+        .open_conflicts
+        .iter()
+        .find(|conflict| conflict.kind == "progress")
+        .expect("the sample lists progress rows like any other kind");
+    assert_eq!(conflict.id, conflict_id);
+    assert_eq!(conflict.field, "progress_percent");
+    assert_eq!(conflict.book_title.as_deref(), Some("Example"));
+    assert_eq!(conflict.created_at, "2026-10-31T09:00:00.000Z");
 }
 
 #[tokio::test]
