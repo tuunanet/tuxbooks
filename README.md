@@ -132,6 +132,26 @@ E2E needs the `xvfb` package (`sudo apt install xvfb` on Debian/Ubuntu).
 `just test-e2e` is safe to run from SSH, CI, or anywhere without a desktop
 session. See [docs/TESTING.md](docs/TESTING.md).
 
+## Packaging locally
+
+`just package` builds the Linux bundles into `dist-packages/`. The recipe
+runs `just build` first, so it is the only command you need after the
+[Getting started](#getting-started) setup:
+
+```sh
+just package                # deb + rpm + AppImage
+just package deb            # one target
+just package "deb AppImage" # several targets
+```
+
+The sidecar build needs docker or podman, because it compiles against the
+pinned glibc 2.35 floor in a container ([docs/BUILD.md](docs/BUILD.md));
+`TUXBOOKS_SIDECAR_HOST_BUILD=1` skips the container but the binary is then
+not portable. The rpm target also needs `rpmbuild`. `just check-deb` and
+`just check-appimage` verify the artifacts, and `just sbom` writes the
+CycloneDX inventory. The release publishes the deb and AppImage; the rpm is
+a local artifact.
+
 ## Layout
 
 ```
