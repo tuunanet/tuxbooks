@@ -182,13 +182,14 @@ build: fetch-pdfium
 
 # Package the distributable Linux bundles with electron-builder
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs
-# it first. Default targets: deb + rpm + AppImage (docs/RELEASE.md); a
-# target list argument narrows the run (e.g. `just package deb`). The rpm
-# needs the `rpm` package (rpmbuild) installed. `--publish never`: this
+# it first. Default targets: deb + rpm + pacman + AppImage (docs/RELEASE.md);
+# a target list argument narrows the run (e.g. `just package deb`). The rpm
+# needs the `rpm` package (rpmbuild); the pacman target needs bsdtar and zstd
+# (libarchive-tools and zstd on Debian/Ubuntu). `--publish never`: this
 # recipe only builds artifacts — electron-builder 26 otherwise publishes
 # implicitly on CI push builds (which needs GH_TOKEN); release.yml cuts the
 # release itself via `gh release create`.
-package TARGETS="deb rpm AppImage": build
+package TARGETS="deb rpm pacman AppImage": build
     pnpm exec electron-builder --linux {{TARGETS}} --publish never
 
 # Packaging regression gate (docs/RELEASE.md): verifies the deb built by
@@ -196,6 +197,12 @@ package TARGETS="deb rpm AppImage": build
 # desktop entry, and hicolor icons.
 check-deb:
     bash scripts/check-deb.sh
+
+# Arch packaging gate: verifies the pacman bundle built by `just package` —
+# .PKGINFO metadata and dependencies, payload (Electron + sidecar + PDFium),
+# desktop entry, and hicolor icons. Needs bsdtar (libarchive-tools).
+check-pacman:
+    bash scripts/check-pacman.sh
 
 # AppImage packaging gate (docs/RELEASE.md "AppImage specifics"): pins the
 # static type2-runtime, verifies the payload, and self-mounts the image when

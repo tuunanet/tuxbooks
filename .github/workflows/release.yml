@@ -131,7 +131,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    name: Release build (deb + AppImage)
+    name: Release build (deb, pacman, AppImage)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: [verify]
@@ -200,26 +200,30 @@ jobs:
           fi
           echo "Releasing $tagged"
 
-      # The rpm needs rpmbuild; the deb and AppImage targets are
-      # self-contained. AppImage bundling runs FUSE-free via
+      # The deb, pacman and AppImage targets are self-contained (the rpm,
+      # which needs rpmbuild, stays a local `just package` artifact).
+      # electron-builder builds pacman packages with fpm, which needs bsdtar
+      # (for .MTREE) and zstd (the tarball). Debian/Ubuntu ship bsdtar in
+      # libarchive-tools. AppImage bundling runs FUSE-free via
       # APPIMAGE_EXTRACT_AND_RUN. The published image embeds AppImage's
       # static type2-runtime, so running it needs no host libfuse2, only a
       # fusermount3 helper (or the extract-and-run fallback).
-      - name: Install rpm tooling
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
+      - name: Install pacman packaging tooling
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
-      # deb for Ubuntu/Debian (primary target), AppImage for other Linux
-      # setups. rpm stays a local `just package` artifact; the site's
-      # audience is Ubuntu. electron-builder wires the sidecar binary and
-      # the PDFium library into resources/sidecar (electron-builder.yml);
-      # the packaging gate re-verifies the payload before anything publishes.
-      - name: Build deb and AppImage bundles
+      # deb for Ubuntu/Debian (primary target), pacman for Arch/Manjaro,
+      # AppImage for other Linux setups. The rpm stays a local `just package`
+      # artifact; the site's audience is Ubuntu. electron-builder wires the
+      # sidecar binary and the PDFium library into resources/sidecar
+      # (electron-builder.yml); the packaging gates re-verify the payload
+      # before anything publishes.
+      - name: Build deb, pacman and AppImage bundles
         env:
           TUXBOOKS_SIDECAR_CACHE: gha
         run: |
           # Quoted: `package` takes one TARGETS argument; unquoted, just
           # would read the second token as another recipe to run.
-          just package "deb AppImage"
+          just package "deb pacman AppImage"
 
       # SBOM / dependency inventory (issue #89, S-4): CycloneDX over the
       # npm and Rust trees, uploaded with the release and covered by
@@ -230,12 +234,13 @@ jobs:
       - name: Verify packaging payloads
         run: |
           just check-deb
+          just check-pacman
           just check-appimage
 
       - name: Write SHA256SUMS.txt
         run: |
           cd dist-packages
-          sha256sum tuxbooks_*.deb tuxbooks-*.AppImage SBOM-tuxbooks-*.cdx.json > SHA256SUMS.txt
+          sha256sum tuxbooks_*.deb tuxbooks-*.pkg.tar.zst tuxbooks-*.AppImage SBOM-tuxbooks-*.cdx.json > SHA256SUMS.txt
 
       - name: Publish GitHub release
         env:
@@ -257,6 +262,7 @@ jobs:
             --title "TuxBooks $GITHUB_REF_NAME" \
             --notes-file "$notes_file" \
             "dist-packages/tuxbooks_${version}_amd64.deb" \
+            "dist-packages/tuxbooks-${version}-1-x86_64.pkg.tar.zst" \
             "dist-packages/tuxbooks-${version}.AppImage" \
             "dist-packages/SBOM-tuxbooks-${version}.cdx.json" \
             "dist-packages/SHA256SUMS.txt"

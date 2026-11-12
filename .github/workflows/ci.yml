@@ -76,11 +76,11 @@ jobs:
           # Packaging-relevant paths: anything that lands in, or configures,
           # the payload the packaging gates inspect (Electron shell, sidecar,
           # builder config). A frontend-only change cannot alter what
-          # check-deb.sh or check-appimage.sh verifies, so the build job then
-          # skips the packaged builds and compiles the sidecar on the host
-          # instead of in the pinned container.
+          # check-deb.sh, check-pacman.sh or check-appimage.sh verifies, so
+          # the build job skips the packaged builds and compiles the sidecar
+          # on the host instead of in the pinned container.
           if printf '%s\n' "$changed" \
-            | grep -qE '^(electron/|sidecar/|build/|scripts/(check-deb\.sh|check-appimage\.sh|build-sidecar-release\.sh|sidecar-build\.Dockerfile|build-electron\.mjs|fetch-pdfium\.sh)|electron-builder\.yml|package\.json|pnpm-lock\.yaml|justfile|\.github/workflows/release\.yml)'; then
+            | grep -qE '^(electron/|sidecar/|build/|scripts/(check-deb\.sh|check-pacman\.sh|check-appimage\.sh|build-sidecar-release\.sh|sidecar-build\.Dockerfile|build-electron\.mjs|fetch-pdfium\.sh)|electron-builder\.yml|package\.json|pnpm-lock\.yaml|justfile|\.github/workflows/release\.yml)'; then
             echo "packaging=true" >> "$GITHUB_OUTPUT"
           else
             echo "packaging=false" >> "$GITHUB_OUTPUT"
@@ -270,7 +270,7 @@ jobs:
         run: cargo test --manifest-path sidecar/Cargo.toml
 
   build:
-    name: Release build (Electron, sidecar, deb)
+    name: Release build (Electron, sidecar, packages)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     # Only the diff classifier gates this job. It runs in parallel with the
@@ -340,16 +340,24 @@ jobs:
           TUXBOOKS_SIDECAR_HOST_BUILD: ${{ needs.changes.outputs.packaging == 'true' && '0' || '1' }}
         run: just build
 
+      # fpm builds Arch packages with bsdtar (for .MTREE) and zstd (the
+      # tarball). Debian/Ubuntu ship bsdtar in libarchive-tools, not under
+      # the upstream `bsdtar` package name.
+      - name: Install pacman packaging tooling
+        if: needs.changes.outputs.packaging == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools zstd
+
       # Packaging gates (docs/RELEASE.md): a packaging regression fails the
-      # build like any other test. CI verifies the deb and AppImage targets,
-      # self-contained, with no rpmbuild needed (only the rpm target wants it,
-      # see justfile `package`); the rpm stays a local artifact. Skipped when
-      # the change cannot reach the packaged payload.
-      - name: Package deb and AppImage, verify payloads
+      # build like any other test. CI verifies the deb, pacman and AppImage
+      # targets, self-contained, with no rpmbuild needed (only the rpm target
+      # wants it, see justfile `package`); the rpm stays a local artifact.
+      # Skipped when the change cannot reach the packaged payload.
+      - name: Package deb, pacman and AppImage, verify payloads
         if: needs.changes.outputs.packaging == 'true'
         run: |
-          just package "deb AppImage"
+          just package "deb pacman AppImage"
           just check-deb
+          just check-pacman
           just check-appimage
 
   # The single required branch-protection check. It runs on every PR and main

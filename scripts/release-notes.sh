@@ -135,8 +135,15 @@ EOF
 sudo apt install ./tuxbooks_${NEW}_amd64.deb
 \`\`\`
 
-Or run the portable AppImage (no \`libfuse2\` install needed; the embedded
-runtime is statically linked):
+## Install on Arch/Manjaro
+
+\`\`\`sh
+sudo pacman -U ./tuxbooks-${NEW}-1-x86_64.pkg.tar.zst
+\`\`\`
+
+## Portable AppImage
+
+No \`libfuse2\` install is needed; the embedded runtime is statically linked.
 
 \`\`\`sh
 chmod +x tuxbooks-${NEW}.AppImage

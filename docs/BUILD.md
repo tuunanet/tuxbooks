@@ -25,10 +25,14 @@ any frontend precondition.
   ABI floor" below). `fetch-pdfium` runs first so packaging has the library.
 - `just build-debug` — same, with the debug sidecar (what E2E runs against).
 - `just package [targets]` — electron-builder (`electron-builder.yml`)
-  over the `just build` artifacts; default targets deb + rpm + AppImage,
-  output in `dist-packages/`. The rpm needs the `rpm` package (rpmbuild)
-  installed; the deb and AppImage targets are self-contained.
+  over the `just build` artifacts; default targets deb + rpm + pacman +
+  AppImage, output in `dist-packages/`. The rpm needs the `rpm` package
+  (rpmbuild); the pacman target needs `bsdtar` and `zstd`
+  (`libarchive-tools` and `zstd` on Debian/Ubuntu); the deb and AppImage
+  targets are self-contained.
 - `just check-deb` — the deb packaging gate (below).
+- `just check-pacman` — the Arch packaging gate: `.PKGINFO` metadata and
+  dependencies, payload, glibc floor, desktop entry, icons (below).
 - `just check-appimage` — the AppImage packaging gate: static runtime,
   payload, and a self-mount probe when the host can mount (docs/RELEASE.md
   "AppImage specifics").
@@ -79,14 +83,17 @@ unversioned, so the binary's floor is 2.34.
 `just build` (and therefore `just package`) goes through the container, so
 docker or podman is required for packaging. `TUXBOOKS_SIDECAR_HOST_BUILD=1`
 forces a host build for a quick local check (not portable).
-`scripts/check-deb.sh` enforces the 2.35 ceiling on the packaged binaries and
+`scripts/check-glibc-floor.sh` (called by `check-deb.sh` and
+`check-pacman.sh`) enforces the 2.35 ceiling on the packaged binaries and
 fails the build when either needs newer symbols. To raise or lower the floor,
 bump the base image digest deliberately and re-run the packaging gate.
 
 ## Packaging (electron-builder)
 
 `electron-builder.yml` is the packaging source of truth; the version in
-the root `package.json` is the released version. Layout in every bundle:
+the root `package.json` is the released version. Releases build x64 only,
+and the deb, pacman and AppImage artifact names encode that architecture.
+Layout in every bundle:
 
 - `app.asar`: `electron/dist/**` + `frontend/dist/**` + `package.json`.
 - `resources/sidecar/tuxbooks`: the release sidecar binary (kept outside
@@ -108,12 +115,15 @@ built deb's control metadata (package name, exact version match,
 non-empty description, **no webkit dependency**), the extracted payload
 (Electron binary + executable sidecar + PDFium resource), the desktop
 entry (structure plus `desktop-file-validate` when installed), and
-hicolor icons. `scripts/check-appimage.sh` covers the AppImage: static
-type2-runtime (no host `libfuse2`), payload, and a self-mount probe
-(docs/RELEASE.md "AppImage specifics"). Run `just check-deb` and
-`just check-appimage` after `just package`; CI's build job runs both
-targets and gates on every packaging-relevant push, and the release
-workflow gates the published artifacts.
+hicolor icons. `scripts/check-pacman.sh` covers the Arch package: `.PKGINFO`
+metadata and resolvable dependencies, the same payload and glibc floor, the
+desktop entry, and the icons (docs/RELEASE.md "Pacman specifics").
+`scripts/check-appimage.sh` covers the AppImage: static type2-runtime (no
+host `libfuse2`), payload, and a self-mount probe (docs/RELEASE.md "AppImage
+specifics"). Run `just check-deb`, `just check-pacman` and
+`just check-appimage` after `just package`; CI's build job runs all three
+targets and gates on every packaging-relevant push, and the release workflow
+gates the published artifacts.
 
 ## E2E runtime
 

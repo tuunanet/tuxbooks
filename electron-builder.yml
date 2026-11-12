@@ -1,7 +1,7 @@
 # Electron packaging (docs/RELEASE.md).
-# The deb/rpm/AppImage artifact set, the version source of truth (package.json
-# version), and the packaging gate (scripts/check-deb.sh) carry over from the
-# Tauri era; only the build internals changed.
+# The deb/rpm/pacman/AppImage artifact set, the version source of truth
+# (package.json version), and the packaging-gate philosophy carry over from
+# the Tauri era; only the build internals changed.
 appId: com.tuxbooks.app
 productName: TuxBooks
 copyright: GPL-3.0-or-later
@@ -14,6 +14,40 @@ copyright: GPL-3.0-or-later
 # sections, and linux.artifactName would also rename the deb.
 appImage:
   artifactName: tuxbooks-${version}.${ext}
+
+# The Arch/Manjaro package (electron-builder's pacman target, beta upstream).
+# fpm assembles it, so the build host needs bsdtar and zstd (Debian/Ubuntu:
+# libarchive-tools and zstd). The depends list is explicit for two reasons:
+# 26.x still defaults to http-parser and libappindicator-gtk3, which Arch
+# dropped from its repositories, and the "default" merge keyword only exists
+# from electron-builder 27. The rest follows Electron's Arch requirements
+# (c-ares/ffmpeg/libvpx/... in the upstream default) plus the desktop
+# integration the deb also declares. scripts/check-pacman.sh asserts the
+# metadata, payload, and glibc floor.
+pacman:
+  # Match the metadata fpm writes (pkgver includes the default pkgrel 1) and
+  # the release workflow's checksum and upload globs. Releases build x64 only,
+  # like the deb and AppImage artifacts.
+  artifactName: tuxbooks-${version}-1-x86_64.pkg.tar.zst
+  # electron-builder passes xz by default; Arch packages use zstd.
+  compression: zstd
+  depends:
+    - at-spi2-core
+    - c-ares
+    - ffmpeg
+    - gtk3
+    - libevent
+    - libnotify
+    - libsecret
+    - libvpx
+    - libxss
+    - libxtst
+    - libxslt
+    - minizip
+    - nss
+    - re2
+    - snappy
+    - xdg-utils
 
 # The AppImage runtime binary (docs/RELEASE.md "AppImage specifics"). 0.0.0,
 # the default, dlopen()s libfuse.so.2, which Ubuntu 22.04+ no longer installs
@@ -65,6 +99,7 @@ linux:
   target:
     - deb
     - rpm
+    - pacman
     - AppImage
   icon: build/icons/
   desktop:
