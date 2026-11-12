@@ -59,21 +59,30 @@ depends="$(printf '%s\n' "$pkginfo" | sed -n 's/^depend = //p')"
 # a second source of truth: changing the package's dependencies means updating
 # both places, and this list keeping every entry is the point.
 expected_depends="
+alsa-lib
 at-spi2-core
-c-ares
-ffmpeg
+cairo
+dbus
+expat
+glib2
+glibc
 gtk3
-libevent
-libnotify
-libsecret
-libvpx
-libxss
-libxtst
-libxslt
-minizip
+hicolor-icon-theme
+libcups
+libgcc
+libx11
+libxcb
+libxcomposite
+libxdamage
+libxext
+libxfixes
+libxkbcommon
+libxrandr
+mesa
+nspr
 nss
-re2
-snappy
+pango
+systemd-libs
 xdg-utils
 "
 for dep in $expected_depends; do

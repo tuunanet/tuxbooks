@@ -174,13 +174,17 @@ needs `bsdtar` for `.MTREE` and `zstd` for the tarball (Debian/Ubuntu:
 artifact is `tuxbooks-<version>-1-x86_64.pkg.tar.zst`, zstd-compressed, with
 `pkgver = <version>-1` in `.PKGINFO`.
 
-The depends list is explicit. electron-builder 26's default still names
-`http-parser` and `libappindicator-gtk3`, which Arch removed from its
-repositories, and the `"default"` merge keyword that would let us extend the
-built-in list only exists from electron-builder 27. The configured list keeps
-Electron's Arch requirements and adds the desktop integration the deb also
-declares. `scripts/check-pacman.sh` (`just check-pacman`) fails the package
-if any of the required entries are missing or either stale package returns.
+The depends list is explicit and follows the packaged binary's direct ELF
+requirements. It is not electron-builder's default, which mirrors Arch's
+system-linked `electron` package (`c-ares`, `ffmpeg`, `libevent`, ...): the
+electron-builder runtime bundles its own ffmpeg/event/codec libraries and
+links only the X/GTK stack. That default also still names `http-parser` and
+`libappindicator-gtk3`, which Arch removed, and the `"default"` merge
+keyword only exists from electron-builder 27. The list here adds
+`hicolor-icon-theme` for the icon hierarchy and `xdg-utils` for
+`shell.openExternal`. `scripts/check-pacman.sh` (`just check-pacman`) fails
+the package if any required entry is missing or either stale package
+returns, and `namcap` on the built package is clean.
 
 Arch is rolling, so it always meets the sidecar's glibc 2.35 floor. The deb
 and pacman packages carry the same sidecar and worker.

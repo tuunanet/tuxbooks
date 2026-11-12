@@ -17,13 +17,14 @@ appImage:
 
 # The Arch/Manjaro package (electron-builder's pacman target, beta upstream).
 # fpm assembles it, so the build host needs bsdtar and zstd (Debian/Ubuntu:
-# libarchive-tools and zstd). The depends list is explicit for two reasons:
-# 26.x still defaults to http-parser and libappindicator-gtk3, which Arch
-# dropped from its repositories, and the "default" merge keyword only exists
-# from electron-builder 27. The rest follows Electron's Arch requirements
-# (c-ares/ffmpeg/libvpx/... in the upstream default) plus the desktop
-# integration the deb also declares. scripts/check-pacman.sh asserts the
-# metadata, payload, and glibc floor.
+# libarchive-tools and zstd). The depends list below is not electron-builder's
+# default: that list mirrors Arch's `electron` package, which links system
+# libraries, while the electron-builder runtime ships its own ffmpeg/event/
+# codec libraries and links only the X/GTK stack. It also still names
+# http-parser and libappindicator-gtk3, which Arch removed. The list here is
+# the direct ELF requirements of the packaged binary (readelf NEEDED) plus
+# hicolor-icon-theme and xdg-utils; namcap on the built package is clean.
+# scripts/check-pacman.sh asserts the metadata, payload, and glibc floor.
 pacman:
   # Match the metadata fpm writes (pkgver includes the default pkgrel 1) and
   # the release workflow's checksum and upload globs. Releases build x64 only,
@@ -32,21 +33,30 @@ pacman:
   # electron-builder passes xz by default; Arch packages use zstd.
   compression: zstd
   depends:
+    - alsa-lib
     - at-spi2-core
-    - c-ares
-    - ffmpeg
+    - cairo
+    - dbus
+    - expat
+    - glib2
+    - glibc
     - gtk3
-    - libevent
-    - libnotify
-    - libsecret
-    - libvpx
-    - libxss
-    - libxtst
-    - libxslt
-    - minizip
+    - hicolor-icon-theme
+    - libcups
+    - libgcc
+    - libx11
+    - libxcb
+    - libxcomposite
+    - libxdamage
+    - libxext
+    - libxfixes
+    - libxkbcommon
+    - libxrandr
+    - mesa
+    - nspr
     - nss
-    - re2
-    - snappy
+    - pango
+    - systemd-libs
     - xdg-utils
 
 # The AppImage runtime binary (docs/RELEASE.md "AppImage specifics"). 0.0.0,
