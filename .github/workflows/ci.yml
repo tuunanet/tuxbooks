@@ -348,12 +348,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
       # Packaging gates (docs/RELEASE.md): a packaging regression fails the
-      # build like any other test. CI verifies the deb, pacman and AppImage
-      # targets, self-contained, with no rpmbuild needed (only the rpm target
-      # wants it, see justfile `package`); the rpm stays a local artifact.
-      # The pacman dependency resolution runs in an Arch container, so it
-      # catches a package Arch has dropped as well as a payload regression.
-      # Skipped when the change cannot reach the packaged payload.
+      # build like any other test. CI builds and verifies the deb, pacman and
+      # AppImage targets; all three are self-contained. The pacman dependency
+      # resolution runs in an Arch container, so it catches a package Arch
+      # has dropped as well as a payload regression. Skipped when the change
+      # cannot reach the packaged payload.
       - name: Package deb, pacman and AppImage, verify payloads
         if: needs.changes.outputs.packaging == 'true'
         run: |

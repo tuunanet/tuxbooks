@@ -1,5 +1,5 @@
 # Electron packaging (docs/RELEASE.md).
-# The deb/rpm/pacman/AppImage artifact set, the version source of truth
+# The deb/pacman/AppImage artifact set, the version source of truth
 # (package.json version), and the packaging-gate philosophy carry over from
 # the Tauri era; only the build internals changed.
 appId: com.tuxbooks.app
@@ -10,7 +10,7 @@ copyright: GPL-3.0-or-later
 # identifier (docs/RELEASE.md artifact table, the release workflow's
 # checksums + upload globs); electron-builder's default would derive
 # `TuxBooks-<version>.AppImage` from the productName. Top-level block:
-# per-target options (like deb/rpm) are siblings of the platform
+# per-target options (like deb/pacman) are siblings of the platform
 # sections, and linux.artifactName would also rename the deb.
 appImage:
   artifactName: tuxbooks-${version}.${ext}
@@ -28,7 +28,7 @@ appImage:
 pacman:
   # Match the metadata fpm writes (pkgver includes the default pkgrel 1) and
   # the release workflow's checksum and upload globs. Releases build x64 only,
-  # like the deb and AppImage artifacts.
+  # like the other artifacts.
   artifactName: tuxbooks-${version}-1-x86_64.pkg.tar.zst
   # electron-builder passes xz by default; Arch packages use zstd.
   compression: zstd
@@ -108,7 +108,6 @@ linux:
   executableName: tuxbooks
   target:
     - deb
-    - rpm
     - pacman
     - AppImage
   icon: build/icons/

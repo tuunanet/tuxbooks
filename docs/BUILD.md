@@ -25,9 +25,8 @@ any frontend precondition.
   ABI floor" below). `fetch-pdfium` runs first so packaging has the library.
 - `just build-debug` — same, with the debug sidecar (what E2E runs against).
 - `just package [targets]` — electron-builder (`electron-builder.yml`)
-  over the `just build` artifacts; default targets deb + rpm + pacman +
-  AppImage, output in `dist-packages/`. The rpm needs the `rpm` package
-  (rpmbuild); the pacman target needs `bsdtar` and `zstd`
+  over the `just build` artifacts; default targets deb + pacman + AppImage,
+  output in `dist-packages/`. The pacman target needs `bsdtar` and `zstd`
   (`libarchive-tools` and `zstd` on Debian/Ubuntu); the deb and AppImage
   targets are self-contained.
 - `just check-deb` — the deb packaging gate (below).

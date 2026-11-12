@@ -5,7 +5,7 @@ tags. This doc is the operating manual: what the artifacts are, how a
 release is cut, and what is deliberately deferred.
 
 **Packaging:** Electron packaging uses `electron-builder`
-(`electron-builder.yml`). The deb/rpm/pacman/AppImage artifact set and the
+(`electron-builder.yml`). The deb/pacman/AppImage artifact set and the
 packaging-gate philosophy carry over from the earlier releases.
 
 ## Artifacts
@@ -17,7 +17,7 @@ packaging-gate philosophy carry over from the earlier releases.
 | `tuxbooks-<version>.AppImage`             | release workflow (tag) | Portable single-file build for other Linux setups, no installation, no host libfuse2 |
 | `SBOM-tuxbooks-<version>.cdx.json`        | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md                |
 | `SHA256SUMS.txt`                          | release workflow (tag) | Checksums for the installers and the SBOM                                            |
-| deb + rpm + pacman + AppImage             | `just package` (local) | Local packaging verification; rpm is not published                                   |
+| deb + pacman + AppImage                   | `just package` (local) | Local packaging verification; same artifacts as the release                          |
 
 Every package ships the desktop entry
 (`usr/share/applications/tuxbooks.desktop`), hicolor icons, the Electron

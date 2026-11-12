@@ -200,8 +200,7 @@ jobs:
           fi
           echo "Releasing $tagged"
 
-      # The deb, pacman and AppImage targets are self-contained (the rpm,
-      # which needs rpmbuild, stays a local `just package` artifact).
+      # The deb, pacman and AppImage targets are self-contained.
       # electron-builder builds pacman packages with fpm, which needs bsdtar
       # (for .MTREE) and zstd (the tarball). Debian/Ubuntu ship bsdtar in
       # libarchive-tools. AppImage bundling runs FUSE-free via
@@ -211,12 +210,10 @@ jobs:
       - name: Install pacman packaging tooling
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools zstd
 
-      # deb for Ubuntu/Debian (primary target), pacman for Arch/Manjaro,
-      # AppImage for other Linux setups. The rpm stays a local `just package`
-      # artifact; the site's audience is Ubuntu. electron-builder wires the
-      # sidecar binary and the PDFium library into resources/sidecar
-      # (electron-builder.yml); the packaging gates re-verify the payload
-      # before anything publishes.
+      # deb for Ubuntu/Debian, pacman for Arch/Manjaro, AppImage for other
+      # Linux setups. electron-builder wires the sidecar binary and the
+      # PDFium library into resources/sidecar (electron-builder.yml); the
+      # packaging gates re-verify the payload before anything publishes.
       - name: Build deb, pacman and AppImage bundles
         env:
           TUXBOOKS_SIDECAR_CACHE: gha

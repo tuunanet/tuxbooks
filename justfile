@@ -182,14 +182,13 @@ build: fetch-pdfium
 
 # Package the distributable Linux bundles with electron-builder
 # (electron-builder.yml). Requires `just build` artifacts — the recipe runs
-# it first. Default targets: deb + rpm + pacman + AppImage (docs/RELEASE.md);
-# a target list argument narrows the run (e.g. `just package deb`). The rpm
-# needs the `rpm` package (rpmbuild); the pacman target needs bsdtar and zstd
-# (libarchive-tools and zstd on Debian/Ubuntu). `--publish never`: this
-# recipe only builds artifacts — electron-builder 26 otherwise publishes
-# implicitly on CI push builds (which needs GH_TOKEN); release.yml cuts the
-# release itself via `gh release create`.
-package TARGETS="deb rpm pacman AppImage": build
+# it first. Default targets: deb + pacman + AppImage (docs/RELEASE.md); a
+# target list argument narrows the run (e.g. `just package deb`). The pacman
+# target needs bsdtar and zstd (libarchive-tools and zstd on Debian/Ubuntu).
+# `--publish never`: this recipe only builds artifacts — electron-builder 26
+# otherwise publishes implicitly on CI push builds (which needs GH_TOKEN);
+# release.yml cuts the release itself via `gh release create`.
+package TARGETS="deb pacman AppImage": build
     pnpm exec electron-builder --linux {{TARGETS}} --publish never
 
 # Packaging regression gate (docs/RELEASE.md): verifies the deb built by
