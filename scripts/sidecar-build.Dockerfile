@@ -5,8 +5,9 @@
 # and recorded as a hard GLIBC_2.39 requirement, and the sidecar then refuses
 # to load on Ubuntu 22.04 / Debian 12 ("version `GLIBC_2.39' not found").
 # Linking against ubuntu:22.04 (glibc 2.35) keeps those weak references
-# unversioned, so the binary's floor is 2.35. scripts/check-deb.sh asserts
-# that ceiling on the packaged binaries.
+# unversioned, so the binary's floor is 2.35.
+# scripts/check-glibc-floor.sh asserts that ceiling on the packaged binaries
+# (check-deb.sh and check-pacman.sh call it).
 #
 # Digest-pinned: the tag can move, the digest cannot, so a release build
 # cannot silently pick up a newer glibc. Bump deliberately (and re-check the

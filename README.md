@@ -26,15 +26,17 @@ progress, and provides EPUB and PDF reading experiences.
 
 ## Install
 
-Prebuilt packages (deb, AppImage) are on the
+Prebuilt packages (deb, pacman, AppImage) are on the
 [releases page](https://github.com/tuunanet/tuxbooks/releases). TuxBooks is
 pre-1.0 and still under active development:
 
 ```sh
 # Ubuntu/Debian
 sudo apt install ./tuxbooks_<version>_amd64.deb
+# Arch/Manjaro
+sudo pacman -U ./tuxbooks-<version>-1-x86_64.pkg.tar.zst
 # Any other Linux — portable, no installation
-chmod +x tuxbooks_<version>_amd64.AppImage && ./tuxbooks_<version>_amd64.AppImage
+chmod +x tuxbooks-<version>.AppImage && ./tuxbooks-<version>.AppImage
 ```
 
 Verify downloads against `SHA256SUMS.txt` in the same release. See
@@ -139,18 +141,20 @@ runs `just build` first, so it is the only command you need after the
 [Getting started](#getting-started) setup:
 
 ```sh
-just package                # deb + rpm + AppImage
-just package deb            # one target
-just package "deb AppImage" # several targets
+just package                       # deb + pacman + AppImage
+just package deb                   # one target
+just package "deb pacman AppImage" # several targets
 ```
 
 The sidecar build needs docker or podman, because it compiles against the
 pinned glibc 2.35 floor in a container ([docs/BUILD.md](docs/BUILD.md));
 `TUXBOOKS_SIDECAR_HOST_BUILD=1` skips the container but the binary is then
-not portable. The rpm target also needs `rpmbuild`. `just check-deb` and
-`just check-appimage` verify the artifacts, and `just sbom` writes the
-CycloneDX inventory. The release publishes the deb and AppImage; the rpm is
-a local artifact.
+not portable. The pacman target needs `bsdtar` and `zstd`
+(`libarchive-tools` and `zstd` on Debian/Ubuntu). `just check-deb`,
+`just check-pacman` and `just check-appimage` verify the artifacts;
+`just check-pacman-arch` resolves the pacman dependencies in an Arch
+container (docker or podman). `just sbom` writes the CycloneDX inventory.
+The release publishes the x86_64 deb, pacman and AppImage.
 
 ## Layout
 

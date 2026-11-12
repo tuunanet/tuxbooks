@@ -5,23 +5,26 @@ tags. This doc is the operating manual: what the artifacts are, how a
 release is cut, and what is deliberately deferred.
 
 **Packaging:** Electron packaging uses `electron-builder`
-(`electron-builder.yml`). The artifact set and packaging-gate philosophy
-are unchanged from the earlier releases.
+(`electron-builder.yml`). The deb/pacman/AppImage artifact set and the
+packaging-gate philosophy carry over from the earlier releases.
 
 ## Artifacts
 
-| Artifact                           | Built by               | Purpose                                                                              |
-| ---------------------------------- | ---------------------- | ------------------------------------------------------------------------------------ |
-| `tuxbooks_<version>_amd64.deb`     | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`                     |
-| `tuxbooks-<version>.AppImage`      | release workflow (tag) | Portable single-file build for other Linux setups, no installation, no host libfuse2 |
-| `SBOM-tuxbooks-<version>.cdx.json` | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md                |
-| `SHA256SUMS.txt`                   | release workflow (tag) | Checksums for both artifacts and the SBOM                                            |
-| deb + rpm + AppImage               | `just package` (local) | Local packaging verification; rpm is not published                                   |
+| Artifact                                  | Built by               | Purpose                                                                              |
+| ----------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------ |
+| `tuxbooks_<version>_amd64.deb`            | release workflow (tag) | Primary target: Ubuntu/Debian install via `sudo apt install ./…`                     |
+| `tuxbooks-<version>-1-x86_64.pkg.tar.zst` | release workflow (tag) | Arch/Manjaro install via `sudo pacman -U ./…`                                        |
+| `tuxbooks-<version>.AppImage`             | release workflow (tag) | Portable single-file build for other Linux setups, no installation, no host libfuse2 |
+| `SBOM-tuxbooks-<version>.cdx.json`        | release workflow (tag) | CycloneDX dependency inventory (issue #89, S-4), docs/SUPPLY_CHAIN.md                |
+| `SHA256SUMS.txt`                          | release workflow (tag) | Checksums for the installers and the SBOM                                            |
+| deb + pacman + AppImage                   | `just package` (local) | Local packaging verification; same artifacts as the release                          |
 
-Every deb ships the desktop entry (`usr/share/applications/tuxbooks.desktop`),
-hicolor icons, the Electron runtime, and the bundled sidecar binary plus
+Every package ships the desktop entry
+(`usr/share/applications/tuxbooks.desktop`), hicolor icons, the Electron
+runtime, and the bundled sidecar binary plus
 document worker (`resources/sidecar/tuxbooks-worker`) plus PDFium resource.
-`scripts/check-deb.sh` gates the worker's presence. Releases are published as
+`scripts/check-deb.sh` and `scripts/check-pacman.sh` gate the worker's
+presence. Releases are published as
 normal releases, not pre-release, and the site links to the latest release at
 `/releases/latest`. The version stays below 1.0 while the app is in active
 development; that is a version number, not a release flag.
@@ -77,12 +80,27 @@ the runtime window icon), the glibc ABI floor for the sidecar and worker
 (structure, `Name=TuxBooks`, `Icon=tuxbooks`, plus `desktop-file-validate`
 when installed), and hicolor icons.
 
+`scripts/check-pacman.sh` verifies the Arch package's `.PKGINFO` (name,
+version, `x86_64`, license, and non-empty description and packager), the
+required dependency entries (and that the stale
+`http-parser`/`libappindicator-gtk3` defaults are gone), the extracted
+payload (Electron binary + executable sidecar and worker + PDFium + window
+icon), the same glibc 2.35 floor, and the desktop entry and hicolor icons.
+It reads the `.pkg.tar.zst` with `bsdtar`; install `libarchive-tools` on
+Debian/Ubuntu.
+
+`scripts/check-pacman-arch.sh` resolves the package's dependency transaction
+inside a current `archlinux` container (`pacman -Sy`, then `pacman -U
+--print`). The host-side gate checks what the metadata says; this one checks
+that Arch can still satisfy it, so a dependency Arch has dropped fails the
+build instead of a user's install. It needs docker or podman.
+
 `scripts/check-appimage.sh` verifies the AppImage's embedded runtime and
 payload (see "AppImage specifics" below).
 
-CI builds the deb and AppImage targets and runs both gates on every
-packaging-relevant push; the release workflow builds the published artifacts
-and runs the same gates before publishing.
+CI builds the deb, pacman and AppImage targets and runs the packaging gates
+on every packaging-relevant push; the release workflow builds the published
+artifacts and runs the same gates before publishing.
 
 ## Cutting a release
 
@@ -116,12 +134,12 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
    - **publish** waits for approval of the `release` environment, which only
      accepts `v*` tags, then refuses to run unless the tag exactly matches
      the version in the packaging manifest and the committed notes file
-     exists. It builds deb + AppImage, generates the SBOM (`just sbom`),
-     writes `SHA256SUMS.txt` over the installers and the SBOM, and publishes
-     the release with those notes and install instructions. Approve the
-     deployment from the Actions run page when it reaches the environment
-     gate. Self-approval is enabled because the repository has one
-     maintainer; the gate makes publishing an explicit step.
+     exists. It builds deb + pacman + AppImage, generates the SBOM
+     (`just sbom`), writes `SHA256SUMS.txt` over the installers and the SBOM,
+     and publishes the release with those notes and install instructions.
+     Approve the deployment from the Actions run page when it reaches the
+     environment gate. Self-approval is enabled because the repository has
+     one maintainer; the gate makes publishing an explicit step.
 
 Before tagging, run `just audit`: release builds must be free of
 untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).
@@ -153,6 +171,32 @@ reference, and is statically linked, then checks the payload and self-mounts
 the image when the host has a mount helper. CI and the release workflow run
 it after `just package`.
 
+## Pacman specifics
+
+`electron-builder.yml` selects the `pacman` target, which electron-builder
+labels beta upstream. fpm assembles the `.pkg.tar.zst`, so the build host
+needs `bsdtar` for `.MTREE` and `zstd` for the tarball (Debian/Ubuntu:
+`libarchive-tools` and `zstd`); `pacman` and `makepkg` are not required. The
+artifact is `tuxbooks-<version>-1-x86_64.pkg.tar.zst`, zstd-compressed, with
+`pkgver = <version>-1` in `.PKGINFO`.
+
+The depends list is explicit and follows the packaged binary's direct ELF
+requirements. It is not electron-builder's default, which mirrors Arch's
+system-linked `electron` package (`c-ares`, `ffmpeg`, `libevent`, ...): the
+electron-builder runtime bundles its own ffmpeg/event/codec libraries and
+links only the X/GTK stack. That default also still names `http-parser` and
+`libappindicator-gtk3`, which Arch removed, and the `"default"` merge
+keyword only exists from electron-builder 27. The list here adds
+`hicolor-icon-theme` for the icon hierarchy and `xdg-utils` for
+`shell.openExternal`. `scripts/check-pacman.sh` (`just check-pacman`) fails
+the package if any required entry is missing or either stale package
+returns, and `namcap` on the built package is clean.
+
+Arch is rolling, so it always meets the sidecar's glibc 2.35 floor. The deb
+and pacman packages carry the same sidecar and worker. CI also resolves the
+package transaction in a current `archlinux` container, so a dependency Arch
+drops from its repositories fails there instead of at install time.
+
 ## Deliberate deferrals
 
 - **Signed artifacts:** `SHA256SUMS.txt` only. GPG/(sigstore) signing waits
@@ -162,9 +206,9 @@ it after `just package`.
   the release workflow from an immutable `v*` tag of this repository, with
   the SBOM (S-4) publishing the exact dependency set the build resolved.
 - **Update strategy:** none built. deb installs upgrade in place via `apt`
-  (same package name and identifier), AppImage is replaced by downloading
-  the newer file. If auto-update is ever required, that is
-  `electron-updater` with signed manifests — a later decision (ROADMAP:
-  "update strategy if later required").
-- **Flatpak/Snap:** not planned; Ubuntu audience is served by deb +
-  AppImage.
+  and pacman via `pacman -U` (same package name and identifier), AppImage is
+  replaced by downloading the newer file. If auto-update is ever required,
+  that is `electron-updater` with signed manifests — a later decision
+  (ROADMAP: "update strategy if later required").
+- **Flatpak/Snap:** not planned; Ubuntu/Debian and Arch are served by the
+  native packages, the other Linux setups by the AppImage.

@@ -1,7 +1,7 @@
 # Electron packaging (docs/RELEASE.md).
-# The deb/rpm/AppImage artifact set, the version source of truth (package.json
-# version), and the packaging gate (scripts/check-deb.sh) carry over from the
-# Tauri era; only the build internals changed.
+# The deb/pacman/AppImage artifact set, the version source of truth
+# (package.json version), and the packaging-gate philosophy carry over from
+# the Tauri era; only the build internals changed.
 appId: com.tuxbooks.app
 productName: TuxBooks
 copyright: GPL-3.0-or-later
@@ -10,10 +10,54 @@ copyright: GPL-3.0-or-later
 # identifier (docs/RELEASE.md artifact table, the release workflow's
 # checksums + upload globs); electron-builder's default would derive
 # `TuxBooks-<version>.AppImage` from the productName. Top-level block:
-# per-target options (like deb/rpm) are siblings of the platform
+# per-target options (like deb/pacman) are siblings of the platform
 # sections, and linux.artifactName would also rename the deb.
 appImage:
   artifactName: tuxbooks-${version}.${ext}
+
+# The Arch/Manjaro package (electron-builder's pacman target, beta upstream).
+# fpm assembles it, so the build host needs bsdtar and zstd (Debian/Ubuntu:
+# libarchive-tools and zstd). The depends list below is not electron-builder's
+# default: that list mirrors Arch's `electron` package, which links system
+# libraries, while the electron-builder runtime ships its own ffmpeg/event/
+# codec libraries and links only the X/GTK stack. It also still names
+# http-parser and libappindicator-gtk3, which Arch removed. The list here is
+# the direct ELF requirements of the packaged binary (readelf NEEDED) plus
+# hicolor-icon-theme and xdg-utils; namcap on the built package is clean.
+# scripts/check-pacman.sh asserts the metadata, payload, and glibc floor.
+pacman:
+  # Match the metadata fpm writes (pkgver includes the default pkgrel 1) and
+  # the release workflow's checksum and upload globs. Releases build x64 only,
+  # like the other artifacts.
+  artifactName: tuxbooks-${version}-1-x86_64.pkg.tar.zst
+  # electron-builder passes xz by default; Arch packages use zstd.
+  compression: zstd
+  depends:
+    - alsa-lib
+    - at-spi2-core
+    - cairo
+    - dbus
+    - expat
+    - glib2
+    - glibc
+    - gtk3
+    - hicolor-icon-theme
+    - libcups
+    - libgcc
+    - libx11
+    - libxcb
+    - libxcomposite
+    - libxdamage
+    - libxext
+    - libxfixes
+    - libxkbcommon
+    - libxrandr
+    - mesa
+    - nspr
+    - nss
+    - pango
+    - systemd-libs
+    - xdg-utils
 
 # The AppImage runtime binary (docs/RELEASE.md "AppImage specifics"). 0.0.0,
 # the default, dlopen()s libfuse.so.2, which Ubuntu 22.04+ no longer installs
@@ -64,7 +108,7 @@ linux:
   executableName: tuxbooks
   target:
     - deb
-    - rpm
+    - pacman
     - AppImage
   icon: build/icons/
   desktop:
