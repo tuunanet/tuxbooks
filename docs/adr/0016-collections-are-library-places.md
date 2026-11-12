@@ -1,6 +1,6 @@
 # ADR 0016: Collections are library places selected from the sidebar
 
-Status: accepted
+Status: accepted (amended 2026-11-12: the sort control offers concrete per-place orders)
 Date: 2026-11-01
 Decides: how collections are selected and presented in the library, how multiple collections combine, and what pinning and ordering mean
 Relates to: `CONTEXT.md` (Collection, Collection membership, Library place, Smart section, Pinned collection), ADR 0012, ADR 0014
@@ -52,13 +52,18 @@ an unrelated smart section.
    uses a hover handle; dragging across the boundary pins or unpins. Pin,
    rename, delete, and drag act on the row they were invoked on, not the whole
    selection. Unpinning a selected collection keeps it selected.
-6. Recently Added and Recently Read leave the sort control. Sort is one global
-   choice with Section order as the default, resolved per place. Date added and
-   Last read remain sort options. Inside a collection place, the date sort uses
-   the collection membership timestamp, labeled Added to collection; All Books
-   uses the library added date, labeled Date added. In a multi-collection place,
-   a book's Added to collection date is the earliest membership among the
-   selected collections.
+6. Recently Added and Recently Read leave the sort control. Sort is always a
+   concrete field, never a place-relative meta-option: the control offers Date
+   added, Last read, Progress updated, Title, and Author. Each place has a
+   default field: All Books and Recently Added use Date added; Recently Read and
+   Reading history use Last read; In Progress and Finished use Progress updated;
+   a collection uses Added to collection. That default is preselected until the
+   user chooses another sort for the place, and choices are remembered per
+   place, so the control always shows the order actually applied. Inside a
+   collection place, the date sort uses the collection membership timestamp,
+   labeled Added to collection; All Books uses the library added date, labeled
+   Date added. In a multi-collection place, a book's Added to collection date is
+   the earliest membership among the selected collections.
 7. Collection rename is added, and delete asks for confirmation. A new
    collection is unpinned and the app navigates to it, replacing any
    multi-selection. Deleting the active collection removes it from the

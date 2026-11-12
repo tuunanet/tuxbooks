@@ -211,7 +211,7 @@ test.describe("library grid selection ring", () => {
       }
     } finally {
       // The shared BrowserWindow carries this view state into later specs.
-      if (sorted) await setSort(page, "Section order");
+      if (sorted) await setSort(page, "Date added");
     }
   });
 });

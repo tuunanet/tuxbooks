@@ -147,11 +147,11 @@ export function filterBooksByCollection(books: Book[], bookIds: number[]): Book[
   return books.filter((book) => members.has(book.id));
 }
 
-/** Sort orders offered by the library header select. */
+/** Concrete sort orders offered by the library header select. */
 export const BOOK_SORT_OPTIONS: { id: BookSortId; label: string }[] = [
-  { id: "section-order", label: "Section order" },
   { id: "date-added", label: "Date added" },
   { id: "last-read", label: "Last read" },
+  { id: "progress-updated", label: "Progress updated" },
   { id: "title", label: "Title" },
   { id: "author", label: "Author" },
 ];
@@ -167,34 +167,8 @@ export function bookSortLabel(id: BookSortId, section: LibrarySection): string {
   return BOOK_SORT_OPTIONS.find((option) => option.id === id)?.label ?? id;
 }
 
-/** The concrete field a sort id resolves to; only Section order picks by place. */
-type BookSortField =
-  | "date-added"
-  | "membership-date"
-  | "last-read"
-  | "progress-updated"
-  | "title"
-  | "author";
-
-/**
- * A place's natural order. All Books uses the library added date; a
- * collection uses the earliest membership date among its selected
- * collections; the smart sections keep the timestamp that defines them.
- */
-function sectionOrderField(section: LibrarySection): BookSortField {
-  if (section.kind === "collection") return "membership-date";
-  if (section.kind === "reading-history") return "last-read";
-  switch (section.id) {
-    case "all-books":
-    case "recently-added":
-      return "date-added";
-    case "recently-read":
-      return "last-read";
-    case "in-progress":
-    case "finished":
-      return "progress-updated";
-  }
-}
+/** The concrete field a sort id resolves to inside the current place. */
+type BookSortField = BookSortId | "membership-date";
 
 export type BookViewMode = "grid" | "list";
 
@@ -203,7 +177,6 @@ const MISSING_AUTHOR_SORT_KEY = "\uffff";
 
 /** The field a chosen sort maps to for this place. */
 function sortFieldFor(sort: BookSortId, section: LibrarySection): BookSortField {
-  if (sort === "section-order") return sectionOrderField(section);
   // Inside a collection place the date option is Added to collection.
   if (sort === "date-added" && section.kind === "collection") return "membership-date";
   return sort;
