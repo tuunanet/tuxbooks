@@ -141,6 +141,12 @@ stock Ubuntu, Fedora and Debian desktops ship. On a minimal system or in a
 container without it, run the image with `APPIMAGE_EXTRACT_AND_RUN=1` (or
 `--appimage-extract-and-run`) to extract and start it without mounting.
 
+Supported platforms: Ubuntu 22.04 and Debian 12 or newer. The static runtime
+is not the limit on older releases, but the bundled sidecar and document
+worker are built against the glibc 2.35 floor (docs/BUILD.md "Release sidecar
+ABI floor"), so on Ubuntu 20.04 or Debian 11 they fail at start with
+`GLIBC_2.35 not found`. The deb carries the same floor.
+
 `scripts/check-appimage.sh` (`just check-appimage`) guards this: it asserts
 the embedded runtime reports the type2-runtime, contains no `libfuse.so.2`
 reference, and is statically linked, then checks the payload and self-mounts
