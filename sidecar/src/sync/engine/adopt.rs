@@ -28,9 +28,10 @@
 //! (a device storing the book under an extension the origin's copy did not
 //! use) would wait forever with zero visibility, so consecutive missing
 //! passes surface a `book_file_adopt_failed` row naming the missing blob
-//! (informational, self-closing on adoption). A blob whose size or hash
-//! does not verify is recorded as `book_file_adopt_failed` and retried; the
-//! row closes when a later pass adopts. A local file whose bytes moved
+//! (informational, self-closing). A blob whose size or hash does not verify
+//! is recorded as `book_file_adopt_failed` and retried; the row closes when
+//! the winning blob arrives intact or the pointer moves, whichever happens
+//! first. A local file whose bytes moved
 //! without a rebind (an external edit in flight) is skipped — the
 //! reconciler's re-import and the mint guard decide, never adoption.
 //! Adoption never deletes anything and never republishes: the swap's own
@@ -102,13 +103,7 @@ impl super::SyncService {
         }
         // The blob name must pass the same grammar staging used; an
         // extension the importer never admitted names no blob.
-        let extension = Path::new(&copy.path)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase());
-        let blob_name = extension
-            .and_then(|ext| store::book_blob_name(&format!("{}.{}", winning.content_hash, ext)));
-        let Some(blob_name) = blob_name else {
+        let Some(blob_name) = blob_name_for(&winning.content_hash, &copy.path) else {
             return Ok(());
         };
         if !store::book_blob_exists(root, &blob_name) {
@@ -186,8 +181,8 @@ impl super::SyncService {
     }
 
     /// Record the visibility row for a blob that is still missing after
-    /// consecutive passes: informational and self-closing — a later pass
-    /// that adopts (or the pointer moving on) resolves the key.
+    /// consecutive passes: informational and self-closing — the blob
+    /// arriving intact or the pointer moving on resolves the key.
     async fn record_missing_blob_issue(
         &self,
         copy: &UnsettledCopy,
@@ -235,6 +230,35 @@ impl super::SyncService {
         )
         .await
     }
+}
+
+/// The blob adoption fetches for a copy: the winning hash under the copy's
+/// own extension, after the name grammar staging used.
+pub(super) fn blob_name_for(hash: &str, path: &str) -> Option<String> {
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase());
+    extension.and_then(|ext| store::book_blob_name(&format!("{hash}.{ext}")))
+}
+
+/// True when the winning blob for one copy has arrived: the
+/// content-addressed file sits in the sync folder and its size and hash
+/// verify against the pointer. Presence alone is not arrival — bytes that
+/// fail verification keep the wait, and its visibility, open.
+pub(super) async fn blob_arrived(
+    root: &Path,
+    winning: &file_version::WinningVersion,
+    path: &str,
+) -> bool {
+    let Some(blob_name) = blob_name_for(&winning.content_hash, path) else {
+        return false;
+    };
+    if !store::book_blob_exists(root, &blob_name) {
+        return false;
+    }
+    let blob_path = root.join(store::BOOK_BLOB_DIR).join(blob_name);
+    read_verified_blob(&blob_path, winning).await.is_ok()
 }
 
 /// Why one blob fetch could not be adopted.

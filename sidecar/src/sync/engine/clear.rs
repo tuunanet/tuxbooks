@@ -7,8 +7,11 @@ use sqlx::SqlitePool;
 use crate::error::AppError;
 
 use crate::sync::clock::now_rfc3339;
+use crate::sync::file_version;
 use crate::sync::model::Op;
 use crate::sync::store;
+
+use super::adopt::blob_arrived;
 
 impl super::SyncService {
     /// True when the condition behind one issue has cleared. This is the one
@@ -90,6 +93,14 @@ impl super::SyncService {
             },
             "book_lifecycle_failed" => match issue_key.strip_prefix("book-lifecycle:") {
                 Some(uid) => Ok(!self.book_record_exists(uid).await?),
+                None => Ok(false),
+            },
+            // The row is the wait for a winning blob (ADR 0018 D2): it ends
+            // when the blob arrives intact or the pointer moves on — no
+            // unsettled copy is left for adoption to run for, so no later
+            // pass would ever close it.
+            "book_file_adopt_failed" => match issue_key.strip_prefix("book-file-adopt:") {
+                Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
                 None => Ok(false),
             },
             // Conflicts belong to review. Informational rows have no
@@ -229,6 +240,37 @@ impl super::SyncService {
         Ok(cover.flatten().is_some_and(|path| {
             Path::new(&path).file_name().and_then(|file| file.to_str()) == Some(name)
         }))
+    }
+
+    /// The wait behind a `book_file_adopt_failed` row: over when the winning
+    /// blob has arrived intact in the sync folder, or when the pointer no
+    /// longer waits on this book — `unsettled_copies` no longer feeds it to
+    /// adoption, so a later pass would never run for the row again.
+    async fn adopt_wait_cleared(
+        &self,
+        book_uid: &str,
+        root: Option<&Path>,
+    ) -> Result<bool, AppError> {
+        let waiting: Vec<_> = file_version::unsettled_copies(&self.inner.pool)
+            .await?
+            .into_iter()
+            .filter(|copy| copy.book_uid == book_uid)
+            .collect();
+        if waiting.is_empty() {
+            return Ok(true);
+        }
+        let Some(winning) = file_version::winning(&self.inner.pool, book_uid).await? else {
+            return Ok(true);
+        };
+        let Some(root) = root else {
+            return Ok(false);
+        };
+        for copy in &waiting {
+            if blob_arrived(root, &winning, &copy.path).await {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
