@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -29,6 +31,25 @@ import {
   INVALID_LIBRARY_PATHS,
   VALID_LIBRARY_PATHS,
 } from "./attackVectors";
+
+/**
+ * Literal sidecar method names the renderer bridge invokes, plus any invoke
+ * call site that hides its method behind a value this scan cannot read.
+ */
+function bridgeInvokeSites(): { literals: string[]; dynamic: string[] } {
+  const source = fs.readFileSync(path.resolve(process.cwd(), "src/lib/bridge.ts"), "utf8");
+  // Cut only the private helper's own definition (declaration plus preload
+  // passthrough), so every other line stays in the scan: a call site hiding
+  // on a line that mentions `.invoke(` must land in `dynamic`, not vanish.
+  const body = source.replace(/async function invoke[\s\S]*?\n\}/, "");
+  const literals: string[] = [];
+  const dynamic: string[] = [];
+  for (const match of body.matchAll(/invoke(?:<[^>]*>)?\(\s*(?:"([^"]+)"|(\S+))/g)) {
+    if (match[1] !== undefined) literals.push(match[1]);
+    else dynamic.push(match[2] ?? "");
+  }
+  return { literals, dynamic };
+}
 
 describe("parseBookId (T-2: invalid ids fail closed)", () => {
   it("accepts plain positive decimal ids", () => {
@@ -340,6 +361,15 @@ describe("boundary configuration tables (T-5)", () => {
     }
     expect(SIDECAR_METHODS.has("fs_read")).toBe(false);
     expect(SIDECAR_METHODS.has("__proto__")).toBe(false);
+  });
+
+  it("allows every sidecar method the renderer bridge invokes", () => {
+    const { literals, dynamic } = bridgeInvokeSites();
+    expect(dynamic, "every bridge invoke must name its method literally").toEqual([]);
+    // The scan must cover the real bridge surface, not a stub.
+    expect(literals.length).toBeGreaterThanOrEqual(55);
+    const missing = literals.filter((method) => !SIDECAR_METHODS.has(method));
+    expect(missing, "bridge methods missing from SIDECAR_METHODS").toEqual([]);
   });
 
   it("enumerates exactly the renderer-facing IPC channels", () => {
