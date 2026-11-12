@@ -151,10 +151,11 @@ pinned glibc 2.35 floor in a container ([docs/BUILD.md](docs/BUILD.md));
 `TUXBOOKS_SIDECAR_HOST_BUILD=1` skips the container but the binary is then
 not portable. The rpm target needs `rpmbuild`; the pacman target needs
 `bsdtar` and `zstd` (`libarchive-tools` and `zstd` on Debian/Ubuntu).
-`just check-deb`,
-`just check-pacman` and `just check-appimage` verify the artifacts, and
-`just sbom` writes the CycloneDX inventory. The release publishes the x86_64
-deb, pacman and AppImage; the rpm is a local artifact.
+`just check-deb`, `just check-pacman` and `just check-appimage` verify the
+artifacts; `just check-pacman-arch` resolves the pacman dependencies in an
+Arch container (docker or podman). `just sbom` writes the CycloneDX
+inventory. The release publishes the x86_64 deb, pacman and AppImage; the rpm
+is a local artifact.
 
 ## Layout
 

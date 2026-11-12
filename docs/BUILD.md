@@ -33,6 +33,9 @@ any frontend precondition.
 - `just check-deb` — the deb packaging gate (below).
 - `just check-pacman` — the Arch packaging gate: `.PKGINFO` metadata and
   dependencies, payload, glibc floor, desktop entry, icons (below).
+- `just check-pacman-arch` — resolves the Arch package's dependency
+  transaction in a current `archlinux` container, so a dependency Arch has
+  removed fails here instead of on a user's system. Needs docker or podman.
 - `just check-appimage` — the AppImage packaging gate: static runtime,
   payload, and a self-mount probe when the host can mount (docs/RELEASE.md
   "AppImage specifics").
@@ -118,12 +121,15 @@ entry (structure plus `desktop-file-validate` when installed), and
 hicolor icons. `scripts/check-pacman.sh` covers the Arch package: `.PKGINFO`
 metadata and resolvable dependencies, the same payload and glibc floor, the
 desktop entry, and the icons (docs/RELEASE.md "Pacman specifics").
-`scripts/check-appimage.sh` covers the AppImage: static type2-runtime (no
-host `libfuse2`), payload, and a self-mount probe (docs/RELEASE.md "AppImage
-specifics"). Run `just check-deb`, `just check-pacman` and
-`just check-appimage` after `just package`; CI's build job runs all three
-targets and gates on every packaging-relevant push, and the release workflow
-gates the published artifacts.
+`scripts/check-pacman-arch.sh` resolves that package's transaction inside a
+current `archlinux` container, which catches a dependency Arch has removed
+(docker or podman required). `scripts/check-appimage.sh` covers the AppImage:
+static type2-runtime (no host `libfuse2`), payload, and a self-mount probe
+(docs/RELEASE.md "AppImage specifics"). Run `just check-deb`,
+`just check-pacman`, `just check-pacman-arch` and `just check-appimage` after
+`just package`; CI's build job runs all three targets and gates on every
+packaging-relevant push, and the release workflow gates the published
+artifacts.
 
 ## E2E runtime
 

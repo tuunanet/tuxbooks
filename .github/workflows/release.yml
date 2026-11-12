@@ -235,6 +235,7 @@ jobs:
         run: |
           just check-deb
           just check-pacman
+          just check-pacman-arch
           just check-appimage
 
       - name: Write SHA256SUMS.txt

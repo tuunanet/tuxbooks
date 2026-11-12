@@ -204,6 +204,12 @@ check-deb:
 check-pacman:
     bash scripts/check-pacman.sh
 
+# Arch dependency-resolution gate: resolves the package transaction inside a
+# current Arch container, so a dependency Arch removed from its repositories
+# fails before release. Needs docker or podman.
+check-pacman-arch:
+    bash scripts/check-pacman-arch.sh
+
 # AppImage packaging gate (docs/RELEASE.md "AppImage specifics"): pins the
 # static type2-runtime, verifies the payload, and self-mounts the image when
 # the host can mount.

@@ -89,11 +89,17 @@ icon), the same glibc 2.35 floor, and the desktop entry and hicolor icons.
 It reads the `.pkg.tar.zst` with `bsdtar`; install `libarchive-tools` on
 Debian/Ubuntu.
 
+`scripts/check-pacman-arch.sh` resolves the package's dependency transaction
+inside a current `archlinux` container (`pacman -Sy`, then `pacman -U
+--print`). The host-side gate checks what the metadata says; this one checks
+that Arch can still satisfy it, so a dependency Arch has dropped fails the
+build instead of a user's install. It needs docker or podman.
+
 `scripts/check-appimage.sh` verifies the AppImage's embedded runtime and
 payload (see "AppImage specifics" below).
 
-CI builds the deb, pacman and AppImage targets and runs all three gates on
-every packaging-relevant push; the release workflow builds the published
+CI builds the deb, pacman and AppImage targets and runs the packaging gates
+on every packaging-relevant push; the release workflow builds the published
 artifacts and runs the same gates before publishing.
 
 ## Cutting a release
@@ -187,7 +193,9 @@ the package if any required entry is missing or either stale package
 returns, and `namcap` on the built package is clean.
 
 Arch is rolling, so it always meets the sidecar's glibc 2.35 floor. The deb
-and pacman packages carry the same sidecar and worker.
+and pacman packages carry the same sidecar and worker. CI also resolves the
+package transaction in a current `archlinux` container, so a dependency Arch
+drops from its repositories fails there instead of at install time.
 
 ## Deliberate deferrals
 
