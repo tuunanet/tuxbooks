@@ -75,7 +75,7 @@ pub struct SyncStatus {
 /// What the UI offers on one issue row. The action is computed from the kind
 /// here, so the renderer never parses issue keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub enum SyncIssueAction {
     /// The condition can be repaired now; run the matching retry path.
     Retry,
