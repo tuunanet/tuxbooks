@@ -1,7 +1,6 @@
 /**
- * The renderer's only window.tuxbooks consumer (docs/ARCHITECTURE.md). Every
- * call to the Rust service, native picker, or protocol URL goes through the
- * typed wrappers here; components never touch the preload API directly.
+ * The renderer's only window.tuxbooks consumer (docs/ARCHITECTURE.md); every
+ * sidecar call, picker, and protocol URL goes through these typed wrappers.
  */
 
 import type {
@@ -70,11 +69,6 @@ export function listBooks(): Promise<Book[]> {
   return invoke("list_books");
 }
 
-/**
- * Reading history: durable books with no file rows, newest activity first.
- * An optional query searches the same FTS index with the opposite membership
- * filter, so library books never appear here.
- */
 export function listReadingHistory(query?: string): Promise<ReadingHistoryBook[]> {
   return invoke(
     "list_reading_history",
@@ -173,9 +167,8 @@ export function forgetBook(bookId: number): Promise<ForgetOutcome> {
 }
 
 /**
- * Bulk Forget for Reading history. The main process rejects one invoke with more than
- * MAX_BULK_BOOK_IDS ids, so a larger selection rides several sequential invokes whose outcomes
- * merge into one. A failed chunk rejects and leaves the earlier chunks forgotten.
+ * The main process rejects one forget_books invoke over MAX_BULK_BOOK_IDS ids;
+ * a failed chunk rejects and leaves the earlier chunks forgotten.
  */
 export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
   if (bookIds.length <= MAX_BULK_BOOK_IDS) {
@@ -208,7 +201,6 @@ export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
   return invoke("get_book_metadata", { bookId });
 }
 
-/** Drop every override; the book returns to its source-file metadata. */
 export function resetBookMetadata(bookId: number): Promise<BookMetadata> {
   return invoke("reset_book_metadata", { bookId });
 }
@@ -238,27 +230,15 @@ export function reconnectBook(bookId: number, path: string): Promise<Book> {
   return invoke("reconnect_book", { bookId, path });
 }
 
-/**
- * Attach a picked file to a Reading-history book; the backend rejects bytes
- * that already belong to a different book.
- */
+/** The backend rejects bytes that already belong to a different book. */
 export function relinkBook(bookId: number, path: string): Promise<Book> {
   return invoke("relink_book", { bookId, path });
 }
 
-/**
- * Raw bytes of a stored book's source file, fetched over the `tuxbooks://` protocol (range-capable;
- * used whole here). Consumers wrap them in a Blob for the reader engines.
- */
 export function getBookBytes(bookId: number, format: BookFormat): Promise<ArrayBuffer> {
   return tuxbooks().fetchBookBytes(bookId, format);
 }
 
-/**
- * The Readium reading session for a stored EPUB, parsed server-side: the webpub manifest and the
- * positions list, both already deserialized JSON. The navigator's document/image resources load
- * over `tuxbooks://` per resource afterwards.
- */
 export function getEpubSession(bookId: number): Promise<{ manifest: unknown; positions: unknown }> {
   return invoke("get_epub_session", { bookId });
 }
@@ -355,8 +335,8 @@ export function getSyncDiagnostics(): Promise<SyncDiagnostics> {
 }
 
 /**
- * Connect a sync folder. A `mismatch` result is expected when the folder belongs to another
- * library; call again with `confirmLibraryId` to merge this machine's state into it.
+ * A `mismatch` result means the folder belongs to another library; call again
+ * with `confirmLibraryId` to merge this machine's state into it.
  */
 export function connectSync(
   path: string,
@@ -385,8 +365,7 @@ export function forgetAllWaitingBooks(): Promise<number> {
   return invoke("forget_all_waiting_books");
 }
 
-/** Attach a waiting book to the file the user located. The sidecar verifies
- * the bytes; a mismatch rejects and leaves the book waiting. */
+/** The sidecar verifies the bytes; a mismatch rejects and leaves the book waiting. */
 export function attachWaitingBook(bookUid: string, path: string): Promise<Book> {
   return invoke("attach_waiting_book", { bookUid, path });
 }
@@ -478,9 +457,8 @@ export function copyLibraryLocationPath(locationId: number): Promise<void> {
 }
 
 /**
- * Copy renderer-formatted text to the native clipboard. The renderer's own
- * `navigator.clipboard` write is denied by the permission policy (X-4), so
- * text copies (diagnostics JSON, sync issue details) go through main.
+ * Copy renderer-formatted text through main: the permission policy (X-4)
+ * denies the renderer's own `navigator.clipboard` write.
  */
 export function copyText(text: string): Promise<void> {
   return tuxbooks().copyText(text);
@@ -497,9 +475,8 @@ export function pathForFile(file: File): string {
 }
 
 /**
- * `tuxbooks://cover/<name>` for an extracted cover image. Only the cover's file name crosses the
- * protocol boundary; main resolves it inside the artwork cache, so the stored absolute path never
- * round-trips through the renderer (issue #84 T-1).
+ * `tuxbooks://cover/<name>`: only the cover's file name crosses the protocol
+ * boundary, so the stored absolute path never round-trips (issue #84 T-1).
  */
 export function coverFileUrl(coverPath: string): string {
   const lastSeparator = Math.max(coverPath.lastIndexOf("/"), coverPath.lastIndexOf("\\"));
