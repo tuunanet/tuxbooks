@@ -64,7 +64,7 @@ describe("Sync issue actions", () => {
     routeIssue(
       issue({
         kind: "operation_rejected",
-        action: "open_folder",
+        action: "openFolder",
         target: "ops/abc/broken.json",
       }),
     );
@@ -83,7 +83,7 @@ describe("Sync issue actions", () => {
     routeIssue(
       issue({
         kind: "duplicate_book",
-        action: "copy_details",
+        action: "copyDetails",
         target: "copy-two.epub",
       }),
       { sync_dismiss_issue: true },
@@ -110,7 +110,7 @@ describe("Sync issue actions", () => {
     routeIssue(
       issue({
         kind: "duplicate_book",
-        action: "copy_details",
+        action: "copyDetails",
         target: "copy-two.epub",
       }),
       { sync_dismiss_issue: true },

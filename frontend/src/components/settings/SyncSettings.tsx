@@ -312,9 +312,9 @@ export function SyncSettings() {
           await retrySyncIssue(issue.id);
           applyStatus(await getSyncStatus());
           await loadLists();
-        } else if (issue.action === "open_folder") {
+        } else if (issue.action === "openFolder") {
           await openSyncFolder();
-        } else if (issue.action === "copy_details") {
+        } else if (issue.action === "copyDetails") {
           await copyText(formatIssueDetails(issue));
           setNotice("Copied issue details.");
         }

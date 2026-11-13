@@ -28,7 +28,7 @@ export function formatIssueDetails(issue: SyncIssue): string {
 }
 
 function isInformational(action: SyncIssue["action"]): boolean {
-  return action === "copy_details" || action === "dismiss";
+  return action === "copyDetails" || action === "dismiss";
 }
 
 /** Accessible label names the row, so several same-kind rows stay distinct. */
@@ -62,7 +62,7 @@ function IssueRow({
       >
         Retry
       </Button>
-    ) : issue.action === "open_folder" ? (
+    ) : issue.action === "openFolder" ? (
       <Button
         size="sm"
         variant="outline"
@@ -73,7 +73,7 @@ function IssueRow({
       >
         Open folder
       </Button>
-    ) : issue.action === "copy_details" ? (
+    ) : issue.action === "copyDetails" ? (
       <Button
         size="sm"
         variant="outline"
@@ -118,7 +118,7 @@ function IssueRow({
         </div>
         <div className="flex flex-wrap items-center gap-1">
           {primary}
-          {issue.action !== "copy_details" ? (
+          {issue.action !== "copyDetails" ? (
             <Button
               size="sm"
               variant="ghost"
@@ -130,7 +130,7 @@ function IssueRow({
               Copy details
             </Button>
           ) : null}
-          {issue.action === "copy_details" ? (
+          {issue.action === "copyDetails" ? (
             <Button
               size="sm"
               variant="ghost"

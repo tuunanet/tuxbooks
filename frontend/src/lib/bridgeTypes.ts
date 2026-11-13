@@ -135,7 +135,7 @@ export interface DiagnosticIssue {
 }
 
 /** What the Sync issues row offers; computed by the sidecar from the kind. */
-export type SyncIssueAction = "retry" | "open_folder" | "copy_details" | "dismiss";
+export type SyncIssueAction = "retry" | "openFolder" | "copyDetails" | "dismiss";
 
 export interface SyncTrashEntry {
   id: number;

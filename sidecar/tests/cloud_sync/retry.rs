@@ -146,7 +146,7 @@ async fn issue_actions_and_targets_are_computed_on_the_server() {
         (
             "file:ops/abc/bad.json".into(),
             "operation_rejected",
-            "open_folder",
+            "openFolder",
             "ops/abc/bad.json",
         ),
         (
@@ -164,25 +164,25 @@ async fn issue_actions_and_targets_are_computed_on_the_server() {
         (
             format!("duplicate-book:{uid}:{file_id}"),
             "duplicate_book",
-            "copy_details",
+            "copyDetails",
             "target",
         ),
         (
             format!("duplicate-book:{short}:{file_id}"),
             "duplicate_book",
-            "copy_details",
+            "copyDetails",
             "Book 00000000",
         ),
         (
             format!("restore-snapshot-missing:{uid}"),
             "book_snapshot_missing",
-            "copy_details",
+            "copyDetails",
             "target",
         ),
         (
             format!("book-snapshot:{uid}"),
             "book_snapshot_invalid",
-            "copy_details",
+            "copyDetails",
             "target",
         ),
         (
@@ -191,12 +191,7 @@ async fn issue_actions_and_targets_are_computed_on_the_server() {
             "dismiss",
             "mystery",
         ),
-        (
-            "future:value".into(),
-            "future_kind",
-            "copy_details",
-            "value",
-        ),
+        ("future:value".into(), "future_kind", "copyDetails", "value"),
     ];
     for (key, kind, _, _) in &cases {
         insert_issue(&a, key, kind).await;

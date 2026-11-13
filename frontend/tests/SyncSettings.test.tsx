@@ -76,7 +76,7 @@ describe("SyncSettings", () => {
       sync_issues: [
         issue({
           kind: "duplicate_book",
-          action: "copy_details",
+          action: "copyDetails",
           target: "copy-two.epub",
           detail: "two files share one book identity",
           fileName: null,
@@ -331,7 +331,7 @@ describe("SyncSettings", () => {
     };
     const issueRow = issue({
       kind: "duplicate_book",
-      action: "copy_details",
+      action: "copyDetails",
       detail: "operation rejected",
       fileName: null,
     });
