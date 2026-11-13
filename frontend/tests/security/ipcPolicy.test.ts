@@ -154,7 +154,7 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       ).toThrow(/join or start new/);
     });
 
-    it("validates the sync id and device name methods", () => {
+    it("validates the sync id and device name methods and allows sync_set_auto_retry", () => {
       expect(() => validateInvokeParams("sync_restore", { id: 1 }, issued())).not.toThrow();
       expect(() => validateInvokeParams("sync_retry_issue", { id: 2 }, issued())).not.toThrow();
       expect(() => validateInvokeParams("sync_retry_issue", { id: 0 }, issued())).toThrow(
@@ -169,6 +169,9 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       expect(() => validateInvokeParams("sync_set_device_name", { name: "  " }, issued())).toThrow(
         /invalid device name/,
       );
+      expect(() =>
+        validateInvokeParams("sync_set_auto_retry", { enabled: false }, issued()),
+      ).not.toThrow();
     });
 
     it("accepts the no-parameter diagnostics command", () => {

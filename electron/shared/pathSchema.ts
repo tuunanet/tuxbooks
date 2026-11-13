@@ -299,6 +299,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "sync_trash",
   "sync_restore",
   "sync_set_device_name",
+  "sync_set_auto_retry",
   "sync_diagnostics",
 ]);
 

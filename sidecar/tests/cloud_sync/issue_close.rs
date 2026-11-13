@@ -1,6 +1,7 @@
 use crate::common::*;
 use crate::support::*;
 use serde_json::json;
+use tuxbooks_lib::sync::file_version;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rejected_operation_closes_when_it_is_applied_or_removed() {
@@ -257,4 +258,165 @@ async fn conflicts_are_never_dismissed() {
             .await
             .unwrap();
     assert!(info_open.is_some(), "the informational row is dismissed");
+}
+
+/// A winning `file_version` pointer as an applied remote op leaves it, for a
+/// local copy that has not adopted it yet.
+async fn insert_file_version(device: &Device, uid: &str, hash: &str, size: i64) {
+    sqlx::query(
+        "INSERT INTO sync_state_entities (kind, entity_uid, book_uid)
+         VALUES ('file_version', ?1, ?1)",
+    )
+    .bind(uid)
+    .execute(&device.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_state_fields
+            (kind, entity_uid, field, value_json, hlc_wall, hlc_counter, hlc_device)
+         VALUES ('file_version', ?1, 'content_hash', ?2, 2, 0, ?3),
+                ('file_version', ?1, 'size', ?4, 2, 0, ?3)",
+    )
+    .bind(uid)
+    .bind(json!(hash).to_string())
+    .bind("f".repeat(32))
+    .bind(json!(size).to_string())
+    .execute(&device.pool)
+    .await
+    .unwrap();
+}
+
+/// Whether adoption still has work for this book: its copy differs from the
+/// winning pointer, so `unsettled_copies` would feed it to the sweep.
+async fn still_unsettled(device: &Device, uid: &str) -> bool {
+    file_version::unsettled_copies(&device.pool)
+        .await
+        .unwrap()
+        .iter()
+        .any(|copy| copy.book_uid == uid)
+}
+
+/// Put `bytes` under the winning book-blob address in the sync folder, so
+/// the arrival half of the self-close can be staged.
+fn write_book_blob(sync_root: &Path, hash: &str, bytes: &[u8]) {
+    let blob_dir = sync_root.join("TuxBooks").join("blobs").join("books");
+    std::fs::create_dir_all(&blob_dir).unwrap();
+    std::fs::write(blob_dir.join(format!("{hash}.epub")), bytes).unwrap();
+}
+
+/// The blob-arrival half of SYNC.md's self-close: a `book_file_adopt_failed`
+/// row is the wait for the winning blob — the arrival itself closes it (no
+/// pass runs, no adoption executes), and the attention count follows.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adopt_wait_issue_closes_when_the_blob_arrives() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "adopt-arrives.epub", b"adopt arrives bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    // The bytes the pointer names; the blob has to verify, not merely sit in
+    // the folder, to count as an arrival.
+    let staged = b"staged bytes";
+    let winning = format!("{:x}", Sha256::digest(staged));
+    insert_file_version(&a, &uid, &winning, staged.len() as i64).await;
+    insert_issue(
+        &a,
+        &format!("book-file-adopt:{uid}"),
+        "book_file_adopt_failed",
+    )
+    .await;
+
+    // Control: the pointer names bytes this copy never received, so the
+    // copy is unsettled and the wait is visible.
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    assert!(still_unsettled(&a, &uid).await, "the copy is still waiting");
+
+    write_book_blob(sync_dir.path(), &winning, staged);
+
+    a.service.status().await.unwrap();
+    assert!(
+        still_unsettled(&a, &uid).await,
+        "the copy still differs from the winner, so only the arrival can close"
+    );
+    assert!(
+        open_issue_kinds(&a).await.is_empty(),
+        "the arrival closed the row"
+    );
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
+}
+
+/// Bytes under the winning address that do not verify are not an arrival:
+/// the wait row stays open, so a verification failure keeps its visibility
+/// until a pass adopts or the pointer moves on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_present_but_unverifiable_blob_keeps_the_adopt_wait_open() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let book = add_book(&a, "adopt-corrupt.epub", b"adopt corrupt bytes").await;
+    let uid = book_uid(&a, book).await;
+    connect(&a, sync_dir.path()).await;
+    // Right size, wrong bytes: the size pre-check passes and the hash is
+    // what must reject.
+    let junk = b"staged bytes";
+    let winning = "c".repeat(64);
+    insert_file_version(&a, &uid, &winning, junk.len() as i64).await;
+    insert_issue(
+        &a,
+        &format!("book-file-adopt:{uid}"),
+        "book_file_adopt_failed",
+    )
+    .await;
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    assert!(still_unsettled(&a, &uid).await, "the copy is still waiting");
+
+    write_book_blob(sync_dir.path(), &winning, junk);
+
+    a.service.status().await.unwrap();
+    assert!(
+        open_issue_kinds(&a)
+            .await
+            .iter()
+            .any(|kind| kind == "book_file_adopt_failed"),
+        "present-but-unverifiable is not an arrival"
+    );
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+}
+
+/// The pointer-moves half of SYNC.md's self-close: once the binding carries
+/// the winning hash the copy settles out of the adoption set, adoption never
+/// runs for the row, and the sweep closes it instead of leaving it lit until
+/// a manual dismissal.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adopt_wait_issue_closes_when_the_pointer_moves_on() {
+    let a = device().await;
+    let book = add_book(&a, "adopt-moved.epub", b"adopt moved bytes").await;
+    let uid = book_uid(&a, book).await;
+    let winning = "b".repeat(64);
+    insert_file_version(&a, &uid, &winning, 23).await;
+    insert_issue(
+        &a,
+        &format!("book-file-adopt:{uid}"),
+        "book_file_adopt_failed",
+    )
+    .await;
+
+    assert_eq!(a.service.status().await.unwrap().issues, 1);
+    assert!(still_unsettled(&a, &uid).await, "the copy is still waiting");
+
+    // The shared bytes landed and the identity sweep rebound the copy onto
+    // the pointer, so adoption has nothing left to run for this row.
+    sqlx::query("UPDATE sync_book_bindings SET content_hash = ?1 WHERE book_id = ?2")
+        .bind(&winning)
+        .bind(book)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+    assert!(!still_unsettled(&a, &uid).await, "the copy settled");
+
+    a.service.status().await.unwrap();
+    assert!(
+        open_issue_kinds(&a).await.is_empty(),
+        "the moved pointer closed the row"
+    );
+    assert_eq!(a.service.status().await.unwrap().issues, 0);
 }

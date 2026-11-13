@@ -238,10 +238,11 @@ async fn hash_failed(pool: &SqlitePool) -> Result<Vec<HashFailedBook>, AppError>
         .collect())
 }
 
-/// The rows the conflict diagnostics talk about: unresolved, never
-/// `progress`. Both queries share the fragment so the count and the sample
-/// cover the same set.
-const OPEN_CONFLICT_WHERE: &str = "c.resolved_at IS NULL AND c.kind <> 'progress'";
+/// Every unresolved row, progress included: the doc contract counts and
+/// samples open conflicts without a kind exclusion (ADR 0017 D2 keeps them
+/// out of product surfaces, not out of the support report). Both queries
+/// share the fragment so the count and the sample cover the same set.
+const OPEN_CONFLICT_WHERE: &str = "c.resolved_at IS NULL";
 
 /// The open-conflict total for support's report, matching the sample query.
 async fn open_conflict_count(pool: &SqlitePool) -> Result<i64, AppError> {
