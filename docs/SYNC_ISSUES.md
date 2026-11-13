@@ -92,7 +92,10 @@ Failures become rows in `sync_issues`:
 
 The Settings > Sync tab shows the state (`Off`, `Up to date`, `Syncing`, `Needs
 attention`), last sync, pending local items, books waiting for their file,
-issues, and recently deleted items. Invalid operation files are
+issues, and recently deleted items. Its **Sync now** button runs the
+`sync_now` command, which wakes the pass loop so a pass starts right away
+instead of waiting for the 2-second dirty poll or the 10-second pass interval;
+it is disabled while a pass is running. Invalid operation files are
 retried five times before being marked processed with an issue, so one bad file
 cannot starve the rest.
 
