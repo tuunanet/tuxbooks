@@ -9,6 +9,7 @@ use crate::error::AppError;
 use super::clear::resolve_issue_key;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::identity::{canonical_book_uid, record_duplicate_bindings, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::merge::{self, Affected};
 use crate::sync::model::EntityKind;
 use crate::sync::store;
@@ -58,7 +59,7 @@ impl super::SyncService {
                             record_issue(
                                 &self.inner.pool,
                                 &format!("cover-missing:{name}"),
-                                "cover_missing",
+                                SyncIssueKind::CoverMissing,
                                 &format!(
                                     "cover {name} is not in the sync folder yet; \
                                      applying the metadata edit without it"
@@ -72,7 +73,7 @@ impl super::SyncService {
                             record_issue(
                                 &self.inner.pool,
                                 &format!("cover-missing:{name}"),
-                                "cover_missing",
+                                SyncIssueKind::CoverMissing,
                                 &format!("could not read cover {name}: {err}"),
                                 Some(&file.relative_path),
                             )
@@ -170,7 +171,7 @@ impl super::SyncService {
                         record_issue(
                             &self.inner.pool,
                             &format!("reproject:{book_uid}"),
-                            "reprojection_failed",
+                            SyncIssueKind::ReprojectionFailed,
                             &format!("could not project state for {book_uid}: {err}"),
                             None,
                         )
@@ -245,9 +246,9 @@ impl super::SyncService {
             &self.inner.pool,
             &format!("file:{}", file.relative_path),
             if give_up {
-                "operation_rejected"
+                SyncIssueKind::OperationRejected
             } else {
-                "operation_retrying"
+                SyncIssueKind::OperationRetrying
             },
             if give_up {
                 format!("gave up after {failures} attempts: {detail}")

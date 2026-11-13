@@ -22,6 +22,7 @@ use crate::domain::IndexingRetry;
 use crate::error::AppError;
 use crate::repository::{books, identity_backfill, sync_issues};
 use crate::sync::identity::ensure_book_identity;
+use crate::sync::kind::SyncIssueKind;
 
 /// How many books one batch claims before yielding. Small enough that a
 /// shutdown or a new import does not wait on a whole library.
@@ -185,7 +186,7 @@ pub async fn ensure_failed_issues(pool: &SqlitePool) -> Result<(), AppError> {
         sync_issues::ensure(
             pool,
             &failure_key(durable_id),
-            "hash_failed",
+            SyncIssueKind::HashFailed,
             &failure_detail(&path),
             None,
         )
@@ -201,7 +202,7 @@ async fn record_hash_issue(pool: &SqlitePool, durable_id: i64, path: &str) -> Re
     sync_issues::record(
         pool,
         &failure_key(durable_id),
-        "hash_failed",
+        SyncIssueKind::HashFailed,
         &failure_detail(path),
         None,
     )

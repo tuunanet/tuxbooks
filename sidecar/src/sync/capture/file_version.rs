@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use crate::error::AppError;
 use crate::sync::file_version;
 use crate::sync::identity::{canonical_book_uid, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::model::{canonical_from_snapshot, EntityKind};
 use crate::sync::store::{self, BookBlobStage};
 
@@ -77,7 +78,7 @@ pub(super) async fn capture_file_version(
             record_issue(
                 pool,
                 &format!("book-blob-oversize:{uid}"),
-                "book_blob_oversize",
+                SyncIssueKind::BookBlobOversize,
                 "the file for this book is larger than the 256 MiB sync limit, \
                      so its bytes cannot be shared. Shrink the file or raise the cap; \
                      the reading state still syncs.",

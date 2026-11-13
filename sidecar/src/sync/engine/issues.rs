@@ -6,6 +6,7 @@ use crate::error::AppError;
 
 use super::{SyncIssue, SyncIssueAction};
 use crate::sync::clock::now_rfc3339;
+use crate::sync::kind::SyncIssueKind;
 
 impl super::SyncService {
     pub async fn issues(&self) -> Result<Vec<SyncIssue>, AppError> {
@@ -143,39 +144,58 @@ async fn issue_target(
         .split_once(':')
         .map(|(_, value)| value)
         .unwrap_or(issue_key);
-    match kind {
-        "sync_failed" => "Sync pass".to_string(),
-        "projection_failed" | "identity_failed" => match suffix.parse::<i64>() {
-            Ok(book_id) => match file_book_title(pool, book_id).await {
-                Some(title) => title,
-                None => format!("Book {book_id}"),
-            },
-            Err(_) => issue_key.to_string(),
-        },
+    match SyncIssueKind::parse(kind) {
+        Some(SyncIssueKind::SyncFailed) => "Sync pass".to_string(),
+        Some(SyncIssueKind::ProjectionFailed | SyncIssueKind::IdentityFailed) => {
+            match suffix.parse::<i64>() {
+                Ok(book_id) => match file_book_title(pool, book_id).await {
+                    Some(title) => title,
+                    None => format!("Book {book_id}"),
+                },
+                Err(_) => issue_key.to_string(),
+            }
+        }
         // A hash failure is keyed by the durable book id, so the label comes
         // from the durable record rather than a file row.
-        "hash_failed" => match suffix.parse::<i64>() {
+        Some(SyncIssueKind::HashFailed) => match suffix.parse::<i64>() {
             Ok(book_id) => match record_book_title(pool, book_id).await {
                 Some(title) => title,
                 None => format!("Book {book_id}"),
             },
             Err(_) => issue_key.to_string(),
         },
-        "duplicate_book" => {
+        Some(SyncIssueKind::DuplicateBook) => {
             let uid = suffix.split(':').next().unwrap_or(suffix);
             durable_book_title(pool, uid)
                 .await
                 .unwrap_or_else(|| format!("Book {}", short_uid(uid)))
         }
-        "reprojection_failed"
-        | "book_lifecycle_failed"
-        | "book_snapshot_missing"
-        | "book_snapshot_invalid" => durable_book_title(pool, suffix)
+        Some(
+            SyncIssueKind::ReprojectionFailed
+            | SyncIssueKind::BookLifecycleFailed
+            | SyncIssueKind::BookSnapshotMissing
+            | SyncIssueKind::BookSnapshotInvalid,
+        ) => durable_book_title(pool, suffix)
             .await
             .unwrap_or_else(|| format!("Book {}", short_uid(suffix))),
-        "operation_retrying" | "operation_rejected" | "cover_missing" | "cover_blob_failed"
-        | "invalid_dirty_kind" => suffix.to_string(),
-        _ => file_name.unwrap_or(suffix).to_string(),
+        Some(
+            SyncIssueKind::OperationRetrying
+            | SyncIssueKind::OperationRejected
+            | SyncIssueKind::CoverMissing
+            | SyncIssueKind::CoverBlobFailed
+            | SyncIssueKind::InvalidDirtyKind,
+        ) => suffix.to_string(),
+        // The rows without a better label show their file (or the raw key):
+        // legacy `conflict` rows and kinds this build does not know fell
+        // through here too. Exhaustive over the enum on purpose: a new kind
+        // must pick a target.
+        Some(
+            SyncIssueKind::ForgetMembershipSkipped
+            | SyncIssueKind::RestoreConflict
+            | SyncIssueKind::BookBlobOversize
+            | SyncIssueKind::BookFileAdoptFailed,
+        )
+        | None => file_name.unwrap_or(suffix).to_string(),
     }
 }
 

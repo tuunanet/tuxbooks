@@ -8,6 +8,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::repository::books;
+use crate::sync::kind::SyncIssueKind;
 
 use super::alias::{canonical_book_uid, resolve_identity};
 use super::merge::merge_book_identity;
@@ -304,7 +305,7 @@ pub(crate) async fn record_duplicate_bindings(
         record_issue(
             pool,
             &format!("duplicate-book:{book_uid}:{duplicate_id}"),
-            "duplicate_book",
+            SyncIssueKind::DuplicateBook,
             &format!(
                 "This library has more than one file for the same book. \
                  Annotations and progress follow \"{canonical_path}\" (book {canonical_id}). \

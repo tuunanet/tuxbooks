@@ -6,6 +6,7 @@
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
+use crate::sync::kind::SyncIssueKind;
 
 /// `sync_meta` key for the sync on/off flag. `sync::clock` re-exports it so the
 /// key has one owner and services can read it without importing `sync/`.
@@ -26,7 +27,7 @@ pub async fn is_enabled(pool: &SqlitePool) -> Result<bool, AppError> {
 pub async fn record(
     pool: &SqlitePool,
     key: &str,
-    kind: &str,
+    kind: SyncIssueKind,
     detail: &str,
     file_name: Option<&str>,
 ) -> Result<(), AppError> {
@@ -42,7 +43,7 @@ pub async fn record(
         "#,
     )
     .bind(key)
-    .bind(kind)
+    .bind(kind.as_str())
     .bind(detail)
     .bind(file_name)
     .execute(pool)
@@ -56,7 +57,7 @@ pub async fn record(
 pub async fn ensure(
     pool: &SqlitePool,
     key: &str,
-    kind: &str,
+    kind: SyncIssueKind,
     detail: &str,
     file_name: Option<&str>,
 ) -> Result<(), AppError> {
@@ -78,7 +79,7 @@ pub async fn ensure(
         "#,
     )
     .bind(key)
-    .bind(kind)
+    .bind(kind.as_str())
     .bind(detail)
     .bind(file_name)
     .execute(pool)

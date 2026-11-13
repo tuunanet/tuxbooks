@@ -11,6 +11,7 @@ use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::{IndexingRetry, NewBook};
 use tuxbooks_lib::repository::{books, identity_backfill, sync_issues};
 use tuxbooks_lib::services::hash_backfill;
+use tuxbooks_lib::sync::kind::SyncIssueKind;
 
 struct Env {
     _tmp: TempDir,
@@ -386,7 +387,7 @@ async fn ensuring_an_issue_refreshes_changed_detail_without_touching_an_unchange
     sync_issues::ensure(
         &env.pool,
         key,
-        "hash_failed",
+        SyncIssueKind::HashFailed,
         "could not index the old path",
         None,
     )
@@ -405,7 +406,7 @@ async fn ensuring_an_issue_refreshes_changed_detail_without_touching_an_unchange
     sync_issues::ensure(
         &env.pool,
         key,
-        "hash_failed",
+        SyncIssueKind::HashFailed,
         "could not index the old path",
         None,
     )
@@ -427,7 +428,7 @@ async fn ensuring_an_issue_refreshes_changed_detail_without_touching_an_unchange
     sync_issues::ensure(
         &env.pool,
         key,
-        "hash_failed",
+        SyncIssueKind::HashFailed,
         "could not index the new path",
         Some("ops/new.json"),
     )
