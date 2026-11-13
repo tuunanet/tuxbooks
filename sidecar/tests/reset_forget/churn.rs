@@ -1,4 +1,5 @@
 use crate::common::*;
+use tuxbooks_lib::sync::kind::SyncIssueKind;
 
 /// A shared Forget replayed onto an already-forgotten durable book rebuilds
 /// the local trash snapshot with book_id 0 (the record was absent at apply
@@ -261,7 +262,7 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
     record_issue(
         &env.pool,
         &format!("book-lifecycle:{uid}"),
-        "book_lifecycle_failed",
+        SyncIssueKind::BookLifecycleFailed,
         "could not apply the shared change for forgotten book {uid}",
         None,
     )

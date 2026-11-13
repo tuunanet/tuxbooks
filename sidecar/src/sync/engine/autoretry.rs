@@ -13,6 +13,7 @@ use crate::error::AppError;
 use super::{SyncIssueAction, SyncStatus};
 use crate::repository::identity_backfill::retry_delay_secs;
 use crate::sync::clock::{get_meta, now_rfc3339, set_meta, META_AUTO_RETRY};
+use crate::sync::kind::SyncIssueKind;
 
 /// Attempts before the sweep gives up on one row.
 const DEFAULT_CAP: i64 = 5;
@@ -22,19 +23,19 @@ const BOOK_LIFECYCLE_CAP: i64 = 3;
 /// (ADR 0017 D4). `hash_failed` is excluded: its backfill loop already is the
 /// schedule, and resetting its budget would defeat that. New Retry kinds stay
 /// manual until a decision adds them here.
-const AUTO_RETRY_CAPS: [(&str, i64); 8] = [
-    ("projection_failed", DEFAULT_CAP),
-    ("identity_failed", DEFAULT_CAP),
-    ("reprojection_failed", DEFAULT_CAP),
-    ("sync_failed", DEFAULT_CAP),
-    ("operation_retrying", DEFAULT_CAP),
-    ("cover_missing", DEFAULT_CAP),
-    ("cover_blob_failed", DEFAULT_CAP),
-    ("book_lifecycle_failed", BOOK_LIFECYCLE_CAP),
+const AUTO_RETRY_CAPS: [(SyncIssueKind, i64); 8] = [
+    (SyncIssueKind::ProjectionFailed, DEFAULT_CAP),
+    (SyncIssueKind::IdentityFailed, DEFAULT_CAP),
+    (SyncIssueKind::ReprojectionFailed, DEFAULT_CAP),
+    (SyncIssueKind::SyncFailed, DEFAULT_CAP),
+    (SyncIssueKind::OperationRetrying, DEFAULT_CAP),
+    (SyncIssueKind::CoverMissing, DEFAULT_CAP),
+    (SyncIssueKind::CoverBlobFailed, DEFAULT_CAP),
+    (SyncIssueKind::BookLifecycleFailed, BOOK_LIFECYCLE_CAP),
 ];
 
 /// The per-kind attempt cap, or None when the sweep must not touch the kind.
-fn auto_retry_cap(kind: &str) -> Option<i64> {
+fn auto_retry_cap(kind: SyncIssueKind) -> Option<i64> {
     AUTO_RETRY_CAPS
         .iter()
         .find(|(swept, _)| *swept == kind)
@@ -58,12 +59,12 @@ pub(super) fn in_flight_where(enabled: bool) -> String {
     }
     let kinds = AUTO_RETRY_CAPS
         .iter()
-        .map(|(kind, _)| format!("'{kind}'"))
+        .map(|(kind, _)| format!("'{}'", kind.as_str()))
         .collect::<Vec<_>>()
         .join(", ");
     let caps = AUTO_RETRY_CAPS
         .iter()
-        .map(|(kind, cap)| format!("WHEN '{kind}' THEN {cap}"))
+        .map(|(kind, cap)| format!("WHEN '{}' THEN {cap}", kind.as_str()))
         .collect::<Vec<_>>()
         .join(" ");
     format!("kind IN ({kinds}) AND auto_attempts < CASE kind {caps} ELSE 0 END")
@@ -71,12 +72,12 @@ pub(super) fn in_flight_where(enabled: bool) -> String {
 
 /// Kinds whose repair needs a connected folder (ADR 0017 D4). While the
 /// engine is disconnected or disabled they skip without spending budget.
-const FOLDER_DEPENDENT: [&str; 5] = [
-    "sync_failed",
-    "cover_missing",
-    "cover_blob_failed",
-    "operation_retrying",
-    "book_lifecycle_failed",
+const FOLDER_DEPENDENT: [SyncIssueKind; 5] = [
+    SyncIssueKind::SyncFailed,
+    SyncIssueKind::CoverMissing,
+    SyncIssueKind::CoverBlobFailed,
+    SyncIssueKind::OperationRetrying,
+    SyncIssueKind::BookLifecycleFailed,
 ];
 
 /// The detail suffix the sweep writes, cut from its first marker on, so a
@@ -119,10 +120,15 @@ impl super::SyncService {
         let mut changed = false;
         let mut cleared = false;
         for (id, issue_key, kind, file_name, attempts) in rows {
-            let Some(cap) = auto_retry_cap(&kind) else {
+            // Legacy `conflict` rows and kinds from another build never
+            // entered the sweep; they have no cap, so they still do not.
+            let Some(kind) = SyncIssueKind::parse(&kind) else {
                 continue;
             };
-            if SyncIssueAction::for_kind(&kind) != SyncIssueAction::Retry {
+            let Some(cap) = auto_retry_cap(kind) else {
+                continue;
+            };
+            if SyncIssueAction::for_kind(kind.as_str()) != SyncIssueAction::Retry {
                 continue;
             }
             if attempts >= cap {
@@ -131,7 +137,7 @@ impl super::SyncService {
                 continue;
             }
             let connected = status.folder.is_some() && status.enabled;
-            if FOLDER_DEPENDENT.contains(&kind.as_str()) && !connected {
+            if FOLDER_DEPENDENT.contains(&kind) && !connected {
                 // A skip is not an attempt: the row keeps its budget and its
                 // backoff clock for when the folder returns.
                 continue;
@@ -143,7 +149,7 @@ impl super::SyncService {
             }
             changed = true;
             let outcome = self
-                .retry_locked(&kind, &issue_key, file_name.as_deref())
+                .retry_locked(kind.as_str(), &issue_key, file_name.as_deref())
                 .await;
             match outcome {
                 Ok(true) => {

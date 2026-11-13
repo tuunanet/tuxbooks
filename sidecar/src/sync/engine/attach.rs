@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::error::AppError;
 
 use crate::sync::identity::{canonical_book_uid, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::merge;
 use crate::sync::store;
 use crate::sync::waiting;
@@ -118,7 +119,7 @@ impl super::SyncService {
             record_issue(
                 pool,
                 &format!("reproject:{book_uid}"),
-                "reprojection_failed",
+                SyncIssueKind::ReprojectionFailed,
                 &format!("could not project state for {book_uid}: {err}"),
                 None,
             )

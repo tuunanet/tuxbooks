@@ -12,6 +12,7 @@ use crate::sync::clock::{
     device_id, get_meta, now_rfc3339, set_meta, META_BASELINE_DONE, META_LAST_SYNC, META_LIBRARY_ID,
 };
 use crate::sync::identity::{ensure_book_identity, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::merge;
 use crate::sync::store;
 
@@ -61,7 +62,7 @@ impl super::SyncService {
                 let _ = record_issue(
                     &self.inner.pool,
                     "sync-pass",
-                    "sync_failed",
+                    SyncIssueKind::SyncFailed,
                     &err.to_string(),
                     None,
                 )
@@ -263,7 +264,7 @@ impl super::SyncService {
                                     record_issue(
                                         &self.inner.pool,
                                         &format!("project-book:{book_id}"),
-                                        "projection_failed",
+                                        SyncIssueKind::ProjectionFailed,
                                         &format!(
                                             "could not project state for book {book_id}: {err}"
                                         ),
@@ -279,7 +280,7 @@ impl super::SyncService {
                         record_issue(
                             &self.inner.pool,
                             &format!("identity:{book_id}"),
-                            "identity_failed",
+                            SyncIssueKind::IdentityFailed,
                             &format!("could not hash book {book_id}: {err}"),
                             None,
                         )

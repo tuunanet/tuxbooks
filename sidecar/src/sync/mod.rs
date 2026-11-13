@@ -13,6 +13,7 @@ pub mod engine;
 pub mod file_version;
 pub mod gc;
 pub mod identity;
+pub mod kind;
 pub mod merge;
 pub mod model;
 pub mod store;

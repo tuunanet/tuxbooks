@@ -1,6 +1,7 @@
 //! Collection merge and canonical-entity-uid tests.
 
 use super::*;
+use crate::sync::kind::SyncIssueKind;
 
 #[tokio::test]
 async fn merging_collections_moves_fields_memberships_and_trash() {
@@ -108,13 +109,19 @@ async fn canonical_entity_ids_follow_a_chain_and_issues_are_refreshed_in_place()
         "c"
     );
 
-    record_issue(&pool, "one-key", "first_kind", "first detail", None)
-        .await
-        .unwrap();
     record_issue(
         &pool,
         "one-key",
-        "second_kind",
+        SyncIssueKind::DuplicateBook,
+        "first detail",
+        None,
+    )
+    .await
+    .unwrap();
+    record_issue(
+        &pool,
+        "one-key",
+        SyncIssueKind::HashFailed,
         "second detail",
         Some("ops/file.json"),
     )
@@ -126,7 +133,7 @@ async fn canonical_entity_ids_follow_a_chain_and_issues_are_refreshed_in_place()
             .await
             .unwrap();
     assert_eq!(rows.len(), 1, "one open issue per key");
-    assert_eq!(rows[0].0, "second_kind");
+    assert_eq!(rows[0].0, "hash_failed");
     assert_eq!(rows[0].1, "second detail");
     assert_eq!(rows[0].2.as_deref(), Some("ops/file.json"));
 

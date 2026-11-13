@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::sync::identity::{canonical_book_uid, canonical_entity_uid, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::model::{canonical_from_snapshot, EntityKind};
 use crate::sync::store;
 
@@ -58,7 +59,7 @@ async fn capture_one(
         record_issue(
             pool,
             &format!("dirty-kind:{}", row.kind),
-            "invalid_dirty_kind",
+            SyncIssueKind::InvalidDirtyKind,
             &format!("unknown dirty marker kind {}", row.kind),
             None,
         )
@@ -245,7 +246,7 @@ async fn capture_book_state(
                 record_issue(
                     pool,
                     &format!("cover:{name}"),
-                    "cover_blob_failed",
+                    SyncIssueKind::CoverBlobFailed,
                     &format!("could not publish cover {name}: {err}"),
                     None,
                 )

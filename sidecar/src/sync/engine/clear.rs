@@ -8,6 +8,7 @@ use crate::error::AppError;
 
 use crate::sync::clock::now_rfc3339;
 use crate::sync::file_version;
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::model::Op;
 use crate::sync::store;
 
@@ -24,23 +25,25 @@ impl super::SyncService {
         file_name: Option<&str>,
     ) -> Result<bool, AppError> {
         let root = self.sync_root();
-        match kind {
-            "duplicate_book" => match issue_key
+        match SyncIssueKind::parse(kind) {
+            Some(SyncIssueKind::DuplicateBook) => match issue_key
                 .strip_prefix("duplicate-book:")
                 .and_then(|rest| rest.split(':').next())
             {
                 Some(uid) => Ok(self.binding_count(uid).await? < 2),
                 None => Ok(false),
             },
-            "operation_retrying" | "operation_rejected" => match issue_key.strip_prefix("file:") {
-                Some(relative) => self.operation_cleared(relative, root.as_deref()).await,
-                None => Ok(false),
-            },
-            "cover_missing" => match issue_key.strip_prefix("cover-missing:") {
+            Some(SyncIssueKind::OperationRetrying | SyncIssueKind::OperationRejected) => {
+                match issue_key.strip_prefix("file:") {
+                    Some(relative) => self.operation_cleared(relative, root.as_deref()).await,
+                    None => Ok(false),
+                }
+            }
+            Some(SyncIssueKind::CoverMissing) => match issue_key.strip_prefix("cover-missing:") {
                 Some(name) => self.cover_applied(name, file_name).await,
                 None => Ok(false),
             },
-            "cover_blob_failed" => match issue_key.strip_prefix("cover:") {
+            Some(SyncIssueKind::CoverBlobFailed) => match issue_key.strip_prefix("cover:") {
                 Some(name) => Ok(root
                     .as_deref()
                     .is_some_and(|root| store::cover_blob_exists(root, name))),
@@ -49,22 +52,29 @@ impl super::SyncService {
             // The file shrank (or the book left the library) and a re-import
             // published a version the cap allows: the winning hash matches a
             // binding under the cap, or no binding remains (ADR 0018 D2).
-            "book_blob_oversize" => match issue_key.strip_prefix("book-blob-oversize:") {
-                Some(uid) => match crate::sync::file_version::winning(&self.inner.pool, uid).await?
-                {
-                    Some(winning) => Ok(self.binding_under_cap(uid, &winning.content_hash).await?),
-                    None => Ok(self.binding_count(uid).await? == 0),
-                },
-                None => Ok(false),
-            },
-            "projection_failed" => match issue_key.strip_prefix("project-book:") {
-                Some(rest) => match rest.parse::<i64>() {
-                    Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
-                    Err(_) => Ok(false),
-                },
-                None => Ok(false),
-            },
-            "identity_failed" => match issue_key.strip_prefix("identity:") {
+            Some(SyncIssueKind::BookBlobOversize) => {
+                match issue_key.strip_prefix("book-blob-oversize:") {
+                    Some(uid) => {
+                        match crate::sync::file_version::winning(&self.inner.pool, uid).await? {
+                            Some(winning) => {
+                                Ok(self.binding_under_cap(uid, &winning.content_hash).await?)
+                            }
+                            None => Ok(self.binding_count(uid).await? == 0),
+                        }
+                    }
+                    None => Ok(false),
+                }
+            }
+            Some(SyncIssueKind::ProjectionFailed) => {
+                match issue_key.strip_prefix("project-book:") {
+                    Some(rest) => match rest.parse::<i64>() {
+                        Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
+                        Err(_) => Ok(false),
+                    },
+                    None => Ok(false),
+                }
+            }
+            Some(SyncIssueKind::IdentityFailed) => match issue_key.strip_prefix("identity:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
                     Err(_) => Ok(false),
@@ -75,7 +85,7 @@ impl super::SyncService {
             // is the claimed state during an attempt, and `failed` is the
             // result; closing on either would drop the issue mid-retry and
             // reopen it with a new id on the next failure.
-            "hash_failed" => match issue_key.strip_prefix("hash-failed:") {
+            Some(SyncIssueKind::HashFailed) => match issue_key.strip_prefix("hash-failed:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => match self.book_hash_state(book_id).await? {
                         None => Ok(true),
@@ -85,27 +95,43 @@ impl super::SyncService {
                 },
                 None => Ok(false),
             },
-            "reprojection_failed" => match issue_key.strip_prefix("reproject:") {
+            Some(SyncIssueKind::ReprojectionFailed) => match issue_key.strip_prefix("reproject:") {
                 Some(uid) => {
                     Ok(!self.book_record_exists(uid).await? && self.binding_count(uid).await? == 0)
                 }
                 None => Ok(false),
             },
-            "book_lifecycle_failed" => match issue_key.strip_prefix("book-lifecycle:") {
-                Some(uid) => Ok(!self.book_record_exists(uid).await?),
-                None => Ok(false),
-            },
+            Some(SyncIssueKind::BookLifecycleFailed) => {
+                match issue_key.strip_prefix("book-lifecycle:") {
+                    Some(uid) => Ok(!self.book_record_exists(uid).await?),
+                    None => Ok(false),
+                }
+            }
             // The row is the wait for a winning blob (ADR 0018 D2): it ends
             // when the blob arrives intact or the pointer moves on — no
             // unsettled copy is left for adoption to run for, so no later
             // pass would ever close it.
-            "book_file_adopt_failed" => match issue_key.strip_prefix("book-file-adopt:") {
-                Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
-                None => Ok(false),
-            },
-            // Conflicts belong to review. Informational rows have no
-            // automatic condition.
-            _ => Ok(false),
+            Some(SyncIssueKind::BookFileAdoptFailed) => {
+                match issue_key.strip_prefix("book-file-adopt:") {
+                    Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
+                    None => Ok(false),
+                }
+            }
+            // Conflicts belong to review; they land here as an unknown kind,
+            // like any string this build does not know. The listed kinds are
+            // the ones with no automatic condition: a later pass resolves
+            // `sync_failed` by key, and the rest are informational. Exhaustive
+            // over the enum on purpose: a new kind must say whether its
+            // condition can clear.
+            Some(
+                SyncIssueKind::SyncFailed
+                | SyncIssueKind::InvalidDirtyKind
+                | SyncIssueKind::BookSnapshotMissing
+                | SyncIssueKind::BookSnapshotInvalid
+                | SyncIssueKind::ForgetMembershipSkipped
+                | SyncIssueKind::RestoreConflict,
+            )
+            | None => Ok(false),
         }
     }
 

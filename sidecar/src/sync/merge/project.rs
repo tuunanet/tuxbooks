@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::sync::identity;
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::model::EntityKind;
 
 use super::catalog;
@@ -160,7 +161,7 @@ async fn project_book_lifecycle(
             identity::record_issue(
                 pool,
                 &format!("book-lifecycle:{book_uid}"),
-                "book_lifecycle_failed",
+                SyncIssueKind::BookLifecycleFailed,
                 &format!("could not apply the shared change for forgotten book {book_uid}: {err}"),
                 None,
             )

@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 use crate::sync::identity::{canonical_book_uid, canonical_entity_uid, record_issue};
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::merge;
 use crate::sync::model::{EntityKind, State};
 
@@ -62,7 +63,7 @@ pub(super) async fn capture_book(
                 record_issue(
                     pool,
                     &format!("book-snapshot:{uid}"),
-                    "book_snapshot_invalid",
+                    SyncIssueKind::BookSnapshotInvalid,
                     &format!(
                         "could not publish the forgotten book snapshot: {err}; \
                          other machines will not be able to restore it"
@@ -79,7 +80,7 @@ pub(super) async fn capture_book(
         record_issue(
             pool,
             &format!("book-snapshot-missing:{uid}"),
-            "book_snapshot_missing",
+            SyncIssueKind::BookSnapshotMissing,
             "this book was forgotten without a portable snapshot; other machines \
              will see the delete but cannot offer a restore",
             None,

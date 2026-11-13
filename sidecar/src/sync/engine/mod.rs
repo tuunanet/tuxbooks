@@ -23,6 +23,7 @@ use super::clock::{
     META_LAST_ERROR, META_LAST_SYNC, META_LIBRARY_ID, META_LIBRARY_RELOAD,
 };
 use super::conflict;
+use super::kind::SyncIssueKind;
 use super::store;
 use super::waiting;
 
@@ -88,24 +89,39 @@ pub enum SyncIssueAction {
 }
 
 impl SyncIssueAction {
+    /// Map a stored kind to its action. The match is exhaustive over
+    /// `SyncIssueKind`: a new kind must pick an action here at compile time,
+    /// while a kind string this build does not know keeps the
+    /// informational default it always had.
     pub fn for_kind(kind: &str) -> Self {
-        match kind {
-            "projection_failed"
-            | "identity_failed"
-            | "reprojection_failed"
-            | "book_lifecycle_failed"
-            | "sync_failed"
-            | "operation_retrying"
-            | "cover_missing"
-            | "cover_blob_failed"
-            | "hash_failed" => Self::Retry,
+        match SyncIssueKind::parse(kind) {
+            Some(
+                SyncIssueKind::ProjectionFailed
+                | SyncIssueKind::IdentityFailed
+                | SyncIssueKind::ReprojectionFailed
+                | SyncIssueKind::BookLifecycleFailed
+                | SyncIssueKind::SyncFailed
+                | SyncIssueKind::OperationRetrying
+                | SyncIssueKind::CoverMissing
+                | SyncIssueKind::CoverBlobFailed
+                | SyncIssueKind::HashFailed,
+            ) => Self::Retry,
             // A rejected operation failed the retry limit. The file has to be
             // fixed or removed in the sync folder before another pass helps.
-            "operation_rejected" => Self::OpenFolder,
+            Some(SyncIssueKind::OperationRejected) => Self::OpenFolder,
             // An unknown dirty marker is internal state that is cleared as it
             // is reported, so there is nothing for the user to repair.
-            "invalid_dirty_kind" => Self::Dismiss,
-            _ => Self::CopyDetails,
+            Some(SyncIssueKind::InvalidDirtyKind) => Self::Dismiss,
+            Some(
+                SyncIssueKind::DuplicateBook
+                | SyncIssueKind::BookSnapshotMissing
+                | SyncIssueKind::BookSnapshotInvalid
+                | SyncIssueKind::ForgetMembershipSkipped
+                | SyncIssueKind::RestoreConflict
+                | SyncIssueKind::BookBlobOversize
+                | SyncIssueKind::BookFileAdoptFailed,
+            ) => Self::CopyDetails,
+            None => Self::CopyDetails,
         }
     }
 

@@ -8,6 +8,7 @@
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
+use crate::sync::kind::SyncIssueKind;
 
 mod alias;
 mod bind;
@@ -37,7 +38,7 @@ pub struct BookIdentity {
 pub async fn record_issue(
     pool: &SqlitePool,
     key: &str,
-    kind: &str,
+    kind: SyncIssueKind,
     detail: &str,
     file_name: Option<&str>,
 ) -> Result<(), AppError> {

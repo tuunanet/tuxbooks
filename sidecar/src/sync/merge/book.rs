@@ -7,6 +7,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use crate::error::AppError;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::identity::merge_book_identity;
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::model::{EntityKind, Hlc, Op, TRASH_DAYS};
 
 use super::Affected;
@@ -379,7 +380,7 @@ pub(super) async fn apply_book(pool: &SqlitePool, op: &Op) -> Result<Vec<Affecte
         crate::sync::identity::record_issue(
             pool,
             &format!("restore-snapshot-missing:{book_uid}"),
-            "book_snapshot_missing",
+            SyncIssueKind::BookSnapshotMissing,
             "a shared restore arrived without a usable snapshot; the book stays forgotten on this machine",
             None,
         )

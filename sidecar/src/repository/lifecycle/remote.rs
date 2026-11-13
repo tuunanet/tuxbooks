@@ -4,6 +4,7 @@
 use sqlx::SqlitePool;
 
 use crate::error::AppError;
+use crate::sync::kind::SyncIssueKind;
 
 use super::now;
 use super::restore::restore_conflict;
@@ -36,7 +37,7 @@ pub async fn apply_remote_forget(
                 let _ = crate::sync::identity::record_issue(
                     pool,
                     &format!("forget-snapshot-invalid:{old_uid}"),
-                    "book_snapshot_invalid",
+                    SyncIssueKind::BookSnapshotInvalid,
                     &format!(
                         "the shared Forget carried an unreadable snapshot ({err}); \
                          the delete was applied but no local restore is available"
@@ -191,7 +192,7 @@ pub async fn apply_remote_forget(
         let _ = crate::sync::identity::record_issue(
             pool,
             &format!("forget-collections:{old_uid}"),
-            "forget_membership_skipped",
+            SyncIssueKind::ForgetMembershipSkipped,
             &format!(
                 "the restored snapshot named shelves this library does not have yet ({})",
                 names.join(", ")
@@ -204,7 +205,7 @@ pub async fn apply_remote_forget(
         let _ = crate::sync::identity::record_issue(
             pool,
             &format!("forget-snapshot:{old_uid}"),
-            "book_snapshot_missing",
+            SyncIssueKind::BookSnapshotMissing,
             "another machine forgot this book without a usable snapshot; the delete was applied but no restore is available here",
             None,
         )
@@ -246,7 +247,7 @@ pub async fn apply_remote_restore(
                 let _ = crate::sync::identity::record_issue(
                     pool,
                     &format!("restore-snapshot:{old_uid}"),
-                    "book_snapshot_missing",
+                    SyncIssueKind::BookSnapshotMissing,
                     "a shared restore arrived without a snapshot; the book was not recreated",
                     None,
                 )
@@ -258,7 +259,7 @@ pub async fn apply_remote_restore(
                 let _ = crate::sync::identity::record_issue(
                     pool,
                     &format!("restore-collections:{old_uid}"),
-                    "forget_membership_skipped",
+                    SyncIssueKind::ForgetMembershipSkipped,
                     &format!(
                         "the restored snapshot named shelves this library does not have yet ({})",
                         unresolved.join(", ")
@@ -290,7 +291,7 @@ pub async fn apply_remote_restore(
             let _ = crate::sync::identity::record_issue(
                 pool,
                 &format!("restore-conflict:{old_uid}"),
-                "restore_conflict",
+                SyncIssueKind::RestoreConflict,
                 &format!(
                     "a shared restore replaced newer local state on the fresh book \
                      ({}% progress, {} annotations)",

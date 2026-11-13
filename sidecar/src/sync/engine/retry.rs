@@ -9,6 +9,7 @@ use super::clear::read_sync_op;
 use super::SyncIssueAction;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::identity::ensure_book_identity;
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::merge;
 use crate::sync::store;
 
@@ -112,7 +113,8 @@ impl super::SyncService {
         // being connected, or a detached device could never retry the hash
         // behind a row that is already listed. The issue key holds the durable
         // book id, so every location is retried together.
-        if kind == "hash_failed" {
+        let parsed = SyncIssueKind::parse(kind);
+        if matches!(parsed, Some(SyncIssueKind::HashFailed)) {
             let book_id = parse_key_i64(issue_key, "hash-failed:")?;
             let outcome =
                 crate::services::hash_backfill::retry_book(&self.inner.pool, book_id).await?;
@@ -122,13 +124,13 @@ impl super::SyncService {
             AppError::InvalidInput("sync is not connected; reconnect the sync folder".into())
         })?;
         let root = store::resolve_root(Path::new(&folder))?;
-        match kind {
-            "projection_failed" => {
+        match parsed {
+            Some(SyncIssueKind::ProjectionFailed) => {
                 let book_id = parse_key_i64(issue_key, "project-book:")?;
                 self.reproject_file_row(book_id, &root).await?;
                 Ok(true)
             }
-            "identity_failed" => {
+            Some(SyncIssueKind::IdentityFailed) => {
                 let book_id = parse_key_i64(issue_key, "identity:")?;
                 match ensure_book_identity(&self.inner.pool, book_id).await? {
                     Some(identity) => {
@@ -147,12 +149,12 @@ impl super::SyncService {
                     }
                 }
             }
-            "reprojection_failed" => {
+            Some(SyncIssueKind::ReprojectionFailed) => {
                 let book_uid = parse_key(issue_key, "reproject:")?;
                 self.reproject_book_or_gone(&book_uid, &root).await?;
                 Ok(true)
             }
-            "book_lifecycle_failed" => {
+            Some(SyncIssueKind::BookLifecycleFailed) => {
                 let book_uid = parse_key(issue_key, "book-lifecycle:")?;
                 if !merge::retry_book_lifecycle(&self.inner.pool, &book_uid).await? {
                     // Nothing in the mirror to replay. Leave the row open so a
@@ -165,7 +167,7 @@ impl super::SyncService {
                 self.run_pass_locked().await?;
                 Ok(true)
             }
-            "sync_failed" => {
+            Some(SyncIssueKind::SyncFailed) => {
                 if !self.status_snapshot().enabled {
                     return Err(AppError::InvalidInput(
                         "sync is not connected; reconnect the sync folder".into(),
@@ -174,7 +176,7 @@ impl super::SyncService {
                 self.run_pass_locked().await?;
                 Ok(true)
             }
-            "operation_retrying" => {
+            Some(SyncIssueKind::OperationRetrying) => {
                 // Drop the cached failure so the next pass reads the file
                 // again instead of skipping it as already processed.
                 let relative = parse_key(issue_key, "file:")?;
@@ -190,18 +192,33 @@ impl super::SyncService {
                 self.run_pass_locked().await?;
                 self.operation_cleared(&relative, Some(&root)).await
             }
-            "cover_missing" => {
+            Some(SyncIssueKind::CoverMissing) => {
                 let name = parse_key(issue_key, "cover-missing:")?;
                 self.apply_missing_cover(&name, file_name, &root).await?;
                 Ok(true)
             }
-            "cover_blob_failed" => {
+            Some(SyncIssueKind::CoverBlobFailed) => {
                 let name = parse_key(issue_key, "cover:")?;
                 store::store_cover_blob(&root, &self.inner.covers_dir, &name)?;
                 Ok(store::cover_blob_exists(&root, &name))
             }
-            other => Err(AppError::InvalidInput(format!(
-                "sync issue kind {other} has no retry path"
+            // `hash_failed` returned above: indexing is local work. The
+            // listed kinds have no replay here because their action is not
+            // Retry — neither entry point dispatches them — and a kind this
+            // build does not know has nothing to replay. Exhaustive over the
+            // enum on purpose: a new kind must say whether Retry repairs it.
+            Some(SyncIssueKind::HashFailed)
+            | Some(SyncIssueKind::OperationRejected)
+            | Some(SyncIssueKind::DuplicateBook)
+            | Some(SyncIssueKind::InvalidDirtyKind)
+            | Some(SyncIssueKind::BookSnapshotMissing)
+            | Some(SyncIssueKind::BookSnapshotInvalid)
+            | Some(SyncIssueKind::ForgetMembershipSkipped)
+            | Some(SyncIssueKind::RestoreConflict)
+            | Some(SyncIssueKind::BookBlobOversize)
+            | Some(SyncIssueKind::BookFileAdoptFailed)
+            | None => Err(AppError::InvalidInput(format!(
+                "sync issue kind {kind} has no retry path"
             ))),
         }
     }

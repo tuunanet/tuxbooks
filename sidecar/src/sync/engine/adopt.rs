@@ -45,13 +45,14 @@ use sha2::{Digest, Sha256};
 use crate::error::AppError;
 use crate::sync::file_version::{self, UnsettledCopy};
 use crate::sync::identity;
+use crate::sync::kind::SyncIssueKind;
 use crate::sync::store;
 
 use super::clear::resolve_issue_key;
 use super::deferred;
 
 /// The sync issue kind for a blob that is present but does not verify.
-const ADOPT_FAILED_KIND: &str = "book_file_adopt_failed";
+const ADOPT_FAILED_KIND: SyncIssueKind = SyncIssueKind::BookFileAdoptFailed;
 
 impl super::SyncService {
     /// Adopt winning versions after a pass. Best effort like the other
