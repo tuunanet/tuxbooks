@@ -10,8 +10,8 @@ The design assumes the folder is untrusted, eventually consistent, and
 lock-free. Files can arrive late, out of order, duplicated as cloud conflict
 copies, or partially. Nothing in the folder is ever overwritten in place.
 
-Status: implemented in `sidecar/src/sync/` and covered by
-`sidecar/tests/cloud_sync.rs`. The decision records are
+Status: implemented in `sidecar/src/sync/` and covered by the directory suite
+`sidecar/tests/cloud_sync/`, entry point `main.rs`; the decision records are
 [ADR 0013](adr/0013-cloud-folder-sync.md) for the transport and
 [ADR 0015](adr/0015-sync-recovery.md) for recovery and issue actions.
 
@@ -440,8 +440,8 @@ through the normal bootstrap.
 
 ## Testing
 
-`sidecar/tests/cloud_sync.rs` drives real SQLite databases against one shared
-folder. It covers:
+The `sidecar/tests/cloud_sync/` suite drives real SQLite databases against one
+shared folder; run `cargo test --test cloud_sync` from `sidecar/`. It covers:
 
 - one machine's annotation appearing on another;
 - two machines importing the same bytes before meeting, including identity
