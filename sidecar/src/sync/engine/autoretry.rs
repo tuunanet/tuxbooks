@@ -12,6 +12,7 @@ use crate::error::AppError;
 
 use super::{SyncIssueAction, SyncStatus};
 use crate::repository::identity_backfill::retry_delay_secs;
+use crate::repository::sync_issues;
 use crate::sync::clock::{get_meta, now_rfc3339, set_meta, META_AUTO_RETRY};
 use crate::sync::kind::SyncIssueKind;
 
@@ -175,13 +176,7 @@ impl super::SyncService {
 
     /// Close one row the sweep proved clear.
     async fn resolve_auto_cleared(&self, id: i64) -> Result<(), AppError> {
-        sqlx::query(
-            "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
-        )
-        .bind(id)
-        .bind(now_rfc3339())
-        .execute(&self.inner.pool)
-        .await?;
+        sync_issues::resolve_by_id(&self.inner.pool, id, &now_rfc3339()).await?;
         Ok(())
     }
 

@@ -15,6 +15,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{watch, Notify};
 
 use crate::error::AppError;
+use crate::repository::sync_issues;
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 
@@ -388,13 +389,7 @@ impl SyncService {
 
     async fn clear_error(&self) {
         let _ = delete_meta(&self.inner.pool, META_LAST_ERROR).await;
-        let _ = sqlx::query(
-            "UPDATE sync_issues SET resolved_at = ?1
-             WHERE issue_key = 'sync-pass' AND resolved_at IS NULL",
-        )
-        .bind(now_rfc3339())
-        .execute(&self.inner.pool)
-        .await;
+        let _ = sync_issues::resolve(&self.inner.pool, "sync-pass").await;
     }
 
     /// Drain the marker a durable merge writes. The marker survives a failed
