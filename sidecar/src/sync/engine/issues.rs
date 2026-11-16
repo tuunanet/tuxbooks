@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 
+use super::issue_ref::SyncIssueRef;
 use super::{SyncIssue, SyncIssueAction};
 use crate::repository::sync_issues;
 use crate::sync::clock::now_rfc3339;
@@ -44,8 +45,15 @@ impl super::SyncService {
             next_auto_retry_at,
         ) in rows
         {
-            let target =
-                issue_target(&self.inner.pool, &kind, &issue_key, file_name.as_deref()).await;
+            let target = issue_target(
+                &self.inner.pool,
+                SyncIssueRef {
+                    kind: &kind,
+                    issue_key: &issue_key,
+                    file_name: file_name.as_deref(),
+                },
+            )
+            .await;
             issues.push(SyncIssue {
                 id,
                 action: SyncIssueAction::for_kind(&kind),
@@ -123,17 +131,13 @@ impl super::SyncService {
 
 /// Short human label for an issue row. Keys carry internal ids; the UI gets a
 /// title, a relative file, or a kind name instead.
-async fn issue_target(
-    pool: &SqlitePool,
-    kind: &str,
-    issue_key: &str,
-    file_name: Option<&str>,
-) -> String {
-    let suffix = issue_key
+async fn issue_target(pool: &SqlitePool, issue: SyncIssueRef<'_>) -> String {
+    let suffix = issue
+        .issue_key
         .split_once(':')
         .map(|(_, value)| value)
-        .unwrap_or(issue_key);
-    match SyncIssueKind::parse(kind) {
+        .unwrap_or(issue.issue_key);
+    match SyncIssueKind::parse(issue.kind) {
         Some(SyncIssueKind::SyncFailed) => "Sync pass".to_string(),
         Some(SyncIssueKind::ProjectionFailed | SyncIssueKind::IdentityFailed) => {
             match suffix.parse::<i64>() {
@@ -141,7 +145,7 @@ async fn issue_target(
                     Some(title) => title,
                     None => format!("Book {book_id}"),
                 },
-                Err(_) => issue_key.to_string(),
+                Err(_) => issue.issue_key.to_string(),
             }
         }
         // A hash failure is keyed by the durable book id, so the label comes
@@ -151,7 +155,7 @@ async fn issue_target(
                 Some(title) => title,
                 None => format!("Book {book_id}"),
             },
-            Err(_) => issue_key.to_string(),
+            Err(_) => issue.issue_key.to_string(),
         },
         Some(SyncIssueKind::DuplicateBook) => {
             let uid = suffix.split(':').next().unwrap_or(suffix);
@@ -184,7 +188,7 @@ async fn issue_target(
             | SyncIssueKind::BookBlobOversize
             | SyncIssueKind::BookFileAdoptFailed,
         )
-        | None => file_name.unwrap_or(suffix).to_string(),
+        | None => issue.file_name.unwrap_or(suffix).to_string(),
     }
 }
 
