@@ -92,11 +92,16 @@ pub enum SyncIssueAction {
 
 impl SyncIssueAction {
     /// Map a stored kind to its action. The match is exhaustive over
-    /// `SyncIssueKind`: a new kind must pick an action here at compile time,
-    /// while a kind string this build does not know keeps the
-    /// informational default it always had.
-    pub fn for_kind(kind: &str) -> Self {
-        match SyncIssueKind::parse(kind) {
+    /// `SyncIssueKind`: a new kind must pick an action here at compile time.
+    /// Row readers pass `SyncIssueKind::parse`'s result unchanged, so the
+    /// policy for a kind string this build does not know stays in this one
+    /// `None` arm: the informational default it always had. An `Unknown`
+    /// variant would have to join `ALL`, `as_str`, and the SYNC_ISSUES.md
+    /// kinds table the doc test keeps in step, and would split this
+    /// fall-through across callers instead; `None` already is what `parse`
+    /// returns.
+    pub fn for_kind(kind: Option<SyncIssueKind>) -> Self {
+        match kind {
             Some(
                 SyncIssueKind::ProjectionFailed
                 | SyncIssueKind::IdentityFailed
@@ -463,4 +468,21 @@ fn default_device_name() -> String {
                 .filter(|name| !name.is_empty())
         })
         .unwrap_or_else(|| "TuxBooks".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyncIssueAction;
+    use crate::sync::kind::SyncIssueKind;
+
+    /// The unknown-kind policy lives in `for_kind`'s `None` arm: whatever
+    /// `parse` cannot map keeps the informational CopyDetails action every
+    /// dispatch site has always given it.
+    #[test]
+    fn an_unparseable_kind_keeps_the_informational_action() {
+        for unknown in ["conflict", "a_kind_from_another_build"] {
+            let action = SyncIssueAction::for_kind(SyncIssueKind::parse(unknown));
+            assert_eq!(action, SyncIssueAction::CopyDetails, "{unknown}");
+        }
+    }
 }

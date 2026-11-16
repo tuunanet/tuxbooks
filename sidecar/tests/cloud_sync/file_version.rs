@@ -6,6 +6,7 @@ use crate::common::*;
 use sha2::{Digest, Sha256};
 use tuxbooks_lib::services::library_reconciler::{ImportOutcome, Reconciler};
 use tuxbooks_lib::sync::file_version;
+use tuxbooks_lib::sync::kind::SyncIssueKind;
 
 /// Three distinct, parseable committed EPUBs, so a rewrite is a genuine
 /// content change the real parser accepts.
@@ -342,7 +343,7 @@ async fn oversize_file_records_an_issue_and_publishes_nothing() {
     .unwrap();
     assert_eq!(issues.len(), 1, "the oversize issue is open");
     assert_eq!(
-        SyncIssueAction::for_kind("book_blob_oversize"),
+        SyncIssueAction::for_kind(Some(SyncIssueKind::BookBlobOversize)),
         SyncIssueAction::CopyDetails,
         "human-required: no Retry action, so the auto-retry sweep skips it"
     );

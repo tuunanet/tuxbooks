@@ -45,10 +45,11 @@ impl super::SyncService {
             next_auto_retry_at,
         ) in rows
         {
+            let parsed = SyncIssueKind::parse(&kind);
             let target = issue_target(
                 &self.inner.pool,
                 SyncIssueRef {
-                    kind: &kind,
+                    kind: parsed,
                     issue_key: &issue_key,
                     file_name: file_name.as_deref(),
                 },
@@ -56,7 +57,7 @@ impl super::SyncService {
             .await;
             issues.push(SyncIssue {
                 id,
-                action: SyncIssueAction::for_kind(&kind),
+                action: SyncIssueAction::for_kind(parsed),
                 kind,
                 detail,
                 file_name,
@@ -88,7 +89,7 @@ impl super::SyncService {
         if kind == "conflict" {
             return Ok(false);
         }
-        if !SyncIssueAction::for_kind(&kind).is_informational() {
+        if !SyncIssueAction::for_kind(SyncIssueKind::parse(&kind)).is_informational() {
             return Err(AppError::InvalidInput(
                 "this sync issue has an action; retry it or fix it in the sync folder".into(),
             ));
@@ -111,7 +112,8 @@ impl super::SyncService {
         let ids: Vec<i64> = rows
             .into_iter()
             .filter(|(_, kind)| {
-                kind != "conflict" && SyncIssueAction::for_kind(kind).is_informational()
+                kind != "conflict"
+                    && SyncIssueAction::for_kind(SyncIssueKind::parse(kind)).is_informational()
             })
             .map(|(id, _)| id)
             .collect();
@@ -137,7 +139,7 @@ async fn issue_target(pool: &SqlitePool, issue: SyncIssueRef<'_>) -> String {
         .split_once(':')
         .map(|(_, value)| value)
         .unwrap_or(issue.issue_key);
-    match SyncIssueKind::parse(issue.kind) {
+    match issue.kind {
         Some(SyncIssueKind::SyncFailed) => "Sync pass".to_string(),
         Some(SyncIssueKind::ProjectionFailed | SyncIssueKind::IdentityFailed) => {
             match suffix.parse::<i64>() {
@@ -214,4 +216,41 @@ async fn durable_book_title(pool: &SqlitePool, book_uid: &str) -> Option<String>
 
 fn short_uid(uid: &str) -> String {
     uid.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::issue_target;
+    use crate::db::connection::init_pool;
+    use crate::sync::engine::issue_ref::SyncIssueRef;
+    use crate::sync::kind::SyncIssueKind;
+
+    /// The unknown-kind label survives the signature move: a stored string
+    /// the build cannot parse labels from the row's file, or from the key's
+    /// suffix when the row has no file.
+    #[tokio::test]
+    async fn an_unparseable_kind_still_gets_a_label() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+        let from_file = issue_target(
+            &pool,
+            SyncIssueRef {
+                kind: SyncIssueKind::parse("conflict"),
+                issue_key: "conflict:annotation:abc:note",
+                file_name: Some("review.json"),
+            },
+        )
+        .await;
+        assert_eq!(from_file, "review.json");
+        let from_key = issue_target(
+            &pool,
+            SyncIssueRef {
+                kind: None,
+                issue_key: "future:value",
+                file_name: None,
+            },
+        )
+        .await;
+        assert_eq!(from_key, "value");
+    }
 }

@@ -31,7 +31,8 @@ impl super::SyncService {
         let Some((issue_key, kind, file_name)) = row else {
             return Ok(false);
         };
-        if SyncIssueAction::for_kind(&kind) != SyncIssueAction::Retry {
+        let parsed = SyncIssueKind::parse(&kind);
+        if SyncIssueAction::for_kind(parsed) != SyncIssueAction::Retry {
             return Err(AppError::InvalidInput(
                 "this sync issue is not retryable; use its listed action".into(),
             ));
@@ -54,7 +55,7 @@ impl super::SyncService {
         .await?;
         let outcome = self
             .retry_locked(SyncIssueRef {
-                kind: &kind,
+                kind: parsed,
                 issue_key: &issue_key,
                 file_name: file_name.as_deref(),
             })
@@ -107,7 +108,7 @@ impl super::SyncService {
         // being connected, or a detached device could never retry the hash
         // behind a row that is already listed. The issue key holds the durable
         // book id, so every location is retried together.
-        let parsed = SyncIssueKind::parse(issue.kind);
+        let parsed = issue.kind;
         if matches!(parsed, Some(SyncIssueKind::HashFailed)) {
             let book_id = retry_key_i64(issue, "hash-failed:")?;
             let outcome =
@@ -199,23 +200,31 @@ impl super::SyncService {
             }
             // `hash_failed` returned above: indexing is local work. The
             // listed kinds have no replay here because their action is not
-            // Retry — neither entry point dispatches them — and a kind this
-            // build does not know has nothing to replay. Exhaustive over the
-            // enum on purpose: a new kind must say whether Retry repairs it.
-            Some(SyncIssueKind::HashFailed)
-            | Some(SyncIssueKind::OperationRejected)
-            | Some(SyncIssueKind::DuplicateBook)
-            | Some(SyncIssueKind::InvalidDirtyKind)
-            | Some(SyncIssueKind::BookSnapshotMissing)
-            | Some(SyncIssueKind::BookSnapshotInvalid)
-            | Some(SyncIssueKind::ForgetMembershipSkipped)
-            | Some(SyncIssueKind::RestoreConflict)
-            | Some(SyncIssueKind::BookBlobOversize)
-            | Some(SyncIssueKind::BookFileAdoptFailed)
-            | None => Err(AppError::InvalidInput(format!(
+            // Retry — neither entry point dispatches them. Exhaustive over
+            // the enum on purpose: a new kind must say whether Retry
+            // repairs it.
+            Some(
+                kind @ (SyncIssueKind::HashFailed
+                | SyncIssueKind::OperationRejected
+                | SyncIssueKind::DuplicateBook
+                | SyncIssueKind::InvalidDirtyKind
+                | SyncIssueKind::BookSnapshotMissing
+                | SyncIssueKind::BookSnapshotInvalid
+                | SyncIssueKind::ForgetMembershipSkipped
+                | SyncIssueKind::RestoreConflict
+                | SyncIssueKind::BookBlobOversize
+                | SyncIssueKind::BookFileAdoptFailed),
+            ) => Err(AppError::InvalidInput(format!(
                 "sync issue kind {} has no retry path",
-                issue.kind
+                kind.as_str()
             ))),
+            // A kind this build cannot parse has nothing to replay either.
+            // No entry point passes one — both filter at the row edge — so
+            // the report names the case instead of echoing a stored string
+            // the type no longer carries.
+            None => Err(AppError::InvalidInput(
+                "an unknown sync issue kind has no retry path".into(),
+            )),
         }
     }
 

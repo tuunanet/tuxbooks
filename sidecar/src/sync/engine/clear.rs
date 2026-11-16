@@ -22,7 +22,7 @@ impl super::SyncService {
     /// retry outcome check. Conflicts are never cleared here.
     async fn issue_cleared(&self, issue: SyncIssueRef<'_>) -> Result<bool, AppError> {
         let root = self.sync_root();
-        match SyncIssueKind::parse(issue.kind) {
+        match issue.kind {
             Some(SyncIssueKind::DuplicateBook) => match issue
                 .key_after("duplicate-book:")
                 .and_then(|rest| rest.split(':').next())
@@ -138,7 +138,7 @@ impl super::SyncService {
         let mut cleared = Vec::new();
         for (id, issue_key, kind, file_name) in rows {
             let issue = SyncIssueRef {
-                kind: &kind,
+                kind: SyncIssueKind::parse(&kind),
                 issue_key: &issue_key,
                 file_name: file_name.as_deref(),
             };
@@ -394,59 +394,59 @@ mod tests {
         // true here on a fresh database; a prefix literal that drifts from
         // the key its writer builds stops matching, the arm takes its
         // "not cleared" skip, and this goes red.
-        let cases: [(&str, String, Option<&str>); 11] = [
+        let cases: [(SyncIssueKind, String, Option<&str>); 11] = [
             (
-                SyncIssueKind::DuplicateBook.as_str(),
+                SyncIssueKind::DuplicateBook,
                 "duplicate-book:uid-abc:1".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::OperationRetrying.as_str(),
+                SyncIssueKind::OperationRetrying,
                 "file:ops/gone.json".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::CoverMissing.as_str(),
+                SyncIssueKind::CoverMissing,
                 cover_missing_key,
                 Some(&file_name),
             ),
             (
-                SyncIssueKind::CoverBlobFailed.as_str(),
+                SyncIssueKind::CoverBlobFailed,
                 format!("cover:{cover}"),
                 None,
             ),
             (
-                SyncIssueKind::BookBlobOversize.as_str(),
+                SyncIssueKind::BookBlobOversize,
                 "book-blob-oversize:uid-abc".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::ProjectionFailed.as_str(),
+                SyncIssueKind::ProjectionFailed,
                 "project-book:999999".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::IdentityFailed.as_str(),
+                SyncIssueKind::IdentityFailed,
                 "identity:999999".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::HashFailed.as_str(),
+                SyncIssueKind::HashFailed,
                 "hash-failed:999999".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::ReprojectionFailed.as_str(),
+                SyncIssueKind::ReprojectionFailed,
                 "reproject:uid-abc".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::BookLifecycleFailed.as_str(),
+                SyncIssueKind::BookLifecycleFailed,
                 "book-lifecycle:uid-abc".to_string(),
                 None,
             ),
             (
-                SyncIssueKind::BookFileAdoptFailed.as_str(),
+                SyncIssueKind::BookFileAdoptFailed,
                 "book-file-adopt:uid-abc".to_string(),
                 None,
             ),
@@ -454,15 +454,16 @@ mod tests {
         for (kind, key, file_name) in cases {
             let cleared = service
                 .issue_cleared(SyncIssueRef {
-                    kind,
+                    kind: Some(kind),
                     issue_key: &key,
                     file_name,
                 })
                 .await
                 .unwrap();
+            let spelling = kind.as_str();
             assert!(
                 cleared,
-                "the {kind} arm's prefix no longer reads {key}: a drifted \
+                "the {spelling} arm's prefix no longer reads {key}: a drifted \
                  literal skips the arm to \"not cleared\""
             );
         }
@@ -471,12 +472,27 @@ mod tests {
         // key does not carry leaves the row open instead of guessing.
         let skipped = service
             .issue_cleared(SyncIssueRef {
-                kind: SyncIssueKind::IdentityFailed.as_str(),
+                kind: Some(SyncIssueKind::IdentityFailed),
                 issue_key: "wrong-prefix:999999",
                 file_name: None,
             })
             .await
             .unwrap();
         assert!(!skipped, "a non-matching prefix must not clear the row");
+
+        // The kind decides before any arm reads the key: a stored string the
+        // build cannot parse never routes to a clearing arm, even when the
+        // key would clear there (a book with no bindings reads as cleared).
+        for unknown in ["conflict", "a_kind_from_another_build"] {
+            let cleared = service
+                .issue_cleared(SyncIssueRef {
+                    kind: SyncIssueKind::parse(unknown),
+                    issue_key: "duplicate-book:uid-abc:1",
+                    file_name: None,
+                })
+                .await
+                .unwrap();
+            assert!(!cleared, "{unknown} must not reach a clearing arm");
+        }
     }
 }
