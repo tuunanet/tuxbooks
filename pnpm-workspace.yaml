@@ -69,12 +69,28 @@ minimumReleaseAgeExclude:
   # files it against vite 7.3.6 via launch-editor). 7.3.7 fixes, and the
   # repo's ^7.1.0 range already admits it. Remove 2026-11-05.
   - "vite@7.3.7"
-  # 2026-10-22: hono GHSA-5r4p-p66f-jhc7 (moderate; serveStatic
-  # double-decodes the request path, bypassing middleware on static paths).
-  # Dev-only: hono reaches the tree through @modelcontextprotocol/sdk (and
-  # its @hono/node-server dep) under shadcn's CLI. 4.13.11 fixes, and
-  # ^4.11.4 resolves to 4.13.13. Remove 2026-11-03.
-  - "hono@4.13.13"
+  # 2026-11-16: Dependabot alerts #53-#57 — GHSA-46wx-v44x-9hh2 (csrf
+  # text/ping), GHSA-4h7h-rv7c-7m2v (form validator skips multipart),
+  # GHSA-4m76-xfj5-7975 (mount path bypass), GHSA-h7mg-cq63-vhpq
+  # (RegExpRouter wildcard skip), GHSA-3gg2-335m-rxc6 (css helper
+  # injection); moderate x4, low x1. 4.13.16 fixes all five and also
+  # carries the 4.13.13 fix for GHSA-5r4p-p66f-jhc7 (2026-10-22,
+  # serveStatic double-decode), whose pin this replaces. Dev-only:
+  # hono reaches the tree through @modelcontextprotocol/sdk (and its
+  # @hono/node-server dep) under shadcn's CLI. 4.13.16 shipped
+  # 2026-11-01, younger than the floor, so the pin is what admits it;
+  # 4.13.17+ stays out until it clears the floor on its own (2026-12-07
+  # for 4.13.17), pin or no pin. Remove 2026-12-01.
+  - "hono@4.13.16"
+  # 2026-11-16: Dependabot alerts #51-#52 — GHSA-jpvv-r467-5p4w
+  # (backslash in the request path parsed as a path separator, bypassing
+  # path-based ACLs at a reverse proxy) and GHSA-qv5m-9pm6-hqp3
+  # (ECONNRESET during an async WebSocket upgrade crashes the process);
+  # moderate x2, both fixed in 2.1.6, which also carries the 2.1.5 fix for
+  # GHSA-rmxm-3fg6-px4f. Same dev-only path as hono above (shadcn CLI ->
+  # @modelcontextprotocol/sdk). 2.1.6 shipped 2026-11-02, younger than
+  # the floor, so the pin is what admits it. Remove 2026-12-02.
+  - "@hono/node-server@2.1.6"
   # 2026-10-12: security fix train for the 2026-09-18 advisories blocking
   # `just audit` before the 0.0.20 release. Every patched version is younger
   # than the 30-day floor, and all are transitive, so the pins are exact.
@@ -129,9 +145,9 @@ minimumReleaseAgeExclude:
   # (shadcn's CLI/MCP server, jsdom under vitest, node-gyp under
   # electron-builder); none ships in the packaged app. Remove each pin once
   # its version ages out.
-  # GHSA-rmxm-3fg6-px4f (@hono/node-server serveStatic path decoding).
-  # Remove 2026-11-12.
-  - "@hono/node-server@2.1.5"
+  # GHSA-rmxm-3fg6-px4f (@hono/node-server serveStatic path decoding):
+  # pin retired 2026-11-16 — superseded by the 2.1.6 pin above, which
+  # carries that fix too. Nothing to remove here.
   # GHSA-2m5v-pch6-74hx, GHSA-qrxm-fqhp-jwvm, GHSA-9fm3-97px-rjf6,
   # GHSA-xjj6-f33q-929c (undici 6.x under node-gyp, 8.x under jsdom and
   # graft's clients). Same-name entries do not stack, so the resolved lines
