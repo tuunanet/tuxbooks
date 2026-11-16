@@ -1,11 +1,18 @@
 //! The trio every dispatch path reads from one `sync_issues` row.
 
+use crate::sync::kind::SyncIssueKind;
+
 /// The three fields a dispatch path works from: which kind of issue, its
 /// internal key, and the operation file it came from. Row readers build one
-/// of these instead of passing the three along separately.
+/// of these instead of passing the three along separately, parsing the
+/// stored kind at the row edge. `None` is what `parse` returns for a string
+/// this build does not know; `SyncIssueAction::for_kind` says why it stays
+/// `None` rather than becoming an `Unknown` variant. Each dispatch function
+/// keeps its historical treatment of `None`: `issue_target` labels,
+/// `issue_cleared` skips, `retry_locked` refuses.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SyncIssueRef<'a> {
-    pub kind: &'a str,
+    pub kind: Option<SyncIssueKind>,
     pub issue_key: &'a str,
     pub file_name: Option<&'a str>,
 }
@@ -27,11 +34,11 @@ impl<'a> SyncIssueRef<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::SyncIssueRef;
+    use super::{SyncIssueKind, SyncIssueRef};
 
     fn issue(key: &'static str) -> SyncIssueRef<'static> {
         SyncIssueRef {
-            kind: "projection_failed",
+            kind: Some(SyncIssueKind::ProjectionFailed),
             issue_key: key,
             file_name: None,
         }

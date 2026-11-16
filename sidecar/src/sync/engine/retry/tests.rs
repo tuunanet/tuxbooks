@@ -3,6 +3,7 @@ use crate::db::connection::init_pool;
 use crate::rpc::EventEmitter;
 use crate::sync::clock::{set_meta, META_FOLDER};
 use crate::sync::engine::SyncService;
+use crate::sync::kind::SyncIssueKind;
 
 async fn folder_service(dir: &std::path::Path) -> SyncService {
     let pool = init_pool(&dir.join("t.db")).await.unwrap();
@@ -33,7 +34,7 @@ async fn every_retry_prefix_reads_the_key_the_record_sites_write() {
     let report = outcome(
         service
             .retry_locked(SyncIssueRef {
-                kind: "projection_failed",
+                kind: Some(SyncIssueKind::ProjectionFailed),
                 issue_key: "wrong-prefix:1",
                 file_name: None,
             })
@@ -64,10 +65,12 @@ async fn every_retry_prefix_reads_the_key_the_record_sites_write() {
         ("cover_blob_failed", "cover:0123456789abcdef.png"),
     ];
     for (kind, key) in cases {
+        let parsed = SyncIssueKind::parse(kind)
+            .unwrap_or_else(|| panic!("{kind} is a stored kind spelling"));
         let report = outcome(
             service
                 .retry_locked(SyncIssueRef {
-                    kind,
+                    kind: Some(parsed),
                     issue_key: key,
                     file_name: None,
                 })
@@ -82,7 +85,7 @@ async fn every_retry_prefix_reads_the_key_the_record_sites_write() {
 
 fn issue(issue_key: &'static str) -> SyncIssueRef<'static> {
     SyncIssueRef {
-        kind: "projection_failed",
+        kind: Some(SyncIssueKind::ProjectionFailed),
         issue_key,
         file_name: None,
     }
@@ -128,5 +131,41 @@ fn retry_key_reports_an_empty_or_non_numeric_value() {
     assert_eq!(
         err.to_string(),
         "invalid input: sync issue key project-book:not-an-id cannot be retried"
+    );
+}
+
+/// No entry point dispatches an unparseable kind — both filter at the row
+/// edge — but the arm holds through the shared type: a stored string the
+/// build cannot parse is refused outright, and a parseable kind without a
+/// repair keeps reporting its exact stored spelling.
+#[tokio::test]
+async fn retry_locked_reports_nothing_to_replay_for_kinds_without_an_arm() {
+    let tmp = tempfile::tempdir().unwrap();
+    let service = folder_service(tmp.path()).await;
+    let unknown = outcome(
+        service
+            .retry_locked(SyncIssueRef {
+                kind: SyncIssueKind::parse("conflict"),
+                issue_key: "conflict:annotation:abc:note",
+                file_name: None,
+            })
+            .await,
+    );
+    assert_eq!(
+        unknown,
+        "invalid input: an unknown sync issue kind has no retry path"
+    );
+    let listed = outcome(
+        service
+            .retry_locked(SyncIssueRef {
+                kind: SyncIssueKind::parse("operation_rejected"),
+                issue_key: "file:ops/gone.json",
+                file_name: None,
+            })
+            .await,
+    );
+    assert_eq!(
+        listed,
+        "invalid input: sync issue kind operation_rejected has no retry path"
     );
 }

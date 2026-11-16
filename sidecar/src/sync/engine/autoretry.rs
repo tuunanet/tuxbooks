@@ -130,7 +130,7 @@ impl super::SyncService {
             let Some(cap) = auto_retry_cap(kind) else {
                 continue;
             };
-            if SyncIssueAction::for_kind(kind.as_str()) != SyncIssueAction::Retry {
+            if SyncIssueAction::for_kind(Some(kind)) != SyncIssueAction::Retry {
                 continue;
             }
             if attempts >= cap {
@@ -152,7 +152,7 @@ impl super::SyncService {
             changed = true;
             let outcome = self
                 .retry_locked(SyncIssueRef {
-                    kind: kind.as_str(),
+                    kind: Some(kind),
                     issue_key: &issue_key,
                     file_name: file_name.as_deref(),
                 })
