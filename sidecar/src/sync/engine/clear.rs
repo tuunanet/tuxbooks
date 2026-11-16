@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 
+use crate::repository::sync_issues;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::file_version;
 use crate::sync::kind::SyncIssueKind;
@@ -161,13 +162,7 @@ impl super::SyncService {
         let now = now_rfc3339();
         let mut tx = self.inner.pool.begin().await?;
         for id in &cleared {
-            sqlx::query(
-                "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
-            )
-            .bind(id)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
+            sync_issues::resolve_by_id(&mut *tx, *id, &now).await?;
         }
         tx.commit().await?;
         Ok(cleared.len() as u64)
@@ -313,15 +308,7 @@ pub(super) async fn issue_key_open(pool: &SqlitePool, issue_key: &str) -> Result
 
 /// Close one issue by its internal key. Used by natural repair paths.
 pub(super) async fn resolve_issue_key(pool: &SqlitePool, issue_key: &str) -> Result<(), AppError> {
-    sqlx::query(
-        "UPDATE sync_issues SET resolved_at = ?2
-         WHERE issue_key = ?1 AND resolved_at IS NULL",
-    )
-    .bind(issue_key)
-    .bind(now_rfc3339())
-    .execute(pool)
-    .await?;
-    Ok(())
+    sync_issues::resolve(pool, issue_key).await
 }
 
 /// Join a folder-relative issue path without allowing traversal.

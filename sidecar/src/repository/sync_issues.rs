@@ -99,3 +99,93 @@ pub async fn resolve(pool: &SqlitePool, key: &str) -> Result<(), AppError> {
     .await?;
     Ok(())
 }
+
+/// Close one open issue by row id, stamping `now`. Returns how many rows
+/// actually flipped: the `resolved_at IS NULL` guard makes a repeat call a
+/// no-op, so a row that is already closed keeps its original stamp. Takes an
+/// executor so batch callers can run their whole sweep inside one transaction.
+pub async fn resolve_by_id<'e, E>(executor: E, id: i64, now: &str) -> Result<u64, AppError>
+where
+    E: sqlx::SqliteExecutor<'e>,
+{
+    let result = sqlx::query(
+        "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(executor)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn open_row_id(pool: &SqlitePool, key: &str) -> i64 {
+        sqlx::query_scalar("SELECT id FROM sync_issues WHERE issue_key = ?1")
+            .bind(key)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn resolve_by_id_closes_one_open_row_exactly_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        record(&pool, "alpha", SyncIssueKind::SyncFailed, "boom", None)
+            .await
+            .unwrap();
+        let alpha = open_row_id(&pool, "alpha").await;
+
+        let flipped = resolve_by_id(&pool, alpha, "2026-11-14T00:00:00.000Z")
+            .await
+            .unwrap();
+        assert_eq!(flipped, 1);
+
+        // The resolved_at IS NULL guard makes the second call a no-op: it
+        // reports zero affected rows and leaves the first stamp in place.
+        let again = resolve_by_id(&pool, alpha, "2026-11-14T00:00:01.000Z")
+            .await
+            .unwrap();
+        assert_eq!(again, 0);
+        let stamp: Option<String> =
+            sqlx::query_scalar("SELECT resolved_at FROM sync_issues WHERE id = ?1")
+                .bind(alpha)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stamp.as_deref(), Some("2026-11-14T00:00:00.000Z"));
+    }
+
+    #[tokio::test]
+    async fn resolve_by_id_leaves_other_rows_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = crate::db::connection::init_pool(&tmp.path().join("t.db"))
+            .await
+            .unwrap();
+        record(&pool, "alpha", SyncIssueKind::SyncFailed, "boom", None)
+            .await
+            .unwrap();
+        record(&pool, "beta", SyncIssueKind::SyncFailed, "bang", None)
+            .await
+            .unwrap();
+        let alpha = open_row_id(&pool, "alpha").await;
+        let beta = open_row_id(&pool, "beta").await;
+
+        resolve_by_id(&pool, alpha, "2026-11-14T00:00:00.000Z")
+            .await
+            .unwrap();
+
+        let beta_stamp: Option<String> =
+            sqlx::query_scalar("SELECT resolved_at FROM sync_issues WHERE id = ?1")
+                .bind(beta)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(beta_stamp.is_none(), "another row's id must stay open");
+    }
+}

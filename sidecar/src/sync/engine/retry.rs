@@ -7,6 +7,7 @@ use crate::error::AppError;
 use super::autoretry::STRIP_AUTO_RETRY_STATE;
 use super::clear::read_sync_op;
 use super::SyncIssueAction;
+use crate::repository::sync_issues;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::identity::ensure_book_identity;
 use crate::sync::kind::SyncIssueKind;
@@ -63,14 +64,7 @@ impl super::SyncService {
                 // retry path reports whether the condition is actually gone;
                 // never close on Ok alone.
                 if !self.issue_is_open(id).await? || cleared {
-                    sqlx::query(
-                        "UPDATE sync_issues SET resolved_at = ?2
-                         WHERE id = ?1 AND resolved_at IS NULL",
-                    )
-                    .bind(id)
-                    .bind(now_rfc3339())
-                    .execute(&self.inner.pool)
-                    .await?;
+                    sync_issues::resolve_by_id(&self.inner.pool, id, &now_rfc3339()).await?;
                     self.refresh_status().await?;
                     self.emit_status();
                     Ok(true)

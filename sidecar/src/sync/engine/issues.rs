@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use crate::error::AppError;
 
 use super::{SyncIssue, SyncIssueAction};
+use crate::repository::sync_issues;
 use crate::sync::clock::now_rfc3339;
 use crate::sync::kind::SyncIssueKind;
 
@@ -84,18 +85,12 @@ impl super::SyncService {
                 "this sync issue has an action; retry it or fix it in the sync folder".into(),
             ));
         }
-        let result = sqlx::query(
-            "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
-        )
-        .bind(id)
-        .bind(now_rfc3339())
-        .execute(&self.inner.pool)
-        .await?;
-        if result.rows_affected() > 0 {
+        let affected = sync_issues::resolve_by_id(&self.inner.pool, id, &now_rfc3339()).await?;
+        if affected > 0 {
             self.refresh_status().await?;
             self.emit_status();
         }
-        Ok(result.rows_affected() > 0)
+        Ok(affected > 0)
     }
 
     /// Dismiss every informational issue. Actionable rows stay open: hiding a
@@ -118,13 +113,7 @@ impl super::SyncService {
         let now = now_rfc3339();
         let mut tx = self.inner.pool.begin().await?;
         for id in &ids {
-            sqlx::query(
-                "UPDATE sync_issues SET resolved_at = ?2 WHERE id = ?1 AND resolved_at IS NULL",
-            )
-            .bind(id)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
+            sync_issues::resolve_by_id(&mut *tx, *id, &now).await?;
         }
         tx.commit().await?;
         self.refresh_status().await?;
@@ -148,7 +137,7 @@ async fn issue_target(
         Some(SyncIssueKind::SyncFailed) => "Sync pass".to_string(),
         Some(SyncIssueKind::ProjectionFailed | SyncIssueKind::IdentityFailed) => {
             match suffix.parse::<i64>() {
-                Ok(book_id) => match file_book_title(pool, book_id).await {
+                Ok(book_id) => match title_by_id(pool, "books", book_id).await {
                     Some(title) => title,
                     None => format!("Book {book_id}"),
                 },
@@ -158,7 +147,7 @@ async fn issue_target(
         // A hash failure is keyed by the durable book id, so the label comes
         // from the durable record rather than a file row.
         Some(SyncIssueKind::HashFailed) => match suffix.parse::<i64>() {
-            Ok(book_id) => match record_book_title(pool, book_id).await {
+            Ok(book_id) => match title_by_id(pool, "book_records", book_id).await {
                 Some(title) => title,
                 None => format!("Book {book_id}"),
             },
@@ -199,17 +188,10 @@ async fn issue_target(
     }
 }
 
-async fn file_book_title(pool: &SqlitePool, book_id: i64) -> Option<String> {
-    sqlx::query_scalar("SELECT title FROM books WHERE id = ?1")
-        .bind(book_id)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-}
-
-async fn record_book_title(pool: &SqlitePool, book_id: i64) -> Option<String> {
-    sqlx::query_scalar("SELECT title FROM book_records WHERE id = ?1")
+/// Title of the book row this id points at: `books` for a file-backed book,
+/// `book_records` for a durable one. The two lookups differ only in table.
+async fn title_by_id(pool: &SqlitePool, table: &str, book_id: i64) -> Option<String> {
+    sqlx::query_scalar(&format!("SELECT title FROM {table} WHERE id = ?1"))
         .bind(book_id)
         .fetch_optional(pool)
         .await
