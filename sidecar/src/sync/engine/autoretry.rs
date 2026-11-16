@@ -10,6 +10,7 @@
 
 use crate::error::AppError;
 
+use super::issue_ref::SyncIssueRef;
 use super::{SyncIssueAction, SyncStatus};
 use crate::repository::identity_backfill::retry_delay_secs;
 use crate::repository::sync_issues;
@@ -150,7 +151,11 @@ impl super::SyncService {
             }
             changed = true;
             let outcome = self
-                .retry_locked(kind.as_str(), &issue_key, file_name.as_deref())
+                .retry_locked(SyncIssueRef {
+                    kind: kind.as_str(),
+                    issue_key: &issue_key,
+                    file_name: file_name.as_deref(),
+                })
                 .await;
             match outcome {
                 Ok(true) => {

@@ -14,37 +14,33 @@ use crate::sync::model::Op;
 use crate::sync::store;
 
 use super::adopt::blob_arrived;
+use super::issue_ref::SyncIssueRef;
 
 impl super::SyncService {
     /// True when the condition behind one issue has cleared. This is the one
     /// place that decides auto-resolution, shared by the status sweep and the
     /// retry outcome check. Conflicts are never cleared here.
-    async fn issue_cleared(
-        &self,
-        kind: &str,
-        issue_key: &str,
-        file_name: Option<&str>,
-    ) -> Result<bool, AppError> {
+    async fn issue_cleared(&self, issue: SyncIssueRef<'_>) -> Result<bool, AppError> {
         let root = self.sync_root();
-        match SyncIssueKind::parse(kind) {
-            Some(SyncIssueKind::DuplicateBook) => match issue_key
-                .strip_prefix("duplicate-book:")
+        match SyncIssueKind::parse(issue.kind) {
+            Some(SyncIssueKind::DuplicateBook) => match issue
+                .key_after("duplicate-book:")
                 .and_then(|rest| rest.split(':').next())
             {
                 Some(uid) => Ok(self.binding_count(uid).await? < 2),
                 None => Ok(false),
             },
             Some(SyncIssueKind::OperationRetrying | SyncIssueKind::OperationRejected) => {
-                match issue_key.strip_prefix("file:") {
+                match issue.key_after("file:") {
                     Some(relative) => self.operation_cleared(relative, root.as_deref()).await,
                     None => Ok(false),
                 }
             }
-            Some(SyncIssueKind::CoverMissing) => match issue_key.strip_prefix("cover-missing:") {
-                Some(name) => self.cover_applied(name, file_name).await,
+            Some(SyncIssueKind::CoverMissing) => match issue.key_after("cover-missing:") {
+                Some(name) => self.cover_applied(name, issue.file_name).await,
                 None => Ok(false),
             },
-            Some(SyncIssueKind::CoverBlobFailed) => match issue_key.strip_prefix("cover:") {
+            Some(SyncIssueKind::CoverBlobFailed) => match issue.key_after("cover:") {
                 Some(name) => Ok(root
                     .as_deref()
                     .is_some_and(|root| store::cover_blob_exists(root, name))),
@@ -53,29 +49,25 @@ impl super::SyncService {
             // The file shrank (or the book left the library) and a re-import
             // published a version the cap allows: the winning hash matches a
             // binding under the cap, or no binding remains (ADR 0018 D2).
-            Some(SyncIssueKind::BookBlobOversize) => {
-                match issue_key.strip_prefix("book-blob-oversize:") {
-                    Some(uid) => {
-                        match crate::sync::file_version::winning(&self.inner.pool, uid).await? {
-                            Some(winning) => {
-                                Ok(self.binding_under_cap(uid, &winning.content_hash).await?)
-                            }
-                            None => Ok(self.binding_count(uid).await? == 0),
+            Some(SyncIssueKind::BookBlobOversize) => match issue.key_after("book-blob-oversize:") {
+                Some(uid) => {
+                    match crate::sync::file_version::winning(&self.inner.pool, uid).await? {
+                        Some(winning) => {
+                            Ok(self.binding_under_cap(uid, &winning.content_hash).await?)
                         }
+                        None => Ok(self.binding_count(uid).await? == 0),
                     }
-                    None => Ok(false),
                 }
-            }
-            Some(SyncIssueKind::ProjectionFailed) => {
-                match issue_key.strip_prefix("project-book:") {
-                    Some(rest) => match rest.parse::<i64>() {
-                        Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
-                        Err(_) => Ok(false),
-                    },
-                    None => Ok(false),
-                }
-            }
-            Some(SyncIssueKind::IdentityFailed) => match issue_key.strip_prefix("identity:") {
+                None => Ok(false),
+            },
+            Some(SyncIssueKind::ProjectionFailed) => match issue.key_after("project-book:") {
+                Some(rest) => match rest.parse::<i64>() {
+                    Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
+                    Err(_) => Ok(false),
+                },
+                None => Ok(false),
+            },
+            Some(SyncIssueKind::IdentityFailed) => match issue.key_after("identity:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => Ok(!self.book_row_exists(book_id).await?),
                     Err(_) => Ok(false),
@@ -86,7 +78,7 @@ impl super::SyncService {
             // is the claimed state during an attempt, and `failed` is the
             // result; closing on either would drop the issue mid-retry and
             // reopen it with a new id on the next failure.
-            Some(SyncIssueKind::HashFailed) => match issue_key.strip_prefix("hash-failed:") {
+            Some(SyncIssueKind::HashFailed) => match issue.key_after("hash-failed:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => match self.book_hash_state(book_id).await? {
                         None => Ok(true),
@@ -96,28 +88,24 @@ impl super::SyncService {
                 },
                 None => Ok(false),
             },
-            Some(SyncIssueKind::ReprojectionFailed) => match issue_key.strip_prefix("reproject:") {
+            Some(SyncIssueKind::ReprojectionFailed) => match issue.key_after("reproject:") {
                 Some(uid) => {
                     Ok(!self.book_record_exists(uid).await? && self.binding_count(uid).await? == 0)
                 }
                 None => Ok(false),
             },
-            Some(SyncIssueKind::BookLifecycleFailed) => {
-                match issue_key.strip_prefix("book-lifecycle:") {
-                    Some(uid) => Ok(!self.book_record_exists(uid).await?),
-                    None => Ok(false),
-                }
-            }
+            Some(SyncIssueKind::BookLifecycleFailed) => match issue.key_after("book-lifecycle:") {
+                Some(uid) => Ok(!self.book_record_exists(uid).await?),
+                None => Ok(false),
+            },
             // The row is the wait for a winning blob (ADR 0018 D2): it ends
             // when the blob arrives intact or the pointer moves on — no
             // unsettled copy is left for adoption to run for, so no later
             // pass would ever close it.
-            Some(SyncIssueKind::BookFileAdoptFailed) => {
-                match issue_key.strip_prefix("book-file-adopt:") {
-                    Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
-                    None => Ok(false),
-                }
-            }
+            Some(SyncIssueKind::BookFileAdoptFailed) => match issue.key_after("book-file-adopt:") {
+                Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
+                None => Ok(false),
+            },
             // Conflicts belong to review; they land here as an unknown kind,
             // like any string this build does not know. The listed kinds are
             // the ones with no automatic condition: a later pass resolves
@@ -149,10 +137,12 @@ impl super::SyncService {
         }
         let mut cleared = Vec::new();
         for (id, issue_key, kind, file_name) in rows {
-            if self
-                .issue_cleared(&kind, &issue_key, file_name.as_deref())
-                .await?
-            {
+            let issue = SyncIssueRef {
+                kind: &kind,
+                issue_key: &issue_key,
+                file_name: file_name.as_deref(),
+            };
+            if self.issue_cleared(issue).await? {
                 cleared.push(id);
             }
         }
@@ -327,4 +317,166 @@ pub(super) fn read_sync_op(root: &Path, relative: &str) -> Result<Op, AppError> 
     })?;
     store::read_op(&path)
         .map_err(|err| AppError::InvalidInput(format!("the operation file is not readable: {err}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::init_pool;
+    use crate::rpc::EventEmitter;
+    use crate::sync::clock::{set_meta, META_FOLDER};
+    use crate::sync::engine::SyncService;
+    use crate::sync::model::{EntityKind, Hlc, OP_SCHEMA};
+
+    async fn folder_service(dir: &std::path::Path) -> (SyncService, SqlitePool) {
+        let pool = init_pool(&dir.join("t.db")).await.unwrap();
+        set_meta(&pool, META_FOLDER, dir.to_str().unwrap())
+            .await
+            .unwrap();
+        let reader = pool.clone();
+        let service = SyncService::new(pool, &dir.join("t.db"), EventEmitter::new(|_, _| {}))
+            .await
+            .unwrap();
+        (service, reader)
+    }
+
+    /// The one case whose clear condition needs disk and rows behind it: the
+    /// cover arm reads its operation file, then compares the book's cover.
+    /// Returns the file name to put on the issue row.
+    async fn stage_cover_case(root: &Path, pool: &SqlitePool) -> String {
+        let uid = "d".repeat(32);
+        let op = Op {
+            schema: OP_SCHEMA,
+            op_id: "a".repeat(32),
+            device_id: "b".repeat(32),
+            hlc: Hlc {
+                wall: 0,
+                counter: 0,
+                device: "b".repeat(32),
+            },
+            kind: EntityKind::Metadata,
+            entity_uid: uid.clone(),
+            book_uid: Some(uid.clone()),
+            deleted: false,
+            restore: false,
+            fields: Default::default(),
+            prior: None,
+            created_at: "2026-01-01T00:00:00.000Z".to_string(),
+        };
+        std::fs::create_dir_all(root.join("ops")).unwrap();
+        std::fs::write(root.join("ops/one.json"), serde_json::to_vec(&op).unwrap()).unwrap();
+        sqlx::query(
+            "INSERT INTO book_records (uid, title, cover_path)
+             VALUES (?1, 'Covered', '/covers/0123456789abcdef.png')",
+        )
+        .bind(&uid)
+        .execute(pool)
+        .await
+        .unwrap();
+        "ops/one.json".to_string()
+    }
+
+    #[tokio::test]
+    async fn every_clearing_prefix_reads_the_key_the_record_sites_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (service, pool) = folder_service(tmp.path()).await;
+        let root = service.sync_root().unwrap();
+
+        // The cover-blob arm closes only when the blob is really in the folder.
+        let cover = "0123456789abcdef.png";
+        let blob = root.join("blobs/covers").join(cover);
+        std::fs::create_dir_all(blob.parent().unwrap()).unwrap();
+        std::fs::write(&blob, b"cover").unwrap();
+        let file_name = stage_cover_case(&root, &pool).await;
+        let cover_missing_key = format!("cover-missing:{cover}");
+
+        // Keys exactly as the record sites build them. Every arm answers
+        // true here on a fresh database; a prefix literal that drifts from
+        // the key its writer builds stops matching, the arm takes its
+        // "not cleared" skip, and this goes red.
+        let cases: [(&str, String, Option<&str>); 11] = [
+            (
+                SyncIssueKind::DuplicateBook.as_str(),
+                "duplicate-book:uid-abc:1".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::OperationRetrying.as_str(),
+                "file:ops/gone.json".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::CoverMissing.as_str(),
+                cover_missing_key,
+                Some(&file_name),
+            ),
+            (
+                SyncIssueKind::CoverBlobFailed.as_str(),
+                format!("cover:{cover}"),
+                None,
+            ),
+            (
+                SyncIssueKind::BookBlobOversize.as_str(),
+                "book-blob-oversize:uid-abc".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::ProjectionFailed.as_str(),
+                "project-book:999999".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::IdentityFailed.as_str(),
+                "identity:999999".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::HashFailed.as_str(),
+                "hash-failed:999999".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::ReprojectionFailed.as_str(),
+                "reproject:uid-abc".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::BookLifecycleFailed.as_str(),
+                "book-lifecycle:uid-abc".to_string(),
+                None,
+            ),
+            (
+                SyncIssueKind::BookFileAdoptFailed.as_str(),
+                "book-file-adopt:uid-abc".to_string(),
+                None,
+            ),
+        ];
+        for (kind, key, file_name) in cases {
+            let cleared = service
+                .issue_cleared(SyncIssueRef {
+                    kind,
+                    issue_key: &key,
+                    file_name,
+                })
+                .await
+                .unwrap();
+            assert!(
+                cleared,
+                "the {kind} arm's prefix no longer reads {key}: a drifted \
+                 literal skips the arm to \"not cleared\""
+            );
+        }
+
+        // The other half of the policy, through the same path: a prefix the
+        // key does not carry leaves the row open instead of guessing.
+        let skipped = service
+            .issue_cleared(SyncIssueRef {
+                kind: SyncIssueKind::IdentityFailed.as_str(),
+                issue_key: "wrong-prefix:999999",
+                file_name: None,
+            })
+            .await
+            .unwrap();
+        assert!(!skipped, "a non-matching prefix must not clear the row");
+    }
 }

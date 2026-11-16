@@ -6,6 +6,7 @@ use crate::error::AppError;
 
 use super::autoretry::STRIP_AUTO_RETRY_STATE;
 use super::clear::read_sync_op;
+use super::issue_ref::SyncIssueRef;
 use super::SyncIssueAction;
 use crate::repository::sync_issues;
 use crate::sync::clock::now_rfc3339;
@@ -52,7 +53,11 @@ impl super::SyncService {
         .execute(&self.inner.pool)
         .await?;
         let outcome = self
-            .retry_locked(&kind, &issue_key, file_name.as_deref())
+            .retry_locked(SyncIssueRef {
+                kind: &kind,
+                issue_key: &issue_key,
+                file_name: file_name.as_deref(),
+            })
             .await;
         match outcome {
             Ok(cleared) => {
@@ -97,19 +102,14 @@ impl super::SyncService {
     /// Run the retry path for one kind. The caller holds `pass_lock` — either
     /// the manual entry point above or the auto-retry sweep. Returns true
     /// when the work itself proves the condition is gone.
-    pub(super) async fn retry_locked(
-        &self,
-        kind: &str,
-        issue_key: &str,
-        file_name: Option<&str>,
-    ) -> Result<bool, AppError> {
+    pub(super) async fn retry_locked(&self, issue: SyncIssueRef<'_>) -> Result<bool, AppError> {
         // Indexing is local work. It must not depend on the sync folder still
         // being connected, or a detached device could never retry the hash
         // behind a row that is already listed. The issue key holds the durable
         // book id, so every location is retried together.
-        let parsed = SyncIssueKind::parse(kind);
+        let parsed = SyncIssueKind::parse(issue.kind);
         if matches!(parsed, Some(SyncIssueKind::HashFailed)) {
-            let book_id = parse_key_i64(issue_key, "hash-failed:")?;
+            let book_id = retry_key_i64(issue, "hash-failed:")?;
             let outcome =
                 crate::services::hash_backfill::retry_book(&self.inner.pool, book_id).await?;
             return Ok(outcome.hash_state == crate::domain::IndexingRetry::HASHED);
@@ -120,12 +120,12 @@ impl super::SyncService {
         let root = store::resolve_root(Path::new(&folder))?;
         match parsed {
             Some(SyncIssueKind::ProjectionFailed) => {
-                let book_id = parse_key_i64(issue_key, "project-book:")?;
+                let book_id = retry_key_i64(issue, "project-book:")?;
                 self.reproject_file_row(book_id, &root).await?;
                 Ok(true)
             }
             Some(SyncIssueKind::IdentityFailed) => {
-                let book_id = parse_key_i64(issue_key, "identity:")?;
+                let book_id = retry_key_i64(issue, "identity:")?;
                 match ensure_book_identity(&self.inner.pool, book_id).await? {
                     Some(identity) => {
                         merge::project_book(
@@ -144,13 +144,13 @@ impl super::SyncService {
                 }
             }
             Some(SyncIssueKind::ReprojectionFailed) => {
-                let book_uid = parse_key(issue_key, "reproject:")?;
-                self.reproject_book_or_gone(&book_uid, &root).await?;
+                let book_uid = retry_key(issue, "reproject:")?;
+                self.reproject_book_or_gone(book_uid, &root).await?;
                 Ok(true)
             }
             Some(SyncIssueKind::BookLifecycleFailed) => {
-                let book_uid = parse_key(issue_key, "book-lifecycle:")?;
-                if !merge::retry_book_lifecycle(&self.inner.pool, &book_uid).await? {
+                let book_uid = retry_key(issue, "book-lifecycle:")?;
+                if !merge::retry_book_lifecycle(&self.inner.pool, book_uid).await? {
                     // Nothing in the mirror to replay. Leave the row open so a
                     // later pass or restore can still settle it.
                     return Ok(false);
@@ -173,9 +173,9 @@ impl super::SyncService {
             Some(SyncIssueKind::OperationRetrying) => {
                 // Drop the cached failure so the next pass reads the file
                 // again instead of skipping it as already processed.
-                let relative = parse_key(issue_key, "file:")?;
+                let relative = retry_key(issue, "file:")?;
                 sqlx::query("DELETE FROM sync_remote_files WHERE relative_path = ?1")
-                    .bind(&relative)
+                    .bind(relative)
                     .execute(&self.inner.pool)
                     .await?;
                 if !self.status_snapshot().enabled {
@@ -184,17 +184,18 @@ impl super::SyncService {
                     ));
                 }
                 self.run_pass_locked().await?;
-                self.operation_cleared(&relative, Some(&root)).await
+                self.operation_cleared(relative, Some(&root)).await
             }
             Some(SyncIssueKind::CoverMissing) => {
-                let name = parse_key(issue_key, "cover-missing:")?;
-                self.apply_missing_cover(&name, file_name, &root).await?;
+                let name = retry_key(issue, "cover-missing:")?;
+                self.apply_missing_cover(name, issue.file_name, &root)
+                    .await?;
                 Ok(true)
             }
             Some(SyncIssueKind::CoverBlobFailed) => {
-                let name = parse_key(issue_key, "cover:")?;
-                store::store_cover_blob(&root, &self.inner.covers_dir, &name)?;
-                Ok(store::cover_blob_exists(&root, &name))
+                let name = retry_key(issue, "cover:")?;
+                store::store_cover_blob(&root, &self.inner.covers_dir, name)?;
+                Ok(store::cover_blob_exists(&root, name))
             }
             // `hash_failed` returned above: indexing is local work. The
             // listed kinds have no replay here because their action is not
@@ -212,7 +213,8 @@ impl super::SyncService {
             | Some(SyncIssueKind::BookBlobOversize)
             | Some(SyncIssueKind::BookFileAdoptFailed)
             | None => Err(AppError::InvalidInput(format!(
-                "sync issue kind {kind} has no retry path"
+                "sync issue kind {} has no retry path",
+                issue.kind
             ))),
         }
     }
@@ -350,19 +352,32 @@ impl super::SyncService {
     }
 }
 
-/// Take the value after `prefix` from an issue key.
-fn parse_key(issue_key: &str, prefix: &str) -> Result<String, AppError> {
-    issue_key
-        .strip_prefix(prefix)
-        .filter(|rest| !rest.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            AppError::InvalidInput(format!("sync issue key {issue_key} cannot be retried"))
-        })
+/// Retry's reading of a key through the shared parser: the key must carry
+/// `prefix` and hold a non-empty value. A key that cannot be read is
+/// reported, never guessed at.
+fn retry_key<'a>(issue: SyncIssueRef<'a>, prefix: &str) -> Result<&'a str, AppError> {
+    issue
+        .key_after(prefix)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| retry_key_error(issue))
 }
 
-fn parse_key_i64(issue_key: &str, prefix: &str) -> Result<i64, AppError> {
-    parse_key(issue_key, prefix)?.parse::<i64>().map_err(|_| {
-        AppError::InvalidInput(format!("sync issue key {issue_key} cannot be retried"))
-    })
+/// The same reading as `retry_key`, as a book id: the value must also parse
+/// to `i64`, and a value it cannot parse reports the same error.
+fn retry_key_i64(issue: SyncIssueRef<'_>, prefix: &str) -> Result<i64, AppError> {
+    retry_key(issue, prefix)?
+        .parse::<i64>()
+        .map_err(|_| retry_key_error(issue))
 }
+
+/// The one error a retry reports for a key it cannot read: wrong prefix,
+/// empty value, or an id that is not a number.
+fn retry_key_error(issue: SyncIssueRef<'_>) -> AppError {
+    AppError::InvalidInput(format!(
+        "sync issue key {} cannot be retried",
+        issue.issue_key
+    ))
+}
+
+#[cfg(test)]
+mod tests;

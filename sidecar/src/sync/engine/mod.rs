@@ -35,6 +35,7 @@ mod clear;
 mod connect;
 mod deferred;
 mod gc;
+mod issue_ref;
 mod issues;
 mod lifecycle;
 mod pass;
