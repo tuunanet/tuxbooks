@@ -44,12 +44,10 @@ Everything else in the app data directory stays local:
 
 The catalog remains derived from the files each machine can see. A machine that
 has never imported a book can still hold that book's shared state; it applies
-the state when the content appears.
-
-A watched folder may itself be a mounted drive or a folder the cloud client
-syncs. The client then copies the book files and TuxBooks syncs reading state
-separately. Each machine adds the folder once, because watched locations and
-absolute paths stay local.
+the state when the content appears. A watched folder may itself be a mounted
+drive or a folder the cloud client syncs, and the client then copies the book
+files while TuxBooks syncs reading state separately. Each machine adds the
+folder once, because watched locations and absolute paths stay local.
 
 ## Choosing a sync folder
 
@@ -90,10 +88,9 @@ values the format cannot store, travel through the state folder.
 
 The scanner, watcher, and identity sweep ignore `.bak` files and the hidden
 `*.tuxbooks-*.tmp` files. TuxBooks never deletes or overwrites an existing
-backup. A backup deleted in a cloud-synced folder is deleted everywhere that
-client syncs it, and TuxBooks cannot recreate the original afterward. The next
-embed makes a fresh backup of the file as it exists at that moment, not of the
-file's first version.
+backup. One deleted in a cloud-synced folder is gone everywhere that client
+syncs it, and TuxBooks cannot recreate the original; the next embed backs up
+the file as it exists at that moment, not its first version.
 
 ## Book identity
 
@@ -147,15 +144,24 @@ folder is already a TuxBooks sync folder:
   blobs/books/<64-hex>.<epub or pdf>
 ```
 
-`library.json` binds the folder to one library. Pointing an unrelated library at it returns
-a mismatch; the UI must confirm before the local sync state is reset and merged into that
-library. A pass that finds another library's file fails; Reconnect opens the confirmation.
+`library.json` binds the folder to one library. A pass that finds another
+library's file fails; Reconnect offers the two choices described above.
 
-Operation files are immutable. Each device writes its own stream temp file then
-rename; readers ignore non-`.json` files and dedupe by operation id. A cloud
-client's conflict copy (`op (1).json`) is parsed like any other file and
-deduped, so duplication is harmless. A partially delivered file fails JSON
-validation and is retried.
+Operation files are immutable: each device writes its own stream temp file
+then renames; readers ignore non-`.json` files and dedupe by operation id, so
+a cloud client's conflict copy (`op (1).json`) and a duplicate are harmless.
+A partially delivered file fails JSON validation and is retried.
+
+## Device name
+
+Settings > Sync shows the stored name, or `This device` when none is stored.
+Its **Edit** dialog saves through `sync_set_device_name`. The sidecar trims
+it, rejects an empty name or over 80 characters, and stores it in `sync_meta`
+under `device_name`; connect defaults an unset name to the host name, else
+`TuxBooks`. Connect, every pass, and a name change rewrite the name in
+`devices/<device id>/device.json`. The name is display state, not identity.
+Operations and clocks key on the device id, and no merge or issue path reads
+it.
 
 ## Operation format
 
@@ -178,8 +184,7 @@ validation and is retried.
 
 `fields` carries only changed fields. A cleared field is present with JSON
 `null`. A delete carries `deleted: true` and the prior canonical state in
-`prior`, so any device can offer the 30-day restore. `restore: true` is emitted
-only by the explicit restore action.
+`prior`, so any device can offer the 30-day restore.
 
 A whole-book Forget is one `kind: "book"` operation with `entity_uid` and
 `book_uid` both set to the forgotten uuid. Its `prior` map carries
@@ -200,8 +205,6 @@ outrank a write that happened after it. A device with a badly skewed wall
 clock can win conflicts until real time catches up;
 this is documented LWW behavior, not silent data loss, because the losing value
 is kept.
-
-Each operation file is capped at 1 MiB; cover blobs at 16 MiB; book blobs at 256 MiB.
 
 A book file version has one minter: the re-import path (`handle_modified` →
 `import_file`) on an upsert that updated an existing book, and only when the
@@ -263,15 +266,13 @@ happens on the first pass after the reader closes.
   subjects.
 
 Losing field values are written to `sync_conflicts` as invisible diagnostics
-(ADR 0017 D2). The winner is applied immediately and nothing asks the user to
-choose; the losing value is kept for support, not for review. Conflict
-diagnostics are described under [Conflict diagnostics](#conflict-diagnostics).
+(ADR 0017 D2); the winner applies immediately and the losing value is kept for
+support, not review. See [Conflict diagnostics](#conflict-diagnostics).
 
 ## Conflict diagnostics
 
-A discarded value stays in `sync_conflicts` until the 30-day window expires.
-The merge result does not wait: the winner is applied immediately and stays
-applied, and no surface asks the user to settle anything. The decision is
+A discarded value stays in `sync_conflicts` for 30 days. The winner stays
+applied and no surface asks the user to settle anything. The decision is
 recorded in [ADR 0017](adr/0017-conflict-free-sync-pre-decided-winners.md).
 
 Each row carries the kind, entity uid, field, both JSON values, both hybrid
@@ -283,12 +284,12 @@ sample of open rows without their values.
 
 Rows recorded before races went silent (ADR 0017 D1) may still have a paired
 `sync_issues` row of kind `conflict`. Those legacy issues are excluded from the
-issue list and the status count and can never be dismissed; the maintenance
-sweep is the only thing that closes them. A status refresh first reconciles
-each open row against the mirror. A row closes once a newer write has moved
-the value or clock past its winner. The refresh then deletes rows older than
-30 days, closing each row's issue once no open row shares its key. Progress
-races are diagnostic only and never open an issue.
+issue list and the status count and can never be dismissed; only the
+maintenance sweep closes them. A status refresh first reconciles each open row
+against the mirror, and a row closes once a newer write has moved the value or
+clock past its winner. The refresh then deletes rows older than 30 days,
+closing each row's issue once no open row shares its key. Progress races are
+diagnostic only and never open an issue.
 
 ## Local capture and projection
 
@@ -482,13 +483,12 @@ shared folder; run `cargo test --test cloud_sync` from `sidecar/`. It covers:
   bytes are already in the folder, and a never-arriving blob surfacing as an
   issue after the missing-pass threshold, then self-closing once it converges.
 
-The frontend tests cover the Settings tab, mismatch confirmation, issue and
-trash actions, the primary action per issue kind, Copy details, opening the sync
-folder without a renderer path, Locate file for a waiting book and its
-cancel/mismatch paths, the sidebar attention dot, the toast
-transition and dismissal, the always-mounted live region, the reader hide, the
-stale status-read race, unsubscribing on unmount, and the IPC policy for the
-sync folder.
+The frontend tests cover the Settings tab and the device-name dialog, mismatch
+confirmation, issue and trash actions, the primary action per issue kind, Copy
+details, opening the sync folder without a renderer path, Locate file for a
+waiting book and its cancel/mismatch paths, sidebar attention dot, toast
+transition and dismissal, always-mounted live region, reader hide, stale
+status-read race, unsubscribing on unmount, and the sync-folder IPC policy.
 
 ## Out of scope
 
