@@ -116,11 +116,7 @@ impl Reconciler {
     /// Apply a debounced batch of filesystem changes. Runs on the watcher
     /// thread; each change is independent and safe to process in any order.
     pub async fn apply(&self, changes: Vec<PathChange>) {
-        // A queued batch can outlive the location it came from: the user
-        // unwatchs a folder while its debounce is still in flight, and the
-        // trailing modify would re-import the very books the unwatch just
-        // purged (the ghost comes back). Re-read the watch list for every
-        // change, not once per batch: an unwatch can land mid-batch.
+        // Re-read the watch list per change: a mid-batch unwatch must not let a modify re-import purged books.
         for change in changes {
             let registered = match library_locations::list_locations(&self.pool).await {
                 Ok(locations) => locations,
@@ -145,9 +141,6 @@ impl Reconciler {
             }
             match change {
                 PathChange::Created(path) => {
-                    // A folder appearing inside the watch (dragged in, or a
-                    // rename destination whose event was lost) brings its
-                    // whole subtree with it: reconcile it like a location.
                     if std::fs::metadata(&path)
                         .map(|m| m.is_dir())
                         .unwrap_or(false)
@@ -178,12 +171,7 @@ impl Reconciler {
     /// written" — retry once, then leave the file alone and wait for the
     /// next modify event. Unknown formats are silently ignored.
     pub async fn import_created(&self, path: &Path) -> ImportOutcome {
-        // Database errors are transient here by construction: another live
-        // reconciler (a not-yet-reaped sidecar of a previous app instance)
-        // can win the race to insert the same row, and the loser's upsert
-        // surfaces a constraint/busy error. The file is fs truth — it stays
-        // on disk, so a bounded retry re-imports cleanly and the change is
-        // still announced. Parse failures are the Ok(None) lane, not this.
+        // A previous sidecar can win the insert race; the file stays, so a bounded retry cleans up.
         let attempts = 4usize;
         for attempt in 0..attempts {
             match import_file(&self.pool, path, &self.covers_dir, &self.pdfium_dirs).await {
@@ -198,8 +186,6 @@ impl Reconciler {
                     };
                 }
                 Ok(None) => {
-                    // Not parseable *yet* — give in-flight writers one extra
-                    // beat before giving up until the next event.
                     if attempt == 0 {
                         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                         continue;
@@ -286,7 +272,6 @@ impl Reconciler {
         };
 
         let Some(book) = known else {
-            // Unknown source: the destination is just a new/changed file.
             if is_book_path(to) {
                 self.import_created(to).await;
             }
@@ -294,16 +279,13 @@ impl Reconciler {
         };
 
         if !is_book_path(to) {
-            // The file is no longer a book (renamed away or replaced by
-            // another format): mark it missing, preserving the row.
             self.mark_removed(from).await;
             return;
         }
 
         let (size, mtime) = file_stats(to).unwrap_or((book.file_size, book.file_mtime));
         let to_str = to.to_string_lossy().into_owned();
-        // Resolve the moved row itself, not the book's active copy: a duplicate
-        // copy that moves must move its own location.
+        // Resolve the moved row itself, not the book's active copy.
         let Some(file_id) = books::find_file_id_by_path(&self.pool, &from_str)
             .await
             .ok()
@@ -322,9 +304,6 @@ impl Reconciler {
                 });
             }
             Ok(books::RelinkOutcome::PathConflict) => {
-                // Another row owns the destination (overwrite): the file
-                // content now belongs to that row, and this row's source is
-                // gone. fs truth on both sides.
                 self.import_created(to).await;
                 self.mark_removed(from).await;
             }
@@ -382,8 +361,7 @@ impl Reconciler {
     pub async fn reconcile_location(&self, root: &Path) -> Result<ReconcileReport, AppError> {
         let files = match crate::services::library_scanner::list_book_files(root) {
             Ok(files) => files,
-            // A temporarily unmounted location must not wipe the library:
-            // leave rows untouched and let startup reconcile again later.
+            // A temporarily unmounted location must not wipe the library.
             Err(err) => {
                 eprintln!(
                     "reconciler: location {} not readable, skipping: {err}",
@@ -415,10 +393,7 @@ impl Reconciler {
             if !needs_import {
                 continue;
             }
-            // Move recovery: a rename whose destination event was lost
-            // surfaces here as an unknown file. Relink a vanished book with
-            // the same name and size instead of importing a duplicate —
-            // this is what keeps identity through moves the watcher missed.
+            // Move recovery: relink a vanished same-name/size book instead of importing a duplicate.
             if self.relink_if_move(&file).await {
                 report.updated += 1;
                 report.changes += 1;
@@ -436,7 +411,6 @@ impl Reconciler {
             }
         }
 
-        // Whatever is left in `known` has no file on disk anymore.
         for (_, book) in known {
             if book.available {
                 let affected = books::set_availability_prefix(&self.pool, &book.path, false)
@@ -572,8 +546,6 @@ pub async fn reconnect_book(
     if !books::update_book_by_id(pool, file_id, &new_book).await? {
         return Err(AppError::NotFound);
     }
-    // The newly located file becomes the source truth; user metadata
-    // overrides stay on top of it (milestone 7).
     crate::repository::metadata::record_imported_source(pool, file_id, &new_book).await?;
     books::get_book(pool, book_id)
         .await?
@@ -636,11 +608,8 @@ pub async fn relink_book(
         known.cover_path.as_deref(),
     )?;
 
-    // Hash before writing the row: if these bytes already belong to another
-    // durable book, binding them here would merge two identities by accident.
-    // A hash failure is not fatal for Reading history — the relink proceeds and
-    // is marked failed. An exact-bytes attach cannot prove anything without the
-    // hash, so it fails cleanly instead.
+    // Hash before writing the row: binding bytes already owned by another durable
+    // book would merge two identities. A hash failure is fatal only for an exact-bytes attach.
     let hashed = match crate::sync::identity::hash_file(path) {
         Ok(value) => Some(value),
         Err(err) => {

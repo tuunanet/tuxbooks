@@ -607,9 +607,6 @@ fn parse_nav_document(
                             if items.is_empty() {
                                 continue;
                             }
-                            // The enclosing scope is the li that opened this
-                            // nested list, or the nav itself for the top-level
-                            // toc list.
                             match stack.last_mut() {
                                 Some(Scope::Li { item, skip, .. }) => {
                                     if !*skip {
@@ -637,7 +634,6 @@ fn parse_nav_document(
         }
     }
 
-    // Prefer the toc-typed nav; fall back to the first nav on the page.
     let selected = finished
         .iter()
         .find(|(is_toc, items)| *is_toc && !items.is_empty())
@@ -663,10 +659,8 @@ fn parse_ncx_document(
     reader.config_mut().trim_text(false);
 
     let mut roots: Vec<TocItem> = Vec::new();
-    // Open navPoints, outermost first; each closing navPoint completes one.
     let mut open_points: Vec<TocItem> = Vec::new();
-    // Parallel to open_points: navPoints whose content src is dangerous are
-    // completed but dropped (E-3).
+    // Parallel to open_points: navPoints with a dangerous src are dropped (E-3).
     let mut open_skips: Vec<bool> = Vec::new();
     let mut text_buf = String::new();
     let mut in_nav_label = false;
@@ -856,9 +850,7 @@ fn build_positions_json<R: Read + Seek>(
     deadline: &Deadline,
 ) -> Result<String, EpubError> {
     let mut item_texts: Vec<(String, usize)> = Vec::with_capacity(spine.len());
-    // The declared-size pre-scan caps honest archives; this running total
-    // caps what this stage can actually decompress when a header lies about
-    // its size, so repeated reads cannot exceed the archive byte budget.
+    // Caps actual decompressed bytes when a header lies about its size.
     let mut bytes_read: u64 = 0;
     for entry in spine {
         deadline.check()?;
@@ -894,8 +886,7 @@ fn build_positions_json<R: Read + Seek>(
                 start as f64 / *item_chars as f64
             };
             let consumed = (progression * *item_chars as f64) as usize;
-            // The book's final position always reports the end, so reaching
-            // it displays 100% regardless of where the last window starts.
+            // The final position reports the end so reaching it shows 100%.
             let total = if is_last_item && start + CHARS_PER_POSITION >= *item_chars {
                 1.0
             } else {
@@ -948,7 +939,6 @@ fn extract_visible_text(xml: &str) -> Result<String, EpubError> {
     reader.config_mut().trim_text(false);
 
     let mut out = String::new();
-    // Depth of the currently-open skipped subtree (head/title/style/script).
     let mut skip_depth = 0usize;
 
     loop {
@@ -1101,9 +1091,7 @@ mod tests {
   </manifest>
   <spine><itemref idref="c1"/><itemref idref="c2"/><itemref idref="c3"/></spine>
 </package>"#;
-        // 1 MiB of text per chapter deflates to ~1 KiB; the declared sizes
-        // are then patched down to 10 bytes, so the declared archive total
-        // passes while the actual per-chapter read is 1 MiB.
+        // Declared sizes patched to 10 bytes; each chapter reads 1 MiB.
         let chapters: Vec<(String, Vec<u8>)> = ["one", "two", "three"]
             .iter()
             .enumerate()
@@ -1144,10 +1132,7 @@ mod tests {
         };
         match build_session(&path, &tight) {
             Err(EpubError::Limit(err)) => assert_eq!(err.limit, "max_total_uncompressed_bytes"),
-            // zip 9 rejects a read that outruns the entry's declared
-            // uncompressed size before the cumulative budget trips; the
-            // budget contract itself is pinned by
-            // parse_epub_rejects_oversized_total_uncompressed.
+            // zip 9 rejects the read before the cumulative budget trips.
             Err(EpubError::Io(err)) if err.to_string().contains("declared uncompressed size") => {}
             Ok(_) => panic!("build_session accepted lying headers past the byte budget"),
             Err(other) => panic!("expected limit error, got: {other:?}"),
@@ -1185,9 +1170,6 @@ mod tests {
                     ("evil.js", b"alert(1)".as_slice()),
                 ],
             );
-            // E-1 fences scripts at the engine seam (sanitizer + frame CSP),
-            // so script resources in the manifest no longer fail the open.
-            // Per EPUB 3, the book renders as if scripting were disabled.
             let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
             assert!(
                 session.manifest_json.contains("chapter1.xhtml"),
@@ -1212,8 +1194,6 @@ mod tests {
                 ("chapter2.xhtml", long_chapter("Two", 4).as_bytes()),
             ],
         );
-        // The Gutenberg nav-script shape. Inline scripting is stripped
-        // downstream (E-1 lives at the engine seam), so the book opens.
         let session = build_session(&path, &ResourceLimits::DEFAULTS).unwrap();
         assert!(session.manifest_json.contains("chapter1.xhtml"));
     }
@@ -1538,7 +1518,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(&png[..4], &[0x89, b'P', b'N', b'G']);
-        // Traversal is rejected outright, not merely missed.
         let err = read_member(&path, "../etc/passwd", &ResourceLimits::DEFAULTS).unwrap_err();
         assert!(
             matches!(err, EpubError::InvalidMemberPath(_)),

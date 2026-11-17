@@ -71,7 +71,6 @@ pub fn parse_opf(xml: &str, limits: &ResourceLimits) -> Result<OpfPackage, EpubE
     let mut legacy_cover_id = None;
     let mut series_index_raw: Option<String> = None;
 
-    // None | "metadata" | "manifest" | "spine"
     let mut section: Option<String> = None;
     // Which metadata element's text we are currently accumulating, if any.
     let mut text_target: Option<&'static str> = None;
@@ -491,13 +490,11 @@ mod tests {
         assert_eq!(opf.metadata.series, None);
         assert_eq!(opf.metadata.series_index, None);
 
-        // A non-numeric index is dropped, not an error.
         let odd = MINIMAL_OPF.replace(r#"content="2""#, r#"content="two""#);
         let opf = parse_opf(&odd, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series.as_deref(), Some("Analytical Engines"));
         assert_eq!(opf.metadata.series_index, None);
 
-        // A comma decimal separator parses.
         let comma = MINIMAL_OPF.replace(r#"content="2""#, r#"content="2,5""#);
         let opf = parse_opf(&comma, &ResourceLimits::DEFAULTS).unwrap();
         assert_eq!(opf.metadata.series_index, Some(2.5));

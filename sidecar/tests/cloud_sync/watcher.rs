@@ -40,9 +40,8 @@ async fn a_remote_op_wakes_the_engine_without_the_pass_interval() {
     let b = device().await;
     let bytes = b"the exact same book bytes";
 
-    // The third-party device folder exists before B's watch is registered,
-    // so the recursive watch covers it from the start and the file event
-    // below cannot be lost to a watch registered a moment too late.
+    // The device folder exists before B's watch registers, so the recursive
+    // watch covers it and no file event is lost to a late registration.
     let remote_dir = sync_dir
         .path()
         .join("TuxBooks")
@@ -63,9 +62,8 @@ async fn a_remote_op_wakes_the_engine_without_the_pass_interval() {
     assert_eq!(annotation_count(&b, b_book).await, 0);
     let shared_uid = book_uid(&b, b_book).await;
 
-    // Connecting started B's watcher (the sync root became known). Start the
-    // loop and wait out its startup sleep plus first pass, so no pass is in
-    // flight or imminent when the remote file lands.
+    // Connecting started B's watcher. Start the loop and wait out its startup
+    // sleep plus first pass, so no pass is in flight when the remote file lands.
     b.service.start();
     let before = syncing_emissions(&b);
     wait_for(
@@ -75,10 +73,8 @@ async fn a_remote_op_wakes_the_engine_without_the_pass_interval() {
     )
     .await;
 
-    // Now the folder gains an operation this device has never seen. The
-    // loop's schedule is empty: its first pass just reset the 10 s interval,
-    // nothing is dirty, so inside the wait bound below only a watcher wake
-    // can run the pass that consumes it.
+    // The loop's schedule is empty and nothing is dirty, so inside the wait
+    // bound below only a watcher wake can run the pass that consumes the op.
     let entity_uid = "1".repeat(32);
     write_manual_op(
         sync_dir.path(),
@@ -105,7 +101,6 @@ async fn a_remote_op_wakes_the_engine_without_the_pass_interval() {
     )
     .await;
 
-    // Shutdown joins both the loop and the watcher thread; a leaked or
-    // wedged watcher would hang here and fail the test.
+    // Shutdown joins both threads; a leaked or wedged watcher hangs here.
     b.service.shutdown().await;
 }

@@ -73,11 +73,9 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
     await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 3", {
       timeout: 30000,
     });
-    // The EPUB engine died with its reader: no orphaned host survives.
     expect(await epubHostCount(page)).toBe(0);
     await returnToLibrary(page);
 
-    // Back into the EPUB: a fresh engine mounts, exactly one host.
     await openReadyEpub(page);
     expect(await epubHostCount(page)).toBe(1);
     await returnToLibrary(page);
@@ -92,7 +90,6 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
       await returnToLibrary(page);
     }
 
-    // The churned session still opens a clean, fully working document.
     await openLargePdf(page);
     const page_number = await currentPageNumber(page);
     expect(page_number).not.toBeNull();
@@ -105,9 +102,7 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
   test("recovers from closing the reader while pages are still rendering", async ({ page }) => {
     await openLargePdf(page);
 
-    // Send the reader deep and close it before any render is waited for:
-    // in-flight renders must unwind (cancel + document destroy) without
-    // wedging the app.
+    // Close before any render is awaited: in-flight renders must cancel and unwind.
     await scrollToSlot(page, 95);
     await returnToLibrary(page);
 
@@ -131,27 +126,20 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
 
       const memory = await pdfSurfaceMemory(page);
       expect(memory.pageCanvases).toBeLessThan(RENDER_BUDGET_LIMIT);
-      // Live canvases are bounded by the render policy: the count cap
-      // (MAX_ACTIVE_CANVASES, 8) × the largest single fit-width buffer at
-      // this session's geometry. (An absolute MB figure would depend on the
-      // window size the session runs at — the budget is policy, not a
-      // fixed byte count.)
+      // Live canvases are capped by policy (8), not an absolute MB count that
+      // depends on window size.
       const onePageBound = await maxSingleBitmapBytes(page, 1);
       expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePageBound);
 
       const cache = await bitmapCacheUsage(page);
       expect(cache).not.toBeNull();
       expect(cache!.entries).toBeLessThanOrEqual(CACHE_MAX_ENTRIES);
-      // The byte budget holds, allowing for the newest single page being
-      // kept even when oversized (oversized-keep-latest); this test never
-      // zooms, so the excess is one fit-width bitmap at the session DPR.
+      // The byte budget allows the newest page even when oversized (no zoom here).
       expect(cache!.bytes).toBeLessThanOrEqual(CACHE_MAX_BYTES + onePageBound);
 
       await returnToLibrary(page);
     }
 
-    // EPUB document lifecycle: after all the PDF churn, the engine host
-    // count is still exactly one while an EPUB is open, zero after it.
     await openReadyEpub(page);
     expect(await epubHostCount(page)).toBe(1);
     await returnToLibrary(page);
@@ -161,7 +149,6 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
   test("keeps rapid navigation inputs converging on a rendered page", async ({ page }) => {
     await openLargePdf(page);
 
-    // Deterministic start, then hammer next.
     await page.keyboard.press("Home");
     await expect.poll(() => currentPageNumber(page), { timeout: 30000 }).toBe(1);
     for (let i = 0; i < 4; i++) {
@@ -171,9 +158,7 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
     await waitForRendered(page, 5);
     expect(await canvasIsNonBlank(page, 5)).toBe(true);
 
-    // Rapid thumbnail clicks: the last target wins and paints. The final
-    // click is re-driven once — a lost programmatic scroll under load must
-    // not fail the convergence wait (systematic loss still would).
+    // Re-drive the final click once: a programmatic scroll can be lost under load.
     await page.getByTestId("reader-sidebar-toggle").click();
     await expect(page.getByTestId("pdf-thumbnails")).toBeVisible({ timeout: 30000 });
     for (const target of [50, 20, 70]) {
@@ -190,9 +175,6 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
   });
 
   test("keeps the current page rendered through window resizes", async ({ page, electronApp }) => {
-    // Window geometry goes through the Playwright main-process bridge
-    // (Electron's BrowserWindow API): bounds are set/read from the app's
-    // real OS window, mirroring what the renderer sees.
     const getBounds = (app: ElectronApplication) =>
       app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getBounds());
     const setBounds = (app: ElectronApplication, bounds: unknown) =>
@@ -207,9 +189,7 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
       await waitForRendered(page, 30);
       expect(await canvasIsNonBlank(page, 30)).toBe(true);
 
-      // Shrink within the window's minimum bounds: fit-width recomputes,
-      // the anchor re-lands by fraction, and page 30 (or its immediate
-      // neighbor — the anchor is a fraction into the page) renders again.
+      // Shrink within the window minimum: the anchor re-lands by fraction, so 29-31.
       await setBounds(electronApp, { x: 10, y: 10, width: 860, height: 600 });
       await expect
         .poll(
@@ -232,10 +212,7 @@ test.describe("tuxbooks reader lifecycle hardening", () => {
   });
 
   test("closing an EPUB does not loop the toolkit's resize observers", async ({ page }) => {
-    // Regression: the toolkit's frame modules (snapper and decoration
-    // ResizeObservers) live on the content frames. Without a synchronous
-    // detach they resize as the reader view collapses, and Chromium reports
-    // a resize loop on every frame of the transition.
+    // Regression: without a synchronous frame detach, Chromium logs a resize loop.
     const before = resizeLoopCount();
     await openReadyEpub(page);
     await returnToLibrary(page);

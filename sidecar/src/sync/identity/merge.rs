@@ -21,9 +21,8 @@ pub async fn merge_book_identity(
     if loser == winner {
         return Ok(());
     }
-    // Delete wins. Folding a live or forgotten identity into a forgotten one
-    // would resurrect the old uuid through sync_book_merges; leave the two
-    // identities alone until an explicit restore clears the tombstone.
+    // Delete wins: merging into a tombstone would resurrect the uuid through
+    // sync_book_merges, so wait for an explicit restore.
     if forgotten_replacement(pool, &winner).await?.is_some()
         || forgotten_replacement(pool, &loser).await?.is_some()
     {
@@ -31,9 +30,8 @@ pub async fn merge_book_identity(
     }
 
     let mut tx = pool.begin().await?;
-    // A merge can move a visible file row to a different record id. Mark the
-    // reload as part of the merge transaction, so a later pass still repairs
-    // the renderer if this pass aborts before it can emit.
+    // Mark the reload inside the merge transaction: a later pass repairs the
+    // renderer even if this pass aborts before it can emit.
     sqlx::query(
         "INSERT INTO sync_meta (key, value) VALUES (?1, '1')
          ON CONFLICT(key) DO UPDATE SET value = '1'",
@@ -62,10 +60,6 @@ pub async fn merge_book_identity(
         .execute(&mut *tx)
         .await?;
 
-    // Fold the losing durable record into the winner and point every local
-    // file row at it. Progress uses the winner's value (the deterministic
-    // canonical identity), annotation counts add up, and the latest opened
-    // timestamp wins.
     sqlx::query(
         r#"
         INSERT INTO book_records (
@@ -172,10 +166,7 @@ pub async fn merge_book_identity(
         .execute(&mut *tx)
         .await?;
 
-    // User state moved to the durable key in 0018. Annotations from both
-    // copies are kept (union; duplicate highlights are possible). Progress
-    // keeps the newest saved position; a tie falls back deterministically to
-    // the losing copy's row so exactly one survives.
+    // Progress keeps the newest position; a tie drops the losing row.
     sqlx::query("UPDATE annotations SET book_uid = ?2 WHERE book_uid = ?1")
         .bind(&loser)
         .bind(&winner)
@@ -212,9 +203,6 @@ pub async fn merge_book_identity(
     .execute(&mut *tx)
     .await?;
 
-    // Metadata overrides and collection membership now belong to the durable
-    // book too. The newest copy's overrides win; a tie keeps the winner.
-    // Memberships from both copies are unioned.
     let (winner_newest, loser_newest): (Option<String>, Option<String>) = sqlx::query_as(
         "SELECT
              (SELECT MAX(modified_at) FROM books WHERE book_uid = ?2),
@@ -320,9 +308,7 @@ pub async fn merge_book_identity(
         .await?;
     tx.commit().await?;
 
-    // The surviving book's effective metadata may now come from the newer
-    // copy's source and overrides, so recompute it once the durable rows have
-    // settled.
+    // Recompute after commit: effective metadata may now come from the newer copy.
     if let Some(file_id) = crate::repository::metadata::primary_file_id(pool, &winner).await? {
         crate::repository::metadata::recompute_effective(pool, &winner, file_id).await?;
     }

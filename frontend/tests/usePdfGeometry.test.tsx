@@ -60,13 +60,10 @@ function renderGeometry(props: HookProps) {
 
 describe("usePdfGeometry eager sweep", () => {
   it("sweeps every page in waves once first paint lands", async () => {
-    // 600 pages crosses two wave boundaries (250 per wave) and ends with a
-    // partial third wave, so the wave loop is exercised for real.
     const { doc, getPage } = makeSweepDocument(600);
     const { result, rerender } = renderGeometry({ doc, pageCount: 600, firstPainted: false });
 
-    // Before first paint only the opening sample (1, 2, 600) is measured;
-    // the rest hold the sampled-median estimate.
+    // Before first paint only the opening sample (1, 2, 600) is measured.
     await waitFor(() => expect(result.current.sizes).not.toBeNull());
     expect(getPage.mock.calls.map(([page]) => page).sort((a, b) => a - b)).toEqual([1, 2, 600]);
     const estimate = result.current.sizes![299];
@@ -77,8 +74,6 @@ describe("usePdfGeometry eager sweep", () => {
       rerender({ doc, pageCount: 600, firstPainted: true });
     });
     await waitFor(() => expect(result.current.sizes![299]).toEqual(storedSize(300)));
-    // The sweep measured every page exactly once; the sample pages were
-    // skipped as already measured.
     const measured = getPage.mock.calls.map(([page]) => page).sort((a, b) => a - b);
     expect(measured).toEqual(Array.from({ length: 600 }, (_, i) => i + 1));
   });
@@ -92,7 +87,6 @@ describe("usePdfGeometry eager sweep", () => {
       rerender({ doc, pageCount: 5001, firstPainted: true });
     });
     await act(async () => {});
-    // First paint alone sweeps nothing: only the opening sample ran.
     expect(getPage.mock.calls.map(([page]) => page).sort((a, b) => a - b)).toEqual([1, 2, 5001]);
 
     // The on-approach path is the correction mechanism for these documents.
@@ -104,9 +98,7 @@ describe("usePdfGeometry eager sweep", () => {
   });
 
   it("drops a superseded document's in-flight sweep", async () => {
-    // A's waves park inside getPage so the switch happens mid-sweep; A's
-    // real sizes carry an offset so a late A commit is distinguishable
-    // from B's.
+    // A's real sizes carry an offset so a late A commit is distinguishable from B's.
     const gates: Array<() => void> = [];
     const getPageA = vi.fn(async (pageNumber: number) => {
       // Hold the sweep's pages, never the opening sample (1, 2, 300).
@@ -118,8 +110,7 @@ describe("usePdfGeometry eager sweep", () => {
     const docA = { numPages: 300, getPage: getPageA } as unknown as PdfDocument;
     const { doc: docB } = makeSweepDocument(300);
 
-    // Production ordering: the sample lands first, then first paint starts
-    // the sweep.
+    // Production ordering: the sample lands first, then first paint starts the sweep.
     const { result, rerender } = renderGeometry({ doc: docA, pageCount: 300, firstPainted: false });
     await waitFor(() => expect(result.current.sizes).not.toBeNull());
     await act(async () => {
@@ -127,23 +118,18 @@ describe("usePdfGeometry eager sweep", () => {
     });
     expect(gates.length).toBeGreaterThan(0);
 
-    // Switch documents while A's first wave is held: the cancelled sweep
-    // must neither keep measuring nor commit into B's geometry.
+    // Switch documents while A's first wave is held: the cancelled sweep must
+    // neither keep measuring nor commit into B's geometry.
     await act(async () => {
       rerender({ doc: docB, pageCount: 300, firstPainted: true });
     });
     for (const resolve of gates.splice(0)) resolve();
     await act(async () => {});
-    // B's sweep ran: a body page carries B's real size, never A's offset one.
     await waitFor(() => expect(result.current.sizes![199]).toEqual(storedSize(200)));
     expect(result.current.sizes![199]?.width).toBe(sizeFor(200).width);
   });
 
   it("carries on past a failed wave; failed pages stay retryable", async () => {
-    // The opening sample (1, 2, 260) succeeds; wave 1 (pages 3..250) fails,
-    // wave 2 (251..259) succeeds. A failed wave must not stop the sweep:
-    // the surviving pages still get measured, failed pages stay unmeasured
-    // for the lazy on-approach path to retry.
     const failing = new Set(Array.from({ length: 248 }, (_, i) => i + 3));
     const getPage = vi.fn(async (pageNumber: number) => {
       if (failing.has(pageNumber)) throw new Error(`page ${pageNumber} unavailable`);
@@ -151,18 +137,13 @@ describe("usePdfGeometry eager sweep", () => {
     });
     const doc = { numPages: 260, getPage } as unknown as PdfDocument;
 
-    // Production ordering: the sample lands first, then first paint starts
-    // the sweep.
     const { result, rerender } = renderGeometry({ doc, pageCount: 260, firstPainted: false });
     await waitFor(() => expect(result.current.sizes).not.toBeNull());
     await act(async () => {
       rerender({ doc, pageCount: 260, firstPainted: true });
     });
-    // Wave 2 landed despite wave 1 failing outright.
     await waitFor(() => expect(result.current.sizes![250]).toEqual(storedSize(251)));
-    // A wave-1 page stays at its estimate: unmeasured, not failed forever.
     expect(result.current.sizes![198]).not.toEqual(storedSize(199));
-    // The sweep attempted every wave (no abort), including wave 2's pages.
     const attempted = getPage.mock.calls.map(([page]) => page);
     expect(attempted.filter((page) => page > 250 && page < 260)).toHaveLength(9);
 

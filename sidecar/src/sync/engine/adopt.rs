@@ -72,9 +72,8 @@ impl super::SyncService {
         };
         for copy in file_version::unsettled_copies(&self.inner.pool).await? {
             if let Err(err) = self.adopt_copy(&root, &copy).await {
-                // One book's failure must not stall the rest of the sweep.
-                // Name the book by its local id: the uid must not reach
-                // stderr (CodeQL rust/cleartext-logging).
+                // Name the book by local id: the uid must not reach stderr
+                // (CodeQL rust/cleartext-logging).
                 eprintln!("sync adoption: book {} adopt failed: {err}", copy.book_id);
             }
         }
@@ -86,13 +85,6 @@ impl super::SyncService {
     /// the visibility threshold record an issue.
     async fn adopt_copy(&self, root: &Path, copy: &UnsettledCopy) -> Result<(), AppError> {
         if self.is_deferred(&copy.book_uid) {
-            // Open-book deferral (ADR 0018 D5): the open session's next
-            // ranged reads re-open the file by path, so swapped bytes would
-            // resolve old offsets — torn pages and decode errors. Skip
-            // silently: no attempt, no issue. The badge is derived from the
-            // unsettled window and stays visible for deferred books, which
-            // is its purpose; the next pass re-checks, and closing the
-            // reader releases the deferral so adoption proceeds then.
             return Ok(());
         }
         let pool = &self.inner.pool;
@@ -102,24 +94,18 @@ impl super::SyncService {
         if winning.content_hash == copy.binding_hash {
             return Ok(());
         }
-        // The blob name must pass the same grammar staging used; an
-        // extension the importer never admitted names no blob.
+        // Only a blob name that passes the staging grammar can exist.
         let Some(blob_name) = blob_name_for(&winning.content_hash, &copy.path) else {
             return Ok(());
         };
         if !store::book_blob_exists(root, &blob_name) {
-            // Op-before-blob arrival (ADR 0018 D2): the pointer is here, the
-            // bytes are still in flight. Silent — but a device that names a
-            // blob the origin never staged (its copy carries a different
-            // extension) waits forever, so after consecutive missing passes
-            // the wait surfaces as an informational row naming the blob.
+            // Op-before-blob arrival: silent, but surface a row after repeated passes.
             if self.record_missing_blob_pass(&copy.book_uid, &winning.content_hash) {
                 self.record_missing_blob_issue(copy, &winning, &blob_name)
                     .await?;
             }
             return Ok(());
         }
-        // The blob is here: the wait is over, so stop counting against it.
         self.clear_missing_blob(&copy.book_uid);
         let blob_path = root.join(store::BOOK_BLOB_DIR).join(&blob_name);
         let bytes = match read_verified_blob(&blob_path, &winning).await {
@@ -133,9 +119,8 @@ impl super::SyncService {
                 return self.record_adopt_failure(copy, &winning, &reason).await;
             }
         };
-        // The local bytes are re-hashed so a stale binding can never cause a
-        // swap: settled bytes need no adoption, and bytes that moved without
-        // a rebind are an external edit in flight — never adoption's input.
+        // Re-hash local bytes: a stale binding or in-flight external edit must
+        // never be swapped.
         let local_path = copy.path.clone();
         let local =
             tokio::task::spawn_blocking(move || identity::hash_file(Path::new(&local_path)))
@@ -144,19 +129,14 @@ impl super::SyncService {
                     AppError::InvalidInput(format!("adoption hash task failed: {err}"))
                 })?;
         let Ok((local_hash, _, _)) = local else {
-            // The file vanished: a local disappearance is not a shared event
-            // (ADR 0013 D6), and the repair path is a re-fetch, not a delete.
+            // Local disappearance is not a shared event; repair is a re-fetch.
             return Ok(());
         };
         if local_hash == winning.content_hash {
-            // Already settled — a cloud client delivered the bytes or a
-            // previous swap crashed before the rebind. The identity sweep
-            // picks the rebind up on its size/mtime divergence.
             return Ok(());
         }
         if local_hash != copy.binding_hash {
-            // An external edit is in flight without a re-import yet.
-            // Overwriting it here would race the user's own write.
+            // An in-flight external edit would race the user's own write.
             return Ok(());
         }
         let destination = copy.path.clone();
@@ -164,10 +144,7 @@ impl super::SyncService {
             .await
             .map_err(|err| AppError::InvalidInput(format!("adoption swap task failed: {err}")))?
             .map_err(AppError::Io)?;
-        // Refresh the file snapshot to the new bytes so the identity sweep
-        // rehashes exactly once (binding vs snapshot diverge), rebinds onto
-        // the existing uid, and settles — the same shape as a re-import's
-        // snapshot update.
+        // Refresh the snapshot so the identity sweep rebinds onto the existing uid.
         let snapshot_path = copy.path.clone();
         let snapshot = tokio::task::spawn_blocking(move || file_stats(Path::new(&snapshot_path)))
             .await
@@ -176,7 +153,6 @@ impl super::SyncService {
             crate::repository::books::update_file_snapshot(pool, copy.book_id, size, mtime).await?;
         }
         resolve_issue_key(pool, &adopt_issue_key(&copy.book_uid)).await?;
-        // Settled: the missing-blob wait (if any was counted) is over.
         self.clear_missing_blob(&copy.book_uid);
         Ok(())
     }

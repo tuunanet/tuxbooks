@@ -63,9 +63,8 @@ describe("parseFoliateCfi", () => {
   });
 
   it("rejects char offsets and odd item steps on the spine path", () => {
-    // A text offset on the itemref step itself, and odd/undersized spine
-    // values, are not spine locators. (Offsets on post-bang steps are text
-    // positions, which are valid.)
+    // A text offset on the itemref step and odd/undersized spine values are not
+    // spine locators; offsets on post-bang steps are valid text positions.
     expect(parseFoliateCfi("epubcfi(/6/2:5!/4/2)")).toBeNull();
     expect(parseFoliateCfi("epubcfi(/6/2!/4/0)")).toBeNull();
     expect(parseFoliateCfi("epubcfi(/6/2!/4/x)")).toBeNull();
@@ -102,7 +101,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
   it("tier exact: text node + offset converts to a text-quote locator", async () => {
     const doc = chapterDoc(["The quick brown fox jumps over the lazy dog near the riverbank."]);
     const source = makeSource([doc]);
-    // html(/4) → body(/4) → p(/4) → text node(/1), offset inside "quick".
     const parsed = parseFoliateCfi("epubcfi(/6/2!/4/4/4/1:4)");
     expect(parsed).not.toBeNull();
     const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/2!/4/4/4/1:4)" }), source);
@@ -122,7 +120,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
     const heading = doc.querySelector("h1");
     heading?.setAttribute("id", "ch1-title");
     const source = makeSource([doc]);
-    // html(/4) → body(/4) → h1(/2).
     const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/2!/4/4/2)" }), source);
     expect(target?.tier).toBe("cfi");
     if (target?.tier !== "cfi") return;
@@ -133,7 +130,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
   it("tier cfi: an element without an id falls back to a text quote", async () => {
     const doc = chapterDoc(["A distinctive paragraph body for the quote tier."]);
     const source = makeSource([doc]);
-    // html(/4) → body(/4) → p(/4).
     const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/2!/4/4/4)" }), source);
     expect(target?.tier).toBe("cfi");
     if (target?.tier !== "cfi") return;
@@ -144,8 +140,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
   it("tier cfi: an empty element among siblings falls back to a css selector", async () => {
     const html = `<!DOCTYPE html><html><head><title>t</title></head><body><h1>Heading</h1><p>one</p><div class="mark"></div><p>two</p></body></html>`;
     const source = makeSource([new DOMParser().parseFromString(html, "application/xhtml+xml")]);
-    // html(/4) -> body(/4) -> p(/2), p(/4), div(/6): the empty div is the
-    // 3rd child; the locator must carry an nth-of-type css selector.
     const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/2!/4/4/6)" }), source);
     expect(target?.tier).toBe("cfi");
     if (target?.tier !== "cfi") return;
@@ -155,7 +149,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
 
   it("yields null when the spine slot is out of range and no chapter rescues it", async () => {
     const source = makeSource([chapterDoc(["Some text."])]);
-    // Item step /8 -> spineIndex 3, past the 3-item spine: no tier applies.
     const target = await convertFoliateRow(row({ cfi: "epubcfi(/6/8!/4/2)" }), source);
     expect(target).toBeNull();
   });
@@ -186,7 +179,6 @@ describe("convertFoliateRow fallback hierarchy", () => {
       locations: { progression: number };
     };
     expect(locator.href).toBe("OEBPS/chapter3.xhtml");
-    // percent 75 of 3 sections, section index 2: (0.75 * 3) - 2 = 0.25.
     expect(locator.locations.progression).toBeCloseTo(0.25, 5);
   });
 
@@ -195,8 +187,8 @@ describe("convertFoliateRow fallback hierarchy", () => {
     const target = await convertFoliateRow(row({ progressPercent: 50 }), source);
     expect(target).toEqual({ tier: "book-percentage", totalProgression: 0.5 });
 
-    // A locator-bearing row with nothing resolvable NEVER trusts its stale
-    // percentage against a different file — it degrades to the beginning.
+    // A locator-bearing row with nothing resolvable never trusts its stale
+    // percentage against a different file; it degrades to the beginning.
     const stale = await convertFoliateRow(
       row({ cfi: "epubcfi(/6/999!/4/2/1:0)", chapterHref: "gone.xhtml", progressPercent: 50 }),
       source,

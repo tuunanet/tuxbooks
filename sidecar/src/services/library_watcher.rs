@@ -68,7 +68,6 @@ impl LibraryWatcher {
         let inner =
             notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
                 if let Ok(event) = result {
-                    // A closed receiver just means the app is shutting down.
                     let _ = event_tx.send(event);
                 }
             })
@@ -141,12 +140,8 @@ impl LibraryWatcher {
 
 impl Drop for LibraryWatcher {
     fn drop(&mut self) {
-        // Take the handle out first: dropping it drops the notify watcher,
-        // which drops the event sender, which makes the reconciler loop
-        // return on Disconnected. The join then guarantees the thread is
-        // gone before the runtime it calls block_on on shuts down — without
-        // it the thread can wake into "A Tokio 1.x context is being
-        // shutdown" while the test runtime tears down (bd tuxbooks-crn).
+        // Drop the handle to disconnect the event channel, then join before the
+        // runtime shuts down, or the thread wakes into a shutdown Tokio context (bd tuxbooks-crn).
         let slot = self.inner.lock().expect("watcher mutex poisoned").take();
         if let Some(WatcherHandle {
             watcher,
@@ -189,9 +184,7 @@ fn run_reconciler_loop(
     loop {
         match events.recv_timeout(debounce) {
             Ok(event) => {
-                // The backend lost events (kernel queue overflow) and asks
-                // for a rescan: drain what we have, then reconcile every
-                // watched location against the database.
+                // Backend lost events (queue overflow): flush, then reconcile every location.
                 if event.flag() == Some(notify::event::Flag::Rescan) {
                     flush(&mut batch, &reconciler);
                     reconciler.block_on(reconciler.reconcile_all_locations());
@@ -221,10 +214,8 @@ fn flush(batch: &mut EventBatch, reconciler: &Reconciler) {
         }
         reconciler.block_on(reconciler.apply(changes));
     }
-    // A rename source expired without a destination. The destination half of
-    // an event pair can be lost entirely when it lands in a directory whose
-    // watch was registered only a moment earlier — reconcile the watched
-    // locations so the move is recovered (identity-preserving relink).
+    // An expired rename source means the destination event may have been lost
+    // (watch registered too late); sweep all locations so the relink is recovered.
     if !batch.expired_froms.is_empty() {
         batch.expired_froms.clear();
         reconciler.block_on(reconciler.reconcile_all_locations());
@@ -271,9 +262,7 @@ impl EventBatch {
                     }
                 }
                 RawKind::Remove => {
-                    // Create+remove inside one window is transient churn
-                    // (e.g. an editor's temp file); the file no longer
-                    // exists, so removal wins.
+                    // Create+remove in one window is transient churn; removal wins.
                     self.creates.retain(|p| *p != path);
                     self.modifies.retain(|p| *p != path);
                     self.removes.push(path);
@@ -300,8 +289,6 @@ impl EventBatch {
 
         let mut changes: Vec<PathChange> = Vec::new();
 
-        // Pair a carried-over source with the oldest destination first: it
-        // has already waited one window for exactly this.
         while let (Some(_), Some(to)) = (carried.first().cloned(), rename_tos.first().cloned()) {
             let from = carried.remove(0);
             rename_tos.remove(0);
@@ -312,8 +299,6 @@ impl EventBatch {
             changes.push(PathChange::Renamed { from, to });
         }
 
-        // Direct rename pairs within this window: consume their paths so
-        // nothing else in the batch double-reports them.
         while let (Some(from), Some(to)) =
             (rename_froms.first().cloned(), rename_tos.first().cloned())
         {
@@ -326,9 +311,8 @@ impl EventBatch {
             changes.push(PathChange::Renamed { from, to });
         }
 
-        // Sources without a destination wait one extra window before being
-        // given up on; sources that already waited are removals (file left
-        // the watch or the destination event was lost) and trigger a sweep.
+        // Unpaired sources wait one extra window; ones that already waited are
+        // removals (file left the watch or the destination event was lost).
         self.pending_froms.append(&mut rename_froms);
         for from in carried {
             self.expired_froms.push(from.clone());
@@ -351,8 +335,7 @@ impl EventBatch {
                 continue;
             }
             seen_removed.push(path.clone());
-            // Created and removed in the same window: a replaced file when
-            // it still exists (re-import), a genuine removal otherwise.
+            // Create+remove still on disk means a replaced file (re-import); otherwise a removal.
             if path.exists() {
                 changes.push(PathChange::Modified(path));
             } else {
@@ -420,8 +403,6 @@ fn classify_event(event: &notify::Event) -> Vec<(PathBuf, RawKind)> {
                 }
             }
             ModifyKind::Name(_) => {
-                // Ambiguous rename signal: settle it as a modification and
-                // let fs truth decide at reconcile time.
                 for path in &event.paths {
                     out.push((path.clone(), RawKind::Modify));
                 }
@@ -532,8 +513,6 @@ mod tests {
         batch.absorb(&create(&kept.to_string_lossy()));
         batch.absorb(&remove(&kept.to_string_lossy()));
 
-        // `gone.epub` vanished: net removal. `here.epub` still exists: the
-        // pair collapses into a single re-import (modified).
         assert_eq!(
             paths(&batch.take()),
             vec![
@@ -545,8 +524,6 @@ mod tests {
 
     #[test]
     fn separate_from_to_events_pair_into_a_rename() {
-        // Linux inotify reports a move as one From event followed by one To
-        // event; the batch must join them into a single rename.
         let mut batch = EventBatch::default();
         batch.absorb(&event(
             notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)),
@@ -565,9 +542,6 @@ mod tests {
 
     #[test]
     fn from_without_to_degrades_to_removal() {
-        // The rename destination was never observed (file moved outside the
-        // watch or deleted mid-window): the source waits one extra window,
-        // then reconciles as a disappearance.
         let mut batch = EventBatch::default();
         batch.absorb(&event(
             notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)),
@@ -602,9 +576,6 @@ mod tests {
             &["/lib/incoming.epub"],
         ));
 
-        // The destination file was also reported as a plain create (some
-        // watchers double-report). The rename wins and must not double-count
-        // the destination; reconciliation imports the destination either way.
         assert_eq!(
             paths(&batch.take()),
             vec!["renamed:/lib/other.epub->/lib/incoming.epub"]
@@ -638,9 +609,6 @@ mod tests {
 
     #[test]
     fn rename_straddling_windows_pairs_across_flushes() {
-        // Under load the From and To halves of one rename can land in
-        // different debounce windows. The source must wait one extra window
-        // instead of degrading into a removal.
         let mut batch = EventBatch::default();
         batch.absorb(&event(
             notify::EventKind::Modify(ModifyKind::Name(RenameMode::From)),
@@ -673,17 +641,12 @@ mod tests {
         ));
         assert!(batch.take().is_empty());
 
-        // A second window without a destination: the file left the watch.
         assert_eq!(paths(&batch.take()), vec!["removed:/lib/gone.epub"]);
-        // And it does not linger afterwards.
         assert!(batch.take().is_empty());
     }
 
     #[test]
     fn rename_pair_beats_separate_remove_noise() {
-        // Some watchers emit both Name(Both) and Remove noise for a move;
-        // the paired rename must consume the remove so the book is relinked
-        // rather than marked missing.
         let mut batch = EventBatch::default();
         batch.absorb(&rename("/lib/a.epub", "/lib/sub/a.epub"));
         batch.absorb(&remove("/lib/a.epub"));

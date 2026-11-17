@@ -203,8 +203,7 @@ export class PdfiumEngine {
       const lines: LineBuilder[] = [];
       for (let i = 0; i < count; i += 1) {
         const unicode = this.mod.FPDFText_GetUnicode(textPage, i);
-        // Control characters (the generated CR/LF between lines) carry no
-        // geometry; the baseline grouping already separates the lines.
+        // Control characters (generated CR/LF) carry no geometry; baselines separate lines.
         if (unicode < 0x20) continue;
         if (!this.mod.FPDFText_GetLooseCharBox(textPage, i, box)) continue;
         this.mod.FPDFText_GetCharOrigin(textPage, i, origin, origin + 8);
@@ -231,8 +230,7 @@ export class PdfiumEngine {
           };
           lines.push(line);
         } else {
-          // A wide horizontal gap is word spacing that the content stream did
-          // not encode as a space character.
+          // A wide horizontal gap is word spacing the stream did not encode as a space.
           if (
             unicode !== 0x20 &&
             !line.text.endsWith(" ") &&
@@ -351,8 +349,7 @@ export class PdfiumEngine {
     const doc = this.requireDoc();
     const page = this.mod.FPDF_LoadPage(doc, index);
     if (!page) throw new Error(`PDFium: FPDF_LoadPage(${index}) failed`);
-    // Never hand PDFium a bitmap its 2 GB heap cannot hold; a caller that
-    // missed the ratio caps gets a CSS-upscaled result instead of a crash.
+    // Never hand PDFium a bitmap its 2 GB heap cannot hold; over-cap calls get CSS-upscaled.
     ({ width, height } = clampBitmapSize(width, height));
     const bitmap = this.mod.FPDFBitmap_Create(width, height, 1);
     if (!bitmap) {
@@ -360,8 +357,7 @@ export class PdfiumEngine {
       throw new Error(`PDFium: FPDFBitmap_Create(${width}×${height}) failed`);
     }
     try {
-      // PDFs paint no page background; viewers supply white — or the dark
-      // page colour the scheme's path fill carries.
+      // PDFs paint no background; viewers supply white or the scheme's dark page fill.
       const background = colorScheme ? colorScheme.pathFill : 0xffffffff;
       this.mod.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, background);
       if (colorScheme) {
@@ -453,8 +449,7 @@ export class PdfiumEngine {
         throw new Error("PDFium: colour-scheme render failed");
       }
     } finally {
-      // The render context lives on the page; clear it whether the render
-      // completed or failed so the next render starts clean.
+      // The render context lives on the page; clear it on success and failure alike.
       this.mod.FPDF_RenderPage_Close(page);
       if (needPause !== null) this.rt.removeFunction(needPause);
       this.rt.wasmExports.free(scheme);

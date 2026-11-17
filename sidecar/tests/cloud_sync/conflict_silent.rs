@@ -34,8 +34,6 @@ async fn an_edit_arriving_after_a_delete_is_discarded_with_one_diagnostic_and_no
         .unwrap()[0]
         .id;
 
-    // A deletes; B edits the still-live annotation before seeing the
-    // tombstone.
     annotations::delete_annotation(&a.pool, annotation)
         .await
         .unwrap();
@@ -51,12 +49,6 @@ async fn an_edit_arriving_after_a_delete_is_discarded_with_one_diagnostic_and_no
     )
     .await
     .unwrap();
-    // B's pass publishes the edit first, then applies the delete; the
-    // tombstone wins without a row. A's pass diverts the arriving edit.
-    // Two devices: exactly one row, recorded by the one device that applies
-    // the edit against the tombstone. At N devices the same race leaves N-1
-    // rows, one per device that applies delete-then-edit; only the editing
-    // device stays quiet.
     run(&b).await;
     run(&a).await;
 

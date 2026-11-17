@@ -32,9 +32,6 @@ pub async fn get_library_stats(state: &AppState) -> Result<LibraryStats, AppErro
 /// All books in the library, ordered by title.
 pub async fn list_books(state: &AppState) -> Result<Vec<Book>, AppError> {
     let mut all = books::list_books(&state.db).await?;
-    // Decorated here rather than in the repository because the repository
-    // module is over the push gate; the source of truth is the sync mirror
-    // (ADR 0018 D3), so the decoration is one extra query per list.
     let unsettled: std::collections::HashSet<String> =
         crate::sync::file_version::unsettled_copies(&state.db)
             .await?
@@ -77,9 +74,7 @@ pub async fn link_book_edition(
     target_book_id: i64,
 ) -> Result<EditionLinkOutcome, AppError> {
     let outcome = editions::link_editions(&state.db, source_book_id, target_book_id).await?;
-    // Both books changed: the target gained progress and provider links, the
-    // source lost them. A book with no file row has no library event to emit;
-    // Reading history reloads on the target's event.
+    // Both books changed; a book with no file row has no event of its own.
     crate::commands::emit_book_changed(state, events, outcome.source_book_id).await?;
     crate::commands::emit_book_changed(state, events, outcome.target_book_id).await?;
     Ok(outcome)
@@ -100,8 +95,7 @@ pub async fn retry_indexing(
     if let Some(book) = books::get_book(&state.db, book_id).await? {
         crate::commands::emit_changed_book(events, book);
     }
-    // Hashing can merge this book into a shared identity and delete the row
-    // the caller held, or delete another card that now shares its bytes.
+    // Hashing can merge identities and delete the rows the caller holds.
     events.emit("library-changed", &LibraryChange::Reload);
     Ok(outcome)
 }
@@ -159,9 +153,7 @@ pub(crate) async fn delete_book_and_notify(
 ) -> Result<bool, AppError> {
     let file_ids = books::file_ids_for_book(&state.db, book_id).await?;
     crate::services::hash_backfill::wait_for_books(&state.db, &file_ids).await?;
-    // Waiting can hash a pending file and merge its identity into another
-    // book. Re-resolve from a file row so the removal follows the book that
-    // actually owns the bytes now.
+    // A pending hash may merge identities; re-resolve from a file row.
     let book_id = match file_ids.first() {
         Some(file_id) => books::durable_id_for_file(&state.db, *file_id)
             .await?
@@ -201,7 +193,6 @@ pub(crate) async fn delete_file_row_and_notify(
     book_id: i64,
 ) -> Result<bool, AppError> {
     crate::services::hash_backfill::wait_for_books(&state.db, &[file_id]).await?;
-    // The pending hash may have merged this file into another identity.
     let book_id = books::durable_id_for_file(&state.db, file_id)
         .await?
         .unwrap_or(book_id);
@@ -326,10 +317,7 @@ where
             trash_ids.push(outcome.trash_id);
             forgotten_count += 1;
         } else if saw_transient {
-            // The book was forgotten on an earlier attempt whose post-commit
-            // bookkeeping lost a contention race: state is committed and the
-            // view reloads the real lists afterwards, so skip the event and
-            // the trash id rather than fail the run.
+            // Already committed on an earlier attempt; skip rather than fail.
             forgotten_count += 1;
         }
     }
@@ -342,8 +330,6 @@ where
 async fn forget_book_inner(state: &AppState, book_id: i64) -> Result<ForgetOutcome, AppError> {
     let file_ids = books::file_ids_for_book(&state.db, book_id).await?;
     crate::services::hash_backfill::wait_for_books(&state.db, &file_ids).await?;
-    // A pending hash can merge this file into another identity. Follow the
-    // bytes the user is looking at before taking a snapshot.
     let book_id = match file_ids.first() {
         Some(file_id) => books::durable_id_for_file(&state.db, *file_id)
             .await?
@@ -358,8 +344,7 @@ async fn emit_forget(
     events: &EventEmitter,
     outcome: &ForgetOutcome,
 ) -> Result<(), AppError> {
-    // The forgotten identity is deleted, so its card has to go even though a
-    // book with a file keeps a fresh one in the same place (tuxbooks-jpj).
+    // The forgotten identity is gone, so its card goes even if a fresh one exists.
     events.emit(
         "library-changed",
         &LibraryChange::Removed {
@@ -389,9 +374,7 @@ pub async fn restore_book(
     mode: Option<RestoreMode>,
 ) -> Result<RestoreOutcome, AppError> {
     let outcome = lifecycle::restore(&state.db, trash_id, mode).await?;
-    // A restore deletes records the renderer can still be showing: the fresh
-    // identity, and the old one when it comes back under a new public id.
-    // Announce those ids, or one file stays on the grid twice (tuxbooks-jpj).
+    // Announce removed ids, or one file stays on the grid twice (tuxbooks-jpj).
     for book_id in &outcome.replaced_book_ids {
         events.emit(
             "library-changed",

@@ -13,15 +13,11 @@ interface UseReaderProgressSeekInput {
  */
 export function useReaderProgressSeek({ position, adapterRef }: UseReaderProgressSeekInput) {
   const [preview, setPreview] = useState<number | null>(null);
-  // While you hover or drag the bar it shows the Kindle-style positioning
-  // label ("Location N of M • P%"); leaving the bar clears it. The adapter
-  // query runs inside the pointer handlers, so refs stay out of render, and
-  // a null open adapter degrades the label to percent-only.
+  // Hover or drag shows the Kindle-style label; the adapter query runs inside
+  // the pointer handlers, and a null adapter degrades the label to percent-only.
   const [label, setLabel] = useState<string | null>(null);
-  // Whether the positioning label is showing. A ref rather than the label
-  // state: a relocate re-render can queue its refresh effect before
-  // pointerleave clears the label, and that effect must not read the stale
-  // non-null label and put the tooltip back.
+  // A ref, not the label state: a queued refresh effect can run before
+  // pointerleave clears the label and must not read a stale non-null label.
   const labelOpenRef = useRef(false);
   const barRef = useRef<HTMLDivElement | null>(null);
 
@@ -46,9 +42,7 @@ export function useReaderProgressSeek({ position, adapterRef }: UseReaderProgres
     setLabel(null);
   }, []);
 
-  // The label is live while it shows: page turns move the value under a
-  // resting pointer, and a label read only at pointer entry would sit frozen
-  // at the location where the seek began.
+  // Live while shown: page turns move the value under a resting pointer.
   const barValue = preview ?? position;
   useEffect(() => {
     if (!labelOpenRef.current) return;

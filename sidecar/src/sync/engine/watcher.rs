@@ -95,10 +95,8 @@ impl SyncFolderWatcher {
 
 impl Drop for SyncFolderWatcher {
     fn drop(&mut self) {
-        // Drop the notify watcher first: it owns the event sender, so its
-        // drop disconnects the channel and the debounce thread returns.
-        // The join then guarantees the thread is gone before the engine is
-        // — no leaked task, no wake racing the service's teardown.
+        // Drop the notify watcher first so its sender disconnects and the debounce
+        // thread returns; the join then proves it is gone before the engine is.
         if let Some(handle) = self.inner.take() {
             drop(handle.watcher);
             let _ = handle.thread.join();
@@ -120,9 +118,7 @@ fn run_wake_loop(
     loop {
         match events.recv_timeout(quiet_period) {
             Ok(event) => {
-                // The backend lost events (kernel queue overflow) and asks
-                // for a rescan: the next pass reconciles against the folder,
-                // so one wake is the right response.
+                // Kernel queue overflow: one wake is right, since the next pass rescans anyway.
                 let rescan = event.flag() == Some(notify::event::Flag::Rescan);
                 let matched = rescan || event.paths.iter().any(|path| wakes_engine(&root, path));
                 if gate.absorb(matched) {
@@ -197,7 +193,7 @@ fn wakes_engine(root: &Path, path: &Path) -> bool {
     };
     let mut components = relative.components();
     let Some(Component::Normal(top)) = components.next() else {
-        return false; // the root itself, or a non-plain component
+        return false;
     };
     match top.to_str() {
         Some("ops") => match (components.next(), components.next()) {
@@ -237,8 +233,7 @@ impl SyncService {
             .watcher
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // Stop the previous watcher first: a root change starts a fresh
-        // watch, and two debounce threads would only double-wake.
+        // Stop the previous watcher first; two debounce threads would double-wake.
         drop(slot.take());
         let Some(root) = self.sync_root() else {
             return;
@@ -279,7 +274,6 @@ mod tests {
             root,
             &root.join("ops").join(device).join("9.json")
         ));
-        // scan_ops tolerates any device directory name; so does the filter.
         assert!(wakes_engine(root, &root.join("ops/any-device/op.json")));
     }
 

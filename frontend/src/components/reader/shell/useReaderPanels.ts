@@ -79,10 +79,8 @@ export function useReaderPanelShortcuts({
     setPdfSidebarOpen((open) => !open),
   );
   useShortcut(READER_PANEL_SHORTCUTS.appearance, () => setAppearanceOpen((open) => !open));
-  // The EPUB navigator's capture-phase host listener intercepts Escape while
-  // the reading frame owns focus, so Radix's popover never sees the key.
-  // Close the controlled appearance popover through the same registry that
-  // receives the forwarded key.
+  // The EPUB navigator intercepts Escape at capture phase while the frame owns
+  // focus, so the popover closes through the registry that receives the key.
   useShortcut(appearanceOpen ? "escape" : null, () => setAppearanceOpen(() => false));
   useShortcut(READER_PANEL_SHORTCUTS.contents, () => {
     focusReadingSurface();

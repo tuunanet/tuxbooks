@@ -69,8 +69,7 @@ async fn the_sweep_retries_a_due_row_and_closes_it_on_success() {
     run(&a).await;
     let uid = book_uid(&a, book).await;
 
-    // A reprojection row stays open while the book exists, and no pass
-    // touches it: only the sweep can close this one.
+    // Only the sweep can close a reprojection row: no pass touches it while the book exists.
     let issue = insert_retry_row(
         &a,
         &format!("reproject:{uid}"),
@@ -81,10 +80,8 @@ async fn the_sweep_retries_a_due_row_and_closes_it_on_success() {
     )
     .await;
 
-    // A whole pass runs end-to-end with a due row present. The sweep
-    // dispatches through the retry_locked arms while run_pass still holds
-    // pass_lock; reaching for retry_issue here would deadlock on that same
-    // lock, so this passing at all is the structural no-deadlock proof.
+    // The sweep dispatches through retry_locked while run_pass holds pass_lock;
+    // calling retry_issue here would deadlock, so passing proves no deadlock.
     run(&a).await;
 
     assert!(!row_is_open(&a, issue).await, "the sweep closed the row");
@@ -100,9 +97,7 @@ async fn an_exhausted_row_gives_up_stays_open_and_stops_being_retried() {
     run(&a).await;
     let uid = book_uid(&a, book).await;
 
-    // A lifecycle row with nothing in the mirror to replay fails on every
-    // attempt. Seed one short of its cap (3) and due, so the sweep spends
-    // the last one.
+    // A lifecycle row with nothing to replay fails every attempt; seed one short of the cap.
     let issue = insert_retry_row(
         &a,
         &format!("book-lifecycle:{uid}"),
@@ -133,7 +128,6 @@ async fn a_failed_attempt_waits_out_the_backoff_before_the_next_try() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
 
-    // A missing cover blob fails on every attempt, on the default budget.
     let issue = insert_retry_row(
         &a,
         "cover-missing:deadbeefdeadbeef.png",
@@ -163,8 +157,6 @@ async fn a_failed_attempt_waits_out_the_backoff_before_the_next_try() {
     assert_eq!(attempts, 1, "not due: skipped without spending budget");
     assert_eq!(next_after, Some(next), "the backoff clock did not move");
 
-    // The payload carries the state so the UI can show it without changing
-    // attention semantics.
     let listed_id = issue_id(&a, "cover-missing:deadbeefdeadbeef.png").await;
     let dto = a
         .service
@@ -204,8 +196,6 @@ async fn a_disconnected_engine_skips_folder_dependent_rows_without_spending_budg
     assert_eq!(next.as_deref(), Some(DUE), "the backoff clock did not move");
     assert_eq!(detail, "test detail");
 
-    // The paused row stays in flight: enabled and under the cap, so it
-    // waits for the folder without driving attention.
     let status = a.service.status().await.unwrap();
     assert_eq!(status.issues, 0, "a paused row is not attention");
     assert_eq!(
@@ -229,9 +219,7 @@ async fn hash_failed_rows_are_never_swept() {
     connect(&a, sync_dir.path()).await;
     run(&a).await;
 
-    // Park the book in a failed hash with its own retry clock far out, so
-    // the open row stays open for the duration: the backfill loop, not the
-    // sweep, is the schedule for this kind.
+    // The backfill loop, not the sweep, schedules this kind; park the hash clock far out.
     let file_id = file_row_id(&a, "sweep-hash.epub").await;
     sqlx::query(
         "UPDATE books SET hash_state = 'failed', hash_attempts = 2,
@@ -255,8 +243,7 @@ async fn hash_failed_rows_are_never_swept() {
     let (attempts, next, detail) = retry_state(&a, issue).await;
     assert_eq!(attempts, 0);
     assert_eq!(next.as_deref(), Some(DUE));
-    // The hash sweep rewrites this row's detail, so assert on the sweep's
-    // marker instead: the auto-retry sweep never touched the row.
+    // The hash sweep rewrites detail, so assert on its marker: the auto-retry sweep never ran.
     assert!(!detail.contains("auto-retry"), "{detail}");
     assert!(row_is_open(&a, issue).await);
 }
@@ -293,7 +280,6 @@ async fn a_manual_retry_grants_a_fresh_budget_and_revives_an_exhausted_row() {
         "{detail}"
     );
 
-    // Revived: the sweep picks the row up again on its own budget.
     run(&a).await;
     let (attempts, _, detail) = retry_state(&a, issue).await;
     assert_eq!(attempts, 1, "the exhausted row is back in the schedule");
@@ -309,8 +295,7 @@ async fn an_in_flight_row_is_work_in_progress_and_exhaustion_flips_attention() {
     run(&a).await;
     let uid = book_uid(&a, book).await;
 
-    // A stuck operation file keeps a human-required row open: the file
-    // exists, so no status sweep closes it, and the kind is not sweep-owned.
+    // A stuck op file keeps a human-required row open: no status sweep closes it.
     let stuck = sync_dir
         .path()
         .join("TuxBooks")
@@ -328,8 +313,6 @@ async fn an_in_flight_row_is_work_in_progress_and_exhaustion_flips_attention() {
     )
     .await;
 
-    // An in-flight row: the sweep owns it and the budget is under the cap.
-    // Work in progress is not attention, whatever the timestamp says.
     insert_retry_row(
         &a,
         &format!("book-lifecycle:{uid}"),
@@ -344,21 +327,16 @@ async fn an_in_flight_row_is_work_in_progress_and_exhaustion_flips_attention() {
     assert!(status.auto_retry, "the toggle rides the status payload");
     assert_eq!(status.issues, 1, "only the human-required row counts");
 
-    // The kill switch ends the exclusion at once: the machine is off, so
-    // even the mid-flight row becomes attention — the rows are the user's
-    // job now.
+    // Kill switch off: the machine is off, so even the mid-flight row becomes the user's job.
     a.service.set_auto_retry(false).await.unwrap();
     let status = a.service.status().await.unwrap();
     assert!(!status.auto_retry);
     assert_eq!(status.issues, 2, "with the sweep off every open row counts");
 
-    // Back on, the under-budget row returns to the sweep.
     a.service.set_auto_retry(true).await.unwrap();
     let status = a.service.status().await.unwrap();
     assert_eq!(status.issues, 1, "the sweep resumes the in-flight row");
 
-    // Exhaust the sweep-owned row: the budget is spent, the machine gave
-    // up, and that is attention again.
     sqlx::query(
         "UPDATE sync_issues SET auto_attempts = 3, next_auto_retry_at = NULL
          WHERE kind = 'book_lifecycle_failed' AND resolved_at IS NULL",
@@ -379,9 +357,6 @@ async fn a_fresh_row_is_in_flight_while_enabled_and_attention_when_disabled() {
     run(&a).await;
     let uid = book_uid(&a, book).await;
 
-    // Fresh: nothing spent, nothing scheduled. While the sweep owns the
-    // kind and the budget is under the cap the row is work in progress,
-    // not indefinite attention.
     let issue = insert_retry_row(
         &a,
         &format!("book-lifecycle:{uid}"),
@@ -399,7 +374,6 @@ async fn a_fresh_row_is_in_flight_while_enabled_and_attention_when_disabled() {
         "the list keeps the in-flight row visible"
     );
 
-    // Kill switch off: the exclusion ends at once and the row is attention.
     a.service.set_auto_retry(false).await.unwrap();
     let status = a.service.status().await.unwrap();
     assert_eq!(
@@ -407,7 +381,6 @@ async fn a_fresh_row_is_in_flight_while_enabled_and_attention_when_disabled() {
         "with the sweep off the row is the user's job"
     );
 
-    // On again: back in flight, and the sweep spends the budget itself.
     a.service.set_auto_retry(true).await.unwrap();
     run(&a).await;
     let (attempts, _, detail) = retry_state(&a, issue).await;

@@ -70,8 +70,6 @@ describe("PdfSidebar virtualization", () => {
     renderSidebar({ pageCount: 100 });
 
     expect(document.querySelectorAll("[data-pdf-thumb-slot]")).toHaveLength(100);
-    // The reading page's thumbnail paints immediately (anchor fallback), the
-    // rest stay unloaded geometry.
     expect(thumbnailPages()).toEqual(["1"]);
     expect(slot(100)).toHaveAttribute("data-thumb-state", "unloaded");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-thumb-state", "rendered"));
@@ -110,7 +108,6 @@ describe("PdfSidebar virtualization", () => {
 
     fireVisible(slot(2), false);
     await waitFor(() => expect(thumbnailPages()).not.toContain("2"));
-    // The cell keeps its reserved geometry.
     expect(slot(2)).toHaveAttribute("data-thumb-state", "unloaded");
     expect(slot(2)).toHaveAttribute("data-pdf-thumb-slot", "2");
   });
@@ -180,7 +177,6 @@ describe("PdfSidebar failures", () => {
     fireVisible(slot(2), true);
 
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-thumb-state", "error"));
-    // The other cells keep working.
     fireVisible(slot(3), true);
     await waitFor(() => expect(slot(3)).toHaveAttribute("data-thumb-state", "rendered"));
   });

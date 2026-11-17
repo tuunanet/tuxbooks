@@ -102,15 +102,11 @@ async fn setup() -> TestEnv {
         })
         .unwrap(),
     );
-    // Production registers every watched root in the database (scan_library
-    // does it); the recovery sweep reconciles exactly those locations.
     library_locations::add_location(&pool, &library.to_string_lossy())
         .await
         .unwrap();
     watcher.watch(&library);
 
-    // The emitter is the same handle request handlers use, so a test can
-    // assert what the client would receive live.
     let fired: Arc<Mutex<FiredEvents>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&fired);
     let emitter = EventEmitter::new(move |name, payload| {
@@ -360,7 +356,6 @@ async fn deleted_file_marks_book_unavailable_and_preserves_progress() {
         unreachable!()
     };
 
-    // The row survives with identity, metadata, and reading progress.
     let stored = book_repo::get_book(&env.pool, book.id)
         .await
         .unwrap()
@@ -528,8 +523,7 @@ async fn modified_file_updates_metadata() {
         _ => unreachable!(),
     };
 
-    // Rewrite the same path with genuinely different content (different
-    // size and mtime), as an external tool would.
+    // Different size and mtime make this a real modification, not a touch.
     write_epub(&path, "After Edit");
     let change = env.wait_for(|c| match c {
         LibraryChange::Changed { book } => book.title == "After Edit",
@@ -546,8 +540,6 @@ async fn modified_file_updates_metadata() {
 async fn duplicate_and_rapid_events_reconcile_to_a_stable_state() {
     let env = setup().await;
 
-    // Rapid sequence: many creates in quick succession — one debounce
-    // window must import them all without duplicates.
     for i in 0..10 {
         env.write_book(&format!("rapid-{i}.epub"), &format!("Rapid {i}"));
     }
@@ -561,8 +553,6 @@ async fn duplicate_and_rapid_events_reconcile_to_a_stable_state() {
     }
     assert_eq!(env.count().await, 10);
 
-    // Duplicate churn on one file: repeated writes must leave exactly one
-    // consistent, available row (no duplicates, no availability churn).
     let path = env.path("rapid-0.epub");
     let before = book_repo::get_book_by_path(&env.pool, &path.to_string_lossy())
         .await
@@ -600,7 +590,6 @@ async fn directory_rename_relinks_all_contained_books() {
     let dir = env.library.join("shelf");
     env.write_book("shelf/one.epub", "Shelf One");
     env.write_book("shelf/two.epub", "Shelf Two");
-    // Batch order is not guaranteed, so collect until both books arrived.
     wait_for_titles(&env, ["Shelf One", "Shelf Two"]);
     let one_id = book_id_stored(&env, "Shelf One").await;
     let two_id = book_id_stored(&env, "Shelf Two").await;
@@ -650,7 +639,6 @@ async fn corrupt_file_is_skipped_and_imports_once_fixed() {
     let path = env.path("broken.epub");
     std::fs::write(&path, b"this is not a zip").unwrap();
 
-    // Give the watcher time to see (and reject) the broken file.
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(env.count().await, 0, "a corrupt file must not be imported");
 
@@ -668,13 +656,10 @@ async fn corrupt_file_is_skipped_and_imports_once_fixed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn startup_reconciliation_diffs_the_location_incrementally() {
     let env = setup().await;
-    // The startup contract is files landing while the app is off: silence
-    // the fs watcher so only the explicit reconcile runs. With the watcher
-    // live its 50ms debounce races reconcile_location for the same files
-    // and the report counts stop being deterministic (bd tuxbooks-6r2).
+    // Silence the watcher: its 50ms debounce races reconcile_location for the
+    // same files, making report counts non-deterministic (bd tuxbooks-6r2).
     env.watcher.unwatch(&env.library);
 
-    // Two files land before reconciliation knows about them.
     env.write_book("a.epub", "Startup A");
     env.write_book("b.epub", "Startup B");
     let report = env
@@ -687,8 +672,6 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
     assert_eq!(report.failed, 0);
     assert_eq!(env.count().await, 2);
 
-    // A file deleted while the app was "off" becomes unavailable; the
-    // survivor is untouched (no re-import, no availability churn).
     std::fs::remove_file(env.path("a.epub")).unwrap();
     let report = env
         .reconciler
@@ -703,7 +686,6 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
         .unwrap();
     assert!(survivor.available);
 
-    // A file added while the app was "off" is imported on the next pass.
     env.write_book("c.epub", "Startup C");
     let report = env
         .reconciler
@@ -714,7 +696,6 @@ async fn startup_reconciliation_diffs_the_location_incrementally() {
     assert_eq!(report.imported, 1);
     assert_eq!(env.count().await, 3);
 
-    // Reconciliation is idempotent: an unchanged library makes no changes.
     let report = env
         .reconciler
         .reconcile_location(&env.library)
@@ -738,13 +719,11 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
     let root = env.library.to_string_lossy().into_owned();
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
-    // The watch list no longer carries the folder...
     assert!(library_locations::list_locations(&env.pool)
         .await
         .unwrap()
         .is_empty());
 
-    // ...the catalog row is gone, not merely detached...
     let books = env.books().await;
     assert_eq!(books.len(), 0, "unwatching must purge the catalog rows");
     assert_eq!(
@@ -763,7 +742,6 @@ async fn unwatching_a_folder_purges_the_catalog_and_leaves_files_byte_for_byte()
         "and finish on the promised count"
     );
 
-    // ...and the file itself is untouched, byte for byte.
     assert_eq!(
         std::fs::read(&kept).unwrap(),
         before,
@@ -906,7 +884,7 @@ async fn unwatching_a_folder_stops_its_disk_changes_from_reaching_the_catalog() 
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
     write_epub(&env.path("ignored.epub"), "Ignored Book");
-    // Give a broken watcher time to deliver this before the live root speaks.
+    // 300ms lets a dead watcher fail this before the live root speaks.
     tokio::time::sleep(Duration::from_millis(300)).await;
     write_epub(&other.join("live.epub"), "Live Book");
     wait_for_titles(&env, ["Live Book"]);
@@ -934,9 +912,7 @@ async fn unwatching_a_parent_keeps_a_watched_subfolder_syncing() {
         .unwrap();
     env.watcher.watch(&sub);
 
-    // Prove the subfolder syncs on its own first; this also drains the
-    // pending "directory appeared" event so nothing is left in flight when
-    // the parent goes away.
+    // Drain the pending "directory appeared" event before the parent goes away.
     write_epub(&sub.join("before.epub"), "Before Unwatch");
     wait_for_titles(&env, ["Before Unwatch"]);
 
@@ -948,11 +924,9 @@ async fn unwatching_a_parent_keeps_a_watched_subfolder_syncing() {
         "the subfolder stays a watched folder of its own"
     );
 
-    // The subfolder still syncs...
     write_epub(&sub.join("after.epub"), "After Unwatch");
     wait_for_titles(&env, ["After Unwatch"]);
 
-    // ...and the parent's own directory does not.
     write_epub(&env.path("root-book.epub"), "Root Book");
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(env.count().await, 2, "only the still-watched root imported");
@@ -1011,13 +985,11 @@ async fn unwatching_keeps_progress_and_annotations_with_the_durable_book() {
     let root = env.library.to_string_lossy().into_owned();
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
 
-    // The library membership is gone, not merely detached...
     assert_eq!(env.count().await, 0, "the book must leave the library");
     assert!(library_locations::list_locations(&env.pool)
         .await
         .unwrap()
         .is_empty());
-    // ...but the durable book still owns its reading data...
     let progress = reading_progress::get_progress(&env.pool, book.id)
         .await
         .unwrap()
@@ -1031,14 +1003,11 @@ async fn unwatching_keeps_progress_and_annotations_with_the_durable_book() {
         1,
         "annotations belong to the durable book and stay"
     );
-    // ...and the file itself is still there.
     assert!(
         file.exists(),
         "removing books from the catalog must never touch files on disk"
     );
 
-    // The client hears `removed`, so the library drops the row without a
-    // restart instead of showing a book that is gone.
     assert_eq!(env.removed_book_ids(), vec![book.id]);
 }
 
@@ -1051,12 +1020,8 @@ async fn unwatching_keeps_progress_and_annotations_with_the_durable_book() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unwatching_a_child_folder_is_refused_while_its_parent_stays_watched() {
     let env = setup().await;
-    // Drive the import pipeline directly instead of through the fs watcher,
-    // the way the predecessor test pinned the unwatch contract: the parent's
-    // recursive watch covers the child too, so notify events queued before
-    // the unwatch race the purge and re-import the child's books through the
-    // parent's prefix (bd tuxbooks-crn). The refusal below is the new home of
-    // that contract; the disk-silence test keeps the fs round-trip covered.
+    // Direct import avoids notify events racing the purge and re-importing
+    // the child's books through the parent's prefix (bd tuxbooks-crn).
     env.watcher.unwatch(&env.library);
     let sub = env.library.join("shelf");
     let deep = sub.join("deep");
@@ -1083,16 +1048,12 @@ async fn unwatching_a_child_folder_is_refused_while_its_parent_stays_watched() {
     let deepest = deep.to_string_lossy().into_owned();
     let response = env.unwatch_error(&[deepest.as_str()]).await;
 
-    // ...and it names the shallowest one as the folder to take, which is the
-    // one that has to go for the books to stay gone. The folder directly
-    // above would leave the hole in place, so it is never offered.
     let message = response["error"]["message"].as_str().unwrap();
     assert!(
         message.contains(&format!("unwatch {library} instead")),
         "the refusal must offer the shallowest watched folder, said: {message}"
     );
 
-    // ...and nothing moved: every row stands, both books stand, files stand.
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
         vec![library, shelf, deepest]
@@ -1169,7 +1130,6 @@ async fn importing_a_folder_collapses_the_folders_it_now_covers() {
         "collapsing a row must never purge its books, got {titles:?}"
     );
 
-    // The folder keeps syncing, under the watch of the folder above it.
     write_epub(&shelf.join("second.epub"), "Second Shelf Book");
     wait_for_titles(&env, ["Second Shelf Book"]);
 }
@@ -1204,8 +1164,6 @@ async fn unwatching_a_parent_leaves_a_surviving_subfolders_books_alone() {
         vec![sub.to_string_lossy().into_owned()]
     );
 
-    // The subfolder is still a watched folder, so it still syncs (its own
-    // watch, unchanged by the parent's purge).
     write_epub(&sub.join("second.epub"), "Second Shelf Book");
     wait_for_titles(&env, ["Second Shelf Book"]);
 }
@@ -1222,7 +1180,6 @@ async fn queued_events_for_an_unwatched_folder_never_resurrect_its_books() {
     let env = setup().await;
     env.watcher.unwatch(&env.library);
 
-    // Positive control: a registered location imports through apply.
     write_epub(&env.path("live.epub"), "Live Book");
     env.reconciler
         .apply(vec![PathChange::Created(env.path("live.epub"))])
@@ -1233,9 +1190,6 @@ async fn queued_events_for_an_unwatched_folder_never_resurrect_its_books() {
     assert_eq!(env.unwatch(&[root.as_str()]).await, 1);
     assert_eq!(env.count().await, 0);
 
-    // The ghost: an event queued before the unwatch, replayed after the
-    // purge. The file is still on disk (unwatch never touches files) but
-    // its location is gone from the watch list, so apply must drop it.
     write_epub(&env.path("ghost.epub"), "Ghost Book");
     env.reconciler
         .apply(vec![PathChange::Modified(env.path("ghost.epub"))])
@@ -1302,8 +1256,6 @@ async fn run_the_upgrade_collapse(pool: &SqlitePool) {
 async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
     let env = setup().await;
 
-    // The shape older versions produced by importing a folder that already
-    // sat under a watched one.
     let sub = env.library.join("shelf");
     std::fs::create_dir_all(&sub).unwrap();
     library_locations::add_location(&env.pool, &sub.to_string_lossy())
@@ -1311,8 +1263,7 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
         .unwrap();
     env.watcher.watch(&sub);
 
-    // A sibling whose path shares a string prefix with the watched folder.
-    // It is not inside it, so the collapse must leave it alone.
+    // A path prefix is not containment: libraryx must survive the collapse.
     let prefix_mate = env.sibling("libraryx");
     std::fs::create_dir_all(&prefix_mate).unwrap();
     library_locations::add_location(&env.pool, &prefix_mate.to_string_lossy())
@@ -1330,8 +1281,6 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
         .await;
     wait_for_titles(&env, ["Parent Book", "Sub Book"]);
 
-    // Metadata on the nested folder's book, so the test can prove the
-    // collapse takes none of it along.
     let sub_id = book_repo::get_book_by_path(&env.pool, &sub_file.to_string_lossy())
         .await
         .unwrap()
@@ -1358,8 +1307,6 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
     let bytes_before = std::fs::read(&sub_file).unwrap();
     run_the_upgrade_collapse(&env.pool).await;
 
-    // Only the redundant row left the watch list: the prefix-sharing
-    // sibling is not inside the watched folder.
     let mut locations = library_locations::list_locations(&env.pool).await.unwrap();
     locations.sort();
     let mut expected = vec![
@@ -1369,8 +1316,6 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
     expected.sort();
     assert_eq!(locations, expected);
 
-    // Both books stay in the catalog with their metadata, owned now by the
-    // folder above. Nothing was purged and no file moved.
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(
         titles,
@@ -1393,8 +1338,6 @@ async fn upgrade_collapses_a_watched_folder_nested_inside_another() {
     );
     assert_eq!(std::fs::read(&sub_file).unwrap(), bytes_before);
 
-    // And the collapse holds: the parent's own watch covers the subfolder,
-    // so a change there still reaches the catalog as the parent's book.
     write_epub(&sub_file, "Sub Book Edited");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1440,14 +1383,10 @@ async fn upgrade_collapse_is_idempotent() {
 async fn upgrade_purge_removes_books_outside_every_watched_folder() {
     let env = setup().await;
 
-    // The watched folder keeps its book — a real reconciler import.
     let kept = env.write_book("kept.epub", "Kept Book");
     wait_for_titles(&env, ["Kept Book"]);
     let kept_id = env.books().await[0].id;
 
-    // Two books an older version left outside the mirror: one in a folder
-    // nothing watches, one whose path merely shares a string prefix with the
-    // watched folder (`…/libraryx` next to `…/library`).
     let stray_file = env.sibling("outside").join("stray.epub");
     write_epub(&stray_file, "Stray Book");
     let stray_id = book_repo::insert_book(&env.pool, &stray_book(&stray_file, "Stray Book"))
@@ -1459,8 +1398,6 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
         .await
         .unwrap();
 
-    // Purged metadata goes with the row: progress, an annotation, and a
-    // collection shared with the surviving book.
     add_progress(&env.pool, stray_id, 42).await;
     annotations::insert_annotation(
         &env.pool,
@@ -1495,12 +1432,9 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
 
     run_the_upgrade_purge(&env.pool).await;
 
-    // Exactly the outside rows left the catalog; the watched book stayed.
     let titles: Vec<String> = env.books().await.iter().map(|b| b.title.clone()).collect();
     assert_eq!(titles, vec!["Kept Book".to_string()]);
 
-    // The purged books' durable state stays, including collection membership;
-    // the surviving book's membership is untouched.
     let progress = reading_progress::get_progress(&env.pool, stray_id)
         .await
         .unwrap()
@@ -1528,13 +1462,11 @@ async fn upgrade_purge_removes_books_outside_every_watched_folder() {
         vec![favorites]
     );
 
-    // The watch list is not part of the purge: the mirror keeps its folders.
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
         vec![env.library.to_string_lossy().into_owned()]
     );
 
-    // Every file is still on disk, byte for byte.
     for (path, bytes) in before {
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -1582,12 +1514,9 @@ async fn upgrade_purge_is_idempotent() {
 async fn list_books_payloads_carry_no_loose_field() {
     let env = setup().await;
 
-    // A book the mirror owns, imported by the reconciler.
     env.write_book("watched.epub", "Watched Book");
     wait_for_titles(&env, ["Watched Book"]);
 
-    // A row outside every watched folder — the case that used to arrive
-    // flagged, since the purge only runs on upgrade.
     let stray_file = env.sibling("outside").join("stray.epub");
     write_epub(&stray_file, "Stray Book");
     book_repo::insert_book(&env.pool, &stray_book(&stray_file, "Stray Book"))
@@ -1622,7 +1551,6 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
 
     let report = env.import_paths(&[&shelf.join("first.epub")]).await;
 
-    // The whole folder's book set arrived with the picked file...
     assert_eq!(
         report["imported"].as_u64(),
         Some(2),
@@ -1631,7 +1559,6 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
     assert!(report["failed"].as_array().unwrap().is_empty(), "{report}");
     assert_eq!(env.count().await, 2);
 
-    // ...the parent became a watched location...
     assert_eq!(
         library_locations::list_locations(&env.pool).await.unwrap(),
         vec![
@@ -1640,15 +1567,12 @@ async fn importing_a_single_file_watches_its_folder_and_syncs_siblings() {
         ]
     );
 
-    // ...and the report disclosed the new watch instead of starting it
-    // silently.
     assert_eq!(
         report["watched"],
         serde_json::json!([shelf.to_string_lossy()]),
         "the new watch must be disclosed on the report: {report}"
     );
 
-    // A sibling dropped on disk afterwards appears without a second import.
     write_epub(&shelf.join("late.epub"), "Shelf Late");
     wait_for_titles(&env, ["Shelf Late"]);
     assert_eq!(env.count().await, 3);
@@ -1703,8 +1627,7 @@ async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() 
         );
     }
 
-    // Drive the real JSON-RPC command in a task and abort it as soon as the
-    // first progress batch lands, which is after at least one row committed.
+    // Abort after the first progress batch, which means a row already committed.
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let emitter = EventEmitter::new(move |name, _| {
         if name == "import-progress" {
@@ -1741,8 +1664,6 @@ async fn an_interrupted_folder_import_leaves_a_watched_folder_that_resumes_it() 
         "an interrupted import must leave its folder watched"
     );
 
-    // The next launch reconciles watched locations. That is what resumes the
-    // import the user never got to finish.
     env.reconciler.reconcile_location(&shelf).await.unwrap();
     assert_eq!(
         env.count().await,

@@ -52,9 +52,7 @@ export const runId = process.env.E2E_RUN_ID;
 export const artifactsDir = path.join(repoRoot, "artifacts", "e2e", runId);
 
 /** Isolated scratch environment the app runs against. */
-// The run id embeds pid + timestamp, so the scratch name is not reusable
-// across runs; prepareEnvironment additionally creates the tree 0700 (its
-// files land with "wx" + 0600), which is what makes shared-tmp writes safe.
+// pid+timestamp keeps the name unique; a 0700 tree with "wx"/0600 files is what makes shared-tmp writes safe.
 export const scratchDir = path.join(os.tmpdir(), `tuxbooks-e2e-${runId}`);
 export const libraryDir = path.join(scratchDir, "library");
 export const databasePath = path.join(scratchDir, "tuxbooks.db");
@@ -70,15 +68,8 @@ export const scaleCorpusDir = path.join(scratchDir, "scale-corpus");
 export const SCALE_CORPUS_SIZE = 1500;
 
 export function killStaleProcesses(): void {
-  // A crashed run can leave the app tree (including the dist's crashpad
-  // helper) or its sidecar alive. Both would interfere with the next run: a
-  // leftover app holds the single-instance lock, a leftover sidecar keeps
-  // watching the old library. SIGKILL — these are wedged leftovers, and the
-  // sweep must not depend on a wedged process honoring TERM. The sweep
-  // matches by /proc/<pid>/exe (setup/sweep.mjs), so a process that merely
-  // mentions a target path in its argv — a recipe shell carrying
-  // TUXBOOKS_SIDECAR=<path> — is never caught. Runs happen before anything
-  // spawns fresh, so this is safe.
+  // Wedged leftovers hold the single-instance lock or keep watching the old
+  // library, so SIGKILL rather than TERM. The sweep matches /proc/<pid>/exe.
   sweepProcesses({ electronDist: electronDistPath, sidecar: sidecarBinaryPath });
 }
 
@@ -105,9 +96,7 @@ function pruneOldScratchDirs(): void {
       if (statSync(dir).mtimeMs < cutoff) {
         rmSync(dir, { recursive: true, force: true });
       }
-    } catch {
-      // Unreadable or already-gone entry — leave it alone.
-    }
+    } catch {}
   }
 }
 
@@ -128,9 +117,7 @@ function pruneOldArtifacts(): void {
       if (statSync(path.join(root, entry)).mtimeMs < cutoff) {
         rmSync(path.join(root, entry), { recursive: true, force: true });
       }
-    } catch {
-      // Unreadable entry — leave it alone.
-    }
+    } catch {}
   }
 }
 
@@ -186,9 +173,7 @@ function seedRegressionFixtures(): void {
   for (const fixture of readerRegressionFixtures) {
     copyFileSync(fixture.path, path.join(libraryDir, path.basename(fixture.path)));
   }
-  // The seek-flash regression needs a book dense enough that a cross-section
-  // jump lands far from its section anchor. A failed generation skips the
-  // spec rather than failing the phase.
+  // Cross-section jumps need a dense book; a failed generation skips the spec.
   try {
     execFileSync("python3", [
       path.join(repoRoot, "scripts", "make-dense-epub.py"),
@@ -203,7 +188,6 @@ function seedRegressionFixtures(): void {
 }
 
 function seedScaleCorpus(): void {
-  // The scale spec imports this corpus through the real bulk path.
   if (process.env.E2E_PHASE !== "seeded") return;
   mkdirSync(scaleCorpusDir, { recursive: true });
   const generator = path.join(repoRoot, "scripts", "make-epub-corpus.py");
@@ -226,7 +210,7 @@ function seedSeededFixtures(): void {
   copyFileSync(mixedPdfFixture, path.join(libraryDir, "mixed.pdf"));
   copyFileSync(smartPdfFixture, path.join(libraryDir, "smart.pdf"));
   copyFileSync(densePdfFixture, path.join(libraryDir, "dense.pdf"));
-  // Real-world crash regression: seed GeoTopo only when the free corpus is present.
+  // GeoTopo seeds only when the free corpus is present.
   if (existsSync(benchPdfFixture)) {
     copyFileSync(benchPdfFixture, path.join(libraryDir, "GeoTopo.pdf"));
   }
@@ -281,16 +265,11 @@ export function prepareEnvironment(seeded: boolean): void {
 
   seedPhaseFixtures(seeded);
 
-  // The app (spawned by the Playwright Electron launcher) inherits these;
-  // production paths are unaffected. Set before the fixture launches the
-  // app — and re-asserted there so a worker restart can never lose them.
+  // Set before launch and re-asserted there so a worker restart cannot lose them.
   process.env.TEST_DATABASE_PATH = databasePath;
   process.env.TEST_LIBRARY_PATH = libraryDir;
-  // Same isolation rule for the app-config dir: the app's Electron userData
-  // (Chromium caches, crashpad state) must never touch the real user's
-  // config, and window-derived expectations stay independent of whatever
-  // the developer's real desktop sessions left behind. A fresh config dir
-  // means the window starts at the Electron main default, deterministically.
+  // App userData must never touch the real config; a fresh dir also makes
+  // window placement start at the Electron default, deterministically.
   process.env.XDG_CONFIG_HOME = configDir;
 }
 
@@ -310,9 +289,8 @@ export function teardownEnvironment(): void {
  */
 export function armTeardownWatchdog(): void {
   const watchdog = path.join(repoRoot, "e2e", "setup", "watchdog.mjs");
-  // E2E_XVFB=1 marks the headless wrapper: DISPLAY then names the private
-  // Xvfb of this phase, which the watchdog reaps if the launcher dies
-  // before xvfb-run could clean up. Headed runs pass no display.
+  // E2E_XVFB=1 marks the headless wrapper: DISPLAY then names this phase's
+  // private Xvfb, which the watchdog reaps if the launcher dies.
   const display = process.env.E2E_XVFB === "1" ? (process.env.DISPLAY ?? "") : "";
   const targets = [electronDistPath, sidecarBinaryPath];
   const child = spawn(

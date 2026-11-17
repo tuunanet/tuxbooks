@@ -132,7 +132,6 @@ async fn apply_form(
         None => None,
     };
 
-    // Minimal overrides: only fields that differ from the source are stored.
     let series_unit = series_override(
         series_name.clone(),
         series_index,
@@ -195,24 +194,19 @@ pub async fn embed_book_metadata(
         ));
     }
 
-    // Persist the form first: embedding the current edits is the point of the
-    // action, and it keeps the no-Save flow coherent.
-    // `apply_form` resolves the durable book; `file_id` is only the location
-    // used for the rehash and the embed below. They are not the same id after
-    // a Forget rebinds the file to a fresh identity.
+    // Persist before embedding. `apply_form` resolves the durable book; `file_id`
+    // below is only the location for the rehash and embed. A Forget rebinds
+    // the file, so the two ids differ and are not interchangeable.
     apply_form(pool, book.id, form).await?;
     let desired = get_book_metadata(pool, book_id)
         .await?
         .ok_or(AppError::NotFound)?
         .effective;
 
-    // Set the crash marker before the bytes change. If the process dies before
-    // the snapshot update below, the sync identity sweep still rehashes the
-    // file and publishes the new content-hash alias.
+    // Crash marker first: if the process dies before the snapshot update, the
+    // sync identity sweep still rehashes the file and publishes the new alias.
     books::mark_rehash_pending(pool, file_id).await?;
 
-    // The rewrite runs in the document worker (the parse-heavy half); the
-    // sidecar keeps the only write authority: backup + atomic replace.
     let client = crate::worker::WorkerClient::locate()?;
     match crate::domain::BookFormat::from_path(&book.path) {
         Some(crate::domain::BookFormat::Epub) => {
@@ -264,18 +258,15 @@ pub async fn embed_book_metadata(
         }
     }
 
-    // Refresh the source snapshot from the file we just wrote, keeping the
-    // existing extracted cover (covers stay cache-side).
+    // Refresh the source snapshot from the just-written file; keep the cached cover.
     let parsed = crate::services::library_scanner::parse_book(&path)
         .map_err(|err| AppError::InvalidInput(format!("rewritten file is unreadable: {err}")))?;
     let existing_cover = repo::load_source(pool, file_id).await?.cover_path;
     let source =
         crate::services::book_importer::bibliographic_new_book(&path, &parsed, existing_cover);
     repo::upsert_source_metadata(pool, file_id, &source).await?;
-    // The rewrite changed the bytes, so the stored file snapshot is stale.
-    // Sync uses this snapshot to decide when to rehash and publish the new
-    // content-hash alias; leaving it stale would strand other machines on the
-    // old identity.
+    // The rewrite changed the bytes, so refresh the snapshot sync uses to decide
+    // when to rehash; a stale one would strand other machines on the old identity.
     books::update_file_snapshot(pool, file_id, source.file_size, source.file_mtime).await?;
     books::clear_rehash_pending(pool, file_id).await?;
 
@@ -447,12 +438,8 @@ fn series_override(
     let name_overridden = text_override(form_name, source_name);
     let index_overridden = form_index != source_index;
     match (name_overridden, index_overridden) {
-        // Unit inherited: no override.
         (None, false) => None,
-        // Name changed (or cleared) → its override is the unit.
         (Some(value), _) => Some(value),
-        // Only the index changed → promote the source name explicitly so
-        // the cleared/changed index is stored with it.
         (None, true) => name.or_else(|| {
             source_name
                 .filter(|value| !value.is_empty())
@@ -578,7 +565,6 @@ mod tests {
             vec!["Ada Lovelace".to_string(), "Charles Babbage".to_string()]
         );
         assert_eq!(view.source.series.as_deref(), Some("Analytical Engines"));
-        // Nothing is overridden yet.
         assert!(!view.overridden.title);
         assert!(!view.overridden.authors);
     }
@@ -627,7 +613,6 @@ mod tests {
         );
         assert_eq!(view.effective.authors, vec!["Ada Lovelace".to_string()]);
 
-        // The display column carries the list so search keeps working.
         let book = effective(&pool, id).await;
         assert_eq!(book.author.as_deref(), Some("Ada Lovelace"));
     }
@@ -646,7 +631,6 @@ mod tests {
                 .title
         );
 
-        // Typing the original title back removes the override again.
         f.title = "File Garbled Title".into();
         apply_form(&pool, id, &f).await.unwrap();
         assert!(
@@ -669,7 +653,6 @@ mod tests {
         let view = get_book_metadata(&pool, id).await.unwrap().unwrap();
         assert!(view.overridden.subtitle);
         assert_eq!(view.effective.subtitle, None, "cleared, not inherited");
-        // The source value survives for the reset path.
         assert_eq!(view.source.subtitle.as_deref(), Some("Original Subtitle"));
     }
 
@@ -680,7 +663,6 @@ mod tests {
         f.publisher = Some("Curated Press".into());
         apply_form(&pool, id, &f).await.unwrap();
 
-        // The file changes on disk: new title/publisher, author list changes.
         let changed = NewBook {
             title: "Second Edition".into(),
             subtitle: Some("New Subtitle".into()),
@@ -700,7 +682,6 @@ mod tests {
         assert_eq!(view.source.title, "Second Edition", "snapshot refreshed");
         assert_eq!(view.effective.title, "Curated Title", "override wins");
         assert_eq!(view.effective.publisher.as_deref(), Some("Curated Press"));
-        // Non-overridden fields follow the new file values.
         assert_eq!(view.effective.subtitle.as_deref(), Some("New Subtitle"));
         assert_eq!(view.effective.series, None, "series change propagates");
         assert_eq!(view.effective.series_index, None);
@@ -767,14 +748,12 @@ mod tests {
             "series names resolve to shared rows"
         );
 
-        // Clearing the series drops membership and the index.
         let mut f = form(id, "File Garbled Title");
         f.series = Some(String::new());
         apply_form(&pool, id, &f).await.unwrap();
         let book = effective(&pool, id).await;
         assert_eq!(book.series_id, None);
         assert_eq!(book.series_index, None, "index dies with the series");
-        // The source series survives for resets.
         assert_eq!(
             get_book_metadata(&pool, id)
                 .await
@@ -829,7 +808,6 @@ mod tests {
         assert!(!view.overridden.authors);
         assert!(!view.overridden.series);
 
-        // Orphaned curation rows (X, Eng…) are swept with the reset.
         let orphans: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM authors WHERE name = 'X'")
             .fetch_one(&pool)
             .await
@@ -882,7 +860,6 @@ mod tests {
         assert_eq!(hits[0].book_id, id);
         assert_eq!(hits[0].author.as_deref(), Some("New Name"));
 
-        // The old values leave the index with the edit.
         let hits = crate::services::search::search_books(&pool, "garbled")
             .await
             .unwrap();
@@ -896,7 +873,6 @@ mod tests {
         std::fs::create_dir_all(&covers).unwrap();
 
         let (_tmp, pool, id) = setup().await;
-        // A source cover exists after the "import".
         let source_png = covers.join("source.png");
         std::fs::write(&source_png, b"\x89PNG\r\n\x1a\n source").unwrap();
         let with_cover = NewBook {
@@ -912,7 +888,6 @@ mod tests {
             Some(source_png.to_string_lossy().into_owned())
         );
 
-        // The user picks a custom image.
         let custom = tmp_dir.path().join("custom.png");
         std::fs::write(&custom, b"\x89PNG\r\n\x1a\n custom-bytes").unwrap();
         let book = set_book_cover(&pool, id, custom.to_str().unwrap(), &covers)
@@ -925,7 +900,6 @@ mod tests {
             b"\x89PNG\r\n\x1a\n custom-bytes"
         );
 
-        // A re-import with a new extracted cover cannot take it away.
         let new_png = covers.join("new.png");
         std::fs::write(&new_png, b"\x89PNG\r\n\x1a\n new").unwrap();
         let changed = NewBook {
@@ -935,7 +909,6 @@ mod tests {
         apply_source_metadata(&pool, id, &changed).await.unwrap();
         assert_eq!(effective(&pool, id).await.cover_path, Some(custom_path));
 
-        // Clearing the override returns the extracted cover.
         let book = clear_book_cover_override(&pool, id).await.unwrap();
         assert_eq!(
             book.cover_path,
@@ -1019,7 +992,6 @@ mod tests {
         form.publisher = Some("Embedded Press".into());
         form.subjects = vec!["Embedded Subject".into()];
 
-        // Embed persists the form itself — no separate save call.
         let view = embed_book_metadata(&pool, id, &form).await.unwrap();
         assert_eq!(view.effective.title, "Embedded Title");
         assert_eq!(view.source.title, "Embedded Title", "source refreshed");
@@ -1052,8 +1024,6 @@ mod tests {
             "the pre-embed original is backed up"
         );
 
-        // The rewrite changed the bytes; the stored snapshot must move too,
-        // or the sync identity sweep never notices the new hash.
         let metadata = std::fs::metadata(&epub_path).unwrap();
         let expected_mtime = metadata
             .modified()

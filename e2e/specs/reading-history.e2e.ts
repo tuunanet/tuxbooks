@@ -37,8 +37,6 @@ test.describe("reading history", () => {
       annotationsAfter === 1 ? "annotation" : "annotations"
     }`;
 
-    // Read and annotate through the same commands the reader uses, then end
-    // the membership without touching the file on disk.
     await page.evaluate(async (bookId) => {
       await window.tuxbooks!.invoke("save_reading_progress", {
         bookId,
@@ -60,8 +58,6 @@ test.describe("reading history", () => {
       await window.tuxbooks!.invoke("remove_book", { bookId });
     }, book.id);
 
-    // The library is membership-only; the book's durable state is visible in
-    // the separate Reading history surface.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await expect(page.locator(`[aria-label="${seededBookTitles.epub} (EPUB)"]`)).toHaveCount(0);
@@ -75,9 +71,6 @@ test.describe("reading history", () => {
     await expect(row.getByTestId("reading-history-progress")).toHaveText("37% read");
     await expect(row.getByTestId("reading-history-annotations")).toHaveText(annotationLabel);
 
-    // Importing the same bytes again attaches the file to the existing
-    // durable book; its Reading history row disappears and the library entry
-    // returns.
     await page.evaluate(async (path) => {
       await window.tuxbooks!.invoke("import_paths", { paths: [path] });
     }, book.path);
@@ -116,8 +109,6 @@ test.describe("reading history", () => {
       await invoke<unknown[]>(page, "list_annotations", { bookId: source.id })
     ).length;
 
-    // The original edition carries progress and annotations, then leaves the
-    // library for Reading history.
     await page.evaluate(async (sourceId) => {
       await window.tuxbooks!.invoke("save_reading_progress", {
         bookId: sourceId,
@@ -133,8 +124,6 @@ test.describe("reading history", () => {
     await expect(historyRow).toHaveCount(1, { timeout: 30000 });
     await expect(historyRow.getByTestId("reading-history-progress")).toHaveText("37% read");
 
-    // From the current edition's detail, confirm the other edition and see
-    // the one-way state transfer spelled out before committing.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await openBookDetail(page, `${seededBookTitles.pdf} (PDF)`);
@@ -187,7 +176,6 @@ test.describe("reading history", () => {
     expect(editions[0]?.id).toBe(source.id);
     expect(editions[0]?.inLibrary).toBe(false);
 
-    // Put the original back so later suites see the seeded library intact.
     await page.evaluate(async (path) => {
       await window.tuxbooks!.invoke("import_paths", { paths: [path] });
     }, source.path);

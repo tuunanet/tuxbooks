@@ -119,10 +119,7 @@ export async function renderPdfTextLayer(
   scale: number,
 ): Promise<{ cancel(): void }> {
   let cancelled = false;
-  // The run measurements below depend on the app font, which loads
-  // asynchronously; measuring before the swap bakes in stale metrics. Wait
-  // for the font set to settle (bounded — the layer is an affordance, never
-  // worth blocking on), and honor a cancel that lands during the wait.
+  // Measuring before the app font loads bakes in stale metrics.
   const fonts = container.ownerDocument.fonts;
   if (fonts !== undefined && fonts.status === "loading") {
     await Promise.race([fonts.ready, new Promise((resolve) => setTimeout(resolve, 1000))]);
@@ -146,17 +143,11 @@ export async function renderPdfTextLayer(
     const line = lines[index]!;
     const span = container.ownerDocument.createElement("span");
     span.textContent = line.text;
-    // Native selection bands follow the inline line box, not the font: a
-    // small font still paints a band the height of line-height. PDFium's
-    // char boxes carry ascent and descent and usually exceed the distance
-    // between line tops, so a band as tall as the box overlaps the next
-    // line. Pin line-height to the gap to the neighbouring line (never more
-    // than the box) and nudge the box down by the difference, keeping the
-    // band centred on the text row.
+    // PDFium char boxes exceed the gap between line tops; pin line-height to
+    // that gap or the selection band overlaps the next line.
     const boxHeight = Math.max(line.h, 1) * scale;
     const bandHeight = Math.min(boxHeight, linePitch(index) * scale);
-    // The painted band is the larger of the line box and the font's glyph
-    // box (~1.3x the font size), so both have to fit the pitch.
+    // The painted band is the larger of line box and glyph box (~1.3x font).
     const fontHeight = Math.min(boxHeight, bandHeight * 0.7);
     span.style.left = `${line.x * scale}px`;
     span.style.top = `${line.y * scale + (boxHeight - bandHeight) / 2}px`;
@@ -166,22 +157,9 @@ export async function renderPdfTextLayer(
     container.appendChild(span);
     spans.push(span);
   }
-  // Selection hit-testing works in the span's text-layout space, so the text
-  // run must span the line's char-box width. Two things get in the way. The
-  // reported font size cannot be trusted: some PDFs carry degenerate text
-  // matrices (a 12pt line reporting ~1pt), which lays the text out into a
-  // sliver of the line and collapses every mouse drag to a caret. And a
-  // transform cannot fix sizing: scaling the span scales its box and its run
-  // together, leaving their ratio untouched. The font comes from the
-  // char-box height, and the width is fitted with letter-spacing — a purely
-  // horizontal adjustment — so every x in the hit area maps to a character.
-  //
-  // The layer can mount before the page slot has layout (a restored
-  // position builds it during reader initialization, and StrictMode
-  // double-mounts in dev), where the Range measures zero and a one-shot fit
-  // would silently leave the run at pass-1 sizing. Measure after the first
-  // frame, and if the container still has no layout, fit the moment it gets
-  // some.
+  // Hit-testing runs in span text-layout space: PDFs can report ~1pt for a
+  // 12pt line, and a transform scales box and run together, so fit the width
+  // with letter-spacing; fit again on resize if the container had no layout.
   const nextFrame = (): Promise<void> =>
     new Promise((resolve) => {
       if (typeof requestAnimationFrame === "function") {
@@ -234,11 +212,8 @@ export async function renderPdfTextLayer(
       cancelled = true;
       layoutObserver?.disconnect();
       layoutObserver = null;
-      // Remove only this build's spans. The layer container is shared across
-      // effect re-runs (StrictMode mounts twice in dev), so a superseded
-      // build resolving late must never wipe the live build's spans; a
-      // container-wide clear here left dev-mode layers empty until the next
-      // layout change forced a rebuild.
+      // Remove only this build's spans: the container is shared across effect
+      // re-runs (StrictMode), so a superseded build must not wipe the live one.
       for (const span of spans) span.remove();
     },
   };

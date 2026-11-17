@@ -121,7 +121,6 @@ async fn a_failed_hash_waits_for_its_backoff_then_retries_automatically() {
         delay_secs(&first)
     );
 
-    // The retry clock is in the future, so the normal loop leaves it alone.
     let pending = identity_backfill::pending_book_ids(&env.pool, 10)
         .await
         .unwrap();
@@ -130,8 +129,6 @@ async fn a_failed_hash_waits_for_its_backoff_then_retries_automatically() {
         "a row inside its backoff window is not retried yet"
     );
 
-    // Once the delay passes, the same query picks the row up. A second failure
-    // counts the attempt and moves the clock to the next schedule step.
     sqlx::query("UPDATE books SET hash_retry_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1")
         .bind(file_id)
         .execute(&env.pool)
@@ -152,7 +149,6 @@ async fn a_failed_hash_waits_for_its_backoff_then_retries_automatically() {
         delay_secs(&second)
     );
 
-    // The file becomes readable and the next due pass hashes it.
     sqlx::query("UPDATE books SET hash_retry_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1")
         .bind(file_id)
         .execute(&env.pool)
@@ -223,8 +219,6 @@ async fn a_successful_retry_hashes_available_locations_and_reports_the_aggregate
     let copy_id = env.file_id("copy.epub").await;
     assert_eq!(env.failure(copy_id).await.0, "failed");
 
-    // The second location is known to be away, so a manual retry leaves it
-    // alone and its attempt budget untouched.
     sqlx::query("UPDATE books SET available = 0, hash_attempts = 3 WHERE id = ?1")
         .bind(copy_id)
         .execute(&env.pool)
@@ -253,7 +247,6 @@ async fn a_successful_retry_hashes_available_locations_and_reports_the_aggregate
         "a failed duplicate outranks the hashed active copy"
     );
 
-    // Once the second copy is back, the retry hashes it too.
     std::fs::write(env.path("copy.epub"), b"the second copy came back").unwrap();
     sqlx::query("UPDATE books SET available = 1 WHERE id = ?1")
         .bind(copy_id)
@@ -285,7 +278,6 @@ async fn retry_reports_missing_when_no_location_is_available() {
     assert_eq!(env.failure(first).await.1, 1);
     assert_eq!(env.failure(second).await.1, 1);
 
-    // Mark both unavailable: a retry must not count another failed attempt.
     sqlx::query("UPDATE books SET available = 0 WHERE id IN (?1, ?2)")
         .bind(first)
         .bind(second)
@@ -314,7 +306,6 @@ async fn a_file_snapshot_change_resets_the_backoff_to_pending() {
     assert_eq!(attempts, 0);
     assert_eq!(retry_at, None);
 
-    // A relink does the same: the new location gets a fresh retry budget.
     sqlx::query("UPDATE books SET hash_state = 'failed', hash_attempts = 4 WHERE id = ?1")
         .bind(file_id)
         .execute(&env.pool)
@@ -334,7 +325,6 @@ async fn a_file_snapshot_change_resets_the_backoff_to_pending() {
     assert_eq!(attempts, 0);
     assert_eq!(retry_at, None);
 
-    // A changed size/mtime on re-import does the same.
     let mut updated = sample(&env.path("book.epub"), "Book");
     updated.file_size = 99;
     updated.file_mtime += 60;
@@ -370,7 +360,6 @@ async fn a_returning_file_resets_the_backoff_even_with_the_same_snapshot() {
         .execute(&env.pool)
         .await
         .unwrap();
-    // Same size and mtime: only the returning availability can reset the row.
     books::update_book_by_path(&env.pool, &sample(&env.path("book.epub"), "Book"))
         .await
         .unwrap();
@@ -401,8 +390,6 @@ async fn ensuring_an_issue_refreshes_changed_detail_without_touching_an_unchange
     .await
     .unwrap();
 
-    // Re-asserting the same detail leaves the row untouched, so a status poll
-    // cannot make a stable issue look fresh.
     sync_issues::ensure(
         &env.pool,
         key,
@@ -424,7 +411,6 @@ async fn ensuring_an_issue_refreshes_changed_detail_without_touching_an_unchange
         "an unchanged sweep does not bump updated_at"
     );
 
-    // A different failing location updates the detail and the file name.
     sync_issues::ensure(
         &env.pool,
         key,
@@ -474,13 +460,11 @@ async fn hash_failures_become_one_issue_per_durable_book_only_when_sync_is_on() 
         vec![format!("hash-failed:{durable}")],
         "two failed locations share one durable-book issue"
     );
-    // The sweep is idempotent: a second refresh does not duplicate the row.
     hash_backfill::ensure_failed_issues(&env.pool)
         .await
         .unwrap();
     assert_eq!(env.open_hash_issue_keys().await.len(), 1);
 
-    // A successful hash of both locations resolves the issue it created.
     std::fs::write(env.path("book.epub"), b"readable again").unwrap();
     std::fs::write(env.path("copy.epub"), b"readable copy again").unwrap();
     let outcome = hash_backfill::retry_book(&env.pool, durable).await.unwrap();

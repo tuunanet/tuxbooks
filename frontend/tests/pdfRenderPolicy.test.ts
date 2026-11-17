@@ -49,9 +49,6 @@ describe("effectiveRenderRatio (PERF-1)", () => {
   it("is inert at 4K dpr 1: the CSS floor keeps the page at layout sharpness", () => {
     const { scale, cssWidth, cssHeight } = CONTENT_4K;
     const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, 1);
-    // The CSS page (18.85 MP) exceeds the soft budget, but dpr 1 means the
-    // CSS-resolution floor and the soft tier agree: ratio 1, within the
-    // hard budget.
     expect(ratio).toBe(1);
     expect(cssWidth * cssHeight * ratio * ratio).toBeLessThanOrEqual(MAX_RENDER_PIXELS_HARD);
     expect(cssWidth * ratio).toBeLessThanOrEqual(MAX_RENDER_DIMENSION);
@@ -63,9 +60,7 @@ describe("effectiveRenderRatio (PERF-1)", () => {
     (dpr) => {
       const { scale, cssWidth, cssHeight } = CONTENT_4K;
       const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, dpr);
-      // The soft budget (2**24) is smaller than the 4K CSS page, but the
-      // CSS-resolution floor kicks in before the ratio drops below 1: the
-      // page stays at layout sharpness, never blurrier.
+      // The CSS-resolution floor binds before the ratio drops below 1: never blurrier.
       expect(ratio).toBe(1);
       expect(ratio).toBeLessThan(dpr);
       const bufferPixels = cssWidth * cssHeight * ratio * ratio;
@@ -77,9 +72,6 @@ describe("effectiveRenderRatio (PERF-1)", () => {
   );
 
   it("pins a dpr-2 page smaller than 4K CSS at the soft budget (2**24)", () => {
-    // Bench geometry class: a ~2600px content area fits the letter page at
-    // ~4.25x (CSS ~9.1 MP). The soft tier binds: half the pixels of the
-    // hard cap, dpr downscaled to the ratio.
     const { scale, cssWidth, cssHeight } = fitWidth(2600);
     const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, 2);
     expect(ratio).toBeGreaterThan(1);
@@ -89,8 +81,7 @@ describe("effectiveRenderRatio (PERF-1)", () => {
   });
 
   it("digs into the hard budget only under zoom past the CSS floor", () => {
-    // 200% zoom at 4K: the CSS page itself is 74.5 MP, so the CSS floor
-    // cannot hold and the hard PERF-1 budget takes over.
+    // At 200% zoom the CSS page is 74.5 MP, so the hard PERF-1 budget takes over.
     const { scale, cssWidth, cssHeight } = fitWidthZoom(3816, 2);
     const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, 1);
     const bufferPixels = cssWidth * cssHeight * ratio * ratio;
@@ -104,8 +95,6 @@ describe("effectiveRenderRatio (PERF-1)", () => {
   });
 
   it("honors the per-dimension budget even when the area budget would not bind", () => {
-    // A tall page: the area budget alone would allow more than the 5000 px
-    // per-side cap; the dimension term must win.
     const ratio = effectiveRenderRatio(1000, 10000, 1, 2, { maxDimension: 5000 });
     expect(ratio).toBe(0.5);
     expect(10000 * ratio).toBe(5000);
@@ -135,7 +124,6 @@ describe("render window byte budget (PERF-4)", () => {
     const order = Array.from({ length: 8 }, (_, index) => index);
     const kept = capByBytes(order, () => bytes, MAX_ACTIVE_CANVAS_BYTES);
     expect(kept.length).toBeGreaterThanOrEqual(3);
-    // And the budget itself is respected by the kept set.
     expect(kept.length * bytes).toBeLessThanOrEqual(MAX_ACTIVE_CANVAS_BYTES);
   });
 
@@ -144,16 +132,12 @@ describe("render window byte budget (PERF-4)", () => {
     const ratio = effectiveRenderRatio(LETTER.width, LETTER.height, scale, 1);
     const bytes = renderBufferBytes(cssWidth, cssHeight, ratio);
     const order = Array.from({ length: 8 }, (_, index) => index);
-    // The full render window fits the byte budget at 1080p; the reader's
-    // count cap (8) remains the effective limit.
     expect(order.length * bytes).toBeLessThanOrEqual(MAX_ACTIVE_CANVAS_BYTES);
     expect(capByBytes(order, () => bytes, MAX_ACTIVE_CANVAS_BYTES)).toHaveLength(8);
   });
 
   it("always keeps the anchor even when it alone exceeds the budget", () => {
-    // Anchor-keep is a capByBytes guarantee, independent of the policy's
-    // current tier sizes: a page whose buffer alone overflows the budget
-    // must still render (the reader is on it).
+    // Anchor-keep is unconditional: a page whose buffer alone overflows still renders.
     const oversized = MAX_ACTIVE_CANVAS_BYTES + 1;
     const kept = capByBytes([0, 1, 2], () => oversized, MAX_ACTIVE_CANVAS_BYTES);
     expect(kept).toEqual([0]);
@@ -168,28 +152,21 @@ describe("render window byte budget (PERF-4)", () => {
 
 describe("retentionRing", () => {
   it("keeps rendered candidates within three of the visible range, closest first", () => {
-    // Visible range [10, 11]; candidates 7 (far side, dist 3), 9 and 12
-    // (dist 1), 13 (dist 2), 15 (beyond depth). Pages inside the range
-    // (distance 0) belong to the render order already and stay out.
     expect(retentionRing([10, 11], [15, 7, 10, 12, 9, 13, 11])).toEqual([9, 12, 13, 7]);
   });
 
   it("drops candidates beyond the depth", () => {
-    // Exactly three stays, four goes — the boundary Papers draws with
-    // MAX_PRELOADED_PAGES 3.
+    // Boundary: depth 3 keeps, depth 4 drops (matches MAX_PRELOADED_PAGES).
     expect(retentionRing([5], [8, 9])).toEqual([8]);
     expect(retentionRing([5], [])).toEqual([]);
   });
 
   it("retains nothing before visibility tracking starts", () => {
-    // An empty visible set must not turn into "keep the whole document":
-    // the ring exists to bridge a moving viewport, and there is none yet.
+    // An empty visible set must not mean "keep the whole document".
     expect(retentionRing([], [1, 2, 3])).toEqual([]);
   });
 
   it("never invents pages: only offered candidates come back", () => {
-    // Unrendered pages have no pixels; the ring only decides what stays
-    // mounted, never what may render (that is renderPermittedPages' job).
     expect(retentionRing([5], [6])).toEqual([6]);
     expect(retentionRing([5], [50, 60])).toEqual([]);
   });
@@ -206,8 +183,6 @@ describe("retentionRing", () => {
 
 describe("presentationPagePlan", () => {
   it("reproduces the layout's rounded slot", () => {
-    // A letter page fit to the 792px presentation viewport (the Papers margin
-    // leaves 768px): scale 768/792 rounds the page to 593x768.
     const scale = 768 / 792;
     expect(presentationPagePlan(LETTER, scale, 1)).toEqual({ width: 593, height: 768, ratio: 1 });
   });
@@ -231,13 +206,11 @@ describe("presentationPagePlan", () => {
 
 describe("needsRegionRender", () => {
   it("is false when the whole-page ratio reaches the device ratio", () => {
-    // Small viewport, caps inert: the whole-page raster is already crisp.
     expect(needsRegionRender(LETTER.width, LETTER.height, 1, 1)).toBe(false);
     expect(needsRegionRender(LETTER.width, LETTER.height, 1.5, 2)).toBe(false);
   });
 
   it("is true once a budget tier pushes the ratio below the device ratio", () => {
-    // 100x a Letter page: the area/dimension budgets bind far below dpr.
     expect(needsRegionRender(LETTER.width, LETTER.height, 100, 1)).toBe(true);
     expect(needsRegionRender(LETTER.width, LETTER.height, 100, 2)).toBe(true);
   });
@@ -264,10 +237,8 @@ describe("regionRenderRatioForPage", () => {
   const region = { width: 2536, height: 2236 } as const;
 
   it("caps the device scale so a page-sized shading stays inside the budget", () => {
-    // PDFium allocates a page-sized shading buffer at the render's device
-    // scale, not the clip's. At scale 21.5 the uncapped region ratio (2) puts
-    // the device scale at 43, which high-waters the WASM heap by hundreds of
-    // MB per render until it cannot grow. The cap holds it under 22.
+    // PDFium allocates a page-sized shading buffer at the device scale, not the clip's:
+    // an uncapped 43× scale high-waters the WASM heap, so the cap holds it under 22.
     for (const scale of [11, 21.5, 43, 100]) {
       const ratio = regionRenderRatioForPage(
         plot.width,

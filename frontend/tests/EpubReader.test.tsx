@@ -73,8 +73,6 @@ function renderReader(props: { onTocLoad?: (toc: unknown[]) => void; bookId?: nu
   };
 }
 
-// Local minimal book literal instead of importing factories (keeps this
-// file's dependency surface small).
 function makeBookShim() {
   return {
     id: 1,
@@ -229,8 +227,6 @@ describe("EpubReader lifecycle", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // The old engine is closed and its host is detached; the new book's
-    // host is the one connected to the document.
     await waitFor(() => expect(first.close).toHaveBeenCalledTimes(1));
     expect(first.hostElement.isConnected).toBe(false);
     expect(second.init).toHaveBeenCalledTimes(1);
@@ -255,9 +251,6 @@ describe("EpubReader lifecycle", () => {
     );
     const second = lastFakeHandle();
 
-    // The first book's engine was superseded mid-open: its gated open, once
-    // resolved, closes the orphaned handle instead of mounting it, and the
-    // second book's reader is untouched.
     const orphan = createFakeHandle();
     expect(orphan.hostElement.isConnected).toBe(false);
     resolveFirstOpen(orphan);
@@ -294,8 +287,7 @@ describe("EpubReader appearance and navigation", () => {
       foreground: null,
       theme: "default",
     });
-    // The Default surface pins light UA defaults regardless of the app's
-    // color-scheme (section documents inherit it through the iframes).
+    // The Default theme pins light UA defaults even when the app is dark.
     expect(screen.getByTestId("epub-reader")).toHaveStyle({ colorScheme: "light" });
   });
 
@@ -310,8 +302,6 @@ describe("EpubReader appearance and navigation", () => {
     const surface = screen.getByTestId("epub-reader").querySelector("[data-epub-measure]");
     expect(surface).not.toBeNull();
     expect(surface).toHaveAttribute("data-epub-measure", "full");
-    // No app-side width cap in paginated flow — the engine's grid already
-    // bounds the section iframe (~two 720px columns).
     expect((surface as HTMLElement).style.maxWidth).toBe("");
   });
 
@@ -344,8 +334,6 @@ describe("EpubReader appearance and navigation", () => {
     const handle = lastFakeHandle();
     await clickProbe("probe-book-mode");
 
-    // The stored preferences (scrolling, one column) stay intact; book
-    // mode derives the spread on top: paginated flow at two columns.
     expect(handle.setFlow).not.toHaveBeenCalledWith("scrolled");
     expect(handle.setFlow).toHaveBeenLastCalledWith("paginated");
     await waitFor(() =>
@@ -364,10 +352,6 @@ describe("EpubReader appearance and navigation", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // Root background follows the engine's theme colors (mocked here) so
-    // the shell area beside the capped column is seamless — except on the
-    // neutral default theme, which bridges nothing (publisher colors own
-    // the content and the app surface shows).
     expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("");
     await clickProbe("probe-paper");
     expect(screen.getByTestId("epub-reader").style.backgroundColor).toBe("rgb(246, 240, 228)");
@@ -409,7 +393,6 @@ describe("EpubReader appearance and navigation", () => {
     const tocJump = epubHrefJump("chapter2.xhtml");
     adapterRef.current?.jump(tocJump);
     expect(handle.goTo).toHaveBeenCalledWith(JSON.stringify({ href: "chapter2.xhtml" }));
-    // The EPUB adapter ignores other formats' jump targets.
     adapterRef.current?.jump({ format: "pdf", page: 3 });
     expect(handle.goTo).toHaveBeenCalledTimes(1);
   });
@@ -445,8 +428,7 @@ describe("EpubReader appearance and navigation", () => {
       chapterHref: "chapter2.xhtml",
     });
 
-    // The engine-reported position must not be fed back into the engine
-    // (the echo guard skips the position round-trip).
+    // Engine-reported position must not be fed back into the engine (echo guard).
     expect(handle.goTo).not.toHaveBeenCalled();
   });
 });
@@ -652,8 +634,7 @@ describe("EpubReader presentation mode (issue #64)", () => {
       </ShortcutProvider>,
     );
     await waitFor(() => expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument());
-    // Entering fullscreen hides shell chrome only — the document must not
-    // reload (init stays a one-time restore).
+    // Fullscreen hides shell chrome only; the document must not reload.
     expect(handle.init).toHaveBeenCalledTimes(1);
     expect(handle.close).not.toHaveBeenCalled();
     expect(handle.hostElement.isConnected).toBe(true);
@@ -670,7 +651,6 @@ describe("EpubReader presentation mode (issue #64)", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // The indicator starts unknown and follows the engine's relocates.
     expect(screen.getByTestId("epub-section-indicator")).toHaveTextContent("…");
     handle.emitRelocate({
       locator: FAKE_LOCATOR.section1,
@@ -740,7 +720,6 @@ describe("EpubReader highlights and selection", () => {
       ),
     );
 
-    // Recoloring redraws the same locator with the new color; removing clears it.
     const recolored = [{ ...highlights[0]!, color: "blue" }];
     rerender(
       <ShortcutProvider>
@@ -777,8 +756,6 @@ describe("EpubReader highlights and selection", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // The engine reports the selection text; the shell surfaces it. EPUB
-    // selections never target an existing highlight from the toolbar.
     handle.emitSelection("a quoted passage");
     await waitFor(() =>
       expect(onSelectionChange).toHaveBeenLastCalledWith({
@@ -795,7 +772,6 @@ describe("EpubReader highlights and selection", () => {
       text: "a quoted passage",
       color: "yellow",
     });
-    // The selection is cleared on creation (engine + shell state).
     expect(handle.clearSelection).toHaveBeenCalledTimes(1);
     expect(onSelectionChange).toHaveBeenLastCalledWith(null);
   });
@@ -830,8 +806,7 @@ describe("EpubReader book mode turn", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
     await clickProbe("probe-book");
-    // Space belongs to a focused button (native activation); the probe is
-    // harness chrome, so drop its focus before pressing keys.
+    // Space belongs to a focused button; drop the probe's focus before keys.
     screen.getByRole("button", { name: "probe-book" }).blur();
   }
 
@@ -875,9 +850,7 @@ describe("EpubReader book mode turn", () => {
     renderBookModeReader({ reducedMotion: false, advance, retreat });
     await enableBookMode();
 
-    // One strip per side plus a bottom-corner triangle per direction: real
-    // buttons carrying the turn labels and the subtle hover shade. The
-    // hover utility is the shipped affordance itself — jsdom applies no
+    // Real buttons with the shipped hover utility. jsdom applies no
     // stylesheets, so the className is the only honest observable here.
     for (const kind of ["edge", "corner"] as const) {
       for (const direction of ["prev", "next"] as const) {
@@ -896,7 +869,6 @@ describe("EpubReader book mode turn", () => {
     expect(retreat).toHaveBeenCalledTimes(1);
     fireEvent.click(turnZone("corner", "prev"));
     expect(retreat).toHaveBeenCalledTimes(2);
-    // The zones drive the seam only; the engine never moves around it.
     expect(lastFakeHandle().next).not.toHaveBeenCalled();
     expect(lastFakeHandle().prev).not.toHaveBeenCalled();
   });
@@ -929,7 +901,6 @@ describe("EpubReader book mode turn", () => {
     expect(advance).toHaveBeenCalledTimes(3);
     await userEvent.keyboard("{PageUp}");
     expect(retreat).toHaveBeenCalledTimes(2);
-    // The keys step the seam by spread; the engine never moves around it.
     expect(lastFakeHandle().next).not.toHaveBeenCalled();
     expect(lastFakeHandle().prev).not.toHaveBeenCalled();
   });
@@ -940,13 +911,10 @@ describe("EpubReader book mode turn", () => {
     await enableBookMode();
     const handle = lastFakeHandle();
 
-    // One press, one engine move: the spread changes with no turn phase
-    // ever published on the surface (tuxbooks-9pr UAT, ADR 0011).
     fireEvent.click(turnZone("edge", "next"));
     expect(handle.next).toHaveBeenCalledTimes(1);
     expect(turnSurface()).not.toHaveAttribute("data-epub-turn-phase");
     expect(turnSurface()).not.toHaveAttribute("data-epub-turn-direction");
-    // Nothing appears later either: no phase lands after a settle window.
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
     expect(document.querySelector("[data-epub-turn-direction]")).toBeNull();
@@ -960,20 +928,15 @@ describe("EpubReader book mode turn", () => {
     const handle = lastFakeHandle();
 
     await userEvent.keyboard("{ArrowRight}");
-    // The view reads the media query and passes the flag into its adapter
-    // (the seam contract Stage 2's renderer needs)…
+    // The view reads the media query and passes the flag into its adapter.
     expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
-    // …and the turn itself is the same: one move, no phase in between.
     expect(handle.next).toHaveBeenCalledTimes(1);
     expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(handle.next).toHaveBeenCalledTimes(1); // no queued repeat
+    expect(handle.next).toHaveBeenCalledTimes(1);
     expect(document.querySelector("[data-epub-turn-phase]")).toBeNull();
   });
 
-  // tuxbooks-9pr.8: the EPUB book surface must match the PDF book view —
-  // a named region announcing the book, with the labelled spread actions
-  // exposed in the accessibility tree.
   it("names and roles the reading surface as the book container while book mode is on", async () => {
     mockHappyPath(null);
     renderBookModeReader();
@@ -1000,14 +963,11 @@ describe("EpubReader book mode turn", () => {
     renderBookModeReader({ reducedMotion: false, advance, retreat });
     await enableBookMode();
 
-    // Edge strip and corner triangle per direction are all real buttons in
-    // the accessibility tree, each carrying its turn label.
     const nextActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.next });
     const previousActions = screen.getAllByRole("button", { name: BOOK_TURN_LABELS.prev });
     expect(nextActions).toHaveLength(2);
     expect(previousActions).toHaveLength(2);
 
-    // The named actions drive the turn seam, not just the zones' chrome.
     fireEvent.click(nextActions[0]!);
     fireEvent.click(previousActions[0]!);
     expect(advance).toHaveBeenCalledTimes(1);

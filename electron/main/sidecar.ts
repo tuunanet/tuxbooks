@@ -76,7 +76,6 @@ export class Sidecar {
     this.startPromise ??= this.startOnce().then(
       () => {},
       (error) => {
-        // Allow a later retry after a failed start.
         this.startPromise = null;
         throw error;
       },
@@ -90,12 +89,9 @@ export class Sidecar {
       throw new SidecarError(`sidecar binary not found at ${this.binaryPath}`);
     }
     this.stopped = false;
-    // Under E2E diagnostics the sidecar's stderr goes to a per-instance file
-    // (clearer than interleaving it with the app's own output). The file
-    // lives in its own mkdtemp'd directory (0700, unpredictable name) — a
-    // fixed, predictable path in the shared temp dir is a symlink target on
-    // multi-user machines (CodeQL js/insecure-temporary-file). Nothing else
-    // locates the log by name; it is human-read diagnostics only.
+    // E2E diagnostics log stderr to a per-instance file inside its own mkdtemp'd
+    // directory (0700, unpredictable name): a fixed path in the shared temp dir is
+    // a symlink target (CodeQL js/insecure-temporary-file). Nothing locates it by name.
     const debugLogPath =
       process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
         ? path.join(
@@ -168,8 +164,7 @@ export class Sidecar {
     }
     this.pending.clear();
 
-    // Renderer reloads and window closes do not stop the sidecar; only an
-    // explicit stop() suppresses the restart ladder (app quit).
+    // Only an explicit stop() (app quit) suppresses the restart ladder.
     if (!this.stopped) {
       const delay = this.restartDelay;
       this.restartDelay = Math.min(this.restartDelay * 2, RESTART_MAX_MS);
@@ -198,16 +193,12 @@ export class Sidecar {
         const idleFor = Date.now() - this.lastActivityAt;
         const remaining = this.idleTimeoutMs - idleFor;
         if (remaining > 0) {
-          // The sidecar streamed something (events from a bulk run, another
-          // call's response) within the window; it is alive, so re-arm for
-          // the remainder instead of failing healthy work.
           pending.timer = setTimeout(check, remaining);
           return;
         }
         this.pending.delete(id);
-        // Per-request wedging is not detectable here: any sidecar output
-        // (including another call's) counts as liveness, by design. A dead
-        // process fails every pending call through the exit handler below.
+        // Any sidecar output counts as liveness for every pending call; a dead
+        // process fails them through the exit handler, not here.
         reject(new RpcFailure(`sidecar call timed out: ${method}`));
       };
       pending.timer = setTimeout(check, this.idleTimeoutMs);
@@ -234,8 +225,7 @@ export class Sidecar {
     }
     this.pending.clear();
     child.kill();
-    // Escalate if a graceful kill is ignored (Rust service has no handlers,
-    // but belt-and-braces for wedged states).
+    // Escalate if a graceful kill is ignored.
     setTimeout(() => {
       if (!child.killed) child.kill("SIGKILL");
     }, 2_000).unref();

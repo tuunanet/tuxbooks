@@ -133,10 +133,8 @@ const methods = {
     colorScheme?: FpdfColorScheme;
   }): Promise<{ width: number; height: number; bitmap: ImageBitmap }> {
     if (!engine) throw new Error("no document open");
-    // The engine caps oversized bitmaps to the WASM heap budget. Clamp here
-    // first so the ImageData is built at the size the engine actually renders;
-    // constructing it at the requested size throws when the cap bites (a
-    // whole-page request rounding just past 2**25 at deep zoom).
+    // Clamp before building ImageData: the engine caps to the WASM heap budget,
+    // and constructing at the requested size throws once the cap bites.
     const capped = clampBitmapSize(width, height);
     const rgba = engine.renderRgba(page - 1, capped.width, capped.height, clip, colorScheme);
     const imageData = new ImageData(rgba, capped.width, capped.height);
@@ -145,11 +143,9 @@ const methods = {
   },
 };
 
-// Dedicated workers only receive messages from the document that created
-// them, and the dispatch below validates the method and id, but verify the
-// sender's origin anyway. The bundle is served from a real origin
-// (`app://bundle` in production, the Vite origin in development), so a message
-// from anywhere else is rejected rather than trusted.
+// Messages come only from the creating document and dispatch validates method
+// and id, but still reject any other origin: the bundle is served from a real
+// origin (`app://bundle` in production, the Vite origin in development).
 const SENDER_ORIGIN = self.location.origin;
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   if (!isTrustedWorkerOrigin(event.origin, SENDER_ORIGIN)) return;

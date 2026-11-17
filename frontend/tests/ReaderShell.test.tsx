@@ -91,9 +91,7 @@ function renderReader(
     delete_annotation: true,
   });
   return render(
-    // The reader surface consumes the global resolved theme (auto reader
-    // theme); jsdom's matchMedia stub reports light, so the surface stays
-    // on publisher default unless a test picks a theme.
+    // jsdom's matchMedia stub reports light, so the surface stays on publisher default.
     <ThemeStateProvider>
       <AppShell
         initialState={{
@@ -109,8 +107,7 @@ function renderReader(
 }
 
 async function openNavigation() {
-  // fireEvent: the tooltip wrapper sets pointer-events:none on hover trails,
-  // which user-event refuses to click through.
+  // fireEvent: user-event refuses clicks through the tooltip wrapper's pointer-events:none.
   fireEvent.click(await screen.findByTestId("reader-nav-trigger"));
   return screen.findByTestId("reader-nav");
 }
@@ -141,8 +138,6 @@ describe("Reader progress footer", () => {
     renderReader("pdf");
     await screen.findByTestId("reader-view");
 
-    // A fixed-layout PDF has no meaningful "percent read", so the PDF reader
-    // has no bottom footer at all (no bar, readout, or reveal zone).
     expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
     expect(screen.queryByTestId("reader-progress")).toBeNull();
@@ -163,14 +158,11 @@ describe("Reader progress footer", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // jsdom performs no layout: stub the bar's geometry so a click at
-    // clientX 510 reads as 51% (Radix computes the value from the rect).
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
     fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
 
-    // The click maps through the engine's position-list snap (at-or-before).
     await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenCalledWith(0.51));
   });
 
@@ -183,8 +175,6 @@ describe("Reader progress footer", () => {
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
 
-    // Drag 10% → 30% → 70%: the preview follows the pointer, but the engine
-    // must not be re-rendered per move; only the release commits a jump.
     fireEvent.pointerDown(bar, { button: 0, clientX: 100, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerMove(bar, { clientX: 300, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerMove(bar, { clientX: 700, pointerId: 1, pointerType: "mouse" });
@@ -204,9 +194,6 @@ describe("Reader progress footer", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // Thumb focus: the bar steps like a slider and jumps like Home/End, and
-    // (per the ShortcutProvider's role="slider" rule) the keys never double
-    // as engine page turns.
     const thumb = screen.getByRole("slider", { name: "Reading position" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -227,23 +214,15 @@ describe("Reader progress footer", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // Click the bar to 51%: one engine jump (same setup as the teleport test).
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
     fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
     await waitFor(() => expect(lastFakeHandle().goToTotalProgression).toHaveBeenCalledWith(0.51));
 
-    // The real engine answers the jump with a relocate, and the shell learns
-    // the reported position. Without this emit the regression below cannot
-    // reproduce: the sibling keyboard test skips it and passes either way.
     lastFakeHandle().emitRelocate({ fraction: 0.51, totalProgression: 0.51 });
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("51%"));
 
-    // A real bar click leaves focus on the thumb, so arrows step the bar.
-    // Each step is 0.1% of the book and must reach the engine: the old echo
-    // guard dropped every step as if it were the jump's own echo, so the
-    // slider ran ahead while the pages stayed put.
     const thumb = screen.getByRole("slider", { name: "Reading position" });
     thumb.focus();
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
@@ -253,8 +232,6 @@ describe("Reader progress footer", () => {
       ),
     );
 
-    // Same for stepping back: the engine reports the right-step landing,
-    // then the left step must reach it too.
     lastFakeHandle().emitRelocate({ fraction: 0.511, totalProgression: 0.511 });
     fireEvent.keyDown(thumb, { key: "ArrowLeft" });
     await waitFor(() =>
@@ -274,18 +251,12 @@ describe("Reader progress footer", () => {
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
     fireEvent.pointerDown(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
-    // The browser's slider focuses the thumb on press; model that before
-    // the release.
     const thumb = screen.getByRole("slider", { name: "Reading position" });
     thumb.focus();
     fireEvent.pointerUp(bar, { button: 0, clientX: 510, pointerId: 1, pointerType: "mouse" });
 
-    // The release must hand focus back to the reading surface. A thumb that
-    // keeps focus turns arrows into 0.1% slider nudges, so reading one page
-    // per keypress takes many.
     expect(thumb).not.toHaveFocus();
 
-    // With focus back on the surface, the reading keys flip pages again.
     const handle = lastFakeHandle();
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(handle.next).toHaveBeenCalledTimes(1);
@@ -305,16 +276,12 @@ describe("Reader progress footer", () => {
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
 
-    // Click at 25.5%: the tooltip names that location.
     fireEvent.pointerDown(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
     expect(screen.getByTestId("reader-progress-tooltip")).toHaveTextContent(
       /Location 1508 of 5913 • 26%/,
     );
 
-    // The pointer never leaves the bar, but reading moves on (arrow page
-    // turns relocate the engine): the label must follow, not sit frozen at
-    // the clicked location.
     lastFakeHandle().emitRelocate({ fraction: 0.76, totalProgression: 0.76 });
     await waitFor(() =>
       expect(screen.getByTestId("reader-progress-tooltip")).toHaveTextContent(
@@ -322,7 +289,6 @@ describe("Reader progress footer", () => {
       ),
     );
 
-    // Leaving the bar still clears it.
     fireEvent.pointerLeave(bar);
     await waitFor(() => expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull());
   });
@@ -337,18 +303,13 @@ describe("Reader progress footer", () => {
     const bar = screen.getByTestId("reader-progress");
     stubProgressBar(bar);
 
-    // No tooltip while you are not positioning the bar.
     expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull();
 
-    // Press at 25.5%: the preview tooltip shows the location label resolved
-    // against the engine's position list (the "Location" unit is a sidecar
-    // positions entry, ~128 characters of chapter text).
     fireEvent.pointerDown(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
     const tooltip = screen.queryByTestId("reader-progress-tooltip");
     expect(tooltip).not.toBeNull();
     expect(tooltip).toHaveTextContent(/Location \d+ of \d+ • 26%/);
 
-    // Release and leave: the tooltip goes away again.
     fireEvent.pointerUp(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerLeave(bar, { button: 0, clientX: 255, pointerId: 1, pointerType: "mouse" });
     await waitFor(() => expect(screen.queryByTestId("reader-progress-tooltip")).toBeNull());
@@ -386,7 +347,6 @@ describe("ReaderShell chrome", () => {
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByTestId("settings-window")).toBeInTheDocument();
-    // The reader stays mounted under the overlay.
     expect(screen.getByTestId("reader-view")).toBeInTheDocument();
   });
 
@@ -406,7 +366,6 @@ describe("ReaderShell chrome", () => {
     expect(await screen.findByTestId("reader-view")).toBeInTheDocument();
     const searchButton = screen.getByRole("button", { name: "Search in book" });
     expect(searchButton).toBeEnabled();
-    // The thumbnails sidebar is a PDF affordance; EPUBs have none.
     expect(screen.queryByTestId("reader-sidebar-toggle")).toBeNull();
 
     await userEvent.click(searchButton);
@@ -425,7 +384,6 @@ describe("ReaderShell chrome", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-search-overlay")).toBeNull());
 
-    // Ctrl+Shift+F no longer opens the overlay; only the plain chord does.
     fireEvent.keyDown(window, { key: "f", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-search-overlay")).toBeNull());
 
@@ -445,8 +403,6 @@ describe("Reader keyboard navigation", () => {
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(handle.next).toHaveBeenCalledTimes(1);
-    // The shell must not percentage-step an EPUB: with no page count that
-    // would clamp the position straight to the end of the document.
     expect(screen.getByTestId("reader-position")).toHaveTextContent("0%");
     fireEvent.keyDown(window, { key: " " });
     expect(handle.next).toHaveBeenCalledTimes(2);
@@ -454,9 +410,6 @@ describe("Reader keyboard navigation", () => {
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     expect(handle.prev).toHaveBeenCalledTimes(1);
 
-    // The engine-driven position report keeps the footer in sync: the
-    // shell percent is the reported totalProgression, whatever flow the
-    // reader is in.
     handle.emitRelocate({
       fraction: 0.5,
       section: { current: 0, total: 2 },
@@ -502,10 +455,8 @@ describe("Reader keyboard navigation", () => {
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
 
-    // End maps onto the end of the book's positions.
     fireEvent.keyDown(window, { key: "End" });
     await waitFor(() => expect(handle.goToTotalProgression).toHaveBeenCalledWith(1));
-    // The engine reports its landing position.
     handle.emitRelocate({ fraction: 1, section: { current: 1, total: 2 }, totalProgression: 1 });
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("100%"));
 
@@ -531,27 +482,17 @@ describe("Reader keyboard navigation in PDF book mode", () => {
     await enterBookMode(6);
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
 
-    // Cover → the first facing spread: one press.
     fireEvent.keyDown(window, { key: "ArrowRight" });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
-    // First page of a pair → the NEXT spread in one press. The old
-    // one-page step landed on page 3 inside the same spread: a dead
-    // press the user had to repeat.
     fireEvent.keyDown(window, { key: "ArrowRight" });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 4 of 6"));
-    // Space steps a spread too (it used to step one page).
     fireEvent.keyDown(window, { key: " " });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 6 of 6"));
-    // The last spread stays put: no wrap.
     fireEvent.keyDown(window, { key: " " });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(indicator()).toHaveTextContent("Page 6 of 6");
-    // Shift+Space turns back one spread, to the previous spread's last
-    // page (it used to be dead outside presentation mode).
     fireEvent.keyDown(window, { key: " ", shiftKey: true });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 5 of 6"));
-    // PageDown/PageUp step by spread instead of scrolling the container
-    // 90% (book mode has no scroll container: it fits the pair).
     fireEvent.keyDown(window, { key: "PageDown" });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 6 of 6"));
     fireEvent.keyDown(window, { key: "PageUp" });
@@ -562,9 +503,6 @@ describe("Reader keyboard navigation in PDF book mode", () => {
     await enterBookMode(6);
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 1 of 6"));
 
-    // The visible ‹/› turn by SPREAD through the same adapter the keys
-    // use — never the one-page step that landed inside the same spread
-    // and needed a second press to leave it.
     fireEvent.click(screen.getByTestId("pdf-next"));
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
     fireEvent.click(screen.getByTestId("pdf-next"));
@@ -580,8 +518,7 @@ describe("Reader keyboard navigation in PDF book mode", () => {
     const nextZone = document.querySelector<HTMLElement>('[data-pdf-book-turn-edge="next"]');
     if (!nextZone) throw new Error("no next turn zone");
     nextZone.focus();
-    // The zone's own activation (Space on keyup) is the one turn; the
-    // global Space shortcut must not fire a second spread on keydown.
+    // The zone's own activation is the one turn; the global Space shortcut must not fire on keydown.
     await userEvent.keyboard(" ");
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -593,7 +530,6 @@ describe("Reader keyboard navigation in PDF book mode", () => {
 
     fireEvent.keyDown(window, { key: "l", ctrlKey: true });
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
-    // Presentation wins: one page per press, not one spread.
     fireEvent.keyDown(window, { key: "ArrowRight" });
     await waitFor(() => expect(indicator()).toHaveTextContent("Page 2 of 6"));
     fireEvent.keyDown(window, { key: "ArrowRight" });
@@ -611,7 +547,6 @@ describe("Reader bookmarks", () => {
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
-    // The relocate gives the shell a concrete CFI to bookmark.
     lastFakeHandle().emitRelocate({ locator: FAKE_LOCATOR.section2 });
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("0%"));
 
@@ -630,14 +565,12 @@ describe("Reader bookmarks", () => {
       expect(screen.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true"),
     );
 
-    // The drawer lists the stored bookmark (from the create response).
     await openNavigation();
     await userEvent.click(await screen.findByTestId("nav-tab-bookmarks"));
     expect(await screen.findByTestId("nav-bookmark-0")).toBeInTheDocument();
     expect(screen.queryByText(/session only/i)).not.toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
 
-    // Toggling again removes the bookmark at the same locator.
     fireEvent.click(screen.getByTestId("reader-bookmark"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 1 }));
     await waitFor(() =>
@@ -797,8 +730,6 @@ describe("Reader bookmarks", () => {
 });
 
 describe("Bookmark label popover", () => {
-  // The reader's canned TOC names chapter1.xhtml "Chapter One"; the create
-  // response carries the section2 locator (55% through the chapter).
   const HINT = "Chapter One · 55% through chapter · Saved just now";
 
   async function bookmarkAtSection2() {
@@ -807,8 +738,6 @@ describe("Bookmark label popover", () => {
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
-    // A distinct total progression makes the wait below prove the relocate
-    // reached the shell (0% is also the pre-relocate value).
     lastFakeHandle().emitRelocate({ locator: FAKE_LOCATOR.section2, totalProgression: 0.55 });
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("55%"));
     fireEvent.click(screen.getByTestId("reader-bookmark"));
@@ -816,10 +745,6 @@ describe("Bookmark label popover", () => {
   }
 
   it("carries the reader theme into the portaled card (UAT: dark theme)", async () => {
-    // The popover portals outside the reader root, so the theme reaches it
-    // only through the app tokens the style scope redefines. Pin the dark
-    // preset and check the card's --popover background matches it (#101013);
-    // without that style the card kept the app's light background.
     window.localStorage.setItem(
       READER_SETTINGS_STORAGE_KEY,
       JSON.stringify({
@@ -838,11 +763,8 @@ describe("Bookmark label popover", () => {
   it("opens under the bookmark button after creation and commits the label on Enter", async () => {
     await bookmarkAtSection2();
 
-    // The button is the popover's anchor, the input takes focus, and the
-    // hint names what is being labeled.
     expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(HINT);
     expect(screen.getByTestId("bookmark-label-input")).toHaveFocus();
-    // The tooltip would stack on the same corner, so it stays away.
     expect(screen.queryByText("Bookmark (Ctrl+B)")).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByTestId("bookmark-label-input"), "Opening scene");
@@ -864,7 +786,6 @@ describe("Bookmark label popover", () => {
 
     const input = screen.getByTestId("bookmark-label-input");
     await userEvent.type(input, "x".repeat(60));
-    // Silent clamp, code-point safe, same as the drawer and details editors.
     expect(input).toHaveValue("x".repeat(50));
 
     await userEvent.keyboard("{Escape}");
@@ -912,7 +833,6 @@ describe("Bookmark label popover", () => {
     await bookmarkAtSection2();
     await userEvent.type(screen.getByTestId("bookmark-label-input"), "draft");
 
-    // Ctrl+B still means "toggle": the bookmark goes, and the draft with it.
     fireEvent.keyDown(window, { key: "b", ctrlKey: true });
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 1 }));
@@ -929,8 +849,6 @@ describe("Bookmark label popover", () => {
     await bookmarkAtSection2();
     await userEvent.type(screen.getByTestId("bookmark-label-input"), "First draft");
 
-    // Moving on and pressing Ctrl+B again bookmarks the new position: the
-    // popover follows the newest bookmark with a blank draft.
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [makeBook()],
@@ -953,9 +871,7 @@ describe("Bookmark label popover", () => {
     await waitFor(() => expect(screen.getByTestId("reader-position")).toHaveTextContent("10%"));
     fireEvent.keyDown(window, { key: "b", ctrlKey: true });
 
-    // The old popover is still mounted while the second create round-trips,
-    // so wait on the rebind's own hint before grabbing the elements —
-    // otherwise the assertions land on the detached first instance.
+    // The old popover stays mounted while the second create round-trips; wait for the rebind hint first.
     await waitFor(
       () =>
         expect(screen.getByTestId("bookmark-label-hint")).toHaveTextContent(
@@ -975,7 +891,6 @@ describe("Bookmark label popover", () => {
         patch: { label: "Second draft" },
       }),
     );
-    // The first bookmark never got the draft typed for it.
     expect(invokeMock).not.toHaveBeenCalledWith("update_annotation", {
       id: 1,
       patch: { label: "First draft" },
@@ -985,7 +900,6 @@ describe("Bookmark label popover", () => {
   it("labels a PDF bookmark and names the page in the hint", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
-    // The PDF reader reports its page on mount, so the shell can bookmark it.
     mockInvoke({
       get_library_stats: { bookCount: 1, collectionCount: 0 },
       list_books: [
@@ -1042,7 +956,6 @@ describe("ReaderNavigation", () => {
     await userEvent.click(screen.getByTestId("toc-item-1"));
     expect(lastFakeHandle().goTo).toHaveBeenCalledWith(JSON.stringify({ href: "chapter2.xhtml" }));
     expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument();
-    // Contents come from the rendering engine, not a backend command.
     expect(invokeMock).not.toHaveBeenCalledWith("get_book_toc", { bookId: 1 });
   });
 
@@ -1148,14 +1061,12 @@ describe("ReaderNavigation", () => {
     expect(screen.getByTestId("nav-tab-outline")).toHaveAttribute("data-state", "active");
     expect(screen.queryByTestId("nav-tab-pages")).toBeNull();
     expect(screen.queryByTestId("nav-pages")).toBeNull();
-    // Hierarchical entries flatten with depth; leaf navigation jumps pages.
     expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Chapter One");
     expect(screen.getByTestId("nav-outline-item-1")).toHaveTextContent("Part Two");
     expect(screen.getByTestId("nav-outline-item-2")).toHaveTextContent("Section Two-A");
 
     await userEvent.click(screen.getByTestId("nav-outline-item-1"));
-    // PDF has no footer, so the shell exposes the position as a deterministic
-    // attribute for tests instead.
+    // PDF has no footer; the shell exposes data-reader-position for tests instead.
     await waitFor(() =>
       expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "50"),
     );
@@ -1187,7 +1098,6 @@ describe("ReaderNavigation", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     const sidebar = await screen.findByTestId("pdf-sidebar");
-    // Whole document reserved; the current page paints and is marked.
     expect(sidebar.querySelectorAll("[data-pdf-thumb-slot]")).toHaveLength(3);
     await waitFor(() =>
       expect(sidebar.querySelector('[data-pdf-thumb-slot="1"]')).toHaveAttribute(
@@ -1266,12 +1176,8 @@ describe("ReaderNavigation", () => {
       .map((child) => child.getAttribute("data-testid"))
       .filter((id): id is string => id !== null);
 
-    // Page thumbnails follow the portaled PDF toolbar, whose last control is
-    // presentation mode.
     expect(order.indexOf("reader-sidebar-toggle")).toBe(order.indexOf("pdf-header-controls") + 1);
 
-    // The trailing group starts with Contents, then search, the book mode
-    // toggle, appearance, bookmark, and settings.
     expect(order.slice(order.indexOf("reader-title") + 1)).toEqual([
       "reader-nav-trigger",
       "reader-search",
@@ -1284,8 +1190,6 @@ describe("ReaderNavigation", () => {
 
   it("themes the portaled drawer with the active reader theme", async () => {
     render(
-      // The standalone drawer needs the tooltip context AppShell normally
-      // provides; its tab triggers carry hover/focus hints.
       <TooltipProvider>
         <ReaderNavigation
           open
@@ -1306,10 +1210,6 @@ describe("ReaderNavigation", () => {
       </TooltipProvider>,
     );
 
-    // The drawer is portaled outside the reader root, so the reader theme's
-    // token overrides must live on the sheet itself; otherwise bg-popover
-    // falls back to the app's light/dark mode (UAT: white drawer over a
-    // dark book).
     const drawer = await screen.findByTestId("reader-nav");
     expect(drawer.getAttribute("style")).toContain("--popover: #101013");
   });
@@ -1319,21 +1219,17 @@ describe("Reader presentation mode (issue #65)", () => {
   it("toggles with Ctrl+L, hides the chrome, and exits with Esc", async () => {
     renderReader("pdf");
     await screen.findByTestId("pdf-canvas");
-    // PDF has no bottom footer at all.
     expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "l", ctrlKey: true });
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
-    // The chrome is gone: no header, no footer, no hover zone.
     expect(screen.queryByTestId("reader-title")).toBeNull();
     expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
-    // The reader swaps in the floating presentation bar.
     expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
     expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
 
-    // Esc is the exit path and restores the normal chrome.
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
@@ -1366,7 +1262,6 @@ describe("Reader presentation mode (issue #65)", () => {
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
     );
 
-    // Shift+Space steps back a page (its own combo, not plain Space).
     fireEvent.keyDown(window, { key: " ", shiftKey: true });
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
@@ -1382,23 +1277,16 @@ describe("Reader EPUB presentation mode (issue #64)", () => {
     );
     expect(screen.getByTestId("reader-footer")).toBeInTheDocument();
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
-    // The EPUB toggle rides in the shell header next to the appearance
-    // popover — the EPUB counterpart of the PDF toolbar's Presentation
-    // button.
     expect(screen.getByTestId("epub-presentation-toggle")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "l", ctrlKey: true });
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-epub-presentation", "true");
-    // The chrome is gone: no header, no footer, no hover zone.
     expect(screen.queryByTestId("reader-title")).toBeNull();
     expect(screen.queryByTestId("reader-footer")).toBeNull();
     expect(screen.queryByTestId("reader-footer-hover-zone")).toBeNull();
-    // The reader swaps in the floating presentation bar.
     expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument();
-    // No PDF presentation state leaks into an EPUB reader.
     expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-pdf-presentation");
 
-    // Esc is the exit path and restores the normal chrome.
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-epub-presentation");
     expect(screen.getByTestId("reader-title")).toBeInTheDocument();
@@ -1429,13 +1317,11 @@ describe("Reader EPUB presentation mode (issue #64)", () => {
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-epub-presentation", "true");
     expect(screen.getByTestId("epub-presentation-bar")).toBeInTheDocument();
 
-    // The bar drives engine page turns (the same seam the keys use).
     fireEvent.click(screen.getByTestId("epub-pres-next"));
     expect(handle.next).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("epub-pres-prev"));
     expect(handle.prev).toHaveBeenCalledTimes(1);
 
-    // The spine indicator follows the relocate the turn reports.
     handle.emitRelocate({
       fraction: 0.5,
       section: { current: 1, total: 2 },
@@ -1445,7 +1331,6 @@ describe("Reader EPUB presentation mode (issue #64)", () => {
       expect(screen.getByTestId("epub-section-indicator")).toHaveTextContent("Section 2 of 2"),
     );
 
-    // The in-mode exit button restores the chrome without a reload.
     fireEvent.click(screen.getByTestId("epub-pres-exit"));
     expect(screen.getByTestId("reader-view")).not.toHaveAttribute("data-epub-presentation");
     expect(screen.queryByTestId("epub-presentation-bar")).toBeNull();
@@ -1487,7 +1372,6 @@ describe("Reader panel shortcuts", () => {
 
     fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
     expect(await screen.findByTestId("appearance-content")).toBeInTheDocument();
-    // Focus must not move into the panel.
     expect(screen.getByTestId("appearance-content")).not.toHaveFocus();
 
     fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
@@ -1501,8 +1385,6 @@ describe("Reader panel shortcuts", () => {
     fireEvent.keyDown(window, { key: "a", ctrlKey: true, shiftKey: true });
     await screen.findByTestId("appearance-content");
 
-    // Escape is a Radix dismiss: the real keydown bubbles from the focused
-    // node through document to window, so drive it with user-event.
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByTestId("appearance-content")).toBeNull());
   });
@@ -1516,7 +1398,6 @@ describe("Reader panel shortcuts", () => {
     const drawer = await screen.findByTestId("reader-nav");
     expect(drawer).toHaveAttribute("data-side", "right");
     expect(screen.getByTestId("nav-tab-outline")).toHaveAttribute("data-state", "active");
-    // The shortcut must not pull focus off the reading surface.
     expect(drawer).not.toContainElement(document.activeElement as HTMLElement);
 
     fireEvent.keyDown(window, { key: "c", ctrlKey: true, shiftKey: true });
@@ -1542,7 +1423,6 @@ describe("Reader panel shortcuts", () => {
     expect(await screen.findByTestId("reader-nav")).toBeInTheDocument();
     expect(screen.getByTestId("nav-tab-bookmarks")).toHaveAttribute("data-state", "active");
 
-    // Close, then open straight onto Highlights.
     fireEvent.keyDown(window, { key: "b", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
 
@@ -1559,7 +1439,6 @@ describe("Reader panel shortcuts", () => {
     await screen.findByTestId("reader-nav");
     expect(screen.getByTestId("nav-tab-bookmarks")).toHaveAttribute("data-state", "active");
 
-    // A different drawer key closes the open drawer instead of switching tabs.
     fireEvent.keyDown(window, { key: "h", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.queryByTestId("reader-nav")).toBeNull());
   });
@@ -1594,7 +1473,6 @@ describe("Reader panel shortcuts", () => {
     expect(appearance).toHaveAttribute("aria-keyshortcuts", "Control+Shift+A");
     expect(contents).toHaveAttribute("aria-keyshortcuts", "Control+Shift+C");
 
-    // The tooltips carry the same Ctrl wording as the other chrome controls.
     for (const [testId, label] of [
       ["reader-sidebar-toggle", "Page thumbnails (Ctrl+Shift+T)"],
       ["appearance-trigger", "Appearance (Ctrl+Shift+A)"],
@@ -1616,8 +1494,6 @@ describe("ReaderAppearance", () => {
     const content = await screen.findByTestId("appearance-content");
     expect(content).toBeInTheDocument();
 
-    // Radix toggle groups inside the popover render radio semantics.
-    // Default follows the app theme; Light and Dark sit together.
     const themeGroup = screen.getByTestId("pref-theme");
     expect(within(themeGroup).getByRole("radio", { name: "Default" })).toBeChecked();
     expect(
@@ -1629,8 +1505,6 @@ describe("ReaderAppearance", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Paper" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "paper");
 
-    // Light paints the whole chrome (not just the page) from its own token
-    // scope, so a dark app cannot leak through the toolbar or popovers.
     await userEvent.click(screen.getByRole("radio", { name: "Light" }));
     const lightView = screen.getByTestId("reader-view");
     expect(lightView).toHaveAttribute("data-theme", "light");
@@ -1638,16 +1512,12 @@ describe("ReaderAppearance", () => {
     expect(lightView.style.getPropertyValue("--foreground")).toBe("#1f2328");
     expect(lightView).toHaveStyle({ colorScheme: "light" });
 
-    // Accessible presets apply like any other theme...
     await userEvent.click(screen.getByRole("radio", { name: "High contrast" }));
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-theme", "contrast");
-    // Dark-family surfaces pin dark UA defaults for their section documents.
     expect(document.querySelector('[data-testid="epub-reader"]')).toHaveStyle({
       colorScheme: "dark",
     });
 
-    // ...and Default restores the publisher-owned colors (neutral state),
-    // with no reader token overrides left on the root.
     await userEvent.click(within(themeGroup).getByRole("radio", { name: "Default" }));
     const defaultView = screen.getByTestId("reader-view");
     expect(defaultView).toHaveAttribute("data-theme", "default");
@@ -1686,7 +1556,6 @@ describe("ReaderAppearance", () => {
     expect(content).toHaveTextContent("Font size");
     expect(content).toHaveTextContent("100%");
     expect(content).toHaveTextContent("Line spacing");
-    // 0 on the reading-system scale means publication default.
     expect(content).toHaveTextContent("Default");
     expect(screen.getByLabelText("Font size")).toBeInTheDocument();
     expect(screen.getByLabelText("Line spacing")).toBeInTheDocument();
@@ -1701,9 +1570,7 @@ describe("ReaderAppearance", () => {
     const handle = lastFakeHandle();
 
     const slider = screen.getByTestId("pref-font-size");
-    // Radix handles the keydown on the thumb (role=slider), not the root.
     const thumb = within(slider).getByRole("slider");
-    // Two steps up the scale: 100% → 112.5% → 137.5%.
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -1723,7 +1590,6 @@ describe("ReaderAppearance", () => {
     );
     expect(screen.getByTestId("appearance-content")).toHaveTextContent("137.5%");
 
-    // The explicit reset returns the default reading size.
     const reset = screen.getByTestId("pref-font-size-reset");
     expect(reset).toBeEnabled();
     await userEvent.click(reset);
@@ -1754,7 +1620,6 @@ describe("ReaderAppearance", () => {
     const handle = lastFakeHandle();
 
     const thumb = within(screen.getByTestId("pref-line-height")).getByRole("slider");
-    // From the 0 (publication default) sentinel: 0 → 1 → 1.125.
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -1774,7 +1639,6 @@ describe("ReaderAppearance", () => {
     );
     expect(screen.getByTestId("appearance-content")).toHaveTextContent("1.125");
 
-    // The explicit reset returns the publication default (0 sentinel).
     const reset = screen.getByTestId("pref-line-height-reset");
     expect(reset).toBeEnabled();
     await userEvent.click(reset);
@@ -1818,7 +1682,6 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // Default removes the override entirely — publisher styling wins.
     await userEvent.click(
       within(screen.getByTestId("pref-font-family")).getByRole("radio", { name: "Default" }),
     );
@@ -1837,8 +1700,6 @@ describe("ReaderAppearance", () => {
     await screen.findByTestId("appearance-content");
     const handle = lastFakeHandle();
 
-    // Paginated exposes exactly 1, 2, 3, and 4 as column icons ("Two
-    // columns" preselected by default); the stored value stays numeric.
     const columns = screen.getByTestId("pref-columns");
     expect(
       within(columns)
@@ -1847,7 +1708,6 @@ describe("ReaderAppearance", () => {
     ).toEqual(["One column", "2 columns", "3 columns", "4 columns"]);
     expect(within(columns).getByRole("radio", { name: "2 columns" })).toBeChecked();
 
-    // Every value is submitted as an explicit numeric target (never auto-fit).
     await userEvent.click(within(columns).getByRole("radio", { name: "4 columns" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
@@ -1861,13 +1721,10 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // Scrolling hides the control and ignores the count — the stored
-    // preference survives untouched.
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
     expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
 
-    // Back to paginated: I (1) is still the selected target.
     await userEvent.click(screen.getByRole("radio", { name: "Paginated" }));
     const columnsAgain = await screen.findByTestId("pref-columns");
     expect(within(columnsAgain).getByRole("radio", { name: "One column" })).toBeChecked();
@@ -1881,7 +1738,6 @@ describe("ReaderAppearance", () => {
     await screen.findByTestId("appearance-content");
     const handle = lastFakeHandle();
 
-    // Word spacing: two steps up the rem scale → 0.25, then reset to 0.
     const wordThumb = within(screen.getByTestId("pref-word-spacing")).getByRole("slider");
     fireEvent.keyDown(wordThumb, { key: "ArrowRight" });
     fireEvent.keyDown(wordThumb, { key: "ArrowRight" });
@@ -1899,7 +1755,6 @@ describe("ReaderAppearance", () => {
     );
     await waitFor(() => expect(screen.getByTestId("pref-word-spacing-reset")).toBeDisabled());
 
-    // Letter spacing: one step → 0.125, reset to 0.
     const letterThumb = within(screen.getByTestId("pref-letter-spacing")).getByRole("slider");
     fireEvent.keyDown(letterThumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -1914,7 +1769,6 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // Paragraph spacing: one step → 0.25, reset to 0.
     const paragraphThumb = within(screen.getByTestId("pref-paragraph-spacing")).getByRole("slider");
     fireEvent.keyDown(paragraphThumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -1939,7 +1793,6 @@ describe("ReaderAppearance", () => {
     await screen.findByTestId("appearance-content");
     const handle = lastFakeHandle();
 
-    // Auto is the preselected publisher default.
     const alignment = screen.getByTestId("pref-text-align");
     expect(within(alignment).getByRole("radio", { name: "Auto" })).toBeChecked();
 
@@ -1957,7 +1810,6 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // Auto restores the publication's own alignment (sentinel, no override).
     await userEvent.click(within(alignment).getByRole("radio", { name: "Auto" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
@@ -1976,7 +1828,6 @@ describe("ReaderAppearance", () => {
 
     const margins = screen.getByTestId("pref-page-gutter");
     const thumb = within(margins).getByRole("slider");
-    // Opens at the 10px default; two steps: 10px → 20px → 30px.
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     await waitFor(() =>
@@ -1985,7 +1836,6 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // Scrolling hides the pagination-scoped control; the value survives.
     await userEvent.click(screen.getByRole("radio", { name: "Scrolling" }));
     expect(await screen.findByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling");
     expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
@@ -1994,8 +1844,6 @@ describe("ReaderAppearance", () => {
     const marginsAgain = await screen.findByTestId("pref-page-gutter");
     expect(within(marginsAgain).getByRole("slider")).toHaveAttribute("aria-valuenow", "3");
 
-    // Reset restores the opening default (10px), one step from the left
-    // edge — not the publication-default 0.
     await userEvent.click(screen.getByRole("button", { name: "Reset page margins" }));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
@@ -2013,14 +1861,11 @@ describe("ReaderAppearance", () => {
     await screen.findByTestId("appearance-content");
     const handle = lastFakeHandle();
 
-    // Default: no override, so the readout shows the theme's own ratio and
-    // the reset is disabled.
     expect(handle.setAppearance).toHaveBeenCalledWith(
       expect.objectContaining({ foreground: null }),
     );
     expect(screen.getByTestId("pref-foreground-reset")).toBeDisabled();
 
-    // A curated swatch submits the hex override...
     await userEvent.click(screen.getByTestId("pref-foreground-parchment"));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
@@ -2029,13 +1874,10 @@ describe("ReaderAppearance", () => {
     );
     expect(screen.getByTestId("pref-foreground-parchment")).toHaveAttribute("aria-pressed", "true");
 
-    // ...the custom picker accepts any hex color (opened from the swatch
-    // trigger; Radix collision handling flips it left near the window edge)...
     await userEvent.click(screen.getByTestId("pref-foreground-input"));
     const hexInput = await screen
       .findByTestId("pref-foreground-hex")
       .then((wrapper) => within(wrapper).getByRole("textbox"));
-    // Partial input is ignored; only complete hex values commit.
     fireEvent.change(hexInput, { target: { value: "#336" } });
     expect(handle.setAppearance).not.toHaveBeenCalledWith(
       expect.objectContaining({ foreground: "#336" }),
@@ -2047,13 +1889,9 @@ describe("ReaderAppearance", () => {
       ),
     );
 
-    // ...and the readout judges the effective color against the active
-    // theme background (default theme → white reference, 6.1:1 for #336699
-    // stays above AA; a failing ratio would tint the readout destructive).
     const readout = screen.getByTestId("foreground-contrast");
     expect(readout).toHaveTextContent(/:1$/);
 
-    // Reset returns to the theme color (null sentinel).
     await userEvent.click(screen.getByTestId("pref-foreground-reset"));
     await waitFor(() =>
       expect(handle.setAppearance).toHaveBeenCalledWith(
@@ -2105,7 +1943,6 @@ describe("PDF appearance menu", () => {
     fireEvent.click(screen.getByTestId("appearance-trigger"));
     await screen.findByTestId("appearance-content");
 
-    // The reflow controls cannot act on a fixed layout: theme only.
     expect(screen.queryByTestId("pref-font-size")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-line-height")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-word-spacing")).not.toBeInTheDocument();
@@ -2117,9 +1954,6 @@ describe("PDF appearance menu", () => {
     expect(screen.queryByTestId("pref-columns")).not.toBeInTheDocument();
     expect(screen.queryByTestId("pref-page-gutter")).not.toBeInTheDocument();
 
-    // Exactly the PDF theme choices are offered (issue #67: Smart dark
-    // recolors in the worker, Invert is the explicit negative), and a
-    // filter choice lands on the rendered pages as a CSS filter.
     const theme = screen.getByTestId("pref-theme");
     expect(
       within(theme)
@@ -2132,17 +1966,12 @@ describe("PDF appearance menu", () => {
       "grayscale(1) invert(1) contrast(1.4)",
     );
 
-    // Paper multiplies the white pages down to the theme's paper color
-    // (a filter cannot darken white); the dark presets use filters only.
     await userEvent.click(within(theme).getByRole("radio", { name: "Paper" }));
     const tint = screen.getByTestId("pdf-theme-tint");
     expect(tint.style.backgroundColor).toBe("rgb(246, 240, 228)");
     expect(tint.style.mixBlendMode).toBe("multiply");
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
 
-    // The page/zoom controls dock into the shell's header (issue #68) — no
-    // separate control row above the document — and the header chrome
-    // follows the theme through the shell's THEME_CLASSES.
     const header = screen.getByTestId("pdf-page-indicator").closest("header");
     expect(header).not.toBeNull();
     expect(header).toContainElement(screen.getByTestId("pdf-toolbar"));
@@ -2190,14 +2019,10 @@ describe("Reader theme scope", () => {
 
     const windowEl = await screen.findByTestId("settings-window");
     expect(document.documentElement).toHaveClass("dark");
-    // The unpinned reader auto-maps dark to the dark preset, so Settings
-    // matches that surface rather than the app's slightly different tokens.
     expect(windowEl.style.getPropertyValue("--background")).toBe("#101013");
 
     await userEvent.click(screen.getByRole("radio", { name: "Light" }));
 
-    // The app flip re-maps the reader to Default; the still-open window
-    // follows it live back to the app scope.
     expect(document.documentElement).not.toHaveClass("dark");
     await waitFor(() => expect(windowEl.style.getPropertyValue("--background")).toBe(""));
   });
@@ -2219,7 +2044,6 @@ describe("Reader theme scope", () => {
     expect(readerView.style.getPropertyValue("--background")).toBe("#101013");
     expect(screen.getByTestId("epub-reader")).toHaveStyle({ colorScheme: "dark" });
 
-    // Settings opened over that reader keeps the same dark scope.
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
     const windowEl = await screen.findByTestId("settings-window");
     expect(windowEl.style.getPropertyValue("--background")).toBe("#101013");
@@ -2288,8 +2112,6 @@ describe("Reader book mode toolbar control", () => {
     const toggle = screen.getByTestId("reader-book-mode");
     expect(toggle).toHaveAccessibleName("Book mode");
     expect(toggle).toHaveAttribute("aria-pressed", "true");
-    // The pressed state is visible, not just an attribute: the icon fills
-    // while the mode is on (the bookmark button's precedent).
     expect(toggle.querySelector("svg")).toHaveClass("fill-current");
 
     await userEvent.click(toggle);
@@ -2354,8 +2176,6 @@ describe("Reader book mode shortcut", () => {
   });
 
   it("derives the EPUB paginated two-column flow with b", async () => {
-    // A stored scrolling layout proves the chord flips the shared flag's
-    // derivation, not the stored preference: book mode implies paginated.
     window.localStorage.setItem(
       READER_SETTINGS_STORAGE_KEY,
       JSON.stringify({
@@ -2388,8 +2208,6 @@ describe("Reader book mode shortcut", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const input = await screen.findByTestId("reader-search-input");
     await userEvent.click(input);
-    // The letter belongs to the field: the engine's editable-target
-    // suppression must keep the chord away from the registry.
     await userEvent.keyboard("b");
     expect(input).toHaveValue("b");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -2404,8 +2222,6 @@ describe("Reader book mode shortcut", () => {
     const input = await screen.findByTestId("pdf-page-input");
     await waitFor(() => expect(input).toBeEnabled());
     await userEvent.click(input);
-    // The letter belongs to the field: editable-target suppression must
-    // keep the chord away from the registry.
     await userEvent.keyboard("b");
     expect(input).toHaveValue("b");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -2420,8 +2236,6 @@ describe("Reader book mode shortcut", () => {
     fireEvent.keyDown(window, { key: "l", ctrlKey: true });
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-pdf-presentation", "true");
 
-    // An invisible flip would surprise the reader on exit: the chord is not
-    // registered while presenting.
     fireEvent.keyDown(window, { key: "b" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.queryByTestId("pdf-book-canvas")).not.toBeInTheDocument();
@@ -2466,7 +2280,6 @@ describe("Reader book switching", () => {
       </ThemeStateProvider>,
     );
 
-    // The EPUB session lists its engine TOC in the drawer.
     await waitFor(() =>
       expect(screen.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready"),
     );
@@ -2475,16 +2288,12 @@ describe("Reader book switching", () => {
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByTestId("reader-nav")).not.toBeInTheDocument());
 
-    // Back to the library, then open the PDF through the normal flow.
     await userEvent.click(screen.getByTestId("reader-back"));
     await screen.findByTestId("library-view");
     fireEvent.doubleClick(await screen.findByLabelText("A Minimal PDF (PDF)"));
     await screen.findByTestId("book-detail");
     await userEvent.click(screen.getByTestId("detail-continue"));
 
-    // The remounted reader starts clean: EPUB chrome is gone, position is
-    // fresh, and the drawer shows the PDF's outline — never the previous
-    // book's table of contents (the shell's bookId-tagged state guard).
     await screen.findByTestId("pdf-canvas");
     expect(screen.queryByTestId("epub-reader")).not.toBeInTheDocument();
     expect(screen.getByTestId("reader-view")).toHaveAttribute("data-reader-position", "0");
@@ -2492,8 +2301,6 @@ describe("Reader book switching", () => {
     expect(await screen.findByTestId("nav-outline-item-0")).toHaveTextContent("Part One");
     expect(screen.queryByTestId("toc-item-0")).not.toBeInTheDocument();
 
-    // The switch closed the EPUB engine and opened no new one (the PDF has
-    // no engine handles): the old engine died with its reader unmount.
     expect(fakeEpubHandles).toHaveLength(1);
     expect(fakeEpubHandles[0]!.close).toHaveBeenCalledTimes(1);
     expect(fakeEpubHandles[0]!.hostElement.isConnected).toBe(false);
@@ -2610,7 +2417,6 @@ describe("Reader highlight toolbar", () => {
     });
     const pointer = await stubPageOnePointer();
 
-    // A fresh selection has no highlight to target: swatches create.
     await pointer.drag();
     expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
     expect(screen.queryByTestId("highlight-remove")).not.toBeInTheDocument();
@@ -2629,15 +2435,12 @@ describe("Reader highlight toolbar", () => {
     );
     await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
 
-    // Selecting the highlighted text again targets it: the palette now
-    // offers Remove, which deletes the annotation itself.
     await pointer.drag();
     expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("highlight-remove"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 4 }));
     await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
 
-    // The text is selectable again and no highlight is targeted.
     await pointer.drag();
     expect(await screen.findByTestId("selection-toolbar")).toBeInTheDocument();
     expect(screen.queryByTestId("highlight-remove")).not.toBeInTheDocument();
@@ -2680,14 +2483,12 @@ describe("Reader highlight toolbar", () => {
     renderPdfShell({ highlights: [stored] });
     const pointer = await stubPageOnePointer();
 
-    // A click inside the highlight's rect opens the palette onto it.
     await pointer.click(64, 64);
     expect(await screen.findByTestId("selection-toolbar")).toHaveTextContent("the stored words");
     fireEvent.click(screen.getByTestId("highlight-remove"));
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("delete_annotation", { id: 9 }));
     await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
 
-    // A click on unhighlighted page space reports no target.
     await pointer.click(480, 480);
     await waitFor(() => expect(screen.queryByTestId("selection-toolbar")).not.toBeInTheDocument());
   });
@@ -2711,8 +2512,6 @@ describe("Reader highlight target", () => {
     });
 
     await screen.findByTestId("reader-view");
-    // The target waits for the engine's adapter, then jumps in the book's
-    // own locator grammar.
     await waitFor(() => expect(lastFakeHandle().goTo).toHaveBeenCalledWith(FAKE_LOCATOR.section2), {
       timeout: 5000,
     });

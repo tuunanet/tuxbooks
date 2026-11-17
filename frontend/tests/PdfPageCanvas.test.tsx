@@ -41,12 +41,9 @@ describe("PdfPageCanvas color-mode reset (issue #67 follow-up)", () => {
       />,
     );
 
-    // The first run starts the smart render; no reset has happened.
     expect(fakeCtx.clearRect).not.toHaveBeenCalled();
 
-    // Switching the color mode must clear the stale wrong-mode bitmap so
-    // the wrapper's themed placeholder shows while the new render is in
-    // flight, and submit a fresh render request.
+    // A variant switch clears the stale wrong-mode bitmap and requests a fresh render.
     const rendersBefore = doc.renderOptions.length;
     view.rerender(
       <PdfPageCanvas
@@ -61,8 +58,6 @@ describe("PdfPageCanvas color-mode reset (issue #67 follow-up)", () => {
     expect(fakeCtx.clearRect).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(doc.renderOptions.length).toBeGreaterThan(rendersBefore));
 
-    // A geometry-only change keeps the old pixels visible (atomic-blit
-    // contract) — no additional reset.
     view.rerender(
       <PdfPageCanvas
         document={doc as never}
@@ -101,24 +96,19 @@ describe("PdfPageCanvas scale-and-swap", () => {
     const view = renderPage(doc);
     const canvas = screen.getByTestId("pdf-canvas");
 
-    // Complete the first render at scale 1.
     await waitFor(() => expect(doc.renderOptions.length).toBe(1));
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
     expect(canvas.style.transform).toBe("");
 
-    // Scale change while the new render is held: the previous bitmap is
-    // immediately drawn under a transform sized to the new box. The visible
-    // surface is never blank (a drawable bitmap is present throughout).
+    // The previous bitmap is drawn under a transform for the new box, so the surface is never blank.
     view.rerender(
       <PdfPageCanvas document={doc as never} pageNumber={1} width={200} height={258} scale={2} />,
     );
     expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
     expect(canvas.style.transform).toBe("scale(2, 2)");
-    expect(fakeCtx.drawImage).toHaveBeenCalledTimes(1); // still the first buffer
+    expect(fakeCtx.drawImage).toHaveBeenCalledTimes(1);
 
-    // The new-scale raster resolves; the atomic blit replaces the scaled
-    // bitmap and clears the transform.
     await waitFor(() => expect(doc.renderOptions.length).toBe(2));
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
@@ -128,10 +118,8 @@ describe("PdfPageCanvas scale-and-swap", () => {
   });
 
   it("sizes the buffer to the rounded CSS box times the ratio, not the raw viewport", async () => {
-    // A real plot page at 426.5%: the raw page-size*scale is 1191.8675 by
-    // 1059.8525, so flooring it times the 2x ratio lands at 2383x2119, one
-    // pixel short of the 2384x2120 CSS box. The browser then resamples the
-    // whole canvas to fit, ghosting its edges.
+    // Flooring page-size*scale before the 2x ratio falls one pixel short, so the browser
+    // resamples and ghosts the canvas edges.
     vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
     const doc = makeFakePdfDocument(1, () => ({ width: 279.5, height: 248.5 }));
     render(
@@ -153,11 +141,8 @@ describe("PdfPageCanvas scale-and-swap", () => {
     const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
     const observed: string[] = [];
 
-    // A parent layout effect runs after a child's layout effects but before
-    // the browser paints, so the canvas state read here is what the first
-    // paintable frame contains. The scaled bitmap must already cover the
-    // wrapper React just resized; as a passive effect it did not, and the
-    // frame in between flashed the page placeholder (the zoom white flash).
+    // A parent layout effect runs before paint, so the canvas state read here is the first
+    // paintable frame; as a passive effect it flashed the placeholder (zoom white flash).
     function Harness({ scale }: { scale: number }) {
       const mounted = useRef(false);
       useLayoutEffect(() => {
@@ -195,8 +180,7 @@ describe("PdfPageCanvas scale-and-swap", () => {
   });
 
   it("scales the previous full-page bitmap over the page box when zoom crosses into region mode", async () => {
-    // The renderer reads devicePixelRatio once per render; force a HiDPI
-    // display so the whole-page ratio caps below it and region mode engages.
+    // The renderer reads devicePixelRatio once per render; force HiDPI so region mode engages.
     vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
     const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
     const view = renderPage(doc);
@@ -205,10 +189,6 @@ describe("PdfPageCanvas scale-and-swap", () => {
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
 
-    // A zoom deep enough that the whole-page buffer would drop below device
-    // resolution, with a viewport region supplied: region mode engages and the
-    // old full-page pixels must cover the *page* box, not the region rect (the
-    // wrapper is now scrolled far from the page origin).
     view.rerender(
       <PdfPageCanvas
         document={doc as never}
@@ -244,9 +224,6 @@ describe("PdfPageCanvas scale-and-swap", () => {
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
 
-    // Half the scale: the crop sits at half the page-local CSS position and
-    // covers half the box, so the visible page content stays put while the
-    // new region raster runs.
     view.rerender(
       <PdfPageCanvas
         document={doc as never}
@@ -282,10 +259,7 @@ describe("PdfPageCanvas scale-and-swap", () => {
     doc.releaseRender(1);
     await waitFor(() => expect(canvas).toHaveAttribute("data-pdf-render-quality", "final"));
 
-    // Zoom out below the region threshold: the remap places the old crop
-    // imperatively (position/left/top), and the full-page render must clear
-    // that placement. Without it the page draws offset and only a fragment is
-    // visible, which is the reported blank page after a keyboard zoom-out.
+    // A full-page render must clear the region's imperative placement or the page draws offset (blank-page bug).
     view.rerender(
       <PdfPageCanvas
         document={doc as never}
@@ -331,9 +305,7 @@ describe("PdfPageCanvas scale-and-swap", () => {
       expect(canvas).toHaveAttribute("data-pdf-render-quality", "scaled");
       expect(canvas.style.transform).toBe("scale(2, 2)");
 
-      // Drive the render-settle window (RENDER_SETTLE_MS) to its end: a
-      // display-only canvas must never ask the engine for a page it is not
-      // budgeted to rasterize.
+      // A display-only canvas must never ask the engine for a page it is not budgeted to rasterize.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200);
       });
@@ -377,12 +349,8 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
     const view = render(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
     await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
 
-    // The render budget reshuffles mid-raster: the page drops out of the
-    // two-slot budget before its raster lands.
     view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
 
-    // The demotion cancelled nothing: the released raster still blits and
-    // reports completion.
     doc.releaseRender(1);
     await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
   });
@@ -393,16 +361,12 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
     const view = render(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
     await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
 
-    // Demote, promote, demote again while the raster runs — the churn a
-    // fast scroll's priority reshuffles produce.
     view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
     view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered })} />);
     view.rerender(<PdfPageCanvas {...props(doc, { onPageRendered, renderEnabled: false })} />);
 
     doc.releaseRender(1);
     await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
-    // The pixels actually landed: the completed raster blitted, not the
-    // transparent placeholder.
     expect(fakeCtx.drawImage).toHaveBeenCalled();
     expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-quality", "final");
   });
@@ -417,15 +381,12 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
 
     vi.useFakeTimers();
     try {
-      // A real input change opens the next commitment and its settle window.
       view.rerender(<PdfPageCanvas {...props(doc, { width: 200, height: 258 })} />);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10);
       });
 
-      // Priority churn inside the window must not re-arm it: the raster
-      // starts at the original commitment's deadline, not 150 ms after the
-      // last re-run.
+      // Priority churn must not re-arm the settle: the raster starts at the original deadline.
       view.rerender(
         <PdfPageCanvas {...props(doc, { width: 200, height: 258, renderEnabled: false })} />,
       );
@@ -440,10 +401,6 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
   });
 
   it("keeps a started raster through scroll-driven region moves and follows the latest target", async () => {
-    // Region mode at these geometry inputs (whole-page buffer over the
-    // pixel budget, so only viewport strips rasterize): region moves with
-    // every scroll frame — the churn that killed every generation inside
-    // its settle window during rapid scroll (issue tuxbooks-x27.2).
     const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
     const onPageRendered = vi.fn();
     const regionAt = (top: number) => ({ left: 0, top, width: 6000, height: 600 });
@@ -454,7 +411,6 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
     );
     await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
 
-    // Scroll-driven region moves while the raster runs — one per frame.
     view.rerender(
       <PdfPageCanvas
         {...props(doc, { width: 6000, height: 6000, region: regionAt(256), onPageRendered })}
@@ -465,12 +421,8 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
         {...props(doc, { width: 6000, height: 6000, region: regionAt(768), onPageRendered })}
       />,
     );
-    // The started raster survived every move: the release below is what
-    // lets it blit — a cancellation here would discard it.
     expect(doc.cancelledPages).toEqual([]);
 
-    // The commitment follows the latest region target with one more pass
-    // instead of staying on the stale crop.
     doc.releaseRender(1);
     await waitFor(() => expect(onPageRendered).toHaveBeenCalledWith(1));
     await waitFor(() => expect(doc.renderOptions.length).toBeGreaterThan(1));

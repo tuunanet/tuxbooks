@@ -13,15 +13,13 @@ import { emitBridgeEvent, mockInvoke } from "./mocks/bridge";
 import { fireResizeOn, stubElementRect } from "./mocks/resizeObserver";
 
 describe("PERF-15: rendered library cards are a bounded window", () => {
-  // Real timers: the virtualizer's notifications are synchronous, but the
-  // initial fetch settles across microtasks/turns whose timing varies with
-  // worker load — fake timers would freeze waitFor's polling.
+  // Real timers: fake timers would freeze waitFor's polling while the initial
+  // fetch settles across microtasks under variable worker load.
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("keeps the DOM card count flat with 2,000 books in the library", async () => {
-    // Fixed geometry: 1200×800 viewport, rect-backed measurements.
     stubElementRect(1200, 800);
     const books = Array.from({ length: 2000 }, (_, index) =>
       makeBook({ id: index + 1, title: `Book ${index + 1}` }),
@@ -42,23 +40,17 @@ describe("PERF-15: rendered library cards are a bounded window", () => {
     );
     const gridEl = await screen.findByTestId("book-grid");
 
-    // Give the scroller the offset geometry tanstack reads (jsdom has no
-    // layout), then fire its ResizeObserver entry — the rect measurement
-    // only happens inside the observer, and only the scroller's observers
-    // (container width + virtualizer rect) must see it, never the per-row
-    // measurers.
+    // jsdom has no layout: give the scroller the offset geometry tanstack
+    // reads, then fire only the scroller's observers, never the per-row ones.
     Object.defineProperty(gridEl, "offsetWidth", { value: 1200, configurable: true });
     Object.defineProperty(gridEl, "offsetHeight", { value: 800, configurable: true });
     act(() => fireResizeOn(gridEl, 1200, 800));
 
-    // A 1200×800 viewport at ~160px columns fits 6 columns; the window is
-    // the visible rows plus overscan — an order of magnitude below the
-    // library size, and constant as the library grows.
+    // Six columns at 1200×800; the window stays constant as the library grows.
     await waitFor(() => expect(screen.getAllByTestId("book-card").length).toBeGreaterThan(0));
     const cards = screen.getAllByTestId("book-card");
     expect(cards.length).toBeLessThanOrEqual(120);
 
-    // The library is 2000 books; the far end must not be in the DOM.
     expect(screen.queryByText("Book 1999")).not.toBeInTheDocument();
     expect(screen.getByTestId("library-stats")).toHaveTextContent("2000 books");
   });
@@ -85,11 +77,9 @@ describe("PERF-16: backend book events commit in batches", () => {
       </LibraryDataProvider>,
     );
 
-    // Drain the initial fetch (microtasks, not timers).
     await act(async () => {});
     const baseline = renderCount;
 
-    // 50 backend events inside one flush window.
     await act(() => {
       for (let index = 0; index < 50; index += 1) {
         emitBridgeEvent("library-changed", {
@@ -102,8 +92,7 @@ describe("PERF-16: backend book events commit in batches", () => {
       vi.advanceTimersByTime(EVENT_FLUSH_MS + 50);
     });
 
-    // One buffered flush → a handful of renders (schedule + commit), not
-    // one per event. Without batching this delta would be ≥ 50.
+    // One buffered flush should render a handful of times, not once per event.
     expect(renderCount - baseline).toBeLessThanOrEqual(6);
     expect(screen.getByTestId("probe")).toHaveTextContent("50");
     vi.useRealTimers();

@@ -319,10 +319,6 @@ async fn exhaustion_with_a_real_database_keeps_the_forgotten_prefix() {
     let (b2, b2_uid) = seed_book(&state, "second.epub", "two").await;
     let (b3, b3_uid) = seed_book(&state, "third.epub", "three").await;
 
-    // Before the second book's forget starts, hold the write lock, so
-    // its single attempt (retries = 0) fails busy against the held
-    // lock and aborts the run. The ready channel hands the lock over
-    // deterministically, without racing the forgets.
     let calls = Arc::new(AtomicUsize::new(0));
     let mut forget = {
         let calls = Arc::clone(&calls);
@@ -365,11 +361,7 @@ async fn exhaustion_with_a_real_database_keeps_the_forgotten_prefix() {
         is_transient_contention(&err),
         "contention surfaces as the transient error: {err}"
     );
-    // SQLite returns busy immediately when a deferred transaction
-    // upgrades to a write lock another writer holds, so the bound here
-    // is generous for CI load, not for lock waits. The waiting the run
-    // does to survive contention lives in the backoff, which the
-    // surviving-contention tests cover.
+    // Busy returns immediately on a deferred-to-write upgrade, so the bound covers CI load only.
     assert!(
         elapsed < Duration::from_secs(30),
         "bounded, not a hang: {elapsed:?}"
@@ -380,18 +372,13 @@ async fn exhaustion_with_a_real_database_keeps_the_forgotten_prefix() {
         "the run stops at the failing book"
     );
 
-    // What landed before the failure stays forgotten and reloadable;
-    // the survivors are untouched.
     let open_trash_uids: Vec<String> =
         sqlx::query_scalar("SELECT book_uid FROM book_trash WHERE restored_at IS NULL ORDER BY id")
             .fetch_all(&state.db)
             .await
             .unwrap();
     assert_eq!(open_trash_uids, vec![b1_uid], "the prefix stayed forgotten");
-    // No uid in the message: a failure message is a log write, and
-    // CodeQL flags a uid reaching one (cleartext-logging). The flags are
-    // in seed order, so the printed vector still says which survivor
-    // lost its record.
+    // No uid in the message: CodeQL flags a uid reaching a log write; flags are in seed order.
     let mut kept = Vec::new();
     for uid in [b2_uid.as_str(), b3_uid.as_str()] {
         let survivors: Option<(i64,)> =

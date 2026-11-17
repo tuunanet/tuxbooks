@@ -27,15 +27,9 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../tests/fixtures/books/{name}"))
 }
 
-// ---------------------------------------------------------------------------
-// R-1: EPUB quotas
-// ---------------------------------------------------------------------------
-
 #[test]
 fn compressed_member_over_the_cap_fails_the_parse_path() {
-    // Deferred from #83 (Task 1 minor): no test tripped
-    // max_compressed_member_bytes on a real parse path. The cover member is
-    // incompressible noise, so its compressed size alone trips the cap.
+    // Incompressible cover noise, so compressed size alone trips the cap.
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("incompressible.epub");
     hostile_epub::incompressible_cover(&path);
@@ -98,9 +92,7 @@ fn malformed_zip_shapes_fail_typed() {
 
 #[test]
 fn entity_expansion_opf_is_inert_and_bounded() {
-    // Billion-laughs style OPF: the XML reader must not expand the entity
-    // chain — the outcome is a typed failure (the hostile title never
-    // materializes) or an inert literal, never exponential expansion.
+    // Billion-laughs OPF: the entity chain must not expand — typed failure or inert literal.
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("entity.epub");
     hostile_epub::entity_bomb(&path);
@@ -134,10 +126,6 @@ fn malformed_fonts_and_covers_travel_inert() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// R-2 / P-1: PDF quotas and worker-boundary parsing
-// ---------------------------------------------------------------------------
-
 #[test]
 fn malformed_pdf_xref_shapes_fail_typed() {
     let tmp = tempfile::tempdir().unwrap();
@@ -161,13 +149,8 @@ fn malformed_pdf_xref_shapes_fail_typed() {
 
 #[test]
 fn pdf_decompression_bomb_is_contained_by_the_worker() {
-    // Trip-level for this class: lopdf answers the ~19 MB to 4095 MiB
-    // xref-stream inflation with the typed limit from the limits table
-    // (wired as `max_decompressed_size`), well inside the deadline, and the
-    // sidecar keeps serving afterwards. The worker's RLIMIT_AS stays the
-    // containment backstop for inflation lopdf does not bound (content
-    // streams decoded by PDFium, for example); #88 fuzzing still hunts
-    // those residual classes, per docs/TESTING.md.
+    // lopdf bounds this inflation with the typed limit; RLIMIT_AS stays the backstop
+    // for classes it does not bound (e.g. content streams decoded by PDFium).
     let client = WorkerClient::locate().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("bomb.pdf");
@@ -192,7 +175,6 @@ fn pdf_decompression_bomb_is_contained_by_the_worker() {
         "containment must be prompt, took {:?}",
         started.elapsed()
     );
-    // The sidecar survived: a benign parse still goes through.
     let good = client
         .pdf_parse(&fixture("minimal.pdf"), &ResourceLimits::DEFAULTS)
         .unwrap();
@@ -201,10 +183,7 @@ fn pdf_decompression_bomb_is_contained_by_the_worker() {
 
 #[test]
 fn stream_inflation_over_the_decompression_cap_fails_typed() {
-    // R-1/R-2 trip-level bomb coverage: a 64 MiB xref-stream inflation
-    // against a 1 MiB cap must fail as the typed limit error from the
-    // limits table, not as a structural parse error and not only through
-    // worker containment.
+    // A 64 MiB inflation against a 1 MiB cap must fail as the typed limit, not a parse error.
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("bomb-small.pdf");
     std::fs::write(&path, hostile_pdf::inflation_bomb_at(64)).unwrap();
@@ -220,8 +199,7 @@ fn stream_inflation_over_the_decompression_cap_fails_typed() {
 
 #[test]
 fn cyclic_page_tree_walk_is_bounded() {
-    // A Pages node whose Kids array references itself: the node budget must
-    // trip instead of looping forever.
+    // A Pages node whose Kids lists itself must trip the node budget, never loop.
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("cyclic.pdf");
     std::fs::write(&path, hostile_pdf::cyclic_page_tree()).unwrap();
@@ -253,10 +231,7 @@ fn hostile_huge_page_cover_render_stays_bounded() {
             "a 100000x100000 page must rasterize into the fixed cover budget, got {} bytes",
             png.len()
         ),
-        // Ok(None) is a sanctioned outcome: the cover importer treats a
-        // failed render as soft (an existing cover is kept), so a hostile
-        // page may yield no cover at all. It may never exceed the budget
-        // or take the worker down.
+        // Ok(None) is sanctioned: a hostile page may yield no cover, but never bust the budget.
         Ok(None) => {}
         Err(err) => assert!(
             matches!(
@@ -266,14 +241,9 @@ fn hostile_huge_page_cover_render_stays_bounded() {
             "a hostile render must fail typed, got: {err:?}"
         ),
     }
-    // The worker recovered: a benign cover render still succeeds.
     let benign = client.pdf_cover(&fixture("minimal.pdf"), &dirs, &ResourceLimits::DEFAULTS);
     assert!(benign.is_ok(), "worker must recover: {benign:?}");
 }
-
-// ---------------------------------------------------------------------------
-// W boundary subset (with #81): hostile input through the real worker
-// ---------------------------------------------------------------------------
 
 #[test]
 fn hostile_epub_scripted_book_opens_inert_through_the_worker_and_the_worker_recovers() {
@@ -282,9 +252,7 @@ fn hostile_epub_scripted_book_opens_inert_through_the_worker_and_the_worker_reco
     let path = tmp.path().join("scripted.epub");
     hostile_epub::scripted_manifest_item(&path);
 
-    // E-1 fences scripts at the engine seam (sanitizer + frame CSP), so a
-    // book shipping script resources opens through the worker, rendered as
-    // if scripting were disabled, instead of tripping a sidecar gate.
+    // E-1 fences scripts at the engine seam, so this opens inert rather than tripping a sidecar gate.
     let session = client
         .epub_session(&path, &ResourceLimits::DEFAULTS)
         .unwrap();
@@ -292,7 +260,6 @@ fn hostile_epub_scripted_book_opens_inert_through_the_worker_and_the_worker_reco
         session.manifest_json.contains("chapter1.xhtml"),
         "session manifest must list the spine: {session:?}"
     );
-    // W-9: the worker is reusable after hostile input.
     let good = client
         .epub_parse(&fixture("minimal.epub"), &ResourceLimits::DEFAULTS)
         .unwrap();

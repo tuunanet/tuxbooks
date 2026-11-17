@@ -251,12 +251,10 @@ export function ReadingHistoryView() {
   const requestRef = useRef(0);
   const queryRef = useRef("");
 
-  // Set membership: row selection checks run per rendered row, and an
-  // O(n) `includes` per row made every selection change quadratic.
+  // Set membership keeps per-row selection checks O(n), not O(n²).
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
-  // PERF-18: the DOM holds the visible window plus overscan, never one
-  // node per history book.
+  // The DOM holds the visible window plus overscan, never one node per book.
   const { attachScroller, virtualizer, virtualRows, unvirtualized, fallbackRowCount } =
     useHistoryVirtualizer(books?.length ?? 0, (index) => `history-${books?.[index]?.id ?? index}`);
 
@@ -266,8 +264,6 @@ export function ReadingHistoryView() {
       const found = await listReadingHistory(search);
       if (request === requestRef.current) {
         setBooks(found);
-        // Set membership keeps this O(n); `found.some` made it O(n²) and
-        // froze large histories on every reload.
         const foundIds = new Set(found.map((book) => book.id));
         setSelected((current) => current.filter((id) => foundIds.has(id)));
         setError(null);
@@ -294,12 +290,8 @@ export function ReadingHistoryView() {
     return () => window.clearTimeout(timer);
   }, [query, load, loadTrash]);
 
-  // A book leaving the library arrives here; a relink or a re-import makes it
-  // leave this view. Keep the list and the trash live without polling. Bulk
-  // Forget emits one event per book, so coalesce the reloads into at most
-  // one per flush window (PERF-16 buffers the same storm inside
-  // useLibraryData); 10,000 uncoalesced reload pairs would queue behind the
-  // sidecar's write loop and stall it.
+  // Bulk Forget emits one event per book: coalesce reloads per flush window so
+  // a 10,000-book forget cannot stall the sidecar's write loop.
   useEffect(() => {
     let disposed = false;
     let reloadTimer: number | null = null;
@@ -380,9 +372,7 @@ export function ReadingHistoryView() {
       await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
     } catch (err) {
       setError(toMessage(err));
-      // A chunked forget leaves earlier chunks forgotten; reload so the
-      // list, the pruned selection, and the trash show what actually
-      // happened instead of waiting for another event.
+      // A chunked forget leaves earlier chunks forgotten; reload actual state.
       await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
     } finally {
       setBusyId(null);
@@ -520,8 +510,7 @@ export function ReadingHistoryView() {
           className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
         >
           {unvirtualized ? (
-            // No geometry yet (jsdom tests, SSR): a bounded static slice,
-            // never the shipped rendering.
+            // No geometry yet (jsdom tests, SSR): bounded static slice, not the real render.
             <div className="flex flex-col gap-2">
               {books.slice(0, fallbackRowCount).map((book) => (
                 <Fragment key={book.id}>{renderHistoryRow(book)}</Fragment>

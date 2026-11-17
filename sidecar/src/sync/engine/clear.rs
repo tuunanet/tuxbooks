@@ -46,9 +46,8 @@ impl super::SyncService {
                     .is_some_and(|root| store::cover_blob_exists(root, name))),
                 None => Ok(false),
             },
-            // The file shrank (or the book left the library) and a re-import
-            // published a version the cap allows: the winning hash matches a
-            // binding under the cap, or no binding remains (ADR 0018 D2).
+            // The file shrank or the book left: cleared when the winning hash
+            // matches a binding under the cap, or no binding remains (ADR 0018 D2).
             Some(SyncIssueKind::BookBlobOversize) => match issue.key_after("book-blob-oversize:") {
                 Some(uid) => {
                     match crate::sync::file_version::winning(&self.inner.pool, uid).await? {
@@ -74,10 +73,8 @@ impl super::SyncService {
                 },
                 None => Ok(false),
             },
-            // A hash row clears only when the whole book is hashed. `pending`
-            // is the claimed state during an attempt, and `failed` is the
-            // result; closing on either would drop the issue mid-retry and
-            // reopen it with a new id on the next failure.
+            // Only a fully hashed book clears: closing on `pending` or `failed`
+            // would drop the row mid-retry and reopen it with a new id.
             Some(SyncIssueKind::HashFailed) => match issue.key_after("hash-failed:") {
                 Some(rest) => match rest.parse::<i64>() {
                     Ok(book_id) => match self.book_hash_state(book_id).await? {
@@ -98,20 +95,12 @@ impl super::SyncService {
                 Some(uid) => Ok(!self.book_record_exists(uid).await?),
                 None => Ok(false),
             },
-            // The row is the wait for a winning blob (ADR 0018 D2): it ends
-            // when the blob arrives intact or the pointer moves on — no
-            // unsettled copy is left for adoption to run for, so no later
-            // pass would ever close it.
             Some(SyncIssueKind::BookFileAdoptFailed) => match issue.key_after("book-file-adopt:") {
                 Some(uid) => self.adopt_wait_cleared(uid, root.as_deref()).await,
                 None => Ok(false),
             },
-            // Conflicts belong to review; they land here as an unknown kind,
-            // like any string this build does not know. The listed kinds are
-            // the ones with no automatic condition: a later pass resolves
-            // `sync_failed` by key, and the rest are informational. Exhaustive
-            // over the enum on purpose: a new kind must say whether its
-            // condition can clear.
+            // Conflicts belong to review; the rest have no automatic condition.
+            // Exhaustive over the enum: a new kind must say whether it can clear.
             Some(
                 SyncIssueKind::SyncFailed
                 | SyncIssueKind::InvalidDirtyKind
@@ -382,7 +371,6 @@ mod tests {
         let (service, pool) = folder_service(tmp.path()).await;
         let root = service.sync_root().unwrap();
 
-        // The cover-blob arm closes only when the blob is really in the folder.
         let cover = "0123456789abcdef.png";
         let blob = root.join("blobs/covers").join(cover);
         std::fs::create_dir_all(blob.parent().unwrap()).unwrap();
@@ -390,10 +378,8 @@ mod tests {
         let file_name = stage_cover_case(&root, &pool).await;
         let cover_missing_key = format!("cover-missing:{cover}");
 
-        // Keys exactly as the record sites build them. Every arm answers
-        // true here on a fresh database; a prefix literal that drifts from
-        // the key its writer builds stops matching, the arm takes its
-        // "not cleared" skip, and this goes red.
+        // Keys exactly as the record sites build them; a drifted prefix literal
+        // takes the "not cleared" skip and this goes red.
         let cases: [(SyncIssueKind, String, Option<&str>); 11] = [
             (
                 SyncIssueKind::DuplicateBook,
@@ -468,8 +454,6 @@ mod tests {
             );
         }
 
-        // The other half of the policy, through the same path: a prefix the
-        // key does not carry leaves the row open instead of guessing.
         let skipped = service
             .issue_cleared(SyncIssueRef {
                 kind: Some(SyncIssueKind::IdentityFailed),
@@ -480,9 +464,7 @@ mod tests {
             .unwrap();
         assert!(!skipped, "a non-matching prefix must not clear the row");
 
-        // The kind decides before any arm reads the key: a stored string the
-        // build cannot parse never routes to a clearing arm, even when the
-        // key would clear there (a book with no bindings reads as cleared).
+        // An unparseable kind never routes to a clearing arm.
         for unknown in ["conflict", "a_kind_from_another_build"] {
             let cleared = service
                 .issue_cleared(SyncIssueRef {

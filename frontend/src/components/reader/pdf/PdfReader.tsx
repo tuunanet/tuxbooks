@@ -304,8 +304,6 @@ function resolveSettledSelection(
   if (rects.length === 0) {
     return { kind: "cleared" };
   }
-  // Re-selecting highlighted text addresses that highlight (largest
-  // overlap) instead of stacking a new one on top.
   const targeted = highlightForSelection(
     input.highlightsByPage.get(found.page) ?? [],
     found.page,
@@ -434,43 +432,21 @@ export function PdfReader({
     openMs,
     openStartedAt,
   } = usePdfDocument(book.id, onDocumentLoad);
-  // First-paint gate for below-first-paint engine work (the geometry sweep
-  // here, the outline request below): it flips once the first canvas blits,
-  // so background measurement can never queue ahead of page 1 on the worker
-  // (§ first-page priority). The open-timeline telemetry keeps its own
-  // timestamps further down.
+  // Below-first-paint work gates on this: measurement and the outline request must never queue ahead of page 1.
   const [firstPainted, setFirstPainted] = useState(false);
   const { sizes, measurePages, isMeasured } = usePdfGeometry(pdfDocument, pageCount, firstPainted);
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
-  // The initial destination is captured when the reader mounts: the shell
-  // clears the app-state target as soon as the annotation list resolves.
+  // Captured at mount: the shell clears the app-state target once annotations resolve.
   const initialJumpRef = useRef(initialJump);
 
-  // Theme treatment (issue #67): the dark preset is Smart Dark — pages
-  // rasterize with worker-side object-aware recoloring (no CSS filter);
-  // Invert keeps the full-page negative as a filter; Paper tints; the rest
-  // render as-is. The smart palette rides the render requests, and the
-  // color-mode variant keys the bitmap cache: switching modes must
-  // invalidate rendered canvases and cached bitmaps (a mode change is a
-  // pixel change, not a zoom change). The invalidation itself runs after
-  // the render-bookkeeping state is declared, in the established
-  // render-phase reset pattern.
   const treatment = pdfThemeTreatment(effectiveTheme);
   const renderVariant = treatment.smart ? "smart" : "original";
 
   const [zoom, setZoom] = useState<ZoomState>(DEFAULT_ZOOM_STATE);
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set());
   const [failedPages, setFailedPages] = useState<ReadonlySet<number>>(() => new Set());
-  // Presentation preloads that landed in the bitmap cache. Diagnostics only:
-  // the count re-renders the reader so `data-pdf-bitmap-cache` (and the
-  // preload attribute) reflect the off-viewport rasters, which otherwise
-  // mutate the cache without a state change.
   const [preloadCount, setPreloadCount] = useState(0);
-  // Pages holding a previous-scale bitmap kept on screen through a zoom
-  // commit. Scale-and-swap (PdfPageCanvas) paints them transformed while the
-  // pages admitted to the render budget rasterize; a completed render clears
-  // its page from this set. Reset with the document, the color variant, and
-  // a presentation flip, never on an ordinary zoom.
+  // Scale-and-swap pages kept for display only; reset on document, variant, or presentation flip, not on zoom.
   const [stalePages, setStalePages] = useState<ReadonlySet<number>>(() => new Set());
   const renderedPagesRef = useRef(renderedPages);
   useEffect(() => {
@@ -482,14 +458,6 @@ export function PdfReader({
   const layoutReady = status === "ready" && sizes !== null;
   const dpr = window.devicePixelRatio || 1;
 
-  // Layout scale from the zoom state (§ issue #65): fit modes recompute
-  // from the measured content area and viewport; presentation mode fits the
-  // whole page being read inside the area (both axes) so mixed-size
-  // documents rescale per page and any page shape stays fully visible.
-  // Document-wide fit uses the largest page, not page 1, matching Papers'
-  // pps_document_get_max_page_size, so a mixed document's widest or tallest
-  // page sets the scale. The request object is memoized — it is the scale
-  // hook's effect dependency.
   const referencePage = useMemo(() => (sizes ? documentMaxPageSize(sizes) : null), [sizes]);
   const presentationPage = presentationMode && sizes ? (sizes[currentPage - 1] ?? null) : null;
   const scaleRequest = useMemo(
@@ -508,21 +476,11 @@ export function PdfReader({
     viewportHeight,
   } = usePdfScale(scaleRequest, scrollContainerRef);
 
-  // Presentation preload request: the zoom state a neighbour's own fit scale
-  // is derived from. Memoized without the per-page override — the preload
-  // fills in each neighbour's page size itself.
   const preloadRequest = useMemo<PdfPreloadRequest>(
     () => ({ mode: zoom.mode, level: zoom.level, reference: referencePage }),
     [zoom.mode, zoom.level, referencePage],
   );
 
-  // PERF-11 diagnostics (docs/PERFORMANCE.md): the reader publishes one
-  // deterministic attribute snapshotting the geometry that drives every
-  // raster budget — device pixel ratio, content width (the fit-width
-  // input), viewport height, and the layout scale. It is refreshed when
-  // the fit scale settles or changes (fit measurement lands an
-  // effect-tick after mount) and is the baseline signal the 4K
-  // investigation records; E2E may assert its shape, never a timing.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const contentAreaElementRef = useRef<HTMLDivElement | null>(null);
   const contentAreaRef = useCallback(
@@ -542,22 +500,11 @@ export function PdfReader({
       `dpr:${dpr};w:${area?.clientWidth ?? 0};h:${window.innerHeight};scale:${Math.round(scale * 100) / 100}`,
     );
   }, [scale]);
-  // Startup diagnostic: the runtime's UA string lands in the renderer
-  // console for environment identification.
   useEffect(() => {
     console.info(`[pdf] webview: ${navigator.userAgent}`);
   }, []);
 
-  // Initialization sequence (§ lifecycle): DOCUMENT_READY → LAYOUT_READY →
-  // POSITION_RESTORED → INTERACTIVE. The document surface renders only once
-  // the saved position has been applied, so a reader never flashes page 1
-  // before jumping to the restored location.
   const [restored, setRestored] = useState(false);
-  // Open-timeline bookkeeping (docs/PERFORMANCE.md PDF-open telemetry): the
-  // hook records the open anchor in its commit effect; the first rendered
-  // page is "first useful page"; the interactive timestamp derives from the
-  // restore callback below. All measurements happen in event callbacks or
-  // pure derivations — never during render or in effects.
   const [firstPaintMs, setFirstPaintMs] = useState<number | null>(null);
   const [restoredAtMs, setRestoredAtMs] = useState<number | null>(null);
   const [firstPaintedPage, setFirstPaintedPage] = useState<number | null>(null);
@@ -584,14 +531,6 @@ export function PdfReader({
   });
   const interactive = layoutReady && restored;
 
-  // Outline resolution is engine-side (the document is already parsed);
-  // failures degrade to an empty outline, never a reader error. The ref
-  // indirection keeps the effect on the document alone, and the cancelled
-  // flag stops a superseded load from reporting. Outline work is explicitly
-  // below first paint (§ first-page priority): the request is sent only
-  // after the first page has rendered, so it can never occupy the PDFium
-  // worker ahead of page 1. The ref guard keeps the one-shot behavior while
-  // `hasFirstPaint` gates the effect.
   const onOutlineLoadRef = useRef(onOutlineLoad);
   useEffect(() => {
     onOutlineLoadRef.current = onOutlineLoad;
@@ -615,9 +554,6 @@ export function PdfReader({
     };
   }, [pdfDocument, hasFirstPaint]);
 
-  // In-book search: extracts page text through the engine seam and streams
-  // matches up to the shell. Consumed by the shell adapter below; a running
-  // search is cancelled by unmount (book switch).
   const searchController = usePdfSearch({
     document: pdfDocument,
     bookId: book.id,
@@ -625,10 +561,6 @@ export function PdfReader({
     onDone: onSearchDone ?? (() => {}),
   });
 
-  // Persisted highlights grouped by page, kept reachable for the selection
-  // handler through a ref: the handler must resolve highlight overlap
-  // against the live list without re-registering its listeners (which
-  // would drop a pending selection mid-creation).
   const highlightsByPage = useMemo(() => {
     const byPage = new Map<number, Annotation[]>();
     for (const highlight of highlights) {
@@ -644,13 +576,6 @@ export function PdfReader({
     highlightsByPageRef.current = highlightsByPage;
   });
 
-  // Text selections on the text layers become highlight candidates. Page,
-  // text, and normalized rects are all captured as soon as the selection
-  // settles — a click on the toolbar's color swatch collapses the native
-  // selection, so creation must not depend on it. Rects are normalized to
-  // page space, which keeps them valid across later scroll and zoom. A
-  // collapsed pointer (plain click) instead resolves the highlight under
-  // the pointer, so the toolbar can recolor or remove an existing one.
   const pendingSelectionRef = useRef<{
     page: number;
     text: string;
@@ -663,17 +588,13 @@ export function PdfReader({
   useEffect(() => {
     if (!pdfDocument) return;
     const readSelection = (event: Event) => {
-      // Toolbar interactions must not clear the candidate they are about to
-      // consume: the click's pointerdown collapses the native selection
-      // before the button's click handler runs.
+      // Toolbar pointerdown collapses the native selection before its click handler runs.
       if (
         event.target instanceof Element &&
         event.target.closest("[data-testid=selection-toolbar]")
       ) {
         return;
       }
-      // The event's target and pointer position survive the deferral; the
-      // selection itself must be read after it settles.
       const clickTarget = event.target instanceof Element ? event.target : null;
       const pointer = event as Partial<PointerEvent>;
       const clickX = typeof pointer.clientX === "number" ? pointer.clientX : 0;
@@ -708,18 +629,11 @@ export function PdfReader({
     };
   }, [pdfDocument]);
 
-  // The shell's selection toolbar drives highlight creation through this
-  // controller; the reader owns the selection → normalized rects translation.
   const onCreateHighlightRef = useRef(onCreateHighlight);
   useEffect(() => {
     onCreateHighlightRef.current = onCreateHighlight;
   });
 
-  // The shell adapter: one object covering jumps (pages/outlines/thumbnail
-  // navigation all land in the same position model), search, and highlight
-  // creation. Registered only while a document is loaded, so a switched
-  // book can never be driven through a stale handle. `goToPage` closes over
-  // the live page count through a ref, keeping the adapter stable.
   const goToPageRef = useRef<(page: number) => void>(() => {});
   useEffect(() => {
     if (!adapterRef) return;
@@ -764,46 +678,16 @@ export function PdfReader({
     () => (sizes ? layoutSlots(displayedSizes(sizes, scale)) : []),
     [sizes, scale],
   );
-  // Latest layout for the imperative wheel-commit scroll math, which runs in
-  // a layout effect and must not re-create the wheel listener every zoom.
   const slotsRef = useRef(slots);
   useEffect(() => {
     slotsRef.current = slots;
   });
 
-  // Presentation mode is a single-page surface: only the current page's slot
-  // is laid out, so no neighbour can peek in from the scroll container. The
-  // document view centres that one page in the viewport. Outside
-  // presentation the full continuous document is used.
   const documentSlots = useMemo(
     () => (presentationMode ? slots.filter((slot) => slot.pageNumber === currentPage) : slots),
     [presentationMode, slots, currentPage],
   );
 
-  // Rendering policy, modeled on the classic viewer render queues,
-  // adjusted for what the PDFium worker actually parallelizes — see
-  // MAX_CONCURRENT_RENDERS below:
-  //
-  //   1. up to MAX_CONCURRENT_RENDERS renders run at a time (started in
-  //      priority order, completed/cancelled ones free their slot);
-  //   2. the reading anchor page has absolute priority, then visible pages
-  //      (closest first);
-  //   3. exactly ONE prerender page beyond the viewport is attempted, and
-  //      only while the concurrency budget has room to spare;
-  //   4. a superseded in-flight render is simply unmounted (cancelled).
-  //
-  // Completed canvases stay mounted while their page remains inside the
-  // virtualization window (anchor ∪ visible ∪ preload), bounded first by
-  // the byte budget (MAX_ACTIVE_CANVAS_BYTES — at 4K only the closest few
-  // page-sized buffers fit) and then by the MAX_ACTIVE_CANVASES count
-  // fallback; on eviction the pixels move into the per-document bitmap
-  // cache, so re-entry blits instead of re-rendering. Distant pages keep
-  // only their geometry slots. Between the window and "distant" sits the
-  // retention ring (below): rendered pages within three of the visible
-  // range stay mounted even once the window has moved on.
-  //
-  // One byte estimator feeds both the window and the ring: a slot's capped
-  // buffer (CSS size × effective ratio² × 4, Phase 1's policy).
   const bufferBytes = useMemo(() => {
     const slotsByPage = new Map(documentSlots.map((slot) => [slot.pageNumber, slot]));
     return (page: number): number => {
@@ -822,34 +706,11 @@ export function PdfReader({
       .sort((a, b) => Math.abs(a - currentPage) - Math.abs(b - currentPage))
       .find((page) => !active.includes(page));
     if (preloaded !== undefined) active.push(preloaded);
-    // PERF-4: slice by each slot's capped buffer bytes before the count
-    // fallback. The anchor survives any budget (capByBytes keeps the first
-    // page).
     return capByBytes(active, bufferBytes, MAX_ACTIVE_CANVAS_BYTES).slice(0, MAX_ACTIVE_CANVASES);
   }, [currentPage, visiblePages, preloadPages, bufferBytes]);
 
-  // The render set, derived purely from the priority order and the
-  // completion/failure state: the first MAX_CONCURRENT_RENDERS unrendered
-  // pages of `renderOrder` own the render budget (bounded concurrency in
-  // flight), and completed canvases stay mounted while their page remains
-  // in-window or inside the retention ring. A zoom does not unmount the
-  // pages that held pixels: they are kept as display-only scale-and-swap
-  // (stalePages) until either the render budget admits them or they leave
-  // the window, so the visible surface is never blank through the commit.
-  // `renderPermittedPages` is exactly the budget, and PdfPageCanvas refuses
-  // to raster outside it.
   const { canvasPages, renderPermittedPages } = useMemo(() => {
-    // Retention ring (docs/research/papers-scrolling.md R3): pages that
-    // hold pixels but fell out of the render window stay mounted while
-    // they are within RETAIN_NEAR_VISIBLE_PAGES of the visible range —
-    // Papers keeps MAX_PRELOADED_PAGES 3 pages each side painted
-    // (pps-pixbuf-cache.c:105). The ring is appended after the render
-    // window and passes through the same byte/count caps, so it only ever
-    // consumes leftover budget: at 4K it shrinks to nothing instead of
-    // pushing PERF-4 over (the shrink order of
-    // pps_pixbuf_cache_get_preload_size, pps-pixbuf-cache.c:416-469).
-    // The ring only decides what stays MOUNTED — it never adds a page to
-    // `renderPermittedPages`, so it cannot start a raster.
+    // The ring only decides what stays mounted; it never adds a page to renderPermittedPages.
     const window = new Set(renderOrder);
     const retained = retentionRing(
       visiblePages,
@@ -874,13 +735,6 @@ export function PdfReader({
     return { canvasPages: [...mounted], renderPermittedPages: new Set(rendering) };
   }, [renderOrder, renderedPages, failedPages, stalePages, visiblePages, bufferBytes]);
 
-  // Per-document bitmap cache: eviction stashes finished buffers and window
-  // re-entry blits them, so scrolling back across a heavy page never
-  // re-pays its full raster. The cache participates in rendering (it is a
-  // prop of every canvas), so it is state, reset whenever the document
-  // instance changes — a switched book can never inherit the previous
-  // book's pixels. The instance itself is a deliberately mutable box; only
-  // its identity matters to React.
   const [cacheState, setCacheState] = useState<{
     document: typeof pdfDocument;
     cache: PdfBitmapCache;
@@ -890,11 +744,6 @@ export function PdfReader({
   }
   const bitmapCache = cacheState.cache;
 
-  // Render bookkeeping is per-document too: stale "rendered" marks from a
-  // previous document would let the next one bypass the concurrency budget,
-  // and stale failures would hide pages. (ReaderShell remounts the reader
-  // per book via `key`; this reset keeps the composition root honest even
-  // without it.)
   const [bookkeepingDocument, setBookkeepingDocument] = useState<typeof pdfDocument>(null);
   if (bookkeepingDocument !== pdfDocument) {
     setBookkeepingDocument(pdfDocument);
@@ -903,12 +752,6 @@ export function PdfReader({
     setStalePages(new Set());
   }
 
-  // Color-mode invalidation (issue #67): a theme switch between modes with
-  // different rendered pixels (as-is ↔ Smart Dark) is a pixel change —
-  // rendered canvases, failure marks, and the bitmap cache reset with the
-  // variant, exactly like a document switch. Filter/tint-only switches
-  // (Invert, Paper) keep variant "original": the CSS treatment applies to
-  // the same pixels live.
   const [variantState, setVariantState] = useState<{
     variant: string;
     document: typeof pdfDocument;
@@ -921,16 +764,11 @@ export function PdfReader({
     setCacheState({ document: pdfDocument, cache: new PdfBitmapCache() });
   }
 
-  // Measure pages as they approach visibility so slot estimates become real
-  // dimensions before their canvases render (lazy geometry correction).
   useEffect(() => {
     if (!layoutReady || (visiblePages.size === 0 && preloadPages.size === 0)) return;
     measurePages([...visiblePages, ...preloadPages]);
   }, [layoutReady, measurePages, visiblePages, preloadPages]);
 
-  // Presentation neighbours are measured even though only the current page is
-  // laid out: the preload needs each neighbour's real size to compute its own
-  // fit scale, and a key computed from a stale estimate would miss on arrival.
   useEffect(() => {
     if (!presentationMode || !layoutReady) return;
     const neighbours = [currentPage - 1, currentPage + 1].filter(
@@ -939,9 +777,6 @@ export function PdfReader({
     if (neighbours.length > 0) measurePages(neighbours);
   }, [presentationMode, layoutReady, currentPage, effectivePageCount, measurePages]);
 
-  // Ready the next and previous pages for presentation steppers (§ issue #65):
-  // only the current page is in the render window, so without this every step
-  // rasterizes from scratch behind a blank placeholder.
   const handlePreloaded = useCallback(() => {
     setPreloadCount((count) => count + 1);
   }, []);
@@ -963,23 +798,9 @@ export function PdfReader({
     onPreloaded: handlePreloaded,
   });
 
-  // Book mode (tuxbooks-9pr): the spread surface (PdfBookView) takes the
-  // continuous document's place while the preference is on, and
-  // presentation mode wins while active. The decision gates everything
-  // scroll-view-only below — the zoom entry points and the toolbar ‹/›
-  // step as well as the mount choice — so a control hidden behind the
-  // mode can never mutate the state the mode restores on exit. It also
-  // gates the scroll tracker (tuxbooks-9pr.11) and the re-anchor effect
-  // below, both of which must see the transition as it happens.
+  // Scroll-view-only controls and effects gate on this so a hidden control cannot mutate the state the mode restores.
   const bookMode = preferences.bookMode && !presentationMode;
 
-  // Book-mode neighbours are measured for the same reason presentation's
-  // are: the preload keys each neighbour bitmap under the spread's own
-  // fit-the-pair scale, and a key computed from a stale size estimate
-  // would miss on arrival. The members come from the same layoutSpread
-  // grouping the view paints with (spreadNeighbourPageIndexes, shared
-  // with the preload hook), so a spread's second page is measured along
-  // with its first.
   useEffect(() => {
     if (!bookMode || !layoutReady || !sizes) return;
     const pageIndex = Math.max(0, currentPage - 1);
@@ -989,10 +810,6 @@ export function PdfReader({
     if (pages.length > 0) measurePages(pages);
   }, [bookMode, layoutReady, sizes, currentPage, effectivePageCount, measurePages]);
 
-  // Ready the next and previous spreads for book-mode turns (tuxbooks-
-  // 9pr.6): the current spread is the only mounted canvas pair, so
-  // without this the first turn pays fresh rasters behind blank
-  // placeholders.
   usePdfBookPreload({
     document: pdfDocument,
     sizes,
@@ -1009,19 +826,10 @@ export function PdfReader({
     onPreloaded: handlePreloaded,
   });
 
-  // Re-anchor after layout-scale changes (zoom, fit recalculation,
-  // window resize, presentation rescale): the anchor's page + in-page
-  // fraction — kept current by the scroll tracker — is mapped onto the
-  // rescaled layout, so
-  // the user keeps reading at the exact same spot (§ zoom preserves the
-  // reading position) instead of falling back to the page's top edge.
   const activeSlotRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
   const anchorInfoRef = useRef<PdfAnchorInfo | null>(null);
 
-  // Position reporting to the shell: the page the reading anchor sits in,
-  // with its in-page fraction at the time the page was entered (a coarse
-  // page-local position is all a PDF bookmark keeps).
   const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
     onPositionChangeRef.current = onPositionChange;
@@ -1033,19 +841,8 @@ export function PdfReader({
       fraction: anchorInfoRef.current?.fraction ?? 0,
     });
   }, [currentPage]);
-  // The loop guard's memory: pages the scroll tracker has reported lately.
-  // A page change that originated from scrolling must never scroll back.
-  // Comparing against only the LAST report (the pre-2026-10-25 guard) broke
-  // under a fast scrollbar drag: the tracker reports at frame rate and
-  // stamps synchronously, while React commits `currentPage` a frame or two
-  // behind, so a stale commit missed the equality and fell into the
-  // scrollIntoView fallback, which yanked the view back toward the stale
-  // page while the held thumb kept dragging forward — the view oscillated
-  // between the two at frame rate (the flying thumb in the 2026-10-25 UAT
-  // zoom log: alternating +-20k..85k px frame deltas at constant
-  // scrollHeight). Membership in the recent set covers stale commits too;
-  // bounded so navigation to a long-past page still re-anchors, and
-  // goToPage deletes its target so an in-range jump always lands.
+  // A set of recent scroll reports, not just the last: React commits currentPage a frame
+  // or two late, so a stale commit would scrollIntoView back mid-drag and oscillate.
   const scrollReportedPagesRef = useRef<{ set: Set<number>; queue: number[] }>({
     set: new Set(),
     queue: [],
@@ -1057,12 +854,6 @@ export function PdfReader({
   const previousSlotsRef = useRef(slots);
   const mountedRef = useRef(false);
 
-  // A zoom or fit-mode change invalidates rendered canvases; the new scale
-  // re-renders the visible pages while evicted slots simply resize their
-  // reservations. Cached bitmaps are keyed by scale, so they are dropped
-  // too. The pages that held pixels before the zoom move to `stalePages`
-  // instead of vanishing: PdfPageCanvas keeps painting their previous bitmap
-  // under a transform until the new-scale raster swaps in (scale-and-swap).
   const applyZoom = useCallback(
     (next: ZoomState) => {
       setZoom(next);
@@ -1074,26 +865,11 @@ export function PdfReader({
     [bitmapCache],
   );
 
-  // § Ctrl+wheel gesture (smooth zoom): wheel events only move a transient
-  // preview — a CSS transform on the document element about the cursor —
-  // while the committed layout scale stays put. WHEEL_SETTLE_MS after the
-  // last event the preview commits: the zoom state takes the previewed
-  // scale, the cursor point is scrolled back under the cursor, and the
-  // canvases rasterize once, sharp.
   const [wheelPreview, setWheelPreview] = useState<WheelPreview | null>(null);
-  // Bumped whenever a zoom change happens outside the gesture (currently
-  // the presentation flip): a gesture started before it is stale and its
-  // settle commit must be discarded, not applied over the new state.
+  // Bumped by non-gesture zoom changes; a pre-bump gesture's settle commit must be discarded.
   const [zoomEpoch, setZoomEpoch] = useState(0);
   const wheelGestureRef = useRef<WheelGesture | null>(null);
   const wheelSettleRef = useRef<number | null>(null);
-  // Set at commit, applied by the layout effect below once React has
-  // re-laid out at the new scale (the scroll math needs the new geometry),
-  // then consumed by the re-anchor effect so the commit's own scale change
-  // skips the reading-spot re-anchor — the cursor point supersedes it. The
-  // offsets are document-local (scroll minus the document element's position
-  // in scroll content) and the policy is Papers' SCROLL_TO_CENTER: the
-  // pointer holds the same document fraction across the scale change.
   const wheelScrollFixupRef = useRef<{
     targetScale: number;
     oldValueX: number;
@@ -1108,8 +884,6 @@ export function PdfReader({
   } | null>(null);
   const committedScaleRef = useRef(scale);
   const zoomEpochRef = useRef(zoomEpoch);
-  // Opt-in zoom telemetry: which action last changed the zoom, and the wheel
-  // cursor it anchored to (read by usePdfZoomTelemetry).
   const zoomTriggerRef = useRef("");
   const zoomPointerRef = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
@@ -1126,17 +900,12 @@ export function PdfReader({
     }
   }, []);
 
-  // A non-wheel zoom action owns the next move: drop the preview (the same
-  // render applies the action's scale, so the page never snaps back).
   const cancelWheelGesture = useCallback(() => {
     clearWheelSettle();
     wheelGestureRef.current = null;
     setWheelPreview(null);
   }, [clearWheelSettle]);
 
-  // Commit the previewed scale. Non-wheel actions running first have
-  // already cancelled the gesture; a gesture overtaken by a zoom-epoch bump
-  // (presentation flip) is discarded instead of committing over it.
   const commitWheelGesture = useCallback(() => {
     const gesture = wheelGestureRef.current;
     if (!gesture) return;
@@ -1147,16 +916,12 @@ export function PdfReader({
     const committed = committedScaleRef.current;
     if (gesture.scale === committed) return;
     const container = scrollContainerRef?.current ?? null;
-    // No scroll container (standalone render): there is no scroll position to
-    // hold, so commit the scale without a focal-anchor fixup.
     if (container) {
       const containerRect = container.getBoundingClientRect();
       const oldSlots = slotsRef.current;
       const oldDocWidth = oldSlots.reduce((max, slot) => Math.max(max, slot.width), 0);
       const viewportWidth = container.clientWidth;
       const viewportHeight = container.clientHeight;
-      // Capture the old adjustment in document-local coordinates; the layout
-      // effect re-derives the new upper once React has laid out the new scale.
       wheelScrollFixupRef.current = {
         targetScale: gesture.scale,
         oldValueX: container.scrollLeft - gesture.docLeft,
@@ -1177,10 +942,6 @@ export function PdfReader({
 
   const reanchorByFraction = useCallback(
     (oldScale: number) => {
-      // The layout in effect before this scale change; it is the "old" content
-      // for the keep-position fallback below. Updated here (not in the effect
-      // that calls this) so the effect never depends on `slots` and so a
-      // measurement-only slots change never re-anchors the viewport.
       const previousSlots = previousSlotsRef.current;
       previousSlotsRef.current = slots;
       const container = scrollContainerRef?.current ?? null;
@@ -1195,10 +956,6 @@ export function PdfReader({
       const scrollLeft = container.scrollLeft;
       const documentTop = documentRect.top - containerRect.top + scrollTop;
       const documentLeft = documentRect.left - containerRect.left + scrollLeft;
-      // The content scales with the zoom, so the pre-change extent is exact
-      // from the ratio even when previousSlots has not caught up (a fresh
-      // measurement can leave it empty at mount). A zero upper would collapse
-      // the kept offset to the top and lose a restored page.
       const ratio = oldScale > 0 && scale > 0 ? oldScale / scale : 1;
       const documentWidth = slots.reduce((max, slot) => Math.max(max, slot.width), 0);
       const contentHeight = documentHeight(slots);
@@ -1206,8 +963,6 @@ export function PdfReader({
         previousSlots.length > 0
           ? previousSlots.reduce((max, slot) => Math.max(max, slot.width), 0)
           : documentWidth * ratio;
-      // Page gaps do not scale, so derive the old height from the scaled page
-      // area plus the fixed gaps rather than scaling the whole content.
       const totalGap = PAGE_GAP_PX * Math.max(0, slots.length - 1);
       const previousContentHeight =
         previousSlots.length > 0
@@ -1225,9 +980,6 @@ export function PdfReader({
         upper: previousContentHeight,
         pageSize: viewportHeight,
       };
-      // Aligned with Papers' per-input rules (docs/PDF-VIEW.md): a keyboard
-      // step or a toolbar button holds the viewport center, while a typed
-      // value, Ctrl+0 and a fit change keep the relative scroll fraction.
       const centerViewport = zoomTriggerRef.current === "keyboard-step";
       const newValueX = centerViewport
         ? centerValue(adjustmentX, documentWidth, viewportWidth, viewportWidth / 2)
@@ -1245,11 +997,6 @@ export function PdfReader({
     [scrollContainerRef, slots, scale],
   );
 
-  // Mode-exit landing geometry, shared by the two exits below: the current
-  // page's slot top edge at the viewport top — the landing a navigation page
-  // change takes — stamped with the policy that named it. The layout in
-  // effect now is the one a later re-anchor compares against, so the
-  // bookkeeping stays current through this path too.
   const restorePageAtTop = useCallback(
     (policy: "presentation-exit" | "book-exit") => {
       const laidOut = slotsRef.current;
@@ -1266,42 +1013,19 @@ export function PdfReader({
         container.getBoundingClientRect().top +
         container.scrollTop;
       setScrollTop(container, documentTop + slot.top);
-      // The landing is the page's top edge, so the anchor names that page;
-      // the scroll tracker's first sample refreshes the in-page fraction
-      // from the restored offset.
       anchorInfoRef.current = { page: currentPage, fraction: 0 };
       rootRef.current?.setAttribute("data-pdf-scroll-policy", policy);
     },
     [currentPage, scrollContainerRef],
   );
 
-  // Presentation exit (docs/PDF.md, Presentation mode): the mode's single
-  // centred page leaves the scroll container at the top of a surface that no
-  // longer exists, so the fractional re-anchor would map "top" to "top" and
-  // drop the reader at page 1 (the scroll tracker then confirms that page
-  // into position). Resume on the page that was being presented instead.
-  // The re-anchor effect calls this before the scroll tracker re-enables, so
-  // the tracker's first sample reads the restored offset and reports the
-  // presented page, not page 1.
   const restorePresentedPage = useCallback(
     () => restorePageAtTop("presentation-exit"),
     [restorePageAtTop],
   );
 
-  // Book-mode exit (tuxbooks-9pr.11): while the spread owns the view the
-  // scroll container's content shrinks to fit the pair, the browser clamps
-  // scrollTop to 0, and the remounted document view restarts at the top. The
-  // keep-position re-anchor cannot recover from that (a kept fraction of the
-  // zeroed offset is page 1) and activeSlotRef was nulled by the unmount, so
-  // the landing is explicit: the slot of the page the spread settled on (turns
-  // settle on the spread's anchor page). It runs before the scroll tracker's
-  // enabled gate re-opens with the remount, so the tracker's first sample
-  // reads the restored offset instead of confirming page 1.
   const restoreBookPage = useCallback(() => restorePageAtTop("book-exit"), [restorePageAtTop]);
 
-  // Keep the latest re-anchoring and mode-exit logic reachable from
-  // the effect below without re-running it on every slots or render change
-  // (geometry corrections must never yank the viewport).
   const reanchorRef = useRef<(oldScale: number) => void>(() => {});
   const restoreRef = useRef<() => void>(() => {});
   const restoreBookRef = useRef<() => void>(() => {});
@@ -1311,20 +1035,6 @@ export function PdfReader({
     restoreBookRef.current = restoreBookPage;
   });
 
-  // The loop guard: a page change that *originated from scrolling* must not
-  // scroll back. The scroll tracker stamps every page it reports; a page
-  // change whose target was scroll-reported recently is the user's own
-  // scroll and re-anchoring is skipped (see the memory's comment above for
-  // why this is a set, not just the last report). A scale change alone
-  // (zoom, fit recalculation) re-anchors by fraction; a page change from
-  // navigation (toolbar, restore) lands on the new page's top edge.
-  // Presentation mode lays out one centred page, so there is nothing to
-  // scroll: the effect only keeps its page/scale bookkeeping current, and
-  // an exit from the mode resumes on the presented page
-  // (restorePresentedPage). Book mode carries no scroll surface either: its
-  // branch keeps the re-anchor anchor on the spread's page, and an exit
-  // resumes on that page's slot (restoreBookPage) — before the scroll
-  // tracker re-enables with the remount.
   useEffect(() => {
     const pageChanged = previousPageRef.current !== currentPage;
     const scaleChanged = previousScaleRef.current !== scale;
@@ -1336,10 +1046,6 @@ export function PdfReader({
     previousPresentationRef.current = presentationMode;
     previousBookRef.current = bookMode;
 
-    // A wheel-gesture commit pins the cursor point through its own scroll
-    // fixup, which supersedes the reading-spot anchor for exactly the
-    // render where the committed scale lands (the tracker refreshes the
-    // anchor from the adjusted scroll position right after).
     if (scaleChanged) {
       const wheelFixup = wheelScrollFixupRef.current;
       wheelScrollFixupRef.current = null;
@@ -1351,28 +1057,18 @@ export function PdfReader({
       return;
     }
     if (presentationMode) {
-      // Scroll tracking is off here, so keep the re-anchor anchor on the
-      // flipped-to page; exiting the mode then restores that page.
       if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
       return;
     }
     if (presentationExited) {
-      // The geometry lives outside this effect: see restorePresentedPage.
       restoreRef.current();
       return;
     }
     if (bookMode) {
-      // Scroll tracking is off here too, and the document surface is not
-      // mounted: keep the re-anchor anchor on the spread's page (a turn
-      // settles through position) so the exit restores the right slot, and
-      // never scrollIntoView an element that is not there.
       if (pageChanged) anchorInfoRef.current = { page: currentPage, fraction: 0 };
       return;
     }
     if (bookExited) {
-      // The geometry lives outside this effect: see restoreBookPage. It
-      // supersedes the keep-position re-anchor below — from a zeroed
-      // offset that math would keep page 1.
       restoreBookRef.current();
       return;
     }
@@ -1386,10 +1082,6 @@ export function PdfReader({
     activeSlotRef.current?.scrollIntoView({ block: "start", inline: "nearest" });
   }, [currentPage, scale, presentationMode, bookMode]);
 
-  // Viewport clipping (high zoom): sample the scroll frame and derive each
-  // laid-out page's visible region. Only canvases whose whole-page ratio
-  // would fall below device resolution consume it (PdfPageCanvas decides),
-  // so at fit width this is inert.
   const pdfViewport = usePdfViewport(
     scrollContainerRef ?? { current: null },
     documentRef,
@@ -1407,8 +1099,6 @@ export function PdfReader({
     [interactive, presentationMode, pdfViewport, documentSlots, documentWidth],
   );
 
-  // Opt-in zoom telemetry (localStorage flag or VITE_PDF_ZOOM_LOG=1); a no-op
-  // otherwise. Records the view centre and canvas state per zoom and scroll.
   usePdfZoomTelemetry({
     scrollContainerRef,
     documentRef,
@@ -1422,9 +1112,6 @@ export function PdfReader({
     pointerRef: zoomPointerRef,
   });
 
-  // Scroll-driven position reporting: the anchor rule decides the page, the
-  // position is written back to ReaderProvider so the shell (footer, keyboard
-  // stepping, pages drawer) stays consistent with what the user sees.
   const handleScrollPageChange = useCallback(
     (page: number) => {
       const memory = scrollReportedPagesRef.current;
@@ -1443,16 +1130,6 @@ export function PdfReader({
     containerRef: scrollContainerRef ?? { current: null },
     documentRef,
     slots,
-    // Presentation lays out a single centred page, so scroll position does
-    // not name the current page there; flips come from navigation only.
-    // Book mode is the same contract for the spread: it reads its page from
-    // position, so while it owns the view no scroll sample may write
-    // position back from a container whose document surface is unmounted —
-    // the browser's clamp to the fitted pair is exactly such a sample
-    // (tuxbooks-9pr.11). Dropping the gate with the mode also cancels any
-    // sample pending from before the toggle; re-opening it on exit runs the
-    // tracker's first sample in the same effect flush, after the re-anchor
-    // effect above has restored the settled page's slot.
     enabled: layoutReady && !presentationMode && !bookMode,
     onPageChange: handleScrollPageChange,
     anchorInfoRef,
@@ -1477,9 +1154,6 @@ export function PdfReader({
     });
   }, []);
 
-  // Open-timeline measurement: the first rendered page is "first useful
-  // page" (its timestamp lands here); restore time is captured in the
-  // onRestored callback above.
   const handlePageRenderedTelemetried = useCallback(
     (pageNumber: number) => {
       setFirstPainted(true);
@@ -1497,9 +1171,6 @@ export function PdfReader({
     return Math.max(restoredAtMs, firstPaintMs);
   }, [restoredAtMs, firstPaintMs]);
 
-  // Deterministic PDF-open telemetry attributes (docs/PERFORMANCE.md):
-  // state machine + compact timing string, present on every reader surface
-  // (error, loading, interactive) so a stuck open names its own stage.
   const openState = pdfOpenState({
     status,
     hasDocument: pdfDocument !== null,
@@ -1531,9 +1202,6 @@ export function PdfReader({
     console.error(`Failed to render PDF page ${pageNumber}`, renderError);
   }, []);
 
-  // § page errors: a failed page shows a retryable error in its own slot;
-  // the document itself stays usable. Clearing the failure makes the page
-  // eligible for rendering again (highest priority first).
   const retryPage = useCallback((pageNumber: number) => {
     setFailedPages((current) => {
       if (!current.has(pageNumber)) return current;
@@ -1545,20 +1213,13 @@ export function PdfReader({
 
   const goToPage = (page: number) => {
     const clamped = clampPage(page, effectivePageCount);
-    // Navigation is not scrolling: drop the target from the loop guard's
-    // memory so a jump to a recently scrolled-past page still re-anchors.
     scrollReportedPagesRef.current.set.delete(clamped);
     setPosition(pageToPosition(clamped, effectivePageCount));
   };
-  // Keep the adapter's jump on the latest page count and position mapping.
   useEffect(() => {
     goToPageRef.current = goToPage;
   });
 
-  // Manual zoom (preset stepping): the effective scale snaps onto the
-  // nearest preset first, so zooming out of a fit mode continues from where
-  // the page actually is (issue #65). A live wheel gesture flushes into the
-  // base scale — the previewed zoom, not the stale committed one.
   const zoomBySteps = useCallback(
     (steps: 1 | -1) => {
       const base = wheelGestureRef.current?.scale ?? scale;
@@ -1575,8 +1236,6 @@ export function PdfReader({
     zoomPointerRef.current = null;
     applyZoom({ mode: "custom", level: DEFAULT_ZOOM_LEVEL });
   }, [applyZoom, cancelWheelGesture]);
-  // Typed/preset zoom: clamp onto the supported range and skip a no-op apply
-  // so re-selecting the current level never clears the render set.
   const setCustomZoom = useCallback(
     (next: number) => {
       const level = clampZoom(next);
@@ -1599,13 +1258,6 @@ export function PdfReader({
     [applyZoom, cancelWheelGesture, zoom.mode, zoom.level],
   );
 
-  // Latest handlers for the keyboard/wheel registrations below (the
-  // registrations are stable; the closures track the live scale). These
-  // refs are also the one gate the zoom shortcuts pass through: while
-  // book mode holds the view they stay inert (spec → Zoom), so the
-  // shortcuts cannot mutate the scroll-view zoom invisibly under the
-  // spread. The toolbar's hidden zoom buttons route through the same
-  // refs.
   const zoomByStepsRef = useRef<(steps: 1 | -1) => void>(() => {});
   useEffect(() => {
     zoomByStepsRef.current = bookMode ? inertZoom : zoomBySteps;
@@ -1618,17 +1270,10 @@ export function PdfReader({
   useEffect(() => {
     setZoomModeRef.current = bookMode ? inertZoom : setZoomMode;
   });
-  // The wheel listener registers once per container, so it reads the
-  // live book-mode decision through a ref instead of re-registering.
   const bookModeRef = useRef(bookMode);
   useEffect(() => {
     bookModeRef.current = bookMode;
   });
-  // Keyboard zoom (§ reader keyboard, issue #65): Ctrl + +/-/0 and the fit
-  // modes on Ctrl+1/2/3, plus the historical bare +/=/- steps. The shell
-  // does not bind these, so there is no conflict with global reader
-  // shortcuts. Both +/=/- spellings are registered: the shifted `+` and
-  // the unshifted `=` share a key on most layouts.
   useShortcut("+", () => zoomByStepsRef.current(1));
   useShortcut("=", () => zoomByStepsRef.current(1));
   useShortcut("-", () => zoomByStepsRef.current(-1));
@@ -1640,20 +1285,11 @@ export function PdfReader({
   useShortcut("mod+2", () => setZoomModeRef.current("fit-width"));
   useShortcut("mod+3", () => setZoomModeRef.current("fit-auto"));
 
-  // Ctrl + mouse wheel zooms (and trackpad pinch, which Chromium reports as
-  // a ctrl-modified wheel): the scroller never zooms the page natively, so
-  // the default must be suppressed. Each event multiplies the previewed
-  // scale continuously (wheelZoomScale); the page re-renders only once the
-  // gesture settles.
   useEffect(() => {
     const container = scrollContainerRef?.current ?? null;
     if (!container) return;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
-      // Book mode is fit-the-pair only (spec → Zoom): the gesture would
-      // preview and commit a scroll-view zoom invisibly under the
-      // spread, so it stays suppressed (the default would zoom the whole
-      // window) and inert while the mode is on.
       if (bookModeRef.current) {
         event.preventDefault();
         return;
@@ -1665,10 +1301,6 @@ export function PdfReader({
       let gesture = wheelGestureRef.current;
       if (gesture && gesture.epoch !== zoomEpochRef.current) gesture = null;
       if (!gesture) {
-        // First tick of the gesture (or a stale one after a zoom-epoch
-        // bump): capture where the document element sits in scroll content,
-        // untransformed. Both layout and scroll stay put for the whole
-        // gesture, so this geometry stays valid until commit.
         const docRect = documentEl.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
         const committedSlots = slotsRef.current;
@@ -1692,12 +1324,7 @@ export function PdfReader({
         event.deltaMode,
         container.clientHeight || 1,
       );
-      // The preview scales about the cursor on an axis only while that axis can
-      // scroll at the target scale. An axis whose content fits the viewport has
-      // no scroll range, so the page stays put and the preview scales about the
-      // page center across and the page top down, which is where the committed
-      // fixup leaves it. The committed scale is the reference, because
-      // gesture.scale tracks the running preview.
+      // The preview scales about the cursor only on an axis that can scroll at the target scale.
       const containerRect = container.getBoundingClientRect();
       const ratio = committedScaleRef.current > 0 ? scale / committedScaleRef.current : 1;
       const cursorX = event.clientX - containerRect.left + container.scrollLeft - gesture.docLeft;
@@ -1722,28 +1349,15 @@ export function PdfReader({
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       container.removeEventListener("wheel", onWheel);
-      // Flush rather than discard: a reader torn down (or its scroll
-      // container swapped) mid-gesture still lands the previewed zoom.
       commitWheelGesture();
       clearWheelSettle();
     };
   }, [scrollContainerRef, commitWheelGesture, clearWheelSettle]);
 
-  // Wheel-gesture commit fixup: runs right after React re-lays out at the
-  // committed scale (before the browser paints), scrolling so the document
-  // point that sat under the cursor still sits there on each axis that can
-  // scroll. The policy is Papers' SCROLL_TO_CENTER (`pdfLayout.centerValue`),
-  // with our raw content extent as the upper. An axis whose content fits the
-  // viewport has no scroll range, so its clamp leaves the page where it is.
-  // The document element is read at its new, untransformed layout here.
   useLayoutEffect(() => {
     const fixup = wheelScrollFixupRef.current;
     const container = scrollContainerRef?.current ?? null;
     const documentEl = documentRef.current;
-    // One application: the fixup is consumed only at the render where the
-    // layout scale lands, which usePdfScale now derives in the same commit as
-    // the zoom state. Applying before then would read the old content extents
-    // and compute a no-op.
     if (!fixup || fixup.applied || !container || !documentEl) return;
     if (scale !== fixup.targetScale) return;
     const containerRect = container.getBoundingClientRect();
@@ -1771,24 +1385,12 @@ export function PdfReader({
     wheelScrollFixupRef.current = { ...fixup, applied: true };
   });
 
-  // Presentation mode is a dynamic page-fit mode (§ issue #65): entering
-  // saves the previous zoom state and switches to fit-page (the current
-  // page and its position are untouched — the scale hook derives the scale
-  // per page); leaving restores exactly what was saved. Render-phase
-  // adjustment: the prop flip is the trigger, so the zoom state adjusts in
-  // the same render pass (the React-recommended alternative to a
-  // setState-in-effect cascade). The invalidation mirrors applyZoom, but
-  // the bitmap cache is replaced wholesale (the established render-phase
-  // pattern) instead of mutated mid-render.
   const [presentationSync, setPresentationSync] = useState<{
     active: boolean;
     saved: ZoomState | null;
   }>(() => ({ active: presentationMode, saved: null }));
   if (presentationSync.active !== presentationMode) {
     const saved = presentationMode ? zoom : presentationSync.saved;
-    // A pending wheel gesture belongs to whichever mode was on screen: drop
-    // its preview and bump the epoch so the settle commit discards it
-    // instead of applying over the restored fit state.
     setWheelPreview(null);
     setZoomEpoch((epoch) => epoch + 1);
     setPresentationSync({ active: presentationMode, saved: presentationMode ? zoom : null });
@@ -1824,10 +1426,6 @@ export function PdfReader({
     return (
       <div
         data-testid="pdf-reader"
-        // Engine lifecycle as a deterministic attribute (docs/PDF.md): a
-        // stuck or failed stage names itself instead of leaving the tests to
-        // infer from a missing reader. status "ready" means the document is
-        // parsed (worker/document path); layout follows once sizes are known.
         data-pdf-engine-state={
           layoutReady ? "layout-ready" : status === "ready" ? "document-parsed" : "document-loading"
         }
@@ -1844,21 +1442,6 @@ export function PdfReader({
     );
   }
 
-  // Document controls (page navigation + zoom): docked into the shell's
-  // header host when one is provided, inline above the document otherwise
-  // (standalone renders). In presentation mode the header chrome is hidden
-  // by the shell; the document instead carries the minimal floating bar
-  // (prev/next, an editable page field, exit) so the workflow stays
-  // pointer-accessible without leaving the mode (§ issue #65).
-  // The toolbar reports the effective scale live: during a wheel gesture
-  // that is the previewed zoom, before any canvas has re-rendered.
-  // The toolbar's ‹/› step by SPREAD in book mode through the same
-  // registered adapter the keyboard uses (tuxbooks-9pr.5): a one-page
-  // step inside a two-page spread is the invisible two-press move the
-  // mode exists to fix. Until the spread surface mounts (layout still
-  // measuring, so no adapter is registered) they keep the page step the
-  // shell keyboard falls back to; scroll view and presentation behavior
-  // never change.
   const stepPageOrSpread = (delta: 1 | -1) => {
     const turn = bookMode ? (bookTurnRef?.current ?? null) : null;
     if (turn) {
@@ -1887,8 +1470,6 @@ export function PdfReader({
       onSetZoom={setCustomZoom}
       onTogglePresentation={onTogglePresentation}
       presentationActive={presentationMode}
-      // Book mode is fit-the-pair only (spec → Zoom): its zoom controls
-      // would act on scroll-view-only state, so they hide while on.
       zoomHidden={bookMode}
     />
   );

@@ -153,8 +153,6 @@ export function registerIpcHandlers(
     if (!isValidBookId(bookId)) {
       throw new SidecarError("reveal requires a book id");
     }
-    // The path is resolved here from the library database; the renderer
-    // never supplies one (issue #84 T-1).
     const books = (await sidecar.call("list_books")) as Array<{ id: number; path: string }>;
     const book = books.find((candidate) => candidate.id === bookId);
     if (!book) {
@@ -165,16 +163,13 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.storageReport, async (event) => {
     requireAppSender(event);
-    // The watched locations and catalog counts come from the sidecar; main
-    // sizes its own data roots and folds both into one report.
     const library = (await sidecar.call("get_storage_stats")) as LibraryStorageStats;
     return buildStorageReport(storageDirs, library);
   });
 
   register(IPC_CHANNELS.openDataFolder, async (event, rootId: unknown) => {
     requireAppSender(event);
-    // The renderer names a stable root id; main resolves the real path and
-    // never accepts one from the renderer (data-management spec).
+    // The renderer names an id; main resolves the real path, never accepts one.
     if (!isStorageRootId(rootId)) {
       throw new SidecarError("open requires a known data folder id");
     }
@@ -184,8 +179,6 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.openLibraryLocation, async (event, locationId: unknown) => {
     requireAppSender(event);
-    // The renderer names a watched location by id; main resolves the real
-    // path from the catalog and never accepts one from the renderer.
     if (!isValidLibraryLocationId(locationId)) {
       throw new SidecarError("open requires a known library location id");
     }
@@ -199,8 +192,6 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.openSyncFolder, async (event) => {
     requireAppSender(event);
-    // The renderer asks to open the connected sync folder and passes no path;
-    // main resolves it from the sidecar status (data-management spec).
     const status = (await sidecar.call("sync_status")) as { folder?: string | null };
     if (!status.folder) {
       throw new SidecarError("sync is not connected");
@@ -210,16 +201,13 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.clearCache, async (event) => {
     requireAppSender(event);
-    // Only the regenerable browser caches and the GPU marker are removed;
-    // containment is enforced in the module against the two resolved roots.
+    // Only regenerable caches and the GPU marker; containment is enforced in
+    // the module against the two resolved roots.
     return clearAppCache(storageDirs);
   });
 
   register(IPC_CHANNELS.copyDataPath, async (event, rootId: unknown) => {
     requireAppSender(event);
-    // The renderer names a stable root id; main resolves the real path and
-    // writes it with the native clipboard, never accepting a path from the
-    // renderer (data-management spec). Same resolution as openDataFolder.
     if (!isStorageRootId(rootId)) {
       throw new SidecarError("copy requires a known data folder id");
     }
@@ -229,9 +217,6 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.copyLibraryLocationPath, async (event, locationId: unknown) => {
     requireAppSender(event);
-    // The renderer names a watched location by id; main resolves the real
-    // path from the catalog and writes it with the native clipboard. Same
-    // resolution as openLibraryLocation.
     if (!isValidLibraryLocationId(locationId)) {
       throw new SidecarError("copy requires a known library location id");
     }
@@ -245,10 +230,8 @@ export function registerIpcHandlers(
 
   register(IPC_CHANNELS.copyText, async (event, text: unknown) => {
     requireAppSender(event);
-    // The renderer's own clipboard API is denied by the permission policy
-    // (X-4), so text copies (diagnostics JSON, sync issue details) ride this
-    // channel instead. Only a bounded string crosses: no path or id
-    // parameters — main writes exactly what the renderer formatted.
+    // The renderer's clipboard API is denied by the permission policy (X-4),
+    // so text copies ride this channel; only a bounded string crosses.
     if (typeof text !== "string" || text.length === 0) {
       throw new SidecarError("copy requires text");
     }

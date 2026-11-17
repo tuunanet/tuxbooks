@@ -57,18 +57,15 @@ export function PdfSidebar({
 }: PdfSidebarProps) {
   const { registerSlot, visiblePages, preloadPages } = usePdfVirtualization();
   const [renderedThumbs, setRenderedThumbs] = useState<ReadonlySet<number>>(() => new Set());
-  // Thumbnail failures are recorded with the render window they failed in;
-  // once the window moves, the failure is stale and the cell re-attempts on
-  // re-entry — derived at selection time, no lifecycle state to reconcile.
+  // Failures carry the render window they failed in, so a moved window counts
+  // them stale at selection time without extra lifecycle state.
   const [failedThumbs, setFailedThumbs] = useState<ReadonlyMap<number, string>>(() => new Map());
   const cellElementsRef = useRef(new Map<number, HTMLDivElement>());
-  // A click already brings its thumbnail into view; the following page
-  // change must not re-scroll (and scroll-tracking must not fight it).
+  // A click already scrolls its cell into view; the page change it causes must
+  // not re-scroll.
   const suppressAutoScrollRef = useRef(false);
 
-  // Render candidates, anchor-first: the first visible cell (or the reading
-  // page before the first observer report) leads, then everything visible
-  // and preloading, nearest first, capped at the sidebar's render budget.
+  // Anchor-first render order, nearest first, capped at the render budget.
   const renderOrder = useMemo(() => {
     const visibleList = [...visiblePages].sort((a, b) => a - b);
     const anchor = visibleList[0] ?? currentPage;
@@ -78,14 +75,10 @@ export function PdfSidebar({
     return candidates.slice(0, MAX_THUMBNAIL_CANVASES);
   }, [visiblePages, preloadPages, currentPage]);
 
-  // Stable key of the current render window; failure staleness is judged
-  // against it.
   const windowKey = useMemo(() => renderOrder.join(","), [renderOrder]);
 
-  // Exactly one render in flight: completed canvases stay mounted within the
-  // window and a single next page joins them (worker rasterization is
-  // serial — queueing more would only starve the cell the user looks at).
-  // A failure only blocks its page while it still belongs to this window.
+  // One render in flight at a time: worker rasterization is serial, so
+  // queueing more would only starve the cell the user looks at.
   const canvasPages = useMemo(() => {
     const completed = [...renderedThumbs].filter((page) => renderOrder.includes(page));
     const next = renderOrder.find(
@@ -99,17 +92,11 @@ export function PdfSidebar({
     [failedThumbs, windowKey],
   );
 
-  // Measure approaching cells so mixed-size documents correct their
-  // estimates before their thumbnails render (same lazy geometry policy as
-  // the document surface; already-measured pages are skipped inside the hook).
   useEffect(() => {
     if (visiblePages.size === 0 && preloadPages.size === 0) return;
     measurePages([...visiblePages, ...preloadPages]);
   }, [measurePages, visiblePages, preloadPages]);
 
-  // Follow the reading position: whenever the page changed from outside the
-  // sidebar (scroll tracking, navigation, restore, open), bring the current
-  // cell into view without jumping it to an edge.
   useEffect(() => {
     if (suppressAutoScrollRef.current) {
       suppressAutoScrollRef.current = false;

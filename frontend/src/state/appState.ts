@@ -219,9 +219,7 @@ function reduceLibrarySelection(state: AppState, action: LibrarySelectionAction)
     case "library-select":
       return { ...state, selectedBookIds: [action.bookId], selectionAnchorId: action.bookId };
     case "library-context-select":
-      // A right click takes the selection over but leaves the anchor alone,
-      // so the next Shift+click still measures from the last plain or Ctrl
-      // click.
+      // A right click takes the selection but leaves the anchor for Shift+click.
       return { ...state, selectedBookIds: [action.bookId] };
     case "library-toggle-select": {
       const selected = state.selectedBookIds;
@@ -318,8 +316,6 @@ function reduceCollectionSelection(
     case "range": {
       const anchorIndex = anchorId === null ? -1 : action.visibleIds.indexOf(anchorId);
       const targetIndex = action.visibleIds.indexOf(action.collectionId);
-      // Without a visible anchor there is no range to take, so fall back to
-      // the target alone and leave the anchor where the last click put it.
       ids =
         anchorIndex < 0 || targetIndex < 0
           ? [action.collectionId]
@@ -353,8 +349,6 @@ function reduceCollectionDeleted(
     state.collectionAnchorId === action.collectionId
       ? (ids[ids.length - 1] ?? null)
       : state.collectionAnchorId;
-  // The place changed shape, so the section-scoped search and book selection
-  // reset the same way they do for any other place change.
   return enterPlace(state, collectionPlace(ids), anchorId);
 }
 
@@ -366,8 +360,6 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
 
   switch (action.type) {
     case "select-section": {
-      // Collections reached through direct navigation (creating one) anchor
-      // their last id so a Shift+click has somewhere to start.
       const anchorId =
         action.section.kind === "collection"
           ? (action.section.ids[action.section.ids.length - 1] ?? null)

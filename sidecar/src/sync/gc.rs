@@ -139,9 +139,7 @@ pub async fn winning_hashes(pool: &SqlitePool) -> Result<HashSet<String>, AppErr
         .filter_map(|(json,)| {
             serde_json::from_str::<String>(&json)
                 .ok()
-                // Lowercase only: hashes are minted lowercase (stage_book_blob
-                // names from the `{:x}` digest); if that ever changes, widen
-                // this filter to match book_blob_name.
+                // Lowercase only: hashes are minted lowercase (`{:x}` digest).
                 .filter(|hash| is_hex_hash(hash))
         })
         .collect())
@@ -213,7 +211,6 @@ mod tests {
     fn winner_blob_is_kept_regardless_of_age() {
         let winner = hash(2);
         let entries = [entry(&format!("{winner}.epub"), 0)];
-        // 400 days old: far past the window, still untouchable.
         assert!(plan(&[&winner], &entries, 400).is_empty());
     }
 
@@ -259,13 +256,9 @@ mod tests {
 
     #[test]
     fn dot_part_names_are_off_grammar_and_age_out() {
-        // The ADR sketch wrote `<hash>.part`; the writer never does, so the
-        // shape is off-grammar and follows the off-grammar rule.
         let part = format!("{}.part", hash(6));
         let entries = [entry(&part, 0)];
         assert_eq!(plan(&[], &entries, 91), vec![part.clone()]);
-        // And it is never mistaken for a winner's blob even when the stem
-        // matches a winning hash: a temp is not a repair channel.
         assert_eq!(plan(&[&hash(6)], &entries, 91), vec![part]);
     }
 
@@ -284,10 +277,6 @@ mod tests {
 
     #[test]
     fn empty_winning_set_ages_old_blobs_out_under_the_pure_rule() {
-        // The pure rule alone: with no winners, everything is superseded,
-        // and only the window protects recent blobs. The engine never
-        // reaches this shape — an empty mirror skips GC entirely
-        // (engine/gc.rs), which is the tested safety net for fresh joiners.
         let loser = hash(9);
         let young = hash(10);
         let entries = [
@@ -330,12 +319,8 @@ mod tests {
             .await
             .unwrap();
         }
-        // The tombstone is excluded at the query itself: its hash is absent
-        // exactly as if it were never a winner at all.
         let winning = winning_hashes(&pool).await.unwrap();
         assert_eq!(winning, HashSet::from([live.clone()]));
-        // The GC consequence: a blob whose only pointer is the tombstone is
-        // superseded once the window passes, while the live winner stays.
         let entries = [
             entry(&format!("{live}.epub"), 0),
             entry(&format!("{tombstoned}.epub"), 0),
@@ -355,22 +340,18 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-11-09T12:00:00.000Z")
             .unwrap()
             .with_timezone(&Utc);
-        // No stamp: due at once.
         assert!(gc_due(&pool, now).await.unwrap());
         crate::sync::clock::set_meta(&pool, META_BLOB_GC, "2026-11-09T11:29:59.000Z")
             .await
             .unwrap();
-        // 30 minutes in: not yet.
         assert!(!gc_due(&pool, now).await.unwrap());
         crate::sync::clock::set_meta(&pool, META_BLOB_GC, "2026-11-09T11:00:00.000Z")
             .await
             .unwrap();
-        // Exactly an hour in: due.
         assert!(gc_due(&pool, now).await.unwrap());
         crate::sync::clock::set_meta(&pool, META_BLOB_GC, "not-a-timestamp")
             .await
             .unwrap();
-        // An unreadable stamp is due: never let a corrupt value wedge GC.
         assert!(gc_due(&pool, now).await.unwrap());
     }
 }

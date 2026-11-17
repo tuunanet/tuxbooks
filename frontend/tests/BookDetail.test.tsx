@@ -75,7 +75,6 @@ describe("BookDetail", () => {
       expect(locations).toHaveTextContent("/tmp/library/first.epub");
       expect(locations).toHaveTextContent("/tmp/library/second.epub");
     });
-    // The active-file rule marks exactly one copy.
     expect(screen.getByTestId("detail-file-active-11")).toBeInTheDocument();
     expect(screen.queryByTestId("detail-file-active-12")).not.toBeInTheDocument();
 
@@ -135,7 +134,6 @@ describe("BookDetail", () => {
     );
 
     await screen.findByTestId("detail-title");
-    // The PDF badge and the Format fact row both say "PDF".
     expect(screen.getAllByText("PDF")).toHaveLength(2);
     const facts = screen.getByTestId("detail-facts");
     expect(facts).toHaveTextContent("Last opened—");
@@ -251,7 +249,6 @@ describe("BookDetail", () => {
     );
 
     await screen.findByTestId("book-detail");
-    // The subjects arrive asynchronously from get_book_metadata.
     expect(await screen.findByText("Computing")).toBeInTheDocument();
     const subjects = screen.getByTestId("detail-subjects");
     expect(subjects).toHaveTextContent("Computing");
@@ -316,7 +313,6 @@ describe("BookDetail", () => {
     await userEvent.click(screen.getByTestId("detail-tab-metadata"));
 
     expect(await screen.findByTestId("metadata-panel")).toBeInTheDocument();
-    // The title diverges from the file, so it carries the orange-dot marker.
     expect(screen.getByTestId("metadata-title-overridden")).toBeInTheDocument();
   });
 

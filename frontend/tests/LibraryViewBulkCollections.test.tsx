@@ -39,7 +39,6 @@ describe("LibraryView bulk collection actions", () => {
     renderLibrary();
     const cards = await screen.findAllByTestId("book-card");
 
-    // Click then right click on the same book: the selection stays at one.
     fireEvent.click(item(cards, 1));
     fireEvent.contextMenu(item(cards, 1));
 
@@ -50,7 +49,6 @@ describe("LibraryView bulk collection actions", () => {
     expect(screen.getByRole("menuitem", { name: "Edit Metadata" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Locate File…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Remove from Library" })).toBeInTheDocument();
-    // The missing file keeps its old disabled states on this menu too.
     expect(screen.getByRole("menuitem", { name: "Continue Reading" })).toHaveAttribute(
       "aria-disabled",
       "true",
@@ -96,8 +94,6 @@ describe("LibraryView bulk collection actions", () => {
       within(menu).getByRole("menuitem", { name: "Remove 3 Books from Library" }),
     ).toHaveAttribute("data-variant", "destructive");
 
-    // All three bulk entries are live: both collection submenus and the
-    // mark-as-finished entry.
     for (const live of ["Add to Collection", "Remove from Collection", "Mark as Finished"]) {
       expect(within(menu).getByRole("menuitem", { name: live })).not.toHaveAttribute(
         "aria-disabled",
@@ -131,15 +127,12 @@ describe("LibraryView bulk collection actions", () => {
 
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Add to Collection" }));
 
-    // Fantasy holds neither book and Sci-Fi holds Alpha; Favorites holds
-    // every selected book, so it stays out of the list.
     expect(await screen.findByTestId("context-add-to-collection-10")).toBeInTheDocument();
     expect(screen.getByTestId("context-add-to-collection-11")).toBeInTheDocument();
     expect(screen.queryByTestId("context-add-to-collection-12")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("context-add-to-collection-11"));
 
-    // Sci-Fi already has Alpha: only Beta gets the bridge call.
     expect(invokeMock).toHaveBeenCalledWith("add_book_to_collection", {
       bookId: 2,
       collectionId: 11,
@@ -164,14 +157,12 @@ describe("LibraryView bulk collection actions", () => {
 
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Remove from Collection" }));
 
-    // Sci-Fi holds Alpha and Favorites holds both; Fantasy holds none.
     expect(await screen.findByTestId("context-remove-from-collection-11")).toBeInTheDocument();
     expect(screen.getByTestId("context-remove-from-collection-12")).toBeInTheDocument();
     expect(screen.queryByTestId("context-remove-from-collection-10")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("context-remove-from-collection-11"));
 
-    // Sci-Fi holds Alpha only: one membership dropped, Beta untouched.
     expect(invokeMock).toHaveBeenCalledWith("remove_book_from_collection", {
       bookId: 1,
       collectionId: 11,
@@ -195,7 +186,6 @@ describe("LibraryView bulk collection actions", () => {
     renderLibrary();
     const menu = await openBulkMenu();
 
-    // Sci-Fi holds Alpha: the member gets no second add, the gap gets one.
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Add to Collection" }));
     await userEvent.click(await screen.findByTestId("context-add-to-collection-11"));
     const addCalls = invokeMock.mock.calls.filter(
@@ -204,7 +194,6 @@ describe("LibraryView bulk collection actions", () => {
     expect(addCalls).toHaveLength(1);
     expect(addCalls[0]).toEqual(["add_book_to_collection", { bookId: 2, collectionId: 11 }]);
 
-    // Favorites holds both selected books: one removal per member, no repeats.
     const cards = await screen.findAllByTestId("book-card");
     fireEvent.contextMenu(item(cards, 1));
     const reopened = await screen.findByRole("menu");
@@ -225,7 +214,6 @@ describe("LibraryView bulk collection actions", () => {
       collectionId: 12,
     });
 
-    // Both chains resolved far enough to post their note; nothing rejected.
     await waitFor(() =>
       expect(screen.getByTestId("selection-message")).toHaveTextContent("Removed 2 from Favorites"),
     );
@@ -251,7 +239,6 @@ describe("LibraryView bulk collection actions", () => {
     );
     expect(screen.getByTestId("selection-count")).toHaveTextContent("2 books selected");
 
-    // The selection survived, so the next action chains off it.
     const cards = await screen.findAllByTestId("book-card");
     fireEvent.contextMenu(item(cards, 1));
     const reopened = await screen.findByRole("menu");
@@ -310,7 +297,6 @@ describe("LibraryView bulk collection actions", () => {
     const empty = await screen.findByTestId("context-no-collections");
     expect(empty).toHaveAttribute("aria-disabled", "true");
     expect(empty).toHaveTextContent("No collections yet");
-    // Nothing to leave, so the remove submenu stays shut.
     expect(within(menu).getByRole("menuitem", { name: "Remove from Collection" })).toHaveAttribute(
       "aria-disabled",
       "true",

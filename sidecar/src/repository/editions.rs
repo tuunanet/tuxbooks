@@ -50,9 +50,7 @@ pub async fn link_editions(
         ));
     }
 
-    // Store the pair in one deterministic order. Both directions mean the
-    // same relation, so a second call with the arguments swapped is a
-    // duplicate, not a second row.
+    // One deterministic order: both directions are the same relation, so swapped args duplicate.
     let (uid_a, uid_b) = if source.uid < target.uid {
         (source.uid.as_str(), target.uid.as_str())
     } else {
@@ -76,9 +74,7 @@ pub async fn link_editions(
         ));
     }
 
-    // A target link for the same provider cannot be overwritten: that would
-    // silently drop the remote work the current edition already tracks. The
-    // caller gets an explicit conflict and can unlink deliberately.
+    // Overwriting would drop the current edition's remote work, so the caller gets a conflict.
     let conflicting_providers: Vec<String> = sqlx::query_scalar(
         "SELECT s.provider FROM book_provider_links s \
          WHERE s.book_uid = ?1 AND EXISTS ( \
@@ -110,10 +106,8 @@ pub async fn link_editions(
         .execute(&mut *tx)
         .await?;
 
-    // Parent link rows move by update, not insert: `(provider, remote_id)` is
-    // unique across the table, so copying before deleting would collide with
-    // the source row. The queued rows are captured and re-inserted because
-    // the composite FK has no ON UPDATE cascade.
+    // Parent link rows move by update: `(provider, remote_id)` is unique table-wide.
+    // Queued rows are captured and re-inserted because the composite FK has no ON UPDATE cascade.
     let queued: Vec<(String, f64, String)> = sqlx::query_as(
         "SELECT provider, progress_percent, queued_at \
          FROM book_provider_pending_progress WHERE book_uid = ?1",
@@ -147,10 +141,8 @@ pub async fn link_editions(
         .await?;
     }
 
-    // Percentage only: no cfi, chapter href, page, progression, locations,
-    // engine marker, or locator JSON crosses editions. The target's own
-    // position is replaced by the source percentage, so opening the newly
-    // linked edition starts at that percentage rather than at an old locator.
+    // Percentage only: no locator JSON crosses editions. The target's position is replaced,
+    // so the newly linked edition opens at that percentage rather than an old locator.
     let source_percent: Option<f64> = sqlx::query_scalar::<_, Option<f64>>(
         "SELECT progress_percent FROM reading_progress WHERE book_uid = ?1",
     )

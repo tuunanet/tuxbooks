@@ -20,43 +20,25 @@ export type AppUiCspVariant = "production" | "development";
 const DIRECTIVES: Record<AppUiCspVariant, string[]> = {
   production: [
     "default-src 'none'",
-    // 'wasm-unsafe-eval' is required by the PDFium WASM (instantiated inside
-    // the PDF worker, which inherits this policy); no inline or eval script
-    // execution is allowed. blob: is the reader toolkit's own injected
-    // section scripts (marked data-readium, inside the sandboxed frames);
-    // this policy is inherited by the blob: frames, so it must not be
-    // stricter there than the frame CSP (contentPolicy.ts) already is.
+    // 'wasm-unsafe-eval' is required by the PDFium WASM in the PDF worker. The
+    // blob: frames inherit this policy, so the blob: grants must not be stricter
+    // than the frame CSP (contentPolicy.ts) already is.
     "script-src 'self' 'wasm-unsafe-eval' blob:",
-    // 'unsafe-inline' styles and blob: stylesheets are ReadiumCSS inside
-    // the reader frames (same inheritance); tuxbooks: styles are the
-    // publication's own linked stylesheets (the frame meta grants them,
-    // and the intersection must not be stricter than the frame CSP).
-    // Styles are not script execution.
     "style-src 'self' tuxbooks: blob: 'unsafe-inline'",
-    // Covers resolve over the resource protocol; data: and blob: cover
-    // bundled icons, reader fonts/media, and locally generated images.
     "img-src 'self' tuxbooks: data: blob:",
     "font-src 'self' tuxbooks: blob: data:",
-    // The app page and the PDF worker fetch book bytes over tuxbooks://.
     "connect-src 'self' tuxbooks:",
-    // The EPUB reader mounts sandboxed section frames from blob: URLs.
     "frame-src 'self' blob:",
     "worker-src 'self' blob:",
     "media-src 'self' tuxbooks: blob:",
     "object-src 'none'",
-    // Reader frames set their document base to the publication root
-    // (tuxbooks://book/<id>/) for relative resource resolution.
     "base-uri 'self' tuxbooks:",
     "form-action 'none'",
     "frame-ancestors 'none'",
   ],
   development: [
-    // Overrides of the production list: the builder keeps every production
-    // directive not named here, so the reader-frame grants (blob: scripts
-    // and styles, tuxbooks: media, the frame/base allowances) carry into
-    // dev untouched. Only the three Vite hot-reload needs are added:
-    // the React-refresh preamble is an inline module script, HMR injects
-    // <style> elements, and the HMR socket is a websocket.
+    // Only the three Vite hot-reload overrides; every other production
+    // directive carries over untouched.
     "script-src 'self' 'wasm-unsafe-eval' blob: 'unsafe-inline'",
     "style-src 'self' tuxbooks: blob: 'unsafe-inline'",
     "connect-src 'self' tuxbooks: ws:",

@@ -44,8 +44,7 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
       invoke: "function",
     });
 
-    // webSecurity on top of the isolation flags: local files are not
-    // reachable from the app origin.
+    // webSecurity on top of isolation: file:// is unreachable from the app origin.
     const fileAccess = await page.evaluate(() =>
       fetch("file:///etc/hostname").then(
         () => "file-readable",
@@ -63,8 +62,7 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
     expect(header).toContain("default-src 'none'");
     expect(header).toContain("script-src 'self' 'wasm-unsafe-eval'");
 
-    // CDP evaluation is CSP-exempt, so enforcement is probed the way the
-    // page itself would be: an inline script element must not execute.
+    // CDP evaluation is CSP-exempt: probe enforcement with an inline script element.
     const inline = await page.evaluate(async () => {
       const probe = document.createElement("script");
       probe.id = "csp-inline-probe";
@@ -76,9 +74,7 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
     });
     expect(inline).toBe("inline-blocked");
 
-    // The external request must be refused. A blocked fetch rejects with a
-    // generic network error, so the CSP's own console violation is the
-    // evidence that the refusal came from the policy.
+    // A blocked fetch rejects generically; the CSP console violation proves policy blocked it.
     const violations: string[] = [];
     page.on("console", (message) => {
       if (/content.security.policy/i.test(message.text())) violations.push(message.text());
@@ -118,8 +114,7 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
   });
 
   test("X-4: the reader's own fullscreen request still works", async ({ page }) => {
-    // A trusted keydown grants transient activation; the presentation-mode
-    // path (ReaderShell requestFullscreen) relies on the same grant.
+    // A trusted keydown grants transient activation, as ReaderShell's requestFullscreen path needs.
     await page.keyboard.press("Shift");
     const result = await page.evaluate(async () => {
       try {
@@ -150,11 +145,8 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
   test("X-3: the renderer cannot navigate the top frame away from the app origin", async ({
     page,
   }) => {
-    // Renderer-initiated attempts are the threat path (will-navigate fires
-    // for them and the policy prevents them). A blocked file:// attempt can
-    // transiently show Chromium's error page, so the verdict is the settled
-    // end state: the app document alive and back at the app origin. A real
-    // takeover never returns to it, which is the failure we want.
+    // Renderer-initiated navigation is the threat path: a blocked file:// attempt can
+    // transiently show Chromium's error page, so assert the settled end state instead.
     const appDocumentState = async (): Promise<{ href: string; shellAlive: boolean } | null> => {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         try {
@@ -182,8 +174,7 @@ test.describe("app hardening (issue #85, X-1..X-5)", () => {
         href: "app://bundle/index.html",
         shellAlive: true,
       });
-      // A committed reload clears the harness's pending-navigation state
-      // from the blocked attempt before the next test runs.
+      // A committed reload clears the harness's pending-navigation state before the next test.
       await page.goto("app://bundle/index.html");
       await expect(page.getByTestId("app-shell")).toBeVisible();
     }

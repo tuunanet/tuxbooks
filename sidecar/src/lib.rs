@@ -86,7 +86,6 @@ impl ImportRun {
         if *finished.borrow() {
             return;
         }
-        // A dropped sender means the run ended too.
         let _ = finished.wait_for(|done| *done).await;
     }
 }
@@ -358,7 +357,6 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
 
     if let Ok(library_root) = std::env::var("TEST_LIBRARY_PATH") {
         if !library_root.is_empty() {
-            // No progress callback: the client is not listening yet.
             let report = services::book_importer::import_directory(
                 &pool,
                 Path::new(&library_root),
@@ -372,9 +370,6 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         }
     }
 
-    // Library reconciliation (milestone 3): one reconciler shared by
-    // the watcher thread and the method table; its change callback is the
-    // single place that turns service-layer changes into IPC events.
     let reconciler = Arc::new(Reconciler::new(
         pool.clone(),
         covers_dir(&db_path),
@@ -390,21 +385,13 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         debounce: Duration::from_millis(600),
     })?;
 
-    // Incremental startup reconciliation: watched locations are diffed
-    // against the database (only new/changed files parse), so events missed
-    // while the app was closed are caught up here. Registration of the
-    // watched roots stays synchronous — the method table going live must
-    // never outrun the watcher (a file added in that window would go unseen
-    // until an unrelated event). The diff walk itself is background work:
-    // the UI consumes `library-changed` events live, so catch-up does not
-    // need to block `service ready` (and with it, the whole window).
+    // Watch registration stays synchronous; a file added before the watcher
+    // starts would go unseen. The diff walk itself runs in the background.
     let locations = crate::repository::library_locations::list_locations(&pool).await?;
     for location in &locations {
         watcher.watch(Path::new(location));
     }
 
-    // The test library is registered like a user import so E2E can
-    // exercise live synchronization against a real watched root.
     let mut catchup_roots = locations;
     if let Ok(library_root) = std::env::var("TEST_LIBRARY_PATH") {
         if !library_root.is_empty() {
@@ -414,12 +401,8 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         }
     }
 
-    // Artwork-cache GC (milestone 4): content-addressed covers stop being
-    // referenced when their source changes or their book is removed;
-    // unreferenced files are swept once at startup, after the catch-up walk
-    // (a new book's cover file exists before its row commits — sweeping
-    // first could race an in-flight import). One summary line — never
-    // per-file noise — with counts the reconciler reported accurately.
+    // Sweep after the catch-up walk: a new book's cover file exists before
+    // its row commits, so sweeping first could race an in-flight import.
     let reconciler = reconciler.clone();
     let reconciler_pool = pool.clone();
     let covers = covers_dir(&db_path);
@@ -427,7 +410,6 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
         let started = std::time::Instant::now();
         let mut report = services::library_reconciler::ReconcileReport::default();
         for root in catchup_roots {
-            // Errors are logged inside; a missing location skips cleanly.
             match reconciler.reconcile_location(Path::new(&root)).await {
                 Ok(passed) => {
                     report.imported += passed.imported;
@@ -459,8 +441,6 @@ pub async fn init_state(events: EventEmitter) -> Result<AppState, anyhow::Error>
     );
     sync.start();
 
-    // Existing libraries get their content hashes in the background; startup
-    // never waits for it and a restart resumes from `books.hash_state`.
     services::hash_backfill::start(pool.clone());
 
     Ok(AppState {

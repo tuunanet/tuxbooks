@@ -118,10 +118,8 @@ describe("sidecar call idle timeout", () => {
   });
 
   it("survives several idle windows at the cadence a real bulk import guarantees", async () => {
-    // A 10k-book folder import (tuxbooks-9zh) emits progress at least every
-    // per-book budget (~31 s worst case) against a 60 s idle window. The
-    // fake derives its cadence from the configured window, so the "half the
-    // window" relationship survives any retune of these numbers.
+    // A bulk import emits progress well inside the configured window; the
+    // fake derives its cadence from that window, so any retune still holds.
     const scriptPath = writeFakeSidecar("sparse", 500);
     const transport = new Sidecar(scriptPath, () => {}, { idleTimeoutMs: 500 });
     active = transport;

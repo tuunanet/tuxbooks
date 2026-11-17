@@ -89,8 +89,7 @@ function neutralizeActiveElement(element: Element): void {
     element.remove();
     return;
   }
-  // `param` only configures the object that is going away; drop it so no
-  // orphan remnant of the active element survives the unwrap.
+  // `param` only configures the object being unwrapped, so drop it with the object.
   for (const param of element.querySelectorAll("param")) param.remove();
   element.replaceWith(...Array.from(element.childNodes));
 }
@@ -147,18 +146,13 @@ export function sanitizePublicationText(text: string, isXml: boolean): string {
     if (xml.querySelector("parsererror") === null && xml.documentElement !== null) {
       return stripActiveContent(xml, true) ?? text;
     }
-    // Sloppy manifest-XHTML (unclosed tags, named HTML entities): the HTML
-    // parser repairs it, and the HTML parser already puts every element in
-    // the XHTML namespace, so XMLSerializer emits well-formed XML the
-    // toolkit's strict parse accepts - named entities decode to characters
-    // here, which is what makes entity-laden chapters renderable at all.
-    // Re-serialize even when nothing was stripped: the raw bytes fail the
-    // strict parse, so "unchanged" is not an option for this class.
+    // Sloppy manifest XHTML: the HTML parser repairs it, namespaces every element,
+    // and decodes named entities, but the raw bytes fail the strict parse, so this
+    // class must always be re-serialized even when nothing was stripped.
     const html = new DOMParser().parseFromString(text, "text/html");
     for (const element of html.querySelectorAll("*")) {
-      // The HTML parser both namespaces every element and keeps a literal
-      // xmlns attribute; XMLSerializer emits both and strict XML rejects
-      // the duplicate declaration. The namespace survives on the element.
+      // The HTML parser keeps the literal xmlns attribute next to the namespace it
+      // assigned; XMLSerializer emits both and strict XML rejects the duplicate.
       for (const attribute of Array.from(element.attributes)) {
         if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")) {
           element.removeAttribute(attribute.name);
@@ -319,10 +313,8 @@ export function policyFetchClient(
     const response = await inner(input, init);
     const contentType = response.headers.get("content-type");
     if (!response.ok || !isSanitizableContentType(contentType)) return response;
-    // The manifest media type is what the toolkit's strict parse follows,
-    // not the transport header: real books keep application/xhtml+xml
-    // content in .html members, which the resource protocol serves as
-    // text/html. Resolve through the publication manifest when available.
+    // The toolkit parses by the manifest media type, not the transport header:
+    // .html members often hold application/xhtml+xml served as text/html.
     const memberHref = safeMemberHref(raw, baseUrl);
     const declared = memberHref === null ? null : (mediaTypeFor?.(memberHref) ?? null);
     return fenceDocumentResponse(response, declared);

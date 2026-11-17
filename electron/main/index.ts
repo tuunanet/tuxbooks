@@ -41,15 +41,10 @@ import { APP_ORIGIN, PRIVILEGED_SCHEMES } from "../shared/pathSchema";
  * sidecar. Plumbing only — no business logic.
  */
 
-// Startup segment timing (dev diagnosis): where the boot latency sits —
-// Electron init, sidecar readiness, or the renderer's first mount.
-// performance.now() is monotonic with the process start, so every segment
-// reads against one origin; never wall-clock differences.
 const BOOT_START = performance.now();
 const bootElapsed = (label: string): void => {
   console.log(`[startup] ${label} +${Math.round(performance.now() - BOOT_START)}ms`);
 };
-// CJS bundle: __dirname is electron/dist; asset paths below resolve from it.
 
 const stdout = (message: string): void => console.log(message);
 const stderr = (message: string): void => console.error(message);
@@ -62,12 +57,7 @@ const resetDeps = (): ResetDataDeps => ({
   stderr,
 });
 
-// Explicit CLI commands (--help, --version, --dry-run, --reset-data) run
-// before any startup log line, before app ready, and before the
-// single-instance lock: help and version own stdout, recovery
-// (data-management spec) must work when a second instance or a broken
-// start would otherwise block it, and a usage error exits 2 without
-// starting the GUI. False means carry on and start the graphical app.
+// CLI commands run before the startup log, app ready, and the single-instance lock.
 const cliHandled = runCli(process.argv, {
   stdout,
   stderr,
@@ -75,35 +65,20 @@ const cliHandled = runCli(process.argv, {
   version: app.getVersion(),
   runDryRun: () => runDryRun(resetDeps()),
   runResetData: () => runResetData(resetDeps()),
-  // Debug hatch: switches after `--` reach Chromium (still before app
-  // ready, where appendSwitch is legal), so any GPU/compositor switch can
-  // be tried on a packaged build without widening the strict option set.
   forwardSwitch: (name, value) => app.commandLine.appendSwitch(name, value ?? ""),
 });
 
-// Anchor segment: bundle evaluation itself (module graph + protocol setup).
-// The gap between this and "app ready" is Chromium's platform init (GPU,
-// compositor, fontconfig, high-DPI) on the developer machine (PERF-11:
-// measure, never work around unmeasured). CLI launches own their stdout,
-// so the anchor only prints for a GUI launch.
 if (!cliHandled) bootElapsed("electron process");
 
-// One library database owner: a second app instance quits immediately.
-// quit() only schedules the exit, so startup would still spawn a sidecar on
-// the first instance's database and create a window that never loads. Exit
-// now, and report why: without the line a lost lock looks like a silent
-// no-start.
+// A second instance would spawn a sidecar on the first's database and open a window that never loads.
+// quit() only schedules the exit; exit now via fs.writeSync, which survives it.
 if (!cliHandled && !app.requestSingleInstanceLock()) {
-  // fs.writeSync, not console.error: app.exit() terminates immediately and
-  // a queued stderr write would be lost.
   try {
     fs.writeSync(
       2,
       `[startup] another TuxBooks instance already owns this profile (${app.getPath("userData")}); exiting\n`,
     );
-  } catch {
-    // stderr unavailable (closed or broken); the exit still has to happen.
-  }
+  } catch {}
   app.exit(0);
 }
 
@@ -125,21 +100,11 @@ if (activeGpuFallback) {
       ` (last ${activeGpuFallback.lastCrashAt}, expires ${activeGpuFallback.expiresAt})`,
   );
 }
-// GPU-process crashes ("crashed", not the benign cleanExit/killed) seen in
-// this session; drives both the threshold check and the will-quit self-heal.
 let gpuCrashCount = 0;
 
-// No application menu: the renderer owns every interaction, and the
-// Electron default bar (File/Edit/View/Window — reload, devtools, close
-// accelerators) has no place in a shipped desktop app. Removes the bar
-// from every window before any exists.
 Menu.setApplicationMenu(null);
 
-// Registered before app ready so the privileged flags apply to every
-// subsequent navigation and fetch. corsEnabled matters: the renderer origin
-// (dev server / packaged page) fetch()es this scheme cross-origin, and
-// Chromium refuses non-CORS-enabled schemes before the handler even runs.
-// The table (docs/ARCHITECTURE.md) declares exactly these two schemes.
+// Registered before app ready; corsEnabled matters because the renderer fetches this scheme cross-origin.
 protocol.registerSchemesAsPrivileged([...PRIVILEGED_SCHEMES]);
 
 /**
@@ -187,6 +152,7 @@ function openExternalIfValid(raw: string): void {
 
 /** Root of the built renderer bundle, served as `app://bundle/...`. */
 
+/** CJS bundle: __dirname is electron/dist; asset paths below resolve from it. */
 function rendererDistDir(): string {
   return path.join(__dirname, "../../frontend/dist");
 }
@@ -233,7 +199,6 @@ function registerAppProtocol(): void {
       if (relative === "" || (!resolved.startsWith(dist + path.sep) && resolved !== dist)) {
         filePath = path.join(dist, "index.html");
       } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        // SPA fallback: the renderer owns its routing state-side.
         filePath = path.join(dist, "index.html");
       }
       const mime =
@@ -244,7 +209,7 @@ function registerAppProtocol(): void {
         headers: {
           "content-type": mime,
           "content-length": String(body.length),
-          // X-2: the app UI's CSP rides on every app:// response (issue #85).
+          // X-2: the app UI's CSP rides on every app:// response.
           "content-security-policy": APP_UI_CSP,
         },
       });
@@ -299,9 +264,7 @@ function appIcon(): Electron.NativeImage | undefined {
 }
 
 function createWindow(forward: (name: string, payload: unknown) => void): BrowserWindow {
-  // X-1 (issue #85): the four isolation flags are explicit, and the
-  // assertion fails startup loudly when one drifts instead of shipping a
-  // softer renderer.
+  // X-1: isolation flags are explicit; the assertion fails startup if one drifts.
   const webPreferences: Electron.WebPreferences = {
     preload: path.join(__dirname, "preload.cjs"),
     ...RENDERER_ISOLATION,
@@ -316,9 +279,6 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     minimizable: true,
     icon: appIcon(),
     show: false,
-    // Light background matching the :root token in frontend/src/index.css;
-    // the renderer's inline theme bootstrap paints the real choice before
-    // first content paint.
     backgroundColor: "#ffffff",
     webPreferences,
   });
@@ -327,10 +287,6 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
   window.webContents.on("console-message", (details) => recordRendererConsole(details));
   window.webContents.on("render-process-gone", (_event, details) => logRenderProcessGone(details));
 
-  // Dev-only DevTools access (the dev server runs only via `just dev`):
-  // with the application menu gone, the stock Ctrl+Shift+I accelerator no
-  // longer exists, so the toggle keys are intercepted before the page sees
-  // them. Everything else passes through untouched.
   if (process.env.VITE_DEV_SERVER_URL !== undefined) {
     window.webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
@@ -351,13 +307,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     bootElapsed("window shown");
   });
 
-  // In-page links never spawn extra Chromium windows. X-5 (issue #85):
-  // every target goes through the validated link seam first, only
-  // canonical http(s) URLs reach the system browser, everything else is
-  // dropped. X-3: the top frame navigates only inside the app origin (or
-  // the dev server while one is actually configured); anything else,
-  // file://, the resource protocol, data:, other origins, is prevented,
-  // and validated http(s) targets go to the system browser instead.
+  // X-5/X-3: only canonical http(s) reach the browser; the top frame stays on the app origin.
   window.webContents.setWindowOpenHandler(({ url }) => {
     openExternalIfValid(url);
     return { action: "deny" };
@@ -368,14 +318,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     openExternalIfValid(url);
   });
 
-  // Dev server only when explicitly requested (just dev); everything else —
-  // packaged builds and the E2E runs — loads the built renderer from disk
-  // through the app:// scheme (a real origin; see registerAppProtocol).
   bootElapsed("browser window created");
-  // Loader lifecycle segments (§11): did-finish-load → ready-to-show hides
-  // the first-paint gap on Linux/Wayland; these labels split loadURL into
-  // did-start-loading, dom-ready, did-finish-load, ready-to-show so the
-  // slow segment is identified, not guessed.
   window.webContents.on("did-start-loading", () => bootElapsed("renderer did-start-loading"));
   window.webContents.on("dom-ready", () => bootElapsed("renderer dom-ready"));
   if (process.env.VITE_DEV_SERVER_URL !== undefined) {
@@ -386,15 +329,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
     void window.loadURL(`${APP_ORIGIN}/index.html`);
   }
 
-  // Dev boot check: the renderer must mount the app shell, or a broken
-  // bridge/preload fails loudly here instead of silently showing a blank
-  // window (xvfb/CI runs have no human to notice). TUXBOOKS_BOOT_PROBE=1
-  // additionally fetches one book through the tuxbooks:// protocol and
-  // logs the byte count (protocol + sidecar byte path end-to-end).
   window.webContents.on("did-finish-load", () => {
-    // Packaged runs skip the check except when TUXBOOKS_BOOT_PROBE=1 opts
-    // in: the probe doubles as the packaged-build smoke test (an asar/path
-    // regression would fail here before any human notices).
     if (
       app.isPackaged &&
       process.env.TUXBOOKS_BOOT_PROBE !== "1" &&
@@ -450,10 +385,7 @@ function createWindow(forward: (name: string, payload: unknown) => void): Browse
 }
 
 function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
-  // Paths handed to the renderer through native dialogs; filesystem-acting
-  // IPC calls accept only these back (docs/ARCHITECTURE.md, issue #84).
-  // The handlers themselves (with the per-channel sender gate) live in
-  // ipcHandlers.ts, unit-tested without Electron.
+  // Filesystem-acting IPC accepts back only paths issued through native dialogs (issue #84).
   registerIpcHandlers(
     (channel, handler) => {
       ipcMain.handle(channel, (event, ...args) => handler(event, ...args));
@@ -474,11 +406,6 @@ function registerIpc(sidecar: Sidecar, debugLog: (line: string) => void): void {
 app.whenReady().then(() => {
   if (cliHandled) return;
   bootElapsed("app ready");
-  // TUXBOOKS_DEBUG_IPC=1 appends bridge/protocol/event traces to a
-  // per-run file, so E2E diagnosis works from CI artifacts alone. The file
-  // lives in its own mkdtemp'd directory (0700, unpredictable name) — a
-  // fixed path in the shared temp dir is a symlink target on multi-user
-  // machines (same class as the sidecar's debug log).
   const debugLogPath =
     process.env.TUXBOOKS_DEBUG_IPC === "1" && process.env.E2E_RUN_ID
       ? path.join(
@@ -490,38 +417,21 @@ app.whenReady().then(() => {
     if (!debugLogPath) return;
     try {
       fs.appendFileSync(debugLogPath, `${new Date().toISOString()} [pid ${process.pid}] ${line}\n`);
-    } catch {
-      // Diagnostics only.
-    }
+    } catch {}
   };
 
-  // Sidecar events (library changes, import progress) reach the renderer
-  // through the one channel the preload listens on.
   const forward = (name: string, payload: unknown): void => {
     const windows = BrowserWindow.getAllWindows();
     debugLog(`forward ${name} windows=${windows.length}`);
     for (const window of windows) {
-      // A window closing, a reload disposing the old frame, or app quit
-      // racing sidecar output can dispose the render frame between the
-      // window lookup and the send — Electron then throws "Render frame
-      // was disposed before WebFrameMain could be accessed". The event is
-      // transient UI state with no renderer left to receive it; dropping
-      // it (and the destroy checks narrow the race without eliminating
-      // it, hence the catch) is the correct behavior. The sidecar keeps
-      // running and the next event reaches the next live frame.
       if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
       try {
         window.webContents.send("tuxbooks:event", name, payload);
-      } catch {
-        // Frame died mid-send; nothing to deliver to.
-      }
+      } catch {}
     }
   };
-  // X-4 (issue #85): permissions are denied by default. The single grant
-  // is fullscreen from the application's own origin, the reader's
-  // presentation mode (ReaderShell). Both handlers share the one policy
-  // function so requests and checks can never disagree.
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  // X-4: permissions are denied by default; only fullscreen from the app origin is granted.
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback, details) => {
       callback(
@@ -537,21 +447,14 @@ app.whenReady().then(() => {
   registerAppProtocol();
   registerProtocol(sidecar);
   registerIpc(sidecar, debugLog);
-  // The window opens only after the sidecar is healthy: the renderer's very
-  // first invokes assume the method table is live, and the service registers
-  // its filesystem watchers during startup — a UI that outruns the sidecar
-  // races those registrations (a file added in that window is never picked
-  // up until an unrelated event). The Tauri shell guaranteed this ordering;
-  // keep it.
   bootElapsed("sidecar start");
   debugLog("app starting sidecar");
+  // The window opens only after the sidecar is healthy: first invokes assume its method table is live.
   sidecar
     .start()
     .then(async () => {
       bootElapsed("sidecar healthy");
       debugLog("sidecar healthy; creating window");
-      // A database the sidecar quarantined at startup is surfaced before the
-      // window opens, naming where the broken file was kept.
       await surfaceStartupQuarantine({
         sidecar,
         dialog,
@@ -562,10 +465,6 @@ app.whenReady().then(() => {
       createWindow(forward);
     })
     .catch((error) => {
-      // A silent quit leaves a desktop user with no window and no message:
-      // leave a timestamped log in the data root, print the resolved paths
-      // and the reset command to stderr, and show the error dialog before
-      // quitting. Recovery never throws, so the quit always runs.
       void reportStartupFailure(
         {
           fs,
@@ -643,13 +542,6 @@ app.on("child-process-gone", (_event, details) => {
   }
 });
 
-// Renderer console mirroring (crash survival) lives in rendererConsole.ts:
-// it buffers every renderer message and echoes live errors, except the known
-// benign browser noise that would otherwise spam the terminal.
-
-// Renderer deaths are fatal to the page but distinct from GPU failures;
-// Electron restarts nothing here, so the log must carry the failure mode
-// plus whatever the renderer logged before dying.
 function logRenderProcessGone(details: Electron.RenderProcessGoneDetails): void {
   console.error(
     `[electron] renderer gone: reason=${details.reason} exitCode=${details.exitCode}` +

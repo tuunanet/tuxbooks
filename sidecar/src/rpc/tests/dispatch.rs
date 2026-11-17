@@ -175,12 +175,8 @@ async fn import_paths_streams_batched_progress_events() {
         !progress.is_empty(),
         "the import streams progress to the UI"
     );
-    // How the batches split is timing: the batcher flushes after
-    // EVENT_BATCH_WINDOW_MS (250ms) or EVENT_BATCH_BOOKS books, and a
-    // first parse that outlasts the window lands the two books in two
-    // events. The contract worth pinning is the stream itself: every
-    // imported book appears exactly once across the batches, each
-    // payload well-formed.
+    // Batch splitting is timing; pin the stream: every imported book appears
+    // exactly once, each payload well-formed.
     let mut ids = Vec::new();
     for (name, payload) in &progress {
         assert_eq!(*name, "import-progress");
@@ -316,7 +312,6 @@ async fn list_books_reports_a_newer_file_version_until_settled() {
         .unwrap();
     assert_eq!(result[0]["newerVersionAvailable"], json!(true));
 
-    // Settled: the pointer names the bytes the binding already proved.
     sqlx::query(
         "UPDATE sync_state_fields SET value_json = ?3
          WHERE kind = 'file_version' AND entity_uid = ?1 AND field = 'content_hash'",
@@ -371,10 +366,8 @@ async fn get_startup_recovery_reports_the_quarantine_paths() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn embed_book_metadata_accepts_the_form_param() {
-    // The bridge sends `{bookId, form}`; a bad shape would fail param
-    // parsing (-32602). The seeded row has no file on disk, so the call
-    // reaches the service and fails there (-32000) — proving the method
-    // and its form argument are wired.
+    // A bad shape would fail param parsing (-32602); the seeded row has no
+    // file, so -32000 proves the method and its form argument are wired.
     let tmp = tempfile::tempdir().unwrap();
     let state = test_state(tmp.path()).await;
     let id = seed_book(&state, "Embed Book").await;
@@ -406,9 +399,7 @@ async fn embed_book_metadata_accepts_the_form_param() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_collection_takes_the_bridge_wire_param() {
-    // The bridge has always sent `collectionId` (the Tauri-era camelCase
-    // param); the method table must keep accepting exactly that shape —
-    // a bare `id` here silently breaks collection deletion client-side.
+    // The bridge sends `collectionId`; a bare `id` silently breaks deletion.
     let tmp = tempfile::tempdir().unwrap();
     let state = test_state(tmp.path()).await;
     let events = test_events();
@@ -435,8 +426,6 @@ async fn delete_collection_takes_the_bridge_wire_param() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_set_auto_retry_persists_and_the_status_reflects_it() {
-    // The sync command module answers only when the engine exists, so this
-    // pins the arm plus the wrapper with a real service behind the state.
     let tmp = tempfile::tempdir().unwrap();
     let base = test_state(tmp.path()).await;
     let sync = crate::sync::engine::SyncService::new(base.db.clone(), &base.db_path, test_events())
@@ -523,8 +512,6 @@ async fn rename_collection_returns_the_updated_summary() {
     assert_eq!(renamed["name"], json!("Shelf"));
     assert_eq!(renamed["bookIds"], json!([]));
 
-    // A duplicate name reaches the UNIQUE constraint and comes back as an
-    // app error, which the dialog shows inline.
     let duplicate = dispatch(
         &state,
         &events,

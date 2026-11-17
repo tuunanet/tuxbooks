@@ -26,8 +26,7 @@ const BENIGN_RO =
 // stuck in a real runaway loop and hit its depth cap.
 const RUNAWAY_RO = "ResizeObserver loop limit exceeded. (app://bundle/index.html:0)";
 
-// Captured live echoes: each entry is the argument list one console.error
-// received. The buffer is module state, so each test drains it first.
+// Module state: each test drains the buffer before it records.
 let echoed: unknown[][];
 
 beforeEach(() => {
@@ -35,7 +34,6 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
     echoed.push(args);
   });
-  // Each test starts from an empty buffer: replay whatever a prior test left.
   replayRendererConsoleTail();
   echoed.length = 0;
 });
@@ -51,7 +49,6 @@ describe("renderer console echo policy", () => {
     expect(
       isBenignRendererMessage("ResizeObserver loop completed with undelivered notifications"),
     ).toBe(true);
-    // The runaway-loop variant is a real fault, not noise.
     expect(isBenignRendererMessage(RUNAWAY_RO)).toBe(false);
     expect(isBenignRendererMessage("TypeError: undefined is not a function")).toBe(false);
     expect(isBenignRendererMessage("")).toBe(false);

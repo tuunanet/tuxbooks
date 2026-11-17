@@ -65,8 +65,7 @@ async function missingOverlays(page: Page): Promise<number> {
 test.describe("tuxbooks filesystem synchronization", () => {
   test.beforeEach(async ({ page }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    // File order matters: a previous spec may leave the app on a detail or
-    // reader view.
+    // File order matters: a previous spec may leave the app on a detail view.
     await ensureLibrary(page);
   });
 
@@ -86,7 +85,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
   test("keeps the book available when its file is renamed on disk", async ({ page }) => {
     renameSync(path.join(libraryDir, "sync-added.epub"), path.join(libraryDir, "sync-moved.epub"));
 
-    // The book survives the move: no duplicate row, no missing marker.
     await expect
       .poll(
         async () => ({
@@ -101,8 +99,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
   test("marks the book unavailable when its file disappears", async ({ page }) => {
     rmSync(path.join(libraryDir, "sync-moved.epub"));
 
-    // The row is kept (progress/metadata survive reconnection), shown as
-    // missing instead of being silently dropped.
+    // The row is kept (progress/metadata survive reconnection), shown as missing.
     await expect
       .poll(
         async () => ({
@@ -132,16 +129,13 @@ test.describe("tuxbooks filesystem synchronization", () => {
   });
 
   test("importing a single file watches its folder so siblings arrive alone", async ({ page }) => {
-    // A shelf outside the seeded library, so the mirror round trip never
-    // disturbs the fixtures the other suites run against.
+    // A shelf outside the seeded library keeps the other suites' fixtures intact.
     const shelf = path.join(scratchDir, "single-file-shelf");
     mkdirSync(shelf, { recursive: true });
     const first = path.join(shelf, "single-first.epub");
     copyFileSync(firstNewEpub, first);
 
-    // The native file dialog cannot be driven from the automation surface,
-    // so the file comes in through the same bridge command Import Files
-    // issues (same rule as the unwatch scenario below).
+    // The native dialog cannot be driven from the automation surface, so import via the bridge.
     const report = (await page.evaluate(
       (file) => window.tuxbooks!.invoke("import_paths", { paths: [file] }),
       first,
@@ -155,8 +149,7 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount + 1);
 
-    // Watching never happens silently: the shelf is listed where the user
-    // manages watches — Settings > Watched folders.
+    // Watching never happens silently: the shelf is listed under Settings > Watched folders.
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
@@ -165,7 +158,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
 
-    // A sibling dropped on disk afterwards appears without a second import.
     copyFileSync(secondNewEpub, path.join(shelf, "single-second.epub"));
     await expect
       .poll(() => cardCount(page), {
@@ -174,8 +166,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount + 2);
 
-    // Clean up the way a user would: unwatch purges the shelf's books and
-    // stops the watch; the files on disk stay for the rm below.
     await page.evaluate(
       (dir) => window.tuxbooks!.invoke("unwatch_locations", { paths: [dir] }),
       shelf,
@@ -190,17 +180,12 @@ test.describe("tuxbooks filesystem synchronization", () => {
   });
 
   test("unwatching a folder empties the app of its books while files stay", async ({ page }) => {
-    // A shelf outside the seeded library, so the mirror round trip never
-    // disturbs the fixtures the other suites run against.
     const shelf = path.join(scratchDir, "unwatch-shelf");
     const shelfBook = path.join(shelf, "shelf-book.epub");
     mkdirSync(shelf, { recursive: true });
     copyFileSync(thirdNewEpub, shelfBook);
     const before = readFileSync(shelfBook);
 
-    // The native import dialog cannot be driven from the automation surface,
-    // so the shelf comes in through the same bridge command the UI's Import
-    // Folder flow issues (same rule as the scale spec).
     const report = (await page.evaluate(
       (dir) => window.tuxbooks!.invoke("import_paths", { paths: [dir] }),
       shelf,
@@ -213,8 +198,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount + 1);
 
-    // Unwatch it the way a user does: Settings > Watched folders > select >
-    // Unwatch.
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
@@ -224,8 +207,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await row.getByRole("checkbox", { name: `Select ${shelf}` }).click();
     await page.getByTestId("folders-unwatch").click();
 
-    // Destructive-only: no keep/remove choice, the loss is spelled out, and
-    // the files-on-disk promise stands.
     const dialog = page.getByTestId("unwatch-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("unwatch-remove-books")).toHaveCount(0);
@@ -235,10 +216,8 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(dialog).toContainText("Your files on disk stay untouched.");
     await page.getByTestId("unwatch-confirm").click();
 
-    // The shelf leaves the watch list...
     await expect(row).toHaveCount(0);
 
-    // ...its book leaves the library view...
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
     await expect
@@ -248,7 +227,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
       })
       .toBe(seededLibraryBookCount);
 
-    // ...and the file on disk is byte-for-byte what it was.
     expect(readFileSync(shelfBook).equals(before)).toBe(true);
     rmSync(shelf, { recursive: true, force: true });
   });
@@ -256,8 +234,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
   test("a folder inside a watched one gains no row, and the parent owns its books", async ({
     page,
   }) => {
-    // A watched folder with a folder inside it, both outside the seeded
-    // library so the suites that follow still find it intact (ADR 0010).
     const parent = path.join(scratchDir, "flat-parent");
     const child = path.join(parent, "child");
     const childBook = path.join(child, "child-book.epub");
@@ -279,15 +255,12 @@ test.describe("tuxbooks filesystem synchronization", () => {
     const imported = await importFolder(parent);
     expect(imported.failed).toEqual([]);
 
-    // The folder inside a watched one registers nothing: the folder above
-    // already watches the whole subtree, so a row of its own would add
-    // nothing and could never be unwatched on its own.
+    // The inner folder registers nothing: the parent already watches the whole subtree.
     const covered = await importFolder(child);
     expect(covered.failed).toEqual([]);
     expect(covered.watched).toEqual([]);
     expect(covered.covered).toEqual([child]);
 
-    // The list carries one row, not two.
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await page.getByRole("button", { name: "Watched folders" }).click();
@@ -296,8 +269,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     await expect(parentBox).toBeVisible();
     await expect(list.getByRole("checkbox", { name: `Select ${child}` })).toHaveCount(0);
 
-    // Unwatching it is unambiguous: the folder and everything inside it go,
-    // with nothing to ask and nothing left behind to re-import them.
     await parentBox.click();
     await page.getByTestId("folders-unwatch").click();
     const dialog = page.getByTestId("unwatch-dialog");
@@ -308,8 +279,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
 
     await expect(parentBox).toHaveCount(0);
 
-    // The book leaves the library and the file stays byte-for-byte, with no
-    // ghost coming back through a watch nothing covers anymore.
     await page.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByTestId("library-view")).toBeVisible();
     await expect
@@ -327,8 +296,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     rmSync(parent, { recursive: true, force: true });
   });
   test("keeps progress and annotations through unwatch and re-import", async ({ page }) => {
-    // A shelf outside the seeded library, so the state journey never disturbs
-    // the fixture books the other suites read.
     const shelf = path.join(scratchDir, "durable-state-shelf");
     const file = path.join(shelf, "state-book.epub");
     mkdirSync(shelf, { recursive: true });
@@ -368,7 +335,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     });
     expect(keptAnnotations).toHaveLength(1);
 
-    // The same bytes return and reattach to the durable book.
     await invoke(page, "import_paths", { paths: [shelf] });
     await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
     const again = await libraryBook(page, file);
@@ -420,7 +386,6 @@ test.describe("tuxbooks filesystem synchronization", () => {
     expect(keptProgress?.progressPercent).toBe(71);
     expect(await invoke<unknown[]>(page, "list_annotations", { bookId: book.id })).toHaveLength(1);
 
-    // Importing the same bytes restores the same book.
     await invoke(page, "import_paths", { paths: [shelf] });
     await expect.poll(() => cardCount(page), { timeout: 30000 }).toBe(seededLibraryBookCount + 1);
     const again = await libraryBook(page, file);

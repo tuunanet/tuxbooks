@@ -14,14 +14,11 @@ export function useLibrarySelection(selectedIds: number[], visibleIds: number[])
     [dispatch],
   );
 
-  // The card hands over the event, so this is the one place that reads the
-  // modifier keys and tells a right click from a plain one.
   const selectBook = useCallback(
     (bookId: number, event: ReactMouseEvent<HTMLElement>) => {
       if (event.type === "contextmenu") {
-        // Right click opens the menu for the selection as it stands; only
-        // an unselected book takes the selection over, and the anchor stays
-        // where the last plain or Ctrl click left it.
+        // Right click opens the menu for the current selection; only an
+        // unselected book takes the selection over.
         if (!selectedSet.has(bookId)) dispatch({ type: "library-context-select", bookId });
         return;
       }
@@ -36,17 +33,14 @@ export function useLibrarySelection(selectedIds: number[], visibleIds: number[])
     [dispatch, selectedSet, visibleIds],
   );
 
-  // A plain click or a right click on empty space starts over, in the grid
-  // as in the empty states below it. Cards, controls, and the missing-file
-  // action buttons own their own clicks, and a modifier click on empty
-  // space belongs to no book.
+  // A plain click or right click on empty space starts over; cards, controls,
+  // and the missing-file buttons own their own clicks.
   const clearOnBackground = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      // Menus and dialogs render into a portal outside this section's DOM
-      // even though React bubbles their events through it: a click there is
-      // never a click on empty space.
+      // Menus and dialogs render in a portal outside this DOM: a click there
+      // is never a click on empty space.
       if (!event.currentTarget.contains(target)) return;
       if (target.closest("[data-book-card], button, input")) return;
       const modified = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;

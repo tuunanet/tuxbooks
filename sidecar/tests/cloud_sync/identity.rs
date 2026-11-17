@@ -21,8 +21,6 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
     let stale_other = add_book(&stale, "other.epub", other_bytes).await;
     add_bookmark(&stale, stale_other, "epubcfi(/6/4!/4/2,/1:0,/1:8)", "keep").await;
 
-    // Both machines meet while both are live: the identities converge on
-    // one canonical uid per book.
     connect(&stale, sync_dir.path()).await;
     run(&stale).await;
     connect(&b, sync_dir.path()).await;
@@ -45,20 +43,15 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
     );
     assert_eq!(book_uid(&b, b_other).await, other_uid);
 
-    // B's second book moves on locally; the stale replay below must leave
-    // it alone.
     seed_progress(&b, b_other, 55.0).await;
 
-    // The stale identity forgets its book; the tombstone lands in the
-    // folder under the stale device directory.
     let outcome = lifecycle::forget(&stale.pool, stale_book).await.unwrap();
     outcome
         .replacement_book_id
         .expect("the file stays on the stale machine");
     run(&stale).await;
 
-    // B applies the stale forget: the old identity leaves B's library and
-    // its state stays restorable from B's local trash.
+    // B applies the stale forget.
     run(&b).await;
     run(&b).await;
     let b_fresh = book_id(&b, "shared.epub").await;
@@ -88,8 +81,6 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
     );
     seed_progress(&b, b_fresh, 71.0).await;
 
-    // The stale identity restores the book. Replaying that restore onto the
-    // moved-on library must recreate the record under a real id.
     let stale_trash = lifecycle::list_trash(&stale.pool).await.unwrap();
     let stale_entry = stale_trash
         .iter()
@@ -112,10 +103,7 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         restored_record.0 > 0,
         "the replayed restore allocates a real id"
     );
-    // The restore wins over the moved-on local state: the library entry
-    // joins the restored identity again, the snapshot's bookmark returns,
-    // and the local progress that lost shows up as a review conflict
-    // instead of vanishing silently.
+    // The restore wins over moved-on local state; lost progress surfaces as a conflict.
     let restored_entry = book_id(&b, "shared.epub").await;
     assert_eq!(
         book_uid(&b, restored_entry).await,
@@ -151,10 +139,8 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         .unwrap();
     assert_eq!(zeros, 0, "no id-0 row from the stale replay");
 
-    // A stale restore op for the second book, carrying a snapshot nothing
-    // can read: a genuine projection conflict. The replay must fail
-    // visibly and leave the book exactly where it was. The clock beats
-    // every real op written earlier.
+    // A stale restore with an unreadable snapshot must fail visibly and leave
+    // the book alone; the clock beats every real op written earlier.
     const STALE_WALL: i64 = 3_000_000_000_000;
     let stale_device = stale
         .service
@@ -208,8 +194,6 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         "the failed replay moves no state"
     );
 
-    // Retry with the snapshot still unreadable fails honestly and keeps
-    // the row open.
     assert!(
         b.service.retry_issue(issue.id).await.is_err(),
         "Retry cannot repair unreadable data"
@@ -220,8 +204,6 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         "the row stays open while the data is broken"
     );
 
-    // Once the snapshot reads, Retry replays the restore and closes the
-    // row; the recreated book carries a real id.
     let readable = serde_json::json!({
         "book_id": 0,
         "book": {
@@ -276,8 +258,7 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         .unwrap();
     assert!(recovered.0 > 0, "the recovered identity gets a real id");
 
-    // B's own captured operations must not re-apply to B: the applied-ops
-    // ledger holds them off, so further passes leave the library alone.
+    // B's own captured ops must not re-apply: the applied-ops ledger holds them off.
     let ledgered: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_applied_ops")
         .fetch_one(&b.pool)
         .await
@@ -327,8 +308,7 @@ async fn a_stale_alias_or_edit_cannot_resurrect_a_forgotten_identity() {
     let fresh_uid = book_uid(&b, book_id(&b, "same.epub").await).await;
     assert_ne!(fresh_uid, old_uid);
 
-    // A device that had not seen the Forget yet replays an old identity alias
-    // and a stale progress edit with a newer clock.
+    // A device that never saw the Forget replays a stale alias and edit.
     let manual_device = "e".repeat(32);
     let stale_hash = "f".repeat(64);
     let identity = Op {

@@ -5,9 +5,7 @@ import { comboFromEvent, useShortcut } from "@/lib/shortcuts";
 import { ShortcutProvider } from "@/state/ShortcutProvider";
 
 function fireKey(init: KeyboardEventInit, target: EventTarget = window): boolean {
-  // Real keydowns bubble to the window-level listener; the synthetic event
-  // must too (KeyboardEvent defaults to bubbles: false), or dispatching on
-  // an element target can never exercise the provider's gating.
+  // Synthetic KeyboardEvents default to bubbles: false, which never reaches the window listener.
   const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(event);
   return event.defaultPrevented;
@@ -51,9 +49,6 @@ describe("comboFromEvent", () => {
   });
 
   it("keeps shift part of the combo", () => {
-    // Shift+Space is its own combo (issue #65: previous page in PDF
-    // presentation mode), and shifted navigation keys (selection
-    // extension) never alias the unmodified navigation combos.
     expect(comboFromEvent(new KeyboardEvent("keydown", { key: " ", shiftKey: true }))).toBe(
       "shift+space",
     );
@@ -138,13 +133,11 @@ describe("ShortcutProvider", () => {
     );
 
     const slider = screen.getByLabelText("sizer");
-    // The appearance sliders step their value with arrows/PageUp/PageDown;
-    // a font-size change must never double as an engine page turn (#42).
+    // Sliders consume arrows/PageUp/PageDown; a font-size change must not page-turn.
     expect(fireKey({ key: "ArrowRight" }, slider)).toBe(false);
     expect(fireKey({ key: "PageDown" }, slider)).toBe(false);
     expect(onFire).not.toHaveBeenCalled();
 
-    // Modifier combos still dispatch over a focused slider.
     const onModFire = vi.fn();
     rerender(
       <ShortcutProvider>
@@ -163,17 +156,12 @@ describe("ShortcutProvider", () => {
       </ShortcutProvider>,
     );
 
-    // The button activates Space on keyup and Enter on keydown natively;
-    // the shortcut firing on keydown as well would double-fire — a
-    // focused book-mode turn zone turned two spreads per Space press.
+    // The button activates Space on keyup natively, so a keydown shortcut would double-fire.
     const button = screen.getByRole("button");
     expect(fireKey({ key: " " }, button)).toBe(false);
     expect(fireKey({ key: "Enter" }, button)).toBe(false);
     expect(onFire).not.toHaveBeenCalled();
 
-    // Only the activation pair belongs to the button: other combos still
-    // dispatch over it, so focus left on a toolbar button keeps its
-    // navigation shortcuts.
     const onArrowFire = vi.fn();
     rerender(
       <ShortcutProvider>

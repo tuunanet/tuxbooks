@@ -70,11 +70,8 @@ describe("fitHeightScale", () => {
 
 describe("fitPageScale", () => {
   it("lets the binding axis win", () => {
-    // A 1224×1584 viewport fits the letter page at 2× on both axes.
     expect(fitPageScale(1224, 1584, 612, 792)).toBe(2);
-    // A narrow viewport is width-bound.
     expect(fitPageScale(612, 1584, 612, 792)).toBe(1);
-    // A short viewport is height-bound.
     expect(fitPageScale(1224, 396, 612, 792)).toBe(0.5);
   });
 
@@ -93,7 +90,6 @@ describe("stepZoomLevel", () => {
   });
 
   it("snaps an off-preset scale onto the nearest preset before stepping", () => {
-    // Zooming out of a fit mode continues from where the page actually is.
     expect(stepZoomLevel(1.2, 1)).toBe(1.25);
     expect(stepZoomLevel(1.2, -1)).toBe(1);
     expect(stepZoomLevel(2.6, 1)).toBe(4);
@@ -104,7 +100,6 @@ describe("stepZoomLevel", () => {
     const ceiling = ZOOM_PRESETS[ZOOM_PRESETS.length - 1] as number;
     expect(stepZoomLevel(floor, -1)).toBe(floor);
     expect(stepZoomLevel(ceiling, 1)).toBe(ceiling);
-    // Below/above the range still clamps to the end preset.
     expect(stepZoomLevel(0.05, -1)).toBe(MIN_ZOOM);
     expect(stepZoomLevel(500, 1)).toBe(MAX_ZOOM);
   });
@@ -128,7 +123,6 @@ describe("wheelZoomScale", () => {
   it("multiplies by 1.2 per standard 100px notch, in and out", () => {
     expect(wheelZoomScale(1, -100, 0)).toBeCloseTo(1.2, 12);
     expect(wheelZoomScale(1, 100, 0)).toBeCloseTo(1 / 1.2, 12);
-    // Chromium often reports ~±120 per notch; the formula is continuous.
     expect(wheelZoomScale(1, -120, 0)).toBeCloseTo(1.2 ** 1.2, 12);
   });
 
@@ -138,9 +132,7 @@ describe("wheelZoomScale", () => {
   });
 
   it("normalizes line and page delta modes first", () => {
-    // deltaMode 1 (lines): 5 lines × 16px = 80px.
     expect(wheelZoomScale(1, -5, 1)).toBeCloseTo(1.2 ** 0.8, 12);
-    // deltaMode 2 (pages): a quarter viewport of 800px = 200px.
     expect(wheelZoomScale(1, -0.25, 2, 800)).toBeCloseTo(1.2 ** 2, 12);
     // The ±300px cap applies after normalization, not to the raw delta.
     expect(wheelZoomScale(1, -0.5, 2, 800)).toBeCloseTo(1.2 ** 3, 12);
@@ -194,21 +186,18 @@ describe("formatZoomPercent", () => {
 
 describe("autoFitScale", () => {
   it("fits the width for a portrait page, whatever the area aspect (zoom_for_size_automatic)", () => {
-    // doc_height >= doc_width → automatic is the fit-width scale, so a tall
-    // area does not switch it to contain the way the old Okular rule did.
+    // doc_height >= doc_width → automatic is the fit-width scale, not contain.
     expect(autoFitScale(1000, 1100, 612, 792)).toBeCloseTo(1000 / 612, 10);
     expect(autoFitScale(1224, 1584, 612, 792)).toBe(2);
   });
 
   it("takes the binding axis for a landscape page", () => {
-    // doc_height < doc_width → MIN(fit width, fit height).
     expect(autoFitScale(1000, 744, 841.89, 612)).toBeCloseTo(1000 / 841.89, 10);
     expect(autoFitScale(600, 744, 841.89, 612)).toBeCloseTo(600 / 841.89, 10);
     expect(autoFitScale(2000, 400, 1000, 500)).toBeCloseTo(0.8, 10);
   });
 
   it("reserves the Papers margin on each side when spacing is given", () => {
-    // target.width = 1024 - 2*12 = 1000, target.height = 768 - 2*12 = 744.
     expect(autoFitScale(1024, 768, 612, 792, 12)).toBeCloseTo(1000 / 612, 10);
     expect(autoFitScale(1024, 768, 841.89, 612, 12)).toBeCloseTo(1000 / 841.89, 10);
   });
@@ -254,9 +243,7 @@ describe("computePdfScale", () => {
   });
 
   it("fits the whole current page inside the area in presentation mode, whatever the mode", () => {
-    // Mixed-size document: page 2 is landscape — presentation rescales per
-    // page from the page being read, and both axes clamp so any page shape
-    // stays fully visible.
+    // Presentation rescales per page from the page being read; both axes clamp.
     const landscape = { width: 1224, height: 612 };
     expect(
       computePdfScale(
@@ -272,7 +259,6 @@ describe("computePdfScale", () => {
         612,
       ),
     ).toBe(1);
-    // A portrait page on the same landscape area is height-bound: 612 / 792.
     const portrait = { width: 612, height: 792 };
     expect(
       computePdfScale(
@@ -281,7 +267,6 @@ describe("computePdfScale", () => {
         612,
       ),
     ).toBe(612 / 792);
-    // A page wider than the area is width-bound instead of overflowing.
     const wide = { width: 2448, height: 612 };
     expect(
       computePdfScale({ mode: "fit-auto", level: 1, reference, presentationPage: wide }, 1224, 612),
@@ -329,9 +314,7 @@ interface OracleGeometry {
   documents: OracleDocument[];
 }
 
-// The test runs with the frontend package as cwd (see the other repo-root
-// readers, e.g. tests/security/preloadSurface.test.ts); walk up to the repo
-// root for the committed oracle output.
+// Test cwd is the frontend package; walk up to the repo root for the oracle.
 const ORACLE: OracleGeometry = JSON.parse(
   fs.readFileSync(path.resolve(process.cwd(), "..", "oracle", "expected", "geometry.json"), "utf8"),
 ) as OracleGeometry;
@@ -409,8 +392,7 @@ describe("Papers fidelity oracle (oracle/expected/geometry.json)", () => {
       expect(width).toBeGreaterThanOrEqual(previousWidth);
       previousWidth = width;
     }
-    // The sweep did cross fractional raw products, so the integer sizes
-    // above are the rounding's doing, not a coincidence.
+    // The sweep crossed fractional raw products, so the integers come from rounding.
     expect(rawWasFractional).toBe(true);
 
     const slots = layoutSlots(displayedSizes([page, { ...page, pageNumber: 2 }], 1.7));
@@ -446,8 +428,7 @@ describe("medianPageSize", () => {
   });
 
   it("is deterministic for even sample counts regardless of order", () => {
-    // Which of the two middles it picks is an implementation detail; the
-    // contract is that shuffled samples give the same page every time.
+    // Either middle is fine; shuffled samples must give the same page.
     expect(medianPageSize([WIDE, ORDINARY])).toEqual(medianPageSize([ORDINARY, WIDE]));
   });
 
@@ -461,7 +442,6 @@ describe("scaledPixels", () => {
   it("rounds points * scale to whole pixels like (int)(points * scale + 0.5)", () => {
     expect(scaledPixels(612, 2)).toBe(1224);
     expect(scaledPixels(612, 1.5)).toBe(918);
-    // 612 * (1000/612) = 1000 exactly; a page one point heavier still rounds.
     expect(scaledPixels(595.276, 1000 / 612)).toBe(973);
     expect(scaledPixels(841.89, 1000 / 612)).toBe(1376);
     // The half-up boundary is what removes the sub-pixel remainder.
@@ -484,8 +464,6 @@ describe("displayedSizes", () => {
   });
 
   it("rounds every displayed dimension to whole pixels", () => {
-    // Mixed-size pages at the oracle's single-page fit-width scale: the raw
-    // products are fractional, so rounding is observable.
     const scale = 1000 / 612;
     const scaled = displayedSizes(
       sizes([
@@ -634,9 +612,6 @@ describe("spread stepping", () => {
       ...LETTER,
     }));
 
-  // The T5 edge-case table: one press per spread change, forward lands on
-  // the next spread's anchor page, backward on the previous spread's last
-  // page, and both ends stay put instead of wrapping.
   it.each([
     [1, 0, 0, 0],
     [2, 0, 1, 0],
@@ -667,13 +642,10 @@ describe("spread stepping", () => {
     },
   );
 
-  // The independent cross-check: the spread sequence comes from
-  // layoutSpread itself (the grouping rule), and every step must agree
-  // with it — the stepping math never re-derives the pairing.
+  // Cross-check: spread sequence comes from layoutSpread, which stepping must match.
   it("steps across the spread sequence layoutSpread defines", () => {
     for (let pageCount = 1; pageCount <= 8; pageCount++) {
       const doc = letterDoc(pageCount);
-      // The distinct spreads in reading order, collected from the rule.
       const spreads: number[][] = [];
       for (let index = 0; index < pageCount; index++) {
         const members = layoutSpread(doc, index)?.pages.map((page) => page.pageNumber - 1) ?? [];
@@ -683,7 +655,6 @@ describe("spread stepping", () => {
         const position = spreads.findIndex((spread) => spread.includes(index));
         const forward = nextSpreadPageIndex(index, pageCount);
         if (position < spreads.length - 1) {
-          // One press reaches the next spread's anchor page.
           expect(forward).toBe(spreads[position + 1]![0]);
         } else {
           // The last spread: the press stays inside it, never wraps.
@@ -691,7 +662,6 @@ describe("spread stepping", () => {
         }
         const backward = previousSpreadPageIndex(index);
         if (position > 0) {
-          // One press back lands on the previous spread's last page.
           expect(backward).toBe(spreads[position - 1]!.at(-1));
         } else {
           expect(backward).toBe(0);

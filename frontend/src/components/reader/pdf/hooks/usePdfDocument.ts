@@ -53,10 +53,8 @@ export function usePdfDocument(
     openMs: null,
     openStartedAt: null,
   }));
-  // Render-phase reset on book switch (same pattern as the reader's bitmap
-  // cache): the previous document leaves state the moment the book id
-  // changes, so a closed document can never serve a render while the next
-  // one loads.
+  // Render-phase reset on book switch: the old document leaves state the moment
+  // the id changes, so it can never serve a render while the next one loads.
   if (snapshot.bookId !== bookId) {
     setSnapshot({
       bookId,
@@ -84,8 +82,7 @@ export function usePdfDocument(
     };
 
     const open = async (): Promise<void> => {
-      // The open anchor for the PDF-open telemetry (docs/PERFORMANCE.md):
-      // everything on the open path is measured from this point.
+      // Open anchor for PDF-open telemetry (docs/PERFORMANCE.md).
       const startedAt = performance.now();
       setOpenStartedAt(startedAt);
       const doc = await openPdfDocumentFromBook(bookId, "pdf");
@@ -94,10 +91,9 @@ export function usePdfDocument(
         return;
       }
       loaded = doc;
-      // Worker death is a diagnostic failure (distinct from cancellation):
-      // the range-backed source needs no retained bytes, so the document
-      // re-opens on a fresh worker. One automatic attempt — a second death
-      // is a real error, not something to loop on.
+      // Worker death is distinct from cancellation: the range-backed source
+      // needs no retained bytes, so re-open once on a fresh worker; a second
+      // death is a real error, not something to loop on.
       doc.onWorkerFailed?.(() => {
         if (cancelled || loaded !== doc) return;
         loaded = null;
@@ -112,8 +108,8 @@ export function usePdfDocument(
       });
       const numPages = doc.numPages;
       const openMs = performance.now() - startedAt;
-      // Read engine values outside the updater: state updaters must stay
-      // pure, so a malformed engine result fails in this try/catch.
+      // Read engine values outside the updater so a malformed result fails
+      // in this try/catch; state updaters must stay pure.
       setSnapshot((current) => ({
         ...current,
         document: doc,

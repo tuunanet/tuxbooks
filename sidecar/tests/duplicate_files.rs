@@ -247,7 +247,6 @@ async fn identical_files_share_one_entry_with_every_location_and_shared_state() 
     assert_eq!(listed.len(), 1, "one library entry per durable book");
     let book = &listed[0];
 
-    // Library counts are books, not file rows.
     let stats = env.rpc("get_library_stats", json!({})).await;
     assert_eq!(stats["bookCount"], json!(1));
 
@@ -289,12 +288,9 @@ async fn identical_files_share_one_entry_with_every_location_and_shared_state() 
         "the reader resolves the same active file"
     );
 
-    // Search indexes the durable book, so the two copies are one hit.
     let hits = env.rpc("search_books", json!({ "query": "Minimal" })).await;
     assert_eq!(hits.as_array().map(Vec::len), Some(1), "one hit per book");
 
-    // State is keyed by the durable book, so reading or annotating through
-    // the one entry is the state both copies share.
     env.save_progress(book.id).await;
     env.annotate(book.id).await;
     let shelf = env.create_collection("Duplicates").await;
@@ -306,7 +302,6 @@ async fn identical_files_share_one_entry_with_every_location_and_shared_state() 
     assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
     assert!(env.last_opened(book.id).await.is_some());
 
-    // Storage reports every file's bytes but counts the book once.
     let file_bytes = std::fs::metadata(&first).unwrap().len() as i64;
     let storage = env.storage().await;
     assert_eq!(storage["catalog"]["books"], json!(1));
@@ -354,8 +349,6 @@ async fn removing_one_copy_keeps_the_book_and_its_state() {
         .await;
     assert_eq!(removed, json!(true));
 
-    // The library entry survives through the other copy and the active file
-    // moved with it.
     let listed = env.library().await;
     assert_eq!(listed.len(), 1, "the book stays while a copy remains");
     assert_eq!(listed[0].id, book.id);
@@ -365,7 +358,6 @@ async fn removing_one_copy_keeps_the_book_and_its_state() {
     assert_eq!(remaining[0]["path"], json!(survivor));
     assert_eq!(remaining[0]["active"], json!(true));
 
-    // Every piece of durable state is untouched.
     assert_eq!(env.progress_percent(book.id).await, Some(42.0));
     assert_eq!(env.annotation_count(book.id).await, 1);
     assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
@@ -380,8 +372,6 @@ async fn removing_one_copy_keeps_the_book_and_its_state() {
     assert_eq!(storage["catalog"]["books"], json!(1));
     assert_eq!(storage["bookTotalBytes"], json!(file_bytes));
 
-    // Removing the last copy ends membership but keeps the durable book in
-    // Reading history with its state.
     let last_id = remaining[0]["id"].as_i64().unwrap();
     env.rpc(
         "remove_book_file",
@@ -463,8 +453,6 @@ async fn existing_duplicate_rows_collapse_after_the_hash_backfill() {
     let second = env.copy_book("second.epub");
     let size = std::fs::metadata(&first).unwrap().len() as i64;
 
-    // Two rows with separate durable identities, as an upgrade leaves them
-    // before the background pass discovers they are the same bytes.
     let first_id = books::insert_book(&env.pool, &sample(&first, size))
         .await
         .unwrap();

@@ -76,9 +76,7 @@ export function SettingsWindow() {
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Opened over the reader, the window paints with the reader's live surface
-  // theme instead of the app theme underneath it. The scope derives from the
-  // same store the reader renders from, so a pinned theme, an auto theme
-  // following an app flip, and a Viewer-settings edit all stay in sync.
+  // theme; the scope derives from the same store the reader renders from.
   const themeScope = useMemo(
     () =>
       app.view === "reader"
@@ -88,7 +86,6 @@ export function SettingsWindow() {
   );
   const themeStyle = useMemo(() => themeScopeStyle(themeScope), [themeScope]);
 
-  // Reopening starts centered again instead of wherever the last drag ended.
   const close = useCallback(() => {
     setOffset({ x: 0, y: 0 });
     setDragging(false);
@@ -99,7 +96,6 @@ export function SettingsWindow() {
     if (event.button !== 0) return;
     const target = event.target as Element;
     if (!target.closest("[data-settings-drag-handle]")) return;
-    // Buttons and form controls inside a header keep their own click behavior.
     if (target.closest("button, a, input, select, textarea, [role='button']")) return;
 
     const rect = contentRef.current?.getBoundingClientRect();
@@ -112,9 +108,8 @@ export function SettingsWindow() {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      // A window resize leaves the stored offset outside the new limits.
-      // Start from where the panel is actually drawn, or the first drag
-      // after a resize moves nothing until the pointer covers the gap.
+      // A resize can leave the stored offset outside the new limits; start
+      // from where the panel is drawn or the first drag moves nothing.
       baseX: clamp(offset.x, -limitX, limitX),
       baseY: clamp(offset.y, -limitY, limitY),
       limitX,
@@ -144,10 +139,8 @@ export function SettingsWindow() {
     }
   };
 
-  // While the window is open it owns every key: the reader's shortcut
-  // registry listens on window, so keydowns are stopped at the dialog unless
-  // they are Escape. Escape keeps bubbling to Radix's document listener so
-  // the dialog closes, then stops there before the registry sees it.
+  // Escape must keep bubbling to Radix's document listener so the dialog
+  // closes; every other key is stopped before the reader's registry sees it.
   return (
     <ThemeScopeProvider scope={themeScope} style={themeStyle}>
       <Dialog
@@ -170,11 +163,8 @@ export function SettingsWindow() {
           onPointerMove={moveDrag}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          // The clamp is what keeps a stale drag offset from leaving the
-          // panel off-screen: the app window can shrink under it (maximize,
-          // drag to a corner, restore) and the stored pixels no longer fit
-          // the viewport. The browser re-evaluates the clamp on every
-          // resize, so no resize listener can lag behind.
+          // The clamp keeps a stale drag offset from leaving the panel
+          // off-screen when the app window shrinks under it.
           style={{
             ...PANEL_SIZE,
             left: `clamp(calc(var(--settings-w) / 2 + ${DRAG_MARGIN}px), calc(50% + ${offset.x}px), calc(100% - var(--settings-w) / 2 - ${DRAG_MARGIN}px))`,

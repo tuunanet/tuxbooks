@@ -31,9 +31,7 @@ async function stagedFrameText(page: Page): Promise<string> {
       try {
         const text = frame.contentDocument?.body?.innerText ?? "";
         if (text.length > best.length) best = text;
-      } catch {
-        /* cross-origin or detached */
-      }
+      } catch {}
     }
     return best;
   });
@@ -52,9 +50,7 @@ async function frameThemeBackground(page: Page): Promise<string> {
             "--USER__backgroundColor",
           ) ?? "";
         if (value) return value;
-      } catch {
-        /* detached */
-      }
+      } catch {}
     }
     return "";
   });
@@ -67,12 +63,9 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
       const host = page.locator("div[data-epub-host]");
       await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
 
-      // The last spine index the host reports; sections are 0-based.
       const lastSection = String(sectionCount - 1);
 
-      // Page forward to the end of the book: every spine crossing must
-      // render (blank frames were the UAT symptom), and the engine must
-      // stay ready rather than wedging on a failed section.
+      // Every spine crossing must render and the engine must stay ready (blank frames were the UAT symptom).
       for (let i = 0; i < sectionCount * 4 + 4; i += 1) {
         if (
           (await page.evaluate(() =>
@@ -105,10 +98,7 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
   }
 
   test("keeps the library layout stable with the regression corpus", async ({ page }) => {
-    // Scrollbar-gutter feedback loop: an arrangement whose content height
-    // sits at the scrollbar boundary reflows forever (cards drift a few px
-    // per toggle), which also makes cards unclickable. Any drift across an
-    // idle window fails this guard.
+    // Scrollbar-gutter feedback: boundary-height content reflows forever; any drift fails.
     await ensureLibrary(page);
     const card = page.locator('[aria-label="Reader Mangled Prolog (EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });
@@ -137,9 +127,8 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
     await page.getByTestId("pref-theme").getByText("Dark", { exact: true }).click();
     await expect.poll(() => frameThemeBackground(page), { timeout: 30000 }).toBe("#101013");
 
-    // Cross at least two spine boundaries forward (frame rebuilds), then
-    // back: the theme must survive every rebuild (the wedge path starts a
-    // fresh navigator with empty preferences and used to drop it).
+    // The theme must survive every frame rebuild; the wedge path starts a fresh
+    // navigator with empty preferences and used to drop it.
     for (let i = 0; i < 10; i += 1) {
       await page.keyboard.press("ArrowRight");
       await page.waitForTimeout(500);
@@ -167,11 +156,9 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
     const host = page.locator("div[data-epub-host]");
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
 
-    // Record every value the thumb paints. A cross-section jump reaches the
-    // engine as two relocates: the target section's frame anchors at its
-    // top the moment it loads, then the navigator reports the deep locator.
-    // Painting both swung the slider through the section start on every
-    // seek (the UAT flash).
+    // A cross-section jump reaches the engine as two relocates: the section
+    // anchors at its top, then the navigator reports the deep locator. Painting
+    // both swung the slider through the section start (the UAT flash).
     await page.evaluate(() => {
       const w = window as typeof window & { __thumbValues?: string[] };
       w.__thumbValues = [];
@@ -189,13 +176,8 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
     const bar = page.getByTestId("reader-progress");
     const box = (await bar.boundingBox())!;
 
-    // Seek across sections and inspect each seek's painted values. The
-    // engine's jump hold dispatches only the landing, so every value a
-    // seek paints must sit within a step of the clicked fraction, of the
-    // landing, or of the previous seek's landing (a landing slow enough to
-    // bleed past the settle wait still belongs to its own seek). The
-    // section anchor sits well outside all three on this dense fixture
-    // (observed swings of ~3-5 points), and its appearance fails here.
+    // The jump hold dispatches only the landing, so painted values must be within
+    // a step of the click, landing, or previous landing.
     let previousLanding: number | null = null;
     for (const fraction of [0.1, 0.8, 0.3, 0.95]) {
       const before = await page.evaluate(
@@ -204,8 +186,7 @@ test.describe("reader regressions from real-world EPUB shapes", () => {
       await bar.click({
         position: { x: Math.round(box.width * fraction), y: Math.round(box.height / 2) },
       });
-      // The settle wait must cover the hold's quiet window plus a slow
-      // frame load; segment boundaries assume the landing has painted.
+      // The settle wait must cover the hold's quiet window plus a slow frame load.
       await page.waitForTimeout(2000);
       const segment = (
         await page.evaluate(

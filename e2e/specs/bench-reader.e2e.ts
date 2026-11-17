@@ -312,10 +312,7 @@ const dragScroll = (
       let lastPos = fmt === "epub" ? epubScroll().pos : 0;
       let jumps = 0;
       await new Promise<number>((resolve) => {
-        // Sampler at 8 ms: registration must be faster than the frame clock
-        // or a 16 ms tick beats against 16.7 ms frames and biases deltas to
-        // double intervals. Duplicate same-frame registrations are filtered
-        // by the monotonic check below.
+        // Sampler at 8 ms: a 16 ms tick beats against 16.7 ms frames and biases deltas to double intervals.
         const sampler = window.setInterval(() => {
           requestAnimationFrame((now) => {
             if (now > last) {
@@ -343,9 +340,6 @@ const dragScroll = (
             if (scroller.el === null || Math.abs(scroller.pos - lastPos) < 1) {
               stalls += 1;
               if (stalls >= 12) {
-                // Section end: turn through the window-level page-turn
-                // shortcut (the engine owns these combos while an EPUB is
-                // open).
                 window.dispatchEvent(
                   new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
                 );
@@ -359,7 +353,6 @@ const dragScroll = (
             }
             const el = scroller.el;
             if (el) {
-              // Raw offset assignment, unclamped: the drag follows content.
               el.scrollTop = scroller.pos + px;
             }
           }
@@ -394,7 +387,6 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
   page.evaluate(
     ({ sampleMs, stopTimeoutMs, lifetimeMs }) => {
       const globals = globalThis as typeof globalThis & { __tuxbooksBenchRapid?: RapidHandle };
-      // A previous failed scenario's sampler must not keep ticking.
       globals.__tuxbooksBenchRapid?.stop();
       const container = document.querySelector<HTMLElement>("[data-testid=reader-content]");
       if (!container) throw new Error("reader-content not found");
@@ -423,10 +415,7 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
       };
       window.addEventListener("wheel", onWheel, { passive: true });
 
-      // Every slot intersecting the reader viewport, in document order:
-      // the walk covers the slots above the viewport first, so the first
-      // entry is the topmost visible one — the page under the viewport's
-      // top edge, what the reader is looking at.
+      // Document order: the first intersecting slot is the page under the viewport's top edge.
       const visibleStates = (): string[] => {
         const box = container.getBoundingClientRect();
         const states: string[] = [];
@@ -439,9 +428,6 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         return states;
       };
 
-      // The interval handle is a parameter: finish() is declared before the
-      // interval exists, and the interval's own callback passes its handle
-      // in when it decides to stop.
       const finish = (interval: number, sharpAt: number, timedOut: boolean): void => {
         if (finished) return;
         finished = true;
@@ -458,8 +444,7 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
         }
         const share = (count: number): number =>
           motionTicks.length === 0 ? 0 : Number(((count / motionTicks.length) * 100).toFixed(1));
-        // Each sample stands for one interval of time, so a run of N white
-        // samples spans N × sampleMs (the baseline's 336 samples = 8,400 ms).
+        // Each sample spans one interval of time, so N white samples = N × sampleMs.
         let longestWhiteStreakMs = 0;
         let whiteSince = -1;
         const lastT = motionTicks[motionTicks.length - 1]?.t ?? 0;
@@ -490,9 +475,7 @@ const startRapidScrollSampler = (page: Page): Promise<void> =>
 
       const timer = window.setInterval(() => {
         const now = performance.now();
-        // Hard bound: a scenario that dies before finish() was awaited must
-        // not keep sampling (layout reads at 40 Hz) through later scenarios
-        // in the same app session.
+        // Hard bound: a scenario that dies before finish() must not keep sampling into later ones.
         if (now - installedAt > lifetimeMs) {
           finish(timer, now, true);
           return;
@@ -548,17 +531,12 @@ test.describe("reader performance benchmark", () => {
 
     const environment = await prepareBenchEnvironment(page);
 
-    // First-render latency: launch-to-first-page on the real-book fixture
-    // (open + engine init + first page bitmap) — the cold-open cost a
-    // reader feels when opening a book.
     const firstRenderStart = Date.now();
     await openInReader(page, benchBookTitles.pdf);
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30_000 });
     try {
       await waitForRendered(page, 1, 90_000);
     } catch (err) {
-      // Diagnose from artifacts: which page is the reader actually on, and
-      // what state are the first slots in?
       const probe = await page.evaluate(() => ({
         indicator: document.querySelector("[data-testid=pdf-page-indicator]")?.textContent ?? "",
         slots: Array.from(document.querySelectorAll("[data-pdf-slot]"))
@@ -582,8 +560,6 @@ test.describe("reader performance benchmark", () => {
     );
 
     const total = Number((await textOf(page, "pdf-page-indicator")).match(/of (\d+)/)![1]);
-    // Walk from the middle of the book: front matter and the ToC are the
-    // least representative pages in the document.
     const startPage = Math.max(1, Math.floor(total / 2));
     await scrollToSlot(page, startPage);
     await waitForRendered(page, startPage, 60_000);
@@ -627,8 +603,7 @@ test.describe("reader performance benchmark", () => {
       onePageBound: onePage,
     };
 
-    // PERF-3 (deterministic attribute): one down-up oscillation must
-    // retain ≥ 2 buffers in the bitmap cache.
+    // PERF-3 (deterministic): one down-up oscillation must retain ≥ 2 cached buffers.
     const down = Math.min(walkTo + 1, total);
     await scrollToSlot(page, down);
     await waitForRendered(page, down, 60_000);
@@ -636,8 +611,6 @@ test.describe("reader performance benchmark", () => {
     await waitForRendered(page, walkTo, 60_000);
     const cacheAfterOscillation = await bitmapCacheUsage(page);
 
-    // Persist before the budget asserts: a failed scenario still leaves its
-    // numbers on disk.
     recordScenario(
       reportFile,
       "pdf-page-walk",
@@ -652,15 +625,12 @@ test.describe("reader performance benchmark", () => {
       { ...environment, pdfRenderInfo },
     );
 
-    // PERF-1 (deterministic): every walked buffer stays under the caps.
     expect(buffers.length).toBeGreaterThan(0);
     for (const buffer of buffers) {
       expect(buffer.bufferPx).toBeLessThanOrEqual(2 ** 25);
       expect(buffer.maxSide).toBeLessThanOrEqual(8192);
     }
 
-    // PERF-4 (derived from slot/canvas state): live canvases within the
-    // count cap and the per-window byte bound.
     expect(memory.pageCanvases).toBeLessThanOrEqual(8);
     expect(memory.pageBytes).toBeLessThanOrEqual(8 * onePage);
 
@@ -722,8 +692,6 @@ test.describe("reader performance benchmark", () => {
     await scrollToSlot(page, startPage);
     await waitForRendered(page, startPage, 60_000);
 
-    // Real wheel input over the content area — the gesture the white-slot
-    // complaint is about, unlike the synthetic scrollTop drag above.
     const box = await page.locator('[data-testid="reader-content"]').boundingBox();
     expect(box).not.toBeNull();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
@@ -732,17 +700,13 @@ test.describe("reader performance benchmark", () => {
     const startedAt = Date.now();
     for (let event = 0; event < RAPID_WHEEL_EVENTS; event++) {
       await page.mouse.wheel(0, RAPID_WHEEL_PX_PER_EVENT);
-      // Absolute pacing: the CDP round trip of each dispatch must not
-      // stretch the pass, or the scroll speed — and with it the baseline —
-      // drifts.
+      // Absolute pacing: CDP round-trip drift would change scroll speed and the baseline.
       const dueAt = startedAt + (event + 1) * RAPID_WHEEL_CADENCE_MS;
       const waitMs = dueAt - Date.now();
       if (waitMs > 0) await page.waitForTimeout(waitMs);
     }
     const sampled = await finishRapidScroll(page);
 
-    // Persist before the liveness asserts: a failed scenario still leaves
-    // its numbers on disk.
     recordScenario(
       reportFile,
       "pdf-rapid-scroll",
@@ -761,8 +725,6 @@ test.describe("reader performance benchmark", () => {
       environment,
     );
 
-    // Deterministic input and liveness checks only; the timing numbers are
-    // reported and compared against the recorded baseline by hand.
     expect(sampled.wheelEvents).toBeGreaterThanOrEqual(RAPID_WHEEL_EVENTS);
     expect(sampled.distancePx).toBeGreaterThan(0);
     expect(sampled.samples).toBeGreaterThan(0);
@@ -795,8 +757,6 @@ test.describe("reader performance benchmark", () => {
     const wheelSettleMs: number[] = [];
     const bigJumpLatencyMs: number[] = [];
 
-    // Rapid page turning: the toolbar's next/prev buttons, one sample each —
-    // the interaction a reader repeats most. Turn down five pages, then up.
     for (let i = 0; i < 5; i++) {
       const before = await indicatorPage();
       const after = await interactionLatency(
@@ -816,9 +776,6 @@ test.describe("reader performance benchmark", () => {
       pageTurnLatencyMs.push(after);
     }
 
-    // Zoom in/out: each step relayouts and re-renders the window; the
-    // observable effect is the zoom label (geometry streams in after). The
-    // buttons disable at the ends of the zoom ladder — stop there.
     const zoomSteps = async (direction: "in" | "out"): Promise<void> => {
       for (let i = 0; i < 2; i++) {
         const button = page.getByTestId(`pdf-zoom-${direction}`);
@@ -835,23 +792,12 @@ test.describe("reader performance benchmark", () => {
     await zoomSteps("in");
     await zoomSteps("out");
 
-    // Ctrl+wheel gesture settle: the page follows the wheel through a CSS
-    // transform preview; the sharp raster commits WHEEL_SETTLE_MS after the
-    // last event. Samples run after the preset steps so the gesture starts
-    // from a settled layout. Measured: last wheel event → the anchor slot
-    // rasterized at the new scale (settle + first sharp raster).
     await page.mouse.move(
       (environment.window.width ?? 1280) / 2,
       (environment.window.height ?? 800) / 2,
     );
     for (let i = 0; i < 3; i++) {
-      // The anchor is the page being read, not the first canvas in DOM order:
-      // the render window keeps a neighbour's preview canvas mounted first, so
-      // the first canvas is often not the anchor and never re-rasterizes.
-      // The settle signal is a new `data-pdf-render-ms` sample on the anchor
-      // canvas, not a backing-store width change: above the whole-page budget
-      // the canvas is a viewport-clipped region whose pixel width is fixed at
-      // the display size, so it never changes with zoom.
+      // The settle signal is a new `data-pdf-render-ms` sample on the anchor canvas, whose width never changes.
       const anchorPage = Number(
         (await textOf(page, "pdf-page-indicator")).match(/Page (\d+)/)?.[1],
       );
@@ -882,15 +828,10 @@ test.describe("reader performance benchmark", () => {
         .toBe(true);
       wheelSettleMs.push(Date.now() - start);
     }
-    // Leave the big-jump walk at a comparable zoom to previous runs. The
-    // reset re-anchors the document asynchronously; let it settle before the
-    // jump samples, or the pending re-anchor clobbers the first jump back to
-    // the top (observed: the scroll lands, then the re-anchor resets it).
+    // Let the Control+0 re-anchor settle, or it clobbers the first jump back to the top.
     await page.keyboard.press("Control+0");
     await page.waitForTimeout(800);
 
-    // Large-document navigation: long scroll jumps across a third of the
-    // document — the virtualization + eviction path under displacement.
     const jumpTargets = [
       startPage,
       Math.max(1, startPage - 30),
@@ -934,11 +875,7 @@ test.describe("reader performance benchmark", () => {
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30_000 });
     const firstRenderLatencyMs = Date.now() - openStart;
 
-    // Chapter changes through the contents drawer: open drawer → click TOC
-    // entry → engine lands on the section. TOC entry indices are not spine
-    // section indices in a real book, so the latency is measured to a
-    // section CHANGE from the pre-click value; entries that resolve to the
-    // section we are already in are skipped, not failed.
+    // TOC entry indices are not spine section indices: measure to a section change, skip no-ops.
     const chapterChangeLatencyMs: number[] = [];
     const sectionNow = async () =>
       page.evaluate(
@@ -947,8 +884,6 @@ test.describe("reader performance benchmark", () => {
             .querySelector("[data-testid=epub-reader] [data-epub-host]")
             ?.getAttribute("data-epub-section") ?? null,
       );
-    // Query per iteration by index, up to the first 8 entries, until 3
-    // changes have been sampled.
     for (let index = 0; index < 8 && chapterChangeLatencyMs.length < 3; index++) {
       await openReaderNavigation(page);
       const item = page.getByTestId(`toc-item-${index}`);
@@ -965,8 +900,6 @@ test.describe("reader performance benchmark", () => {
           return true;
         })
         .catch(() => false);
-      // The drawer closes itself on a successful navigation; a no-op entry
-      // leaves it open — normalize either way before the next sample.
       if (changed) {
         await page
           .getByTestId("reader-nav")
@@ -976,8 +909,6 @@ test.describe("reader performance benchmark", () => {
         await closeReaderNavigation(page);
       }
     }
-    // Persist before the sample-count assert: a failed scenario still
-    // leaves its partial numbers on disk.
     recordScenario(
       reportFile,
       "epub-chapter-change",
@@ -1002,17 +933,13 @@ test.describe("reader performance benchmark", () => {
     await host.waitFor({ state: "attached", timeout: 30_000 });
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30_000 });
 
-    // Continuous layout: fresh sessions default to paginated (the
-    // preference is not persisted), and this suite measures scrolling.
     await page.getByTestId("appearance-trigger").click();
     await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 10_000 });
     const layoutItems = page.locator('[data-testid="pref-layout"] button');
     expect(await layoutItems.count()).toBe(2);
     const label = await layoutItems.nth(1).textContent();
     expect(label).toBe("Scrolling");
-    // The popover's enter/exit animation can swallow the layout click —
-    // re-drive it until the flow lands on the reader surface as a pinned
-    // attribute (docs/EPUB.md testability contract).
+    // The popover's enter/exit animation can swallow the click: re-drive until the flow is pinned.
     let applied = false;
     for (let attempt = 0; attempt < 3 && !applied; attempt++) {
       await layoutItems.nth(1).click();
@@ -1028,8 +955,6 @@ test.describe("reader performance benchmark", () => {
     expect(applied).toBe(true);
     await page.keyboard.press("Escape");
 
-    // PERF-12: the scrolled reading surface must be measure-capped.
-    // Deterministic DOM attribute — timing assertions stay out of E2E.
     await expect
       .poll(async () => (await page.locator("div[data-epub-measure=capped]").count()) > 0, {
         timeout: 10_000,
@@ -1039,11 +964,6 @@ test.describe("reader performance benchmark", () => {
       () => document.querySelector<HTMLElement>("[data-epub-measure]")?.style.maxWidth ?? "",
     );
 
-    // Jump deep into the book through the shell's End shortcut (the shell
-    // maps the position onto the engine's nearest position): front matter
-    // and the ToC are the least representative content. The pre-jump probe
-    // is captured first so "changed" is measured against where the restored
-    // session had put us.
     const beforeJump = await epubPositionProbe(page);
     await page.keyboard.press("End");
     await expect
@@ -1074,8 +994,6 @@ test.describe("reader performance benchmark", () => {
   });
 
   test.afterAll(() => {
-    // The file is the source of truth (written per scenario): summaries and
-    // the trend line read it back, so a worker restart cannot zero them.
     const report = readBenchReport(reportFile);
     if (report === null) return;
     logReport(report);

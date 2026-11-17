@@ -147,8 +147,6 @@ pub async fn import_paths(
     };
 
     let mut report = ImportReport::default();
-    // Folder scans run after every explicit entry is in hand, so a drop of
-    // ten books from one folder scans that folder once instead of ten times.
     let mut folders: Vec<PathBuf> = Vec::new();
     let mut seen_folders: HashSet<PathBuf> = HashSet::new();
     for raw in paths {
@@ -165,9 +163,6 @@ pub async fn import_paths(
         if path.is_dir() {
             queue_folder(&mut folders, &mut seen_folders, path);
         } else if path.is_file() {
-            // A picked file is imported by its parent's scan. Reject a
-            // non-book now, so a stray file never watches its folder only
-            // to fail inside the scan.
             if !has_book_extension(&path) {
                 report
                     .failed
@@ -248,9 +243,7 @@ async fn register_and_import_folder(
         .start(&root_key)
         .map_err(AppError::InvalidInput)?;
     let (registration, result) = {
-        // Finish and unregister on every exit path, panics included, or an
-        // unwatch could wait forever for a run that is gone. The guard drops
-        // at the end of this block, before the final status event below.
+        // Unregister on every exit path, panics included, or an unwatch waits forever for a dead run.
         let _guard = ImportGuard {
             importing: state.importing.clone(),
             root: root_key,
@@ -261,8 +254,6 @@ async fn register_and_import_folder(
         if !registration.newly_added {
             run.mark_refreshing();
         }
-        // The folder is registered before its scan, so Settings can show it
-        // while the import is still running instead of after it finishes.
         if registration.watch {
             events.emit("watched-folders-changed", &());
         }
@@ -276,11 +267,8 @@ async fn register_and_import_folder(
             Some(run.cancel_flag()),
         )
         .await;
-        // Start watching only after the scan, so the watcher cannot import
-        // the same files concurrently. A cancelled scan gets no watcher at
-        // all: its folder is about to be purged and starting one would let a
-        // late event write rows after the purge. A failed scan keeps its
-        // watch for a retry.
+        // Watch only after the scan so the watcher cannot import the same files;
+        // a cancelled scan gets none, or a late event could write rows after the purge.
         let cancelled = run.cancelled();
         let result = match outcome {
             Ok(mut folder_report) => {
@@ -304,8 +292,6 @@ async fn register_and_import_folder(
         (registration, result)
     };
 
-    // The run is gone now, so the reload sees the final idle state and the
-    // settled book count.
     if registration.watch {
         events.emit("watched-folders-changed", &());
     }
@@ -367,16 +353,12 @@ async fn register_location(
             newly_added: false,
         });
     }
-    // Add the parent before dropping the nested rows it now covers. If the
-    // process dies between the two, the list briefly holds a nested entry
-    // but every book still has a watched owner; the reverse order would
-    // orphan the descendants' books during the gap.
+    // Add the parent before dropping nested rows: the reverse order would orphan
+    // their books if the process dies in between.
     let added = library_locations::add_location(&state.db, &root).await?;
     if added {
         report.watched.push(root.clone());
     }
-    // A watched folder inside another adds nothing (ADR 0010). Its row goes
-    // without a purge and its books stay, owned by this folder from here on.
     let collapsed = library_locations::collapse_descendants(&state.db, &root).await?;
     for gone in &collapsed {
         state.watcher.unwatch(Path::new(gone));
@@ -429,14 +411,9 @@ pub async fn unwatch_locations(
         roots.push(path.to_string());
     }
 
-    // Read once, while every row still stands, so the refusal reasons about
-    // the watch list the user is looking at.
     let registered = library_locations::list_locations(&state.db).await?;
 
     for root in &roots {
-        // The shallowest folder above it, which is the one the dialog would
-        // name: taking that folder takes everything between the two, so
-        // naming a deeper one would offer a move that leaves the hole open.
         let ancestor = registered
             .iter()
             .filter(|candidate| {
@@ -453,12 +430,8 @@ pub async fn unwatch_locations(
         }
     }
 
-    // A scan registers its folder before importing, so the folder is visible
-    // in Settings while rows are still landing. Block the roots under the
-    // same lock a new scan uses to register, then cancel any matching scan
-    // and wait for it to stop before collecting the purge set. Without the
-    // shared lock, an import that had not registered yet could start after
-    // this purge and re-create the folder.
+    // Share the registration lock with new scans, then cancel and wait: without
+    // it an import that had not registered yet could start after this purge.
     let (runs, blocked) = state.importing.block(&roots);
     let _unwatch_block = UnwatchBlockGuard {
         importing: state.importing.clone(),
@@ -471,11 +444,7 @@ pub async fn unwatch_locations(
         run.wait_finished().await;
     }
 
-    // Which file rows these folders own has to be settled before any row
-    // goes: the dialog counts each folder with `storage_stats`, and that
-    // count is the promise "these N books are removed". Ownership flips the
-    // moment a row is deleted, so the removal set is read while the rows
-    // still stand.
+    // Settle the removal set while rows stand: `storage_stats` already promised them.
     let mut doomed = Vec::new();
     for path in &roots {
         for book in books::books_owned_by(&state.db, path).await? {
@@ -485,10 +454,7 @@ pub async fn unwatch_locations(
         }
     }
 
-    // Stop the taps first: a row left behind is visible and retryable, a
-    // watch left behind would keep syncing a folder the user just left. The
-    // whole set goes as one operation so a cascaded subfolder is not
-    // re-registered on its way out.
+    // Stop the taps first: a leftover row is retryable, a leftover watch keeps syncing.
     let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
     state.watcher.unwatch_all(&dying);
 
@@ -503,10 +469,6 @@ pub async fn unwatch_locations(
         events.emit("watched-folders-changed", &());
     }
 
-    // The same membership-only delete the library's own Remove uses: file
-    // rows and memberships go, while the durable book and its progress and
-    // annotations stay. Files on disk do not. The cache scan runs once
-    // below, not once per row.
     let total = doomed.len();
     events.emit("unwatch-progress", &UnwatchProgress { removed: 0, total });
     let mut processed = 0usize;
@@ -530,8 +492,6 @@ pub async fn unwatch_locations(
         }
     }
 
-    // Sweep before the final count so a bar reading "all done" never sits
-    // behind work still in flight.
     if processed > 0 {
         if let Err(err) = crate::services::artwork_cache::sweep_unreferenced_covers(
             &state.db,

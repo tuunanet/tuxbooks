@@ -24,18 +24,13 @@ import {
 } from "./helpers.js";
 
 test.describe("tuxbooks continuous PDF reader", () => {
-  // Virtualization on the 100-page fixture: the whole document reserves
-  // geometry, but only a bounded set of pages may own canvases at any time.
-  // The upper bound is a regression guard against rendering the entire
-  // document — not an exact contract.
+  // Upper bound on live canvases; a regression guard, not an exact contract.
   const RENDER_BUDGET_LIMIT = 15;
   const THUMBNAIL_BUDGET_LIMIT = 20;
 
   async function openLargeFixture(page: Page): Promise<void> {
     await openInReader(page, "A Large Fixture (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
-    // The document may restore to a previously read page (persistence), so
-    // only the page count itself is a stable expectation here.
     await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 100", {
       timeout: 30000,
     });
@@ -49,8 +44,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 30000,
     });
 
-    // Deterministic geometry: pages render fit-to-width times the zoom
-    // multiplier, times the device pixel ratio for the backing store.
     const dpr = await page.evaluate(() => window.devicePixelRatio);
     const fit = await fitFactor(page);
     await expect
@@ -70,14 +63,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // The toolbar's editable page field: type a page and press Enter to jump.
-  // The accessible readout is the hidden live region, so the assertion is the
-  // exact indicator text, plus the destination page rasterizing.
   test("jumps to a typed page in the reader toolbar", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
-    // Progress persists across tests, so start from a known page and prove the
-    // jump moves off it.
     await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
@@ -95,8 +83,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // An out-of-range typed page clamps onto the document's range instead of
-  // leaving the field or the indicator off-document.
   test("clamps an out-of-range typed page to the last page", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
@@ -116,8 +102,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Okular-style zoom control: an editable percentage plus a presets
-  // dropdown (fit modes and percentages) replace the fixed ladder.
   test("zooms to a typed percentage and a dropdown preset", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
@@ -126,8 +110,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     const input = page.getByTestId("pdf-zoom-input");
     const widthAtFit = Number(await canvas.getAttribute("width"));
 
-    // A typed percentage becomes the zoom (the field reports the effective
-    // scale, so 250 reads back as "250").
     await input.fill("250");
     await input.press("Enter");
     await expect(input).toHaveValue("250");
@@ -136,12 +118,10 @@ test.describe("tuxbooks continuous PDF reader", () => {
       .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
       .toBeGreaterThan(widthAtFit);
 
-    // An unparseable value leaves the current zoom in place.
     await input.fill("abc");
     await input.press("Enter");
     await expect(input).toHaveValue("250");
 
-    // The dropdown's fit entries switch the mode back.
     await page.getByTestId("pdf-zoom-menu").click();
     await page.getByTestId("pdf-zoom-fit-width").click();
     await expect(toolbar).toHaveAttribute("data-pdf-zoom-mode", "fit-width");
@@ -149,45 +129,31 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Smooth Ctrl+wheel zoom: while the wheel turns, the scale only PREVIEWS —
-  // a CSS transform on the document element with the toolbar tracking it
-  // live, no canvas re-render — and the sharp raster commits once the wheel
-  // settles. Deterministic DOM contract; no timing assertions.
   test("previews Ctrl+wheel zoom and commits it after the wheel settles", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
     await canvas.waitFor({ state: "attached", timeout: 30000 });
-    // Reading progress persists across tests in a seeded run, so reopening the
-    // fixture can restore to a page other than 1. Force the top before the
-    // geometry assertions below so they run against page 1 regardless.
     await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
-    // The width attribute is 0 until the first raster lands. Wait for that or
-    // the no-re-render assertion below reads a stale zero as the baseline.
+    // The width attribute is 0 until the first raster lands; wait for it or the baseline reads stale.
     await waitForRendered(page, 1);
     const input = page.getByTestId("pdf-zoom-input");
     const widthBefore = Number(await canvas.getAttribute("width"));
     const percentBefore = await input.inputValue();
 
-    // Gesture over the page surface: one notch in.
     const box = await page.getByTestId("reader-content").boundingBox();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await page.keyboard.down("Control");
     await page.mouse.wheel(0, -120);
 
-    // The preview is visible immediately: the toolbar percentage moved off
-    // the fit value, the document element carries the transform, and no
-    // canvas re-render happened (the backing store keeps its fit geometry).
     await expect(input).not.toHaveValue(percentBefore);
     await expect
       .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.transform))
       .toContain("scale(");
     expect(Number(await canvas.getAttribute("width"))).toBe(widthBefore);
 
-    // Settle: the transform clears and the page rasterizes sharp at the
-    // previewed scale.
     await page.keyboard.up("Control");
     await expect
       .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.transform), {
@@ -206,8 +172,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
 
-    // The title is centered on the header itself, not on the space between the
-    // unequal left and right groups (the PDF zoom controls widen the left).
     const centers = await page.evaluate(() => {
       const title = document.querySelector<HTMLElement>("[data-testid=reader-title]")!;
       const header = document.querySelector<HTMLElement>("header")!;
@@ -217,7 +181,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     });
     expect(Math.abs(centers.title - centers.header)).toBeLessThanOrEqual(2);
 
-    // Presentation mode: the bar is transparent until the pointer is over it.
     await page.keyboard.press("Control+l");
     const bar = page.getByTestId("pdf-presentation-bar");
     await expect(bar).toBeVisible({ timeout: 10000 });
@@ -225,13 +188,10 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await bar.hover();
     await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 
-    // Leave presentation mode for the next spec; the app is shared.
     await page.getByTestId("pdf-pres-exit").click();
     await returnToLibrary(page);
   });
 
-  // The presentation bar carries the same editable page field as the toolbar:
-  // a typed jump works with the normal reader chrome hidden.
   test("jumps to a typed page in the presentation bar", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
@@ -257,10 +217,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Leaving presentation must resume on the page that was being presented.
-  // The mode's single centred page leaves the scroll container at the top of
-  // a surface that no longer exists, so a bare exit dropped the reader back
-  // to page 1 (the scroll tracker then wrote that page into position).
   test("resumes on the presented page after leaving presentation mode", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
@@ -269,8 +225,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 30000,
     });
 
-    // Enter presentation and flip to page 3: that is the page in view when
-    // the mode ends.
     await page.keyboard.press("Control+l");
     const bar = page.getByTestId("pdf-presentation-bar");
     await expect(bar).toBeVisible({ timeout: 10000 });
@@ -287,8 +241,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 10000,
     });
 
-    // The reported page is not enough: page 3's slot must be the one at the
-    // top of the scroll container, not two pages further down.
+    // Page 3's slot must sit at the top of the scroll container, not two pages down.
     const geometry = await page.evaluate(() => {
       const slot = document.querySelector('[data-pdf-slot="3"]');
       if (!slot) return null;
@@ -308,10 +261,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Same contract without a flip: entering presentation clamps the scroll
-  // container to the single centred page, so the exit has to restore the
-  // entry page as well. jsdom lays out nothing and cannot clamp, which is
-  // why this path is proven here rather than in the unit suite.
+  // jsdom lays out nothing and cannot clamp, so this path is only provable here.
   test("returns to the entry page when presentation is left without flipping", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
@@ -335,10 +285,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Presentation steppers pre-render the neighbour (Papers' next/prev job
-  // model), so a step blits instead of rastering fresh behind a blank page.
-  // Deterministic signal: the cache holds the neighbour while the current page
-  // is still on screen.
   test("pre-renders the next page before a presentation step", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
@@ -350,8 +296,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await page.keyboard.press("Control+l");
     await expect(page.getByTestId("pdf-presentation-bar")).toBeVisible({ timeout: 10000 });
 
-    // Page 1 is on screen and page 2 has already been rasterized offscreen:
-    // the reader reports the preload before anything is stepped to.
     await expect
       .poll(
         () => page.getByTestId("pdf-reader").getAttribute("data-pdf-preload-count").then(Number),
@@ -370,18 +314,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Viewport clipping above the whole-page budget (deep zoom): the canvas
-  // rasterizes only the visible region and never allocates a page-sized
-  // buffer. The region ratio is capped by the whole-page budget (ADR 0004),
-  // so at deep zoom it can be below device resolution and the region buffer
-  // smaller than the CSS region. Deterministic DOM contract; no timing
-  // assertions.
   test("rasterizes only the visible region above the whole-page budget", async ({ page }) => {
     await openInReader(page, "A Large Fixture (PDF)");
     const canvas = firstPdfCanvas(page);
     await canvas.waitFor({ state: "attached", timeout: 30000 });
 
-    // Fit width keeps the whole-page path untouched.
     await expect(canvas).toHaveAttribute("data-pdf-render-region", "full");
 
     const input = page.getByTestId("pdf-zoom-input");
@@ -389,7 +326,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await input.press("Enter");
     await expect(input).toHaveValue("1600");
 
-    // The visible page re-renders as a clipped region at device resolution.
     const region = page
       .locator(
         '[data-testid=pdf-canvas][data-pdf-render-region]:not([data-pdf-render-region="full"])',
@@ -397,13 +333,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
       .first();
     await expect(region).toBeVisible({ timeout: 30000 });
 
-    // Wait for the region raster to land: until the atomic blit, the canvas
-    // still carries the previous (fit-width) geometry. Assert consistency
-    // against the element's own current region attribute, since the attribute
-    // updates a render before the slower blit. Both dimensions must match:
-    // a vertical move through the page keeps the region width and changes
-    // only its y and height, so a width-only poll can accept a canvas whose
-    // height is still the previous region's.
+    // The region attribute updates a render before the blit, and a vertical move keeps the width, so poll both dimensions.
     await expect
       .poll(
         () =>
@@ -446,17 +376,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(geometry.top).toBe(`${geometry.y}px`);
     expect(geometry.cssWidth).toBe(`${geometry.w}px`);
     expect(geometry.cssHeight).toBe(`${geometry.h}px`);
-    // The region ratio is capped at device resolution and by the whole-page
-    // budget (ADR 0004): at deep zoom it is at or below dpr, and the buffer
-    // respects the PERF-1 dimension and pixel budgets.
     expect(geometry.bufferRatio).toBeLessThanOrEqual(geometry.dpr + 0.02);
     expect(geometry.bufferRatio).toBeGreaterThan(0);
     expect(Math.max(geometry.w, geometry.h)).toBeLessThanOrEqual(8192);
     expect(geometry.w * geometry.h * geometry.bufferRatio ** 2).toBeLessThanOrEqual(2 ** 25);
 
-    // The region must carry page ink over the page background, not a sized
-    // but blank or black box (a wrong clip transform, or an opaque clear,
-    // bakes a uniform region). Composite over the white page wrapper.
     const stats = await region.evaluate((el) => {
       const canvas = el as HTMLCanvasElement;
       const ctx = canvas.getContext("2d");
@@ -487,10 +411,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // The appearance controls are reflow-only (issue #46 UAT): a fixed-layout
-  // PDF exposes exactly the theme — applied as a CSS filter over the
-  // rendered pages (the Foliate fixed-content approach) — and none of the
-  // EPUB typography/layout sections that could not act on a raster page.
   test("exposes only the theme in the appearance menu", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const canvas = firstPdfCanvas(page);
@@ -500,7 +420,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     const content = page.getByTestId("appearance-content");
     await expect(content).toBeVisible({ timeout: 30000 });
 
-    // No reflow sections for a fixed layout.
     await expect(page.getByTestId("pref-font-size")).not.toBeAttached();
     await expect(page.getByTestId("pref-word-spacing")).not.toBeAttached();
     await expect(page.getByTestId("pref-font-family")).not.toBeAttached();
@@ -509,9 +428,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect(page.getByTestId("pref-columns")).not.toBeAttached();
     await expect(page.getByTestId("pref-page-gutter")).not.toBeAttached();
 
-    // The theme group offers exactly the PDF color modes (issue #67):
-    // Smart dark (worker-side recoloring), the explicit Invert negative,
-    // and High contrast — a choice lands on the document surface.
     const theme = page.getByTestId("pref-theme");
     await expect(theme.getByText("Default", { exact: true })).toBeVisible();
     await expect(theme.getByText("Smart dark", { exact: true })).toBeVisible();
@@ -521,8 +437,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await expect(page.getByTestId("pdf-document").evaluate((el) => el.style.filter)).resolves.toBe(
       "",
     );
-    // Invert is the full-page negative (the old Dark recipe); Smart dark
-    // applies no CSS filter — it recolors at raster time in the worker.
     await theme.getByText("Invert", { exact: true }).click();
     await expect
       .poll(() => page.getByTestId("pdf-document").evaluate((el) => el.style.filter), {
@@ -536,11 +450,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       })
       .toBe("");
 
-    // Paper multiplies the white pages down to the theme's paper color —
-    // the tint overlay, not a filter (a filter cannot darken white) — and
-    // the page/zoom controls dock into the reader header (issue #68), whose
-    // chrome the themed shell paints (no app-white strip floating over the
-    // tinted pages).
     await theme.getByText("Paper", { exact: true }).click();
     await expect(page.getByTestId("pdf-theme-tint")).toBeAttached();
     await expect(
@@ -561,8 +470,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       )
       .toBe("rgb(246, 240, 228)");
 
-    // The reading surface's scrollbar thumb derives from the theme (via the
-    // --reader-scrollbar-thumb custom property feeding scrollbar-color).
     await expect
       .poll(
         () =>
@@ -576,11 +483,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // § PDF-open telemetry: the deterministic, state-only half of the open
-  // timeline. The state machine must reach "interactive" through the
-  // range-backed open (bytes=range); timing segments are recorded but only
-  // their shape is asserted — thresholds live in the manual bench
-  // (docs/PERFORMANCE.md), never in headless CI.
   test("publishes the PDF-open state timeline attributes", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     const root = page.getByTestId("pdf-reader");
@@ -596,15 +498,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("tracks the current page while scrolling continuously", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
-    // Progress persists across tests, so start from a known page: the
-    // presentation specs now leave the reader on the page they ended on.
     await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
 
-    // Scrolling is the navigation: the anchor rule moves the current page
-    // forward through the document and back without any button presses.
     await scrollToSlot(page, 2);
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,
@@ -626,16 +524,11 @@ test.describe("tuxbooks continuous PDF reader", () => {
 
     expect(await renderedCount(page)).toBeLessThan(RENDER_BUDGET_LIMIT);
 
-    // Scrolling deep must render the destination page without ever
-    // exploding the number of live canvases.
     await scrollToSlot(page, 60);
     await waitForRendered(page, 60);
     expect(await textOf(page, "pdf-page-indicator")).toContain("Page");
     expect(await renderedCount(page)).toBeLessThan(RENDER_BUDGET_LIMIT);
 
-    // The engine worker must actually load. A silent fake-worker fallback
-    // (main-thread rendering) is a classic cause of seconds-long, highly
-    // variable page render times.
     const workerSrc = await page.evaluate(() =>
       document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-worker-src"),
     );
@@ -655,8 +548,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await waitForRendered(page, 100);
     expect(await renderedCount(page)).toBeLessThan(RENDER_BUDGET_LIMIT);
 
-    // Distant pages are evicted: slot 2's canvas is gone while its
-    // geometry reservation remains as an unloaded slot.
     await expect
       .poll(
         () =>
@@ -667,12 +558,7 @@ test.describe("tuxbooks continuous PDF reader", () => {
       )
       .toBe("unloaded");
 
-    // Rapid long-distance jumps (scrollbar-drag churn): superseded renders
-    // must unwind cleanly, and the final revisit ends with a fully painted
-    // canvas — no interleaved-paint fragments. The last jump is re-driven
-    // once: under load one programmatic scroll of a rapid burst can be
-    // dropped, and the stress target here is the render unwind, not scroll
-    // coalescing. (A systematic scroll loss still fails the wait below.)
+    // Under load one programmatic scroll of a burst can be dropped; the last jump is re-driven.
     await scrollToSlot(page, 87);
     await scrollToSlot(page, 30);
     await scrollToSlot(page, 74);
@@ -684,13 +570,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await returnToLibrary(page);
   });
 
-  // Milestone 9 stress: the report that motivated the render-policy rework.
-  // Oscillating scroll between two pages must converge — each page, as the
-  // reading anchor, renders and paints; revisited pages blit retained
-  // bitmaps instead of re-running the full raster; zoom churn during the
-  // same session settles cleanly. (Only the anchor page is a guaranteed
-  // render-set member at fit-width geometry, so every assertion targets the
-  // page currently scrolled to.)
   test("recovers rendered pages under rapid scroll oscillation and zoom churn", async ({
     page,
   }) => {
@@ -705,8 +584,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await scrollToSlot(page, 11);
     await expect.poll(() => canvasIsNonBlank(page, 11), { timeout: 30000 }).toBe(true);
 
-    // Zoom invalidates every cached bitmap; the visible page must converge
-    // to a freshly rendered canvas at the new scale.
     const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();
     await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelBefore, {
@@ -714,44 +591,28 @@ test.describe("tuxbooks continuous PDF reader", () => {
     });
     await expect.poll(() => canvasIsNonBlank(page, 11), { timeout: 30000 }).toBe(true);
 
-    // Reverse scroll across already-visited pages: cached bitmaps make
-    // re-entry cheap, and the render budget still holds at the end.
     await scrollToSlot(page, 1);
     await expect.poll(() => canvasIsNonBlank(page, 1), { timeout: 30000 }).toBe(true);
     expect(await renderedCount(page)).toBeLessThan(RENDER_BUDGET_LIMIT);
 
-    // Milestone 9 memory bound: after the stress, cache occupancy as
-    // reported by the diagnostics attribute stays within its configured
-    // budget (8 entries / 320 MiB — mirroring PdfBitmapCache's defaults;
-    // sized for ≥ 2 capped 4K page buffers at BOTH reference dprs,
-    // docs/PERFORMANCE.md PERF-3).
+    // Cache budget: 8 entries / 320 MiB plus the one oversized-keep-latest page (PERF-3).
     const cache = await bitmapCacheUsage(page);
     expect(cache).not.toBeNull();
     expect(cache!.entries).toBeLessThanOrEqual(8);
-    // The byte budget bounds retained memory except the newest single page
-    // (oversized-keep-latest): at this point the reader sits one ladder rung
-    // above its fit scale (issue #65 — at reference viewport sizes that is
-    // at most 1.5× the fit factor; 2 covers the whole ladder), so one
-    // dpr-scaled page bitmap is the allowed excess.
     const onePage = await maxSingleBitmapBytes(page, 2);
     expect(cache!.bytes).toBeLessThanOrEqual(320 * 1024 * 1024 + onePage);
 
     await returnToLibrary(page);
   });
 
-  // Critical acceptance test (§ persistence): the reader resumes where the
-  // user stopped, across close/reopen.
   test("restores the reading position when a PDF is reopened", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
-    // Progress persists across tests, so start from a known page before
-    // proving the restore.
     await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
 
-    // Scroll to page 2 and let the debounced save land before leaving.
     await scrollToSlot(page, 2);
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,
@@ -759,7 +620,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await page.waitForTimeout(1500);
     await returnToLibrary(page);
 
-    // Reopen: page 2 is restored (indicator, canvas, geometry).
     await openInReader(page, "A Minimal Manual (PDF)");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,
@@ -773,9 +633,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("keeps the current page rendered when zooming deep in the document", async ({ page }) => {
     await openLargeFixture(page);
 
-    // Jump deep via the toolbar's page field (not pixel coordinates). The
-    // drawer no longer lists page numbers; typed jumps go through the same
-    // page locator as scrolling.
     const pageInput = page.getByTestId("pdf-page-input");
     await pageInput.fill("87");
     await pageInput.press("Enter");
@@ -785,8 +642,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 30000,
     });
 
-    // Zoom rescales every slot; the current page must stay rendered and
-    // visible rather than leaving a stale viewport offset (UAT regression).
     const levelBefore = await page.getByTestId("pdf-zoom-input").inputValue();
     await page.getByTestId("pdf-zoom-in").click();
     await expect(page.getByTestId("pdf-zoom-input")).not.toHaveValue(levelBefore, {
@@ -809,11 +664,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
       timeout: 30000,
     });
 
-    // Geometry corrects lazily as pages approach the viewport, and the fit
-    // reference is the document's widest page (792pt here), not page 1's
-    // 612pt. Walk the whole document once so every page is measured and the
-    // fit scale settles on its final reference before the heights below are
-    // read. (100% zoom = fit width; dpr = 1 under Xvfb.)
     const rawHeights = [792, 612, 1008, 500, 842, 504];
     for (let pageNumber = 1; pageNumber <= rawHeights.length; pageNumber++) {
       await scrollToSlot(page, pageNumber);
@@ -823,9 +673,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     const fit = await fitFactor(page, 792);
     const expectedHeights = rawHeights.map((height) => Math.floor(height * fit));
 
-    // From the top, the document shows real mixed geometry and stacks
-    // strictly: each top equals the previous bottom plus the 8px page gap —
-    // no overlap, no collapse (±1px for offsetHeight rounding).
     await scrollToSlot(page, 1);
     const layout = await page.evaluate(() =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-pdf-slot]")).map((slot) => ({
@@ -840,19 +687,12 @@ test.describe("tuxbooks continuous PDF reader", () => {
       expect(Math.abs(layout[i].height - expectedHeights[i])).toBeLessThanOrEqual(1);
     }
 
-    // Slots stack strictly: each top equals the previous bottom plus the
-    // 8px page gap — no overlap, no collapse (±1px: offsetTop/offsetHeight
-    // round independently at fractional fit scales).
     for (let i = 1; i < layout.length; i++) {
       expect(
         Math.abs(layout[i].top - layout[i - 1].top - (layout[i - 1].height + 8)),
       ).toBeLessThanOrEqual(1);
     }
 
-    // The bounded render budget holds on a mixed-size document too. The
-    // eviction set is derived from the visible pages and lands a render after
-    // the scroll commits, so poll rather than reading the count once: the
-    // budget must hold, it just may not have flushed yet at the first read.
     await expect.poll(() => renderedCount(page), { timeout: 10_000 }).toBeLessThan(6);
     await returnToLibrary(page);
   });
@@ -865,8 +705,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     });
 
     await openReaderNavigation(page);
-    // 15 deterministic entries (5 parts × 2 sections), flattened depth-first:
-    // index 6 is "Part Three" (page 41), index 8 "Section Three-B" (page 51).
     await openReaderTab(page, "nav-tab-outline", "nav-outline-item-0");
     expect(await textOf(page, "nav-outline-item-6")).toContain("Part Three");
 
@@ -874,11 +712,9 @@ test.describe("tuxbooks continuous PDF reader", () => {
       (await textOf(page, "pdf-page-indicator")).includes("Page 41 of 100"),
     );
     await waitForRendered(page, 41);
-    // Selecting an entry closes the drawer; wait out the exit animation so
-    // the fading sheet overlay cannot swallow the header clicks below.
+    // Wait out the sheet's exit animation so the fading overlay cannot swallow the header clicks.
     await page.getByTestId("reader-nav").waitFor({ state: "detached", timeout: 30000 });
 
-    // A nested entry resolves to its own destination, not its parent's.
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-outline", "nav-outline-item-8");
     await clickUntilEffect(page, "[data-testid=nav-outline-item-8]", async () =>
@@ -893,8 +729,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
   test("shows an empty outline state for documents without one", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
     await firstPdfCanvas(page).waitFor({ state: "attached", timeout: 30000 });
-    // The document may restore a previously read page (persistence), so only
-    // the page count itself is a stable expectation here.
     await expect(page.getByTestId("pdf-page-indicator")).toContainText("of 3", {
       timeout: 30000,
     });
@@ -903,7 +737,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await openReaderTab(page, "nav-tab-outline", "nav-outline-empty");
     expect(await textOf(page, "nav-outline-empty")).toContain("no outline");
 
-    // Close the drawer before leaving: the sheet overlay covers the header.
     await page.keyboard.press("Escape");
     await page.getByTestId("reader-nav").waitFor({ state: "detached", timeout: 30000 });
 
@@ -916,16 +749,12 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await page.getByTestId("reader-sidebar-toggle").click();
     await expect(page.getByTestId("pdf-thumbnails")).toBeVisible({ timeout: 30000 });
 
-    // The reading page is indicated without any interaction — whichever page
-    // the reader restored to, its thumbnail is marked active.
     const restoredPage = Number(
       (await textOf(page, "pdf-page-indicator")).match(/Page (\d+) of 100/)?.[1],
     );
     expect(restoredPage).toBeGreaterThanOrEqual(1);
     await expect.poll(() => thumbnailIsActive(page, restoredPage), { timeout: 30000 }).toBe(true);
 
-    // Clicking a thumbnail navigates the document (the whole list reserves
-    // cells up front, so the target exists even while far out of view).
     await page.locator('[data-pdf-thumb-slot="50"] button').click();
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 50 of 100", {
       timeout: 30000,
@@ -934,34 +763,24 @@ test.describe("tuxbooks continuous PDF reader", () => {
     expect(await thumbnailIsActive(page, 50)).toBe(true);
     expect(await thumbnailCanvasCount(page)).toBeLessThan(THUMBNAIL_BUDGET_LIMIT);
 
-    // Scrolling the sidebar deep renders destination thumbnails and still
-    // never mounts the whole document as bitmaps.
     await scrollThumbnailsToBottom(page);
     await expect.poll(() => thumbnailState(page, 100), { timeout: 30000 }).toBe("rendered");
     expect(await thumbnailCanvasCount(page)).toBeLessThan(THUMBNAIL_BUDGET_LIMIT);
 
-    // Current-page synchronization: scrolling the document moves the
-    // highlight (and brings the page's thumbnail into view and rendered).
     await scrollToSlot(page, 70);
     await expect.poll(() => thumbnailIsActive(page, 70), { timeout: 30000 }).toBe(true);
     await expect.poll(() => thumbnailState(page, 70), { timeout: 30000 }).toBe("rendered");
     expect(await canvasIsNonBlank(page, 70, "pdf-thumbnail")).toBe(true);
 
-    // Closing the sidebar unmounts the thumbnails with it.
     await page.getByTestId("reader-sidebar-toggle").click();
     await page.getByTestId("pdf-thumbnails").waitFor({ state: "detached", timeout: 30000 });
 
     await returnToLibrary(page);
   });
 
-  // Milestone 5 — in-book search: page text comes from the engine through
-  // the seam; picking a match navigates to its page.
   test("finds page text and navigates to the matching page", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
-    // Earlier specs leave the book's saved position past page 1, and the
-    // reader restores it before the surface mounts — so wait for the
-    // document slots, then navigate to page 1 explicitly before waiting
-    // for its render.
+    // Earlier specs leave a saved position past page 1, so scroll to page 1 before waiting for its render.
     await expect
       .poll(async () => (await slotStates(page)).length, { timeout: 30000 })
       .toBeGreaterThan(0);
@@ -971,7 +790,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     await page.getByTestId("reader-search").click();
     const searchInput = page.getByTestId("reader-search-input");
     await expect(searchInput).toBeVisible({ timeout: 30000 });
-    // "Page 2 of 3" exists only on page 2 of the fixture.
     await searchInput.fill("Page 2 of 3");
 
     await expect(page.getByTestId("reader-search-match").first()).toBeVisible({
@@ -985,7 +803,6 @@ test.describe("tuxbooks continuous PDF reader", () => {
     );
     expect(resultsText).toContain("Page 2");
 
-    // Clicking the match navigates to page 2 and closes the overlay.
     await page.getByTestId("reader-search-match").click();
     await expect.poll(() => currentPageNumber(page), { timeout: 30000 }).toBe(2);
     await expect(page.getByTestId("reader-search-overlay")).toBeHidden({ timeout: 30000 });

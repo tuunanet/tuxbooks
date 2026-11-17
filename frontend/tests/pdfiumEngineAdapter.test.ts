@@ -36,8 +36,6 @@ class FakeWorker {
   onerror: ((event: { message: string }) => void) | null = null;
 
   constructor(url: string) {
-    // The fake implements Worker's constructor signature; no assertion
-    // reads the URL (the wiring asserts were slimmed away).
     void url;
     workers.push(this);
   }
@@ -60,10 +58,8 @@ class FakeWorker {
         }
       } else if (method === "text") {
         const page = (params as { page: number }).page;
-        // Page 3 has no usable text: the reader must degrade to no layer.
-        // Page 4 reports a lying font size (a degenerate text matrix: the
-        // char boxes stand 30 units while GetFontSize says 1.2), the shape
-        // that collapsed PDF mouse selection when the text layer trusted it.
+        // Page 3 has no usable text. Page 4 reports a lying font size (GetFontSize 1.2
+        // while boxes stand 30 units) — the shape that once broke PDF mouse selection.
         const lines =
           page === 3
             ? []
@@ -72,7 +68,6 @@ class FakeWorker {
               : [{ text: `line ${page}`, x: 10, y: 20, w: 100, h: 30, size: 24 }];
         this.respond({ id, ok: true, result: { lines } });
       } else if (method === "outline") {
-        // The raw seam shape: 0-based pages, an external link without a page.
         this.respond({
           id,
           ok: true,
@@ -164,9 +159,7 @@ describe("PDFium adapter", () => {
     const staleTask = stale.render({ canvas: staleCanvas, viewport: { width: 10, height: 10 } });
     const targetTask = target.render({ canvas: targetCanvas, viewport: { width: 10, height: 10 } });
 
-    // Only the first raster has reached the worker; the other two are held
-    // behind the document's render tail. Cancelling the middle one must drop
-    // it before dispatch, not leave it for the worker to execute later.
+    // A still-queued middle render must be dropped on cancel, before dispatch.
     staleTask.cancel();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(worker.renders.map((request) => request.page)).toEqual([1]);
@@ -202,9 +195,7 @@ describe("PDFium adapter", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(worker.renders.map((request) => request.page)).toEqual([1]);
 
-    // Cancelling the already-posted first request must not release the tail:
-    // PDFium is still busy with it, and posting the target early would put a
-    // second stale request behind the worker's synchronous raster.
+    // Cancelling an already-posted request must not release the tail while PDFium is busy.
     firstTask.cancel();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(worker.renders.map((request) => request.page)).toEqual([1]);
@@ -233,9 +224,6 @@ describe("PDFium adapter", () => {
       region: { x: 10, y: 20, width: 30, height: 40 },
     }).promise;
 
-    // Region buffer is region-sized at the ratio (30×40 CSS × 2), and the
-    // clip converts CSS to page units through the page-units-per-CSS ratio
-    // (200 page units / 100 CSS = 2).
     expect(workers[0]!.renders).toEqual([
       { page: 1, width: 60, height: 80, clip: [20, 40, 60, 80] },
     ]);
@@ -249,9 +237,6 @@ describe("PDFium adapter", () => {
     canvas.width = 200;
     canvas.height = 300;
 
-    // The seam passes the reader's `SmartPalette`; the adapter converts it to
-    // PDFium's category colour scheme before it crosses to the worker, so the
-    // worker payload carries plain 32-bit colours (tuxbooks-koe.9).
     await page.render({
       canvas,
       viewport: { width: 100, height: 150 },
@@ -265,8 +250,6 @@ describe("PDFium adapter", () => {
       textStroke: 0xff101013,
     });
 
-    // Without a palette (default, paper via CSS tint, filter modes) the
-    // request carries no colour scheme.
     await page.render({ canvas, viewport: { width: 100, height: 150 } }).promise;
     expect(workers[0]!.renders[1]?.colorScheme).toBeUndefined();
 
@@ -276,8 +259,6 @@ describe("PDFium adapter", () => {
   test("routes outline and search through the worker and shapes the results", async () => {
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
-    // Outline: the worker walks PDFium's bookmarks and returns the raw tree;
-    // the seam normalizes it to the reader's 1-based page locators.
     await expect(getPdfOutline(pdf)).resolves.toEqual([
       {
         title: "Part One",
@@ -289,8 +270,6 @@ describe("PDFium adapter", () => {
       },
     ]);
 
-    // Search: page text comes from the same structured text lines the text
-    // layer uses, assembled and matched case-insensitively by the pure helpers.
     const pageText = await getPdfPageText(pdf, 2);
     expect(pageText).toBe("line 2");
     expect(findPageMatches(pageText, "LINE")).toEqual([{ pre: "", match: "line", post: " 2" }]);
@@ -305,11 +284,7 @@ describe("PDFium adapter", () => {
       { text: "line 2", x: 10, y: 20, w: 100, h: 30, size: 24 },
     ]);
 
-    // The seam's text-layer renderer turns those lines into positioned,
-    // transparent spans at the requested scale. No fixed width: the box
-    // shrink-wraps its run, and the width is fitted in the browser
-    // (unmeasurable in jsdom). The font stays under the line box so the
-    // painted selection band cannot exceed the line pitch.
+    // No fixed width in jsdom: the box shrink-wraps, and the font stays inside the line box.
     const container = document.createElement("div");
     await renderPdfTextLayer(pdf, 2, container, 2);
     const span = container.querySelector("span")!;
@@ -331,8 +306,7 @@ describe("PDFium adapter", () => {
     await renderPdfTextLayer(pdf, 4, container, 2);
     const span = container.querySelector("span")!;
     expect(span.textContent).toBe("degenerate");
-    // 1.2 (reported) x 2 would be an invisible 2.4px text run inside a
-    // 60px hit box; the char box keeps selection hit-testing aligned.
+    // Trusting 1.2×2 would render an invisible run inside the hit box; size from the box.
     expect(span.style.fontSize).toBe("42px");
 
     await pdf.destroy();
@@ -341,10 +315,7 @@ describe("PDFium adapter", () => {
   test("a superseded layer's cancel keeps the live layer's spans", async () => {
     const pdf = await openPdfDocumentFromBook(1, "pdf");
 
-    // StrictMode (dev) mounts the layer effect twice; the first build's
-    // promise can resolve after the second has painted. Its cancel must
-    // remove only its own spans — a container-wide clear left dev-mode
-    // layers empty until a resize forced a rebuild.
+    // StrictMode mounts twice; a late first build's cancel must remove only its own spans.
     const container = document.createElement("div");
     const [first, second] = await Promise.all([
       renderPdfTextLayer(pdf, 2, container, 1),

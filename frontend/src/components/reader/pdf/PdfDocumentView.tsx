@@ -137,16 +137,9 @@ export function PdfDocumentView({
     <div
       ref={contentAreaRef}
       data-testid="pdf-content-area"
-      // No self-scrolling: the shell scroller (reader-content) owns both
-      // axes. An overflow here gives the area its own scrollbars, whose
-      // width feeds back into usePdfScale's measurement — the fit
-      // scale then oscillates and re-anchoring yanks the viewport
-      // (invisible on WebKitGTK overlay scrollbars, loud on Chromium).
-      // The document centers itself with auto margins below: flex
-      // `justify-center` would center an overflowing document so its left
-      // overflow lands at negative coordinates, which scrollLeft can never
-      // reach — the page's left edge would be cut off with the scrollbar
-      // already at its end.
+      // No self-scrolling: the shell scroller owns both axes. An overflow here
+      // feeds back into usePdfScale's measurement and makes the fit scale
+      // oscillate. Auto margins (not justify-center) keep left overflow reachable.
       className={`flex min-h-0 w-full${presentation ? " h-full items-center" : ""}`}
     >
       <div
@@ -164,9 +157,7 @@ export function PdfDocumentView({
         }}
         className="relative mx-auto flex flex-col items-center"
       >
-        {/* Paper-style themes multiply-tint the opaque white pages down to
-            the theme color (white × tint = tint, black stays black). The
-            overlay sits above every page and ignores the pointer. */}
+        {/* White × tint = tint, black stays black; the overlay ignores the pointer. */}
         {themeTint && (
           <div
             aria-hidden
@@ -176,9 +167,7 @@ export function PdfDocumentView({
           />
         )}
         {slots.map((slot, index) => {
-          // Canvases live only on the render set, so lifecycle states stay
-          // honest: a page outside the set is unloaded unless it failed —
-          // failures keep their slot flagged (with retry) until retried.
+          // Canvases exist only on the render set; failures stay flagged for retry.
           let state: PdfPageLifecycle = "unloaded";
           if (failedPages.has(slot.pageNumber)) {
             state = "error";
@@ -204,23 +193,15 @@ export function PdfDocumentView({
               onRetry={onRetryPage ? () => onRetryPage(slot.pageNumber) : undefined}
             >
               {canvasPages.has(slot.pageNumber) ? (
-                // Page chrome (border, rounded clip, paper background) sits
-                // on this cheap wrapper, never on the page-sized canvas
-                // layer itself (PERF-6): a clip here is nearly free, while
-                // painted effects on the canvas would be re-composited every
-                // frame. Text/highlight overlays are positioned in this same
-                // wrapper, so the 1px border inset applies to all equally.
-                // The placeholder background follows the theme (issue #67
-                // follow-up): a Smart Dark page still queued/rendering must
-                // not flash white before its dark bitmap blits.
+                // Page chrome lives on this cheap wrapper, never the page-sized
+                // canvas (PERF-6). The themed background keeps a queued page from
+                // flashing white before its dark bitmap blits.
                 <div
                   data-pdf-page-wrapper={slot.pageNumber}
                   className="relative overflow-hidden rounded-sm border bg-white"
                   style={{
-                    // The wrapper owns the page geometry: in region mode the
-                    // canvas is position:absolute, so without an explicit size
-                    // the wrapper collapses to 1px and overflow-hidden clips
-                    // the whole page away (blank viewport at deep zoom).
+                    // Explicit size: region mode makes the canvas absolute, so
+                    // without it the wrapper collapses and clips the page away.
                     width: slot.width,
                     height: slot.height,
                     ...(pageBackground ? { backgroundColor: pageBackground } : {}),

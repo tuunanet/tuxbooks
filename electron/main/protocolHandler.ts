@@ -66,9 +66,7 @@ function textResponse(status: number, body: string): Response {
 }
 
 function asBody(bytes: Uint8Array): BodyInit {
-  // Buffers are ArrayBuffer-backed at runtime; the cast only bridges the
-  // DOM type's ArrayBuffer-specific variance and avoids copying book-sized
-  // payloads.
+  // Buffers are ArrayBuffer-backed: the cast only bridges DOM variance, no copy.
   return bytes as unknown as BodyInit;
 }
 
@@ -110,15 +108,11 @@ export async function handleProtocolRequest(
     }
     if (url.protocol !== "tuxbooks:") return textResponse(404, "not found");
 
-    // tuxbooks://book/<id>?format=epub|pdf — a stored book's source bytes.
-    // tuxbooks://book/<id>/<encoded member path> — one EPUB ZIP member for
-    // the Readium navigator, percent-encoded exactly like the manifest's
-    // hrefs and decoded exactly once here.
+    // tuxbooks://book/<id>?format=epub|pdf serves source bytes; /<id>/<encoded
+    // member> serves one ZIP member for Readium, percent-decoded exactly once here.
     if (url.host === "book") return await serveBook(url, request, sources);
 
-    // tuxbooks://cover/<name> — artwork-cache cover file. The renderer sends
-    // a flat file name, never a path; the handler resolves it inside the
-    // covers directory (T-1, T-3).
+    // Cover URLs carry a flat file name, never a path; resolve it inside covers (T-1, T-3).
     if (url.host === "cover") return await serveCover(url, sources);
 
     return textResponse(404, "not found");
@@ -174,8 +168,7 @@ async function serveBookBytes(
         "content-range": `bytes ${payload.offset}-${payload.offset + bytes.length - 1}/${payload.total}`,
       });
     }
-    // No range, or a suffix range (bytes=-N) which the source cannot seek
-    // for: serve the whole file and let the client slice.
+    // A suffix range (bytes=-N) cannot be seeked; serve the whole file and let the client slice.
     const payload = await sources.getBookBytes(bookId);
     const bytes = Buffer.from(payload.data, "base64");
     return bytesResponse(bytes, bookSourceMime(url.searchParams.get("format")), 200);
@@ -210,11 +203,8 @@ async function serveBookResource(
         headers: { "content-range": `bytes */${payload.total}`, ...CORS },
       });
     }
-    // The source applies the range itself; payload.data is the sliced
-    // window starting at payload.offset.
     const bytes = Buffer.from(payload.data, "base64");
-    // The content type comes from the fixed extension table, never from the
-    // wire payload's mediaType string (T-4).
+    // Content type comes from the fixed extension table, never the wire mediaType (T-4).
     return bytesResponse(
       bytes,
       memberMime(member),

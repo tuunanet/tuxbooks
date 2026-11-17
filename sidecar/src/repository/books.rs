@@ -275,7 +275,6 @@ pub async fn list_files_for_book(
     .bind(durable_id)
     .fetch_all(pool)
     .await?;
-    // The first row under the active-file order is the copy the reader opens.
     if let Some(active) = files.first_mut() {
         active.active = true;
     }
@@ -696,7 +695,6 @@ pub async fn relink_book(
     .execute(pool)
     .await
     {
-        // Another row already owns `new_path` (books.path is UNIQUE).
         Err(err)
             if err
                 .as_database_error()
@@ -749,8 +747,7 @@ pub async fn set_availability_prefix(
         .execute(pool)
         .await?;
     }
-    // Re-read through the active-file rule so a disappeared duplicate does not
-    // make the book look unavailable when another copy is still on disk.
+    // Re-read through the active-file rule: a gone duplicate must not hide a live copy.
     let mut books = Vec::with_capacity(affected.len());
     for id in affected.drain(..) {
         if let Some(book) = get_book(pool, id).await? {
@@ -1017,8 +1014,6 @@ mod tests {
         let (inside_id, _) = upsert_book(&pool, &sample("/lib/inside.epub", "Inside"))
             .await
             .unwrap();
-        // A sibling prefix and a book outside every watched location
-        // serialize the same way as a watched one: no flag at all.
         let (sibling_id, _) = upsert_book(&pool, &sample("/libx/sibling.epub", "Sibling"))
             .await
             .unwrap();
@@ -1026,9 +1021,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The listing, `get_book` (library-changed and import-progress
-        // payloads), and `get_book_by_path` (rename payloads) all serialize
-        // the same struct, so all three reads must offer no loose field.
+        // All three reads share the struct, so none may expose a loose flag.
         let books = list_books(&pool).await.unwrap();
         for book in &books {
             assert_no_loose_flag(book);
@@ -1083,26 +1076,21 @@ mod tests {
             .await
             .unwrap();
 
-        // A trailing-separator-free prefix must not match the sibling
-        // directory `/libx`, and literal `_` must never act as a wildcard.
+        // A bare prefix must not match `/libx`, and literal `_` is not a wildcard.
         let affected = set_availability_prefix(&pool, "/lib", false).await.unwrap();
         let mut paths: Vec<String> = affected.iter().map(|b| b.path.clone()).collect();
         paths.sort();
         assert_eq!(paths, vec!["/lib/a.epub", "/lib/b.epub"]);
-        // Rows are reported with their fresh (post-change) availability.
         assert!(affected.iter().all(|b| !b.available));
 
-        // Sibling directories and underscore-containing paths stay available.
         assert_eq!(
             stayed_available_sorted(&pool).await,
             vec!["/lib_sub/under_score.epub", "/libx/c.epub"]
         );
 
-        // Only changed rows are reported; a second pass is a no-op.
         let again = set_availability_prefix(&pool, "/lib", false).await.unwrap();
         assert!(again.is_empty());
 
-        // And the reverse transition restores availability.
         let restored = set_availability_prefix(&pool, "/lib", true).await.unwrap();
         assert_eq!(restored.len(), 2);
         assert!(restored.iter().all(|b| b.available));
@@ -1183,7 +1171,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome, RelinkOutcome::PathConflict);
-        // The conflicting row is untouched and the relinked row keeps its path.
         let book = get_book(&pool, id).await.unwrap().unwrap();
         assert_eq!(book.path, "/a.epub");
         assert_eq!(count_books(&pool).await.unwrap(), 2);

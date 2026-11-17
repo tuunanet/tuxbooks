@@ -17,9 +17,6 @@ async fn restored_sync_snapshot_allocates_a_fresh_record_id() {
         .clone()
         .expect("the imported book carries a durable uid");
 
-    // Forget the durable identity: the record goes away (the file stays in
-    // the library under a fresh one), a trash row carries the snapshot, and
-    // the shared forget op lands in the sync folder.
     env.rpc("forget_book", json!({ "bookId": book.id })).await;
     let old_record: Option<(i64,)> = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
         .bind(&uid)
@@ -28,8 +25,7 @@ async fn restored_sync_snapshot_allocates_a_fresh_record_id() {
         .unwrap();
     assert!(old_record.is_none(), "the forget deletes the old record");
 
-    // The other device's forget op replays onto the already-forgotten book:
-    // applying it rebuilds the local snapshot with book_id forced to 0.
+    // The shared forget replay rebuilds the local snapshot with book_id 0.
     let shared_snapshot = json!({
         "book_id": 7,
         "book": {
@@ -69,7 +65,6 @@ async fn restored_sync_snapshot_allocates_a_fresh_record_id() {
     .await
     .unwrap();
 
-    // The rebuilt trash snapshot carries the poisoned book_id 0.
     let trash_json: String = sqlx::query_scalar(
         "SELECT snapshot_json FROM book_trash WHERE book_uid = ?1 AND restored_at IS NULL",
     )
@@ -188,14 +183,11 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
     .to_string();
 
     for _round in 0..3 {
-        // The local forget: the record leaves and the trash opens.
         env.rpc("forget_book", json!({ "bookId": cur })).await;
         assert!(uid_record_ids(&env, &uid).await.is_empty());
         assert_no_nonpositive_ids(&env).await;
 
-        // The other device's shared forget replays onto the
-        // already-forgotten book and rewrites the open trash snapshot with
-        // the poisoned book_id 0.
+        // The replay rewrites the open trash snapshot with a poisoned book_id 0.
         lifecycle::apply_remote_forget(&env.pool, &uid, None, Some(shared.as_str()))
             .await
             .unwrap();
@@ -207,8 +199,7 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
         assert!(uid_record_ids(&env, &uid).await.is_empty());
         assert_no_nonpositive_ids(&env).await;
 
-        // The renderer restores the poisoned entry: the id must be
-        // allocated, never bound to the snapshot's 0.
+        // The restore must allocate a fresh id, never bind the snapshot's 0.
         let restored = env
             .rpc("restore_book", json!({ "trashId": trash_id }))
             .await;
@@ -218,9 +209,7 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
         assert!(cur > 0, "restored under a real id, got {cur}");
         assert_no_nonpositive_ids(&env).await;
 
-        // The shared restore replays onto the book whose local state moved
-        // on: the record is replaced under another fresh id and the trash
-        // stays closed.
+        // The shared restore replaces the record under another fresh id.
         let replayed = lifecycle::apply_remote_restore(&env.pool, &uid, Some(shared.as_str()))
             .await
             .unwrap()
@@ -240,10 +229,8 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
         assert_eq!(open, 0, "the restore closes the trash");
         assert_no_nonpositive_ids(&env).await;
 
-        // Sync is off during the churn, so the capture markers the replays
-        // fired would pile up and later replay as stale deletes; with sync
-        // on, the engine drains them as they fire. The projection layer is
-        // this test's subject, so drop the pile-up here.
+        // Sync is off here, so drop the capture markers before they replay as
+        // stale deletes.
         sqlx::query("DELETE FROM sync_dirty")
             .execute(&env.pool)
             .await
@@ -255,10 +242,6 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
         "the last transition was a restore"
     );
 
-    // The wedge's recorded issue, and the poisoned shared mirror row a
-    // Retry replays: the snapshot carries book_id 0 and the transition says
-    // restored. Retry must return true, keep the book under a real id, and
-    // resolve the issue row.
     record_issue(
         &env.pool,
         &format!("book-lifecycle:{uid}"),
@@ -287,12 +270,10 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
     assert!(replayed, "the poisoned projection still replays");
     let ids = uid_record_ids(&env, &uid).await;
     assert_eq!(ids.len(), 1);
-    // The message stays id-free: a failure message is a log write, and
-    // CodeQL flags a uid-derived value reaching one (cleartext-logging).
+    // Keep the message id-free: CodeQL flags uid-derived values in logs.
     assert!(ids[0] > 0, "retry keeps a real id");
     assert_no_nonpositive_ids(&env).await;
-    // The replay reads the mirror and applies it; it never rewrites the
-    // mirror row, which stays the record of the last transition.
+    // The replay never rewrites the mirror row, the record of the last transition.
     let mirror: (Option<String>, i64) =
         sqlx::query_as("SELECT restored_at, discarded FROM sync_book_trash WHERE book_uid = ?1")
             .bind(&uid)
@@ -305,9 +286,7 @@ async fn lifecycle_projection_survives_restore_and_forget_churn() {
         "the mirror still says restored"
     );
 
-    // The Retry action runs against a connected device, so connect a real
-    // service to a real folder: replaying the poisoned projection also runs
-    // a pass, exactly as it does in the app.
+    // Retry runs a pass, so it needs a real connected service.
     let sync_dir = tempfile::tempdir().unwrap();
     let service = SyncService::new(
         env.pool.clone(),
