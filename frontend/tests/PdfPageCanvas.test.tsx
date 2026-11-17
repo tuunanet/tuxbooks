@@ -400,6 +400,57 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
     }
   });
 
+  it("skips a 0x0 region raster when the region disappears mid-commitment, then recovers when it returns (tuxbooks-39o)", async () => {
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
+    const onPageError = vi.fn();
+    const onPageRendered = vi.fn();
+    const region = { left: 0, top: 0, width: 600, height: 800 };
+    const at = (overrides: Record<string, unknown>) =>
+      props(doc, {
+        width: 6000,
+        height: 6000,
+        scale: 30,
+        onPageError,
+        onPageRendered,
+        ...overrides,
+      });
+    const view = render(<PdfPageCanvas {...at({ region })} />);
+    await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
+
+    /** The region prop going undefined mid-commitment zeroes regionRef without supersession. */
+    view.rerender(<PdfPageCanvas {...at({ region: undefined })} />);
+
+    doc.releaseRender(1);
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+
+      const badRequests = doc.renderOptions.filter((options) => {
+        const request = options.region as { width: number; height: number } | undefined;
+        return request !== undefined && (!(request.width > 0) || !(request.height > 0));
+      });
+      expect(badRequests).toEqual([]);
+      expect(onPageError).not.toHaveBeenCalled();
+
+      /** A returning region must start a fresh commitment without waiting for a zoom commit. */
+      view.rerender(<PdfPageCanvas {...at({ region })} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400);
+      });
+
+      const finalRequest = doc.renderOptions.at(-1)?.region as
+        | { width: number; height: number }
+        | undefined;
+      expect(finalRequest).toMatchObject({ width: 600, height: 800 });
+      expect(onPageError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a started raster through scroll-driven region moves and follows the latest target", async () => {
     const doc = makeFakePdfDocument(1, undefined, { holdRenderFor: [1] });
     const onPageRendered = vi.fn();
