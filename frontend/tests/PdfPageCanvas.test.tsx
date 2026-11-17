@@ -406,33 +406,20 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
     const onPageError = vi.fn();
     const onPageRendered = vi.fn();
     const region = { left: 0, top: 0, width: 600, height: 800 };
-    const view = render(
-      <PdfPageCanvas
-        document={doc as never}
-        pageNumber={1}
-        width={6000}
-        height={6000}
-        scale={30}
-        region={region}
-        onPageError={onPageError}
-        onPageRendered={onPageRendered}
-      />,
-    );
+    const at = (overrides: Record<string, unknown>) =>
+      props(doc, {
+        width: 6000,
+        height: 6000,
+        scale: 30,
+        onPageError,
+        onPageRendered,
+        ...overrides,
+      });
+    const view = render(<PdfPageCanvas {...at({ region })} />);
     await waitFor(() => expect(doc.renderOptions).toHaveLength(1));
 
     /** The region prop going undefined mid-commitment zeroes regionRef without supersession. */
-    view.rerender(
-      <PdfPageCanvas
-        document={doc as never}
-        pageNumber={1}
-        width={6000}
-        height={6000}
-        scale={30}
-        region={undefined}
-        onPageError={onPageError}
-        onPageRendered={onPageRendered}
-      />,
-    );
+    view.rerender(<PdfPageCanvas {...at({ region: undefined })} />);
 
     doc.releaseRender(1);
     vi.useFakeTimers();
@@ -442,27 +429,14 @@ describe("PdfPageCanvas render commitment (issue tuxbooks-x27.2)", () => {
       });
 
       const badRequests = doc.renderOptions.filter((options) => {
-        const regionRequest = options.region as { width: number; height: number } | undefined;
-        return (
-          regionRequest !== undefined && (!(regionRequest.width > 0) || !(regionRequest.height > 0))
-        );
+        const request = options.region as { width: number; height: number } | undefined;
+        return request !== undefined && (!(request.width > 0) || !(request.height > 0));
       });
       expect(badRequests).toEqual([]);
       expect(onPageError).not.toHaveBeenCalled();
 
       /** A returning region must start a fresh commitment without waiting for a zoom commit. */
-      view.rerender(
-        <PdfPageCanvas
-          document={doc as never}
-          pageNumber={1}
-          width={6000}
-          height={6000}
-          scale={30}
-          region={region}
-          onPageError={onPageError}
-          onPageRendered={onPageRendered}
-        />,
-      );
+      view.rerender(<PdfPageCanvas {...at({ region })} />);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(400);
       });
