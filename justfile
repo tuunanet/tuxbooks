@@ -242,6 +242,21 @@ audit:
 check-supply-chain:
     node scripts/supply-chain-gate.mjs
 
+# Per-file explanatory comment budget (tuxbooks-hxl): 10 lines per Rust or
+# TypeScript file. `just check` compares the working tree with origin/main, so
+# a legacy over-budget file may not grow; new files start at the cap.
+check-comments:
+    node scripts/comment-budget-gate.mjs --self-test
+    node scripts/comment-budget-gate.mjs --base origin/main
+
+# Repo-wide comment budget report for burn-down. Informational, never a gate.
+comment-report:
+    node scripts/comment-budget-gate.mjs --all --report
+
+# Explain the counted and exempt comment lines in one file.
+comment-explain FILE:
+    node scripts/comment-budget-gate.mjs --explain {{FILE}}
+
 # CycloneDX SBOM over the npm and Rust trees (issue #89, S-4), written to
 # dist-packages/SBOM-tuxbooks-<version>.cdx.json. Release builds publish it
 # next to SHA256SUMS.txt (docs/RELEASE.md).
@@ -499,6 +514,7 @@ check:
         'format: just format-check-frontend' \
         'fixtures: just check-epub-fixtures' \
         'supply-chain: just check-supply-chain' \
+        'comments: just check-comments' \
         'workflows: just lint-workflows'
     @echo "check: OK"
 

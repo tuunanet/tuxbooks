@@ -42,6 +42,7 @@ jobs:
     outputs:
       code: ${{ steps.classify.outputs.code }}
       packaging: ${{ steps.classify.outputs.packaging }}
+      base: ${{ steps.classify.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -56,6 +57,7 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
           if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "packaging=true" >> "$GITHUB_OUTPUT"
@@ -100,6 +102,35 @@ jobs:
         run: |
           bash scripts/install-actionlint.sh
           .build/bin/actionlint
+
+  # Flat per-file comment budget (tuxbooks-hxl). The script compares changed
+  # Rust/TS files with the merge base: a legacy over-budget file may not grow,
+  # while a new file must stay at or under 10 explanatory lines. Doc comments
+  # and machine directives are excluded. Node built-ins only, so this job needs
+  # no toolchain install.
+  comments:
+    name: Comment budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request'))
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the per-file comment budget
+        run: |
+          set -euo pipefail
+          base="${{ needs.changes.outputs.base }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            git fetch --no-tags origin main:refs/remotes/origin/main
+            base="$(git merge-base origin/main HEAD)"
+          fi
+          node scripts/comment-budget-gate.mjs --self-test
+          node scripts/comment-budget-gate.mjs --base "$base" --head HEAD
 
   frontend:
     name: Frontend (format, lint, typecheck)
@@ -370,7 +401,7 @@ jobs:
     name: CI gate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [changes, workflows, frontend, coverage, rust, build]
+    needs: [changes, workflows, comments, frontend, coverage, rust, build]
     if: always()
     permissions:
       contents: read
@@ -381,6 +412,7 @@ jobs:
           for entry in \
             "changes:${{ needs.changes.result }}" \
             "workflows:${{ needs.workflows.result }}" \
+            "comments:${{ needs.comments.result }}" \
             "frontend:${{ needs.frontend.result }}" \
             "coverage:${{ needs.coverage.result }}" \
             "rust:${{ needs.rust.result }}" \

@@ -21,6 +21,24 @@ Write code that matches the surrounding code. If a local convention conflicts wi
 
 Comments explain a constraint, trap, root cause, or decision that code cannot express on its own. Do not narrate the next line of code.
 
+- Budget: at most 10 explanatory comment lines per Rust or TypeScript file.
+  Doc comments (`///`, `//!`, `/** */`), lint directives, `SAFETY:` blocks,
+  and shebangs do not count. Config files (`*.config.ts`) and JavaScript
+  (`*.mjs`, `*.js`) are out of scope.
+- `just check` compares the change with the merge base of `origin/main`. A
+  file already over budget may not grow; new files and clean files must stay
+  at or below 10. `just comment-report` lists the remaining over-budget
+  files.
+- `just check-comments` runs the gate's `--self-test` fixture cases and the
+  base comparison; `just comment-explain <file>` prints every counted and
+  exempt line.
+- A new file may declare `// comment-budget: N because <reason>` in its first
+  five lines. N becomes its explanatory-line budget (0 to 20). It cannot
+  raise an existing file above its recorded count.
+- CI's `comments` job is part of the required `CI gate`, and the pre-push
+  hook runs the same check on the pushed blobs before the 500-line check, so
+  a comment-heavy file is pruned before a split is forced.
+
 ## Writing and agent behavior
 
 - Use plain language in prose, comments, logs, and commit messages.
