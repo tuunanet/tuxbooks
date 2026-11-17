@@ -405,6 +405,10 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
       const target = regionRef.current;
 
       if (regionMode) {
+        // Region vanished mid-commitment (regionRef zeroed without supersession); a 0x0 clip trips the engine guard (tuxbooks-39o).
+        if (!(target.regionWidth > 0) || !(target.regionHeight > 0)) {
+          break;
+        }
         const ratio = regionRenderRatioForPage(
           pipeline.width / scale,
           pipeline.height / scale,
@@ -591,8 +595,7 @@ export function PdfPageCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Inputs identity excludes the render budget and region moves on purpose: superseding on
-    // either kept slots white through scroll, and cancelled rasters mid-settle (tuxbooks-x27.2).
+    // Inputs identity excludes the render budget and region moves on purpose: superseding on either kept slots white through scroll (tuxbooks-x27.2).
     regionRef.current = {
       regionKey,
       regionLeft,

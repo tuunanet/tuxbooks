@@ -89,6 +89,19 @@ export function makeFakePdfDocument(
           renderOptions.push(renderCall);
           renderPages.push(number);
           attempts.set(number, (attempts.get(number) ?? 0) + 1);
+          // Mirrors pdfiumCore's clip guard: a non-positive region is the
+          // "region render needs a positive size" failure the engine throws on.
+          const region = renderCall.region as { width: number; height: number } | undefined;
+          if (region && (!(region.width > 0) || !(region.height > 0))) {
+            return {
+              promise: Promise.reject(
+                new Error(
+                  `PDFium: region render needs a positive size, got ${region.width}×${region.height}`,
+                ),
+              ),
+              cancel: vi.fn(),
+            };
+          }
           if (failOnce.has(number) && (attempts.get(number) ?? 0) === 1) {
             return {
               promise: Promise.reject(new Error(`render boom ${number}`)),
