@@ -47,24 +47,15 @@ pub fn prepare(limits: &ResourceLimits) -> Result<SandboxReport, String> {
         LandlockStatus::NotApplicable
     };
     check(&status)?;
-    // 1. PR_SET_NO_NEW_PRIVS: required by Landlock's restrict_self and by
-    //    seccomp; also prevents privilege escalation through exec.
+    // PR_SET_NO_NEW_PRIVS is required by landlock_restrict_self and seccomp, and blocks exec escalation.
     set_no_new_privs()?;
-    // 2. Landlock deny-all: every handled FS access is denied because the
-    //    ruleset carries zero rules. Filesystem only; the network is
-    //    seccomp's job (see below).
     let landlock = if cfg!(target_os = "linux") {
         apply_landlock_deny_all().map_err(|err| format!("landlock: {err}"))?
     } else {
         LandlockStatus::NotApplicable
     };
-    // 3. seccomp deny-list: exec/spawn/namespaces/debug syscalls, and
-    //    socket creation unconditionally (owns W-3 on every kernel).
     let seccomp_applied = install_seccomp()?;
-    // 4. rlimits: CPU, address space, no file writes (Linux; the report
-    //    records honestly what applied on each platform).
     let rlimits_applied = apply_rlimits(limits)?;
-    // 5. self-verification: the probes must observe the claimed denials.
     let report = SandboxReport {
         landlock,
         seccomp_applied,
@@ -109,8 +100,6 @@ pub fn landlock_supported() -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // No Landlock off Linux: kernel-gated tests must skip, not claim a
-        // sandbox that does not exist.
         false
     }
 }
@@ -127,7 +116,6 @@ pub fn probe_socket_denied() -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // No sandbox layer claims network denial off Linux.
         false
     }
 }
@@ -138,9 +126,6 @@ pub fn self_verify(report: &SandboxReport) -> Result<(), String> {
     {
         return Err("self-verification failed: filesystem denial not in effect".to_string());
     }
-    // C3: socket denial is claimed whenever seccomp applied (always on
-    // Linux), so the probe must observe it unconditionally. There is no
-    // ABI-4 branch left to disagree with the layering.
     if report.seccomp_applied && !probe_socket_denied() {
         return Err("self-verification failed: network denial not in effect".to_string());
     }
@@ -178,16 +163,17 @@ pub fn apply_rlimits(limits: &ResourceLimits) -> Result<bool, String> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // No rlimit enforcement off Linux; the report says so.
         let _ = limits;
         Ok(false)
     }
 }
 
+#[cfg(target_os = "linux")]
+const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+
 fn set_no_new_privs() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
         let rc = unsafe { libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
         if rc == -1 {
             Err(format!(
@@ -200,49 +186,29 @@ fn set_no_new_privs() -> Result<(), String> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // prctl does not exist off Linux; nothing to set there.
         Ok(())
     }
 }
 
-// ---- Landlock FFI (linux/landlock.h) ---------------------------------------
-//
-// ABI probe: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
-// returns the ABI version, or -1 with EOPNOTSUPP/EINVAL on pre-5.13 kernels.
-// Apply: create a ruleset whose handled_access_fs carries the FS bits the
-// probed ABI supports, add ZERO rules, then
-// landlock_restrict_self(ruleset_fd, 0): every handled access is denied.
-// C2: the ruleset attribute is the fs-only 8-byte struct the UAPI has had
-// since 5.13 on every supported kernel. The 16-byte struct with
-// handled_access_net (6.7+) is deliberately not used: pre-6.7 kernels
-// reject larger attribute sizes with E2BIG, and the network is seccomp's
-// job anyway. Syscall numbers come from libc's SYS_landlock_* constants.
-
+// Landlock FFI mirrors linux/landlock.h's fs-only 8-byte ruleset attr; the 16-byte net variant gets E2BIG below 6.7.
 #[cfg(target_os = "linux")]
 mod landlock_ffi {
-    // repr(C) mirror of the UAPI struct (libc does not ship landlock.h).
-    // fs-only: exactly one u64, so no attr-size negotiation can ever occur.
     #[repr(C)]
     pub struct LandlockRulesetAttr {
         pub handled_access_fs: u64,
     }
 
-    // LANDLOCK_ACCESS_FS bits (UAPI, stable): EXECUTE(0), WRITE_FILE(1),
-    // READ_FILE(2), READ_DIR(3), REMOVE_DIR(4), REMOVE_FILE(5), MAKE_CHAR(6),
-    // MAKE_DIR(7), MAKE_REG(8), MAKE_SOCK(9), MAKE_FIFO(10), MAKE_BLOCK(11),
-    // MAKE_SYM(12); ABI 2 adds REFER(13); ABI 3 adds TRUNCATE(14); ABI 5
-    // adds IOCTL_DEV(15). Handled bits are chosen from the probed ABI so an
-    // older kernel never handles an access bit it cannot enforce.
+    // ABI 2 adds REFER (13), ABI 3 TRUNCATE (14), ABI 5 IOCTL_DEV (15); older kernels never handle what they cannot enforce.
     pub fn fs_bits(abi: u32) -> u64 {
-        let mut bits = 0x1FFFu64; // EXECUTE .. MAKE_SYM (bits 0..12)
+        let mut bits = 0x1FFFu64;
         if abi >= 2 {
-            bits |= 1 << 13; // REFER
+            bits |= 1 << 13;
         }
         if abi >= 3 {
-            bits |= 1 << 14; // TRUNCATE
+            bits |= 1 << 14;
         }
         if abi >= 5 {
-            bits |= 1 << 15; // IOCTL_DEV
+            bits |= 1 << 15;
         }
         bits
     }
@@ -284,7 +250,6 @@ mod landlock_ffi {
             ));
         }
         let rc = unsafe { libc::syscall(libc::SYS_landlock_restrict_self, fd as i32, 0u32) };
-        // The ruleset fd is consumed by restrict_self; close it either way.
         unsafe { libc::close(fd as i32) };
         if rc < 0 {
             Err(format!(
@@ -316,20 +281,7 @@ fn apply_landlock_deny_all() -> Result<LandlockStatus, String> {
     Ok(LandlockStatus::NotApplicable)
 }
 
-// ---- seccomp classic BPF ----------------------------------------------------
-//
-// Program shape: load the arch word, deny everything on a foreign arch, load
-// the syscall number, one compare-and-deny pair per denied syscall (with the
-// clone flag check inlined for clone), then RET_ALLOW. Jump offsets are
-// computed so the arithmetic cannot drift: each JEQ uses jt=0 so the true
-// path falls through to the immediately following RET EPERM and jf skips
-// exactly that one instruction; the arch check inverts this (jt=1 skips the
-// RET EPERM on match); the clone block's first JEQ uses jf=3 to skip the
-// three instructions of the flag check.
-// Building the program (a plain Vec) and installing it (a syscall) are split
-// (M2): the forked test child must not allocate, so it receives a program
-// built before the fork.
-
+// Seccomp classic BPF: process-wide and irreversible, so the program is built before any fork (M2).
 #[cfg(target_os = "linux")]
 mod seccomp_ffi {
     /// repr(C) mirror of the UAPI `sock_filter` (libc does not ship it).
@@ -356,7 +308,6 @@ mod seccomp_ffi {
     pub const BPF_JSET: u16 = 0x40;
     pub const BPF_RET: u16 = 0x06;
     pub const BPF_K: u16 = 0x00;
-    // seccomp_data layout (UAPI, stable): nr(0), arch(4), ip(8), args[0](16).
     pub const OFFSET_NR: u32 = 0;
     pub const OFFSET_ARCH: u32 = 4;
     pub const OFFSET_ARG0: u32 = 16;
@@ -416,40 +367,31 @@ fn build_seccomp_program() -> Vec<seccomp_ffi::sock_filter> {
         libc::SYS_finit_module,
         libc::SYS_delete_module,
     ];
-    // x86_64 only: aarch64 has no fork/vfork syscalls (glibc emulates
-    // them through clone), so those two constants do not exist there.
+    // x86_64 only: aarch64 has no fork/vfork syscalls, so those constants do not exist there.
     if cfg!(target_arch = "x86_64") {
         denied.push(libc::SYS_fork);
         denied.push(libc::SYS_vfork);
     }
-    // CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID |
-    // CLONE_NEWIPC | CLONE_NEWUTS
+    // CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWNET | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWUTS
     const NS_FLAGS: u64 =
         0x0002_0000 | 0x1000_0000 | 0x4000_0000 | 0x2000_0000 | 0x0800_0000 | 0x0400_0000;
 
     let mut program = vec![load(OFFSET_ARCH)];
-    program.push(instr(BPF_JMP | BPF_JEQ, 1, 0, audit_arch)); // match -> skip EPERM
+    program.push(instr(BPF_JMP | BPF_JEQ, 1, 0, audit_arch));
     program.push(ret_eperm);
     program.push(load(OFFSET_NR));
     for syscall in &denied {
         program.push(instr(BPF_JMP | BPF_JEQ, 0, 1, *syscall as u32));
         program.push(ret_eperm);
     }
-    // clone/clone3: deny only when the flag word carries namespace bits.
-    // clone3's arg0 is a POINTER to struct clone_args (flags at offset 0),
-    // which classic BPF cannot dereference, so its flag word cannot be
-    // inspected. Returning ENOSYS for clone3 makes glibc fall back to the
-    // plain clone syscall, whose flags ARE in arg0 and are checked below
-    // (the same technique Chromium uses). Threads pass; namespaces die.
+    // clone3's arg0 is a pointer BPF cannot deref: return ENOSYS so glibc falls back to clone.
     program.push(instr(BPF_JMP | BPF_JEQ, 0, 1, libc::SYS_clone3 as u32));
     program.push(ret_enosys);
     program.push(instr(BPF_JMP | BPF_JEQ, 0, 3, libc::SYS_clone as u32));
     program.push(load(OFFSET_ARG0));
     program.push(instr(BPF_JMP | BPF_JSET, 0, 1, NS_FLAGS as u32));
     program.push(ret_eperm);
-    // C3: socket denial is unconditional. One rule closes TCP, UDP,
-    // AF_UNIX, and netlink creation, which owns W-3 on every supported
-    // kernel; there is no Landlock-network conditional to disagree with.
+    // Socket creation is denied unconditionally: one rule closes TCP, UDP, AF_UNIX, and netlink.
     for syscall in [
         libc::SYS_socket,
         libc::SYS_socketpair,
@@ -508,8 +450,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn handled_fs_bits_track_the_probed_abi() {
-        // C2 pin: handled bits grow only with the ABI the kernel reported,
-        // so an older kernel never handles an access bit it cannot enforce.
         let abi1 = landlock_ffi::fs_bits(1);
         assert_eq!(abi1 & (1 << 13), 0, "REFER is ABI 2+");
         let abi2 = landlock_ffi::fs_bits(2);
@@ -526,10 +466,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn landlock_ruleset_attr_is_fs_only_so_no_e2big_negotiation_exists() {
-        // C2 pin: the attribute is the 8-byte fs-only struct every
-        // Landlock kernel accepts. The 16-byte struct with
-        // handled_access_net is rejected with E2BIG on kernels below 6.7,
-        // which is one reason the network bits are gone.
         assert_eq!(
             std::mem::size_of::<landlock_ffi::LandlockRulesetAttr>(),
             std::mem::size_of::<u64>()
@@ -542,11 +478,7 @@ mod tests {
             eprintln!("skipping: kernel lacks Landlock (5.13+)");
             return;
         }
-        // Landlock is thread-scoped: this restriction affects this test's
-        // thread only, never sibling tests. The scratch dir is created
-        // first; tempfile's Drop tolerates a denied unlink at teardown.
-        // restrict_self requires no_new_privs without CAP_SYS_ADMIN, so the
-        // test thread sets it first (per-thread; siblings unaffected).
+        // Landlock is thread-scoped: this restricts the test thread only, never sibling tests.
         set_no_new_privs().expect("no_new_privs applies");
         let scratch = tempfile::tempdir().unwrap();
         let readable = scratch.path().join("before.txt");
@@ -561,14 +493,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn seccomp_denies_socket_exec_and_namespace_creation() {
-        // A seccomp filter is process-wide and irreversible, and the test
-        // process is multithreaded: the BPF program is built BEFORE the
-        // fork (M2), so the forked child only runs async-signal-safe
-        // syscalls (prctl, install, socket, execve probe, _exit).
-        // Every probe below must be observed, not just enforced: a wrong
-        // SYS_* constant in the deny array would otherwise be invisible.
-        // Success exits with the distinctive 7 so a wrongly-allowed execve
-        // (which replaces this image with /bin/true, exit 0) cannot pass.
+        // Every probe must be observed, not just enforced; the child exits 7 so a wrongly allowed execve cannot pass.
         if !landlock_supported() {
             eprintln!("skipping: sandbox layer only meaningful on supported kernels");
             return;
@@ -577,11 +502,8 @@ mod tests {
         let pid = unsafe { libc::fork() };
         assert!(pid >= 0);
         if pid == 0 {
-            // Unprivileged seccomp requires no_new_privs; prctl is
-            // async-signal-safe, so it is safe in the forked child.
-            unsafe {
-                libc::prctl(38 /* PR_SET_NO_NEW_PRIVS */, 1, 0, 0, 0)
-            };
+            // SAFETY: prctl is async-signal-safe, so it is safe in the forked child.
+            unsafe { libc::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
             if install_seccomp_program(&program).is_err() {
                 unsafe { libc::_exit(2) };
             }
@@ -590,31 +512,18 @@ mod tests {
             if !socket_denied {
                 unsafe { libc::_exit(1) };
             }
-            // clone3 must answer ENOSYS (forcing glibc's fallback to the
-            // inspectable clone), not EPERM: threads are created through
-            // clone3 on modern glibc, and EPERM there would kill thread
-            // creation for entirely benign parsers (lopdf uses rayon).
             let rc = unsafe {
                 libc::syscall(libc::SYS_clone3, std::ptr::null::<libc::c_void>(), 0usize)
             };
             if !(rc == -1 && unsafe { *libc::__errno_location() } == libc::ENOSYS) {
                 unsafe { libc::_exit(3) };
             }
-            // A clone carrying a namespace flag must die with EPERM.
-            // (Unprivileged kernels reject it too, but under the filter the
-            // denial is filter-owned, before the kernel ever sees it.)
             let rc = unsafe {
-                libc::syscall(
-                    libc::SYS_clone,
-                    0x0002_0000 | libc::SIGCHLD, // CLONE_NEWNS
-                    0usize,
-                )
+                libc::syscall(libc::SYS_clone, libc::CLONE_NEWNS | libc::SIGCHLD, 0usize)
             };
             if !(rc == -1 && unsafe { *libc::__errno_location() } == libc::EPERM) {
                 unsafe { libc::_exit(4) };
             }
-            // execve must die with EPERM (W-4): process creation is denied
-            // at the filter, observed here and not merely enforced.
             let path = b"/bin/true\0";
             let argv: [*const libc::c_char; 1] = [std::ptr::null()];
             let rc = unsafe {

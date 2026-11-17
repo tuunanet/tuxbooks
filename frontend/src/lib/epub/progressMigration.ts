@@ -293,8 +293,6 @@ function convertSpineProgression(
   if (href === undefined) return null;
   let progression = 0;
   if (typeof progressPercent === "number" && Number.isFinite(progressPercent) && total > 0) {
-    // Inverse of the shell's spine-percent model:
-    // percent = ((index + inSection) / total) * 100.
     progression = Math.min(Math.max((progressPercent / 100) * total - spineIndex, 0), 1);
   }
   return {

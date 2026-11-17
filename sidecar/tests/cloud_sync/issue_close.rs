@@ -24,8 +24,6 @@ async fn a_rejected_operation_closes_when_it_is_applied_or_removed() {
         ]
     );
 
-    // Fix one file: the next pass applies it and the current cache row closes
-    // the issue without an explicit dismiss.
     let fixed = review_op(
         30,
         EntityKind::Metadata,
@@ -42,7 +40,6 @@ async fn a_rejected_operation_closes_when_it_is_applied_or_removed() {
         "the applied file closes its issue"
     );
 
-    // Remove the other file: nothing is left to retry.
     std::fs::remove_file(op_dir.join("two.json")).unwrap();
     assert_eq!(a.service.status().await.unwrap().issues, 0);
     assert!(open_issue_kinds(&a).await.is_empty());
@@ -116,8 +113,7 @@ async fn an_operation_issue_ignores_a_stale_applied_row() {
             .unwrap();
     assert_eq!(applied, 1, "the first version applied");
 
-    // The same path is rewritten and corrupt: the old applied row must not
-    // close the fresh issue.
+    // The old applied row must not close the fresh issue for the rewritten path.
     std::fs::write(op_dir.join("same.json"), b"{corrupt rewrite").unwrap();
     run(&a).await;
     assert_eq!(
@@ -125,8 +121,7 @@ async fn an_operation_issue_ignores_a_stale_applied_row() {
         vec!["operation_retrying".to_string()],
         "a stale applied-op row cannot hide the fresh failure"
     );
-    // The row is the sweep's work in progress (ADR 0017 D4): listed above,
-    // but outside the attention count until the attempts run out.
+    // Listed as work in progress, outside the attention count (ADR 0017 D4).
     assert_eq!(a.service.status().await.unwrap().issues, 0);
 
     let second = review_op(
@@ -154,9 +149,8 @@ async fn a_natural_projection_repairs_a_current_binding() {
     run(&a).await;
     let file_id = file_row_id(&a, "natural-project.epub").await;
 
-    // Shared state is waiting for a projection that failed after identity was
-    // already current. The open issue must make the next sweep project even
-    // though the binding did not change.
+    // The open issue must make the next sweep project even though the
+    // binding did not change.
     let annotation_uid = "c".repeat(32);
     sqlx::query(
         "INSERT INTO sync_state_entities (kind, entity_uid, book_uid)
@@ -194,7 +188,6 @@ async fn natural_repairs_close_identity_and_reprojection_issues() {
     connect(&a, sync_dir.path()).await;
     let file_id = file_row_id(&a, "natural-repair.epub").await;
 
-    // A missing binding makes the next identity sweep hash and bind again.
     sqlx::query("DELETE FROM sync_book_bindings WHERE book_id = ?1")
         .bind(file_id)
         .execute(&a.pool)
@@ -314,8 +307,7 @@ async fn an_adopt_wait_issue_closes_when_the_blob_arrives() {
     let book = add_book(&a, "adopt-arrives.epub", b"adopt arrives bytes").await;
     let uid = book_uid(&a, book).await;
     connect(&a, sync_dir.path()).await;
-    // The bytes the pointer names; the blob has to verify, not merely sit in
-    // the folder, to count as an arrival.
+    // The blob must verify, not merely sit in the folder, to count as an arrival.
     let staged = b"staged bytes";
     let winning = format!("{:x}", Sha256::digest(staged));
     insert_file_version(&a, &uid, &winning, staged.len() as i64).await;
@@ -326,8 +318,6 @@ async fn an_adopt_wait_issue_closes_when_the_blob_arrives() {
     )
     .await;
 
-    // Control: the pointer names bytes this copy never received, so the
-    // copy is unsettled and the wait is visible.
     assert_eq!(a.service.status().await.unwrap().issues, 1);
     assert!(still_unsettled(&a, &uid).await, "the copy is still waiting");
 
@@ -355,8 +345,7 @@ async fn a_present_but_unverifiable_blob_keeps_the_adopt_wait_open() {
     let book = add_book(&a, "adopt-corrupt.epub", b"adopt corrupt bytes").await;
     let uid = book_uid(&a, book).await;
     connect(&a, sync_dir.path()).await;
-    // Right size, wrong bytes: the size pre-check passes and the hash is
-    // what must reject.
+    // Right size, wrong bytes: only the hash check can reject these.
     let junk = b"staged bytes";
     let winning = "c".repeat(64);
     insert_file_version(&a, &uid, &winning, junk.len() as i64).await;
@@ -403,8 +392,6 @@ async fn an_adopt_wait_issue_closes_when_the_pointer_moves_on() {
     assert_eq!(a.service.status().await.unwrap().issues, 1);
     assert!(still_unsettled(&a, &uid).await, "the copy is still waiting");
 
-    // The shared bytes landed and the identity sweep rebound the copy onto
-    // the pointer, so adoption has nothing left to run for this row.
     sqlx::query("UPDATE sync_book_bindings SET content_hash = ?1 WHERE book_id = ?2")
         .bind(&winning)
         .bind(book)

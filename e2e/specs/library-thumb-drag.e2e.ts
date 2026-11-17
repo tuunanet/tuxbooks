@@ -206,15 +206,13 @@ async function calibrateAndGrab(
     const before = (await readContainer(page, selector)).scrollTop;
     await page.mouse.move(model.trackX, cursorY);
     await page.mouse.down();
-    // Nudge in the drag direction: at the track end a nudge into the
-    // boundary clamps to zero movement and would read as a missed grab.
+    // At the track end a nudge can clamp to zero and read as a missed grab.
     await page.mouse.move(model.trackX, cursorY + 3 * direction);
     await page.waitForTimeout(60);
     const after = (await readContainer(page, selector)).scrollTop;
     const moved = (after - before) * direction;
 
     if (moved >= GRAB_MIN_MOVE_PX && moved <= GRAB_MAX_JUMP_PX) {
-      // Keep holding: the drag continues from exactly this press.
       return { grabCursorY: cursorY + 3 * direction, grabScrollTop: after };
     }
 
@@ -453,8 +451,7 @@ async function dragThumb(
   const endThumbCenterY = predictedThumbCenterY(endModel, endGeometry, endGeometry.scrollTop);
   const thumbUnderCursorAtEnd = Math.abs(endCursorY - endThumbCenterY) <= endModel.thumbLen / 2;
 
-  // Frozen-geometry prediction: where the scroll offset would be if the
-  // scrollbar geometry at grab time had stayed true through the drag.
+  // Frozen-geometry prediction: the offset if grab-time geometry had held.
   const predictedEndScrollTop =
     calibration.grabScrollTop + (endCursorY - calibration.grabCursorY) * grabModel.pxPerCursor;
   const finalErrorPx = endGeometry.scrollTop - predictedEndScrollTop;
@@ -492,9 +489,7 @@ async function dragThumb(
 }
 
 test.describe.serial("10,000-book scrollbar thumb drag (tuxbooks-y9s)", () => {
-  // The tests share one app + library (one Electron invocation per phase,
-  // workers 1) and run in file order: the import lands once in the first
-  // test, and later tests skip if it never happened.
+  // One app per file, tests in order: the import lands once; later tests skip.
   let importedOnce = false;
 
   test("grid thumb stays under the cursor through a full-track downward drag", async ({ page }) => {
@@ -506,8 +501,7 @@ test.describe.serial("10,000-book scrollbar thumb drag (tuxbooks-y9s)", () => {
 
     await importLibrary(page);
 
-    // An empty library renders the empty state rather than LibraryView, so
-    // select All Books only once the imported books have landed.
+    // Select All Books only after import: an empty library has no LibraryView.
     await page.getByRole("button", { name: "All Books", exact: true }).click();
     await expect(page.getByTestId("library-view")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("book-grid")).toBeVisible();
@@ -522,18 +516,13 @@ test.describe.serial("10,000-book scrollbar thumb drag (tuxbooks-y9s)", () => {
     test.setTimeout(900_000);
     test.skip(!importedOnce, "runs after the downward drag in the same session");
 
-    // Navigate away and back: LibraryView unmounts on navigation (the
-    // scroll-position map is module-level for exactly this reason), so the
-    // virtualizer's measurement cache starts empty — jumping to the bottom
-    // then leaves every unmounted row above the viewport unmeasured, which
-    // is the upward drag's correction territory.
+    // Remount clears the measurement cache, leaving rows above unmeasured.
     await page.getByRole("button", { name: "Reading history", exact: true }).click();
     await page.waitForTimeout(300);
     await page.getByRole("button", { name: "All Books", exact: true }).click();
     await expect(page.getByTestId("book-grid")).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(500);
 
-    // Jump to the bottom (instant, no intermediate mounting), settle.
     await jumpToBottom(page, GRID_SELECTOR);
     const start = await readContainer(page, GRID_SELECTOR);
 
@@ -545,10 +534,7 @@ test.describe.serial("10,000-book scrollbar thumb drag (tuxbooks-y9s)", () => {
     test.setTimeout(900_000);
     test.skip(!importedOnce, "runs after the downward drag in the same session");
 
-    // The issue covers Grid AND List (tuxbooks-y9s): switch views, which
-    // re-prices every row (list rows were never measured in this view), so
-    // the drag crosses fresh measurement territory.
-    // Radix ToggleGroup items render role=radio, not role=button.
+    // Switch views so every list row is measured here; Radix items are role=radio.
     await page.getByRole("radio", { name: "List view" }).click();
     await expect(page.getByTestId("book-list")).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1_000);
@@ -589,14 +575,10 @@ function assertThumbTracked(
       `controlGapPx=${result.controlGapPx.toFixed(1)}`,
   );
 
-  // Harness sanity.
   expect(Math.abs(result.traveledPx)).toBeGreaterThan(50_000);
   expect(result.controlGapPx, "static control must track the cursor").toBeLessThan(30);
 
-  // The regression assertion: the thumb must still be under the held
-  // cursor at release. Model noise measured at ~11 track px (control 7.1),
-  // so the bound absorbs the model without letting a real divergence
-  // through (the unfixed build diverges 369-512 px).
+  // Bound absorbs model noise (~11 track px), not the 369-512 px regression.
   expect(
     result.gapTrackPx,
     `thumb drifted ${result.gapTrackPx.toFixed(0)} track px from the cursor on the ${direction} drag ` +
@@ -606,11 +588,7 @@ function assertThumbTracked(
       `${result.appWriteCount} app scrollTop writes, net ${result.appWriteDeltaSum.toFixed(0)} px)`,
   ).toBeLessThanOrEqual(THUMB_DRIFT_TOLERANCE_PX);
 
-  // Mechanism guard: the fix's whole point is that no geometry correction
-  // lands during a held drag (mid-drag corrections of any net size break
-  // Chromium's drag tracking: 36-48 events on the unfixed build vs 0
-  // fixed). The slack absorbs one incidental reflow; a regression back to
-  // per-row correction cascades fails here with a direct message.
+  // No geometry correction may land mid-drag; the slack absorbs one reflow.
   expect(
     result.heightEventsDuringDrag,
     `${result.heightEventsDuringDrag} scroll-height corrections landed mid-drag ` +

@@ -131,14 +131,9 @@ export function usePdfGeometry(
     };
   }, [document, pageCount]);
 
-  // Eager full-document measurement (see the constants above). Gated on
-  // first paint so the sweep never queues ahead of page 1
-  // on the worker — the same ordering rule as the outline request
-  // (docs/PDF.md, § first-page priority). One geometry commit per wave, so
-  // the layout converges in a handful of beats right after open instead of
-  // correcting slot heights for as long as the user scrolls. A page whose
-  // measurement fails stays unmeasured — the lazy on-approach path retries
-  // it — and the sweep carries on with the rest of its wave.
+  // Eager sweep, gated on first paint so it never queues ahead of page 1 on the
+  // worker (docs/PDF.md, § first-page priority). One commit per wave; a page
+  // whose measurement fails stays unmeasured for the lazy retry path.
   useEffect(() => {
     if (!document || pageCount === 0 || !firstPainted) return;
     if (pageCount > EAGER_MEASURE_PAGE_LIMIT) return;

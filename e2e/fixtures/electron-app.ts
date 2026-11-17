@@ -42,19 +42,14 @@ interface WorkerFixtures {
 
 const versions = stackVersions();
 
-// A high-DPI/high-refresh desktop is part of the reference conditions
-// (docs/PERFORMANCE.md); the hidpi phase (just test-e2e-hidpi) forces a
-// device scale factor through this Chromium switch.
+// The hidpi phase forces a device scale factor through this Chromium switch.
 const deviceScaleFactor = Number(process.env.E2E_DEVICE_SCALE_FACTOR ?? "");
 const appArgs = ["--no-sandbox", "--ozone-platform=x11"];
 if (Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0) {
   appArgs.push(`--force-device-scale-factor=${deviceScaleFactor}`);
 }
-// X-4 (issue #85) pins that a real getUserMedia request is denied. A host
-// without a capture device fails device enumeration first, so Chromium
-// rejects with NotFoundError before the permission handler is consulted.
-// The security phase gets a fake capture device so the deny handler is what
-// the test actually exercises. No other phase touches media capture.
+// Without a capture device Chromium rejects with NotFoundError before the permission
+// handler, so the security phase gets a fake device to exercise the deny path.
 if (process.env.E2E_PHASE === "security") {
   appArgs.push("--use-fake-device-for-media-stream");
 }
@@ -64,9 +59,7 @@ function logLine(file: string, line: string): void {
   try {
     fs.mkdirSync(artifactsDir, { recursive: true });
     fs.appendFileSync(path.join(artifactsDir, file), `${new Date().toISOString()} ${line}\n`);
-  } catch {
-    // Diagnostics only — never fail a run over its own log.
-  }
+  } catch {}
 }
 
 /** Merge a patch into the run's environment record (diagnostics only). */
@@ -75,9 +68,7 @@ function patchEnvironmentRecord(patch: Record<string, unknown>): void {
   try {
     const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
     fs.writeFileSync(file, JSON.stringify({ ...record, ...patch }, null, 2));
-  } catch {
-    // Diagnostics only.
-  }
+  } catch {}
 }
 
 /**
@@ -87,10 +78,8 @@ function patchEnvironmentRecord(patch: Record<string, unknown>): void {
  * close on an already-closed app is a no-op).
  */
 export async function launchElectronApp(): Promise<ElectronApplication> {
-  // Isolation gate (docs/TESTING.md): the scratch database must belong to
-  // this run before the app ever launches. A fixture-level failure stops
-  // the worker — there is no WDIO-style "log the hook error and continue"
-  // that could silently degrade into testing the real user library.
+  // A fixture-level failure must stop the worker: logging a hook error and continuing
+  // would silently degrade into testing the real user library.
   const dbPath = process.env.TEST_DATABASE_PATH ?? "";
   if (!dbPath.includes("tuxbooks-e2e-") || dbPath !== databasePath) {
     throw new Error(
@@ -101,23 +90,14 @@ export async function launchElectronApp(): Promise<ElectronApplication> {
     throw new Error("E2E isolation broken: scratch environment variables are not coherent");
   }
 
-  // Playwright's Electron launcher: spawns the electron binary from this
-  // package's node_modules pointed at our CJS main bundle (the unpackaged
-  // dev app), then attaches to it over CDP. Main-process stdout/stderr —
-  // including every main-process console.log/error — rides through the
-  // child pipes and is captured below.
   const app = await electron.launch({ args: [appEntryPoint, ...appArgs] });
 
-  // Main-process console/errors (the WDIO service's captureMainProcessLogs
-  // equivalent): everything the app prints lands in the per-run log.
   const child = app.process();
   const mainLog = path.join(artifactsDir, "electron-main.log");
   fs.mkdirSync(artifactsDir, { recursive: true });
   child.stdout?.on("data", (chunk: Buffer) => fs.appendFile(mainLog, chunk, () => {}));
   child.stderr?.on("data", (chunk: Buffer) => fs.appendFile(mainLog, chunk, () => {}));
 
-  // Renderer diagnostics: console messages and uncaught page errors go to
-  // the per-run renderer log next to the main-process one.
   const window = await app.firstWindow();
   window.on("console", (message) =>
     logLine("electron-renderer.log", `[${message.type()}] ${message.text()}`),
@@ -127,16 +107,9 @@ export async function launchElectronApp(): Promise<ElectronApplication> {
   );
   window.on("close", () => logLine("electron-renderer.log", "[close] window closed"));
 
-  // The global theme (and through it the reader surface's auto theme) now
-  // follows the host OS color scheme; pin it so spec expectations that
-  // assume the light default hold on any E2E host. The emulation reaches
-  // the provider's matchMedia subscription and re-applies the resolved
-  // theme, so a dark host's startup paint is corrected before assertions.
+  // Pin light so spec expectations hold on dark hosts; the emulation re-applies the resolved theme.
   await window.emulateMedia({ colorScheme: "light" });
 
-  // Complete the environment record with the Chromium build the running
-  // app actually reports (the launcher side only knows the Electron
-  // package version).
   try {
     const runtime = await app.evaluate(() => ({
       electron: process.versions.electron,
@@ -148,14 +121,9 @@ export async function launchElectronApp(): Promise<ElectronApplication> {
       electronRuntime: runtime.electron,
     });
     console.log(`[e2e] session versions: electron=${runtime.electron} chromium=${runtime.chrome}`);
-  } catch {
-    // Diagnostics only.
-  }
+  } catch {}
 
-  // Isolation gate, second half (docs/TESTING.md): the sidecar must have
-  // written the schema into the scratch database before any test runs. The
-  // window only appears after the sidecar is healthy, so by the time the
-  // page exists the DB should be written — poll anyway, bounded.
+  // The window only appears after a healthy sidecar, so the DB should exist; poll bounded anyway.
   await expect
     .poll(
       () => {
@@ -184,29 +152,17 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
   page: [
     async ({ electronApp }, use) => {
-      // firstWindow() memoizes: every test in the worker gets the same
-      // BrowserWindow, so reading-position/view state accumulates across
-      // specs exactly like the shared-session harness (helpers re-navigate
-      // to a known state before asserting).
+      // firstWindow() memoizes: every test gets the same BrowserWindow, so view state accumulates.
       const window = await electronApp.firstWindow();
-      // Renderer-local settings (app theme, reader appearance) persist in
-      // localStorage, which this shared window carries across tests. Clear
-      // them so one test's appearance picks cannot leak into the next;
-      // backend state (reading positions, the library) still accumulates by
-      // design. Best effort — the very first test may still be on about:blank.
+      // Clear localStorage between tests so appearance picks do not leak; backend state accumulates.
       await window
         .evaluate(() => {
           try {
             window.localStorage.clear();
-          } catch {
-            // about:blank or storage unavailable.
-          }
+          } catch {}
         })
         .catch(() => {});
-      // The Settings window floats over the shared page, so a test that left
-      // it open would hide the sidebar from the next test's role queries.
-      // Escape dismisses any open Radix layer without racing its close
-      // animation; wait for the settings window to actually detach.
+      // A settings window left open would hide the sidebar; Escape dismisses it without racing.
       if ((await window.getByTestId("settings-window").count()) > 0) {
         await window.keyboard.press("Escape").catch(() => {});
         await window
@@ -215,8 +171,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           .catch(() => {});
       }
       await use(window);
-      // No explicit teardown: closing the app (worker teardown) closes its
-      // windows; a lingering window dies with the app process.
     },
     { scope: "test" },
   ],
@@ -226,8 +180,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       await use();
       if (testInfo.status !== "failed" && testInfo.status !== "timedOut") return;
       const sanitized = testInfo.title.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 80) || "test";
-      // Screenshot-only-on-failure debugging aid; no visual baselines.
-      // Best effort: the screenshot itself fails when the app died.
       try {
         await page.screenshot({
           path: path.join(artifactsDir, `${runId}-${sanitized}.png`),
@@ -236,10 +188,6 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       } catch (err) {
         console.warn(`[e2e] failure screenshot unavailable: ${err}`);
       }
-      // Failure metadata (docs/TESTING.md): what failed, where, and against
-      // which stack — so CI artifacts answer "React, Electron, engine, IPC,
-      // or harness?" without a local reproduction. Renderer/main console
-      // output and the Playwright trace sit next to this file.
       try {
         const failure = {
           runId,

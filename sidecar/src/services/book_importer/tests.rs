@@ -192,8 +192,6 @@ async fn pdf_import_writes_a_rasterized_cover_when_pdfium_is_available() {
     );
 }
 
-// ---- Artwork cache (milestone 4) ----
-
 /// Content-addressed keys: identical cover bytes share one cache file,
 /// and the second import is a cache hit (no rewrite, no duplicate).
 #[tokio::test]
@@ -294,10 +292,8 @@ async fn changed_cover_gets_new_file_and_sweep_invalidates_old() {
         .clone()
         .expect("v1 cover");
 
-    // Same path, different content -> different cache key. The rewrite
-    // is same-length within the same second, so size+mtime would still
-    // match — bump mtime explicitly to simulate a real modification
-    // (the skip-if-unchanged contract sees it, and re-parses).
+    // Same path, different content -> different key. The rewrite is same-length
+    // within the second, so bump mtime; the skip-if-unchanged contract re-parses.
     tmp_epub_with_cover(&lib, "book.epub", Some(b"cover-version-2"));
     let previous = std::fs::metadata(&book_file).unwrap().modified().unwrap();
     std::fs::File::open(&book_file)
@@ -408,7 +404,6 @@ fn pdf_cover_indeterminate_outcomes_preserve_previous_cover() {
     .unwrap();
     assert_eq!(failed.as_deref(), Some(previous_str.as_str()));
 
-    // No previous cover: indeterminate stays coverless, never an error.
     let fresh = pdf_cover_from_result(Ok(None), &covers, None, source).unwrap();
     assert_eq!(fresh, None);
 }

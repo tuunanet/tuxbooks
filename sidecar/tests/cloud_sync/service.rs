@@ -177,9 +177,7 @@ async fn a_pass_reports_syncing_then_idle_and_refreshes_aggregate_counts() {
     let status = a.service.status().await.unwrap();
     assert_eq!(status.state, SyncState::Idle);
     assert_eq!(status.pending_local, 0);
-    // The corrupt file's row is the sweep's work in progress (ADR 0017 D4):
-    // it stays listed but outside the attention count until the attempts
-    // run out. The trash count is not the sweep's business.
+    // The corrupt row is scheduled sweep work (ADR 0017 D4), not attention; trash is unrelated.
     assert_eq!(status.issues, 0, "a scheduled auto-retry is not attention");
     assert!(status.trash >= 1, "the deleted bookmark is counted");
     assert!(
@@ -242,9 +240,7 @@ async fn a_missing_or_corrupt_library_file_fails_the_pass_and_recovers() {
     let failed = a.service.status().await.unwrap();
     assert_eq!(failed.state, SyncState::Error);
     assert!(failed.last_error.is_some());
-    // The sweep already picked the failed pass up (ADR 0017 D4), so the row
-    // is scheduled work, not attention: the failed pass itself keeps the
-    // state on error, and the row stays listed.
+    // The failed pass keeps the state on error; its row stays listed, not counted.
     assert_eq!(failed.issues, 0);
     assert!(a
         .service
@@ -336,8 +332,6 @@ async fn sync_issues_can_be_dismissed_only_when_they_are_informational() {
     );
     let left = a.service.issues().await.unwrap();
     assert_eq!(left.len(), 2, "the retryable rows stay: {left:?}");
-    // Both retryable rows are the sweep's scheduled work (ADR 0017 D4), so
-    // the attention count is empty while they retry.
     assert_eq!(a.service.status().await.unwrap().issues, 0);
 }
 
@@ -358,9 +352,8 @@ async fn a_pass_rejects_a_folder_that_belongs_to_another_library() {
     let err = a.service.run_pass().await.unwrap_err();
     assert!(err.to_string().contains("different library"), "got {err}");
     assert_eq!(a.service.status().await.unwrap().state, SyncState::Error);
-    // The UI repairs this failure by suffix-matching the stored last_error
-    // (frontend SyncPanels), so the AppError Display wrapper must stay a
-    // prefix of what the pass stores, with the stable message as its tail.
+    // The UI suffix-matches the stored last_error, so the AppError Display wrapper
+    // must stay a prefix of what the pass stores, with the stable message as its tail.
     let stored = a.service.status().await.unwrap().last_error.unwrap();
     assert!(
         stored.ends_with("sync folder belongs to a different library; reconnect to confirm"),
@@ -390,8 +383,7 @@ async fn service_helpers_work_before_connecting() {
 
 #[tokio::test(start_paused = true)]
 async fn the_background_loop_starts_and_stops() {
-    // Setup uses real time: sqlx pool acquisition has its own 30 s timer, and
-    // an idle paused runtime would auto-advance straight into it.
+    // Setup needs real time: sqlx pool acquisition has its own 30 s timer that a paused runtime would fast-forward.
     tokio::time::resume();
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tuxbooks.db");
@@ -407,7 +399,6 @@ async fn the_background_loop_starts_and_stops() {
     tokio::time::pause();
     service.start();
     service.wake();
-    // Let the task reach its startup sleep, then release it.
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(2)).await;
     // Database work runs in real time; only the loop's timers are paused.
@@ -431,7 +422,6 @@ async fn the_background_loop_starts_and_stops() {
         "the shutdown flush records a sync time"
     );
 
-    // The loop is gone, so waking it and passing the poll interval is inert.
     tokio::time::pause();
     service.wake();
     tokio::time::advance(Duration::from_secs(10)).await;

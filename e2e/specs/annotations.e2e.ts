@@ -106,11 +106,8 @@ test.describe("reading annotations", () => {
   }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
 
-    // Deterministic anchor: page 1 rendered, with its selectable text layer
-    // (the spans render asynchronously after the container mounts). The
-    // reader restores the book's saved position before the surface mounts,
-    // so wait for the document slots before scrolling — scrollToSlot
-    // no-ops while the reader is still loading.
+    // Wait for the document slots before scrolling: the reader restores the book's saved
+    // position before the surface mounts, and scrollToSlot no-ops while loading.
     await expect
       .poll(async () => (await slotStates(page)).length, { timeout: 30000 })
       .toBeGreaterThan(0);
@@ -127,21 +124,16 @@ test.describe("reading annotations", () => {
       )
       .toBe(true);
 
-    // Select the page's text through its text layer and release the pointer,
-    // so the reader captures the selection the same way a mouse drag ends.
     await selectPageOneText(page);
 
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
 
-    // The stored highlight's overlay draws on the page right away (one
-    // overlay per selection rectangle — multi-line selections make several).
     await page
       .locator("[data-pdf-highlight]")
       .first()
       .waitFor({ state: "attached", timeout: 10000 });
 
-    // Attach a note through the drawer's Highlights tab.
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
     await page.getByTestId("nav-highlight-note-0").click();
@@ -152,15 +144,12 @@ test.describe("reading annotations", () => {
     });
     await closeReaderNavigation(page);
 
-    // Bookmark the page as well, then leave; the debounced progress save
-    // plus the unmount flush persist everything.
     await page.getByTestId("reader-bookmark").click();
     await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
       timeout: 10000,
     });
     await returnToLibrary(page);
 
-    // Reopen: highlight, note, and bookmark all come back from the database.
     await openInReader(page, "A Minimal Manual (PDF)");
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
@@ -168,14 +157,11 @@ test.describe("reading annotations", () => {
       timeout: 10000,
     });
 
-    // Revisit: jumping to the highlight lands on page 1 with the overlay drawn.
     await page.getByTestId("nav-highlight-jump-0").click();
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
     await waitForRendered(page, 1);
-    // A highlight draws one overlay per selection rectangle (multi-line
-    // selections produce several) — any overlay present is the contract.
     await page
       .locator("[data-pdf-highlight]")
       .first()
@@ -192,9 +178,7 @@ test.describe("reading annotations", () => {
   test("creates an EPUB highlight from a selection and paints it again after reopen and jump", async ({
     page,
   }) => {
-    // Order independence: earlier specs in the shared scratch library may
-    // have left highlights on this book — clear them through the bridge
-    // before the reader loads its annotation list.
+    // Shared scratch library: clear earlier highlights before the reader loads its annotations.
     await page.evaluate(async () => {
       const books = (await window.tuxbooks!.invoke("list_books")) as {
         id: number;
@@ -217,12 +201,10 @@ test.describe("reading annotations", () => {
       timeout: 30000,
     });
 
-    // Select the fixture's deterministic passage and pick yellow.
     await selectEpubSectionText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
 
-    // The highlight paints right away, in-session.
     await expect(page.locator("[data-epub-host]")).toHaveAttribute("data-epub-highlights", "1", {
       timeout: 10000,
     });
@@ -230,10 +212,6 @@ test.describe("reading annotations", () => {
 
     await returnToLibrary(page);
 
-    // Reopen: the stored highlight must paint again with no interaction.
-    // Regression: highlights present before the navigator existed were
-    // queued but never applied once the engine finished loading, so they
-    // stayed invisible for the whole session.
     await openInReader(page, "A Minimal Book (EPUB)");
     await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-epub-state", "ready", {
       timeout: 30000,
@@ -242,15 +220,12 @@ test.describe("reading annotations", () => {
     await expect(host).toHaveAttribute("data-epub-highlights", "1", { timeout: 30000 });
     await expect.poll(() => epubHighlightPainted(page), { timeout: 30000 }).toBe(true);
 
-    // Jump from the drawer: the row's destination is the painted highlight.
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
     await page.getByTestId("nav-highlight-jump-0").click();
     await expect(host).toHaveAttribute("data-epub-highlights", "1", { timeout: 30000 });
     await expect.poll(() => epubHighlightPainted(page), { timeout: 30000 }).toBe(true);
 
-    // Remove the highlight through the drawer: the reader drops it live
-    // (nothing left behind for the specs that share this library).
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-highlights", "nav-highlight-0");
     await page.getByTestId("nav-highlight-delete-0").click();
@@ -273,8 +248,6 @@ test.describe("reading annotations", () => {
     await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
       timeout: 10000,
     });
-    // Naming happens right at the toggle: the popover drops out of the
-    // button and commits on Enter.
     await page.getByTestId("bookmark-label-input").fill("Opening scene");
     await page.getByTestId("bookmark-label-input").press("Enter");
     await expect(page.getByTestId("bookmark-label-popover")).toBeHidden();
@@ -289,22 +262,17 @@ test.describe("reading annotations", () => {
     await openInReader(page, "A Minimal Book (EPUB)");
     await epubReady(page);
 
-    // Reopening restores the same position, so the stored bookmark lights
-    // the toolbar button up again.
     await expect(page.getByTestId("reader-bookmark")).toHaveAttribute("aria-pressed", "true", {
       timeout: 30000,
     });
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
-    // The label and the in-chapter progress both come back from the store.
     await expect(page.getByTestId("nav-bookmark-0")).toContainText("Opening scene");
     await expect(page.getByTestId("nav-bookmark-0")).toContainText(/% through chapter/);
     await closeReaderNavigation(page);
 
     await returnToLibrary(page);
 
-    // The detail view reviews the same bookmark and opens the reader at its
-    // stored position.
     await openBookDetail(page, "A Minimal Book (EPUB)");
     await page.getByTestId("detail-tab-bookmarks").click();
     const rows = page.locator('[data-testid="detail-bookmarks"] > li');
@@ -319,7 +287,6 @@ test.describe("reading annotations", () => {
   test("truncates long bookmark labels and keeps the row actions inside the drawer", async ({
     page,
   }) => {
-    // Created before the reader opens, so the drawer's initial load has it.
     const marker = "very-long-chapter-href-".padEnd(180, "x");
     const created = (await page.evaluate(async (marker) => {
       const books = (await window.tuxbooks!.invoke("list_books")) as {
@@ -346,9 +313,6 @@ test.describe("reading annotations", () => {
     await openReaderNavigation(page);
     await openReaderTab(page, "nav-tab-bookmarks", "nav-bookmark-0");
 
-    // The bookmark's spine href is far longer than the drawer: its label
-    // must ellipsize instead of stretching the row past the sheet edge
-    // (regression: the delete button disappeared off-sheet on wide rows).
     const rowChecks = await page.evaluate((marker) => {
       const rows = Array.from(
         document.querySelectorAll<HTMLDivElement>("[data-testid^=nav-bookmark-]"),
@@ -388,9 +352,6 @@ test.describe("reading annotations", () => {
   test("removes a PDF highlight from the palette and the removal persists across reopen", async ({
     page,
   }) => {
-    // Order independence: earlier specs in the shared scratch library may
-    // have left highlights on this book — clear them through the bridge
-    // before the reader loads its annotation list.
     await page.evaluate(async () => {
       const books = (await window.tuxbooks!.invoke("list_books")) as {
         id: number;
@@ -427,7 +388,6 @@ test.describe("reading annotations", () => {
       .toBe(true);
     await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0);
 
-    // Create a yellow highlight from a real text-layer selection.
     await selectPageOneText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await page.getByTestId("highlight-color-yellow").click();
@@ -436,9 +396,6 @@ test.describe("reading annotations", () => {
       .first()
       .waitFor({ state: "attached", timeout: 10000 });
 
-    // A plain click on the highlighted text addresses it: the palette
-    // offers Remove, and Remove deletes the annotation — the overlay
-    // disappears and the underlying text keeps working.
     await page.locator('[data-pdf-text-layer="1"] span').first().click();
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("highlight-remove")).toBeVisible();
@@ -446,13 +403,11 @@ test.describe("reading annotations", () => {
     await expect(page.locator("[data-pdf-highlight]")).toHaveCount(0, { timeout: 10000 });
     await expect(page.getByTestId("selection-toolbar")).toBeHidden({ timeout: 10000 });
 
-    // The same text is selectable again and nothing is targeted.
     await selectPageOneText(page);
     await expect(page.getByTestId("selection-toolbar")).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("highlight-remove")).toHaveCount(0);
     await page.getByRole("button", { name: "Dismiss selection" }).click();
 
-    // Reopen: the removal was persisted — no highlight comes back.
     await returnToLibrary(page);
     await openInReader(page, "A Minimal Manual (PDF)");
     await expect
@@ -467,8 +422,6 @@ test.describe("reading annotations", () => {
   test("lists a book's highlights in the detail view and jumps to one", async ({ page }) => {
     await ensureLibrary(page);
 
-    // Seed one highlight at the database level: this test is about the
-    // detail surface and its jump, not selection-to-highlight creation.
     const seeded = await page.evaluate(async () => {
       const books = (await window.tuxbooks!.invoke("list_books")) as {
         id: number;
@@ -497,8 +450,7 @@ test.describe("reading annotations", () => {
       })) as { id: number };
       return { id: created.id, bookId: pdf.id };
     });
-    // Pin the stored position to page 1 so a passing jump can only come
-    // from the clicked highlight, not from restored progress.
+    // Pin the stored position to page 1 so a passing jump can only come from the clicked highlight.
     await pinProgressToFirstPage(page, seeded.bookId);
 
     await expect
@@ -524,8 +476,6 @@ test.describe("reading annotations", () => {
       await expect(row).toContainText("detail tab probe", { timeout: 10000 });
       await expect(row).toContainText("Page 2");
 
-      // The row opens the reader at the highlight's page, not at the
-      // stored reading position.
       await row.click();
       await expect(page.getByTestId("reader-view")).toBeVisible({ timeout: 30000 });
       await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
@@ -540,12 +490,8 @@ test.describe("reading annotations", () => {
       await page.evaluate(async (id) => {
         await window.tuxbooks!.invoke("delete_annotation", { id });
       }, seeded.id);
-      // The seeded phase shares one app per worker, so even a failed run
-      // must leave the library in order: ensureLibrary closes whichever
-      // view the jump left open, and the pin undoes the persisted jump
-      // position — closing at page 2 saves it by design, and the specs
-      // after this file open the book expecting page 1 (issue
-      // tuxbooks-k5m).
+      // Even a failed run must leave the library at page 1: closing the reader at
+      // page 2 saves that position by design (issue tuxbooks-k5m).
       await ensureLibrary(page);
       await pinProgressToFirstPage(page, seeded.bookId);
     }

@@ -165,12 +165,8 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
   });
 
   test("degrades a stale foliate row to the beginning without crashing", async ({ page }) => {
-    // A CFI pointing at a nonexistent spine entry plus a chapter href that
-    // matches no spine item: every locator tier of the migration adapter's
-    // fallback hierarchy (docs/EPUB.md) fails validation against the actual
-    // EPUB. A locator-bearing row never falls back to its stale percentage
-    // — that would silently jump into a different file — so the adapter
-    // degrades to the beginning (section 0), and the reader stays usable.
+    // A stale locator must never fall back to its percentage — that would
+    // jump into a different file — so the adapter degrades to section 0.
     seedProgress(db, epubUid, {
       cfi: "epubcfi(/6/999!/4/2/1:0)",
       chapterHref: "gone.xhtml",
@@ -179,10 +175,7 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
     });
     await openInReader(page, `${EPUB_TITLE} (EPUB)`);
     await waitForEpubSection(page, "0");
-    // A real position change (page turn) flushes the debounced save and
-    // lands the migration markers: the converted row carries the Readium
-    // locator + engine/schema markers while the original foliate locator
-    // survives as provenance (docs/EPUB.md).
+    // A page turn flushes the debounced save and lands the migration markers.
     await page.keyboard.press("ArrowRight");
     await page.waitForTimeout(1500);
     const migrated = db
@@ -199,7 +192,6 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
     expect(migrated.engine).toBe("readium");
     expect(migrated.schema_version).toBe(2);
     expect(migrated.locator).toContain("chapter");
-    // Original data preserved beside the converted locator.
     expect(migrated.cfi).toBe("epubcfi(/6/999!/4/2/1:0)");
     expect(migrated.chapter_href).toBe("gone.xhtml");
     await returnToLibrary(page);
@@ -221,16 +213,13 @@ test.describe("tuxbooks reading-progress migration (foliate rows)", () => {
 
   test.afterAll(() => {
     if (db === undefined || !epubUid || !pdfUid) return;
-    // Clean up this suite's DB writes so later specs in the phase see the
-    // state they expect (no spec may assume fresh state, but leaving seeded
-    // rows behind would spread restore side effects across every reader).
+    // Leave no seeded rows behind; no spec may assume fresh state.
     try {
       db.prepare("DELETE FROM reading_progress WHERE book_uid = ? OR book_uid = ?").run(
         epubUid,
         pdfUid,
       );
     } catch {
-      // beforeAll failed before the scratch schema existed; nothing to clean.
     } finally {
       db.close();
     }

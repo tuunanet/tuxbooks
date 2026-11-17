@@ -16,9 +16,7 @@ async fn bulk_forget_survives_writer_contention() {
         env.save_progress(book.id, 40.0).await;
     }
 
-    // Hold the write lock for 6 s: past the pool's 5 s busy timeout, so the
-    // first book's forget returns busy and must be retried, then the lock
-    // releases while the run continues.
+    // Hold the write lock past the pool's 5 s busy timeout so the forget goes busy.
     let db_path = env.db_path.clone();
     let holder = tokio::spawn(async move {
         let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db_path.display()))
@@ -101,8 +99,6 @@ async fn bulk_forget_survives_a_live_sync_drain() {
     }
     assert_eq!(env.durable_count().await, BOOKS);
 
-    // Real sync against a real folder, with the pass loop running in the
-    // background: it drains `sync_dirty` while the forget run writes.
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&events);
     let emitter = EventEmitter::new(move |name: &'static str, payload: Value| {
@@ -124,8 +120,6 @@ async fn bulk_forget_survives_a_live_sync_drain() {
     assert!(connected.mismatch.is_none());
     service.start();
 
-    // Hold the run until the loop is mid-pass on the seeded backlog, so the
-    // forgets below contend with live drains and not just with the poll.
     let waited = Instant::now();
     loop {
         let passing = events
@@ -154,15 +148,7 @@ async fn bulk_forget_survives_a_live_sync_drain() {
         Some(BOOKS as usize)
     );
 
-    // The queue must settle with nothing left for the renderer to see.
-    // `pending_local` is the engine's own `COUNT(*) FROM sync_dirty`, so
-    // this covers the drain the ticket asks for. A pass that loses a write
-    // race mid-run records a `sync_failed` issue and an error status by
-    // design; the loop's next pass clears both, so only the settled state
-    // proves the run ended clean. `Idle` is part of the settle because a
-    // pass still in flight reports a clean status while it works. Poll
-    // rather than sleep: while dirty rows remain, the loop passes every
-    // couple of seconds.
+    // Poll for Idle: a pass still in flight reports a clean status.
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
         let status = service.status().await.unwrap();
@@ -221,9 +207,8 @@ async fn a_lost_ledger_write_leaves_no_orphan_tombstone() {
     env.write_book("book.epub", &minimal_epub());
     env.scan().await;
     let book = imported_book(&env).await;
-    // Drop the library entry's file rows so the forget produces no
-    // replacement identity: the dirty set is then the tombstone row alone,
-    // and the lock lands on its own capture.
+    // Drop file rows so the forget leaves no replacement identity, isolating
+    // the tombstone.
     sqlx::query("DELETE FROM books WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)")
         .bind(book.id)
         .execute(&env.pool)
@@ -242,13 +227,12 @@ async fn a_lost_ledger_write_leaves_no_orphan_tombstone() {
     let sync_root = store::resolve_root(sync_dir.path()).unwrap();
     let covers = tempfile::tempdir().unwrap();
 
-    // Mint the device identity before the lock: the first capture under the
-    // lock must fail on its ledger write, not on minting the device id.
+    // Mint the device identity first, so the capture fails on the ledger
+    // write, not the mint.
     device_id(&env.pool).await.unwrap();
 
-    // Hold the write lock past the pool's 5 s busy timeout, so the drain
-    // publishes the op file and then fails on its ledger insert. The
-    // readiness gate pins the lock before the drain starts.
+    // Hold the lock past the busy timeout so the drain publishes the op file
+    // then fails its ledger insert.
     let (lock_ready, lock_held) = tokio::sync::oneshot::channel();
     let holder = tokio::spawn(hold_write_lock(env.db_path.clone(), 6, lock_ready));
     lock_held.await.unwrap();
@@ -260,8 +244,7 @@ async fn a_lost_ledger_write_leaves_no_orphan_tombstone() {
     );
     holder.await.unwrap();
 
-    // The row survives the failed attempt; the next pass recaptures it and
-    // the folder must end with exactly one tombstone, no orphan.
+    // The row survives; the next pass recaptures it, leaving exactly one tombstone.
     capture::drain(&env.pool, &sync_root, covers.path(), 10)
         .await
         .unwrap();
@@ -276,8 +259,7 @@ async fn a_lost_ledger_write_leaves_no_orphan_tombstone() {
         "exactly one tombstone per forgotten book, whatever the retries did"
     );
 
-    // And the folder holds no unowned files: every published op is in the
-    // ledger, on this device's recapture or not.
+    // Every published op file must be ledgered.
     let ledgered: HashSet<String> =
         sqlx::query_as::<_, (String,)>("SELECT file_name FROM sync_ops")
             .fetch_all(&env.pool)
@@ -330,8 +312,6 @@ async fn single_forget_aborts_on_transient_contention() {
     let book = imported_book(&env).await;
     env.save_progress(book.id, 30.0).await;
 
-    // Hold the write lock for 6 s, past the pool's 5 s busy timeout, so
-    // the forget's write fails busy.
     let (ready, _) = tokio::sync::oneshot::channel();
     let holder = tokio::spawn(hold_write_lock(env.db_path.clone(), 6, ready));
 
@@ -358,8 +338,6 @@ async fn single_forget_aborts_on_transient_contention() {
         "bounded, not a hang: {elapsed:?}"
     );
 
-    // Nothing moved: the book, its state, and the trash are exactly as the
-    // user left them.
     assert_eq!(env.books().await.len(), 1);
     assert_eq!(env.books().await[0].id, book.id);
     assert_eq!(env.progress_percent(book.id).await, Some(30.0));

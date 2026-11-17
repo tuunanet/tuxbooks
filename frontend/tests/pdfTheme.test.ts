@@ -16,8 +16,6 @@ describe("PDF theme treatments", () => {
   });
 
   it("maps the dark theme to the worker colour scheme (ADR 0002)", () => {
-    // Dark is no longer a CSS invert filter: pages rasterize with the
-    // category-level recoloring palette shared with the EPUB dark preset.
     const treatment = pdfThemeTreatment("dark");
     expect(treatment.filter).toBeUndefined();
     expect(treatment.tint).toBeUndefined();
@@ -25,7 +23,6 @@ describe("PDF theme treatments", () => {
       background: hexToRgb01(EPUB_THEME_COLORS.dark.background),
       text: hexToRgb01(EPUB_THEME_COLORS.dark.text),
     });
-    // The palette is a genuinely dark/light pair.
     expect(treatment.smart?.background.reduce((a, b) => a + b, 0)).toBeLessThan(0.5);
     expect(treatment.smart?.text.reduce((a, b) => a + b, 0)).toBeGreaterThan(1.5);
     // The pending-page placeholder matches the raster's own pre-fill, so a
@@ -34,8 +31,6 @@ describe("PDF theme treatments", () => {
   });
 
   it("needs no placeholder for the filter-based and as-is treatments", () => {
-    // Filter modes invert the white placeholder live; as-is modes are
-    // faithful white pages.
     expect(pdfThemeTreatment("invert").pageBackground).toBeUndefined();
     expect(pdfThemeTreatment("contrast").pageBackground).toBeUndefined();
     expect(pdfThemeTreatment("default").pageBackground).toBeUndefined();
@@ -43,8 +38,6 @@ describe("PDF theme treatments", () => {
   });
 
   it("keeps the explicit negative as the Invert choice (issue #67)", () => {
-    // The old Dark recipe survives as a first-class mode for users who
-    // actually want a full-page inversion.
     expect(pdfThemeTreatment("invert").filter).toBe("invert(1) hue-rotate(180deg)");
     expect(pdfThemeTreatment("invert").tint).toBeUndefined();
     expect(pdfThemeTreatment("invert").smart).toBeUndefined();
@@ -59,8 +52,6 @@ describe("PDF theme treatments", () => {
   });
 
   it("has a treatment for exactly the themes offered to PDFs", () => {
-    // Default/Light render as-is; Dark recolors in the worker; Invert and
-    // High contrast filter.
     for (const theme of PDF_THEME_CHOICES) {
       expect(theme in PDF_THEME_TREATMENTS).toBe(true);
       expect(isPdfThemeChoice(theme)).toBe(true);

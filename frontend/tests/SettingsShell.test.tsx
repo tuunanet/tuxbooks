@@ -313,7 +313,6 @@ describe("SettingsShell", () => {
     await userEvent.click(screen.getByRole("button", { name: "Viewer settings" }));
     expect(screen.getByTestId("highlight-settings")).toBeInTheDocument();
 
-    // Pick a custom hue for the light-family yellow slot.
     await userEvent.click(screen.getByTestId("highlight-color-light-yellow"));
     const hexInput = within(await screen.findByTestId("highlight-hex-light-yellow")).getByRole(
       "textbox",

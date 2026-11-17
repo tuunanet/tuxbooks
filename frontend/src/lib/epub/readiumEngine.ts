@@ -316,10 +316,7 @@ export class ReadiumEpubHandle {
 
     this.positions = buildPositions(this.publication, positionsJson);
 
-    // The host element React mounts; the navigator renders inside a plain
-    // child div (its own sizing chain, like the foliate `<foliate-view>`).
-    // The container is the containing block for the navigator's absolutely
-    // positioned section iframes (readiumEngine.css sizes them to fill it).
+    // The container is the containing block for the navigator's absolutely positioned iframes.
     this.host = document.createElement("div");
     this.host.setAttribute("data-epub-host", "");
     this.host.style.width = "100%";
@@ -328,11 +325,6 @@ export class ReadiumEpubHandle {
     this.container.style.position = "relative";
     this.container.style.width = "100%";
     this.container.style.height = "100%";
-    // The reading system sizes the paginated spread to its computed width
-    // (capped by the maximal line length), which can be narrower than the
-    // window; auto margins center it so the blank space splits evenly
-    // instead of pooling on one side. A no-op at width 100% (initial and
-    // scrolled flow).
     this.container.style.marginInline = "auto";
     this.host.appendChild(this.container);
 
@@ -351,9 +343,7 @@ export class ReadiumEpubHandle {
     let decoded = memberHref;
     try {
       decoded = decodeURIComponent(memberHref);
-    } catch {
-      /* keep the raw form */
-    }
+    } catch {}
     for (const [href, type] of this.mediaTypes) {
       if (href === memberHref || href.endsWith(memberHref) || decoded.endsWith(href)) {
         return type;
@@ -361,9 +351,7 @@ export class ReadiumEpubHandle {
       let decodedKey = href;
       try {
         decodedKey = decodeURIComponent(href);
-      } catch {
-        /* keep the raw form */
-      }
+      } catch {}
       if (decodedKey === decoded) return type;
     }
     return null;
@@ -404,17 +392,10 @@ export class ReadiumEpubHandle {
    */
   async init(saved: ReadingProgressRecord | null): Promise<void> {
     const initialLocator = await this.resolveInitialLocator(saved);
-    // Serialize behind any navigation that slipped in before the load (the
-    // shell only navigates after ready, but a hot Home/progress-bar press
-    // can race the restore — see the initChain note above).
+    // A hot Home/progress-bar press can race the restore; serialize behind initChain.
     this.initChain = this.navigatorLoad(initialLocator);
     await this.initChain;
-    // Highlights that arrived before the navigator existed (the reader's
-    // highlight diff runs as soon as the handle is open, while init is
-    // still loading) were queued in the map but never drawn — apply them
-    // now, exactly like rebuildNavigator does after its rebuild. Without
-    // this, every highlight stored before this open is invisible for the
-    // whole session, including the one a drawer jump navigates to.
+    // Highlights queued before the navigator existed must be applied after load.
     await this.applyHighlights();
   }
 
@@ -445,11 +426,7 @@ export class ReadiumEpubHandle {
       );
       this.navigator = navigator;
       if (this.lastAppearance !== null) void this.setAppearance(this.lastAppearance);
-      // The toolkit's frame-comms handshake can drop an ack under load,
-      // leaving load() unsettled forever (the reader wedges on a blank
-      // surface). Bound each attempt; a fresh navigator re-runs the whole
-      // handshake. Two attempts: a transient race recovers, a systematic
-      // failure surfaces as the reader's error state.
+      // The frame-comms handshake can drop an ack and wedge load(): bound it and retry.
       const outcome = await Promise.race([
         navigator.load().then(
           () => "ok" as const,
@@ -489,7 +466,6 @@ export class ReadiumEpubHandle {
     }
 
     if (saved.progressPercent !== null && !saved.cfi && !saved.chapterHref && !saved.locator) {
-      // Percentage-only row: nearest position at or before the fraction.
       return this.locatorForTotalProgression(clamp01(saved.progressPercent / 100));
     }
 
@@ -631,8 +607,6 @@ export class ReadiumEpubHandle {
     return best ?? this.positions[0] ?? undefined;
   }
 
-  // Engine events ----------------------------------------------------------------
-
   private handlePositionChanged(locator: Locator): void {
     this.currentLocator = locator;
     this.relocateCount += 1;
@@ -648,12 +622,10 @@ export class ReadiumEpubHandle {
       totalProgression: this.totalProgressionOf(locator),
       tocItem: this.nearestTocLabel(locator.href),
     };
-    // A jump in flight holds the event: see jumpHold.
     const hold = this.jumpHold;
     if (hold !== null) {
       hold.events.push(detail);
-      // Quiet-period semantics: the flush waits for the LAST relocate plus
-      // the quiet window, however slowly the frame load stretches the pair.
+      // Flush after the last relocate plus the quiet window, however slow the frame load.
       window.clearTimeout(hold.timer);
       hold.timer = window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_QUIET_MS);
       return;
@@ -667,11 +639,8 @@ export class ReadiumEpubHandle {
 
   /** Start holding relocates for a commanded jump (see jumpHold). */
   private armJumpHold(): void {
-    // A newer jump supersedes an unsettled hold: its held events describe a
-    // position the new jump is about to replace, so drop rather than flush.
     if (this.jumpHold !== null) window.clearTimeout(this.jumpHold.timer);
-    // The bail-out timer covers only the wait for the first relocate; each
-    // held event then re-arms the shorter quiet window (handlePositionChanged).
+    // The bail-out timer covers only the first relocate; later events re-arm the quiet one.
     this.jumpHold = {
       events: [],
       timer: window.setTimeout(() => this.flushJumpHold(), JUMP_HOLD_MAX_MS),
@@ -744,9 +713,6 @@ export class ReadiumEpubHandle {
       for (const handler of this.selectionHandlers) handler({ text: "" });
       return;
     }
-    // Enrich the wire selection with the live DOM range from the frame
-    // (same-origin sandboxed iframe), so highlight creation is anchored
-    // exactly — the quote locator needs the surrounding text.
     let doc: Document | null = null;
     let range: Range | null = null;
     try {
@@ -756,9 +722,7 @@ export class ReadiumEpubHandle {
         range = live.getRangeAt(0).cloneRange();
         doc = frame?.document ?? null;
       }
-    } catch {
-      // A closed frame or cross-realm hiccup degrades to quote-only.
-    }
+    } catch {}
     this.pendingSelection = { wire: selection, doc, range, text };
     for (const handler of this.selectionHandlers) handler({ text });
   }
@@ -797,8 +761,6 @@ export class ReadiumEpubHandle {
     this.selectionHandlers.add(handler);
     return () => this.selectionHandlers.delete(handler);
   }
-
-  // Navigation -------------------------------------------------------------------
 
   /**
    * Run a navigation once the restore's frame update has settled (see the
@@ -958,7 +920,6 @@ export class ReadiumEpubHandle {
         }
         if (this.relocateCount !== before) return;
       }
-      // Wedged: rebuild at the current position and re-issue the turn once.
       console.warn("epub engine navigation wedged; rebuilding the navigator");
       await this.rebuildNavigator();
       const before = this.relocateCount;
@@ -1028,17 +989,12 @@ export class ReadiumEpubHandle {
   async setAppearance(appearance: EpubAppearance): Promise<void> {
     this.lastAppearance = appearance;
     if (!this.navigator) return;
-    // The neutral default submits explicit nulls: the toolkit's preference
-    // merging copies nulls (clearing a previously applied theme so
-    // publisher colors are restored) and skips undefined.
+    // Nulls clear a previous theme, undefined skips: the neutral default must submit nulls.
     const colors = epubThemeColors(appearance.theme);
     const layout = this.navigator.layout as EpubDocumentLayout;
     await this.navigator.submitPreferences(
       new EpubPreferences({
         backgroundColor: colors?.background ?? null,
-        // The foreground override composes on top of the theme: null falls
-        // back to the theme's text color, which for the neutral default is
-        // itself null (publisher text colors stay intact).
         textColor: epubForegroundPreference(appearance.foreground) ?? colors?.text ?? null,
         linkColor: colors?.link ?? null,
         visitedColor: colors?.visited ?? null,
@@ -1060,8 +1016,6 @@ export class ReadiumEpubHandle {
     );
   }
 
-  // Search -----------------------------------------------------------------------
-
   /**
    * Whole-book search over actual EPUB content: walks the spine, matches
    * inside each section document, and streams results per section through
@@ -1076,7 +1030,6 @@ export class ReadiumEpubHandle {
     );
     void this.consumeSearch(query.trim(), items, generation, callbacks)
       .then((truncated) => {
-        // A superseded walk never fires its predecessor's callbacks.
         if (generation === this.searchGeneration) callbacks.onDone(truncated);
       })
       .catch(() => {
@@ -1132,7 +1085,6 @@ export class ReadiumEpubHandle {
         });
         this.navigator?.applyDecorations(decorations, "search");
       }
-      // Yield between sections so a superseded search cancels promptly.
       await Promise.resolve();
     }
     return matchCount >= SEARCH_MAX_MATCHES;
@@ -1143,8 +1095,6 @@ export class ReadiumEpubHandle {
     this.searchGeneration += 1;
     this.navigator?.applyDecorations([], "search");
   }
-
-  // Highlights -------------------------------------------------------------------
 
   /**
    * Draws a highlight at the locator and keeps it for section remounts
@@ -1178,18 +1128,13 @@ export class ReadiumEpubHandle {
         style: {
           type: "highlight",
           tint: highlightTint(key === undefined ? "" : (this.highlights.get(key) ?? "")),
-          // Washes arrive pre-tuned (lib/highlightPalette); the toolkit's
-          // contrast enforcement would otherwise darken low-contrast tints
-          // toward 3:1 against the page, ignoring their alpha and
-          // destroying the translucent look.
+          // Washes arrive pre-tuned; toolkit contrast enforcement would darken and flatten them.
           enforceContrast: false,
         },
       });
     });
     active.applyDecorations(decorations, "highlights");
-    // Testability contract (docs/EPUB.md): how many stored highlights are
-    // applied as decorations right now — E2E asserts highlight paint after
-    // reopen/jump through this host attribute, not engine-internal DOM.
+    // E2E reads highlight paint from this host attribute, not engine-internal DOM.
     this.host.dataset.epubHighlights = String(decorations.length);
   }
 
@@ -1271,8 +1216,6 @@ export class ReadiumEpubHandle {
     const locator = this.locatorForTotalProgression(clamp01(totalProgression));
     if (!locator) return null;
     const index = this.positions.indexOf(locator);
-    // locatorForTotalProgression returns members of this.positions, so this
-    // always resolves; the -1 branch only degrades the label to percent.
     if (index === -1) return null;
     return { index: index + 1, total: this.positions.length };
   }
@@ -1288,13 +1231,7 @@ export class ReadiumEpubHandle {
     this.loadHandlers.clear();
     this.externalLinkHandlers.clear();
     this.selectionHandlers.clear();
-    // Detach synchronously before the async toolkit teardown. The frame
-    // modules' ResizeObservers (snapper and decoration, on the content-frame
-    // documents) are only destroyed by `destroy()`, which awaits the frame
-    // pool; by then React has removed the reader view, the frames have
-    // collapsed, and Chromium reports a resize loop ("ResizeObserver loop
-    // completed with undelivered notifications"). Disconnecting the
-    // navigator's own observer and clearing the frames first stops it.
+    // Detach synchronously before async teardown to avoid a ResizeObserver loop.
     const navigator = this.navigator;
     this.navigator = null;
     if (navigator !== null) this.disconnectNavigatorObserver(navigator);
@@ -1314,8 +1251,6 @@ export class ReadiumEpubHandle {
     this.disconnectNavigatorObserver(navigator);
     await navigator.destroy();
   }
-
-  // TOC --------------------------------------------------------------------------
 
   private collectTocLabels(items: EpubTocItem[]): void {
     for (const item of items) {
@@ -1355,8 +1290,6 @@ export class ReadiumEpubHandle {
     return this.publication.readingOrder.items.length;
   }
 }
-
-// Locator helpers ----------------------------------------------------------------
 
 /** Serialize a real `Locator` to the app's canonical locator JSON. */
 export function serializeLocator(locator: Locator): string {
@@ -1409,8 +1342,6 @@ function mapToc(items: Link[]): EpubTocItem[] {
   }));
 }
 
-// Search text matching -----------------------------------------------------------
-
 /**
  * Case-insensitive whole-document text matching with excerpts. The built
  * locator carries an empty href; the search caller fills the section href.
@@ -1421,7 +1352,7 @@ function* matchInDocument(
 ): Generator<[SerializedLocator, EpubSearchExcerpt]> {
   const body = doc.body ?? doc.documentElement;
   if (!body) return;
-  const walker = doc.createTreeWalker(body, 4 /* NodeFilter.SHOW_TEXT */);
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT);
   const needle = query.toLowerCase();
   if (needle.length === 0) return;
   let node = walker.nextNode();

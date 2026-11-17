@@ -36,11 +36,8 @@ describe("createInstantPdfBookTurn", () => {
 
   it("advances one spread per press and stops at the last one", () => {
     const { turn, onSettle } = makeTurn(2, 6);
-    // From the first page of a pair (the old two-press bug: page 2 landed
-    // on page 3 inside the same spread) one press reaches spread [4,5].
     turn.advance();
     expect(onSettle).toHaveBeenLastCalledWith(4);
-    // From the second page of a pair, also one press.
     turn.advance();
     expect(onSettle).toHaveBeenLastCalledWith(6);
     // The last spread [6]: stay put, no wrap, no settle.
@@ -50,11 +47,8 @@ describe("createInstantPdfBookTurn", () => {
 
   it("retreats to the previous spread's last page and stops at the cover", () => {
     const { turn, onSettle } = makeTurn(5, 6);
-    // From the second page of a pair.
     turn.retreat();
     expect(onSettle).toHaveBeenLastCalledWith(3);
-    // From the first page of a pair: one press back again, onto the
-    // cover (the first spread's last page).
     turn.retreat();
     expect(onSettle).toHaveBeenLastCalledWith(1);
     // The cover is the first spread: stay put, no settle.

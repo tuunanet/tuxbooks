@@ -76,8 +76,8 @@ export function useLibraryVirtualizer({
    */
   const attachScroller = useCallback((el: HTMLDivElement | null) => {
     scrollRef.current = el;
-    // `scrollRef.current` is nulled by React on detach, before layout
-    // cleanups run, so the scroll-save path reads this handle instead.
+    // React nulls `scrollRef.current` on detach before cleanups, so saves read
+    // this handle instead.
     scrollElRef.current = el;
     setScrollEl(el);
     observerRef.current?.disconnect();
@@ -121,8 +121,6 @@ export function useLibraryVirtualizer({
    */
   const measuredRatioRef = useRef(1);
   useEffect(() => {
-    // The ratio is relative to the base estimate; a new base (view switch,
-    // column-count change) invalidates it.
     measuredRatioRef.current = 1;
   }, [rowEstimate]);
 
@@ -156,8 +154,6 @@ export function useLibraryVirtualizer({
     for (const node of nodes) instance.measureElement(node);
   }, []);
 
-  // Arm/refresh the scrolling window on every scroll event; the flush runs
-  // when the scroll has been idle for IS_SCROLL_IDLE_FLUSH_MS.
   const markScrolling = useCallback(() => {
     scrollingRef.current = true;
     if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current);
@@ -177,23 +173,14 @@ export function useLibraryVirtualizer({
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollEl,
-    // tanstack's default flushSync-on-notify fires from layout effects
-    // while React is rendering ("React cannot flush when React is already
-    // rendering"); async commits keep the window shift on the normal
-    // scheduler, which is imperceptible for scrolling.
+    // tanstack's default flushSync-on-notify fires from layout effects during
+    // render ("React cannot flush when React is already rendering").
     useFlushSync: false,
     estimateSize: () => Math.round(rowEstimate * measuredRatioRef.current),
-    // estimateSize/measureElement run inside TanStack's internals (render
-    // for the former, ResizeObserver and the idle-flush timer for the
-    // latter), not in this component's render. The refs they read are
-    // written only from event/timer contexts, and a stale read is
-    // self-correcting (estimates are re-priced on the next measurement),
-    // so the React Compiler render-phase-ref rule's hazard does not apply.
+    // These run inside TanStack (render, observer, idle timer), not this
+    // component's render; stale ref reads self-correct.
     overscan: OVERSCAN_ROWS,
-    // No-layout environments (jsdom tests, SSR) report offsetHeight 0 for
-    // every row; taking that at face value collapses the whole list into
-    // the viewport (every row "fits") and re-renders forever. Keep the
-    // estimate there; real renders report true heights and are measured.
+    // jsdom/SSR report offsetHeight 0; keep the estimate or re-render forever.
     measureElement: (node, entry, instance) => {
       const entrySize = entry?.borderBoxSize?.at(0)?.blockSize;
       const size = typeof entrySize === "number" ? entrySize : (node as HTMLElement).offsetHeight;
@@ -202,10 +189,7 @@ export function useLibraryVirtualizer({
       if (size <= 0)
         return lastReportedSizesRef.current.get(key) ?? instance.options.estimateSize(index);
       if (scrollingRef.current) {
-        // Scroll in flight: defer. Reporting the row's LAST reported size
-        // (or, for a first measurement, the estimate) keeps this row's
-        // contribution to the total size, and the scrollbar geometry,
-        // frozen for the duration.
+        // Report the last size while scrolling so the total size stays frozen.
         deferredMeasurementsRef.current.set(key, node);
         return lastReportedSizesRef.current.get(key) ?? instance.options.estimateSize(index);
       }
@@ -225,19 +209,11 @@ export function useLibraryVirtualizer({
       return first ? `book-${first.id}` : `row-${rowIndex}`;
     },
   });
-  // The instance mirror for the idle-flush timer (which fires outside
-  // render) is assigned in an effect, not the component body: refs may not
-  // be written during render.
+  // Assigned in an effect: refs may not be written during render.
   useEffect(() => {
     virtualizerRef.current = virtualizer;
   }, [virtualizer]);
 
-  // Scroll position survives navigation: saved continuously on scroll
-  // (plus on section change/unmount) and restored on mount. The save must
-  // not read `scrollRef.current` at unmount time: React detaches refs
-  // (callback refs get null) before layout cleanups run, which silently
-  // dropped every save; `scrollElRef` is never nulled and the onScroll
-  // write keeps the map current regardless of teardown order.
   const sectionKey =
     section.kind === "collection"
       ? `collection:${section.ids.join(",")}`
@@ -255,8 +231,7 @@ export function useLibraryVirtualizer({
     const saved = scrollPositions.get(sectionKey);
     if (saved !== undefined) {
       scrollEl.scrollTop = saved;
-      // jsdom does not fire scroll on programmatic sets; the virtualizer
-      // needs the event to pick the offset up.
+      // jsdom does not fire scroll on programmatic sets; the virtualizer needs the event.
       scrollEl.dispatchEvent(new Event("scroll"));
     }
   }, [scrollEl, sectionKey]);

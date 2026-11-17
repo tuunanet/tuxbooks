@@ -41,16 +41,14 @@ fn job(op: WorkerOp, limits: ResourceLimits) -> WorkerJob {
 
 #[test]
 fn a_dead_worker_never_takes_down_the_calling_process() {
-    // W-9: the client returns a typed crash error; the calling process
-    // (here: the test process standing in for the sidecar) continues, and
-    // the next spawn with the real worker succeeds.
+    // W-9: the client returns a typed crash error, the calling process survives,
+    // and the next spawn with the real worker succeeds.
     let path = fixture("minimal.epub");
     let (_dir, killer) = client_with("kill -SEGV $$");
     let err = killer
         .run(&job(WorkerOp::EpubParse, ResourceLimits::DEFAULTS), &path)
         .unwrap_err();
     assert!(matches!(err, WorkerError::Crash(_)), "got: {err:?}");
-    // The next job spawns cleanly: containment, not accumulated state.
     let book = client()
         .epub_parse(&path, &ResourceLimits::DEFAULTS)
         .unwrap();
@@ -105,9 +103,8 @@ fn worker_with_missing_binary_fails_closed() {
 
 #[test]
 fn an_rlimit_cpu_kill_maps_to_a_typed_limit_error() {
-    // I3: SIGXCPU (the RLIMIT_CPU backstop firing) is a resource-limit
-    // failure, not a mystery crash, so it must surface as a typed limit
-    // error rather than Crash/-32004.
+    // I3: SIGXCPU (the RLIMIT_CPU backstop) is a resource-limit failure, not a
+    // mystery crash, so it must surface as Limit, never Crash/-32004.
     let path = fixture("minimal.pdf");
     let (_dir, cpu) = client_with("kill -XCPU $$");
     let err = cpu
@@ -118,9 +115,8 @@ fn an_rlimit_cpu_kill_maps_to_a_typed_limit_error() {
 
 #[test]
 fn a_failed_response_reaches_the_sidecar_as_a_typed_error() {
-    // C1 regression pin: the worker writes a well-formed Failed response
-    // and exits 0, so the client must map it by kind, never as Crash. The
-    // real worker refuses garbage with kind=parse.
+    // C1 regression pin: a well-formed Failed response that exits 0 must map by
+    // kind, never as Crash; the real worker refuses garbage with kind=parse.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("garbage.epub");
     std::fs::write(&path, b"definitely not a zip archive").unwrap();

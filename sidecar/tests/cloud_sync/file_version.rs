@@ -137,7 +137,6 @@ async fn external_edit_stages_the_blob_then_publishes_the_file_version() {
         "a first import never mints (ADR 0018 D1)"
     );
 
-    // The external edit: size and mtime move, the reconciler re-imports.
     let v2 = epub_v2();
     std::fs::write(&path, &v2).unwrap();
     bump_mtime(&path);
@@ -174,8 +173,6 @@ async fn external_edit_stages_the_blob_then_publishes_the_file_version() {
         "the op is a pointer, not bytes: {payload_bytes} bytes"
     );
 
-    // The loop break: a re-import whose bytes hash to the winning version —
-    // the shape every adoption re-import will have — mints nothing.
     bump_mtime(&path);
     reconciler(&device).handle_modified(&path).await;
     assert_eq!(
@@ -206,7 +203,6 @@ async fn reimport_of_identical_content_mints_nothing() {
     let uid = uid_of(&device, "book.epub").await;
     assert!(mirrored_version(&device, &uid).await.is_some());
 
-    // Same bytes, new mtime: the reconciler re-imports, the guard blocks.
     bump_mtime(&path);
     reconciler(&device).handle_modified(&path).await;
     assert_eq!(file_version_dirty_rows(&device).await, 0);
@@ -237,7 +233,6 @@ async fn local_file_deletion_publishes_nothing() {
     reconciler(&device).handle_modified(&path).await;
     assert_eq!(file_version_dirty_rows(&device).await, 1);
 
-    // The bytes vanish before the capture pass can stage them.
     std::fs::remove_file(&path).unwrap();
     run(&device).await;
     assert_eq!(file_version_ops(&device).await, 0, "no pointer published");
@@ -321,7 +316,6 @@ async fn oversize_file_records_an_issue_and_publishes_nothing() {
     .await
     .unwrap();
 
-    // Queue the mint the re-import path would have recorded.
     let payload = serde_json::json!({ "content_hash": hash, "size": size });
     sqlx::query(
         "INSERT INTO sync_dirty (kind, entity_key, op, old_json, new_json)
@@ -371,7 +365,6 @@ async fn newer_file_version_from_another_device_wins_as_one_value() {
     let b = device().await;
     connect(&a, sync_dir.path()).await;
 
-    // Device A imports and externally edits to v2; the pointer travels.
     let a_path = library_path(&a, "book.epub").await;
     std::fs::write(&a_path, epub_v1()).unwrap();
     let _ = reconciler(&a).import_created(&a_path).await;
@@ -419,8 +412,7 @@ async fn newer_file_version_from_another_device_wins_as_one_value() {
         "the superseded blob stays under its own hash"
     );
 
-    // A replays B's ops and converges: the whole pair, not a mix, under the
-    // identity both devices merged onto.
+    // A replays B's ops and converges on the same whole pair.
     run(&a).await;
     let shared_uid = canonical_uid(&a, &uid).await;
     assert_eq!(
@@ -453,7 +445,6 @@ async fn newer_file_version_from_another_device_wins_as_one_value() {
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_helper_is_silent_without_a_binding_or_before_publication() {
     let device = device().await;
-    // No binding for this file id: nothing to mint.
     file_version::mint_after_reimport(&device.pool, 404)
         .await
         .unwrap();

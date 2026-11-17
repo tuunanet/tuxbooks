@@ -70,15 +70,11 @@ async function jumpToTocItem(page: Page, index: number): Promise<void> {
 test.describe("tuxbooks EPUB reader", () => {
   test("opens the fixture and renders it through the engine", async ({ page }) => {
     await openReadyEpub(page);
-    // The shell footer tracks the engine's progression (starts at the top).
     await expect
       .poll(() => textOf(page, "reader-position"), { timeout: 30000 })
       .toMatch(/^(100|[1-9]?\d)%$/);
 
-    // The navigator's section iframes must fill the navigator container.
-    // The toolkit mounts them without dimensions; a host app that loses the
-    // sizing stylesheet renders the book as a 300x150 block in the top-left
-    // corner while every state attribute stays honest (regression).
+    // Readium mounts section iframes without dimensions: losing the sizing stylesheet yields 300x150.
     const frames = await page.evaluate(() => {
       const container = document.querySelector("[data-epub-host]")?.firstElementChild;
       const containerRect = container?.getBoundingClientRect();
@@ -114,15 +110,10 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Regression: the shell used to keep its percentage-stepping arrow
-  // handlers registered for EPUB, where the step is 100/0 (no page count)
-  // and the provider clamps straight to 100%/0% — one ArrowRight landed on
-  // the end of the document. Arrows must drive the engine's page turns:
-  // asserted on the engine's pinned fraction/section attributes (exact
-  // engine truth) rather than the interpolated shell percent.
+  // Arrows must drive the engine's page turns; assert on its own fraction/section, not shell percent.
   test("turns pages with the arrow keys through the engine", async ({ page }) => {
     await openReadyEpub(page);
-    // Position may restore from an earlier test; start from the top.
+    // Specs share the scratch library's saved positions; start from the top.
     await page.keyboard.press("Home");
     await expect
       .poll(
@@ -143,8 +134,6 @@ test.describe("tuxbooks EPUB reader", () => {
     };
     expect(parseInt(await textOf(page, "reader-position"), 10)).toBeLessThan(95);
 
-    // One ArrowLeft must go back: the engine fraction/section must not sit
-    // past where ArrowRight landed.
     await page.keyboard.press("ArrowLeft");
     await expect
       .poll(() => engineMovedPast(page, Number(afterRight.section), afterRight.fraction), {
@@ -153,8 +142,6 @@ test.describe("tuxbooks EPUB reader", () => {
       .toBe(false);
   });
 
-  // MathML in EPUB 3 renders natively via the browser engine; the fixture's
-  // third chapter carries one formula.
   test("renders native MathML content", async ({ page }) => {
     await openReadyEpub(page);
 
@@ -187,14 +174,9 @@ test.describe("tuxbooks EPUB reader", () => {
 
     await page.getByTestId("appearance-trigger").click();
     await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
-    // The appearance controls are Radix ToggleGroup items (role=radio) —
-    // click by text within the group's stable test id, not by role.
     await page.getByTestId("pref-font-family").getByText("Serif", { exact: true }).click();
     await page.getByTestId("pref-theme").getByText("Paper", { exact: true }).click();
 
-    // The two-column layout keeps the popover free of scrollbars on the
-    // standard window (the max-height cap is a fallback for very short
-    // ones, issue #46 UAT).
     await expect
       .poll(() =>
         page.getByTestId("appearance-content").evaluate((el) => ({
@@ -204,9 +186,6 @@ test.describe("tuxbooks EPUB reader", () => {
       )
       .toEqual({ x: 0, y: 0 });
 
-    // The theme lands on section frames as user color variables (issue #46)
-    // and repagination keeps the reading location (assertion pattern from
-    // the shared-library note below).
     const themeVar = (name: string) =>
       page
         .frameLocator("[data-epub-host] iframe")
@@ -219,11 +198,6 @@ test.describe("tuxbooks EPUB reader", () => {
       .toBe("#f6f0e4");
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionAtThemeSwitch);
 
-    // Font size walks the Readium percent scale (issue #42). The slider owns
-    // its arrow keys, and larger text must repaginate cleanly while keeping
-    // the reading location: the reader stays ready in the same spine
-    // section. The book may open at a previously saved position (specs share
-    // the scratch library), so assert preservation, not an absolute section.
     const fontSlider = page.getByTestId("pref-font-size").getByRole("slider");
     const host = page.locator("div[data-epub-host]");
     const sectionBefore = await currentSection(page);
@@ -246,15 +220,10 @@ test.describe("tuxbooks EPUB reader", () => {
       timeout: 30000,
     });
 
-    // Close the popover so it cannot intercept the toolbar clicks below.
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
 
-    // Scrolled-flow regression pin (issue #42 UAT): the toolkit stubs
-    // go_next/go_prev in scrolled mode, which chapter-skips when the app
-    // turns pages through the navigator. The seam scrolls one viewport
-    // instead, so one ArrowRight may hold the section (fraction advanced)
-    // or hop exactly one spine item for a short chapter — never two.
+    // In scrolled flow the go_next/go_prev stubs chapter-skip: one ArrowRight may hop one spine item, never two.
     const sectionBeforeScroll = await currentSection(page);
     await page.keyboard.press("ArrowRight");
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
@@ -278,9 +247,6 @@ test.describe("tuxbooks EPUB reader", () => {
       )
       .toBeGreaterThanOrEqual(-1);
 
-    // The theme survived moving through the book (variable still on the
-    // current frame); switching back to Default removes the variables
-    // entirely — publisher colors are restored, nothing injected (issue #46).
     await expect
       .poll(() => themeVar("--USER__backgroundColor"), { timeout: 30000 })
       .toBe("#f6f0e4");
@@ -294,20 +260,12 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Issue #44: the column count is an explicit paginated target (1–4, default
-  // 2), passed through to the Readium pagination configuration as
-  // --USER__colCount on the section frames — never a viewport-dependent
-  // auto-fit. Switching repaginates in place (reader stays ready, same
-  // spine section), and scrolling ignores the count without dropping the
-  // stored preference.
   test("targets an explicit column count in paginated flow", async ({ page }) => {
     await openReadyEpub(page);
     const host = page.locator("div[data-epub-host]");
     await page.getByTestId("appearance-trigger").click();
     await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
 
-    // The preference lands on every rendered section frame as the toolkit's
-    // user column-count variable.
     const colCountInFrame = () =>
       page
         .frameLocator("[data-epub-host] iframe")
@@ -316,8 +274,6 @@ test.describe("tuxbooks EPUB reader", () => {
         .evaluate((el) => el.style.getPropertyValue("--USER__colCount"));
 
     const columns = page.getByTestId("pref-columns");
-    // Exactly 1–4 are offered as column icons; the stored value stays
-    // numeric, with the two-page spread preselected.
     await expect(columns.getByRole("radio", { name: "One column" })).toBeVisible();
     await expect(columns.getByRole("radio", { name: "4 columns" })).toBeVisible();
     await expect(columns.getByRole("radio", { name: "2 columns" })).toHaveAttribute(
@@ -328,11 +284,7 @@ test.describe("tuxbooks EPUB reader", () => {
     const sectionBefore = await currentSection(page);
     await columns.getByRole("radio", { name: "4 columns" }).click();
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
-    // The target passes through exactly when the viewport can fit it at the
-    // toolkit's minimal readable line length; ReadiumCSS otherwise floors to
-    // what fits (observed capacity on this window: 3 or 4). It never falls
-    // back to an automatic count — that floor is the issue's "when
-    // sufficient width exists" qualifier, not an auto-fit.
+    // ReadiumCSS floors the target to the viewport: a requested 4 may report 3, never an automatic count.
     await expect.poll(colCountInFrame, { timeout: 30000 }).toMatch(/^[34]$/);
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
 
@@ -341,9 +293,6 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
     await expect.poll(() => currentSection(page), { timeout: 30000 }).toBe(sectionBefore);
 
-    // The computed spread is narrower than the window for one column — it
-    // must center in the reading surface instead of hugging the left edge
-    // (blank space splits evenly on both sides, issue #44 UAT).
     const hostBox = await host.boundingBox();
     const containerBox = await page.locator("[data-epub-host] > div").first().boundingBox();
     expect(hostBox).not.toBeNull();
@@ -355,9 +304,6 @@ test.describe("tuxbooks EPUB reader", () => {
       expect(Math.abs(containerCenter - hostCenter)).toBeLessThan(2);
     }
 
-    // Scrolling is a continuous single column: the engine drops the column
-    // variable entirely, the control disappears, and the stored target
-    // survives the round trip back to paginated.
     await page.getByTestId("pref-layout").getByText("Scrolling", { exact: true }).click();
     await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "scrolling", {
       timeout: 30000,
@@ -368,7 +314,6 @@ test.describe("tuxbooks EPUB reader", () => {
     await expect(page.getByTestId("epub-reader")).toHaveAttribute("data-layout", "paginated", {
       timeout: 30000,
     });
-    // The stored target (one column, the last explicit choice) survives scrolling.
     await expect.poll(colCountInFrame, { timeout: 30000 }).toBe("1");
     await expect(
       page.getByTestId("pref-columns").getByRole("radio", { name: "One column" }),
@@ -379,16 +324,12 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Issue #45: the text-layout controls flow through the engine's
-  // preference API onto every section frame as ReadiumCSS user variables.
-  // 0/"Auto" sentinels must inject nothing (no --USER__* variable at all).
   test("applies text-layout controls through the engine and across sections", async ({ page }) => {
     await openReadyEpub(page);
     const host = page.locator("div[data-epub-host]");
     await page.getByTestId("appearance-trigger").click();
     await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
 
-    // User variables land inline on the section frame's :root.
     const frameVar = (name: string) =>
       page
         .frameLocator("[data-epub-host] iframe")
@@ -396,8 +337,6 @@ test.describe("tuxbooks EPUB reader", () => {
         .locator("html")
         .evaluate((el, styleName) => el.style.getPropertyValue(styleName), name);
 
-    // Word spacing (rem scale): two steps → 0.25rem, then reset removes the
-    // variable entirely (publisher default, not an injected 0 override).
     const wordThumb = page.getByTestId("pref-word-spacing").getByRole("slider");
     await wordThumb.press("ArrowRight");
     await wordThumb.press("ArrowRight");
@@ -406,16 +345,11 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.getByTestId("pref-word-spacing-reset").click();
     await expect.poll(() => frameVar("--USER__wordSpacing"), { timeout: 30000 }).toBe("");
 
-    // Letter spacing must survive moving through the book: ReadiumCSS
-    // stores the compiled properties, so the frame displayed after moving
-    // carries the variable whether it was kept or freshly mounted.
     const letterThumb = page.getByTestId("pref-letter-spacing").getByRole("slider");
     await letterThumb.press("ArrowRight");
     await expect.poll(() => frameVar("--USER__letterSpacing"), { timeout: 30000 }).toBe("0.125rem");
     await page.keyboard.press("Escape");
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
-    // Start from the top so one ArrowRight deterministically moves the
-    // engine (specs share the scratch library and its saved positions).
     await page.keyboard.press("Home");
     await expect
       .poll(async () => `${await currentSection(page)}:${await engineFraction(page)}`, {
@@ -433,7 +367,6 @@ test.describe("tuxbooks EPUB reader", () => {
       .not.toBe(before);
     await expect.poll(() => frameVar("--USER__letterSpacing"), { timeout: 30000 }).toBe("0.125rem");
 
-    // Alignment: Justify applies the variable; Auto removes it again.
     await page.getByTestId("appearance-trigger").click();
     await expect(page.getByTestId("appearance-content")).toBeVisible({ timeout: 30000 });
     await page.getByTestId("pref-text-align").getByText("Justify", { exact: true }).click();
@@ -441,15 +374,10 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.getByTestId("pref-text-align").getByText("Auto", { exact: true }).click();
     await expect.poll(() => frameVar("--USER__textAlign"), { timeout: 30000 }).toBe("");
 
-    // Foreground override (issue #55): a curated swatch lands as
-    // --USER__textColor on the frames (on top of the active theme) and the
-    // reset removes the variable entirely — publisher/theme colors win.
     await page.getByTestId("pref-foreground-parchment").click();
     await expect.poll(() => frameVar("--USER__textColor"), { timeout: 30000 }).toBe("#f5efe0");
 
-    // The custom picker renders as a real popover and must stay inside the
-    // window (the appearance popover sits at the right edge here) — a
-    // native <input type="color"> popup is Chromium-positioned and clips.
+    // The picker must stay inside the window: native input[type=color] popups clip at the right edge.
     await page.getByTestId("pref-foreground-input").click();
     const picker = page.getByTestId("pref-foreground-picker");
     await expect(picker).toBeVisible({ timeout: 30000 });
@@ -471,19 +399,14 @@ test.describe("tuxbooks EPUB reader", () => {
     await page.getByTestId("appearance-content").waitFor({ state: "detached", timeout: 30000 });
     await returnToLibrary(page);
   });
-  // Critical acceptance test (§ persistence): the reader resumes the saved
-  // CFI location after the book is closed and reopened.
   test("restores the reading position when the EPUB is reopened", async ({ page }) => {
     await openReadyEpub(page);
 
-    // Jump to Chapter Three via the contents drawer and let the debounced
-    // save land before leaving the reader.
     await jumpToTocItem(page, 2);
     await waitForSection(page, 2);
     await page.waitForTimeout(1500);
     await returnToLibrary(page);
 
-    // Reopen: the engine restores into Chapter Three (spine section 2).
     await openReadyEpub(page);
     await waitForSection(page, 2);
     const percent = await textOf(page, "reader-position");
@@ -492,16 +415,9 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Semantic persistence regression (docs/TESTING.md): the exact engine
-  // locator — not just the section index or a percentage — survives the
-  // close/reopen cycle. This is the reading-position regression protection
-  // the engine migration (foliate → Readium) must keep passing. The locator
-  // grammar is the serialized Readium locator JSON; the restored locator
-  // must name the same section at the same in-section progression.
   test("restores the exact locator across close and reopen", async ({ page }) => {
     await openReadyEpub(page);
 
-    // Land on a known in-chapter position via the contents drawer.
     await jumpToTocItem(page, 1);
     await waitForSection(page, 1);
     await expect.poll(() => epubLocator(page), { timeout: 30000 }).not.toBeNull();
@@ -512,12 +428,9 @@ test.describe("tuxbooks EPUB reader", () => {
     };
     expect(saved.href).toContain("chapter2.xhtml");
 
-    // Let the debounced save flush before leaving the reader.
     await page.waitForTimeout(1500);
     await returnToLibrary(page);
 
-    // Reopen: the restored locator names the same logical content position
-    // (same section, same in-section progression within a tolerance).
     await openReadyEpub(page);
     await expect.poll(() => epubLocator(page), { timeout: 30000 }).not.toBeNull();
     const restoredLocator = (await epubLocator(page)) ?? "{}";
@@ -534,27 +447,19 @@ test.describe("tuxbooks EPUB reader", () => {
     await returnToLibrary(page);
   });
 
-  // Milestone 5 — in-book search: the overlay streams matches from the
-  // engine (query, count, excerpt, chapter) and navigating to a match moves
-  // the engine to the match's CFI.
   test("finds text in the book and navigates to a match", async ({ page }) => {
     await openReadyEpub(page);
 
-    // Move away from Chapter One so navigating to the match is observable.
     await jumpToTocItem(page, 2);
     await waitForSection(page, 2);
     await page.getByTestId("reader-nav").waitFor({ state: "detached", timeout: 30000 });
 
-    // Open through the toolbar button: the Ctrl+F binding is unit-covered in
-    // ReaderShell, while frame focus after a drawer close is not stable when
-    // this spec shares the app with earlier suites.
+    // Open through the toolbar button: frame focus after a drawer close is unstable here.
     await page.getByTestId("reader-search").click();
     const searchInput = page.getByTestId("reader-search-input");
     await expect(searchInput).toBeVisible({ timeout: 30000 });
 
-    // Regression: the EPUB navigator installs a capture-phase listener on the
-    // host document. Space typed into the overlay must stay in the field and
-    // must not reach the reader's page-turn shortcut.
+    // The navigator installs a capture-phase listener on the host document: Space must stay in the field.
     await searchInput.fill("first");
     await page.keyboard.press("Space");
     await expect(searchInput).toHaveValue("first ");
@@ -564,7 +469,6 @@ test.describe("tuxbooks EPUB reader", () => {
 
     await searchInput.fill("deterministic");
 
-    // "deterministic" occurs exactly once, in Chapter One's text.
     await expect(page.getByTestId("reader-search-match").first()).toBeVisible({
       timeout: 30000,
     });
@@ -575,16 +479,12 @@ test.describe("tuxbooks EPUB reader", () => {
       () => document.querySelector("[data-testid=reader-search-match]")?.textContent ?? "",
     );
     expect(matchText).toContain("deterministic");
-    // The excerpt must keep the space after the match, not read
-    // "deterministicto open".
     expect(matchText).toContain("deterministic to open");
     const resultsText = await page.evaluate(
       () => document.querySelector("[data-testid=reader-search-results]")?.textContent ?? "",
     );
     expect(resultsText).toContain("Chapter One");
 
-    // Clicking the match drives the engine back to Chapter One (section 0)
-    // and closes the overlay so the page is visible.
     await page.getByTestId("reader-search-match").click();
     await waitForSection(page, 0);
     await expect(page.getByTestId("reader-search-overlay")).toBeHidden({ timeout: 30000 });

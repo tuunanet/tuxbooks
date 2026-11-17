@@ -48,16 +48,14 @@ export function PdfPageField({
   const display = draft ?? String(pageNumber);
   const digitCount = Math.max(1, String(pageCount).length);
 
-  // The native wheel listener is attached once, so it reads the live props
-  // through this ref rather than the closure it captured at mount.
+  // Native listener attaches once, so it reads live props through this ref.
   const stateRef = useRef({ pageNumber, pageCount, disabled, onSetPage });
   useEffect(() => {
     stateRef.current = { pageNumber, pageCount, disabled, onSetPage };
   });
 
-  // A page change from outside the field (scroll, navigation, restore) while
-  // the user has not typed must not leave a stale draft behind: drop it so
-  // the field tracks the live page and a later blur cannot jump back.
+  // An outside page change while the user has not typed drops the draft, so a
+  // later blur cannot jump back to it.
   useEffect(() => {
     if (!editedRef.current) setDraft(null);
   }, [pageNumber]);
@@ -74,8 +72,6 @@ export function PdfPageField({
     if (live.disabled) return;
     const next = clampPage(live.pageNumber + delta, live.pageCount);
     if (next === live.pageNumber) return;
-    // Drop any in-progress edit so the field tracks the page we jump to and a
-    // follow-up blur cannot commit the stale draft back.
     editedRef.current = false;
     setDraft(null);
     live.onSetPage(next);
@@ -155,9 +151,8 @@ export function PdfPageField({
           if (event.key === "Enter") {
             event.preventDefault();
             commit();
-            // The blur below fires onBlur, whose commit closure still holds
-            // the pre-commit draft; skip that second commit so Enter commits
-            // exactly once.
+            // Blur fires onBlur whose closure still holds the pre-commit draft;
+            // skip it so Enter commits exactly once.
             skipCommitRef.current = true;
             event.currentTarget.blur();
           } else if (event.key === "Escape") {

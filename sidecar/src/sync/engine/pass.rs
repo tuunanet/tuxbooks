@@ -23,20 +23,16 @@ impl super::SyncService {
     pub async fn run_pass(&self) -> Result<(), AppError> {
         let _guard = self.inner.pass_lock.lock().await;
         let result = self.run_pass_locked().await;
-        // The sweep reuses this call's lock (ADR 0017 D4). It runs after a
-        // failed pass too: its own backoff governs how often its retries
-        // burn, and the rows it retries may not be the ones this pass
-        // reported.
+        // The sweep reuses this call's lock and runs after a failed pass too:
+        // its backoff governs retries, which need not be this pass's rows.
         self.auto_retry_sweep().await;
-        // Adoption (ADR 0018 D3) also reuses this call's lock, but only
-        // after a successful pass: the mirror must already hold every
-        // remote op, or adoption could swap bytes toward a stale pointer
-        // while a newer local edit is still waiting to publish.
+        // Adoption reuses this call's lock but only after a successful pass:
+        // the mirror must hold every remote op, or adoption could swap bytes
+        // toward a stale pointer while a newer local edit still awaits publish.
         if result.is_ok() {
             self.adopt_sweep().await;
-            // Blob GC (ADR 0018 D4) reads its winning set from the same
-            // mirror, so it waits for a healthy pass the same way, under
-            // the same lock; its hourly stamp throttles the folder listing.
+            // Blob GC reads the same mirror, so it also waits for a healthy
+            // pass under this lock; its hourly stamp throttles the listing.
             self.blob_gc_sweep().await;
         }
         result
@@ -125,8 +121,7 @@ impl super::SyncService {
         self.sync_remote(&root).await?;
         self.reproject_queued(&root).await?;
 
-        // Projection writes local rows, which fire the same triggers; drain
-        // the echo markers so the next pass starts clean.
+        // Projection fires the same triggers; drain the echo markers.
         let _ = capture::drain(
             &self.inner.pool,
             &root,
@@ -149,8 +144,7 @@ impl super::SyncService {
             return Ok(());
         }
         let mut tx = self.inner.pool.begin().await?;
-        // Touching each row fires the same AFTER UPDATE triggers that capture
-        // ordinary edits, so the baseline cannot drift from the live rules.
+        // Touching each row fires the capture triggers the live rules rely on.
         sqlx::query("UPDATE annotations SET sync_uid = sync_uid")
             .execute(&mut *tx)
             .await?;
@@ -236,8 +230,7 @@ impl super::SyncService {
                 last_id = book_id;
                 match ensure_book_identity(&self.inner.pool, book_id).await {
                     Ok(Some(identity)) => {
-                        // The identity condition is cleared as soon as hashing
-                        // and binding succeed, whether or not the hash moved.
+                        // A successful hash+bind clears the identity issue regardless.
                         resolve_issue_key(&self.inner.pool, &format!("identity:{book_id}")).await?;
                         let changed =
                             before_hash.as_deref() != Some(identity.content_hash.as_str());

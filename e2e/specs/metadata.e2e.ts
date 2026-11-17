@@ -35,9 +35,7 @@ async function openMetadataPanel(page: Page, ariaLabel: string): Promise<void> {
 }
 
 test.describe("metadata curation (milestone 7)", () => {
-  // This suite rewrites the seeded EPUB. Restore it after every test so the
-  // specs that follow (progress-migration in particular) keep the source
-  // title and file bytes they assert against.
+  // Each test rewrites the seeded EPUB; restore it so later specs keep the original bytes.
   test.afterEach(async ({ page }) => {
     if (!existsSync(seededEpubBackup)) return;
     copyFileSync(seededEpubBackup, seededEpub);
@@ -64,8 +62,6 @@ test.describe("metadata curation (milestone 7)", () => {
 
     await openMetadataPanel(page, `${seededBookTitles.epub} (EPUB)`);
 
-    // Edit title + add a second author + series and publication date. The form
-    // was prefilled, so untouched fields round-trip unchanged.
     await page.getByTestId("metadata-title").fill("The Curated Book");
     await page.getByTestId("metadata-authors").fill("Grace Hopper");
     await page.getByTestId("metadata-authors-add").click();
@@ -74,8 +70,6 @@ test.describe("metadata curation (milestone 7)", () => {
     await page.getByTestId("metadata-series-index").fill("2");
     await page.getByTestId("metadata-panel-save").click();
 
-    // Save confirmation: every field fits an EPUB, so nothing stays behind
-    // as a library edit. The hero reflects the edit through library-changed.
     await expect(page.getByTestId("metadata-panel-saved")).toHaveText(
       "Saved. Written into the EPUB file.",
       { timeout: 30000 },
@@ -87,15 +81,12 @@ test.describe("metadata curation (milestone 7)", () => {
       timeout: 30000,
     });
 
-    // With no remaining overrides the reset affordance retires itself.
     await expect(page.getByTestId("metadata-panel-reset")).toBeDisabled();
 
-    // The library grid shows the new title on the same card.
     await page.getByTestId("detail-back").click();
     await waitForLibraryView(page);
     await expect.poll(() => cardTexts(page), { timeout: 30000 }).toContain("The Curated Book");
 
-    // FTS picked up the edit: the new title is the ranked hit.
     const input = page.getByTestId("global-search");
     await input.click();
     await input.fill("curated");
@@ -104,8 +95,7 @@ test.describe("metadata curation (milestone 7)", () => {
     expect(hitText).toContain("The Curated Book");
     await page.keyboard.press("Escape");
 
-    // The file itself was rewritten: the original rides in the one-time
-    // `.bak`, and the live file now carries the embedded title.
+    // The rewrite leaves the original in the one-time `.bak` and embeds the title in the live file.
     const after = sourceSnapshot();
     expect(after.size).not.toBe(before.size);
     expect(after.mtimeMs).toBeGreaterThanOrEqual(before.mtimeMs);
@@ -115,8 +105,7 @@ test.describe("metadata curation (milestone 7)", () => {
 
   test("opens the metadata panel from a card's context menu", async ({ page }) => {
     await ensureLibrary(page);
-    // The seeded library has exactly one EPUB; its title may be the source
-    // title or a curated one depending on the first test's outcome.
+    // Shared app state: the EPUB's title may be the source or a curated one from an earlier test.
     const card = page.locator('[aria-label*="(EPUB)"]');
     await card.waitFor({ state: "visible", timeout: 30000 });
     await card.click();
@@ -126,7 +115,6 @@ test.describe("metadata curation (milestone 7)", () => {
     await expect(item).toBeVisible({ timeout: 30000 });
     await item.click();
 
-    // The action now lands on the detail view's Metadata panel.
     await expect(page.getByTestId("metadata-panel")).toBeVisible({ timeout: 30000 });
     await expect(page.getByTestId("metadata-title")).not.toHaveValue("", { timeout: 30000 });
   });

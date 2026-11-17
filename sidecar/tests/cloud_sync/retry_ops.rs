@@ -89,7 +89,6 @@ async fn a_pending_hash_keeps_its_issue_open_on_a_status_refresh() {
         "the pending attempt keeps the same row: {open:?}"
     );
 
-    // A failure keeps it as well.
     sqlx::query("UPDATE books SET hash_state = 'failed' WHERE id = ?1")
         .bind(file_id)
         .execute(&a.pool)

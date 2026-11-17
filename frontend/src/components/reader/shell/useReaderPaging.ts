@@ -35,17 +35,14 @@ export function useReaderPaging({
   bookTurnRef,
 }: UseReaderPagingInput): ReaderPaging {
   const pageCount = isPdf ? (pdfPageCount ?? pdfPageCountPlaceholder) : 0;
-  // Percentage stepping is only meaningful with a known page count; the
-  // EPUB surface owns these keys instead (engine page turns).
+  // Percentage stepping needs a known page count; EPUB owns these keys instead.
   const step = pageCount > 0 ? 100 / pageCount : 0;
 
   useShortcut("home", () => setPosition(0));
   useShortcut("end", () => setPosition(100));
 
-  // PDF steps are page-based (issue #65): percentage stepping accumulates
-  // rounding error (66.67% maps back onto page 2), so a page flip always
-  // lands on the adjacent page. Without a known page count the percentage
-  // step remains the fallback.
+  // PDF steps are page-based: percentage stepping accumulates rounding error, so a
+  // flip always lands on the adjacent page; without a page count it is the fallback.
   const flipPdfPage = useCallback(
     (delta: 1 | -1) => {
       const count = pdfPageCount ?? 0;
@@ -60,12 +57,9 @@ export function useReaderPaging({
     [pdfPageCount, position, setPosition, step],
   );
 
-  // Book mode steps by SPREAD through the registered turn adapter: a
-  // one-page step inside a two-page spread is an invisible move, the
-  // two-press feel the mode exists to fix. A book view that has not mounted
-  // yet (layout still measuring, so no adapter is registered) falls back to
-  // page stepping, keeping the position tracking; the mounted spread then
-  // renders whatever page the position names.
+  // Book mode steps by SPREAD via the registered turn adapter: a one-page step
+  // inside a spread is invisible. With no adapter yet (view still mounting),
+  // fall back to page stepping and let the mounted spread render the position.
   const bookTurn = useCallback(
     (delta: 1 | -1) => {
       const turn = bookTurnRef.current;
@@ -79,10 +73,7 @@ export function useReaderPaging({
     [bookTurnRef, flipPdfPage],
   );
 
-  // The one PDF mode decision every stepping key shares (tuxbooks-9pr.5):
-  // presentation wins with one-page flips, book mode turns by spread
-  // through the registered adapter, and the scroll view falls through to
-  // the caller's own step. Returns whether a mode consumed the step.
+  // Every stepping key shares this: presentation flips pages, book turns spreads, scroll falls through.
   const pdfModeStep = useCallback(
     (delta: 1 | -1): boolean => {
       if (!isPdf) return false;

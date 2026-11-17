@@ -102,16 +102,10 @@ function blit(
   left?: number,
   top?: number,
 ): void {
-  // Reassigning width/height reallocates the backing store (and clears it);
-  // when the size is unchanged — a cache-hit blit, or a re-render at the
-  // same geometry — draw straight into the existing store instead.
+  // Reassigning width/height reallocates and clears the backing store; skip equal sizes.
   if (canvas.width !== buffer.width) canvas.width = buffer.width;
   if (canvas.height !== buffer.height) canvas.height = buffer.height;
-  // A region blit is placed at its page-local offset; a full-page blit is in
-  // flow at the page origin. Both are set here, not left to React: the
-  // scale-and-swap remap writes `position/left/top` imperatively, and React
-  // never removes styles it does not own, so a full-page blit must clear them
-  // or the page lands at a stale offset (only a fragment visible).
+  // React never removes styles it does not own: a full-page blit must clear region placement.
   if (left !== undefined && top !== undefined) {
     canvas.style.position = "absolute";
     canvas.style.left = `${left}px`;
@@ -123,8 +117,6 @@ function blit(
   }
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
-  // A fresh blit lands at its natural size: clear any scale-and-swap
-  // transform left by the previous bitmap so it cannot compound.
   canvas.style.transform = "";
   canvas.style.transformOrigin = "";
   canvas.getContext("2d")?.drawImage(buffer, 0, 0);
@@ -277,8 +269,6 @@ async function rasterPage(
 ): Promise<HTMLCanvasElement> {
   const { canvas, document, pageNumber, scale, smartColors, gen } = pipeline;
   const page = await document.getPage(pageNumber);
-  // Checkpoint: this instance may have been superseded while getPage
-  // was in flight; do not start work at all.
   if (gen.cancelled) throw new CancelledRender();
   const viewport = page.getViewport({ scale });
 
@@ -290,9 +280,6 @@ async function rasterPage(
   const bufferContext = buffer.getContext("2d");
   if (!bufferContext) throw new Error("Canvas 2D context is unavailable");
 
-  // The transform maps viewport units onto device pixels at the
-  // (possibly capped) ratio. For a region the engine converts the region
-  // to page units and clips the raster to it.
   const startedAt = performance.now();
   const task = page.render({
     canvas: buffer,
@@ -306,7 +293,6 @@ async function rasterPage(
   gen.task = task;
   await task.promise;
 
-  // Checkpoint: only the current generation may touch the canvas.
   if (gen.cancelled) throw new CancelledRender();
   pipeline.publishRenderMs(performance.now() - startedAt);
   return buffer;
@@ -335,8 +321,6 @@ function blitFromCache(pipeline: RenderPipeline, ratio: number): boolean {
     mode: regionMode ? "region" : "full",
   };
   pipeline.publishRenderMs(performance.now() - startedAt);
-  // Pixels landed: a later same-inputs re-run supersedes this finished
-  // commitment and re-blits from here instead of rastering.
   gen.status = "done";
   pipeline.renderedRef.current?.(pageNumber);
   return true;
@@ -372,14 +356,10 @@ function presentPrevious(pipeline: RenderPipeline): void {
       previous.cssHeight !== height
     ) {
       if (regionMode) {
-        // The page origin, not the region origin: the transform stretches
-        // the full-page bitmap across the whole page.
         canvas.style.position = "absolute";
         canvas.style.left = "0px";
         canvas.style.top = "0px";
       } else {
-        // In flow at the page origin; clear any region placement so a
-        // full-page bitmap is not drawn at a stale offset.
         canvas.style.position = "";
         canvas.style.left = "";
         canvas.style.top = "";
@@ -410,18 +390,13 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
   try {
     gen.status = "live";
 
-    // An explicit scale change (zoom commit) is not a scroll burst: start
-    // its first raster now rather than paying the coalescing delay.
     if (scaleRef.current !== scale) {
       scaleRef.current = scale;
       renderedOnceRef.current = false;
     }
 
     for (;;) {
-      // Coalesce superseding changes (see RENDER_SETTLE_MS). The timeout
-      // is intentionally not cleared: it is short, and the
-      // `gen.cancelled` check after it is what discards a superseded
-      // generation.
+      // The settle timeout is intentionally not cleared; the `gen.cancelled` check discards it.
       if (renderedOnceRef.current) {
         await new Promise<void>((resolve) => setTimeout(resolve, RENDER_SETTLE_MS));
         if (gen.cancelled) throw new CancelledRender();
@@ -430,8 +405,6 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
       const target = regionRef.current;
 
       if (regionMode) {
-        // Recomputed per pass: the target may have moved since the effect
-        // body computed its ratio.
         const ratio = regionRenderRatioForPage(
           pipeline.width / scale,
           pipeline.height / scale,
@@ -469,16 +442,10 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
           buffer,
         });
         renderedRef.current?.(pageNumber);
-        // Region moved while this pass rendered: run again for the new
-        // target. Stable → the commitment is done.
         if (regionRef.current.regionKey === target.regionKey) break;
         continue;
       }
 
-      // Two-stage first paint for a whole page: the preview tier only
-      // exists when refinement would actually change something (ratio > 1);
-      // otherwise the render is already final quality. Whole-page geometry
-      // is identity-stable — one pass.
       const ratio = pipeline.fullRatio;
       const previewRatio = preview ? Math.min(ratio, 1) : ratio;
       const needsRefinement = ratio - previewRatio > 1e-9;
@@ -496,8 +463,6 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
         mode: "full",
       };
       renderedRef.current?.(pageNumber);
-      // The preview is cached too, so a supersession before refinement
-      // completes still avoids a re-raster on re-entry.
       bitmapCache?.put({
         pageNumber,
         scale,
@@ -508,8 +473,6 @@ async function runRenderCommitment(pipeline: RenderPipeline): Promise<void> {
       });
       if (!needsRefinement) break;
 
-      // Background refinement: a fresh buffer at the full effective ratio,
-      // atomically replacing the preview blit.
       const refinedBuffer = await rasterPage(pipeline, ratio, null);
       canvas.setAttribute("data-pdf-render-quality", "final");
       bitmapCache?.put({
@@ -565,9 +528,7 @@ export function PdfPageCanvas({
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const activeRef = useRef<RenderGeneration | null>(null);
-  // Unmount only: the render effect deliberately has no cleanup (a same-
-  // inputs re-run must not kill the standing commitment), so the kill
-  // lives here.
+  // The render effect has no cleanup (a same-inputs re-run must not kill the commitment); unmount kills.
   useEffect(
     () => () => {
       const active = activeRef.current;
@@ -578,28 +539,13 @@ export function PdfPageCanvas({
     },
     [],
   );
-  // The last bitmap presented (blitted or shown scaled). Scale-and-swap
-  // reads it to keep the old pixels on screen through a scale change.
   const lastPresentedRef = useRef<PresentedGeometry | null>(null);
-  // PERF-2 signal (docs/PERFORMANCE.md): durations (ms) of the last renders
-  // published as a deterministic `data-pdf-render-ms` attribute — a
-  // diagnostic only, never asserted by timing in CI.
   const renderMsRef = useRef<number[]>([]);
-  // Color-mode identity of the last effect run (issue #67 follow-up): a
-  // change means the mounted canvas still holds the previous mode's opaque
-  // bitmap, which must be cleared before the new-mode render starts.
   const previousVariantRef = useRef(renderVariant);
-  // True once this canvas instance has rasterized at least once: the first
-  // render starts immediately (open latency), later ones coalesce.
   const renderedOnceRef = useRef(false);
-  // Scale of the last render generation: a change resets the coalescing so an
-  // explicit zoom commit starts its first raster immediately.
   const scaleRef = useRef(scale);
 
   const dpr = window.devicePixelRatio || 1;
-  // Region primitives keep the effect dependencies stable: the parent may
-  // hand a fresh object each render, but the effect only re-runs when the
-  // numbers (or the mode) actually change.
   const regionMode = region != null && needsRegionRender(width / scale, height / scale, scale, dpr);
   const regionLeft = region?.left ?? 0;
   const regionTop = region?.top ?? 0;
@@ -610,12 +556,9 @@ export function PdfPageCanvas({
     : "full";
   const cssWidth = regionMode ? regionWidth : width;
   const cssHeight = regionMode ? regionHeight : height;
-  // Applied imperatively at blit time (never through React's style prop), so
-  // a scroll-driven re-render cannot move the stale bitmap before its
-  // replacement is ready.
+  // Placement is imperative so a scroll-driven re-run cannot move the stale bitmap early.
   const blitLeft = regionMode ? regionLeft : undefined;
   const blitTop = regionMode ? regionTop : undefined;
-  // The render target: refreshed on every effect run, re-read per pass.
   const regionRef = useRef<RegionTarget>({
     regionKey,
     regionLeft,
@@ -634,12 +577,6 @@ export function PdfPageCanvas({
     canvas.setAttribute("data-pdf-render-ms", samples.map((value) => value.toFixed(1)).join(";"));
   };
 
-  // Layout phase, not passive: a cache blit reports synchronously from the
-  // commitment layout effect below, so the latest callback must land before
-  // that effect runs (tuxbooks-9pr review). A passive refresh would leave
-  // the previous commit's callback in place through the layout phase, which
-  // breaks a parent that keys its report state on render-time values —
-  // PdfBookView's spread key — without reading a ref during render.
   const renderedRef = useRef(onPageRendered);
   useLayoutEffect(() => {
     renderedRef.current = onPageRendered;
@@ -649,25 +586,13 @@ export function PdfPageCanvas({
     errorRef.current = onPageError;
   });
 
-  // Layout phase, not passive: the wrapper's box is mutated in the same
-  // commit that resizes the canvas, so the previous bitmap must be presented
-  // (and a cached bitmap blitted) before the browser paints. As a passive
-  // effect this ran after the first paint, flashing the uncovered wrapper
-  // (the page placeholder) for one frame on every zoom commit.
+  // Layout phase, not passive: as a passive effect this flashed the placeholder for a frame.
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Inputs identity: everything that changes what this canvas must draw.
-    // The render budget (renderEnabled) is deliberately absent — a priority
-    // reshuffle re-runs this effect with the same inputs, and that re-run
-    // must not cancel, re-settle, or restart the standing commitment
-    // (issue tuxbooks-x27.2: cancelling on every reshuffle is what kept
-    // slots white through rapid scroll).
-    // Region moves refresh the render target; they are absent from the
-    // identity below — superseding on a scroll-driven move cancelled every
-    // generation inside its settle window, so no raster ever started while
-    // the page moved (issue tuxbooks-x27.2).
+    // Inputs identity excludes the render budget and region moves on purpose: superseding on
+    // either kept slots white through scroll, and cancelled rasters mid-settle (tuxbooks-x27.2).
     regionRef.current = {
       regionKey,
       regionLeft,
@@ -692,15 +617,9 @@ export function PdfPageCanvas({
       !active.cancelled &&
       active.status === "live"
     ) {
-      // A live commitment (settling or rastering) survives: budget flips,
-      // region moves, and other same-inputs re-runs leave it alone; a
-      // region move only refreshes the target its loop picks up.
       return;
     }
     if (active) {
-      // Supersession: inputs changed, or the previous commitment finished
-      // with a stale target (a finished one has no task to cancel; after
-      // StrictMode's simulated unmount a cancelled one is restarted).
       active.cancelled = true;
       if (active.status === "live") active.task?.cancel();
     }
@@ -747,34 +666,19 @@ export function PdfPageCanvas({
       publishRenderMs: (ms) => publishRenderMs(canvas, ms),
     };
 
-    // Mode-switch reset (issue #67 follow-up): a canvas that survives a
-    // color-mode change still holds the previous mode's opaque bitmap, and
-    // while the new-mode render is in flight it would present the wrong
-    // colors entirely (a Smart Dark page sitting dark inside a Default
-    // document). Clear it to transparent so the wrapper's themed
-    // placeholder shows, exactly like a never-rendered page. Geometry-only
-    // re-renders (zoom, resize) deliberately keep the old pixels visible
-    // until the atomic blit — smoother there, and the pixels are merely
-    // stale-scaled, never wrong-mode.
+    // A color-mode switch must clear the previous mode's opaque bitmap before the new render.
     if (previousVariantRef.current !== renderVariant) {
       previousVariantRef.current = renderVariant;
       canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-      // Wrong-mode pixels must not be scaled either: drop the swap source.
       lastPresentedRef.current = null;
       canvas.style.transform = "";
       canvas.style.transformOrigin = "";
     }
 
-    // Fast path: a bitmap rendered at this scale, ratio, region, and variant
-    // is already retained from an earlier visit — blit it and report
-    // completion. No page request, no raster, no worker round-trip.
     if (blitFromCache(pipeline, ratio)) return;
 
     presentPrevious(pipeline);
 
-    // Display-only stale canvas: keep painting the scaled previous bitmap and
-    // let the reader promote this page back into the render budget. Without a
-    // previous bitmap there is nothing to show, so stay blank as before.
     if (!renderEnabled) {
       return;
     }
@@ -809,13 +713,9 @@ export function PdfPageCanvas({
       ref={canvasRef}
       data-testid={testId}
       data-pdf-page={pageNumber}
-      // Deterministic region identity for tests/diagnostics: "full" for a
-      // whole-page raster, else the page-local `x,y,w,h` of the region.
       data-pdf-render-region={regionKey}
       style={regionMode ? { position: "absolute" } : undefined}
-      // PERF-6: no decorations here — the canvas is a page-sized layer and
-      // any filter/effect on it is per-frame compositing work. Page chrome
-      // lives on the cheap wrapper (PdfDocumentView).
+      // PERF-6: no filters/effects on the canvas; page chrome lives on the cheap wrapper.
       className="block"
     />
   );

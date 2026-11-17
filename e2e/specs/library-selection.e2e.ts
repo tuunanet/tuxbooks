@@ -87,8 +87,7 @@ async function probeRing(page: Page, cardIndex: number): Promise<RingProbe> {
       const row = card.closest(".grid");
       if (!cell || !row) throw new Error("card's grid slot or row not found");
 
-      // Collapsing one nesting level at a time must drop the parentheses too,
-      // or replacing them with "()" would match forever and wedge the renderer.
+      // Collapse innermost parens first; replacing them with "()" would match forever.
       let shadow = getComputedStyle(card).boxShadow;
       while (/\([^()]*\)/.test(shadow)) shadow = shadow.replace(/\([^()]*\)/g, " ");
       const extents = shadow
@@ -143,14 +142,11 @@ test.describe("library grid selection ring", () => {
     await waitForLibraryView(page);
     let sorted = false;
     try {
-      // Title order puts cover-bearing books in the first and last column of
-      // the top row. The default order ends the row with an EPUB whose
-      // placeholder cover leaves the card short of its slot, so its ring
-      // never reaches the grid edge in the first place.
+      // Title order puts cover-bearing books in the outer columns; the default
+      // order's trailing placeholder cover never reaches the grid edge.
       await setSort(page, "Title");
       sorted = true;
-      // Scroll position survives section navigation; the top row must sit on
-      // the grid's top edge for the top-edge probe to mean anything.
+      // The top row must sit on the grid's top edge for the top-edge probe to mean anything.
       await page.evaluate((selector) => {
         const grid = document.querySelector<HTMLElement>(selector);
         if (grid) grid.scrollTop = 0;
@@ -168,9 +164,8 @@ test.describe("library grid selection ring", () => {
       await expect(rightCard).toHaveAttribute("aria-pressed", "true");
       const right = await probeRing(page, rightIndex);
 
-      // Precondition: the card must fill its slot in the outermost column,
-      // or its ring never reaches the grid edge and the probe below would
-      // pass without covering the reported case.
+      // Precondition: unless the card fills its slot in the outermost column,
+      // the probe below passes without covering the reported case.
       expect(
         left.cell.left - left.row.left,
         `top-left card's slot is ${left.cell.left - left.row.left}px from the grid's left edge; expected the first column`,

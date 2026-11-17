@@ -50,19 +50,15 @@ impl super::SyncService {
         if !self.status_snapshot().enabled {
             return Ok(());
         }
-        // A GC with no folder is a no-op.
         let Some(root) = self.sync_root() else {
             return Ok(());
         };
-        // The startup run: consume the boot flag only after the gates, so
-        // the once-per-process sweep lands on the first enabled pass.
+        // Boot flag after the gates: the per-process sweep runs on the first enabled pass.
         let startup = !self.inner.blob_gc_boot.swap(true, Ordering::Relaxed);
         if !startup && !gc::gc_due(&self.inner.pool, Utc::now()).await? {
             return Ok(());
         }
-        // Not enough information: no `file_version` rows, no winners, no
-        // plan (see the module docs). The pass still counts — stamp it, so
-        // the folder is listed hourly, never on every 10-second pass.
+        // No `file_version` rows means no plan, but stamp it so the folder is listed hourly.
         let winning = gc::winning_hashes(&self.inner.pool).await?;
         if winning.is_empty() {
             return self.stamp_gc().await;

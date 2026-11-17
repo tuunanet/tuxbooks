@@ -130,13 +130,9 @@ export function EpubReader({
   const reportedFractionRef = useRef<number | null>(null);
   const currentSectionRef = useRef<EpubSectionProgress | null>(null);
   const [locator, setLocator] = useState<EpubLocator | null>(null);
-  // Spine position for the presentation bar's indicator (a ref alone would
-  // not re-render; relocates already re-render via setLocator, and the two
-  // states commit together).
   const [section, setSection] = useState<EpubSectionProgress | null>(null);
   const { status, handle, error } = useEpubDocument(book.id);
-  // The initial destination is captured when the reader mounts: the shell
-  // clears the app-state target as soon as the annotation list resolves.
+  // Capture the mount-time destination: the shell clears it once the annotation list resolves.
   const initialJumpRef = useRef(initialJump);
   const onPositionChangeRef = useRef(onPositionChange);
   useEffect(() => {
@@ -151,29 +147,17 @@ export function EpubReader({
       reportedFractionRef.current = detail.totalProgression;
       view.hostElement.dataset.epubSection = String(detail.section.current);
       view.hostElement.dataset.epubSectionTotal = String(detail.section.total);
-      // The exact locator the persistence layer would save right now
-      // (docs/EPUB.md stable attributes): E2E reads it for the locator
-      // round-trip regression test instead of inferring position from
-      // page-level state.
       view.hostElement.dataset.epubLocator = detail.locator;
       const chapterHref = view.getSectionHref(detail.section.current);
       setLocator({ locator: detail.locator, chapterHref });
-      // Bookmarks read this state; it must hold the exact locator a
-      // bookmark placed right now would persist.
       onPositionChangeRef.current?.({ format: "epub", locator: detail.locator, chapterHref });
       setPosition(overall);
     },
     [setPosition],
   );
 
-  // Relocate → shell position + persistence locator; also flips the host's
-  // E2E state attributes to "ready". The ready flip must wait for the
-  // restore to settle (restoredRef below): the engine's first relocate can
-  // report the initial position while the restored locator's frame update
-  // is still in flight — a "ready" reader would then visibly jump when the
-  // restore lands, and E2E navigation keys pressed in that window race the
-  // restore (the frame pool's per-href in-flight update can re-apply the
-  // restored locator over an early user navigation).
+  // Ready must wait for the restore to settle: an early ready lets the restore's
+  // frame update land after a user turn, and E2E keys race the restore.
   const restoredRef = useRef(false);
   useEffect(() => {
     if (!handle) return;
@@ -184,10 +168,6 @@ export function EpubReader({
     });
   }, [handle, handleRelocate]);
 
-  // Text selections inside a section document become highlight candidates:
-  // the engine hands over the selection (with the live DOM range from its
-  // same-origin frame), kept so creation translates it to a canonical
-  // locator at the moment the user picks a color.
   const onSelectionChangeRef = useRef(onSelectionChange);
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
@@ -201,10 +181,6 @@ export function EpubReader({
     });
   }, [handle]);
 
-  // Section documents: forward navigation keys — iframe key events never
-  // reach the window registry. Routed through the turn ref so book mode
-  // routes frame-originated turns exactly like window ones. One
-  // direction vocabulary across the turn path: "next"/"prev".
   const turnSpreadRef = useRef<(direction: EpubTurnDirection) => void>(() => {});
   useEffect(() => {
     if (!handle) return;
@@ -219,8 +195,7 @@ export function EpubReader({
     });
   }, [handle]);
 
-  // External links must not navigate the reading surface; the engine's
-  // handleLocator interception is cancelled by this subscription's existence.
+  // Subscribing cancels the engine's default link navigation; log and drop the link.
   useEffect(() => {
     if (!handle) return;
     return handle.onExternalLink((href) => {
@@ -228,9 +203,6 @@ export function EpubReader({
     });
   }, [handle]);
 
-  // Restore path: the record passes through untouched; the engine seam
-  // resolves Readium rows directly and migrates foliate rows through the
-  // versioned adapter's fallback hierarchy (docs/EPUB.md).
   const [hostMounted, setHostMounted] = useState(false);
   const [restored, setRestored] = useState(false);
   useReaderProgress<EpubSavedState>({
@@ -244,10 +216,6 @@ export function EpubReader({
         const record = saved !== null && "record" in saved ? saved.record : null;
         if (handle) {
           const target = initialJumpRef.current;
-          // A stale saved locator can make the engine's load never settle
-          // — bound it and fall back to the start of the book instead of
-          // wedging the reader on a blank loading surface. A late-settling
-          // load is harmless: the engine jumps only to a valid location.
           void Promise.race([
             (target?.format === "epub"
               ? handle.init(null).then(() => handle.goTo(target.locator))
@@ -259,15 +227,8 @@ export function EpubReader({
               .catch(() => {}),
             new Promise<void>((resolve) => window.setTimeout(resolve, EPUB_RESTORE_TIMEOUT_MS)),
           ]).finally(() => {
-            // A wedged restore degrades to ready-at-start: the reader must
-            // never stay locked on the loading surface. The engine's own
-            // locator resolution is untouched by this flag — it only gates
-            // the E2E ready attribute (see the relocate subscription).
             restoredRef.current = true;
             if (currentSectionRef.current !== null) {
-              // The restore's own relocate already landed during init; the
-              // reader is at its position — flip ready now (no further
-              // relocate will fire on its own).
               handle.hostElement.dataset.epubState = "ready";
             }
             setRestored(true);
@@ -284,8 +245,6 @@ export function EpubReader({
   });
   const interactive = status === "ready" && restored;
 
-  // Mount the engine's host element exactly once per opened handle and
-  // report the TOC (available as soon as the publication is built).
   const onTocLoadRef = useRef(onTocLoad);
   useEffect(() => {
     onTocLoadRef.current = onTocLoad;
@@ -303,20 +262,9 @@ export function EpubReader({
     };
   }, [handle]);
 
-  // Book mode (spec tuxbooks-9pr) derives over the stored preferences: it
-  // implies a paginated two-column flow while the stored layout and column
-  // count stay intact for when the mode turns off again.
   const layout = epubBookModeLayout(preferences);
   const columnCount = epubBookModeColumnCount(preferences);
 
-  // Turn routing (tuxbooks-9pr.7): while book mode is on, every turn —
-  // zones, window keys, and section-frame keys alike — goes through one
-  // turn adapter, so the spread change has a single path (instant since
-  // ADR 0011). The view reads the reduced-motion media query and passes
-  // the flag into the adapter; the adapter itself never reads it (spec →
-  // Reduced motion). Presentation mode keeps its own direct page
-  // stepping. Directions are "next"/"prev" everywhere in this path; the
-  // adapter's advance/retreat verbs are translated here, at the seam.
   const reducedMotion = usePrefersReducedMotion();
   const createdInstantTurn = useMemo(
     () =>
@@ -325,10 +273,6 @@ export function EpubReader({
             reducedMotion,
             move: async (direction) => {
               await (direction === "next" ? handle.next() : handle.prev());
-              // The settled locator, read after the move lands — the
-              // adapter's settlement report (tuxbooks-9pr review). The
-              // app position itself keeps flowing through the engine's
-              // relocate events.
               return handle.getCurrentLocator();
             },
           })
@@ -346,23 +290,16 @@ export function EpubReader({
     const move = direction === "next" ? handle?.next() : handle?.prev();
     move?.catch(() => {});
   };
-  // Section-frame keys reach navigation through this ref (their effect
-  // registers before the adapter exists); refreshed every render so a
-  // frame press always sees the live turn.
   useEffect(() => {
     turnSpreadRef.current = turnSpread;
   });
 
-  // Reflow layout (flow preference) — applied as soon as the renderer exists
-  // and on every layout preference change.
   useEffect(() => {
     if (!handle) return;
     const flow: EpubFlow = layout === "scrolling" ? "scrolled" : "paginated";
     handle.setFlow(flow).catch(() => {});
   }, [handle, layout, interactive]);
 
-  // User appearance (font size, family override, line spacing, columns,
-  // text layout, theme colors) through the engine's Preferences API.
   useEffect(() => {
     if (!handle) return;
     void handle.setAppearance({
@@ -394,19 +331,8 @@ export function EpubReader({
     interactive,
   ]);
 
-  // Outside position changes (bookmarks, Home/End, progress bar) map onto
-  // the nearest book position; engine-driven changes are skipped via the
-  // reported-progress echo guard, mirroring the PDF reader's scroll-report
-  // loop guard. Only actual position changes map back — the interactive
-  // flip itself must not re-jump an engine that init has already positioned
-  // (restored locator or start).
-  //
-  // The echo is exact by construction: a relocate's echo arrives as
-  // `reported * 100`, the same float the guard compares against, so the
-  // epsilon only needs to ride out float noise. It must stay far below the
-  // progress bar's 0.1% keyboard step. The old 0.5 window read genuine
-  // thumb steps as echoes and dropped them, leaving the pages unmoved
-  // while the slider ran ahead.
+  // Echo guard: relocates echo back as reported * 100; the epsilon must stay far
+  // below the progress bar's 0.1% keyboard step.
   const previousPositionRef = useRef(0);
   useEffect(() => {
     if (!interactive || !handle) return;
@@ -417,9 +343,6 @@ export function EpubReader({
     handle.goToTotalProgression(position / 100).catch(() => {});
   }, [interactive, handle, position]);
 
-  // Window-level page navigation; registered after the shell's handlers, so
-  // while an EPUB is open these combos drive the engine, not percentage steps.
-  // In book mode they step by spread through the turn adapter.
   const turnPages = (move: Promise<void> | undefined): void => {
     move?.catch(() => {});
   };
@@ -429,9 +352,6 @@ export function EpubReader({
   useShortcut("pagedown", () => turnSpread("next"));
   useShortcut("pageup", () => turnSpread("prev"));
 
-  // In-book search runs on the engine and streams matches up to the shell;
-  // callbacks reach the shell through refs so re-renders never re-register
-  // the adapter. Unmounting (book switch) cancels a running search.
   const onSearchGroupRef = useRef(onSearchGroup);
   const onSearchDoneRef = useRef(onSearchDone);
   useEffect(() => {
@@ -439,11 +359,6 @@ export function EpubReader({
     onSearchDoneRef.current = onSearchDone;
   });
 
-  // Draw highlights through the engine and keep them in step with the
-  // persisted list (created in the tabs, deleted, recolored). The navigator
-  // re-applies group decorations to mounted frames, so this only has to
-  // move the diff since the last commit. The diff runs on resolved CSS, so
-  // a palette override or theme-family flip with the book open repaints.
   const drawnHighlightsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     if (!handle) return;
@@ -468,18 +383,11 @@ export function EpubReader({
     drawnHighlightsRef.current = next;
   }, [handle, highlights, effectiveTheme, preferences.highlightOverrides]);
 
-  // The shell's selection toolbar drives highlight creation through this
-  // controller; the reader owns the selection → locator translation.
   const onCreateHighlightRef = useRef(onCreateHighlight);
   useEffect(() => {
     onCreateHighlightRef.current = onCreateHighlight;
   });
 
-  // The shell adapter: one object covering jumps (TOC hrefs, bookmark and
-  // search locators — the engine accepts all, migrating legacy foliate CFIs
-  // on the fly), search, and highlight creation. Registered only while a
-  // handle is open, so a switched book can never be driven through a stale
-  // engine.
   useEffect(() => {
     if (!adapterRef) return;
     if (!handle) {
@@ -487,7 +395,6 @@ export function EpubReader({
       return;
     }
     let cancelLast: (() => void) | null = null;
-    // Chapter numbering fallback for books without TOC labels.
     let unlabeledOrdinal = 0;
     adapterRef.current = {
       jump: (target) => {
@@ -556,12 +463,7 @@ export function EpubReader({
     );
   }
 
-  // Bounded measure (PERF-12, docs/PERFORMANCE.md): in scrolled flow the
-  // navigator's section iframe spans the full host width, so the container
-  // caps it and centers the column; paginated flow keeps the engine's own
-  // grid cap and no app-side cap. The root bridges the engine's theme
-  // background so the area beside the capped column is seamless with the
-  // reading surface in every theme.
+  // Bounded measure (PERF-12): scrolled flow spans the host iframe, so cap and center it.
   const scrolled = layout === "scrolling";
   return (
     <div
@@ -573,9 +475,7 @@ export function EpubReader({
       className="relative h-full"
       style={{
         backgroundColor: epubThemeBackground(epubSurfaceTheme(effectiveTheme)),
-        // Pin the section documents' UA-default colors to the theme family
-        // instead of the OS/global scheme (color-scheme inherits into the
-        // navigator's iframes).
+        // color-scheme inherits into the navigator's iframes; pin it to the theme family.
         colorScheme: epubThemeColorScheme(epubSurfaceTheme(effectiveTheme)),
       }}
     >
@@ -599,9 +499,6 @@ export function EpubReader({
         ref={containerRef}
         className="h-full"
         data-epub-measure={scrolled ? "capped" : "full"}
-        // Assistive tech (tuxbooks-9pr.8): in book mode this surface is
-        // the book — a named region, matching the PDF book view. The
-        // plain reading surface stays an unlabelled container.
         {...(bookTurnActive ? { role: "region", "aria-label": BOOK_SPREAD_LABEL } : null)}
         style={{
           ...(scrolled ? { maxWidth: EPUB_SCROLLED_SURFACE_MAX_PX, marginInline: "auto" } : null),

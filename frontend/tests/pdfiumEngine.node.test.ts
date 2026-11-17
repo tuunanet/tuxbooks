@@ -122,9 +122,7 @@ describe("PdfiumEngine (WASM)", () => {
     const lines = engine.textLines(0);
     expect(lines.map((line) => line.text)).toEqual(["Tuxbooks PDF Fixture", "Page 1 of 3"]);
 
-    // Page units, top-left origin (y down). PDFium's loose character boxes
-    // are the font's line box, so the extents land a few points from the
-    // glyph ink while keeping the font size.
+    // Page units, top-left origin; boxes are the font's line box, not ink.
     const [title, body] = lines;
     expect(title!.x).toBeCloseTo(72, 0);
     expect(title!.y).toBeCloseTo(234.2, 0);
@@ -136,7 +134,6 @@ describe("PdfiumEngine (WASM)", () => {
     expect(body!.x).toBeCloseTo(72, 0);
     expect(body!.size).toBe(28);
 
-    // The page argument selects the page: page 2 differs only in its marker.
     expect(engine.textLines(1).map((line) => line.text)).toEqual([
       "Tuxbooks PDF Fixture",
       "Page 2 of 3",
@@ -149,7 +146,6 @@ describe("PdfiumEngine (WASM)", () => {
     const file = readFileSync(fixturePath);
     engine.openBytes(toArrayBuffer(file));
 
-    // Page 1 text sits at roughly y 243–338; x 72–470 (pdftotext -bbox).
     const clip: PageClip = [72, 243, 378, 40];
     const width = 378;
     const height = 40;
@@ -158,8 +154,6 @@ describe("PdfiumEngine (WASM)", () => {
     expect(region.length).toBe(width * height * 4);
     expect(countNonWhite(region)).toBeGreaterThan(0);
 
-    // The region must match the same crop of a 1:1 whole-page raster: same
-    // content, same page offset, same device scale.
     const whole = engine.renderRgba(0, 612, 792);
     const expected = cropRgba(whole, 612, 72, 243, width, height);
     let mismatches = 0;
@@ -173,8 +167,6 @@ describe("PdfiumEngine (WASM)", () => {
     }
     expect(mismatches / (width * height)).toBeLessThan(0.02);
 
-    // A blank band below the text renders white: the page offset is applied,
-    // not defaulted to the page origin.
     const blank = engine.renderRgba(0, width, height, [72, 520, 378, 40]);
     expect(countNonWhite(blank)).toBe(0);
   });
@@ -189,14 +181,11 @@ describe("PdfiumEngine (WASM)", () => {
     const height = 792;
     const dark = engine.renderRgba(0, width, height, undefined, DARK_SCHEME);
 
-    // The unpainted page background takes the scheme's path fill, not white.
     const corner = pixelOffset(width, 5, 5);
     expect(dark[corner]).toBe(0x10);
     expect(dark[corner + 1]).toBe(0x10);
     expect(dark[corner + 2]).toBe(0x13);
 
-    // The title band (x 72..470 at device y 80..135) carries light text on
-    // the dark page; text is sparse, so most of the band stays background.
     let light = 0;
     for (let y = 80; y < 135; y += 1) {
       for (let x = 72; x < 470; x += 1) {
@@ -206,7 +195,6 @@ describe("PdfiumEngine (WASM)", () => {
     expect(light).toBeGreaterThan(50);
     expect(light).toBeLessThan(55 * (470 - 72) * 0.5);
 
-    // A blank band below the text is the dark page, never white.
     const blank = cropRgba(dark, width, 40, 500, 100, 100);
     let blankLuminance = 0;
     for (let i = 0; i < blank.length; i += 4) blankLuminance += pixelLuminance(blank, i);
@@ -224,9 +212,6 @@ describe("PdfiumEngine (WASM)", () => {
     const plain = engine.renderRgba(1, width, height);
     const dark = engine.renderRgba(1, width, height, undefined, DARK_SCHEME);
 
-    // The gradient photo spans device x 56..556, y 62..712. The colour
-    // scheme recolors path and text categories only, so image pixels are
-    // byte-for-byte the plain raster's.
     for (const [x, y] of [
       [300, 300],
       [200, 200],
@@ -246,8 +231,6 @@ describe("PdfiumEngine (WASM)", () => {
     const file = readFileSync(smartFixturePath);
     engine.openBytes(toArrayBuffer(file));
 
-    // The region uses the progressive colour-scheme path (no matrix variant
-    // exists), so it must land on the same pixels as the whole-page crop.
     const clip: PageClip = [72, 80, 470, 80];
     const width = 470;
     const height = 80;
@@ -303,8 +286,6 @@ describe("PdfiumEngine (WASM)", () => {
     const file = readFileSync(outlineFixturePath);
     engine.openBytes(toArrayBuffer(file));
 
-    // large.pdf carries a nested outline: five parts on pages 1/21/41/61/81,
-    // each with two sections offset by ten pages (see make-fixture.py).
     const raw = engine.outline();
     expect(raw).toHaveLength(5);
     expect(raw![0]).toEqual({
@@ -324,8 +305,6 @@ describe("PdfiumEngine (WASM)", () => {
       ],
     });
 
-    // The pure normalizer still turns those 0-based destinations into the
-    // reader's 1-based page locators, unchanged by the engine swap.
     const normalized = normalizePdfOutline(raw);
     expect(normalized[0]?.page).toBe(1);
     expect(normalized[0]?.items[1]).toEqual({

@@ -112,9 +112,7 @@ function ReaderSearchBody({ search, onSearch, onPickMatch }: ReaderSearchBodyPro
   // reopen must not re-run the search or clear the restored results.
   const submittedRef = useRef(initialQuery);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // The active row is tagged with the query it belongs to. A new query
-  // renders at the top without an effect that writes state on every result
-  // update; arrow and hover moves re-tag the selection with the live query.
+  // Tag the selection with its query so a new query renders at the top without an effect.
   const [selection, setSelection] = useState({ query: initialQuery, index: 0 });
 
   const trimmed = text.trim();
@@ -124,8 +122,6 @@ function ReaderSearchBody({ search, onSearch, onPickMatch }: ReaderSearchBodyPro
     selection.query === activeQuery
       ? Math.min(selection.index, Math.max(results.length - 1, 0))
       : 0;
-  // A query that differs from the parent's state is between the keystroke
-  // and its debounced search; show progress instead of the empty hint.
   const pending = trimmed !== "" && (search === null || search.query !== trimmed);
   const searching = pending || search?.status === "running";
   const activeId = results.length > 0 ? resultId(activeIndex) : undefined;
@@ -147,7 +143,6 @@ function ReaderSearchBody({ search, onSearch, onPickMatch }: ReaderSearchBodyPro
     input.select();
   }, []);
 
-  // Keep the arrow-key selection inside the scroll viewport.
   useEffect(() => {
     if (results.length === 0) return;
     document.getElementById(resultId(activeIndex))?.scrollIntoView({ block: "nearest" });

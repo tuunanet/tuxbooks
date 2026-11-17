@@ -145,8 +145,7 @@ async fn open_book_defers_adoption_until_the_reader_closes() {
     let v2 = epub_v2();
     let v2_hash = sha(&v2);
 
-    // First pass: the pointer lands while the blob is still in flight, so
-    // nothing can adopt yet and the identity merge settles.
+    // First pass: the pointer lands while the blob is in flight, so nothing adopts yet.
     let (blob, parked) = park_blob(sync_dir.path(), &v2_hash);
     run(&b).await;
 
@@ -154,8 +153,7 @@ async fn open_book_defers_adoption_until_the_reader_closes() {
     let uid = canonical_uid(&b, &uid_of(&b, "book.epub").await).await;
     b.service.reader_opened(uid.clone());
 
-    // The blob arrives; pointer and bytes are both there, yet the open
-    // reader keeps the file untouched and the badge state stays visible.
+    // The blob arrives, but the open reader keeps the file untouched and the badge visible.
     std::fs::rename(&parked, &blob).unwrap();
     run(&b).await;
     assert_eq!(
@@ -173,8 +171,8 @@ async fn open_book_defers_adoption_until_the_reader_closes() {
         "deferral records no issue"
     );
 
-    // Closing the reader empties the deferral; the next pass adopts and the
-    // one after rebinds, settling the badge state.
+    // Closing the reader empties the deferral; the next pass adopts, the one
+    // after rebinds.
     b.service.reader_closed(uid);
     run(&b).await;
     assert_eq!(
@@ -204,8 +202,7 @@ async fn repeated_missing_blob_passes_surface_an_issue_then_self_close() {
     run(&b).await;
     let uid = canonical_uid(&b, &uid_of(&b, "book.epub").await).await;
 
-    // Threshold minus one missing passes in total: the op-before-blob wait
-    // is still invisible.
+    // Threshold minus one: the op-before-blob wait is still invisible.
     for _ in 1..MISSING_BLOB_ISSUE_THRESHOLD - 1 {
         run(&b).await;
     }

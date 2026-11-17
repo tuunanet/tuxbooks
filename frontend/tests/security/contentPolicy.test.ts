@@ -60,16 +60,11 @@ describe("publication content sanitization (E-1, E-2)", () => {
   });
 
   it("repairs a clean but not-well-formed manifest-XHTML document", () => {
-    // The toolkit strict-parses manifest-XHTML, so a clean-but-sloppy
-    // document (HTML-style unclosed img) cannot be returned raw: the fence
-    // re-serializes it into XML the strict parse accepts. The HTML parser
-    // represents a leading XML declaration as a comment; the repair keeps
-    // it as such, which stays well-formed.
+    // The toolkit strict-parses manifest-XHTML, so a clean-but-sloppy document
+    // must be re-serialized into XML; a leading XML declaration stays a comment.
     const doc = xhtml(`<p>Hello <em>world</em></p><img src="img/pic.png" alt="p">`);
     const out = sanitizePublicationText(doc, true);
-    // XML-safe serialization: void elements self-close and the strict
-    // parser's sentinel never appears. The round-trip against a real XML
-    // parse is pinned by the fixture regression suite (raw file input).
+    // Void elements self-close and the parser sentinel never appears.
     expect(out).toContain('<img src="img/pic.png" alt="p" />');
     expect(out).toContain("<em>world</em>");
     expect(out).not.toContain("<parsererror");
@@ -86,10 +81,8 @@ describe("publication content sanitization (E-1, E-2)", () => {
   });
 
   it("keeps the inert fallback of an unsupported object (E-2)", () => {
-    // A reading system without support for an object's media type must render
-    // its fallback (EPUB 3; the figure-gallery sample's spine is one document
-    // whose only content is an object fallback). The object element and its
-    // URL go, the inert children stay.
+    // A reading system must render an unsupported object's fallback; keep the
+    // inert children and drop the element and its URL.
     const doc = xhtml(
       `<object data="gallery.xml" type="application/x-epub-figure-gallery">` +
         `<figure><img src="images/moon.jpg"/><figcaption>New Moon</figcaption></figure>` +
@@ -308,7 +301,6 @@ describe("the publication fetch client (E-3)", () => {
         );
       },
       (memberHref) => {
-        // Manifest lookup receives the percent-decoded member href.
         expect(memberHref).toBe("chap ter 1.html");
         return "application/xhtml+xml";
       },

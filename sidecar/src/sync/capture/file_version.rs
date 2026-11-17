@@ -41,8 +41,7 @@ pub(super) async fn capture_file_version(
         clear_row(pool, row).await?;
         return Ok(Captured::Skipped);
     }
-    // The loop break, re-checked at drain: the winning pointer may have moved
-    // since the mint (a remote version landed) — never republish its hash.
+    // Re-checked at drain: a remote version may have landed since the mint.
     if file_version::winning(pool, &uid)
         .await?
         .is_some_and(|winning| winning.content_hash == hash)

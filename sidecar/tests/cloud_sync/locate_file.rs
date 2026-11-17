@@ -56,7 +56,6 @@ async fn locate_file_attaches_a_waiting_book_from_the_exact_bytes() {
     let waiting = waiting::list(&b.pool).await.unwrap();
     assert_eq!(waiting.len(), 1);
     let uid = waiting[0].book_uid.clone();
-    // B has never imported this book, so only the mirror describes it.
     let records: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
         .bind(&uid)
         .fetch_one(&b.pool)
@@ -128,7 +127,6 @@ async fn locate_file_rejects_a_different_book_and_unseen_bytes() {
         "the target is on the waiting list"
     );
 
-    // Another book's bytes have an alias, but it names a different uid.
     let other_path = place_file(&b, "other.epub", &other_bytes);
     let err = b
         .service
@@ -138,7 +136,6 @@ async fn locate_file_rejects_a_different_book_and_unseen_bytes() {
     assert!(err.to_string().contains("different book"), "got {err}");
     assert_eq!(waiting::list(&b.pool).await.unwrap().len(), 2);
 
-    // Bytes nothing has imported carry no alias at all.
     let unseen_path = place_file(&b, "unseen.epub", &unseen_bytes);
     let err = b
         .service
@@ -231,7 +228,6 @@ async fn locate_file_reports_path_errors_and_keeps_the_waiting_row() {
         "got {err}"
     );
 
-    // A path that is not a book fails the parse, not the process.
     let notes = place_file(&b, "notes.txt", b"not a book at all");
     let err = b
         .service
@@ -248,8 +244,7 @@ async fn locate_file_parse_failure_leaves_no_reading_history_row() {
     let sync_dir = tempfile::tempdir().unwrap();
     let a = device().await;
     let b = device().await;
-    // The fixture helper accepts arbitrary bytes, so A publishes an alias for
-    // content the parser will reject on B. The hash matches; the parse fails.
+    // The fixture accepts arbitrary bytes, so A publishes an alias for content B cannot parse.
     let bytes = b"not an epub, but the same bytes on both machines";
     let a_book = add_book(&a, "corrupt.epub", bytes).await;
     seed_progress(&a, a_book, 25.0).await;
@@ -297,8 +292,6 @@ async fn locate_file_projection_failure_retries_the_attached_book() {
     run(&a).await;
     connect(&b, sync_dir.path()).await;
     run(&b).await;
-    // Another local book keeps its own ids, so a retry that used the wrong id
-    // space would project this one instead.
     let unrelated = add_book(&b, "unrelated.epub", b"unrelated book").await;
     assert_eq!(waiting::list(&b.pool).await.unwrap().len(), 1);
 
@@ -434,7 +427,6 @@ async fn locate_file_unreadable_file_keeps_the_waiting_state() {
         .unwrap();
     assert_eq!(records, 0, "the failed attempt left no phantom record");
 
-    // The row is still attachable once the file can be read.
     std::fs::set_permissions(&path, original).unwrap();
     b.service
         .attach_waiting_book(&uid, &path, &[])

@@ -60,16 +60,12 @@ export function useLibraryData(): LibraryState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Mirrors of `books` so the flush can patch imperatively without a
-  // functional updater (whose double-invocation under StrictMode would
-  // corrupt a map maintained as a side effect).
+  // Mirrors of `books`: a functional updater double-invokes under StrictMode and corrupts the map.
   const booksRef = useRef<Book[]>([]);
   const indexRef = useRef<Map<number, number>>(new Map());
   const pendingRef = useRef<PendingChange[]>([]);
   const flushTimerRef = useRef<number | null>(null);
-  // A wholesale fetch is only applied while it is still the newest one. An
-  // unwatch refresh starts after the purge, so an older import refresh that
-  // resolves later must not put the purged books back on screen.
+  // Only the newest wholesale fetch applies: an older import refresh must not undo a purge.
   const fetchSeqRef = useRef(0);
 
   const cancelFlushTimer = useCallback(() => {
@@ -81,10 +77,7 @@ export function useLibraryData(): LibraryState {
 
   const applyFetched = useCallback(
     (next: Book[]) => {
-      // A wholesale fetch supersedes buffered events. Event payloads are built
-      // before the backend serves this snapshot (a watched-folder import
-      // streams books while the location row is still absent), so letting
-      // them flush afterwards would overwrite fresh rows with stale ones.
+      // A wholesale fetch supersedes buffered events whose payloads predate this snapshot.
       pendingRef.current = [];
       cancelFlushTimer();
       booksRef.current = next;
@@ -100,8 +93,6 @@ export function useLibraryData(): LibraryState {
     if (pending.length === 0) return;
     pendingRef.current = [];
 
-    // Collapse the batch first: for each id the chronologically last event
-    // wins (an upsert after a removal resurrects, and vice versa).
     const upserts = new Map<number, Book>();
     const removedIds = new Set<number>();
     for (const change of pending) {
@@ -128,8 +119,6 @@ export function useLibraryData(): LibraryState {
         edit();
         next[index] = book;
       } else {
-        // Unknown or stale index: linear fallback (a stale map is only
-        // possible right after a wholesale fetch replaced the array).
         const found = next.findIndex((candidate) => candidate.id === id);
         edit();
         if (found !== -1) next[found] = book;
@@ -143,9 +132,7 @@ export function useLibraryData(): LibraryState {
         removedPresent += 1;
         return false;
       });
-      // Only count removals that were actually in the list. A late removal
-      // after a refresh (an unwatch purge racing the import) must not lower
-      // the fresh count.
+      // Count only removals actually present: a late removal racing a refresh must not lower it.
       if (removedPresent > 0) {
         setStats((prev) =>
           prev === null
@@ -155,9 +142,7 @@ export function useLibraryData(): LibraryState {
       }
     }
 
-    // Single ref write per flush: the fresh id→index map for the next
-    // batch (O(n) rebuild is trivial against the O(1) per-change lookups
-    // it buys between flushes).
+    // Single ref write per flush: O(n) rebuild buys O(1) per-change lookups.
     booksRef.current = next;
     indexRef.current = new Map(next.map((book, index) => [book.id, index]));
     setBooks(next);
@@ -198,23 +183,17 @@ export function useLibraryData(): LibraryState {
         setError(null);
       } catch (err) {
         if (seq !== fetchSeqRef.current) return;
-        // A quiet reload keeps the library already on screen. Its failure
-        // belongs to the sync status, not a full-page error banner.
         if (showLoading) setError(toMessage(err));
         else console.error("library reload failed:", toMessage(err));
       } finally {
-        // A quiet reload can supersede an in-flight initial load or refresh.
-        // The older fetch then skips its own cleanup, so this path must settle
-        // the skeleton too.
+        // A quiet reload can supersede an in-flight load whose cleanup is skipped.
         if (seq === fetchSeqRef.current) setLoading(false);
       }
     },
     [applyFetched],
   );
 
-  // A sync identity merge can replace the public book id, so per-id patches
-  // cannot reconcile the list. Refetch quietly instead of flashing the
-  // skeleton over a library the user is already looking at.
+  // A sync identity merge can replace book ids, so refetch quietly instead of patching.
   const reloadFromBackend = useCallback(async () => {
     void fetchCollections();
     await loadLibrary(false);
@@ -246,12 +225,6 @@ export function useLibraryData(): LibraryState {
     };
   }, [applyFetched, fetchCollections]);
 
-  // Imports stream one event per persisted book (throttled batches from
-  // the sidecar are also flattened here); buffered events land as one
-  // commit per flush tick so books and covers appear while the scan is
-  // still running. The final refresh after the import completes
-  // reconciles ordering and stats, and supersedes anything still buffered
-  // (the sidebar count lags a few seconds by design).
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -275,10 +248,6 @@ export function useLibraryData(): LibraryState {
     };
   }, [scheduleFlush, cancelFlushTimer]);
 
-  // Filesystem synchronization (milestone 3): the watcher pushes book
-  // changes (new/updated/relinked/unavailable) and removals live, so the
-  // library view tracks the folder without any polling or manual rescan.
-  // Shares the same flush window as import events.
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;

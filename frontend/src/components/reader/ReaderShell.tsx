@@ -61,34 +61,23 @@ export function ReaderShell() {
   const dispatch = useAppDispatch();
   const { preferences, effectiveTheme, position, setPosition, setPreferences } = useReader();
 
-  // One scope owns every token the reader chrome consumes. Portaled menus,
-  // tooltips, and the settings window opened from here read the same style,
-  // so an explicit reader theme cannot mix with the app's light/dark mode.
+  // Portaled menus, tooltips, and the settings window read this scope's tokens.
   const themeScope = useMemo(() => readerThemeScope(effectiveTheme), [effectiveTheme]);
   const themeStyle = useMemo(() => themeScopeStyle(themeScope), [themeScope]);
 
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   const bookId = book?.id ?? -1;
-  // Which reader draws this book is the format registry's decision; the
-  // surface asks for it. The shell only needs the format checks it gates
-  // chrome and shortcuts with.
   const isPdf = book?.format === "pdf";
   const isEpub = book?.format === "epub";
 
   const readerViewRef = useRef<HTMLDivElement | null>(null);
-  // The reading scroll surface; PDF page tracking and PageUp/PageDown live here.
   const readerContentRef = useRef<HTMLElement | null>(null);
-  // The open reader's adapter: how the shell jumps, searches, and creates
-  // highlights without knowing which engine is underneath. Registered while
-  // the reader's document is open, nulled on unmount/book switch.
+  // Engine-agnostic jump/search/highlight seam; set while the document is open.
   const adapterRef = useRef<ReaderAdapter | null>(null);
-  // The open book view's turn adapter (tuxbooks-9pr.5): the keyboard's
-  // book-mode keys call the same instance the view's edge/corner zones call.
   const bookTurnRef = useRef<PdfBookTurnAdapter | null>(null);
   useAxisLockedWheel(readerContentRef);
 
-  // Navigation data reported by the open reader, tagged with its book id so a
-  // stale book's TOC, outline, or position is never shown.
+  // Tagged with book id so a stale book's TOC, outline, or position never shows.
   const [epubTocState, setEpubTocState] = useState<{
     bookId: number;
     toc: EpubTocItem[];
@@ -103,9 +92,6 @@ export function ReaderShell() {
     position: ReaderPosition;
   } | null>(null);
 
-  // Highlight swatches and painted washes resolve through the palette so a
-  // theme-family flip or a Settings override restyles without touching the
-  // annotations themselves (they persist slot keys).
   const highlightColorFor = useCallback(
     (color: string | null | undefined) =>
       highlightCss(color, readerThemeFamily(effectiveTheme), preferences.highlightOverrides),
@@ -129,9 +115,6 @@ export function ReaderShell() {
     adapterRef,
   });
 
-  // Every navigation entry point funnels through the open adapter: search
-  // matches, annotations, TOC entries, outline entries, and pages all jump in
-  // the document's own coordinates.
   const jump = useCallback((target: Parameters<ReaderAdapter["jump"]>[0]) => {
     adapterRef.current?.jump(target);
   }, []);
@@ -180,8 +163,7 @@ export function ReaderShell() {
     dispatch,
   });
   useMarkBookOpened(bookId);
-  // Open-book deferral (ADR 0018 D5): the sync engine must not swap this
-  // book's bytes while its reader session holds them.
+  // Sync must not swap this book's bytes while a reader session holds them (ADR 0018 D5).
   useReaderSessionRegistry(bookId);
 
   const toggleBookMode = useCallback(
@@ -210,9 +192,7 @@ export function ReaderShell() {
     );
   }
 
-  // The initial highlight is read from the annotation list; wait for it so
-  // the reader's first restore can land on the row the user clicked instead
-  // of opening at the saved position first.
+  // Wait for the annotation list so the first restore lands on the clicked row.
   if (waiting) {
     return (
       <ThemeScopeProvider scope={themeScope} style={themeStyle}>

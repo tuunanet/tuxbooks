@@ -172,10 +172,6 @@ async fn gc_prunes_superseded_artifacts_and_keeps_the_winner_forever() {
     assert!(std::fs::metadata(&loser).is_ok());
     assert!(std::fs::metadata(&winner).is_ok());
 
-    // Age everything the D4 window can see: the loser past the window, the
-    // winner at 400 days (it must survive regardless of age), plus debris
-    // — an old cloud conflict copy, a recent one, a stale staging temp in
-    // the writer's real grammar.
     backdate_past_window(&loser);
     let ancient = SystemTime::now() - Duration::from_secs(400 * 24 * 60 * 60);
     std::fs::File::open(&winner)
@@ -223,7 +219,6 @@ async fn gc_prunes_superseded_artifacts_and_keeps_the_winner_forever() {
         std::fs::metadata(&new_conflict).is_ok(),
         "recent debris is inside the window and stays"
     );
-    // Nothing outside blobs/books/ was touched: A's own operations survive.
     assert!(
         std::fs::read_dir(sync_dir.path().join("TuxBooks").join("ops"))
             .unwrap()
@@ -255,8 +250,6 @@ async fn gc_prunes_superseded_artifacts_and_keeps_the_winner_forever() {
             .await
             .unwrap();
     assert_eq!(binding, sha(&v3), "B's identity rebound onto the winner");
-    // B staged nothing and deleted nothing: the folder holds exactly the
-    // winner and the recent artifact now.
     assert_eq!(
         blob_names(sync_dir.path()),
         vec![
@@ -282,14 +275,11 @@ async fn gc_is_throttled_to_one_sweep_per_hour() {
     connect(&a, sync_dir.path()).await;
     publish_two_versions(&a, "book.epub").await;
 
-    // Pass 1 already ran the startup sweep: the stamp exists.
     let first_stamp = gc_stamp(&a.pool).await.expect("the startup sweep stamped");
     let v2 = epub_v2();
     let loser = blob_path(sync_dir.path(), &v2, "epub");
     backdate_past_window(&loser);
 
-    // Second pass, back to back: throttled, so the now-prunable loser
-    // survives, and the stamp did not move.
     run(&a).await;
     assert!(
         std::fs::metadata(&loser).is_ok(),

@@ -144,7 +144,6 @@ describe("useLibraryData library-changed synchronization", () => {
     });
 
     await waitFor(() => expect(result.current.books[0]).toMatchObject({ id: 5, available: false }));
-    // The row stays: metadata, collections, and progress survive.
     expect(result.current.books).toHaveLength(1);
     expect(result.current.stats?.bookCount).toBe(1);
   });
@@ -254,9 +253,7 @@ describe("useLibraryData library-changed synchronization", () => {
   });
 
   it("reflects reading progress saved by the reader", async () => {
-    // Regression (issue #10): progress saves used to leave the library
-    // stale until a restart. The backend now pushes the updated book over
-    // `library-changed`, so the saved percent shows up live.
+    // The backend pushes the updated book over `library-changed`, so saved progress shows up live.
     mockInvoke({
       ...emptyLibrary,
       list_books: [makeBook({ id: 4, title: "Slow", progressPercent: null })],
@@ -310,7 +307,6 @@ describe("useLibraryData post-import refresh", () => {
 });
 
 function act_emit(book: ReturnType<typeof makeBook>): void {
-  // The sidecar batches persisted books into one event (issue #61).
   act(() => {
     emitBridgeEvent("import-progress", { books: [book] });
   });

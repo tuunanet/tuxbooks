@@ -107,9 +107,7 @@ describe("epubFontSizeRatio", () => {
   });
 
   it("rejects the raw px unit the relative scale replaces (regression pin)", () => {
-    // Every value of the old 14–22 px slider would be discarded by
-    // EpubPreferences' range validation — the silently-dropped preference of
-    // issue #40 that the percent scale (issue #42) removes.
+    // A raw px value falls outside EpubPreferences' range and is dropped (#40).
     for (let px = 14; px <= 22; px += 1) {
       expect(px).toBeGreaterThan(EPUB_FONT_RATIO_RANGE[1]);
     }
@@ -200,10 +198,8 @@ describe("EPUB_FONT_FAMILIES", () => {
   });
 
   it("uses the reference typeface names with intent-preserving fallbacks", () => {
-    // Same family names the reference implementation injects.
     expect(EPUB_FONT_FAMILIES.duospace).toContain("IA Writer Duospace");
     expect(EPUB_FONT_FAMILIES.readable).toContain("AccessibleDfA");
-    // Both degrade to usable stacks when the typeface is not installed.
     for (const key of ["duospace", "readable"] as const) {
       expect(EPUB_FONT_FAMILIES[key].split(",").length).toBeGreaterThan(1);
     }
@@ -212,8 +208,6 @@ describe("EPUB_FONT_FAMILIES", () => {
 
 describe("epubFontFamilyPreference", () => {
   it("maps Default to no preference, leaving publisher font styling intact", () => {
-    // The toolkit writes no --USER__fontFamily for null, so publisher
-    // styling (including embedded @font-face faces) applies untouched.
     expect(epubFontFamilyPreference(null)).toBeNull();
   });
 
@@ -235,7 +229,6 @@ describe("EPUB column counts", () => {
     for (const count of EPUB_COLUMN_COUNTS) {
       expect(clampEpubColumnCount(count)).toBe(count);
     }
-    // Persistence robustness: stale/invalid values land on the scale.
     expect(clampEpubColumnCount(0)).toBe(1);
     expect(clampEpubColumnCount(-3)).toBe(1);
     expect(clampEpubColumnCount(2.6)).toBe(3);
@@ -260,8 +253,6 @@ describe("epubColumnCountPreference", () => {
 
 describe("EPUB text-layout scales (issue #45)", () => {
   it("matches the toolkit range configs with 0 as the publisher-default sentinel", () => {
-    // wordSpacingRangeConfig [0,2] step 0.125; letterSpacingRangeConfig
-    // [0,1] step 0.125; paragraphSpacingRangeConfig [0,3] step 0.25.
     expect(EPUB_WORD_SPACING_SCALE[0]).toBe(0);
     expect(EPUB_WORD_SPACING_SCALE.at(-1)).toBe(2);
     expect(EPUB_WORD_SPACING_SCALE[1]).toBe(0.125);
@@ -271,7 +262,6 @@ describe("EPUB text-layout scales (issue #45)", () => {
     expect(EPUB_PARAGRAPH_SPACING_SCALE[0]).toBe(0);
     expect(EPUB_PARAGRAPH_SPACING_SCALE.at(-1)).toBe(3);
     expect(EPUB_PARAGRAPH_SPACING_SCALE[1]).toBe(0.25);
-    // Deliberate TuxBooks ladder (no toolkit config for pageGutter).
     expect([...EPUB_PAGE_GUTTER_SCALE_PX]).toEqual([0, 10, 20, 30, 40, 60]);
     for (const scale of [
       EPUB_WORD_SPACING_SCALE,
@@ -332,7 +322,6 @@ describe("EPUB themes (issue #46)", () => {
   it("offers the neutral default plus retained and accessible presets", () => {
     expect(EPUB_DEFAULT_THEME).toBe("default");
     expect(DEFAULT_READER_PREFERENCES.theme).toBe("default");
-    // Every themed preset provides the full six-color vocabulary.
     for (const theme of Object.keys(EPUB_THEME_COLORS) as (keyof typeof EPUB_THEME_COLORS)[]) {
       const colors = EPUB_THEME_COLORS[theme];
       expect(Object.keys(colors!).sort()).toEqual(
@@ -357,7 +346,6 @@ describe("EPUB themes (issue #46)", () => {
       expect(ratio(colors!.link, bg)).toBeGreaterThanOrEqual(4.5);
       expect(ratio(colors!.visited, bg)).toBeGreaterThanOrEqual(4.5);
       expect(ratio(colors!.selectionText, colors!.selectionBackground)).toBeGreaterThanOrEqual(4.5);
-      // The selection must also be visible against the page background.
       expect(ratio(colors!.selectionBackground, bg)).toBeGreaterThanOrEqual(1.5);
       void theme;
     }
@@ -383,9 +371,8 @@ describe("readerThemeVariables", () => {
   });
 
   it("derives the full chrome and control set from the theme's text color", () => {
-    // Chrome tints, form controls, status cards, and the progress bar must
-    // follow the active theme, not the app tokens — in a dark app they would
-    // float light-on-light over the Light/Paper chrome (UAT feedback).
+    // Chrome must follow the active theme, not app tokens, or a dark app
+    // floats light-on-light over Light/Paper chrome.
     expect(readerThemeVariables("light")).toMatchObject({
       "--background": "#ffffff",
       "--foreground": "#1f2328",
@@ -436,20 +423,17 @@ describe("EPUB foreground override (issue #55)", () => {
     expect(epubForegroundPreference(null)).toBeNull();
     expect(epubForegroundPreference("#B8D4C8")).toBe("#b8d4c8");
     expect(epubForegroundPreference("#1f3a6e")).toBe("#1f3a6e");
-    // Invalid stored values normalize to null, never reach the engine.
     expect(epubForegroundPreference("green")).toBeNull();
     expect(epubForegroundPreference("#12345")).toBeNull();
   });
 
   it("keeps overrides that fit the theme and drops the rest", () => {
-    // Family rule: dark inks fit light-family themes, light inks fit
-    // dark-family ones. The neutral Default theme is judged on white.
+    // Dark inks fit light-family themes, light inks fit dark-family; Default is judged on white.
     expect(epubForegroundFitsTheme(null, "dark")).toBe(true);
     expect(epubForegroundFitsTheme("#f5efe0", "dark")).toBe(true);
     expect(epubForegroundFitsTheme("#f5efe0", "default")).toBe(false);
     expect(epubForegroundFitsTheme("#1f3a6e", "light")).toBe(true);
     expect(epubForegroundFitsTheme("#1f3a6e", "dark")).toBe(false);
-    // Every curated swatch fits its own family.
     for (const [theme, fits] of [
       ["light", "#1f3a6e"],
       ["paper", "#6b2737"],
@@ -461,9 +445,8 @@ describe("EPUB foreground override (issue #55)", () => {
   });
 
   it("pins the reading surface's color-scheme per theme family", () => {
-    // The obvious exception to the app's color-scheme: publisher content
-    // is light-family by default, so Default-in-a-dark-app must not run
-    // its section documents under UA dark defaults.
+    // Publisher content is light-family, so Default-in-a-dark-app must not
+    // run its section documents under UA dark defaults.
     expect(epubThemeColorScheme("default")).toBe("light");
     expect(epubThemeColorScheme("light")).toBe("light");
     expect(epubThemeColorScheme("paper")).toBe("light");
@@ -476,7 +459,6 @@ describe("EPUB foreground override (issue #55)", () => {
   it("computes the WCAG ratio with one shared implementation", () => {
     expect(epubContrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
     expect(epubContrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 1);
-    // The theme table stays WCAG-AA through the same function.
     for (const [, colors] of Object.entries(EPUB_THEME_COLORS)) {
       expect(epubContrastRatio(colors!.text, colors!.background)).toBeGreaterThanOrEqual(4.5);
     }
@@ -491,8 +473,8 @@ describe("EPUB foreground override (issue #55)", () => {
   it("guarantees every curated swatch on its theme family", () => {
     const lightFamily = ["light", "paper", "mint-contrast"] as const;
     const darkFamily = ["dark", "contrast", "blue-contrast"] as const;
-    // No color can reach 4.5:1 on both near-black and near-white, so the
-    // swatches come in two families; each is safe on its entire family.
+    // No color reaches 4.5:1 on both near-black and near-white, so swatches
+    // split into two families.
     for (const swatch of EPUB_FOREGROUND_SWATCHES.slice(0, 3)) {
       for (const theme of lightFamily) {
         expect(

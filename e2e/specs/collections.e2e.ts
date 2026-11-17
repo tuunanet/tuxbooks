@@ -16,7 +16,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
   }) => {
     await ensureLibrary(page);
 
-    // Create the collection from the sidebar; creation lands in its section.
     await page.getByTestId("new-collection-button").click();
     const dialog = page.getByTestId("collection-dialog");
     await expect(dialog).toBeVisible({ timeout: 30000 });
@@ -29,7 +28,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
     // The fresh collection is empty.
     await expect(page.getByTestId("empty-collection")).toBeVisible({ timeout: 30000 });
 
-    // Add the seeded EPUB through the card's context menu.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const card = page.locator(`[aria-label^="${seededBookTitles.epub}"]`);
@@ -41,15 +39,12 @@ test.describe("collections and reading sections (milestone 10)", () => {
     const addEntry = page.locator("[data-testid^=context-add-to-collection-]");
     await expect(addEntry).toBeVisible({ timeout: 30000 });
     await addEntry.click();
-    // The menu closes after the selection.
     await page
       .getByTestId("context-add-to-collection")
       .waitFor({ state: "detached", timeout: 30000 });
 
-    // The collection section lists exactly the member book. The row has
-    // hover-revealed drag and action buttons whose accessible names also
-    // contain the collection name, so click the row's label instead of
-    // resolving the first matching button.
+    // The row's action buttons carry accessible names containing the
+    // collection name, so click the row's label instead of the first button.
     await page
       .locator("[data-collection-row]")
       .filter({ hasText: "Reading Queue" })
@@ -64,7 +59,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
     );
     expect(memberText).toContain(seededBookTitles.epub);
 
-    // Remove the membership again from the same context menu.
     const memberCard = page.getByTestId("book-card");
     await memberCard.click();
     await memberCard.click({ button: "right" });
@@ -75,10 +69,8 @@ test.describe("collections and reading sections (milestone 10)", () => {
     const removeEntry = page.locator("[data-testid^=context-remove-from-collection-]");
     await expect(removeEntry).toBeVisible({ timeout: 30000 });
     await removeEntry.click();
-    // The section empties out live.
     await expect(page.getByTestId("empty-collection")).toBeVisible({ timeout: 30000 });
 
-    // Mark the seeded PDF as finished from its context menu.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const pdfCard = page.locator(`[aria-label^="${seededBookTitles.pdf}"]`);
@@ -89,7 +81,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
     await page.getByTestId("context-mark-finished").click();
     await page.getByTestId("context-mark-finished").waitFor({ state: "detached", timeout: 30000 });
 
-    // The Finished section lists the PDF; the In Progress section does not.
     await page.getByRole("button", { name: "Finished" }).click();
     await waitForLibraryView(page);
     await expect(page.getByTestId("book-card").first()).toBeVisible({ timeout: 30000 });
@@ -100,8 +91,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
 
     await page.getByRole("button", { name: "In Progress" }).click();
     await waitForLibraryView(page);
-    // Earlier specs may have left the EPUB in progress, which is correct;
-    // the finished PDF must never appear here.
     await expect
       .poll(
         () =>
@@ -114,7 +103,6 @@ test.describe("collections and reading sections (milestone 10)", () => {
       )
       .not.toContain(seededBookTitles.pdf);
 
-    // Reopening the context menu shows the finished confirmation, disabled.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     const finishedCard = page.locator(`[aria-label^="${seededBookTitles.pdf}"]`);
@@ -127,10 +115,7 @@ test.describe("collections and reading sections (milestone 10)", () => {
     await expect(finishedItem).toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Escape");
 
-    // Delete the collection: the grouping goes, the library stays. The
-    // delete affordance is hover-revealed (opacity 0 until the row is
-    // hovered), so the click goes through the DOM instead of a pointer.
-    // Delete now asks for confirmation first.
+    // The delete affordance is opacity-0 until hover, so click through the DOM.
     const deleteButton = page.locator("[data-testid^=collection-delete-]");
     await deleteButton.waitFor({ state: "attached", timeout: 30000 });
     await page.evaluate(() => {

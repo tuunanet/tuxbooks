@@ -162,7 +162,6 @@ async fn closed_book_adopts_the_winning_bytes_and_keeps_its_identity() {
     publish_edit(&a, "book.epub", &v2).await;
     assert!(staged_blob(sync_dir.path(), &sha(&v2), "epub").is_some());
 
-    // Device B has the same original bytes, plus state that must survive.
     connect(&b, sync_dir.path()).await;
     let b_path = library_path(&b, "book.epub").await;
     std::fs::write(&b_path, epub_v1()).unwrap();
@@ -173,9 +172,6 @@ async fn closed_book_adopts_the_winning_bytes_and_keeps_its_identity() {
     seed_progress(&b, b_id, 42.0).await;
     assert_eq!(file_version_ops(&b).await, 0);
 
-    // First pass: the pointer lands, and adoption swaps the bytes in the
-    // same pass. The binding is still the old hash until the sweep rebinds,
-    // which is exactly the window the badge state reports.
     run(&b).await;
     assert_eq!(std::fs::read(&b_path).unwrap(), v2, "B adopted the bytes");
     assert_eq!(sha(&std::fs::read(&b_path).unwrap()), sha(&v2));
@@ -187,8 +183,6 @@ async fn closed_book_adopts_the_winning_bytes_and_keeps_its_identity() {
     );
     let identity_at_swap = binding_uid(&b, b_file_row).await;
 
-    // Second pass: the identity sweep rehashes the swapped file and rebinds
-    // it onto the existing uid.
     run(&b).await;
     assert_eq!(binding_hash(&b, b_file_row).await, sha(&v2));
     assert_eq!(
@@ -202,7 +196,6 @@ async fn closed_book_adopts_the_winning_bytes_and_keeps_its_identity() {
         "settled: local hash equals the winning hash"
     );
 
-    // Annotations and progress keep their rows and their stored locators.
     let annotations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM annotations")
         .fetch_one(&b.pool)
         .await
@@ -211,7 +204,6 @@ async fn closed_book_adopts_the_winning_bytes_and_keeps_its_identity() {
     let b_id_after = book_id(&b, "book.epub").await;
     assert_eq!(progress_percent(&b, b_id_after).await, Some(42.0));
 
-    // And A is already settled: its bytes are the winner, nothing to do.
     run(&a).await;
     assert_eq!(unsettled_uids(&a).await, Vec::<String>::new());
 }
@@ -238,7 +230,6 @@ async fn pointer_before_blob_waits_then_converges_when_the_blob_arrives() {
     std::fs::write(&b_path, epub_v1()).unwrap();
     let _ = reconciler(&b).import_created(&b_path).await;
 
-    // The blob is still "in flight": move it out of the folder.
     let blob = staged_blob(sync_dir.path(), &v2_hash, "epub").unwrap();
     let parked = sync_dir.path().join("parked.blob");
     std::fs::rename(&blob, &parked).unwrap();
@@ -255,7 +246,6 @@ async fn pointer_before_blob_waits_then_converges_when_the_blob_arrives() {
         "a missing blob is not a failure"
     );
 
-    // The blob arrives; the next pass adopts and settles.
     std::fs::rename(&parked, &blob).unwrap();
     run(&b).await;
     assert_eq!(
@@ -295,8 +285,7 @@ async fn corrupted_blob_blocks_adoption_until_it_verifies() {
     std::fs::write(&b_path, epub_v1()).unwrap();
     let _ = reconciler(&b).import_created(&b_path).await;
 
-    // Corrupt the staged copy, keeping its length so the size pre-check
-    // passes and the hash is what rejects it.
+    // Same length as the original, so the size pre-check passes.
     let blob = staged_blob(sync_dir.path(), &v2_hash, "epub").unwrap();
     let junk = vec![0u8; v2.len()];
     std::fs::write(&blob, &junk).unwrap();
@@ -313,8 +302,6 @@ async fn corrupted_blob_blocks_adoption_until_it_verifies() {
         "the failure is visible"
     );
 
-    // The folder heals (a re-stage or a fresh cloud copy); adoption succeeds
-    // and the issue row closes.
     std::fs::write(&blob, &v2).unwrap();
     run(&b).await;
     assert_eq!(std::fs::read(&b_path).unwrap(), v2);
@@ -353,8 +340,6 @@ async fn adoption_reimport_mints_nothing() {
         "adopted and rebound"
     );
 
-    // The watcher fires on the swap's file change: a re-import whose bytes
-    // hash to the winning version. It rebinds and mints nothing.
     bump_mtime(&b_path);
     reconciler(&b).handle_modified(&b_path).await;
     assert_eq!(
@@ -390,8 +375,6 @@ async fn adoption_skips_a_file_whose_bytes_moved_without_a_rebind() {
     std::fs::write(&b_path, epub_v1()).unwrap();
     let _ = reconciler(&b).import_created(&b_path).await;
 
-    // The pointer arrives without the blob, so the first pass cannot adopt;
-    // then the user edits the file externally before the blob lands.
     let parked = sync_dir.path().join("parked.blob");
     std::fs::rename(&blob, &parked).unwrap();
     run(&b).await;
@@ -407,7 +390,6 @@ async fn adoption_skips_a_file_whose_bytes_moved_without_a_rebind() {
         "the in-flight edit was not clobbered by the older winner"
     );
 
-    // The edit re-imports, mints a newer pointer, and A converges onto it.
     bump_mtime(&b_path);
     reconciler(&b).handle_modified(&b_path).await;
     run(&b).await;
@@ -448,7 +430,6 @@ async fn vanished_local_file_changes_nothing() {
     std::fs::write(&b_path, epub_v1()).unwrap();
     let _ = reconciler(&b).import_created(&b_path).await;
     let b_file_row = file_row_id(&b, "book.epub").await;
-    // The file disappears; the row waits for reconnection.
     std::fs::remove_file(&b_path).unwrap();
     sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
         .bind(b_file_row)

@@ -39,9 +39,7 @@ impl super::SyncService {
         }
 
         let _guard = self.inner.pass_lock.lock().await;
-        // A human press grants a fresh budget (ADR 0017 D4): the auto-retry
-        // count resets and an exhausted row revives, its gave-up detail
-        // stripped so only live state stays on the row.
+        // A human press grants a fresh budget (ADR 0017 D4): reset auto-retry state.
         sqlx::query(&format!(
             "UPDATE sync_issues SET
                 auto_attempts = 0,
@@ -62,13 +60,10 @@ impl super::SyncService {
             .await;
         match outcome {
             Ok(cleared) => {
-                // A retry can hash a file and merge its durable identity, even
-                // while sync is off; drain the merge marker here instead of
-                // waiting for the next pass.
+                // A retry can merge identity while sync is off; drain that now.
                 self.flush_library_reload().await?;
-                // A pass may have closed the row itself (sync_failed). The
-                // retry path reports whether the condition is actually gone;
-                // never close on Ok alone.
+                // A pass may have closed the row itself; never close on Ok
+                // alone, the retry path reports whether the condition is gone.
                 if !self.issue_is_open(id).await? || cleared {
                     sync_issues::resolve_by_id(&self.inner.pool, id, &now_rfc3339()).await?;
                     self.refresh_status().await?;
@@ -104,10 +99,8 @@ impl super::SyncService {
     /// the manual entry point above or the auto-retry sweep. Returns true
     /// when the work itself proves the condition is gone.
     pub(super) async fn retry_locked(&self, issue: SyncIssueRef<'_>) -> Result<bool, AppError> {
-        // Indexing is local work. It must not depend on the sync folder still
-        // being connected, or a detached device could never retry the hash
-        // behind a row that is already listed. The issue key holds the durable
-        // book id, so every location is retried together.
+        // Indexing is local work: it must not require a connected folder, or a
+        // detached device could never retry the hash behind a listed row.
         let parsed = issue.kind;
         if matches!(parsed, Some(SyncIssueKind::HashFailed)) {
             let book_id = retry_key_i64(issue, "hash-failed:")?;
@@ -152,8 +145,6 @@ impl super::SyncService {
             Some(SyncIssueKind::BookLifecycleFailed) => {
                 let book_uid = retry_key(issue, "book-lifecycle:")?;
                 if !merge::retry_book_lifecycle(&self.inner.pool, book_uid).await? {
-                    // Nothing in the mirror to replay. Leave the row open so a
-                    // later pass or restore can still settle it.
                     return Ok(false);
                 }
                 if !self.status_snapshot().enabled {
@@ -172,8 +163,6 @@ impl super::SyncService {
                 Ok(true)
             }
             Some(SyncIssueKind::OperationRetrying) => {
-                // Drop the cached failure so the next pass reads the file
-                // again instead of skipping it as already processed.
                 let relative = retry_key(issue, "file:")?;
                 sqlx::query("DELETE FROM sync_remote_files WHERE relative_path = ?1")
                     .bind(relative)
@@ -198,11 +187,8 @@ impl super::SyncService {
                 store::store_cover_blob(&root, &self.inner.covers_dir, name)?;
                 Ok(store::cover_blob_exists(&root, name))
             }
-            // `hash_failed` returned above: indexing is local work. The
-            // listed kinds have no replay here because their action is not
-            // Retry — neither entry point dispatches them. Exhaustive over
-            // the enum on purpose: a new kind must say whether Retry
-            // repairs it.
+            // Exhaustive over the enum on purpose: a new kind must say whether
+            // Retry repairs it, even when the answer is "no replay here".
             Some(
                 kind @ (SyncIssueKind::HashFailed
                 | SyncIssueKind::OperationRejected
@@ -218,10 +204,6 @@ impl super::SyncService {
                 "sync issue kind {} has no retry path",
                 kind.as_str()
             ))),
-            // A kind this build cannot parse has nothing to replay either.
-            // No entry point passes one — both filter at the row edge — so
-            // the report names the case instead of echoing a stored string
-            // the type no longer carries.
             None => Err(AppError::InvalidInput(
                 "an unknown sync issue kind has no retry path".into(),
             )),
@@ -242,8 +224,6 @@ impl super::SyncService {
                     .await?;
                 Ok(())
             }
-            // The row disappeared before a binding existed, or a fresh import
-            // has not hashed it yet. Hashing here repairs both cases.
             None => match ensure_book_identity(&self.inner.pool, book_id).await? {
                 Some(identity) => {
                     merge::project_book(

@@ -99,9 +99,7 @@ const TURN_EDGE_WIDTH_PX = 32;
 /** Leg length of the triangular bottom-corner turn zones. */
 const TURN_CORNER_SIZE_PX = 72;
 
-// The turn labels and the spread region's accessible name are shared with
-// the EPUB book surface (bookModeLabels), so the mode reads the same in
-// both readers and E2E asserts one set of strings.
+// Turn labels and the spread label are shared with the EPUB book surface (E2E asserts one set).
 type TurnDirection = keyof typeof BOOK_TURN_LABELS;
 
 /**
@@ -141,10 +139,7 @@ export function PdfBookView({
   bookTurnRef,
 }: PdfBookViewProps) {
   const pageIndex = Math.max(0, currentPage - 1);
-  // The spread in page units — only its bounds feed the fit. The inter-page
-  // gap rides at PAGE_GAP_PX in both this call and the displayed one below;
-  // the Papers margin (2 * PAPERS_VIEW_SPACING) reserved by the fit absorbs
-  // the few unscaled gap pixels, so the displayed spread always fits.
+  // Only the spread bounds feed the fit; the Papers margin absorbs the unscaled gap.
   const rawSpread = useMemo(() => layoutSpread(sizes, pageIndex), [sizes, pageIndex]);
   const scale = useMemo(
     () =>
@@ -159,17 +154,11 @@ export function PdfBookView({
         : 1,
     [rawSpread, areaWidth, viewportHeight],
   );
-  // The painted spread: the same geometry function, now over displayed
-  // sizes, so page rects stay layoutSpread's output — book mode never
-  // computes page rectangles inline.
   const spread = useMemo(
     () => layoutSpread(displayedSizes(sizes, scale), pageIndex),
     [sizes, scale, pageIndex],
   );
 
-  // Pages of the current spread that have painted (blit or raster). Keyed
-  // by the spread so a turn starts from an honest empty set — diagnostics
-  // and tests only, never render-critical.
   const spreadKey = spread ? `${pageIndex}@${scale}` : "none";
   const [paintState, setPaintState] = useState<{ key: string; pages: ReadonlySet<number> }>(() => ({
     key: spreadKey,
@@ -179,11 +168,8 @@ export function PdfBookView({
     setPaintState({ key: spreadKey, pages: new Set() });
   }
   const painted = paintState.key === spreadKey ? paintState.pages : NO_PAGES;
-  // The callback closes over this render's spread key rather than reading a
-  // live ref: PdfPageCanvas refreshes its callback ref in the layout phase
-  // (before its commitment effect reports), so a blit on a turned-to spread
-  // always reports through the callback of the commit that mounted it, and
-  // a late report from a superseded spread is dropped by the key check.
+  // Close over this render's spread key, not a live ref: PdfPageCanvas refreshes
+  // its callback ref in the layout phase, so a late report from a superseded spread is dropped.
   const handlePageRendered = useCallback(
     (pageNumber: number) => {
       setPaintState((current) =>
@@ -195,13 +181,8 @@ export function PdfBookView({
     [spreadKey],
   );
 
-  // Turn adapter (tuxbooks-9pr.5): the book view reads the reduced-motion
-  // media query itself (the adapter must not) and passes the flag into the
-  // Stage 1 instant adapter, whose settle moves the reading position — the
-  // spread the position names is what renders, so the position model stays
-  // the single source of truth. An injected adapter (the test seam) wins
-  // over the created one; either way the active instance registers into
-  // bookTurnRef so the shell's keyboard steps through this same path.
+  // Reduced-motion is read here, not in the adapter; its settle moves the reading
+  // position, which stays the single source of truth. An injected adapter wins.
   const { setPosition } = useReader();
   const reducedMotion = usePrefersReducedMotion();
   const onSettle = useCallback(
@@ -224,12 +205,7 @@ export function PdfBookView({
 
   if (!spread) return null;
 
-  // Turn affordances (spec → Turn interaction): an edge strip along each
-  // spread-edge page's outer edge plus a triangular bottom-corner zone per
-  // direction. They are chrome buttons layered over the page wrappers —
-  // never over the canvas layer (PERF-6) — and cover only the edges, so
-  // interior clicks stay untouched. The hover shade rides the foreground
-  // token, subtle on light or Smart Dark pages alike.
+  // Turn chrome layers over the page wrappers, never the canvas (PERF-6), and covers only the edges.
   const turnStrip = (direction: TurnDirection, side: "left" | "right") => (
     <button
       type="button"
@@ -264,8 +240,6 @@ export function PdfBookView({
     <div ref={contentAreaRef} data-testid="pdf-content-area" className="flex min-h-0 w-full">
       <div
         data-testid="pdf-book-view"
-        // Assistive tech (tuxbooks-9pr.8): the spread surface is a named
-        // region, announced when the reading area takes focus.
         role="region"
         aria-label={BOOK_SPREAD_LABEL}
         data-pdf-book-rendered={[...painted].sort((a, b) => a - b).join(",")}
@@ -277,9 +251,7 @@ export function PdfBookView({
           filter: themePaint?.filter,
         }}
       >
-        {/* Paper-style themes multiply-tint the opaque white pages down
-            to the theme color (white × tint = tint, black stays black).
-            The overlay covers the whole spread and ignores the pointer. */}
+        {/* White × tint = tint, black stays black; covers the spread, ignores the pointer. */}
         {themePaint?.tint && (
           <div
             aria-hidden
@@ -289,11 +261,7 @@ export function PdfBookView({
           />
         )}
         {spread.pages.map((page, index) => (
-          // Page chrome on the cheap wrapper, never on the canvas layer
-          // (PERF-6) — same split as the scroll view's page slots. The
-          // scroll view's slot attribute rides along so the reader's
-          // settled-selection pipeline resolves book pages exactly like
-          // scroll slots (selection/highlight parity, tuxbooks-9pr.6).
+          // Page chrome on the wrapper, never the canvas (PERF-6); `data-pdf-slot` keeps selection parity.
           <div
             key={page.pageNumber}
             data-pdf-book-page={page.pageNumber}
@@ -319,22 +287,15 @@ export function PdfBookView({
               testId="pdf-book-canvas"
               onPageRendered={handlePageRendered}
             />
-            {/* The selectable text surface, at the spread's fit scale —
-                same gate as the scroll view: a text layer only on pages
-                whose canvas has painted. */}
             {painted.has(page.pageNumber) && (
               <PdfPageTextLayer document={document} pageNumber={page.pageNumber} scale={scale} />
             )}
-            {/* Persisted highlights, one overlay per spread page — the
-                same normalized page space the scroll view draws in, so
-                they track the canvas at the spread scale. */}
             <PdfHighlightOverlay
               highlights={highlights.byPage?.get(page.pageNumber) ?? []}
               family={highlights.family}
               overrides={highlights.overrides}
             />
-            {/* The spread's outer edges turn; the gutter-side edge of a
-                paired page does not. The lone cover is both edges. */}
+            {/* Only the spread's outer edges turn; a paired page's gutter edge does not. */}
             {index === 0 && turnStrip("prev", "left")}
             {index === spread.pages.length - 1 && turnStrip("next", "right")}
           </div>

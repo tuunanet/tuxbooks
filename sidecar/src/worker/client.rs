@@ -98,7 +98,6 @@ impl WorkerClient {
         let mut candidates: Vec<PathBuf> = Vec::new();
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                // Packaged: the worker installs next to the sidecar binary.
                 candidates.push(dir.join("tuxbooks-worker"));
             }
         }
@@ -175,8 +174,7 @@ impl WorkerClient {
         }
         let mut child = retry_etxtbsy(|| command.spawn())
             .map_err(|err| WorkerError::Unavailable(format!("worker spawn: {err}")))?;
-        // `file` stays open while the pre_exec closure may still run; the
-        // drop after spawn closes only the parent's copy of the descriptor.
+        // Keep `file` open through spawn: the pre_exec closure still uses its fd.
         drop(file);
 
         let job_line =
@@ -187,13 +185,8 @@ impl WorkerClient {
                 .write_all(job_line.as_bytes())
                 .and_then(|_| stdin.write_all(b"\n"));
             if let Err(err) = write {
-                // A broken pipe means the worker closed stdin without reading
-                // its job, i.e. it died during startup. The exit status is the
-                // real event and the pipe error is only a symptom, so report the
-                // crash instead of a protocol failure. This also closes the
-                // race where a worker exits before the parent's write lands:
-                // the same death must not be a Crash or a Protocol depending
-                // on scheduling.
+                // Broken pipe means the worker died before reading its job: the
+                // exit status is the real event, so report a crash, not a protocol error.
                 drop(stdin);
                 if err.kind() == std::io::ErrorKind::BrokenPipe {
                     let status = wait_bounded(&mut child, Duration::from_secs(2))
@@ -202,7 +195,7 @@ impl WorkerClient {
                 }
                 return Err(WorkerError::Protocol(format!("job write: {err}")));
             }
-        } // stdin drops: the worker sees EOF after its single job line
+        }
 
         // Read the (single) response on a thread so the deadline can kill.
         let mut stdout = child.stdout.take().expect("piped stdout");
@@ -216,18 +209,13 @@ impl WorkerClient {
         });
         let (buf, _outcome) = rx.recv_timeout(Self::budget(&job.limits)).map_err(|_| {
             kill_group(&mut child);
-            // M1: reap before returning, or the killed worker stays a
-            // zombie for the lifetime of this process.
+            // Reap before returning, or the killed worker stays a zombie.
             let _ = child.wait();
             let _ = reader.join();
             WorkerError::Deadline
         })?;
 
-        // Bounded post-response reap: a worker that wrote its response and
-        // then hung must not hold the client past the wall-clock budget.
-        // The response is already in hand (C1), so a grace kill loses
-        // nothing; two seconds covers normal exit, SIGPIPE deaths from the
-        // response-cap cutoff, and process teardown.
+        // Bounded reap: a worker that hung after responding must not hold the client.
         let status = wait_bounded(&mut child, Duration::from_secs(2))
             .map_err(|err| WorkerError::Protocol(format!("worker wait: {err}")))?;
         if buf.len() > MAX_WORKER_RESPONSE_BYTES {
@@ -236,12 +224,8 @@ impl WorkerClient {
             ));
         }
 
-        // C1: the worker exits 0 whenever it wrote a well-formed response,
-        // including `Failed` responses, so the response is parsed BEFORE the
-        // exit status is consulted. A nonzero exit only means "no well-formed
-        // response existed", which is where crash mapping belongs. A worker
-        // that crashes after writing a well-formed response still gets its
-        // response honored: the response is the contract.
+        // Parse before consulting the exit status: the worker exits 0 whenever it
+        // wrote a well-formed response (`Failed` included), so the response is the contract.
         if buf.is_empty() {
             return Err(crash_error(&status, "worker produced no response"));
         }
@@ -265,10 +249,7 @@ impl WorkerClient {
                 message,
                 limit,
             } => Err(match kind {
-                // `LimitExceeded.limit` is `&'static str`; the wire sends the
-                // name as a String. Leaking one bounded quota-name string per
-                // tripped limit is acceptable (rare, tiny); the alternative
-                // would widen the #83 error type across the crate.
+                // Leak one bounded quota-name string per tripped limit instead of widening the error type.
                 WorkerErrorKind::Limit => WorkerError::Limit(crate::limits::LimitExceeded {
                     limit: Box::leak(limit.map(Into::into).unwrap_or_else(|| "worker".into())),
                     detail: message,
@@ -573,8 +554,6 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn client_with(script_body: &str) -> (tempfile::TempDir, WorkerClient) {
-        // Stand-in "worker" binaries exercise the client's supervision logic
-        // without test-only ops in the production worker.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("fake-worker.sh");
         let mut f = std::fs::File::create(&path).unwrap();
@@ -621,9 +600,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("doc.bin");
         std::fs::write(&path, b"x").unwrap();
-        // The worker exits before it can read the job, so the parent's write
-        // races process death: it gets a broken pipe when the exit wins, a
-        // clean EOF otherwise. Both have to surface as the same typed crash.
         let (_sdir, client) = client_with("exit 3");
         let err = client
             .run(&self_test_job(ResourceLimits::DEFAULTS), &path)
@@ -636,11 +612,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("doc.bin");
         std::fs::write(&path, b"x").unwrap();
-        // A job larger than the pipe buffer makes the parent block inside
-        // write; the worker then exits without reading, so the blocked write
-        // returns EPIPE once the read end is gone. That is the deterministic
-        // form of the startup-crash race the flaky `exit 3` test hits by
-        // timing. The job must surface as a Crash, not a Protocol error.
         let (_sdir, client) = client_with("sleep 0.5; exit 3");
         let mut job = self_test_job(ResourceLimits::DEFAULTS);
         job.member = Some("x".repeat(512 * 1024));
@@ -654,13 +625,7 @@ mod tests {
         let path = dir.path().join("doc.bin");
         std::fs::write(&path, b"x").unwrap();
         let (_sdir, client) = client_with("head -c 3000000000 /dev/zero | tr '\\0' 'x'");
-        // The cap is 2 GiB and the reader has to stream all of it before
-        // the cap can trip, while `tr` burns a core transforming every
-        // byte. Under the parallel gate's load the DEFAULTS budget (31s)
-        // expired first and the deadline beat the cap three runs in a row
-        // (bd tuxbooks-6r2). This assertion is about the cap, so the job
-        // gets 4x headroom: a healthy cap still fails fast (SIGPIPE at
-        // 2 GiB), a broken one fails bounded at 121s instead of passing.
+        // 4x budget headroom: the 2 GiB cap must trip before the deadline under gate load (bd tuxbooks-6r2).
         let limits = ResourceLimits {
             max_parse_seconds: 120,
             ..ResourceLimits::DEFAULTS
@@ -671,8 +636,6 @@ mod tests {
 
     #[test]
     fn a_held_write_descriptor_makes_execve_report_etxtbsy() {
-        // The condition the spawn retry targets: while a write descriptor to
-        // the executable is open, execve fails with ETXTBSY.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("stand-in.sh");
         std::fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
@@ -705,7 +668,6 @@ mod tests {
 
     #[test]
     fn retry_etxtbsy_is_bounded_and_propagates_other_errors() {
-        // A non-ETXTBSY error is returned without retrying.
         let mut calls = 0;
         let err = retry_etxtbsy(|| -> std::io::Result<()> {
             calls += 1;
@@ -715,8 +677,6 @@ mod tests {
         assert_eq!(err.raw_os_error(), Some(libc::ENOENT));
         assert_eq!(calls, 1);
 
-        // Persistent ETXTBSY is retried a bounded number of times, then
-        // reported instead of spinning forever.
         let mut calls = 0;
         let err = retry_etxtbsy(|| -> std::io::Result<()> {
             calls += 1;

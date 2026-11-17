@@ -76,14 +76,12 @@ function slotsAt(doc: OracleDocument, scale: number): LayoutSlot[] {
 
 describe("keepPositionValue", () => {
   it("preserves the old relative offset on the new content", () => {
-    // value / upper = 0.5, reapplied to a 2000px content.
     const next = keepPositionValue({ value: 500, upper: 1000, pageSize: 400 }, 2000, 400);
     expect(next).toBe(1000);
     expect(next / 2000).toBeCloseTo(500 / 1000, 12);
   });
 
   it("clamps onto the new scroll range", () => {
-    // The old offset near the bottom must not overflow the new content.
     expect(keepPositionValue({ value: 950, upper: 1000, pageSize: 400 }, 500, 400)).toBe(100);
     expect(keepPositionValue({ value: 0, upper: 1000, pageSize: 400 }, 2000, 400)).toBe(0);
   });
@@ -99,7 +97,7 @@ describe("centerValue", () => {
     const next = centerValue(adjustment, 1577, 768, 200);
     const before = viewportPointToDocumentPoint(adjustment.value, 200, ORACLE.spacing, 1.633986928);
     const after = viewportPointToDocumentPoint(next, 200, ORACLE.spacing, 1.960784314);
-    // Papers' own rounding leaves sub-point drift; the point stays fixed.
+    // The oracle allows sub-point drift here.
     expect(Math.abs(after - before)).toBeLessThan(1);
   });
 
@@ -110,16 +108,13 @@ describe("centerValue", () => {
   });
 
   it("clamps onto the new scroll range", () => {
-    // The focal point wants a value beyond the bottom of the new range.
     expect(centerValue({ value: 900, upper: 1000, pageSize: 500 }, 1000, 500, 0)).toBe(500);
-    // A pointer below the anchor pulls the value above the top.
     expect(centerValue({ value: 0, upper: 1000, pageSize: 500 }, 1000, 500, 800)).toBe(0);
   });
 });
 
 describe("viewportPointToDocumentPoint", () => {
   it("maps a viewport position to a page-local point", () => {
-    // Single-page free step: (0 + 384 - 12) / 1.633986928 = 227.664.
     expect(viewportPointToDocumentPoint(0, 384, 12, 1.633986928)).toBeCloseTo(227.664, 3);
   });
 
@@ -144,8 +139,6 @@ describe("anchorAtOffset / offsetForAnchor", () => {
   });
 
   it("clamps the fraction inside a page and handles empty slots", () => {
-    // Above the first page top the offset is clamped into page 1, matching
-    // pageAtOffset; an unknown page has no offset.
     expect(anchorAtOffset(-50, slots)).toEqual({ page: 1, fraction: 0 });
     expect(anchorAtOffset(0, [])).toBeNull();
     expect(offsetForAnchor({ page: 9, fraction: 0 }, slots)).toBeNull();
@@ -162,8 +155,7 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
         for (const axis of ["hadjustment", "vadjustment"] as const) {
           const old = asAdjustment(previous[axis]);
           const next = step[axis];
-          // Papers' zoom anchor is the viewport centre for keyboard/scripted
-          // steps: zoom_center = page_size * 0.5.
+          // Papers anchors scripted zoom steps at the viewport centre.
           const predicted = centerValue(old, next.upper, next.page_size, old.pageSize * 0.5);
           expect(predicted, `${doc.name} step ${i} ${axis}`).toBeCloseTo(next.value, 8);
         }
@@ -205,9 +197,7 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
           step.scale,
         );
 
-        // The derived document point is the oracle's recorded anchor, and its
-        // drift across the step is the oracle's anchor_error (sub-point,
-        // caused by integer page sizing).
+        // Drift is the oracle's anchor_error, a sub-point effect of integer page sizing.
         expect(afterX, `${doc.name} step ${i} x anchor`).toBeCloseTo(step.center_anchor.x, 6);
         expect(afterY, `${doc.name} step ${i} y anchor`).toBeCloseTo(step.center_anchor.y, 6);
         expect(Math.abs(afterX - beforeX), `${doc.name} step ${i} x drift`).toBeCloseTo(
@@ -221,8 +211,6 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
         expect(Math.abs(afterX - beforeX), `${doc.name} step ${i} x tolerance`).toBeLessThan(1);
         expect(Math.abs(afterY - beforeY), `${doc.name} step ${i} y tolerance`).toBeLessThan(1);
 
-        // The anchor names the same page the oracle records, resolved through
-        // the reader's own slot math at the post-zoom scale.
         const slots = slotsAt(doc, step.scale);
         const anchor = anchorAtOffset(step.vadjustment.value + centerY, slots);
         expect(anchor?.page, `${doc.name} step ${i} anchor page`).toBe(step.center_anchor.page + 1);
@@ -234,8 +222,6 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
     for (const doc of ORACLE.documents) {
       const free = doc.zoom_script[0] as OracleZoomStep;
       const zoomed = doc.zoom_script[1] as OracleZoomStep;
-      // A pointer at 30% of the viewport, not the centre the scripted zoom
-      // uses, must still land on the same page point after the transform.
       const pointerX = ORACLE.viewport.width * 0.3;
       const pointerY = ORACLE.viewport.height * 0.3;
 
@@ -256,8 +242,7 @@ describe("Papers fidelity oracle: focal zoom and scroll policies", () => {
           pointer,
         );
         const after = viewportPointToDocumentPoint(next, pointer, ORACLE.spacing, zoomed.scale);
-        // Integer page sizing bends the transform by up to ~1.2 points at an
-        // off-centre pointer (the oracle's centre anchor stays under 1).
+        // Integer page sizing bends an off-centre pointer by up to ~1.2 points.
         expect(Math.abs(after - before), `${doc.name} ${axis} pointer`).toBeLessThan(1.5);
       }
     }

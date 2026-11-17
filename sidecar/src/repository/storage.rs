@@ -174,8 +174,6 @@ mod tests {
         seed_book(&pool, "/lib/a.epub", 100).await;
         seed_book(&pool, "/lib/b.epub", 200).await;
         seed_book(&pool, "/other/c.epub", 50).await;
-        // A sibling directory must not match `/lib`, and a file imported
-        // outside every watched location stays out of the per-location sums.
         seed_book(&pool, "/libx/d.epub", 999).await;
         seed_book(&pool, "/loose.epub", 7).await;
 
@@ -273,7 +271,6 @@ mod tests {
             .unwrap();
         seed_book(&pool, "/lib/first.epub", 100).await;
         seed_book(&pool, "/lib/second.epub", 100).await;
-        // The hash backfill collapses identical bytes onto one durable book.
         let uid: String =
             sqlx::query_scalar("SELECT book_uid FROM books WHERE path = '/lib/first.epub'")
                 .fetch_one(&pool)

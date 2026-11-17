@@ -113,11 +113,8 @@ impl SyncIssueAction {
                 | SyncIssueKind::CoverBlobFailed
                 | SyncIssueKind::HashFailed,
             ) => Self::Retry,
-            // A rejected operation failed the retry limit. The file has to be
-            // fixed or removed in the sync folder before another pass helps.
+            // Rejected ops need the file fixed in the sync folder first.
             Some(SyncIssueKind::OperationRejected) => Self::OpenFolder,
-            // An unknown dirty marker is internal state that is cleared as it
-            // is reported, so there is nothing for the user to repair.
             Some(SyncIssueKind::InvalidDirtyKind) => Self::Dismiss,
             Some(
                 SyncIssueKind::DuplicateBook
@@ -298,40 +295,23 @@ impl SyncService {
 
     async fn refresh_status(&self) -> Result<(), AppError> {
         let pool = &self.inner.pool;
-        // Retire the legacy diagnostics: close conflict rows whose winner has
-        // moved and expire rows past the 30-day window, closing the paired
-        // legacy issues. Best effort: a busy database must not fail a status
-        // read.
         if let Err(err) = conflict::reconcile(pool).await {
             eprintln!("sync diagnostics: reconcile failed: {err}");
         }
         if let Err(err) = conflict::expire(pool).await {
             eprintln!("sync diagnostics: expiry failed: {err}");
         }
-        // Close rows whose condition is gone before counting, so the count,
-        // the list, and the open rows always agree. Best effort, like the
-        // conflict reconcile above.
+        // Close cleared rows before counting so count, list, and rows agree.
         if let Err(err) = self.resolve_cleared_issues().await {
             eprintln!("sync issues: auto-resolve failed: {err}");
         }
-        // A hash can fail while sync is off and be retried by the book's own
-        // backoff. The sweep gives every already-failed book its row, so
-        // turning sync on surfaces the failure instead of hiding it.
         if let Err(err) = crate::services::hash_backfill::ensure_failed_issues(pool).await {
             eprintln!("sync issues: hash failure sweep failed: {err}");
         }
         let pending_local: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_dirty")
             .fetch_one(pool)
             .await?;
-        // Conflict-kind rows are legacy review leftovers. They never reach the
-        // user: the reconcile/expire sweep closes each one once its diagnostic
-        // row is gone, so listing them here would show rows nothing can settle.
-        // Attention-driving count (ADR 0017 D4): a row the sweep still owns
-        // — auto-retry on, its kind swept, the budget under the cap — is
-        // work in progress, not attention. Attention means the machine gave
-        // up or a human is required; with the sweep off every open row is
-        // the user's job. The list keeps every open row, so in-flight
-        // retries stay visible.
+        // In-flight auto-retries are not attention; the list keeps them visible.
         let auto_retry = autoretry::read_auto_retry_setting(pool).await?;
         let in_flight = autoretry::in_flight_where(auto_retry);
         let issues: i64 = sqlx::query_scalar(&format!(

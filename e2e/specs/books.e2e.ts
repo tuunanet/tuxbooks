@@ -11,7 +11,6 @@ import {
 } from "./helpers.js";
 
 test.describe("tuxbooks library navigation", () => {
-  // Test B — the library shows the seeded fixtures with the sidebar up.
   // The seed carries the five committed fixtures (EPUB + PDF pair, large,
   // mixed-size, smart-colors) plus the optional GeoTopo crash-regression
   // book when the free corpus has been fetched (seededLibraryBookCount).
@@ -38,7 +37,6 @@ test.describe("tuxbooks library navigation", () => {
     expect(await textOf(page, "library-stats")).toContain(`${seededLibraryBookCount} books`);
   });
 
-  // Test C — detail view with title and format for the EPUB fixture.
   test("opens the EPUB detail view showing title and format", async ({ page }) => {
     await openBookDetail(page, "A Minimal Book (EPUB)");
 
@@ -49,8 +47,6 @@ test.describe("tuxbooks library navigation", () => {
     await waitForLibraryView(page);
   });
 
-  // Test D — the PDF fixture opens the reader shell: toolbar visible,
-  // library sidebar gone, and the real engine canvas rendered.
   test("opens the PDF in the reader shell with the sidebar hidden", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
 

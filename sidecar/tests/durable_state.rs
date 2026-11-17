@@ -267,7 +267,6 @@ async fn unwatch_then_rewatch_restores_progress_and_annotations() {
         json!(1)
     );
     assert!(env.books().await.is_empty(), "membership ends");
-    // Reading data is still there, addressed by the durable book id.
     assert_eq!(env.progress_percent(book.id).await, Some(42.5));
     assert_eq!(env.annotation_count(book.id).await, 1);
     assert!(!env.pool.is_closed());
@@ -459,7 +458,6 @@ async fn collection_metadata_and_last_opened_survive_unwatch_and_rewatch() {
     );
     assert!(env.books().await.is_empty(), "membership ends");
 
-    // No file is present, but the durable book still owns all three states.
     assert_eq!(env.collection_book_ids(shelf).await, vec![book.id]);
     assert_eq!(
         env.durable_last_opened(&book_uid).await.as_deref(),
@@ -655,7 +653,6 @@ async fn removing_the_last_file_row_keeps_every_user_state_table() {
     env.save_progress(book.id, 33.0, "chapter1.xhtml").await;
     env.annotate(book.id, "epubcfi(/6/4!/4/2,/1:0,/1:8)").await;
 
-    // A customized list is user state too.
     let overrides = metadata_repo::OverrideRow {
         authors_customized: true,
         subjects_customized: true,

@@ -52,17 +52,12 @@ test.describe("library scale (issue #61)", () => {
 
   test.beforeEach(async ({ page }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    // The scale corpus runs after every other spec; leave any detail or
-    // reader view a previous spec kept open before asserting the library.
     await ensureLibrary(page);
   });
 
   test("imports 1,500 books and keeps the library interactive", async ({ page }) => {
     await test.setTimeout(240_000);
 
-    // Bulk import through the real sidecar path with the UI live: the
-    // report resolves when the run completes, while batched progress
-    // events stream the books into the grid along the way.
     const report = (await page.evaluate(
       (dir) =>
         (
@@ -74,21 +69,15 @@ test.describe("library scale (issue #61)", () => {
     )) as Record<string, number>;
     expect(report).toMatchObject({ imported: SCALE_CORPUS_SIZE, skipped: 0 });
 
-    // The streamed events patched the grid live: the full count is in the
-    // header (LibraryHeader shows visible.length, fed by the event
-    // stream — no refetch involved).
     await expect(page.getByTestId("library-stats")).toHaveText(
       `${seededLibraryBookCount + SCALE_CORPUS_SIZE} books`,
       { timeout: 30000 },
     );
 
-    // PERF-15 at scale: right after the import (grid at top) only the
-    // window is mounted, not 1,500 cards.
+    // PERF-15 at scale: only the window is mounted, not 1,500 cards.
     expect(await cardCount(page)).toBeLessThanOrEqual(WINDOW_CAP);
     const beforeScroll = await firstCardTitle(page);
 
-    // Scroll to the middle of the library: a different window renders —
-    // instantly, no progressive loading — and it stays bounded.
     await page.evaluate(() => {
       const grid = document.querySelector<HTMLElement>('[data-testid="book-grid"]');
       if (grid) grid.scrollTop = grid.scrollHeight / 2;
@@ -96,15 +85,12 @@ test.describe("library scale (issue #61)", () => {
     await expect.poll(() => firstCardTitle(page)).not.toBe(beforeScroll);
     expect(await cardCount(page)).toBeLessThanOrEqual(WINDOW_CAP);
 
-    // Sorting applies instantly across all 1,504 books: the card under
-    // the (unchanged) scroll position changes.
     const beforeSort = await firstCardTitle(page);
     await page.getByRole("combobox", { name: "Sort books" }).click();
     await page.getByRole("option", { name: "Title" }).click();
     await expect.poll(() => firstCardTitle(page)).not.toBe(beforeSort);
 
-    // Phase 2 contract at scale: a re-import is a stat-only pass — every
-    // file unchanged, nothing re-parsed, reported as skipped.
+    // Phase 2: a re-import is stat-only; unchanged files are skipped, not re-parsed.
     const second = (await page.evaluate(
       (dir) =>
         (

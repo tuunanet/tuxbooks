@@ -246,11 +246,9 @@ async fn retry_reports_rows_it_cannot_repair_and_closes_gone_targets() {
     let a = device().await;
     connect(&a, sync_dir.path()).await;
 
-    // A missing book row means the condition is gone.
     let gone = insert_issue(&a, "identity:999999", "identity_failed").await;
     assert!(a.service.retry_issue(gone).await.unwrap());
 
-    // An existing row whose file is unavailable cannot be repaired now.
     let _book = add_book(&a, "unavailable.epub", b"unavailable retry bytes").await;
     let file_id = file_row_id(&a, "unavailable.epub").await;
     sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
@@ -277,7 +275,6 @@ async fn retry_reports_rows_it_cannot_repair_and_closes_gone_targets() {
         .detail;
     assert!(detail.contains("retry failed"), "{detail}");
 
-    // An orphaned reprojection target is already resolved.
     let orphan_uid = "e".repeat(32);
     let orphan = insert_issue(
         &a,
@@ -287,7 +284,6 @@ async fn retry_reports_rows_it_cannot_repair_and_closes_gone_targets() {
     .await;
     assert!(a.service.retry_issue(orphan).await.unwrap());
 
-    // A cover publish failure retries from the local cover cache.
     let name = "abcdef0123456789.png";
     let covers = tuxbooks_lib::covers_dir(&a.db_path);
     std::fs::create_dir_all(&covers).unwrap();

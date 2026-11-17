@@ -85,14 +85,10 @@ export function ReaderSurface({
         // when its async contents load.
         tabIndex={-1}
         aria-label="Reading view"
-        // overflow-anchor off: Chromium's scroll anchoring adjusts scrollTop
-        // when the PDF virtualizer corrects slot heights above the viewport,
-        // double-compensating against pdfLayout's own scroll compensation, so
-        // long jumps never converge (WebKit has no scroll anchoring, which is
-        // why this only bites on Electron). scrollbar-gutter stable:
-        // Chromium's classic scrollbars take real width, so without it the
-        // fit-width scale recomputes twice and every fit-scale change
-        // re-anchors the viewport, landing long jumps on the wrong page.
+        // overflow-anchor off: Chromium's scroll anchoring double-compensates
+        // pdfLayout's slot corrections, so long jumps never converge (WebKit has
+        // none, so this only bites on Electron). scrollbar-gutter stable: classic
+        // scrollbars take real width, else fit-width re-anchors the viewport.
         className="min-h-0 flex-1 overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable] [scrollbar-color:var(--reader-scrollbar-thumb,auto)]"
         style={
           {

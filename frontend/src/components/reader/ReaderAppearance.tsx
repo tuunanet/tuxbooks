@@ -250,9 +250,8 @@ export function ReaderAppearanceControls({
 }) {
   const isPdf = format === "pdf";
 
-  // The sliders walk the supported Readium scales by index; the state holds
-  // the scale values themselves, snapped so an off-scale value (e.g. a
-  // future stored preference) can never wedge a slider.
+  // Sliders index the Readium scales; snap stored values so an off-scale one
+  // cannot wedge the slider.
   const fontSize = nearestEpubFontSize(preferences.epubFontSize);
   const fontSizeIndex = EPUB_FONT_SIZE_SCALE_PERCENT.indexOf(fontSize);
   const atDefaultFontSize = fontSize === EPUB_DEFAULT_FONT_SIZE_PERCENT;
@@ -261,16 +260,10 @@ export function ReaderAppearanceControls({
   const lineHeightIndex = EPUB_LINE_HEIGHT_SCALE.indexOf(lineHeight);
   const atDefaultLineHeight = lineHeight === EPUB_DEFAULT_LINE_HEIGHT;
 
-  // Explicit 1–4 target (issue #44); only offered for paginated reflow, and
-  // the stored value survives switching to scrolling untouched.
   const columnCount = clampEpubColumnCount(preferences.columnCount);
 
-  // Foreground override (issue #55): null = the active theme's (or
-  // publisher's) text color. The readout judges the effective color — the
-  // override, or the theme's own — against the surface actually applied
-  // (Default in a dark app resolves to the dark preset). The palette lookup
-  // uses the EPUB-facing theme: a PDF-only Invert pick maps onto the dark
-  // preset's colors.
+  // The readout judges the effective color against the applied surface; PDF
+  // Invert maps onto the dark preset.
   const themePalette = epubThemeColors(epubSurfaceTheme(surfaceTheme));
   const referenceBackground = epubForegroundReferenceBackground(epubSurfaceTheme(surfaceTheme));
   const effectiveForeground = preferences.foreground ?? themePalette?.text ?? null;
@@ -280,9 +273,8 @@ export function ReaderAppearanceControls({
       : null;
   const belowAA = foregroundRatio !== null && foregroundRatio < EPUB_FOREGROUND_AA_RATIO;
 
-  // PDFs expose theme choices with a faithful treatment (issue #67: Smart
-  // dark recolors in the worker, Invert is the explicit negative) — a
-  // superset of the EPUB-faithful filter list.
+  // PDF themes are a superset: Smart dark recolors in the worker, Invert is
+  // the explicit negative.
   const themeOptions = isPdf ? PDF_THEME_MENU_OPTIONS : THEME_OPTIONS;
   const themeSwatchStyle = (value: ReaderTheme): CSSProperties | undefined => {
     const colors = epubThemeColors(epubSurfaceTheme(value));
@@ -333,11 +325,6 @@ export function ReaderAppearanceControls({
 
   return (
     <>
-      {/* PDFs expose only the theme; EPUB gets the full reflow set.
-          Two balanced columns keep the popover short enough to avoid
-          scrollbars on normal windows; the max-height is only a fallback
-          for very short ones. Sliders live on the left, choice groups on
-          the right. */}
       {isPdf ? (
         themeSection
       ) : (
@@ -411,9 +398,7 @@ export function ReaderAppearanceControls({
               />
             </div>
 
-            {/* Text-layout scales (issue #45): 0 = publication default, mapped
-                to the toolkit's "no preference" at the seam. They apply in
-                both paginated and scrolling flow. */}
+            {/* 0 = publication default, mapped to "no preference"; both flows. */}
             <ScaleSliderRow
               label="Word spacing"
               icon={WrapText}
@@ -438,8 +423,7 @@ export function ReaderAppearanceControls({
               value={nearestEpubParagraphSpacing(preferences.paragraphSpacing)}
               onStep={(step) => setPreferences({ paragraphSpacing: step })}
             />
-            {/* Page margins are pagination-scoped in the reading system (body
-                padding applies only outside scroll flow). */}
+            {/* Page margins apply only outside the scroll flow. */}
             {preferences.layout === "paginated" && (
               <ScaleSliderRow
                 label="Page margins"
@@ -518,10 +502,6 @@ export function ReaderAppearanceControls({
 
             {themeSection}
 
-            {/* Foreground override (issue #55): composes on top of the
-                  active theme; links/visited/selection keep their theme
-                  colors (toolkit semantics). The readout never blocks a
-                  choice — it only informs. */}
             <div>
               <div className="mb-1.5 flex items-center justify-between text-sm">
                 <ControlLabel icon={Baseline}>Foreground</ControlLabel>
@@ -682,13 +662,10 @@ export function ReaderAppearance({
         align="end"
         className={cn(
           "max-h-[85vh] flex-col gap-0 overflow-hidden p-0",
-          // PDFs expose only the theme — a narrow popover; the EPUB reflow
-          // controls use the wider two-column shape that avoids scrollbars.
           isPdf ? "w-64" : "w-[min(32rem,calc(100vw-1rem))]",
         )}
-        // The popover is portaled outside the reader root; carry the full
-        // reader token set so it follows the book's theme instead of the
-        // global light/dark mode.
+        // The popover portals outside the reader root; carry the reader token
+        // set so it follows the book's theme instead of the global mode.
         style={readerThemeStyle(effectiveTheme)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >

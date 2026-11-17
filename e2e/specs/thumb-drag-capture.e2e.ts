@@ -298,7 +298,6 @@ async function calibrateAndGrab(page: Page, startScrollTop: number): Promise<Cal
 
     if (moved >= GRAB_MIN_MOVE_PX && moved <= GRAB_MAX_JUMP_PX) {
       probes.push({ offset, moved });
-      // Keep holding: the drag continues from exactly this press.
       return {
         grabCursorY: cursorY + 3,
         grabScrollTop: after,
@@ -310,7 +309,6 @@ async function calibrateAndGrab(page: Page, startScrollTop: number): Promise<Cal
     await page.mouse.up();
     probes.push({ offset, moved });
     if (moved > GRAB_MAX_JUMP_PX) {
-      // Track press: the document jumped to the press point. Restore.
       await page.evaluate((top) => {
         const container = document.querySelector<HTMLElement>("[data-testid=reader-content]");
         if (container) container.scrollTop = top;
@@ -329,8 +327,7 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     await openInReader(page, "Thumb Capture Mixed (PDF)");
     await waitForRendered(page, 1);
 
-    // Start from a fixed offset (~8% into the document): past the opening
-    // render window, so the drag travels into unmeasured pages.
+    // ~8% in: past the opening render window, so the drag enters unmeasured pages.
     const startScrollTop = await page.evaluate(() => {
       const container = document.querySelector<HTMLElement>("[data-testid=reader-content]");
       if (!container) throw new Error("PDF scroll container not found");
@@ -345,9 +342,6 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     const startGeometry = await readContainer(page);
     const grabModel = thumbModel(startGeometry);
 
-    // The drag: 60 steps x 10 cursor px downward, one trusted mousemove
-    // per step while the calibration press is still held. Each step's
-    // wall time is recorded so samples map to steps (one shared clock).
     const dragSteps: DragStep[] = [];
     const dragStartedAt = await page.evaluate(() => performance.now());
     let cursorY = calibration.grabCursorY;
@@ -358,7 +352,6 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
       const tEnd = await page.evaluate(() => performance.now());
       dragSteps.push({ step, cursorY, tStart, tEnd });
     }
-    // Let the last frames land, then release and settle.
     await page.waitForTimeout(400);
     await page.mouse.up();
     await page.waitForTimeout(400);
@@ -372,15 +365,11 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     const endModel = thumbModel(endGeometry);
     const endCursorY = cursorY;
 
-    // -- Analysis -----------------------------------------------------------
-
-    // Sample timestamps are relative to the in-page install time; the
-    // step timestamps are raw performance.now(). Rebase via the offset.
+    // Sample times are relative to install; step times are raw performance.now().
     const toSampleT = (pageT: number) => pageT - collected.t0;
     const dragStartSampleT = toSampleT(dragStartedAt);
     const dragEndSampleT = toSampleT(dragSteps[dragSteps.length - 1].tEnd) + 50;
 
-    // Scroll-height events: consecutive samples whose scrollHeight differs.
     const heightEvents = [] as {
       t: number;
       from: number;
@@ -403,23 +392,17 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     }
     const heightEventsDuringDrag = heightEvents.filter((event) => event.duringDrag);
 
-    // Re-anchor firings: programmatic scrollTop writes inside the drag window.
     const appWritesDuringDrag = collected.appWrites.filter(
       (write) => write.t >= dragStartSampleT && write.t <= dragEndSampleT,
     );
 
-    // Thumb-versus-cursor error against the grab-time (frozen) geometry:
-    // predicted scrollTop maps cursor travel by the grab-time ratio. The
-    // grab point carries the calibration nudge, so cursor travel counts
-    // from where the held drag actually started.
+    // Predict with the grab-time geometry; cursor travel starts at the grabbed press.
     const predictedEndScrollTop =
       calibration.grabScrollTop + (endCursorY - calibration.grabCursorY) * grabModel.pxPerCursor;
     const actualEndScrollTop = endGeometry.scrollTop;
     const traveledPx = actualEndScrollTop - calibration.grabScrollTop;
     const finalErrorPx = actualEndScrollTop - predictedEndScrollTop;
 
-    // Per-step error from samples: the last sample at or before each
-    // step's end, against the same frozen-geometry prediction.
     const perStep = dragSteps
       .map((step) => {
         const tSample = toSampleT(step.tEnd);
@@ -443,9 +426,7 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
       .filter((entry) => entry !== null);
     const maxAbsErrorPx = Math.max(...perStep.map((entry) => Math.abs(entry.error)));
 
-    // Thumb-under-cursor at the end, under live geometry: where the cursor
-    // sits within the usable track versus where the thumb actually is.
-    // Prediction-free: this is the user-visible jump, not a model artifact.
+    // Live geometry, prediction-free: the user-visible gap, not a model artifact.
     const endMaxScroll = endGeometry.scrollHeight - endGeometry.clientHeight;
     const cursorTrackFrac = (endCursorY - endModel.trackTop - endModel.arrowLen) / endModel.usable;
     const thumbTrackFrac = actualEndScrollTop / endMaxScroll;
@@ -453,21 +434,13 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
     const endThumbCenterY = predictedThumbCenterY(endModel, endGeometry, actualEndScrollTop);
     const thumbUnderCursorAtEnd = Math.abs(endCursorY - endThumbCenterY) <= endModel.thumbLen / 2;
 
-    // -- Verdict ------------------------------------------------------------
-
     const t1HeightEvents = heightEventsDuringDrag.length;
     const heightDeltaPx = heightEventsDuringDrag.reduce((sum, event) => sum + event.delta, 0);
     const errorMultipleOfBaseline = maxAbsErrorPx / VERDICT.uniformBaselineErrorPx;
-    // The confirmed flag keys off the settled END error, not the per-step
-    // max: per-step samples can land before a move's scroll paints and run
-    // short by up to one predicted step (~7k px), which aliasing also
-    // inflates. The end state is settled and aliasing-proof.
+    // Confirm on the settled END error: per-step samples alias and can miss a step (~7k px).
     const t1Confirmed = t1HeightEvents > 0 && Math.abs(finalErrorPx) >= VERDICT.jumpErrorPx;
     const t2Firings = appWritesDuringDrag.length;
 
-    // Per-step actual deltas: quantization to step multiples is the capture
-    // racing the frame clock (aliasing redistributes deltas across steps),
-    // but the total is preserved — lost travel is predicted minus actual.
     const stepDeltas: number[] = [];
     for (let i = 1; i < perStep.length; i += 1) {
       stepDeltas.push(perStep[i].scrollTop - perStep[i - 1].scrollTop);
@@ -497,22 +470,12 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
           : "not reproduced",
     };
 
-    // -- Harness sanity only (never thumb behavior) --------------------------
     expect(traveledPx).toBeGreaterThan(50_000);
     expect(collected.samples.length).toBeGreaterThan(60);
-    // scrollHeight growth during the drag was the unfixed build's harness
-    // sanity (the fixture guaranteed T1 fired). Since tuxbooks-x27.5 the
-    // geometry sweep measures every page right after first paint, so the
-    // fixed build must show NO in-drag height events — that outcome is
-    // report data below (heightEventsDuringDrag / scrollHeightChangePx),
-    // asserted by neither this suite nor any regression test, per the
-    // ticket's no-thumb-regression-test decision.
+    // The fixed build must show NO in-drag height events; that is report data, not an assertion.
 
     const report = {
       issue: "tuxbooks-x27.5",
-      // The capture instrument was built as the evidence capture for
-      // tuxbooks-x27.4; on the fixed build it is the rerun instrument the
-      // fix ticket's acceptance criteria call for.
       captureIssue: "tuxbooks-x27.4",
       fixture: {
         path: "tests/fixtures/books/thumb-capture-mixed.pdf",
@@ -543,13 +506,10 @@ test.describe("thumb-drag capture (mixed-size document)", () => {
         finalErrorPctOfTravel: (finalErrorPx / traveledPx) * 100,
         maxAbsErrorPx,
         finalErrorPages: finalErrorPx / MEAN_BODY_PAGE_PT,
-        // Live-geometry, prediction-free jump evidence.
         cursorTrackFrac,
         thumbTrackFrac,
         thumbCursorGapTrackPx,
         thumbUnderCursorAtEnd,
-        // Travel accounting: aliasing redistributes per-step deltas but
-        // preserves totals, so predicted-minus-actual is real lost travel.
         lostTravelPx,
         deadSteps,
         scrollHeightChangePx: endGeometry.scrollHeight - startGeometry.scrollHeight,

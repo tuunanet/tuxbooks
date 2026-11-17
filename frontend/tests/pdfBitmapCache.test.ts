@@ -30,8 +30,6 @@ describe("PdfBitmapCache", () => {
     expect(cache.get(1, 1, 1, "original")?.pageNumber).toBe(1);
     expect(cache.size).toBe(2);
 
-    // Page 1 was just touched, so page 2 is now the LRU entry: a third put
-    // under the entry cap must evict page 2, not page 1.
     cache.put(bitmap(3, 1, 8, 8));
     expect(cache.get(1, 1, 1, "original")).not.toBeNull();
     expect(cache.get(2, 1, 1, "original")).toBeNull();
@@ -46,9 +44,7 @@ describe("PdfBitmapCache", () => {
   });
 
   it("misses when the render ratio differs", () => {
-    // A resize across monitors changes devicePixelRatio and with it the
-    // effective render ratio: the stale low-ratio bitmap must never be
-    // served — a miss re-renders once instead.
+    // A monitor move changes devicePixelRatio, so the stale-ratio bitmap must miss.
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 1, 8, 8, 1));
     expect(cache.get(1, 1, 1, "original")).not.toBeNull();
@@ -56,8 +52,7 @@ describe("PdfBitmapCache", () => {
   });
 
   it("misses when the color-mode variant differs (issue #67)", () => {
-    // Smart Dark pixels are not Original pixels: a mode switch must miss
-    // and re-render, never blit the other variant's bitmap.
+    // Smart Dark and Original pixels differ; a mode switch must miss, never blit the other variant.
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 1, 8, 8, 1, "smart"));
     expect(cache.get(1, 1, 1, "smart")).not.toBeNull();
@@ -72,7 +67,6 @@ describe("PdfBitmapCache", () => {
   });
 
   it("evicts by byte budget, oldest first", () => {
-    // Budget fits exactly two 16x16 RGBA buffers (2048 bytes).
     const cache = new PdfBitmapCache(2048, 10);
     cache.put(bitmap(1, 1, 16, 16));
     cache.put(bitmap(2, 1, 16, 16));
@@ -101,8 +95,7 @@ describe("PdfBitmapCache", () => {
   });
 
   it("holds two 4K-scale page buffers under the default budget (PERF-3, dpr 1)", () => {
-    // Two ~74 MB buffers (a capped 4K page at dpr 1) must coexist: the byte
-    // budget is sized so one down-up scroll oscillation retains ≥ 2 pages.
+    // The budget is sized so one down-up scroll oscillation retains both ~74 MB buffers.
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 6.2, 3816, 4938, 1));
     cache.put(bitmap(2, 6.2, 3816, 4938, 1));
@@ -112,9 +105,8 @@ describe("PdfBitmapCache", () => {
   });
 
   it("holds two dpr-2 capped 4K buffers under the default budget (PERF-3, dpr 2)", () => {
-    // At the reference dpr 2 the cap binds and one 4K page buffer is the
-    // full 2**25 px ≈ 134 MB — the budget must still retain both sides of
-    // one down-up oscillation, or scrolling back re-rasterizes.
+    // At dpr 2 a capped 4K page is 2**25 px ≈ 134 MB; the budget is sized so both sides of
+    // one down-up oscillation still fit, or scrolling back re-rasterizes.
     const cache = new PdfBitmapCache();
     cache.put(bitmap(1, 6.2, 5092, 6590, 1.334));
     cache.put(bitmap(2, 6.2, 5092, 6590, 1.334));

@@ -44,12 +44,8 @@ function writeMarker(expiresInDays: number): void {
     chrome: "e2e",
   };
   fs.mkdirSync(path.dirname(markerPath), { recursive: true });
-  // js/insecure-temporary-file triage (dismissed "used in tests" on the
-  // code-scanning alert): the marker path is fixed by the app's own
-  // contract — the Electron main reads it next to TEST_DATABASE_PATH — and
-  // the scratch dir is a single-run, single-user ephemeral directory
-  // (e2e/setup/environment.ts). Path predictability is the multi-process
-  // E2E contract, not an attacker-controlled name.
+  // js/insecure-temporary-file triage: the path is the app's own contract and
+  // the scratch dir is single-run ephemeral (e2e/setup/environment.ts).
   fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2));
 }
 
@@ -65,9 +61,8 @@ function gpuDisabled(electronApp: ElectronApplication): Promise<boolean> {
 }
 
 test.describe("TuxBooks GPU-crash fallback", () => {
-  // The worker-scoped app fixture launches lazily on first use — after this
-  // module has placed the active marker, so the fixture's very first launch
-  // is the degraded one.
+  // The worker-scoped app fixture launches lazily on first use, after this
+  // marker is placed, so its first launch is the degraded one.
   fs.mkdirSync(path.dirname(markerPath), { recursive: true });
   writeMarker(7);
 
@@ -76,15 +71,11 @@ test.describe("TuxBooks GPU-crash fallback", () => {
     page,
   }) => {
     await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
-    // The startup decision is in effect for this process.
     expect(await gpuDisabled(electronApp)).toBe(true);
-    // Diagnostic record of the degraded environment (values are
-    // environment-dependent; the activation above is not).
     const gpuStatus = await electronApp.evaluate(({ app }) => app.getGPUFeatureStatus());
     console.log(`[e2e] GPU feature status under fallback: ${JSON.stringify(gpuStatus)}`);
-    // The decision state must not be lost across a restart: the marker is
-    // cleared only by a stable HARDWARE-accelerated session, and this
-    // session did not run one. Asserted on the file the next launch reads.
+    // Only a stable hardware-accelerated session clears the marker, so this
+    // software-rendered session must leave it in place for the next launch.
     expect(fs.existsSync(markerPath)).toBe(true);
   });
 
@@ -100,15 +91,9 @@ test.describe("TuxBooks GPU-crash fallback", () => {
   test("a stable hardware-accelerated session clears an expired fallback marker", async ({
     electronApp,
   }) => {
-    // Clean quit of the software-rendered session from the previous tests:
-    // it must NOT have cleared the active marker (it proves nothing about
-    // the hardware path).
     await electronApp.close();
     expect(fs.existsSync(markerPath)).toBe(true);
 
-    // Now the marker is expired: the next session reads as
-    // hardware-accelerated and — ending cleanly with zero GPU crashes —
-    // removes the stale marker so the fallback does not stick forever.
     writeMarker(-1);
     const relaunched = await launchElectronApp();
     try {

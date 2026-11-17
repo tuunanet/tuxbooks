@@ -115,10 +115,8 @@ pub async fn import_directory_with_cancel(
         other => AppError::InvalidInput(other.to_string()),
     })?;
 
-    // One snapshot of the known rows: stored size/mtime for the skip check
-    // and the stored cover path for the keep-what-works rule. Only those
-    // columns are read, so a 10k-book re-import does not deserialize 10k
-    // descriptions to compare two integers.
+    // Snapshot only the columns the skip check and keep-what-works rule need,
+    // so a 10k-book re-import does not deserialize 10k descriptions.
     let known: HashMap<String, books::BookFileSnapshot> = books::list_file_snapshots(pool)
         .await?
         .into_iter()
@@ -145,10 +143,8 @@ pub async fn import_directory_with_cancel(
         queued.push((path, previous_cover));
     }
 
-    // Bounded parse workers feed one persister through a channel: parsing
-    // and cover extraction block on the worker pool while DB writes stay
-    // serialized, and the channel's backpressure keeps memory bounded — a
-    // parser can only run ahead by the channel's few slots.
+    // Bounded workers feed one persister: parsing blocks on the worker pool
+    // while DB writes stay serialized, and channel backpressure bounds memory.
     let semaphore = Arc::new(Semaphore::new(PARSE_CONCURRENCY));
     let (tx, mut rx) = mpsc::channel::<(PathBuf, Result<NewBook, String>)>(PARSE_CONCURRENCY);
     let mut workers = Vec::with_capacity(queued.len());
@@ -187,7 +183,6 @@ pub async fn import_directory_with_cancel(
             let _ = tx.send((path, result)).await;
         }));
     }
-    // Dropping the sender ends the receive loop once every worker finished.
     drop(tx);
 
     while let Some((path, result)) = rx.recv().await {
@@ -202,9 +197,7 @@ pub async fn import_directory_with_cancel(
             }),
             Ok(new_book) => {
                 let upserted = books::upsert_file(pool, &new_book).await?;
-                // Record the fresh parse as source truth and re-merge the
-                // effective view, so user metadata overrides survive file
-                // changes (milestone 7).
+                // Re-merge the effective view so user overrides survive the change.
                 crate::repository::metadata::record_imported_source(
                     pool,
                     upserted.file_id,
@@ -218,8 +211,7 @@ pub async fn import_directory_with_cancel(
         }
     }
     // Close the channel before joining: a cancelled persister must not leave
-    // a worker blocked on a full channel waiting for a reader that never
-    // comes back.
+    // a worker blocked on a full channel forever.
     drop(rx);
     for worker in workers {
         worker
@@ -252,12 +244,9 @@ pub async fn import_file(
         previous_cover.as_deref(),
     )?;
     let upserted = books::upsert_file(pool, &new_book).await?;
-    // Record the fresh parse as source truth and re-merge the effective
-    // view, so user metadata overrides survive file changes (milestone 7).
     crate::repository::metadata::record_imported_source(pool, upserted.file_id, &new_book).await?;
     let book = finalize_import(pool, upserted.file_id).await?;
-    // ADR 0018 D1: only the re-import path mints a file_version, and only
-    // when the hash changed. The guard lives in the mint.
+    // Only the re-import path mints, and only on a hash change (ADR 0018 D1).
     if !upserted.inserted {
         crate::sync::file_version::mint_after_reimport(pool, upserted.file_id).await?;
     }

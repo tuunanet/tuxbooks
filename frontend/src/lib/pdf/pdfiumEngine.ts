@@ -99,18 +99,14 @@ class PdfiumDocument implements PdfDocument {
     },
   ): PdfRenderTask {
     this.assertAlive();
-    // Render exactly the pixels the caller sized the destination canvas to.
-    // PdfPageCanvas sizes it to the CSS box times the device ratio, so this
-    // keeps the buffer 1:1 with the box. Deriving the size from the unrounded
-    // page-size*scale here can land a pixel short, and the browser then
-    // resamples the whole canvas to fit, ghosting its edges.
+    // Render exactly the pixels the caller sized the canvas to: deriving from
+    // page-size*scale can land a pixel short and resample the whole canvas.
     const width = Math.max(1, options.canvas.width);
     const height = Math.max(1, options.canvas.height);
     let clip: PageClip | undefined;
     if (options.region) {
-      // Region mode: the caller's canvas is region-sized, and the viewport is
-      // the full page's CSS size, so CSS pixels convert to page units through
-      // the page-units-per-CSS ratio.
+      // Region mode: the caller's canvas is region-sized while the viewport is
+      // the full page's CSS size, so scale page units by page-units-per-CSS.
       const pageUnitsPerCss =
         size.width > 0 && options.viewport.width > 0 ? size.width / options.viewport.width : 1;
       clip = [
@@ -120,9 +116,8 @@ class PdfiumDocument implements PdfDocument {
         options.region.height * pageUnitsPerCss,
       ];
     }
-    // The seam hands the dark palette across; PDFium's category colour
-    // scheme is derived here so the worker payload carries plain 32-bit
-    // colours.
+    // Derive PDFium's colour scheme here; the worker payload carries plain
+    // 32-bit colours.
     const colorScheme = options.smartColors
       ? colorSchemeFromPalette(options.smartColors)
       : undefined;
@@ -137,10 +132,9 @@ class PdfiumDocument implements PdfDocument {
     const run = async (): Promise<void> => {
       if (queued.cancelled) throw new PdfRenderCancelledError();
       const handle = this.client.requestCancellable("render", request);
-      // A dispatched request stays pending until the worker answers, even if
-      // its canvas unmounts meanwhile. Rejecting it early would let the tail
-      // post the next page while PDFium is still rasterizing the stale one,
-      // recreating the backlog this queue exists to prevent.
+      // A dispatched request stays pending even if its canvas unmounts: early
+      // rejection would let the queue post the next page mid-raster and rebuild
+      // the backlog this queue prevents.
       const raw = await handle.result;
       const { bitmap } = raw as { bitmap: ImageBitmap };
       if (queued.cancelled) {
@@ -155,8 +149,7 @@ class PdfiumDocument implements PdfDocument {
         bitmap.close();
       }
     };
-    // The tail is always resolved after each attempt, so one failed raster
-    // cannot wedge every later page behind it.
+    // The tail resolves after each attempt, so one failure cannot wedge later pages.
     const promise = this.renderTail.then(run, run);
     this.renderTail = promise.then(
       () => undefined,

@@ -208,8 +208,6 @@ describe("PdfReader loading", () => {
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
 
     const canvas = await screen.findByTestId("pdf-canvas");
-    // Backing-store attributes are set when the first render blits, a beat
-    // after the canvas element mounts.
     await waitFor(() => expect(canvas).toHaveAttribute("width", "612"));
     expect(canvas).toHaveAttribute("height", "792");
     expect(canvas).toHaveAttribute("data-pdf-page", "1");
@@ -247,7 +245,6 @@ describe("PdfReader loading", () => {
     await renderLoadedReader();
 
     expect(document.querySelectorAll("[data-pdf-slot]")).toHaveLength(100);
-    // Only the active page owns a canvas; the rest are geometry-only slots.
     expect(screen.getAllByTestId("pdf-canvas")).toHaveLength(1);
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
     expect(slot(2)).toHaveAttribute("data-render-state", "unloaded");
@@ -266,11 +263,6 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    // Every page of a 3-page document is in the opening sample, so the
-    // landscape page already has its real box before anything approaches;
-    // firePreload below only mounts its canvas. (The snap-on-approach path
-    // for pages outside the sample is covered by the 20-page test after
-    // this one.)
     firePreload(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveStyle({ width: "792px", height: "612px" }));
     expect(slot(1)).toHaveStyle({ width: "612px", height: "792px" });
@@ -280,11 +272,6 @@ describe("PdfReader loading", () => {
   });
 
   it("estimates unmeasured pages from the sampled median, not an odd page 1", async () => {
-    // The incident book's shape (Python Debugging for ML and Cloud): page
-    // 1 is the document's only wide page (827x1180 pt), every other page
-    // is 504x720 pt. Estimating from page 1 stamped the wide box onto the
-    // whole document, so each ordinary page visibly snapped narrower as
-    // its measurement landed on approach: a width flash per page.
     const doc = makeFakePdfDocument(20, (pageNumber) =>
       pageNumber === 1 ? { width: 827, height: 1180 } : { width: 504, height: 720 },
     );
@@ -296,24 +283,12 @@ describe("PdfReader loading", () => {
 
     await renderLoadedReader();
 
-    // The wide page keeps its real box, and with it the max-page fit
-    // reference the scale derives from (no global rescale when the other
-    // pages measure).
     await waitFor(() => expect(slot(1)).toHaveStyle({ width: "827px", height: "1180px" }));
-    // Unmeasured pages already reserve their REAL box from the median
-    // estimate: nothing snaps when they come into view.
     expect(slot(2)).toHaveStyle({ width: "504px", height: "720px" });
     expect(slot(12)).toHaveStyle({ width: "504px", height: "720px" });
   });
 
   it("measures the whole document eagerly after first paint", async () => {
-    // The scrollbar fix (tuxbooks-x27.5): a body page outside the opening
-    // sample no longer waits for an
-    // approach — every page is measured in one background sweep that starts
-    // after the first page renders, so slot heights (scrollHeight) settle
-    // long before the user can grab the native scrollbar thumb and never
-    // move mid-drag. The sweep's getPage calls are held below so the
-    // estimate/fit assertions stay deterministic.
     const doc = makeFakePdfDocument(20, (pageNumber) =>
       pageNumber === 10 ? { width: 827, height: 1180 } : { width: 504, height: 720 },
     );
@@ -322,7 +297,6 @@ describe("PdfReader loading", () => {
       getViewport: (options: { scale: number }) => { width: number; height: number };
     }>;
     doc.getPage.mockImplementation(async (page: number) => {
-      // Hold the sweep's pages, never the opening sample (1, 2, 20).
       if (page >= 3 && page < 20) await new Promise<void>((resolve) => heldWaves.push(resolve));
       return underlyingGetPage(page);
     });
@@ -333,34 +307,19 @@ describe("PdfReader loading", () => {
     });
 
     await renderLoadedReader();
-    // The body page starts at the median estimate: the sweep has not landed.
     expect(slot(10)).toHaveStyle({ width: "504px", height: "720px" });
 
-    // With a measured area the fit starts against the sampled max (504pt):
-    // (1248 - 24) / 504 = 242.9%.
     const area = screen.getByTestId("pdf-content-area");
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("242.9"));
 
-    // Release the sweep: the body page corrects without any approach, the
-    // fit reference rises to its real width
-    // (pps_document_get_max_page_size), the scale drops to
-    // (1248 - 24) / 827 = 148%, and the slot swaps to the real box in the
-    // same correction. Neighbours keep their boxes. The zoom readback and
-    // the slots land in the same commit, so the scale is asserted first.
-    // The sweep starts on the first canvas blit, which can land a beat
-    // after the canvas mounts, so hold the release until its pages are
-    // actually parked.
     await waitFor(() => expect(heldWaves.length).toBeGreaterThan(0));
     for (const resolve of heldWaves.splice(0)) resolve();
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("148"));
     expect(slot(10)).toHaveStyle({ width: "1224px", height: "1746px" });
     expect(slot(9)).toHaveStyle({ width: "746px", height: "1066px" });
     expect(slot(11)).toHaveStyle({ width: "746px", height: "1066px" });
-    // Every page was measured: the engine saw a getPage for each page
-    // (rendered pages can appear more than once — the canvases go through
-    // the same seam).
     const measuredPages = new Set(doc.getPage.mock.calls.map(([page]) => page));
     expect(measuredPages).toEqual(new Set(Array.from({ length: 20 }, (_, i) => i + 1)));
   });
@@ -385,9 +344,6 @@ describe("PdfReader loading", () => {
       save_reading_progress: null,
     });
 
-    // Default (neutral) renders the pages as-is; Dark rasterizes with
-    // worker-side Smart Dark recoloring (no CSS filter); Invert is the
-    // explicit negative filter; Paper multiplies the tint over the pages.
     const onSearchGroup = vi.fn() as never;
     const onSelectionChange = vi.fn() as never;
     render(
@@ -410,16 +366,13 @@ describe("PdfReader loading", () => {
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
 
-    // Smart dark: no filter — the recoloring happened at raster time.
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
     expect(screen.queryByTestId("pdf-theme-tint")).not.toBeInTheDocument();
 
-    // The explicit negative: the full-page inversion filter.
     await userEvent.click(screen.getByRole("button", { name: "probe-invert" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("invert(1) hue-rotate(180deg)");
 
-    // Paper multiplies the white pages down to the theme's paper color.
     await userEvent.click(screen.getByRole("button", { name: "probe-paper" }));
     expect(screen.getByTestId("pdf-document").style.filter).toBe("");
     const tint = screen.getByTestId("pdf-theme-tint");
@@ -447,32 +400,24 @@ describe("PdfReader loading", () => {
     await screen.findByTestId("pdf-canvas");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
 
-    // Neutral default: pages render as-is — no palette rides the requests.
     expect(doc.renderOptions.length).toBeGreaterThan(0);
     for (const call of doc.renderOptions) {
       expect(call.smartColors).toBeUndefined();
     }
 
-    // Dark: the render requests carry the Smart Dark palette (the EPUB
-    // dark preset's own background/text pair).
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     await waitFor(() => expect(doc.renderOptions.at(-1)?.smartColors).toBeDefined());
     const smart = doc.renderOptions.at(-1)?.smartColors as
       | { background: number[]; text: number[] }
       | undefined;
-    // #101013 background, #e4e4e7 text (0–1 components).
     expect(smart?.background[0]).toBeCloseTo(16 / 255, 3);
     expect(smart?.text[0]).toBeCloseTo(228 / 255, 3);
 
-    // Back to default: the palette disappears again (variant invalidation
-    // re-rendered — the smart colors are gone from the latest requests).
     await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
     await waitFor(() => expect(doc.renderOptions.at(-1)?.smartColors).toBeUndefined());
   });
 
   it("placeholders pending page slots with the dark palette in Smart Dark (issue #67)", async () => {
-    // A page that is queued/rendering shows the wrapper behind its still-
-    // transparent canvas; white there is a white flash on a dark surface.
     const doc = makeFakePdfDocument(3);
     openDocumentMock.mockResolvedValue(doc as unknown as EngineDocument);
     mockInvoke({
@@ -492,30 +437,22 @@ describe("PdfReader loading", () => {
     await screen.findByTestId("pdf-canvas");
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
 
-    // Default (neutral): the faithful paper-white placeholder.
     const wrapper = document.querySelector("[data-pdf-page-wrapper='1']");
     expect(wrapper).not.toBeNull();
     expect((wrapper as HTMLElement).style.backgroundColor).toBe("");
 
-    // Smart Dark: the placeholder is the raster's own pre-fill color.
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     await waitFor(() => {
       const darkWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
       expect((darkWrapper as HTMLElement | null)?.style.backgroundColor).toBe("rgb(16, 16, 19)");
     });
 
-    // Back to Default: the dark placeholder must go with it — a pending
-    // slot returns to the paper-white background.
     await userEvent.click(screen.getByRole("button", { name: "probe-default" }));
     await waitFor(() => {
       const plainWrapper = document.querySelector("[data-pdf-page-wrapper='1']");
       expect((plainWrapper as HTMLElement | null)?.style.backgroundColor).toBe("");
     });
 
-    // The same treatment reaches a slot with NO mounted canvas: pages 2-3
-    // were never visible, so their page box is the only placeholder there
-    // is. Paper white by default, the dark palette in Smart Dark, back
-    // again on default — an unloaded page never punches a hole (R4).
     expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
     await userEvent.click(screen.getByRole("button", { name: "probe-dark" }));
     await waitFor(() => {
@@ -566,8 +503,6 @@ describe("PdfReader loading", () => {
     await renderLoadedReader();
     expect(openDocumentMock).toHaveBeenCalledTimes(1);
 
-    // The worker dies underneath a loaded reader: the dead handle is
-    // destroyed and the document re-opens from its range-backed source.
     doc.failWorker();
     await waitFor(() => expect(closeDocumentMock).toHaveBeenCalledWith(doc));
     await waitFor(() => expect(openDocumentMock).toHaveBeenCalledTimes(2));
@@ -619,11 +554,7 @@ describe("PdfReader book switching", () => {
 
     view.rerenderBook({ book: secondBook });
 
-    // The previous document is destroyed the moment the book changes, and
-    // its reading surface leaves instead of lingering while the next loads.
-    // Assert the loading surface synchronously: the mocked open resolves on
-    // a microtask, and awaiting findBy first lets it swap loading out for
-    // the next canvas, detaching the node before the membership check runs.
+    // Assert synchronously: the mocked open resolves on a microtask, so awaiting lets it swap away first.
     expect(closeDocumentMock).toHaveBeenCalledWith(docA);
     expect(screen.getByTestId("pdf-loading")).toBeInTheDocument();
     await screen.findByTestId("pdf-canvas");
@@ -653,8 +584,6 @@ describe("PdfReader book switching", () => {
     await screen.findByTestId("pdf-canvas");
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 5");
 
-    // The superseded document resolves late: it must be destroyed, never
-    // mounted, and never reported as the shell's page count.
     const lateDocument = makeFakePdfDocument(7);
     resolveFirst(lateDocument as unknown as EngineDocument);
     await waitFor(() => expect(closeDocumentMock).toHaveBeenCalledWith(lateDocument));
@@ -673,12 +602,8 @@ describe("PdfReader book switching", () => {
     });
 
     const view = await renderLoadedReader();
-    // Widen the window to pages 1–2 and let both complete, so the previous
-    // document leaves rendered marks and cached bitmaps behind.
     firePreload(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
-    // Two pages are cached; the byte totals are the cache's internal
-    // accounting, not the contract.
     expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(
       /^2:[1-9]\d*$/,
     );
@@ -686,9 +611,6 @@ describe("PdfReader book switching", () => {
     view.rerenderBook({ book: secondBook });
     await screen.findAllByTestId("pdf-canvas");
 
-    // The new document's pages 1–2 are in-flight again (held by the fake):
-    // stale "rendered" marks must not report them done, and the cache must
-    // start empty — the previous book's pixels never leak into this one.
     expect(slot(1)).toHaveAttribute("data-render-state", "rendering");
     expect(slot(2)).toHaveAttribute("data-render-state", "rendering");
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-bitmap-cache", "0:0");
@@ -714,8 +636,6 @@ describe("PdfReader outline and thumbnails", () => {
     const onOutlineLoad = vi.fn();
     await renderLoadedReader({ onOutlineLoad });
 
-    // The outline request waits for the first rendered page (§ first-page
-    // priority), so it can land a beat after the canvas mounts.
     await waitFor(() =>
       expect(getPdfOutline).toHaveBeenCalledWith(expect.objectContaining({ numPages: 3 })),
     );
@@ -738,8 +658,6 @@ describe("PdfReader outline and thumbnails", () => {
     renderPdfReader({ onOutlineLoad });
     await screen.findByTestId("pdf-loading");
 
-    // § first-page priority: outline work must not occupy the PDFium worker
-    // before page 1 has rendered.
     expect(getPdfOutline).not.toHaveBeenCalled();
 
     resolveDocument(makeFakePdfDocument(3) as unknown as EngineDocument);
@@ -755,7 +673,6 @@ describe("PdfReader outline and thumbnails", () => {
     });
 
     renderPdfReader();
-    // While the document is still opening the state names that stage.
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute(
       "data-pdf-open-state",
       "document-opening",
@@ -804,7 +721,6 @@ describe("PdfReader outline and thumbnails", () => {
     document.body.appendChild(host);
     const view = await renderLoadedReader({ sidebarHost: host });
     try {
-      // The whole document reserves thumbnail cells; the current page paints.
       expect(host.querySelectorAll("[data-pdf-thumb-slot]")).toHaveLength(3);
       await waitFor(() =>
         expect(host.querySelector('[data-pdf-thumb-slot="1"]')).toHaveAttribute(
@@ -817,7 +733,6 @@ describe("PdfReader outline and thumbnails", () => {
         "true",
       );
 
-      // A thumbnail click navigates the reader.
       await userEvent.click(
         host.querySelector('[data-pdf-thumb-slot="3"] button') as HTMLButtonElement,
       );
@@ -845,7 +760,6 @@ describe("PdfReader virtualization", () => {
     });
 
     await renderLoadedReader();
-    // Before any intersection events, only the current page has a canvas.
     expect(canvasPages()).toEqual(["1"]);
 
     fireVisible(slot(2) as Element, true);
@@ -853,13 +767,9 @@ describe("PdfReader virtualization", () => {
     firePreload(slot(4) as Element, true);
     firePreload(slot(5) as Element, true);
 
-    // Completed canvases stay mounted; only ONE prerender page beyond the
-    // visible range is attempted (the closest, page 4 — like the official
-    // viewer's single pre-render slot).
     await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3", "4"]));
     await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
     expect(slot(5)).toHaveAttribute("data-render-state", "unloaded");
-    // Approaching pages are measured so their geometry is real before use.
     expect(doc.getPage).toHaveBeenCalledWith(4);
   });
 
@@ -874,23 +784,16 @@ describe("PdfReader virtualization", () => {
     await renderLoadedReader();
     expect(canvasPages()).toEqual(["1"]);
 
-    // PDF.js pipelines pages: each page's operator list is produced
-    // independently in the worker and each paint loop time-slices on the
-    // main thread, so while the anchor's heavy raster is held, the next
-    // visible page starts instead of waiting behind it (a heavy page 1
-    // must never starve page 2).
+    // PDF.js pipelines pages: while page 1's heavy raster is held, page 3 must still start.
     fireVisible(slot(3) as Element, true);
     await waitFor(() => expect(canvasPages()).toEqual(["1", "3"]));
 
-    // The concurrency budget is full: a further visible page waits.
     fireVisible(slot(4) as Element, true);
     expect(canvasPages()).toEqual(["1", "3"]);
 
-    // Completing a render frees its slot for the next priority page.
     doc.releaseRender(1);
     await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "4"]));
 
-    // With nothing visible pending, a single prerender page is allowed.
     firePreload(slot(7) as Element, true);
     await waitFor(() => expect(canvasPages()).toEqual(["1", "3", "4", "7"]));
   });
@@ -913,10 +816,6 @@ describe("PdfReader virtualization", () => {
     firePreload(slot(3) as Element, false);
 
     await waitFor(() => expect(canvasPages()).toEqual(["1"]));
-    // Evicted pages keep their reserved geometry as honest unloaded slots,
-    // and the empty box is paper white — the page reads as unprinted
-    // paper, never as a hole onto the content area (R4, the reason Papers
-    // paints a CSS rect behind every page).
     expect(slot(2)).toHaveAttribute("data-render-state", "unloaded");
     expect(slot(2)).toHaveStyle({ height: "792px" });
     expect((slot(2) as HTMLElement).style.backgroundColor).toBe("rgb(255, 255, 255)");
@@ -938,11 +837,6 @@ describe("PdfReader virtualization", () => {
       expect(canvasPages()).toHaveLength(4);
     });
 
-    // The viewport moves back to page 2: page 5 sits exactly three from
-    // the visible range and keeps its mounted canvas (Papers holds
-    // MAX_PRELOADED_PAGES 3 pages each side painted, pps-pixbuf-cache.c:105),
-    // page 6 sits four away and evicts to its geometry slot. The ring is
-    // mount-only: it never asked the engine to render either page anew.
     fireVisible(slot(5) as Element, false);
     fireVisible(slot(6) as Element, false);
     await waitFor(() => expect(canvasPages()).not.toContain("6"));
@@ -977,10 +871,6 @@ describe("PdfReader virtualization", () => {
     });
 
     await renderLoadedReader();
-    // Emulate the 4K reference conditions (docs/PERFORMANCE.md): a ~3816px
-    // content area reserves the 24px Papers margin and fits the letter page
-    // at ~6.2×, so each slot's capped buffer is ~75 MB and only ~3 fit the
-    // 256 MB live-canvas budget.
     const area = screen.getByTestId("pdf-content-area");
     Object.defineProperty(area, "clientWidth", { value: 3816, configurable: true });
     window.dispatchEvent(new Event("resize"));
@@ -990,8 +880,6 @@ describe("PdfReader virtualization", () => {
       fireVisible(slot(page) as Element, true);
     }
 
-    // The count fallback would allow 8; the byte budget keeps the closest 3
-    // (anchor first) and the rest stay geometry-only slots.
     await waitFor(() => expect(canvasPages()).toEqual(["1", "2", "3"]));
     expect(slot(8)).toHaveAttribute("data-render-state", "unloaded");
   });
@@ -1011,16 +899,12 @@ describe("PdfReader virtualization", () => {
     const page2GetPageCalls = () => doc.getPage.mock.calls.filter(([page]) => page === 2).length;
     const callsBeforeEviction = page2GetPageCalls();
     expect(callsBeforeEviction).toBeGreaterThan(0);
-    // Diagnostics: both rendered pages are retained in the bitmap cache.
     expect(screen.getByTestId("pdf-reader").getAttribute("data-pdf-bitmap-cache")).toMatch(/^2:/);
 
-    // Eviction unmounts the canvas, but its pixels move into the cache.
     fireVisible(slot(2) as Element, false);
     firePreload(slot(2) as Element, false);
     await waitFor(() => expect(canvasPages()).not.toContain("2"));
 
-    // Re-entry blits the retained bitmap: the slot reports rendered again
-    // without a second engine page request or raster.
     fireVisible(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
     expect(page2GetPageCalls()).toBe(callsBeforeEviction);
@@ -1045,8 +929,6 @@ describe("PdfReader virtualization", () => {
     await waitFor(() => expect(canvasPages()).not.toContain("2"));
     const callsBeforeZoom = page2GetPageCalls();
 
-    // Cached bitmaps are scale-keyed and dropped on zoom: re-entry must go
-    // back to the engine rather than blit a stale-scale bitmap.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     fireVisible(slot(2) as Element, true);
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
@@ -1078,8 +960,6 @@ describe("PdfReader scroll tracking", () => {
       expect(await screen.findByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
       scrollIntoViewSpy.mockClear();
 
-      // Anchor = scrollTop + 25% of the 720px viewport; 810 + 180 lands in
-      // page 2, 1620 + 180 in page 3, and back to 0 in page 1.
       scrollTo(container, 810);
       await waitFor(() =>
         expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
@@ -1093,7 +973,6 @@ describe("PdfReader scroll tracking", () => {
         expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
       );
 
-      // The scroll itself is the navigation: the reader must not scroll back.
       expect(scrollIntoViewSpy).not.toHaveBeenCalled();
     } finally {
       scrollIntoViewSpy.mockRestore();
@@ -1113,7 +992,6 @@ describe("PdfReader scroll tracking", () => {
       );
       scrollIntoViewSpy.mockClear();
 
-      // Toolbar navigation is external: the reader scrolls to page 3's top.
       await userEvent.click(screen.getByTestId("pdf-next"));
       await waitFor(() =>
         expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
@@ -1126,13 +1004,6 @@ describe("PdfReader scroll tracking", () => {
   });
 
   it("does not scroll back on a stale write for a scroll-reported page", async () => {
-    // The fast-drag race (2026-10-25 UAT zoom log): the tracker reports
-    // pages at frame rate and stamps synchronously, while React commits
-    // `currentPage` a frame or two behind. A commit for the earlier page
-    // then lands with the last report pointing further ahead — the commit's
-    // page is scroll-reported, just not LAST. The reader must treat it as
-    // the user's own scroll and keep still, or the scrollIntoView fallback
-    // fights the held thumb for the whole drag.
     const scrollIntoViewSpy = vi
       .spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => {});
@@ -1149,8 +1020,6 @@ describe("PdfReader scroll tracking", () => {
       );
       scrollIntoViewSpy.mockClear();
 
-      // The stale write: page 2, already scroll-reported, arrives after
-      // page 3 is current. The indicator follows it; the view must not move.
       await userEvent.click(screen.getByTestId("probe-position-2"));
       await waitFor(() =>
         expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
@@ -1162,9 +1031,6 @@ describe("PdfReader scroll tracking", () => {
   });
 
   it("re-anchors on navigation to a recently scroll-reported page", async () => {
-    // The guard's memory is bounded on purpose, but a jump to a page the
-    // user recently scrolled past must still land: navigation deletes its
-    // target from the memory before writing the position.
     const scrollIntoViewSpy = vi
       .spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => {});
@@ -1177,7 +1043,6 @@ describe("PdfReader scroll tracking", () => {
       );
       scrollIntoViewSpy.mockClear();
 
-      // Toolbar prev lands on page 1, which the tracker reported on mount.
       await userEvent.click(screen.getByTestId("pdf-prev"));
       await waitFor(() =>
         expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3"),
@@ -1220,7 +1085,6 @@ describe("PdfReader persistence", () => {
     try {
       renderPdfReader();
 
-      // The restored page renders directly — no page-one flash first.
       await waitFor(() =>
         expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
       );
@@ -1262,7 +1126,6 @@ describe("PdfReader persistence", () => {
     invokeMock.mockClear();
 
     await userEvent.click(screen.getByTestId("pdf-next"));
-    // The write is debounced (1s): it must not appear immediately.
     expect(invokeMock).not.toHaveBeenCalledWith(
       "save_reading_progress",
       expect.objectContaining({ bookId: 7 }),
@@ -1309,16 +1172,12 @@ describe("PdfReader fit width and zoom anchoring", () => {
 
     await renderLoadedReader();
 
-    // A 1248px-wide content area reserves the Papers margin (2 * 12px) on
-    // each side, so the 612pt reference page fits at 2×.
     const area = screen.getByTestId("pdf-content-area");
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
     await waitFor(() => expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "1224"));
     expect(slot(1)).toHaveStyle({ width: "1224px" });
-    // The zoom indicator shows the effective page zoom (scale × 100), not a
-    // multiplier: the fit-width scale here is 2× the page's point size.
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("200");
   });
 
@@ -1337,12 +1196,6 @@ describe("PdfReader fit width and zoom anchoring", () => {
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
-    // The opening sample measures all three pages of this short document,
-    // so the fit reference is the widest page (pps_document_get_max_page_size)
-    // from the very first layout: (1248 - 24) / 1224 = 1. There is no
-    // page-1-only 2x phase that later snaps down when the wide page is
-    // measured; that snap only survives for wide pages a big document has
-    // not reached yet (see the sampled-median test above).
     await waitFor(() => expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("100"));
     expect(slot(1)).toHaveStyle({ width: "612px" });
     expect(slot(2)).toHaveStyle({ width: "1224px" });
@@ -1396,18 +1249,15 @@ describe("PdfReader hardening", () => {
 
     await renderLoadedReader();
 
-    // Page 2 fails: its own slot reports the failure with a retry action…
     await userEvent.click(screen.getByTestId("pdf-next"));
     expect(await screen.findByTestId("pdf-retry-2")).toBeInTheDocument();
     expect(slot(2)).toHaveAttribute("data-render-state", "error");
 
-    // …while the rest of the document keeps working.
     await userEvent.click(screen.getByTestId("pdf-next"));
     await waitFor(() =>
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "3"),
     );
 
-    // Retry re-renders the failed page (the fake fails once, then succeeds).
     await userEvent.click(screen.getByTestId("pdf-prev"));
     await userEvent.click(await screen.findByTestId("pdf-retry-2"));
     await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
@@ -1439,12 +1289,10 @@ describe("PdfReader hardening", () => {
 
     await renderLoadedReader();
     for (let i = 0; i < 12; i++) fireEvent.keyDown(window, { key: "-" });
-    // The preset ladder floor is 12% (Okular's kZoomValues[0]).
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("12");
     expect(screen.getByTestId("pdf-zoom-out")).toBeDisabled();
 
     for (let i = 0; i < 20; i++) fireEvent.keyDown(window, { key: "+" });
-    // The preset ladder ceiling is 10000% (Okular's tiled cap).
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("10000");
     expect(screen.getByTestId("pdf-zoom-in")).toBeDisabled();
   });
@@ -1470,7 +1318,6 @@ describe("PdfReader navigation", () => {
     );
     expect(doc.getPage).toHaveBeenCalledWith(2);
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3");
-    // The previous slot keeps its geometry without a canvas.
     expect(slot(1)).toHaveAttribute("data-render-state", "unloaded");
 
     await userEvent.click(next);
@@ -1722,8 +1569,6 @@ describe("PdfReader controls docking", () => {
       save_reading_progress: null,
     });
 
-    // Mirrors the shell: a header-owned slot the reader's controls portal
-    // into (issue #68), rendered alongside the reader itself.
     function Harness() {
       const [host, setHost] = useState<HTMLElement | null>(null);
       return (
@@ -1741,8 +1586,6 @@ describe("PdfReader controls docking", () => {
   it("docks the toolbar into the shell's header host when one is provided", async () => {
     await renderWithHeaderHost();
 
-    // The controls live in the header, not in a separate row above the
-    // document — the reader element must not contain them.
     const toolbar = screen.getByTestId("pdf-toolbar");
     expect(screen.getByTestId("fake-reader-header")).toContainElement(toolbar);
     expect(screen.getByTestId("pdf-reader")).not.toContainElement(toolbar);
@@ -1775,16 +1618,12 @@ describe("PdfReader zoom", () => {
     try {
       await renderLoadedReader();
 
-      // Land on page 2 first (navigation re-anchors; clear that call).
       await userEvent.click(screen.getByTestId("pdf-next"));
       await waitFor(() =>
         expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-page", "2"),
       );
       scrollIntoViewSpy.mockClear();
 
-      // Zooming rescales every slot: the active page must be scrolled back
-      // into view, or the viewport lands on a stale offset showing an
-      // unloaded slot while the indicator still names the page.
       await userEvent.click(screen.getByTestId("pdf-zoom-in"));
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
       expect(scrollIntoViewSpy.mock.contexts[0]).toBe(slot(2));
@@ -1793,7 +1632,6 @@ describe("PdfReader zoom", () => {
         inline: "nearest",
       });
 
-      // Pure page-state churn (render completion) must not re-anchor.
       scrollIntoViewSpy.mockClear();
       await waitFor(() => expect(slot(2)).toHaveAttribute("data-render-state", "rendered"));
       expect(scrollIntoViewSpy).not.toHaveBeenCalled();
@@ -1803,9 +1641,6 @@ describe("PdfReader zoom", () => {
   });
 
   it("never paints a superseded render over the current one (scroll artifact race)", async () => {
-    // getPage calls are gated so we control resolution order across effect
-    // generations: geometry init, the first canvas render, then the render
-    // re-triggered by a zoom change.
     const gatedPage = {
       getViewport: vi.fn(({ scale }: { scale: number }) => ({
         width: 612 * scale,
@@ -1826,32 +1661,23 @@ describe("PdfReader zoom", () => {
     });
 
     renderPdfReader();
-    // The opening sample measures pages 1, 2, and the last page in
-    // parallel; all three getPage calls gate on the same resolver queue.
     await waitFor(() => expect(pending).toHaveLength(3));
-    for (const resolve of pending.splice(0)) resolve(gatedPage); // geometry ready
+    for (const resolve of pending.splice(0)) resolve(gatedPage);
 
-    await screen.findByTestId("pdf-canvas"); // canvas mounted, render gated
+    await screen.findByTestId("pdf-canvas");
     expect(pending).toHaveLength(1);
     const [staleRender] = pending.splice(0) as [(page: unknown) => void];
 
-    // Zoom supersedes the in-flight render: cleanup runs for the first
-    // effect, and the second effect requests the page again.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
-    // A superseding render coalesces a short quiet period before it starts.
     await waitFor(() => expect(pending).toHaveLength(1));
     const [freshRender] = pending.splice(0) as [(page: unknown) => void];
 
-    // The NEWER render resolves first and paints at 125%…
     freshRender(gatedPage);
     await waitFor(() =>
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25)),
     );
     expect(gatedPage.render).toHaveBeenCalledTimes(1);
 
-    // …then the STALE one resolves. It must not cancel the fresh render or
-    // paint old-scale content over the resized canvas (real-world symptom:
-    // mirrored page fragments blitted over pages while scrolling).
     staleRender(gatedPage);
     await waitFor(() => expect(gatedPage.render).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25));
@@ -1881,11 +1707,9 @@ describe("PdfReader zoom", () => {
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.5)),
     );
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
-    // Zoom rescales the whole document layout, not just the canvas.
     expect(slot(1)).toHaveStyle({ width: "918px" });
     expect(slot(3)).toHaveStyle({ height: "1188px" });
 
-    // Stepping back down walks the same presets.
     await userEvent.click(screen.getByTestId("pdf-zoom-out"));
     await waitFor(() =>
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", String(612 * 1.25)),
@@ -2020,8 +1844,6 @@ describe("PdfReader text layer and highlights", () => {
     renderPdfReader({ onCreateHighlight, onSelectionChange, adapterRef });
     await screen.findByTestId("pdf-canvas");
 
-    // A selection anchored inside page 1's slot with two client rects (one
-    // zero-sized, which must be dropped).
     const pageSlot = slot(1) as HTMLElement;
     const anchor = document.createElement("span");
     pageSlot.appendChild(anchor);
@@ -2041,7 +1863,6 @@ describe("PdfReader text layer and highlights", () => {
       .spyOn(window, "getSelection")
       .mockReturnValue(fakeSelection as unknown as Selection);
 
-    // The selection is captured on pointerup (deferred one tick).
     fireEvent.pointerUp(document);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSelectionChange).toHaveBeenLastCalledWith({
@@ -2095,8 +1916,6 @@ describe("PdfReader text layer and highlights", () => {
 
     fireEvent.pointerUp(document);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    // The selection rects (normalized 0.125..0.375) intersect the stored
-    // highlight, so the toolbar edits it instead of stacking a new one.
     expect(onSelectionChange).toHaveBeenLastCalledWith({ text: "selected words", highlightId: 11 });
     selectionSpy.mockRestore();
   });
@@ -2132,8 +1951,6 @@ describe("PdfReader text layer and highlights", () => {
       .spyOn(window, "getSelection")
       .mockReturnValue(collapsed as unknown as Selection);
 
-    // A plain click inside the highlight's rect addresses it: the toolbar
-    // can then recolor or remove the annotation.
     fireEvent.pointerUp(anchor, { clientX: 64, clientY: 64 });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(onSelectionChange).toHaveBeenLastCalledWith({
@@ -2218,12 +2035,10 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(input).toHaveValue("137");
     expect(screen.getByTestId("pdf-toolbar")).toHaveAttribute("data-pdf-zoom-mode", "custom");
 
-    // Above the cap: clamped to 10000%.
     await userEvent.clear(input);
     await userEvent.type(input, "99999{Enter}");
     expect(input).toHaveValue("10000");
 
-    // Unparseable: the current value is kept.
     await userEvent.clear(input);
     await userEvent.type(input, "abc{Enter}");
     expect(input).toHaveValue("10000");
@@ -2238,7 +2053,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     Object.defineProperty(area, "clientWidth", { value: 1224, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
-    // Fit width keeps the whole-page path.
     await waitFor(() =>
       expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("data-pdf-render-region", "full"),
     );
@@ -2270,36 +2084,29 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const container = document.createElement("div");
     const { doc } = await renderZoomableReader(container);
 
-    // One notch previews ×1.2 immediately in the toolbar — no preset snap.
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 300, clientY: 300 });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("120");
 
-    // The gesture is a CSS transform about the cursor; nothing re-renders.
     const documentEl = screen.getByTestId("pdf-document");
     expect(documentEl).toHaveStyle({ transform: "scale(1.2)", transformOrigin: "300px 300px" });
     expect(doc.scales).not.toContain(1.2);
     expect(screen.getByTestId("pdf-canvas")).toHaveAttribute("width", "612");
 
-    // Trackpad deltas keep multiplying the preview continuously.
     fireEvent.wheel(container, { deltaY: -30, ctrlKey: true, clientX: 300, clientY: 300 });
     expect(Number((screen.getByTestId("pdf-zoom-input") as HTMLInputElement).value)).toBeCloseTo(
       100 * 1.2 ** 1.3,
       1,
     );
 
-    // 250ms after the last event the scale commits and the page rasterizes
-    // sharp at the previewed scale; the preview transform is gone.
     await settle();
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("126.7");
     await waitFor(() => expectCanvasWidthNear(612 * 1.2 ** 1.3));
     expect(doc.scales.some((scale) => Math.abs(scale - 1.2 ** 1.3) < 1e-9)).toBe(true);
     expect(documentEl.style.transform).toBe("");
 
-    // The committed zoom is the base for the keyboard presets (closest next).
     fireEvent.keyDown(window, { key: "-" });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
 
-    // Plain wheel events still scroll; they never zoom.
     fireEvent.wheel(container, { deltaY: -120 });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("125");
   });
@@ -2308,12 +2115,10 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const container = document.createElement("div");
     await renderZoomableReader(container);
 
-    // A huge single event moves at most 300px of delta: 1.2³.
     fireEvent.wheel(container, { deltaY: -50_000, ctrlKey: true, clientX: 0, clientY: 0 });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("172.8");
     await settle();
 
-    // At the 10000% ceiling the wheel cannot push further.
     const input = screen.getByTestId("pdf-zoom-input");
     await userEvent.clear(input);
     await userEvent.type(input, "99999{Enter}");
@@ -2324,18 +2129,12 @@ describe("PdfReader zoom modes (issue #65)", () => {
     expect(input).toHaveValue("10000");
   });
 
-  // The derived fit scale reaches the wheel handler through the layout
-  // pipeline, which the react-virtual bumps (#205, tuxbooks-4yc) can defer
-  // past the input's own update under load: wheeling too early then multiplies
-  // the stale base (100% × 1.2 = 120 instead of 200% × 1.2 = 240). Waiting for
-  // the fit commit to reach the document engine waits out that pipeline; the
-  // WHEEL_SETTLE_MS commit that follows gets its own budget for the same reason.
+  // Under load (#205) the fit scale reaches the wheel handler late, so an early wheel
+  // would multiply a stale base; wait for the fit commit first.
   it("multiplies the derived fit scale on the first wheel tick out of a fit mode", async () => {
     const container = document.createElement("div");
     const { doc } = await renderZoomableReader(container);
 
-    // 1248px content area reserves the 24px Papers margin, fitting the 612pt
-    // reference page at 2× (200%).
     const area = screen.getByTestId("pdf-content-area");
     Object.defineProperty(area, "clientWidth", { value: 1248, configurable: true });
     window.dispatchEvent(new Event("resize"));
@@ -2356,7 +2155,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const container = document.createElement("div");
     const { doc } = await renderZoomableReader(container);
 
-    // Two ticks preview 144%; the toolbar "+" steps from that preview base.
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("144");
@@ -2366,7 +2164,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await waitFor(() => expectCanvasWidthNear(612 * 1.5));
     expect(screen.getByTestId("pdf-document").style.transform).toBe("");
 
-    // The abandoned settle timer must not fire a second commit afterwards.
     const scalesBefore = doc.scales.length;
     await settle();
     expect(doc.scales.length).toBe(scalesBefore);
@@ -2377,28 +2174,18 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const container = document.createElement("div");
     await renderZoomableReader(container);
     stubScrollGeometry(container, screen.getByTestId("pdf-document"));
-    // Wider than the page at 100%: the content extent starts below the
-    // viewport on X and rises past it across the zoom. The old
-    // MAX(viewport, content) denominator changed meaning there, so the cursor
-    // point drifted (north-west on zoom in, south-east on zoom out).
+    // The old MAX(viewport, content) denominator made the cursor point drift (north-west in, south-east out).
     Object.defineProperty(container, "clientWidth", { value: 800, configurable: true });
     Object.defineProperty(container, "clientHeight", { value: 800, configurable: true });
     scrollTo(container, 0);
 
     const cursorX = 200;
     const cursorY = 200;
-    // The capped step (-300) takes the page from narrower than the viewport to
-    // wider, so the vertical axis becomes scrollable during the zoom.
     fireEvent.wheel(container, { deltaY: -300, ctrlKey: true, clientX: cursorX, clientY: cursorY });
     await settle();
 
     const newScale = Number((screen.getByTestId("pdf-zoom-input") as HTMLInputElement).value) / 100;
     expect(newScale).toBeGreaterThan(1.7);
-    // The page point under the cursor, in page units, is unchanged on both
-    // axes. Nothing here mirrors the implementation formula: this is the
-    // property the reader must hold.
-    // Within a CSS pixel: the slot heights and the reported zoom are rounded,
-    // so the held point lands on the nearest pixel, not exactly.
     expect(Math.abs((container.scrollLeft + cursorX) / newScale - cursorX)).toBeLessThan(1);
     expect(Math.abs((container.scrollTop + cursorY) / newScale - cursorY)).toBeLessThan(1);
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
@@ -2420,8 +2207,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     fireEvent.keyDown(window, { key: "+" });
     await settle();
 
-    // Papers' -1 sentinel: the keyboard step holds the viewport center. Scale
-    // 1 -> 1.25, content 2000 -> 2500, so (500 + 400) / 2000 = (new + 400) / 2500.
     expect(container.scrollTop).toBeCloseTo(725, 4);
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-scroll-policy", "center");
   });
@@ -2444,7 +2229,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await userEvent.type(input, "200{Enter}");
     await settle();
 
-    // Papers' KEEP_POSITION: 500 / 2000 = 0.25, new content 4000 -> 1000.
     expect(container.scrollTop).toBeCloseTo(1000, 4);
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute(
       "data-pdf-scroll-policy",
@@ -2463,7 +2247,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     renderPdfReader({ scrollContainerRef: { current: container } });
     await screen.findByTestId("pdf-canvas");
 
-    // Bring all three pages into the window and complete their first paints.
     doc.releaseRender(1);
     await waitFor(() => expect(slot(1)).toHaveAttribute("data-render-state", "rendered"));
     fireVisible(slot(2) as Element, true);
@@ -2476,11 +2259,7 @@ describe("PdfReader zoom modes (issue #65)", () => {
     await waitFor(() => expect(slot(3)).toHaveAttribute("data-render-state", "rendered"));
     expect(canvasPages()).toEqual(["1", "2", "3"]);
 
-    // A zoom keeps every previously rendered canvas mounted. Each presents
-    // its previous bitmap scaled to the new page box while the new-scale
-    // raster is held, so the commit never shows a blank frame. Asserting the
-    // "scaled" quality (not final) is what proves the old bitmap is on
-    // screen: the held render cannot have replaced it yet.
+    // "scaled" (not final) proves the previous bitmap is on screen through the commit.
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await waitFor(() => {
       expect(canvasPages()).toEqual(["1", "2", "3"]);
@@ -2497,9 +2276,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     const page2 = canvasFor("2");
     const page3 = canvasFor("3");
 
-    // Only the pages inside the render budget get a new raster. Completing
-    // them swaps the scaled bitmap for the sharp final one, atomically; the
-    // page outside the budget keeps its scaled bitmap and starts no render.
     doc.releaseRender(1);
     doc.releaseRender(2);
     await waitFor(() => {
@@ -2515,8 +2291,6 @@ describe("PdfReader zoom modes (issue #65)", () => {
     fireEvent.wheel(container, { deltaY: -100, ctrlKey: true, clientX: 0, clientY: 0 });
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("120");
 
-    // Closing the reader before the settle timer fires must cancel the
-    // pending commit: the previewed scale never reaches the engine.
     const rendersBefore = doc.renderOptions.length;
     view.unmount();
     await settle();
@@ -2562,8 +2336,7 @@ describe("PdfReader presentation mode (issue #65)", () => {
       Object.defineProperty(area, "clientWidth", { value: areaWidth, configurable: true });
       window.dispatchEvent(new Event("resize"));
     }
-    // Exposed so scroll-dependent tests can stub the viewport geometry the
-    // way a live browser reports it (rect.top moves with scrollTop).
+    // Live viewport geometry: rect.top must move with scrollTop the way a browser reports it.
     return Object.assign(view, { container });
   }
 
@@ -2571,9 +2344,6 @@ describe("PdfReader presentation mode (issue #65)", () => {
     await renderPresentingReader();
 
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-presentation", "true");
-    // The single-page surface mounts just the current slot, so no neighbour
-    // can show through the scroll container. The 792px viewport reserves the
-    // 24px Papers margin, so the letter page fits at 0.9697× (height 768).
     expect(slot(1)).toHaveStyle({ height: "768px" });
     expect(slot(2)).toBeNull();
     expect(slot(3)).toBeNull();
@@ -2586,27 +2356,17 @@ describe("PdfReader presentation mode (issue #65)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
-    // The flipped-to page is now the only slot in the document.
     expect(slot(1)).toBeNull();
     expect(slot(3)).toBeNull();
 
-    // Page 2 was measured by the opening sample; bring it into view as the
-    // visible observer would.
     fireVisible(slot(2) as Element, true);
-    // The 1224pt-wide page is width-bound: the contain scale is
-    // (1224 - 24) / 1224, so it fills the area minus the Papers margin
-    // (1200x600) and never clips (a height-only fit would have made it
-    // 1584px wide).
     await waitFor(() => expect(slot(2)).toHaveStyle({ width: "1200px", height: "600px" }));
   });
 
   it("keeps the current page on enter and restores the zoom state on exit", async () => {
-    // No measured area width: the pre-presentation fit-width scale falls
-    // back to 1× so the zoom step below lands on 150%.
     const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
 
-    // Land on page 2 and zoom to 150% before entering (two preset steps).
     await userEvent.click(screen.getByTestId("pdf-next"));
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
     await userEvent.click(screen.getByTestId("pdf-zoom-in"));
@@ -2614,12 +2374,8 @@ describe("PdfReader presentation mode (issue #65)", () => {
 
     view.rerenderBook({ presentationMode: true });
     expect(screen.getByTestId("pdf-reader")).toHaveAttribute("data-pdf-presentation", "true");
-    // The header toolbar is gone; the floating bar carries the controls.
     expect(screen.queryByTestId("pdf-toolbar")).toBeNull();
     expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument();
-    // Page is preserved. Page 2 is in the opening sample, so its real
-    // landscape box is known at enter; with the unmeasurable jsdom area
-    // the contained height is the page's own 612px at scale 1.
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),
     );
@@ -2628,7 +2384,6 @@ describe("PdfReader presentation mode (issue #65)", () => {
     view.rerenderBook({ presentationMode: false });
     expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull();
     expect(screen.getByTestId("pdf-toolbar")).toBeInTheDocument();
-    // The pre-presentation zoom state is restored exactly.
     expect(screen.getByTestId("pdf-zoom-input")).toHaveValue("150");
   });
 
@@ -2636,12 +2391,6 @@ describe("PdfReader presentation mode (issue #65)", () => {
     await renderPresentingReader({ preferencesPatch: { bookMode: true } });
     fireEvent.click(screen.getByText("probe-preferences"));
 
-    // The presented layout always fits the page, so the observable is the
-    // zoom state the shortcuts step underneath it (the telemetry log
-    // samples it per commit). Book preference on, but presentation wins —
-    // so the gate stays open: Ctrl+- leaves fit-page for the 75% preset
-    // and Ctrl++ steps back up to 100% (each step re-derives from the
-    // presentation fit scale, the pre-existing behavior).
     setPdfZoomTelemetryEnabled(true);
     clearPdfZoomLog();
     fireEvent.keyDown(window, { key: "-", ctrlKey: true });
@@ -2656,12 +2405,8 @@ describe("PdfReader presentation mode (issue #65)", () => {
   });
 
   it("stays on the page reached in presentation after exiting", async () => {
-    // Enter on page 2 so page 1, the entry page and the flipped-to page are
-    // all distinguishable after the exit.
     const view = await renderPresentingReader({ presentationMode: false }, undefined, 0);
-    // Scroll-dependent assertions need live viewport geometry: jsdom's rects
-    // are all zero, which would make the reading anchor independent of the
-    // scroll offset (always page 1).
+    // jsdom rects are all zero, which would make the scroll anchor always name page 1.
     stubScrollGeometry(view.container, screen.getByTestId("pdf-document"));
     await userEvent.click(screen.getByTestId("pdf-next"));
     await waitFor(() =>
@@ -2671,7 +2416,6 @@ describe("PdfReader presentation mode (issue #65)", () => {
     view.rerenderBook({ presentationMode: true });
     await waitFor(() => expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument());
 
-    // Flip forward inside the mode: this is the page the user is reading.
     await userEvent.click(screen.getByTestId("pdf-pres-next"));
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
@@ -2680,11 +2424,6 @@ describe("PdfReader presentation mode (issue #65)", () => {
     view.rerenderBook({ presentationMode: false });
     await waitFor(() => expect(screen.queryByTestId("pdf-presentation-bar")).toBeNull());
 
-    // The reader resumes exactly where the presentation left off: not at
-    // the document start and not back at the entry page. The scroll offset
-    // must actually move off the top too, because an exit that only
-    // suppressed the scroll tracker would keep the indicator right while
-    // the viewport still showed page 1.
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 3 of 3"),
     );
@@ -2702,9 +2441,7 @@ describe("PdfReader presentation mode (issue #65)", () => {
 
     view.rerenderBook({ presentationMode: true });
     await waitFor(() => expect(screen.getByTestId("pdf-presentation-bar")).toBeInTheDocument());
-    // jsdom lays out nothing, so the single centred page cannot shrink the
-    // container's scroll range the way a browser does. Apply the clamp a
-    // browser applies when the surface fits the viewport.
+    // jsdom cannot shrink the scroll range, so apply the clamp a browser applies.
     view.container.scrollTop = 0;
 
     view.rerenderBook({ presentationMode: false });
@@ -2777,13 +2514,9 @@ describe("PdfReader presentation mode (issue #65)", () => {
     Object.defineProperty(area, "clientWidth", { value: PRESENT_AREA_WIDTH, configurable: true });
     window.dispatchEvent(new Event("resize"));
 
-    // Page 1 is on screen and page 2 is already rasterized offscreen (once),
-    // so the shared cache holds the neighbour before any navigation.
     await waitFor(() => expect(doc.renderPages.filter((page) => page === 2)).toHaveLength(1));
     expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 1 of 3");
 
-    // Stepping forward consumes that bitmap: page 2 is never rastered a second
-    // time, so the step cannot flash a blank placeholder while it renders.
     await userEvent.click(screen.getByTestId("pdf-pres-next"));
     await waitFor(() =>
       expect(screen.getByTestId("pdf-page-indicator")).toHaveTextContent("Page 2 of 3"),

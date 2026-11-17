@@ -23,22 +23,15 @@ import {
 
 test.describe("tuxbooks engine smoke (EPUB)", () => {
   test("initializes the EPUB engine and reports metadata and progression", async ({ page }) => {
-    // Metadata: the library imported and indexed the book — its card (built
-    // from the parsed publication metadata) is present and opens a detail
-    // view that names the title and format.
     await openInReader(page, "A Minimal Book (EPUB)");
 
-    // Engine initialized: the host mounts and the engine reports ready.
     const host = page.locator("div[data-epub-host]");
     await host.waitFor({ state: "attached", timeout: 30000 });
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
 
-    // Publication structure: a spine with the three fixture chapters.
     const total = await epubSectionTotal(page);
     expect(Number(total)).toBeGreaterThanOrEqual(3);
 
-    // Location/progression available: the shell reports a percentage and
-    // the engine reports its exact locator (data-epub-locator).
     await expect
       .poll(() => textOf(page, "reader-position"), { timeout: 30000 })
       .toMatch(/^(100|[1-9]?\d)%$/);
@@ -54,9 +47,6 @@ test.describe("tuxbooks engine smoke (EPUB)", () => {
       )
       .toBe(true);
 
-    // Visible content rendered: no engine error surface, and the reader
-    // surface is on screen (an engine that failed to load content shows
-    // data-testid=epub-error instead).
     await expect(page.getByTestId("epub-error")).toHaveCount(0);
     await expect(page.getByTestId("reader-view")).toBeVisible();
 
@@ -68,13 +58,8 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
   test("initializes the PDF engine, renders page 1, navigates, and zooms", async ({ page }) => {
     await openInReader(page, "A Minimal Manual (PDF)");
 
-    // Engine lifecycle: the deterministic stage attribute reaches
-    // "interactive" (document parsed → layout ready → position restored).
     await waitForPdfEngineState(page, "interactive");
 
-    // WASM/worker assets: the worker script the engine configured is
-    // reachable through the app's resource path (a packaged build that
-    // loses its assets fails here, not visually).
     const workerSrc = await page.evaluate(
       () =>
         document.querySelector("[data-testid=pdf-reader]")?.getAttribute("data-pdf-worker-src") ??
@@ -92,13 +77,11 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
     }, workerSrc);
     expect(workerReachable).toBe(true);
 
-    // First page rendered: geometry reported and pixels on the canvas.
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
     });
     expect(await canvasIsNonBlank(page, 1)).toBe(true);
 
-    // Page navigation works in both directions.
     await page.getByTestId("pdf-next").click();
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 2 of 3", {
       timeout: 30000,
@@ -108,14 +91,9 @@ test.describe("tuxbooks engine smoke (PDF)", () => {
       timeout: 30000,
     });
 
-    // Zoom works: the level indicator changes and the backing store grows
-    // with it (fit-width × zoom × dpr). The manual zoom is a ladder step
-    // from the current effective scale (issue #65): zoom-in snaps onto the
-    // next rung above the fit, zoom-out steps back down the ladder — which
-    // is at or below the fit scale, never a fixed value.
+    // Zoom is a ladder from the fit scale: in snaps up a rung, out steps back.
     const canvas = page.locator('[data-testid=pdf-canvas][data-pdf-page="1"]');
-    // Wait for page 1's raster to land: right after navigating back the
-    // canvas list can still lead with another page's not-yet-rendered canvas.
+    // Wait for page 1's raster: the canvas list can lead with a stale page.
     await expect
       .poll(() => canvas.getAttribute("width").then(Number), { timeout: 30000 })
       .toBeGreaterThan(0);

@@ -122,8 +122,7 @@ impl super::SyncService {
         let mut changed = false;
         let mut cleared = false;
         for (id, issue_key, kind, file_name, attempts) in rows {
-            // Legacy `conflict` rows and kinds from another build never
-            // entered the sweep; they have no cap, so they still do not.
+            // Legacy `conflict` rows and other-build kinds have no cap, so they stay out.
             let Some(kind) = SyncIssueKind::parse(&kind) else {
                 continue;
             };
@@ -134,8 +133,7 @@ impl super::SyncService {
                 continue;
             }
             if attempts >= cap {
-                // Exhausted: the gave-up detail is already on the row. A
-                // manual Retry resets the budget and puts it back in play.
+                // Exhausted: the gave-up detail is already on the row; manual Retry resets the budget.
                 continue;
             }
             let connected = status.folder.is_some() && status.enabled;
@@ -168,8 +166,7 @@ impl super::SyncService {
             }
         }
         if changed {
-            // A retried identity or projection can write a durable merge, so
-            // drain the reload marker here instead of waiting for a pass.
+            // A retried identity or projection can write a durable merge; drain the reload marker here.
             if cleared {
                 self.flush_library_reload().await?;
             }

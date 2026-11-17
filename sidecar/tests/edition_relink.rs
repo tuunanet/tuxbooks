@@ -279,7 +279,6 @@ async fn confirmed_link_copies_percentage_moves_provider_and_keeps_annotations()
     env.annotate(source.id, "epubcfi(/6/4!/4/2,/1:0,/1:8)")
         .await;
 
-    // The original edition leaves the library but keeps its state.
     assert_eq!(
         env.rpc("remove_book", json!({ "bookId": source.id })).await,
         json!(true)
@@ -395,8 +394,6 @@ async fn confirmed_link_copies_percentage_moves_provider_and_keeps_annotations()
     assert_eq!(history[0]["progressPercent"].as_f64(), Some(42.5));
     assert_eq!(history[0]["providerLinks"], json!([]));
 
-    // The relation is visible from both sides, with the surface each edition
-    // currently belongs to.
     let target_editions = env
         .rpc("list_book_editions", json!({ "bookId": target.id }))
         .await;

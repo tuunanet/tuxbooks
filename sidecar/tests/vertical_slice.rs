@@ -63,7 +63,6 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     );
     assert!(Path::new(book.cover_path.as_deref().unwrap()).exists());
 
-    // Full-text search sees the imported book.
     let hits = search_books(&pool, "minimal").await?;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].book_id, book.id);
@@ -88,7 +87,6 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     assert_eq!(changed.updated, 1);
     assert_eq!(books::count_books(&pool).await?, 1);
 
-    // Collections count feeds the same stats command shape the frontend gets.
     collections::create_collection(&pool, "Favorites").await?;
     let stats_after = LibraryStats {
         book_count: books::count_books(&pool).await?,
@@ -121,8 +119,6 @@ async fn fixture_flows_through_the_whole_stack() -> anyhow::Result<()> {
     let progress = get_progress(&pool, book.id).await?.expect("progress row");
     assert_eq!(progress.chapter_href.as_deref(), Some("chapter1.xhtml"));
 
-    // Collection membership shows up in the summary shape behind
-    // `list_collections`.
     let favorites = collections::list_collection_summaries(&pool).await?;
     assert_eq!(favorites.len(), 1);
     assert!(favorites[0].book_ids.is_empty());

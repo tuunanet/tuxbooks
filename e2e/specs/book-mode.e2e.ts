@@ -84,47 +84,33 @@ test.describe("tuxbooks book mode", () => {
       timeout: 30000,
     });
 
-    // Book mode on through the toolbar control (aria-pressed mirrors the
-    // persisted flag; the fixture cleared it per test, so it starts off).
     const toggle = page.getByTestId("reader-book-mode");
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 30000 });
     await expect(page.getByTestId("pdf-book-view")).toBeVisible({ timeout: 30000 });
 
-    // The cover stands alone: one painted page, and the assistive-tech
-    // contract — a named book region with the labelled spread actions.
     await waitForPdfBookRendered(page, [1]);
     await expect(page.locator("[data-pdf-book-page]")).toHaveCount(1);
     await expect(page.getByRole("region", { name: BOOK_SPREAD_LABEL })).toBeVisible();
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.next }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: BOOK_TURN_LABELS.prev }).first()).toBeVisible();
 
-    // Stage 1 is fit-the-pair only: the toolbar's zoom controls act on
-    // scroll-view-only state, so they are gone while book mode is on —
-    // and back after the toggle-off below.
     await expect(page.getByTestId("pdf-zoom-in")).toHaveCount(0);
     await expect(page.getByTestId("pdf-zoom-out")).toHaveCount(0);
     await expect(page.getByTestId("pdf-zoom-input")).toHaveCount(0);
 
-    // Advancing through the labelled next action turns one spread: the
-    // facing pair replaces the cover.
     await page.locator('[data-pdf-book-turn-edge="next"]').click();
     await waitForPdfBookRendered(page, [2, 3]);
     await expect(page.locator("[data-pdf-book-page]")).toHaveCount(2);
     await expect(page.locator("[data-pdf-book-page='1']")).toHaveCount(0);
 
-    // Turning with the keyboard: back to the cover, forward to the spread
-    // — one spread per press through the same turn path.
     await page.keyboard.press("ArrowLeft");
     await waitForPdfBookRendered(page, [1]);
     await page.keyboard.press("ArrowRight");
     await waitForPdfBookRendered(page, [2, 3]);
 
-    // "Reload": the seeded app is one window per worker, so the journey's
-    // reload is close/reopen (the position save needs the debounce to
-    // land first). The persisted flag plus the saved position must land
-    // on the same spread.
+    // Reload is close/reopen (one window per worker); wait out the save debounce.
     await page.waitForTimeout(1500);
     await returnToLibrary(page);
     await openInReader(page, "A Minimal Manual (PDF)");
@@ -135,9 +121,6 @@ test.describe("tuxbooks book mode", () => {
       timeout: 30000,
     });
 
-    // Book mode off again: the scroll view is unchanged — the book is
-    // gone, the same page renders through the slot pipeline, and the
-    // zoom controls are back.
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false", { timeout: 30000 });
     await expect(page.getByTestId("pdf-book-view")).toBeHidden();
@@ -147,8 +130,7 @@ test.describe("tuxbooks book mode", () => {
     expect(await canvasIsNonBlank(page, 2)).toBe(true);
     await expect(page.getByTestId("pdf-zoom-in")).toBeVisible();
 
-    // Leave the fixture at its first page: the seeded phase shares one app
-    // per worker, so a mid-document position would leak into later specs.
+    // Leave the fixture at page 1: the seeded phase shares one app per worker.
     await page.keyboard.press("Home");
     await expect(page.getByTestId("pdf-page-indicator")).toHaveText("Page 1 of 3", {
       timeout: 30000,
@@ -163,10 +145,7 @@ test.describe("tuxbooks book mode", () => {
     await host.waitFor({ state: "attached", timeout: 30000 });
     await expect(host).toHaveAttribute("data-epub-state", "ready", { timeout: 30000 });
 
-    // Pin the start at the first chapter through the contents drawer — the
-    // shared session may carry a mid-book position from an earlier spec,
-    // and the forward turn below needs headroom ahead of the start. The
-    // jump closes the drawer behind itself.
+    // Pin the start at chapter 1: the shared session may carry a mid-book position.
     await openReaderNavigation(page);
     await page.getByTestId("toc-item-0").click();
     await page.getByTestId("reader-nav").waitFor({ state: "detached", timeout: 30000 });
@@ -180,8 +159,6 @@ test.describe("tuxbooks book mode", () => {
       )
       .toContain("chapter1.xhtml");
 
-    // Book mode on: the surface derives the paginated two-column flow and
-    // the turn layer mounts over it with the assistive-tech contract.
     const toggle = page.getByTestId("reader-book-mode");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 30000 });
@@ -195,9 +172,7 @@ test.describe("tuxbooks book mode", () => {
     const startSection = Number((await currentSection(page)) ?? "0");
     const startFraction = (await engineFraction(page)) ?? "0";
 
-    // Advancing a spread through the labelled next action is instant:
-    // the reported position moves past where the book was open, and no
-    // turn phase exists at any point — not mid-turn, not after.
+    // Instant turn (ADR 0011): no turn phase exists at any point.
     await page.locator('[data-epub-book-turn-edge="next"]').click();
     expect(await turnPhaseAttributes(page)).toBe(0);
     await expect
@@ -205,8 +180,6 @@ test.describe("tuxbooks book mode", () => {
       .toBe(true);
     expect(await turnPhaseAttributes(page)).toBe(0);
 
-    // Reduced motion: the same instant spread change — the position
-    // moves back, still with no turn phase published.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect
       .poll(
@@ -223,7 +196,7 @@ test.describe("tuxbooks book mode", () => {
       .toBe(false);
     expect(await turnPhaseAttributes(page)).toBe(0);
 
-    // The window is shared per worker: hand the media emulation back.
+    // Shared window per worker: hand the media emulation back.
     await page.emulateMedia({ reducedMotion: null });
     await returnToLibrary(page);
   });

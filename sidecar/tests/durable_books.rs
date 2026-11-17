@@ -113,7 +113,6 @@ async fn seed_user_library(pool: &SqlitePool) {
     .await
     .unwrap();
 
-    // Two file rows already share one sync identity; the third is unbound.
     for (book_id, hash, size, mtime) in [
         (1, "1".repeat(64), 11_i64, 101_i64),
         (2, "2".repeat(64), 22, 202),
@@ -135,8 +134,6 @@ async fn seed_user_library(pool: &SqlitePool) {
         .unwrap();
     }
 
-    // Mirror state for a book that was unwatched before the upgrade, with
-    // metadata; and one whose metadata never arrived.
     for (uid, with_metadata) in [(RECOVERED_UID, true), (WAITING_UID, false)] {
         sqlx::query(
             "INSERT INTO sync_state_entities (kind, entity_uid, book_uid)
@@ -233,14 +230,10 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
     let (pool, recovery) = init_pool_recovering(&db_path).await.unwrap();
     assert!(recovery.is_none(), "a healthy upgrade is not quarantine");
 
-    // The pre-change backup is consistent and still has the old schema.
     let backups = backup_files(tmp.path());
     assert_eq!(backups.len(), 1, "one backup per upgrade: {backups:?}");
     assert_eq!(count_backup_books(&backups[0]).await, 3);
 
-    // Everything the user sees survives through the repository API. The two
-    // rows that already shared one sync identity now show as one library
-    // entry (ADR 0014 D7), so three file rows mean two books.
     let listed = books::list_books(&pool).await.unwrap();
     assert_eq!(listed.len(), 2);
     let alpha = books::get_book_by_path(&pool, "/library/alpha.epub")
@@ -249,7 +242,6 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
         .unwrap();
     assert_eq!(alpha.title, "Alpha Override");
     let book_id = alpha.id;
-    // The durable record keeps the latest last-opened across the copies.
     assert_eq!(
         alpha.last_opened_at.unwrap().to_rfc3339(),
         "2026-01-05T00:00:00+00:00"
@@ -273,7 +265,6 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
         .unwrap();
     assert_eq!(beta.id, book_id, "both copies resolve to the same book");
 
-    // File rows share the durable book their sync binding already named.
     let alpha_uid = alpha.book_uid.clone().expect("alpha has a bookUid");
     assert_eq!(alpha_uid, SHARED_UID);
     assert_eq!(beta.book_uid.as_deref(), Some(SHARED_UID));
@@ -285,8 +276,6 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
     assert_eq!(gamma_uid.len(), 32);
     assert_ne!(gamma_uid, SHARED_UID);
 
-    // One durable record for the shared identity, carrying the newest
-    // metadata and the unioned annotation count.
     let (title, annotations, state): (String, i64, String) = sqlx::query_as(
         "SELECT title, annotation_count, metadata_state FROM book_records WHERE uid = ?1",
     )
@@ -301,7 +290,6 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
     assert_eq!(annotations, 1);
     assert_eq!(state, "available");
 
-    // The mirror-only identity is recovered; missing metadata is labelled.
     let (title, progress, state): (Option<String>, Option<f64>, String) = sqlx::query_as(
         "SELECT title, progress_percent, metadata_state FROM book_records WHERE uid = ?1",
     )
@@ -320,7 +308,6 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
             .unwrap();
     assert_eq!(state, "waiting_for_file");
 
-    // Bound rows are already hashed; the unbound one is queued durably.
     let hash_states: Vec<(i64, String)> =
         sqlx::query_as("SELECT id, hash_state FROM books ORDER BY id")
             .fetch_all(&pool)
@@ -335,8 +322,7 @@ async fn upgrade_preserves_user_state_assigns_identity_and_writes_a_backup() {
         ]
     );
 
-    // Identity merge notices are no longer shown. The upgrade used to leave a
-    // duplicate-identity row open; 0026 resolves it and keeps the audit trail.
+    // 0026 resolves the duplicate-identity row but keeps its audit trail.
     let open_kinds: Vec<String> =
         sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
             .fetch_all(&pool)
@@ -369,8 +355,7 @@ async fn migration_0026_resolves_identity_notices_and_0028_resolves_hash_failure
         )
         .await
         .unwrap();
-    // Stop before 0026 so both the informational notices and the hash relink
-    // row exist when the upgrade runs.
+    // Stop before 0026 so both the notices and the hash relink row exist.
     migrator_through(tmp.path(), 25)
         .await
         .run(&fixture)
@@ -452,7 +437,6 @@ async fn migration_0028_resolves_only_the_hash_failure_rows() {
         )
         .await
         .unwrap();
-    // 0026 already ran here, so this isolates what 0028 itself changes.
     migrator_through(tmp.path(), 27)
         .await
         .run(&fixture)
@@ -522,8 +506,6 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
         .await
         .unwrap();
 
-    // Two file rows already share one durable identity, each carrying its own
-    // state. This is the shape T1 could identify but not merge.
     sqlx::query(
         r#"
         INSERT INTO books (id, book_uid, path, title)
@@ -574,7 +556,6 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
         .await
         .unwrap()
         .expect("durable book");
-    // Both copies resolve to one book.
     assert_eq!(
         book.id,
         books::get_book_by_path(&pool, "/library/beta.epub")
@@ -584,7 +565,6 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
             .id
     );
 
-    // Newest progress wins; every annotation is kept.
     let progress = reading_progress::get_progress(&pool, book.id)
         .await
         .unwrap()
@@ -599,8 +579,6 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
         "annotations from both copies are unioned"
     );
 
-    // 0018 records what it unioned; 0026 resolves those notices, so the audit
-    // trail stays without listing internal uids in Settings.
     let open_kinds: Vec<String> =
         sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
             .fetch_all(&pool)
@@ -630,7 +608,6 @@ async fn the_0018_upgrade_unions_duplicate_progress_and_annotations() {
         ]
     );
 
-    // The durable record survives the last file row.
     assert!(books::delete_book(&pool, book.id).await.unwrap());
     let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
         .bind(SHARED_UID)
@@ -662,7 +639,6 @@ async fn a_failed_migration_fails_closed_and_keeps_the_original_database() {
         "a migration failure is reported as such, got {error:?}"
     );
 
-    // The original database is still there, unquarantined, with its data.
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(
@@ -761,8 +737,6 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
         .await
         .unwrap();
     assert_eq!(records, 1);
-    // A collapse is automatic: it stays in the merge diagnostics table and is
-    // not recorded as a user issue.
     let open_kinds: Vec<String> =
         sqlx::query_scalar("SELECT kind FROM migration_issues WHERE resolved_at IS NULL")
             .fetch_all(&pool)
@@ -780,8 +754,6 @@ async fn background_hash_backfill_is_resumable_and_collapses_duplicate_bytes() {
         .unwrap();
     assert!(merges > 0, "the collapse is kept for diagnostics");
 
-    // Deleting file rows ends membership only; the durable record survives
-    // the last one (ticket .2).
     let first_book = books::get_book_by_path(&pool, &first_path.to_string_lossy())
         .await
         .unwrap()
@@ -855,8 +827,7 @@ async fn an_unreadable_file_becomes_a_retrying_failure_without_a_relink_row() {
     assert_eq!(state, "failed");
     assert_eq!(attempts, 1, "the failure is counted for the backoff");
     assert!(retry_at.is_some(), "the retry has a due time");
-    // With sync off the book itself carries the failure; the retired
-    // migration_issues path must not write a row.
+    // With sync off the book carries the failure; the retired migration_issues path writes nothing.
     let relink_rows: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM migration_issues WHERE kind = 'hash_failed'")
             .fetch_one(&pool)
@@ -889,8 +860,6 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
         .await
         .unwrap();
 
-    // Two file rows already share one durable identity and each carries its
-    // own source metadata, last-opened, shelves, and overrides.
     sqlx::query(
         r#"
         INSERT INTO books
@@ -928,7 +897,6 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
         .execute(&fixture)
         .await
         .unwrap();
-    // Both copies are on 'Shelf'; one is also on 'Other'. Membership unions.
     sqlx::query(
         "INSERT INTO book_collections (book_id, collection_id)
          VALUES (1, 1), (2, 1), (1, 2)",
@@ -962,14 +930,12 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
             .unwrap()
             .id
     );
-    // The newest override wins; source Beta is the primary file by id tie.
     assert_eq!(book.title, "Newest override");
     assert_eq!(
         book.author.as_deref(),
         Some("Bob"),
         "source follows the primary file"
     );
-    // The newest last-opened survives.
     assert_eq!(
         book.last_opened_at.unwrap().to_rfc3339(),
         "2026-03-01T00:00:00+00:00"
@@ -1019,7 +985,6 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
         "the override tie is labelled ambiguous: {metadata:?}"
     );
 
-    // Source metadata stays per file.
     let alpha_file = books::find_file_id_by_path(&pool, "/library/alpha.epub")
         .await
         .unwrap()

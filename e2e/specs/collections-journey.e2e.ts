@@ -81,7 +81,6 @@ async function createCollection(page: Page, name: string): Promise<void> {
   await page.getByTestId("collection-name").fill(name);
   await page.getByTestId("collection-create").click();
   await dialog.waitFor({ state: "detached", timeout: 30_000 });
-  // Creation lands in the new collection's empty place.
   await expect(page.getByTestId("library-header").getByRole("heading", { name })).toBeVisible({
     timeout: 30_000,
   });
@@ -226,11 +225,9 @@ test.describe("collections redesign journey", () => {
     await ensureLibrary(page);
     await resetCollections(page);
 
-    // New collections are unpinned and land in the Unpinned group.
     for (const name of Object.values(names)) {
       await createCollection(page, name);
     }
-    // Alphabetical until the first drag.
     await expectGroupOrder(page, "unpinned", [
       names.alpha,
       names.beta,
@@ -239,7 +236,6 @@ test.describe("collections redesign journey", () => {
       names.gamma,
     ]);
 
-    // Pin from the row actions menu, then unpin back to Unpinned.
     await setPinned(page, names.alpha, true);
     await expectGroupOrder(page, "pinned", [names.alpha]);
     await expectGroupOrder(page, "unpinned", [names.beta, names.delta, names.epsilon, names.gamma]);
@@ -253,15 +249,12 @@ test.describe("collections redesign journey", () => {
       names.gamma,
     ]);
 
-    // Two pinned rows give the drag inside Pinned something to reorder.
     await setPinned(page, names.alpha, true);
     await setPinned(page, names.gamma, true);
     await expectGroupOrder(page, "pinned", [names.alpha, names.gamma]);
     await dragCollection(page, names.alpha, names.gamma, "below");
     await expectGroupOrder(page, "pinned", [names.gamma, names.alpha]);
 
-    // Dragging across the boundary pins; dragging back unpins. Unpinned keeps
-    // its custom order afterwards (Epsilon before Beta).
     await dragCollection(page, names.beta, names.gamma, "above");
     await expectGroupOrder(page, "pinned", [names.beta, names.gamma, names.alpha]);
     await expectGroupOrder(page, "unpinned", [names.delta, names.epsilon]);
@@ -269,12 +262,10 @@ test.describe("collections redesign journey", () => {
     await expectGroupOrder(page, "pinned", [names.gamma, names.alpha]);
     await expectGroupOrder(page, "unpinned", [names.delta, names.epsilon, names.beta]);
 
-    // Membership to sort: two books in Alpha, one in Gamma.
     const alphaId = await collectionId(page, names.alpha);
     const gammaId = await collectionId(page, names.gamma);
     await addBookToCollection(page, seededBookTitles.epub, alphaId);
-    // The membership timestamp has millisecond resolution; a short pause
-    // keeps the two Alpha memberships in a known Added to collection order.
+    // Membership timestamps are ms-resolution; pause so Alpha order is known.
     await page.waitForTimeout(50);
     await addBookToCollection(page, seededBookTitles.pdf, alphaId);
     await addBookToCollection(page, seededBookTitles.largePdf, gammaId);
@@ -288,9 +279,6 @@ test.describe("collections redesign journey", () => {
     if (!epubJoined || !pdfJoined) throw new Error("Alpha memberships are missing");
     expect(pdfJoined > epubJoined).toBe(true);
 
-    // Inside Alpha the date sort is renamed Added to collection. Title order
-    // is EPUB then PDF; membership order is the reverse because the PDF
-    // joined later, so switching the sort visibly reorders the members.
     await clickCollection(page, names.alpha);
     await expect(
       page.getByTestId("library-header").getByRole("heading", { name: names.alpha }),
@@ -305,8 +293,6 @@ test.describe("collections redesign journey", () => {
     await expect(page.getByTestId("library-sort")).toContainText("Added to collection");
     await expect.poll(() => bookCardLabels(page), { timeout: 30_000 }).toEqual([pdfCard, epubCard]);
 
-    // Ctrl+click two collections: the title names both in sidebar order and
-    // the grid shows the union of their members.
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await clickCollection(page, names.alpha, ["Control"]);
@@ -321,8 +307,6 @@ test.describe("collections redesign journey", () => {
       .toEqual(expect.arrayContaining([epubCard, pdfCard, `${seededBookTitles.largePdf} (PDF)`]));
     await expect(page.getByTestId("book-card")).toHaveCount(3);
 
-    // Shift+click a range from the pinned Gamma row across the boundary to
-    // the unpinned Delta row: three collections selected, Beta outside it.
     await clickCollection(page, names.delta, ["Shift"]);
     await expect(
       page.getByTestId("library-header").getByRole("heading", { name: "3 collections" }),
@@ -336,14 +320,12 @@ test.describe("collections redesign journey", () => {
       collectionRow(page, names.beta).locator('button[aria-current="true"]'),
     ).toHaveCount(0);
 
-    // Rename updates the sidebar row and the library title of the place.
     await clickCollection(page, names.alpha);
     await renameCollection(page, names.alpha, renamedAlpha);
     await expect(
       page.getByTestId("library-header").getByRole("heading", { name: renamedAlpha }),
     ).toBeVisible({ timeout: 30_000 });
 
-    // Delete asks first: cancel keeps the row, confirm removes it.
     await collectionRow(page, names.epsilon).hover();
     const epsilonId = await collectionId(page, names.epsilon);
     await page.getByTestId(`collection-delete-${epsilonId}`).click();
@@ -360,15 +342,11 @@ test.describe("collections redesign journey", () => {
     await expect(collectionRow(page, names.epsilon)).toHaveCount(0);
     await expectGroupOrder(page, "unpinned", [names.delta, names.beta]);
 
-    // The command palette lists collections above books; Enter lands in the
-    // highlighted collection.
     await page.keyboard.press("Control+k");
     const search = page.getByTestId("global-search");
     await expect(search).toBeFocused();
     await search.fill("A");
     await expect(page.getByTestId("global-search-result").first()).toContainText(renamedAlpha);
-    // Book hits arrive from the backend after the debounce; the collection
-    // group is client-side and renders first.
     await expect(page.locator("#global-search-collections-label")).toBeVisible({
       timeout: 30_000,
     });
@@ -386,8 +364,6 @@ test.describe("collections redesign journey", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(search).toHaveValue("");
 
-    // Restart: pin membership and custom order are device preferences, so a
-    // fresh launch must render the same Pinned and Unpinned groups.
     const expectedGroups = {
       pinned: [names.gamma, renamedAlpha],
       unpinned: [names.delta, names.beta],
