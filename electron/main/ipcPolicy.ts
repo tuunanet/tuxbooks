@@ -87,6 +87,7 @@ const ISSUED_PATH_METHODS = new Set([
   "scan_library",
   "reconnect_book",
   "relink_book",
+  "locate_book",
   "attach_waiting_book",
   "set_book_cover",
   "sync_connect",
@@ -154,7 +155,7 @@ function validateIssuedPaths(
     requireIssued(issued, "directory", record.path, "path");
     return;
   }
-  if (method === "reconnect_book" || method === "relink_book") {
+  if (method === "reconnect_book" || method === "relink_book" || method === "locate_book") {
     requireBookId(record);
     requireLibraryPath(record.path, "path");
     requireIssued(issued, "book-file", record.path, "path");
@@ -287,6 +288,9 @@ function validateEditionLink(record: Record<string, unknown>): void {
   requirePositiveId(record.targetBookId, "targetBookId");
   if (record.sourceBookId === record.targetBookId) {
     throw policyError("an edition link needs two different books");
+  }
+  if (record.copyProgress !== undefined && typeof record.copyProgress !== "boolean") {
+    throw policyError("invalid copyProgress");
   }
 }
 

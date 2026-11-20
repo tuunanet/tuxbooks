@@ -410,3 +410,34 @@ export interface AnnotationPatch {
   label?: string | null;
   note?: string | null;
 }
+
+/** User state on the entry Locate File was trying to restore. */
+export interface LocateState {
+  annotations: number;
+  hasProgress: boolean;
+  progressPercent: number | null;
+  collections: number;
+  hasMetadataOverrides: boolean;
+  providerLinks: number;
+  editionLinks: number;
+}
+
+/** A picked file that already belongs to another library entry. */
+export interface LocateConflict {
+  owner: Book;
+  candidate: Book;
+  candidateState: LocateState;
+}
+
+/** Result of `locate_book`: reconnect, merge, detach, or ask the user. */
+export type LocateOutcome =
+  | { kind: "reconnected"; book: Book }
+  | { kind: "merged"; book: Book; mergedFrom: { id: number; title: string } }
+  | { kind: "detached"; book: Book; detachedFrom: { id: number; title: string } }
+  | { kind: "conflict"; conflict: LocateConflict };
+
+/** What the renderer acts on after a picker and a locate attempt. */
+export type LocateResult =
+  | LocateOutcome
+  | { kind: "cancelled" }
+  | { kind: "failed"; error: string };

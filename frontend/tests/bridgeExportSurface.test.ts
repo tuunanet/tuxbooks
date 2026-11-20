@@ -53,6 +53,7 @@ const EXPORT_SURFACE = [
   "listSyncIssues",
   "listSyncTrash",
   "listWaitingBooks",
+  "locateBookFile",
   "markBookFinished",
   "markBookOpened",
   "onImportProgress",

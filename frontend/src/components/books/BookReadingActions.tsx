@@ -7,6 +7,8 @@ interface BookReadingActionsProps {
   onLocate: () => void;
   onRemoveFromLibrary: () => void;
   onContinue: () => void;
+  /** Why the last Locate File attempt was rejected, if it was. */
+  locateError?: string | null;
 }
 
 /**
@@ -19,6 +21,7 @@ export function BookReadingActions({
   onLocate,
   onRemoveFromLibrary,
   onContinue,
+  locateError = null,
 }: BookReadingActionsProps) {
   if (book.available) {
     return (
@@ -58,6 +61,15 @@ export function BookReadingActions({
             Remove from Library
           </Button>
         </div>
+        {locateError && (
+          <p
+            data-testid="detail-locate-error"
+            role="alert"
+            className="mt-2 text-xs text-destructive"
+          >
+            {locateError}
+          </p>
+        )}
       </div>
     </div>
   );

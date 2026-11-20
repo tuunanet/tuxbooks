@@ -5,6 +5,7 @@ pub mod hash_backfill;
 pub mod library_reconciler;
 pub mod library_scanner;
 pub mod library_watcher;
+pub mod locate_file;
 pub mod metadata;
 pub mod providers;
 pub mod reader;

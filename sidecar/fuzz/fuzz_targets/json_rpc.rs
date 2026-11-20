@@ -124,7 +124,7 @@ fn gate_filesystem_paths(method: &str, request: &mut Value, library_dir: &Path) 
                 params["paths"] = json!([library_dir.to_string_lossy()]);
             }
         }
-        "reconnect_book" => {
+        "reconnect_book" | "locate_book" => {
             if is_string(params, "path") {
                 params["path"] = in_scratch("seed.epub");
             }

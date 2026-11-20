@@ -21,6 +21,7 @@ import type {
   IndexingRetry,
   LibraryChange,
   LibraryStats,
+  LocateOutcome,
   MetadataFields,
   ReadingHistoryBook,
   ReadingProgressInput,
@@ -138,8 +139,12 @@ export function listBookEditions(bookId: number): Promise<EditionBook[]> {
 export function linkBookEdition(
   sourceBookId: number,
   targetBookId: number,
+  copyProgress = true,
 ): Promise<EditionLinkOutcome> {
-  return invoke("link_book_edition", { sourceBookId, targetBookId });
+  return invoke(
+    "link_book_edition",
+    copyProgress ? { sourceBookId, targetBookId } : { sourceBookId, targetBookId, copyProgress },
+  );
 }
 
 /**
@@ -228,6 +233,11 @@ export function pickCoverImage(): Promise<string | null> {
 
 export function reconnectBook(bookId: number, path: string): Promise<Book> {
   return invoke("reconnect_book", { bookId, path });
+}
+
+/** Locate File: reconnect, merge a lossless duplicate, or report a conflict. */
+export function locateBookFile(bookId: number, path: string): Promise<LocateOutcome> {
+  return invoke("locate_book", { bookId, path });
 }
 
 /** The backend rejects bytes that already belong to a different book. */

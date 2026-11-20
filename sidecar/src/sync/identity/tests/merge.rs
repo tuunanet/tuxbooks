@@ -80,6 +80,67 @@ async fn merging_two_identities_moves_every_piece_of_state() {
     .await
     .unwrap();
 
+    // Provider and edition links are user state too. A conflicting provider
+    // keeps the winner's link; the rest move with their queued progress.
+    let third = "c".repeat(32);
+    sqlx::query("INSERT INTO book_records (uid, title) VALUES (?1, 'Third')")
+        .bind(&third)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO book_provider_links (book_uid, provider, remote_id)
+         VALUES (?1, 'hardcover', 'loser-hardcover')",
+    )
+    .bind(&loser)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO book_provider_links (book_uid, provider, remote_id)
+         VALUES (?1, 'goodreads', 'loser-goodreads')",
+    )
+    .bind(&loser)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO book_provider_links (book_uid, provider, remote_id)
+         VALUES (?1, 'goodreads', 'winner-goodreads')",
+    )
+    .bind(&winner)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO book_provider_pending_progress (book_uid, provider, progress_percent)
+         VALUES (?1, 'hardcover', 42.0)",
+    )
+    .bind(&loser)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (edition_a, edition_b) = if loser < third {
+        (loser.as_str(), third.as_str())
+    } else {
+        (third.as_str(), loser.as_str())
+    };
+    sqlx::query("INSERT INTO book_edition_links (book_uid_a, book_uid_b) VALUES (?1, ?2)")
+        .bind(edition_a)
+        .bind(edition_b)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let before: Vec<String> = sqlx::query_scalar(
+        "SELECT provider FROM book_provider_links WHERE book_uid = ?1 ORDER BY provider",
+    )
+    .bind(&loser)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(before, vec!["goodreads", "hardcover"]);
+
     merge_book_identity(&pool, &loser, &winner).await.unwrap();
 
     let old_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book_records WHERE uid = ?1")
@@ -153,6 +214,50 @@ async fn merging_two_identities_moves_every_piece_of_state() {
     .await
     .unwrap();
     assert_eq!(loser_state, 0);
+
+    let providers: Vec<(String, String)> = sqlx::query_as(
+        "SELECT provider, remote_id FROM book_provider_links WHERE book_uid = ?1 ORDER BY provider",
+    )
+    .bind(&winner)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        providers,
+        vec![
+            ("goodreads".into(), "winner-goodreads".into()),
+            ("hardcover".into(), "loser-hardcover".into()),
+        ],
+        "non-conflicting links move and the winner keeps its own on a conflict"
+    );
+    let pending: Vec<(String, f64)> = sqlx::query_as(
+        "SELECT provider, progress_percent FROM book_provider_pending_progress
+         WHERE book_uid = ?1",
+    )
+    .bind(&winner)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        pending,
+        vec![("hardcover".into(), 42.0)],
+        "queued progress follows a link that moved"
+    );
+    let link: (String, String) =
+        sqlx::query_as("SELECT book_uid_a, book_uid_b FROM book_edition_links")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (expected_a, expected_b) = if winner < third {
+        (winner.clone(), third.clone())
+    } else {
+        (third.clone(), winner.clone())
+    };
+    assert_eq!(
+        link,
+        (expected_a, expected_b),
+        "edition links to third books follow the winner"
+    );
 }
 
 #[tokio::test]

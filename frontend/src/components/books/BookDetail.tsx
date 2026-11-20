@@ -12,14 +12,17 @@ import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
 import { ResetBookDialog } from "./ResetBookDialog";
-import { useBookActions } from "@/hooks/useBookActions";
+import { useBookActions, userFacing } from "@/hooks/useBookActions";
 import { useBookFiles } from "@/hooks/useBookFiles";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
 import { useLibrary } from "@/hooks/useLibrary";
 import { sectionTitle } from "@/components/library/sections";
 import { useAppDispatch, useAppState, type DetailTab } from "@/state/appState";
 import { providerLinkLabel } from "@/lib/providers";
+import { linkBookEdition } from "@/lib/bridge";
 import type { Book, BookFile, CollectionSummary } from "@/lib/bridge";
+import type { LocateResult } from "@/types/domain";
+import { LocateConflictDialog } from "./LocateConflictDialog";
 
 /** ISO dates render deterministically in UTC so tests and locales agree. */
 function formatDate(iso: string | null): string {
@@ -55,7 +58,7 @@ function bookFacts(book: Book): [string, string][] {
  */
 export function BookDetail() {
   const { selectedBookId, section, detailTab = "overview" } = useAppState();
-  const { books, collections } = useLibrary();
+  const { books, collections, refresh } = useLibrary();
   const {
     locateBook,
     removeBookFromLibrary,
@@ -68,6 +71,11 @@ export function BookDetail() {
   const [forgetOpen, setForgetOpen] = useState(false);
   const [indexingError, setIndexingError] = useState<string | null>(null);
   const [indexingBusy, setIndexingBusy] = useState(false);
+  const [locateState, setLocateState] = useState<{ bookId: number; result: LocateResult } | null>(
+    null,
+  );
+  const [locateBusy, setLocateBusy] = useState(false);
+  const [locateActionError, setLocateActionError] = useState<string | null>(null);
   const dispatch = useAppDispatch();
   const book = books.find((candidate) => candidate.id === selectedBookId) ?? null;
   // One curation view is shared by the Overview subjects row and the
@@ -102,6 +110,60 @@ export function BookDetail() {
 
   const removeFile = async (fileId: number) => {
     if (await removeCopy(book.id, fileId)) await refreshFiles();
+  };
+
+  const locateFile = async () => {
+    setLocateState(null);
+    setLocateActionError(null);
+    const result = await locateBook(book.id);
+    if (result.kind === "merged" || result.kind === "detached") {
+      dispatch({ type: "open-book-detail", bookId: result.book.id });
+      return;
+    }
+    if (result.kind === "failed" || result.kind === "conflict") {
+      setLocateState({ bookId: book.id, result });
+    }
+  };
+
+  const conflict =
+    locateState?.bookId === book.id && locateState.result.kind === "conflict"
+      ? locateState.result.conflict
+      : null;
+
+  const openConflictOwner = () => {
+    if (!conflict) return;
+    setLocateState(null);
+    dispatch({ type: "open-book-detail", bookId: conflict.owner.id });
+  };
+
+  const moveConflictToHistory = async () => {
+    if (!conflict) return;
+    setLocateBusy(true);
+    setLocateActionError(null);
+    const result = await removeBookFromLibrary(book.id);
+    setLocateBusy(false);
+    if (result.ok) {
+      setLocateState(null);
+      dispatch({ type: "open-book-detail", bookId: conflict.owner.id });
+    } else {
+      setLocateActionError(result.error);
+    }
+  };
+
+  const linkConflictEdition = async () => {
+    if (!conflict) return;
+    setLocateBusy(true);
+    setLocateActionError(null);
+    try {
+      await linkBookEdition(book.id, conflict.owner.id, false);
+      await refresh();
+      setLocateState(null);
+      dispatch({ type: "open-book-detail", bookId: conflict.owner.id });
+    } catch (err) {
+      setLocateActionError(userFacing(err));
+    } finally {
+      setLocateBusy(false);
+    }
   };
 
   const retryIndexingNow = async () => {
@@ -154,9 +216,14 @@ export function BookDetail() {
 
           <BookReadingActions
             book={book}
-            onLocate={() => void locateBook(book.id)}
+            onLocate={() => void locateFile()}
             onRemoveFromLibrary={() => void removeBookFromLibrary(book.id)}
             onContinue={() => dispatch({ type: "open-reader", bookId: book.id })}
+            locateError={
+              locateState?.bookId === book.id && locateState.result.kind === "failed"
+                ? locateState.result.error
+                : null
+            }
           />
         </div>
       </div>
@@ -227,6 +294,21 @@ export function BookDetail() {
         }}
         onCancel={() => setForgetOpen(false)}
       />
+      {conflict && (
+        <LocateConflictDialog
+          conflict={conflict}
+          open
+          busy={locateBusy}
+          error={locateActionError}
+          onOpenOwner={openConflictOwner}
+          onMoveToHistory={() => void moveConflictToHistory()}
+          onLinkEdition={() => void linkConflictEdition()}
+          onCancel={() => {
+            setLocateState(null);
+            setLocateActionError(null);
+          }}
+        />
+      )}
     </section>
   );
 }
