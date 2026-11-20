@@ -205,6 +205,10 @@ export interface ReadingHistoryBook {
   annotationCount: number;
   lastOpenedAt: string | null;
   metadataState: "available" | "waiting_for_file";
+  /** True when Locate File detached this row as an empty duplicate. */
+  isEmptyDuplicate: boolean;
+  /** Title of the library entry that owns the picked bytes, when known. */
+  duplicateOfTitle: string | null;
   /** Links that outlived the book's file rows. */
   providerLinks?: ProviderLink[];
 }

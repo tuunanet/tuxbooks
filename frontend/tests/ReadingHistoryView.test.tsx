@@ -65,6 +65,27 @@ describe("ReadingHistoryView", () => {
     expect(provider).toHaveTextContent("Hardcover · Reading");
   });
 
+  it("names the surviving book on an empty duplicate", async () => {
+    renderHistory([
+      makeReadingHistoryBook({
+        id: 41,
+        title: "Book",
+        isEmptyDuplicate: true,
+        duplicateOfTitle: "Machine Learning",
+      }),
+    ]);
+
+    const label = await screen.findByTestId("reading-history-duplicate-of");
+    expect(label).toHaveTextContent("Empty duplicate of Machine Learning");
+  });
+
+  it("leaves an ordinary Reading history row unlabelled", async () => {
+    renderHistory([makeReadingHistoryBook({ id: 41 })]);
+
+    await screen.findByTestId("reading-history-book");
+    expect(screen.queryByTestId("reading-history-duplicate-of")).not.toBeInTheDocument();
+  });
+
   it("searches Reading history through the sidecar", async () => {
     renderHistory([makeReadingHistoryBook({ title: "Searchable History" })]);
 

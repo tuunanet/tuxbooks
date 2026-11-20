@@ -179,6 +179,14 @@ pub struct ReadingHistoryBook {
     /// `available` when the durable snapshot has metadata, `waiting_for_file`
     /// for a record recovered from the sync mirror without one.
     pub metadata_state: String,
+    /// True when Locate File detached this record as an empty duplicate of
+    /// another library entry (ADR 0019 D2).
+    #[sqlx(default)]
+    pub is_empty_duplicate: bool,
+    /// Title of the entry that owns the picked bytes, when the local marker
+    /// still resolves to a durable record.
+    #[sqlx(default)]
+    pub duplicate_of_title: Option<String>,
     /// Provider links survive the last file row leaving, so Reading history
     /// can show where the book is tracked elsewhere.
     #[sqlx(skip)]

@@ -42,7 +42,12 @@ The candidate (the missing entry) has no user state when it has no progress,
 annotations, collections, metadata overrides, provider links, or edition
 links. Such an entry detaches to Reading history: its missing file row is
 removed and its durable record stays. There is nothing to merge and no
-different-bytes identity merge is needed.
+different-bytes identity merge is needed. The detach records the entry that
+owns the picked bytes in a local-only marker, so Reading history labels the
+row "Empty duplicate of <title>" instead of showing an unexplained second
+copy. The marker snapshots the title, so the label survives the owner being
+forgotten or merged. Binding a file row to the record clears the marker.
+Like provider links, the marker does not sync.
 
 When the candidate has state, it merges into the owner only if the picked
 bytes match one of the candidate's bound content hashes. A missing binding

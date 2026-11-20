@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 use crate::domain::{ReadingHistoryBook, SearchHit};
 use crate::error::AppError;
 use crate::repository::books;
+use crate::repository::reading_history;
 
 /// Turns a raw user query into FTS5 MATCH syntax: whitespace-separated
 /// tokens become quoted prefix phrases ANDed together (`wind river` →
@@ -46,7 +47,7 @@ pub async fn list_reading_history(
         ),
         None => None,
     };
-    books::list_reading_history(pool, match_query.as_deref()).await
+    reading_history::list(pool, match_query.as_deref()).await
 }
 
 #[cfg(test)]
