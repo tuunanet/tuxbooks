@@ -33,8 +33,8 @@ function renderHistory(books: ReturnType<typeof makeReadingHistoryBook>[]) {
 /** Fixed scroller geometry: jsdom has no layout, so hand the virtualizer one. */
 async function mountScrollerGeometry() {
   const scroller = await screen.findByTestId("reading-history-scroller");
-  Object.defineProperty(scroller, "offsetWidth", { value: 1200, configurable: true });
-  Object.defineProperty(scroller, "offsetHeight", { value: 800, configurable: true });
+  Object.defineProperty(scroller, "clientWidth", { value: 1200, configurable: true });
+  Object.defineProperty(scroller, "clientHeight", { value: 800, configurable: true });
   act(() => fireResizeOn(scroller, 1200, 800));
   return scroller;
 }

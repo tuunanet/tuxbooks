@@ -40,10 +40,10 @@ describe("PERF-15: rendered library cards are a bounded window", () => {
     );
     const gridEl = await screen.findByTestId("book-grid");
 
-    // jsdom has no layout: give the scroller the offset geometry tanstack
+    // jsdom has no layout: give the scroller the client geometry tanstack
     // reads, then fire only the scroller's observers, never the per-row ones.
-    Object.defineProperty(gridEl, "offsetWidth", { value: 1200, configurable: true });
-    Object.defineProperty(gridEl, "offsetHeight", { value: 800, configurable: true });
+    Object.defineProperty(gridEl, "clientWidth", { value: 1200, configurable: true });
+    Object.defineProperty(gridEl, "clientHeight", { value: 800, configurable: true });
     act(() => fireResizeOn(gridEl, 1200, 800));
 
     // Six columns at 1200×800; the window stays constant as the library grows.
