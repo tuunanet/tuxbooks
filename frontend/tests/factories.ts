@@ -67,6 +67,8 @@ export function makeReadingHistoryBook(
     annotationCount: 3,
     lastOpenedAt: "2026-03-01T00:00:00.000Z",
     metadataState: "available",
+    isEmptyDuplicate: false,
+    duplicateOfTitle: null,
     providerLinks: [],
     ...overrides,
   };

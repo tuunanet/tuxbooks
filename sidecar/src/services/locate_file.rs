@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 use crate::domain::Book;
 use crate::error::AppError;
 use crate::repository::books;
+use crate::repository::reading_history;
 use crate::services::library_reconciler::reconnect_book;
 use crate::sync::identity::{hash_file, merge_book_identity};
 
@@ -138,8 +139,9 @@ pub async fn locate_book(
     let state = load_state(pool, &candidate_uid).await?;
     if !state.has_state() {
         // Nothing user-authored can be misplaced. Detach the stale entry to
-        // Reading history instead of merging two different byte streams.
-        books::delete_book(pool, candidate.id).await?;
+        // Reading history instead of merging two different byte streams, and
+        // record the owner so the row explains what it is.
+        reading_history::detach_duplicate(pool, candidate.id, &owner_uid).await?;
         let book = books::get_book(pool, owner_id)
             .await?
             .ok_or(AppError::NotFound)?;

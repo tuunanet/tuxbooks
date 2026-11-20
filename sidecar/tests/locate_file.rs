@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tuxbooks_lib::db::connection::init_pool;
 use tuxbooks_lib::domain::NewBook;
-use tuxbooks_lib::repository::{books, editions};
+use tuxbooks_lib::repository::{books, editions, reading_history};
 use tuxbooks_lib::services::locate_file::{locate_book, LocateOutcome};
 
 fn minimal_epub() -> PathBuf {
@@ -170,6 +170,122 @@ async fn empty_duplicate_moves_to_reading_history() {
     );
     let files = books::list_files_for_book(&env.pool, owner).await.unwrap();
     assert_eq!(files.len(), 1, "the owner keeps only its own location");
+
+    let history = reading_history::list(&env.pool, None).await.unwrap();
+    let row = history
+        .iter()
+        .find(|row| row.id == candidate)
+        .expect("the detached duplicate is in Reading history");
+    assert!(row.is_empty_duplicate);
+    assert_eq!(row.duplicate_of_title.as_deref(), Some("Machine Learning"));
+
+    // Binding a file row makes it a real book again, so the label clears.
+    let revived = env.dir.join("revived.epub");
+    books::insert_file_for_book(&env.pool, candidate, &new_book(&revived, "Old copy", size))
+        .await
+        .unwrap();
+    let marked: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM book_detached_duplicates
+         WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
+    )
+    .bind(candidate)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(marked, 0, "the label does not outlive the empty state");
+    assert!(
+        reading_history::list(&env.pool, None)
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.id != candidate),
+        "a record with a file is no longer in Reading history"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_a_file_row_to_a_detached_duplicate_clears_the_label() {
+    let env = setup().await;
+    let present = env.dir.join("present.epub");
+    std::fs::copy(minimal_epub(), &present).unwrap();
+    let missing = env.dir.join("missing.epub");
+    let size = std::fs::metadata(&present).unwrap().len() as i64;
+
+    let candidate = insert(&env.pool, &missing, "Old copy", size).await;
+    let owner = insert(&env.pool, &present, "Machine Learning", size).await;
+    sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
+        .bind(file_id(&env.pool, candidate).await)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    locate_book(&env.pool, candidate, &present, &env.covers, &[])
+        .await
+        .unwrap();
+
+    // Identity merges and lifecycle rebinds move a file row by uid update,
+    // not by insert. That path must clear the marker too.
+    let candidate_uid: String = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(candidate)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE books SET book_uid = ?1 WHERE id = ?2")
+        .bind(&candidate_uid)
+        .bind(file_id(&env.pool, owner).await)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let marked: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM book_detached_duplicates WHERE book_uid = ?1")
+            .bind(&candidate_uid)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(marked, 0, "a rebound record is no longer a duplicate");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forgetting_the_owner_keeps_the_label_and_its_title() {
+    let env = setup().await;
+    let present = env.dir.join("present.epub");
+    std::fs::copy(minimal_epub(), &present).unwrap();
+    let missing = env.dir.join("missing.epub");
+    let size = std::fs::metadata(&present).unwrap().len() as i64;
+
+    let candidate = insert(&env.pool, &missing, "Old copy", size).await;
+    let owner = insert(&env.pool, &present, "Machine Learning", size).await;
+    sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
+        .bind(file_id(&env.pool, candidate).await)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    locate_book(&env.pool, candidate, &present, &env.covers, &[])
+        .await
+        .unwrap();
+
+    let owner_uid = uid(&env.pool, owner).await;
+    sqlx::query("DELETE FROM books WHERE book_uid = ?1")
+        .bind(&owner_uid)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM book_records WHERE uid = ?1")
+        .bind(&owner_uid)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    let history = reading_history::list(&env.pool, None).await.unwrap();
+    let row = history
+        .iter()
+        .find(|row| row.id == candidate)
+        .expect("the detached duplicate stays in Reading history");
+    assert!(row.is_empty_duplicate);
+    assert_eq!(
+        row.duplicate_of_title.as_deref(),
+        Some("Machine Learning"),
+        "the snapshotted title outlives the owner record"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
