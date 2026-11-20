@@ -23,6 +23,9 @@ command -v bsdtar >/dev/null 2>&1 ||
   fail "bsdtar is required (Debian/Ubuntu: install libarchive-tools)"
 
 declared_version="$(jq -r .version "$CONF")"
+# Arch pkgver cannot carry the semver hyphen; electron-builder writes it as
+# an underscore (`0.1.12_pre.1`). The artifact name keeps the raw version.
+pkg_version="$(printf '%s' "$declared_version" | sed 's/-/_/g')"
 
 shopt -s nullglob
 packages=("$PACKAGE_DIR/tuxbooks-${declared_version}-1-x86_64.pkg.tar.zst")
@@ -44,8 +47,8 @@ field() {
 
 [ "$(field pkgname)" = "tuxbooks" ] ||
   fail "pkgname is '$(field pkgname)', expected tuxbooks"
-[ "$(field pkgver)" = "${declared_version}-1" ] ||
-  fail "pkgver $(field pkgver) does not match package.json ${declared_version}-1"
+[ "$(field pkgver)" = "${pkg_version}-1" ] ||
+  fail "pkgver $(field pkgver) does not match package.json ${pkg_version}-1"
 [ "$(field arch)" = "x86_64" ] || fail "arch is '$(field arch)', expected x86_64"
 [ "$(field license)" = "GPL-3.0-or-later" ] ||
   fail "license is '$(field license)', expected GPL-3.0-or-later"
@@ -140,4 +143,4 @@ else
   echo "check-pacman: desktop-file-validate not installed; skipped (structure still checked)"
 fi
 
-echo "check-pacman: OK (version $declared_version-1, x86_64, $icon_count icons, sidecar + document worker + PDFium bundled, glibc floor OK)"
+echo "check-pacman: OK (version $pkg_version-1, x86_64, $icon_count icons, sidecar + document worker + PDFium bundled, glibc floor OK)"

@@ -24,10 +24,19 @@ Every package ships the desktop entry
 runtime, and the bundled sidecar binary plus
 document worker (`resources/sidecar/tuxbooks-worker`) plus PDFium resource.
 `scripts/check-deb.sh` and `scripts/check-pacman.sh` gate the worker's
-presence. Releases are published as
-normal releases, not pre-release, and the site links to the latest release at
-`/releases/latest`. The version stays below 1.0 while the app is in active
-development; that is a version number, not a release flag.
+presence. A stable `vX.Y.Z` tag publishes a normal release, and the site
+links to the latest release at `/releases/latest`. A `vX.Y.Z-pre.N` (or
+`-rc.N`) tag publishes a GitHub pre-release: testers can install it, GitHub
+keeps it out of `/releases/latest`, and the final `vX.Y.Z` follows it. The
+version stays below 1.0 while the app is in active development; that is a
+version number, not a release flag.
+
+Prerelease artifact filenames keep the semver string
+(`tuxbooks_0.1.12-pre.1_amd64.deb`, `tuxbooks-0.1.12-pre.1.AppImage`), but
+the package metadata cannot carry the hyphen. electron-builder writes
+`0.1.12~pre.1` for the deb and `0.1.12_pre.1` for pacman, both of which
+sort before the final `0.1.12`; the packaging gates apply the same
+substitution before comparing.
 
 ### Desktop identity (branding vs technical identifiers)
 
@@ -107,11 +116,15 @@ artifacts and runs the same gates before publishing.
 Per the versioning policy in ROADMAP.md (pre-1.0: patch bumps for early
 releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
 
-1. Bump the version in **one normal commit on main**: root `package.json`
+1. Bump the version in **one normal commit on main** with
+   `scripts/bump-version.sh X.Y.Z` (use the full `X.Y.Z-pre.N` or
+   `X.Y.Z-rc.N` string for a pre-release). It updates root `package.json`
    (the electron-builder source of truth), the Rust crate's
-   `Cargo.toml`/`Cargo.lock`, `frontend/package.json`, and the homepage
-   version badge in `site/index.html` when the headline version changes.
-2. Draft the release notes with `just release-notes X.Y.Z`: the script
+   `Cargo.toml`/`Cargo.lock`, and `frontend/package.json`. A stable version
+   also moves the homepage badge in `site/index.html`; a prerelease leaves
+   the badge on the stable release the site advertises.
+2. Draft the release notes with `just release-notes X.Y.Z` (the same
+   prerelease suffix is accepted): the script
    writes `docs/release-notes/vX.Y.Z.md`, grouping the user-facing
    commits since the previous tag into **New** (`feat`), **Changed**
    (`refactor`, `perf`), and **Fixed** (`fix`) sections, plus the install
@@ -137,9 +150,20 @@ releases, `0.y.0` for milestone-scale points, `1.0.0` at exit criteria):
      exists. It builds deb + pacman + AppImage, generates the SBOM
      (`just sbom`), writes `SHA256SUMS.txt` over the installers and the SBOM,
      and publishes the release with those notes and install instructions.
-     Approve the deployment from the Actions run page when it reaches the
-     environment gate. Self-approval is enabled because the repository has
-     one maintainer; the gate makes publishing an explicit step.
+     A tag containing a `-` is published as a GitHub pre-release; a stable
+     tag is published normally. Approve the deployment from the Actions run
+     page when it reaches the environment gate. Self-approval is enabled
+     because the repository has one maintainer; the gate makes publishing an
+     explicit step.
+
+### Pre-releases
+
+A pre-release uses the same steps and the full semver everywhere: version
+`0.1.12-pre.1`, notes `docs/release-notes/v0.1.12-pre.1.md`, tag
+`v0.1.12-pre.1`. GitHub then marks the release as a pre-release, so it
+never becomes `/releases/latest` and the site keeps advertising the last
+stable version. The next stable release is a normal `v0.1.12` bump, with
+its own notes file, cut from the commits that follow the pre-release.
 
 Before tagging, run `just audit`: release builds must be free of
 untriaged npm and RustSec advisories (docs/SUPPLY_CHAIN.md).

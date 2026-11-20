@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Verify the Debian bundle produced by `just package` (electron-builder).
 # This is the packaging regression gate: the deb must be installable-by-
-# strangers, so its control metadata must match the package.json version,
-# the desktop entry must be valid, the hicolor icons must be installed, and
-# the bundled sidecar + PDFium resource must be present (docs/RELEASE.md).
+# strangers, so its control metadata must match the package.json version
+# (electron-builder writes a prerelease `-` as `~`), the desktop entry must
+# be valid, the hicolor icons must be installed, and the bundled sidecar +
+# PDFium resource must be present (docs/RELEASE.md).
 # Unlike the Tauri-era payload, the Electron deb must NOT depend on
 # libwebkit2gtk.
 set -euo pipefail
@@ -14,6 +15,10 @@ CONF="$ROOT/package.json"
 
 shopt -s nullglob
 declared_version="$(jq -r .version "$CONF")"
+# Debian sorts a prerelease before its final release; electron-builder
+# writes the semver hyphen as a tilde (`0.1.12~pre.1`). The artifact name
+# keeps the raw version.
+deb_version="$(printf '%s' "$declared_version" | sed 's/-/~/g')"
 debs=("$DEB_DIR"/tuxbooks_"$declared_version"_*.deb)
 shopt -u nullglob
 if [ "${#debs[@]}" -ne 1 ]; then
@@ -38,8 +43,8 @@ depends="$(dpkg-deb -f "$deb" Depends)"
 description="$(dpkg-deb -f "$deb" Description)"
 
 [ "$package" = "tuxbooks" ] || fail "package name is $package, expected tuxbooks"
-[ "$version" = "$declared_version" ] ||
-  fail "deb version $version does not match package.json $declared_version"
+[ "$version" = "$deb_version" ] ||
+  fail "deb version $version does not match package.json $declared_version (expected $deb_version)"
 case "$arch" in
 amd64 | arm64) ;;
 *) fail "unexpected architecture $arch" ;;

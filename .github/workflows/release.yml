@@ -7,9 +7,11 @@ name: Release
 # push origin v0.1.1`). The workflow refuses a tag outside main, waits for
 # approval of the `release` environment, and refuses to publish unless the
 # tag exactly matches the version bundled below and the committed notes
-# file exists. A stale or reused version, or a forgotten New/Changed/Fixed
-# note, can never produce a release. See docs/RELEASE.md and the versioning
-# policy under Milestone 11 in ROADMAP.md.
+# file exists. A `vX.Y.Z-pre.N` or `vX.Y.Z-rc.N` tag publishes a GitHub
+# pre-release; a stable tag publishes a normal release. A stale or reused
+# version, or a forgotten New/Changed/Fixed note, can never produce a
+# release. See docs/RELEASE.md and the versioning policy under Milestone 11
+# in ROADMAP.md.
 
 on:
   push:
@@ -256,8 +258,16 @@ jobs:
             echo "::error::run 'just release-notes $version', polish the draft, and commit it with the version bump"
             exit 1
           fi
+          # A prerelease tag must not become the repository's "latest"
+          # release (the site links to /releases/latest). GitHub excludes
+          # prereleases from that pointer when the flag is set.
+          flags=()
+          case "$GITHUB_REF_NAME" in
+            *-*) flags+=(--prerelease) ;;
+          esac
           gh release create "$GITHUB_REF_NAME" \
             --title "TuxBooks $GITHUB_REF_NAME" \
+            "${flags[@]}" \
             --notes-file "$notes_file" \
             "dist-packages/tuxbooks_${version}_amd64.deb" \
             "dist-packages/tuxbooks-${version}-1-x86_64.pkg.tar.zst" \
