@@ -13,10 +13,10 @@
 # this file and fails the release when it is missing, so the section
 # shape cannot be forgotten (see .github/workflows/release.yml).
 #
-# Usage: scripts/release-notes.sh X.Y.Z [--force]
+# Usage: scripts/release-notes.sh X.Y.Z[-pre.N|-rc.N] [--force]
 #
-# Safety rails: refuses a non X.Y.Z version, a version whose v* tag
-# already exists (never move or reuse a tag), and a draft that already
+# Safety rails: refuses a version outside that shape, a version whose v*
+# tag already exists (never move or reuse a tag), and a draft that already
 # exists unless --force is passed — a polished file must not be
 # clobbered by a re-run. Run from anywhere; the draft stays uncommitted.
 set -euo pipefail
@@ -36,8 +36,8 @@ FORCE="${2:-}"
 if [ -n "$FORCE" ] && [ "$FORCE" != "--force" ]; then
   usage
 fi
-if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "release-notes: '$NEW' is not an X.Y.Z version" >&2
+if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(pre|rc)\.[0-9]+)?$ ]]; then
+  echo "release-notes: '$NEW' is not X.Y.Z, X.Y.Z-pre.N, or X.Y.Z-rc.N" >&2
   exit 1
 fi
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/v$NEW" >/dev/null; then

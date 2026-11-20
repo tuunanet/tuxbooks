@@ -2,30 +2,36 @@
 # Apply one version to every place a release bump touches (docs/RELEASE.md
 # "Cutting a release", step 1): the root package.json (the electron-builder
 # source of truth), the frontend package.json, the Rust crate's
-# Cargo.toml + Cargo.lock, and the homepage version badge in site/index.html.
+# Cargo.toml + Cargo.lock, and — for a stable release — the homepage version
+# badge in site/index.html. A prerelease leaves the badge on the stable
+# version the site advertises.
 #
-# Usage: scripts/bump-version.sh X.Y.Z
+# Usage: scripts/bump-version.sh X.Y.Z[-pre.N|-rc.N]
 #
-# Safety rails: refuses a non X.Y.Z version, a bump to the current version,
-# and a version whose v* tag already exists (never move or reuse a tag).
-# Every file is asserted to carry the current version first, so a drifted
-# file fails loudly instead of silently staying stale. Run from anywhere;
-# edits stay uncommitted — review the diff, commit, then tag per
+# Safety rails: refuses a version outside that shape, a bump to the current
+# version, and a version whose v* tag already exists (never move or reuse a
+# tag). Every file is asserted to carry the current version first, so a
+# drifted file fails loudly instead of silently staying stale. Run from
+# anywhere; edits stay uncommitted — review the diff, commit, then tag per
 # docs/RELEASE.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 X.Y.Z" >&2
+  echo "usage: $0 X.Y.Z[-pre.N|-rc.N]" >&2
   exit 1
 fi
 
 NEW="$1"
-if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "bump-version: '$NEW' is not an X.Y.Z version" >&2
+if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(pre|rc)\.[0-9]+)?$ ]]; then
+  echo "bump-version: '$NEW' is not X.Y.Z, X.Y.Z-pre.N, or X.Y.Z-rc.N" >&2
   exit 1
 fi
+PRERELEASE=0
+case "$NEW" in
+*-*) PRERELEASE=1 ;;
+esac
 
 CURRENT="$(jq -r .version "$ROOT/package.json")"
 if [ "$CURRENT" = "$NEW" ]; then
@@ -44,15 +50,19 @@ fi
 #   package.json / frontend/package.json — "version": "X.Y.Z" (first match)
 #   sidecar/Cargo.toml — the [package] version (first `version = ` line)
 #   site/index.html — the homepage badge's version token (the badge text may
-#     wrap across lines, so match only the `vX.Y.Z &middot;` token)
+#     wrap across lines, so match only the `vX.Y.Z &middot;` token); a
+#     prerelease skips this file, because the badge advertises the stable
+#     release rather than a tester build.
 # sidecar/Cargo.lock is handled separately below (the tuxbooks package's own
 # entry is located by its preceding `name = "tuxbooks"` line).
 OLD_LINE=(
   "package.json|\"version\": \"$CURRENT\""
   "frontend/package.json|\"version\": \"$CURRENT\""
   "sidecar/Cargo.toml|^version = \"$CURRENT\""
-  "site/index.html|v$CURRENT &middot;"
 )
+if [ "$PRERELEASE" -eq 0 ]; then
+  OLD_LINE+=("site/index.html|v$CURRENT &middot;")
+fi
 
 # Rewrite Cargo.lock first into a temp file: the script must not leave a
 # half-applied state if this step fails. Only the tuxbooks package's own
@@ -90,11 +100,15 @@ changed+=("sidecar/Cargo.lock")
 
 # Verify: every touched place now reports the new version.
 status=0
-for version_line in \
-  "package.json" \
-  "frontend/package.json" \
-  "sidecar/Cargo.toml" \
-  "site/index.html"; do
+version_files=(
+  "package.json"
+  "frontend/package.json"
+  "sidecar/Cargo.toml"
+)
+if [ "$PRERELEASE" -eq 0 ]; then
+  version_files+=("site/index.html")
+fi
+for version_line in "${version_files[@]}"; do
   if ! grep -q "$NEW" "$ROOT/$version_line"; then
     echo "bump-version: $version_line does not report $NEW after the edit" >&2
     status=1
