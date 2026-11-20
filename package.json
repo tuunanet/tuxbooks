@@ -23,7 +23,7 @@
     "@nanonets/graft": "0.24.1",
     "@types/node": "^24.19.2",
     "electron": "^44.9.1",
-    "electron-builder": "26.17.0",
+    "electron-builder": "26.18.0",
     "esbuild": "^0.28.2",
     "lint-staged": "^17.6.0",
     "typescript": "^7.0.2",
