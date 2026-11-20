@@ -20,6 +20,7 @@ struct BookFileArgs {
 struct EditionLinkArgs {
     source_book_id: i64,
     target_book_id: i64,
+    copy_progress: Option<bool>,
 }
 
 #[derive(serde::Deserialize)]
@@ -102,7 +103,8 @@ pub(super) async fn dispatch(
                 state,
                 events,
                 p.source_book_id,
-                p.target_book_id
+                p.target_book_id,
+                p.copy_progress.unwrap_or(true)
             ))))
         }
         "remove_book_file" => {

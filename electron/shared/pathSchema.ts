@@ -260,6 +260,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "unwatch_locations",
   "reconnect_book",
   "relink_book",
+  "locate_book",
   "get_book_metadata",
   "reset_book_metadata",
   "set_book_cover",

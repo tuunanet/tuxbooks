@@ -32,11 +32,14 @@ async fn identity(pool: &SqlitePool, book_id: i64) -> Result<Option<BookIdentity
 /// `source` is the edition that already carries the reading state; `target`
 /// is the edition the user is reading now. Only the source percentage and
 /// provider links move. Annotations stay with the source, and the target's
-/// old locator is replaced by the percentage-only row.
+/// old locator is replaced by the percentage-only row. Pass
+/// `copy_progress = false` when the caller must keep the target's position
+/// (a duplicate resolution where the target is the readable copy).
 pub async fn link_editions(
     pool: &SqlitePool,
     source_book_id: i64,
     target_book_id: i64,
+    copy_progress: bool,
 ) -> Result<EditionLinkOutcome, AppError> {
     let source = identity(pool, source_book_id)
         .await?
@@ -143,43 +146,48 @@ pub async fn link_editions(
 
     // Percentage only: no locator JSON crosses editions. The target's position is replaced,
     // so the newly linked edition opens at that percentage rather than an old locator.
-    let source_percent: Option<f64> = sqlx::query_scalar::<_, Option<f64>>(
-        "SELECT progress_percent FROM reading_progress WHERE book_uid = ?1",
-    )
-    .bind(&source.uid)
-    .fetch_optional(&mut *tx)
-    .await?
-    .flatten();
-    let copied_progress_percent = match source_percent {
-        Some(percent) => {
-            sqlx::query(
-                "INSERT INTO reading_progress (book_uid, progress_percent) VALUES (?1, ?2) \
-                 ON CONFLICT(book_uid) DO UPDATE SET \
-                     chapter_href = NULL, \
-                     cfi = NULL, \
-                     character_offset = NULL, \
-                     page_number = NULL, \
-                     scroll_offset = NULL, \
-                     progress_percent = excluded.progress_percent, \
-                     locator = NULL, \
-                     progression = NULL, \
-                     locations = NULL, \
-                     engine = NULL, \
-                     schema_version = NULL, \
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-            )
-            .bind(&target.uid)
-            .bind(percent)
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("UPDATE book_records SET progress_percent = ?2 WHERE uid = ?1")
+    // A caller resolving a duplicate keeps the target's own position instead.
+    let copied_progress_percent = if copy_progress {
+        let source_percent: Option<f64> = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT progress_percent FROM reading_progress WHERE book_uid = ?1",
+        )
+        .bind(&source.uid)
+        .fetch_optional(&mut *tx)
+        .await?
+        .flatten();
+        match source_percent {
+            Some(percent) => {
+                sqlx::query(
+                    "INSERT INTO reading_progress (book_uid, progress_percent) VALUES (?1, ?2) \
+                     ON CONFLICT(book_uid) DO UPDATE SET \
+                         chapter_href = NULL, \
+                         cfi = NULL, \
+                         character_offset = NULL, \
+                         page_number = NULL, \
+                         scroll_offset = NULL, \
+                         progress_percent = excluded.progress_percent, \
+                         locator = NULL, \
+                         progression = NULL, \
+                         locations = NULL, \
+                         engine = NULL, \
+                         schema_version = NULL, \
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                )
                 .bind(&target.uid)
                 .bind(percent)
                 .execute(&mut *tx)
                 .await?;
-            Some(percent)
+                sqlx::query("UPDATE book_records SET progress_percent = ?2 WHERE uid = ?1")
+                    .bind(&target.uid)
+                    .bind(percent)
+                    .execute(&mut *tx)
+                    .await?;
+                Some(percent)
+            }
+            None => None,
         }
-        None => None,
+    } else {
+        None
     };
 
     tx.commit().await?;

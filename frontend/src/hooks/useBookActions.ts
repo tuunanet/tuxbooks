@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import {
   forgetBook,
+  locateBookFile,
   markBookFinished,
   pickBookFile,
   reconnectBook,
@@ -9,15 +10,29 @@ import {
   resetBookReadingData,
   retryIndexing as retryBookIndexing,
 } from "@/lib/bridge";
+import type { LocateResult } from "@/types/domain";
 import { useLibrary } from "./useLibrary";
 
 function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The sidecar wraps InvalidInput failures; the wrapper is noise in the UI. */
+const INVALID_INPUT_PREFIX = "invalid input: ";
+
+/** Strip the sidecar's InvalidInput wrapper for user-facing copy. */
+export function userFacing(err: unknown): string {
+  const message = toMessage(err);
+  return message.startsWith(INVALID_INPUT_PREFIX)
+    ? message.slice(INVALID_INPUT_PREFIX.length)
+    : message;
+}
+
 const INDEXING_RETRY_FAILED =
   "TuxBooks still could not index this book. It will keep trying while the file can be read.";
 const INDEXING_FILE_MISSING = "The file is not available. Use Locate File, then retry indexing.";
+/** The sidecar's refusal when the picked path belongs to another entry. */
+const FILE_ALREADY_OWNED = "already in the library";
 
 /**
  * User-driven library maintenance (ROADMAP milestone 3): reconnect a book
@@ -32,23 +47,43 @@ const INDEXING_FILE_MISSING = "The file is not available. Use Locate File, then 
 export function useBookActions() {
   const { refresh } = useLibrary();
 
-  const locateBook = useCallback(async (bookId: number) => {
+  /**
+   * Locate a missing file. A plain reconnect stays on the existing command; a
+   * file another entry already owns falls back to the resolver, which merges a
+   * lossless duplicate or returns the conflict for the caller.
+   */
+  const locateBook = useCallback(async (bookId: number): Promise<LocateResult> => {
     const path = await pickBookFile();
-    if (path === null || path.trim() === "") return;
+    if (path === null || path.trim() === "") return { kind: "cancelled" };
     try {
-      await reconnectBook(bookId, path);
+      const book = await reconnectBook(bookId, path);
+      return { kind: "reconnected", book };
     } catch (err) {
-      console.error("reconnect failed:", toMessage(err));
+      if (!toMessage(err).includes(FILE_ALREADY_OWNED)) {
+        console.error("locate failed:", toMessage(err));
+        return { kind: "failed", error: userFacing(err) };
+      }
+    }
+    try {
+      return await locateBookFile(bookId, path);
+    } catch (err) {
+      console.error("locate failed:", toMessage(err));
+      return { kind: "failed", error: userFacing(err) };
     }
   }, []);
 
-  const removeBookFromLibrary = useCallback(async (bookId: number) => {
-    try {
-      await removeBook(bookId);
-    } catch (err) {
-      console.error("remove failed:", toMessage(err));
-    }
-  }, []);
+  const removeBookFromLibrary = useCallback(
+    async (bookId: number): Promise<{ ok: boolean; error: string | null }> => {
+      try {
+        await removeBook(bookId);
+        return { ok: true, error: null };
+      } catch (err) {
+        console.error("remove failed:", toMessage(err));
+        return { ok: false, error: userFacing(err) };
+      }
+    },
+    [],
+  );
 
   /**
    * Drop one file copy. The durable book and its reading state stay while

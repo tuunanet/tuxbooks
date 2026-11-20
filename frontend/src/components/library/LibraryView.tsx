@@ -1,11 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useBookActions } from "@/hooks/useBookActions";
+import { useBookActions, userFacing } from "@/hooks/useBookActions";
 import { useCollectionActions } from "@/hooks/useCollectionActions";
 import { useCollectionPreferences } from "@/hooks/useCollectionPreferences";
 import { useLibrary } from "@/hooks/useLibrary";
-import { revealBook } from "@/lib/bridge";
+import { linkBookEdition, revealBook } from "@/lib/bridge";
+import { LocateConflictDialog } from "@/components/books/LocateConflictDialog";
+import type { LocateConflict } from "@/types/domain";
 import { resolveCollectionGroups } from "@/lib/collectionPreferences";
 import {
   sortForPlace,
@@ -74,6 +76,14 @@ export function LibraryView({ section }: LibraryViewProps) {
   const dispatch = useAppDispatch();
   const [resetTarget, setResetTarget] = useState<Book | null>(null);
   const [forgetTarget, setForgetTarget] = useState<Book | null>(null);
+  const [locateError, setLocateError] = useState<string | null>(null);
+  const [locateNotice, setLocateNotice] = useState<string | null>(null);
+  const [locateConflict, setLocateConflict] = useState<{
+    bookId: number;
+    conflict: LocateConflict;
+  } | null>(null);
+  const [locateBusy, setLocateBusy] = useState(false);
+  const [locateActionError, setLocateActionError] = useState<string | null>(null);
 
   // View mode is a presentation preference. The search query is app state
   // scoped to the section and cleared when the section changes; the format
@@ -115,6 +125,67 @@ export function LibraryView({ section }: LibraryViewProps) {
   const handleReveal = useCallback((bookId: number) => {
     void revealBook(bookId);
   }, []);
+  const handleLocate = useCallback(
+    async (bookId: number) => {
+      setLocateError(null);
+      setLocateNotice(null);
+      setLocateConflict(null);
+      const result = await locateBook(bookId);
+      if (result.kind === "failed") {
+        setLocateError(result.error);
+      } else if (result.kind === "conflict") {
+        setLocateConflict({ bookId, conflict: result.conflict });
+      } else if (result.kind === "merged") {
+        setLocateNotice(
+          `Merged into "${result.book.title}". Conflicting provider links keep the existing entry's link.`,
+        );
+      } else if (result.kind === "detached") {
+        setLocateNotice(
+          `Moved "${result.detachedFrom.title}" to Reading history. Nothing was deleted.`,
+        );
+      }
+    },
+    [locateBook],
+  );
+
+  const openLocateOwner = () => {
+    if (!locateConflict) return;
+    const ownerId = locateConflict.conflict.owner.id;
+    setLocateConflict(null);
+    dispatch({ type: "open-book-detail", bookId: ownerId });
+  };
+
+  const moveLocateToHistory = async () => {
+    if (!locateConflict) return;
+    const { bookId } = locateConflict;
+    setLocateBusy(true);
+    setLocateActionError(null);
+    const result = await removeBookFromLibrary(bookId);
+    setLocateBusy(false);
+    if (result.ok) {
+      setLocateConflict(null);
+      setLocateNotice("Moved to Reading history. Its state is kept for a later relink.");
+    } else {
+      setLocateActionError(result.error);
+    }
+  };
+
+  const linkLocateEdition = async () => {
+    if (!locateConflict) return;
+    const { bookId, conflict } = locateConflict;
+    setLocateBusy(true);
+    setLocateActionError(null);
+    try {
+      await linkBookEdition(bookId, conflict.owner.id, false);
+      await refresh();
+      setLocateConflict(null);
+      setLocateNotice(`Linked as an edition of "${conflict.owner.title}".`);
+    } catch (err) {
+      setLocateActionError(userFacing(err));
+    } finally {
+      setLocateBusy(false);
+    }
+  };
 
   const collectionEmpty = collectionEmptyKind(section, collections);
 
@@ -210,7 +281,7 @@ export function LibraryView({ section }: LibraryViewProps) {
     onSelect: selectBook,
     onOpen: openDetail,
     onRead: openReader,
-    onLocate: locateBook,
+    onLocate: handleLocate,
     onEditMetadata: openMetadataEditor,
     onRemove: removeBookFromLibrary,
     onReset: (bookId: number) => {
@@ -261,6 +332,30 @@ export function LibraryView({ section }: LibraryViewProps) {
         message={bulk.bulkMessage}
         onClear={clearSelection}
       />
+      {locateError && (
+        <div
+          data-testid="library-locate-error"
+          role="alert"
+          className="mt-3 flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+        >
+          <p className="text-sm text-destructive">{locateError}</p>
+          <Button size="sm" variant="ghost" onClick={() => setLocateError(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+      {locateNotice && (
+        <div
+          data-testid="library-locate-notice"
+          role="status"
+          className="mt-3 flex items-start justify-between gap-3 rounded-md border bg-muted/40 p-3"
+        >
+          <p className="text-sm">{locateNotice}</p>
+          <Button size="sm" variant="ghost" onClick={() => setLocateNotice(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
       <BulkRemoveDialog
         open={bulk.bulkRemoveOpen}
         count={selectedIds.length}
@@ -288,6 +383,21 @@ export function LibraryView({ section }: LibraryViewProps) {
         }}
         onCancel={() => setForgetTarget(null)}
       />
+      {locateConflict && (
+        <LocateConflictDialog
+          conflict={locateConflict.conflict}
+          open
+          busy={locateBusy}
+          error={locateActionError}
+          onOpenOwner={openLocateOwner}
+          onMoveToHistory={() => void moveLocateToHistory()}
+          onLinkEdition={() => void linkLocateEdition()}
+          onCancel={() => {
+            setLocateConflict(null);
+            setLocateActionError(null);
+          }}
+        />
+      )}
       {visible.length === 0 ? (
         <LibraryEmptyState
           query={query}

@@ -72,8 +72,10 @@ pub async fn link_book_edition(
     events: &EventEmitter,
     source_book_id: i64,
     target_book_id: i64,
+    copy_progress: bool,
 ) -> Result<EditionLinkOutcome, AppError> {
-    let outcome = editions::link_editions(&state.db, source_book_id, target_book_id).await?;
+    let outcome =
+        editions::link_editions(&state.db, source_book_id, target_book_id, copy_progress).await?;
     // Both books changed; a book with no file row has no event of its own.
     crate::commands::emit_book_changed(state, events, outcome.source_book_id).await?;
     crate::commands::emit_book_changed(state, events, outcome.target_book_id).await?;

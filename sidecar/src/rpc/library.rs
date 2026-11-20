@@ -59,6 +59,12 @@ pub(super) async fn dispatch(
                 state, events, p.book_id, p.path
             ))))
         }
+        "locate_book" => {
+            let p: ReconnectArgs = parse_params(params)?;
+            Ok(Some(call!(commands::locate::locate_book(
+                state, events, p.book_id, p.path
+            ))))
+        }
         "relink_book" => {
             let p: ReconnectArgs = parse_params(params)?;
             Ok(Some(call!(commands::library::relink_book(

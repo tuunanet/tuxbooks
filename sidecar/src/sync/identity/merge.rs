@@ -267,6 +267,67 @@ pub async fn merge_book_identity(
     .execute(&mut *tx)
     .await?;
 
+    // Provider links are local user state; conflicts keep the winner's link.
+    sqlx::query(
+        "DELETE FROM book_provider_links
+         WHERE book_uid = ?1
+           AND provider IN (SELECT provider FROM book_provider_links WHERE book_uid = ?2)",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+    let pending: Vec<(String, f64, String)> = sqlx::query_as(
+        "SELECT provider, progress_percent, queued_at
+         FROM book_provider_pending_progress WHERE book_uid = ?1",
+    )
+    .bind(&loser)
+    .fetch_all(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM book_provider_pending_progress WHERE book_uid = ?1")
+        .bind(&loser)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE book_provider_links SET book_uid = ?2 WHERE book_uid = ?1")
+        .bind(&loser)
+        .bind(&winner)
+        .execute(&mut *tx)
+        .await?;
+    for (provider, progress_percent, queued_at) in pending {
+        sqlx::query(
+            "INSERT OR IGNORE INTO book_provider_pending_progress
+                 (book_uid, provider, progress_percent, queued_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&winner)
+        .bind(provider)
+        .bind(progress_percent)
+        .bind(queued_at)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Re-key edition links to third books; drop a link that becomes a self-link.
+    sqlx::query(
+        "INSERT OR IGNORE INTO book_edition_links (book_uid_a, book_uid_b, linked_at)
+         SELECT MIN(a, b), MAX(a, b), linked_at FROM (
+             SELECT CASE WHEN book_uid_a = ?1 THEN ?2 ELSE book_uid_a END AS a,
+                    CASE WHEN book_uid_b = ?1 THEN ?2 ELSE book_uid_b END AS b,
+                    linked_at
+             FROM book_edition_links
+             WHERE book_uid_a = ?1 OR book_uid_b = ?1
+         ) AS rekeyed
+         WHERE a <> b",
+    )
+    .bind(&loser)
+    .bind(&winner)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM book_edition_links WHERE book_uid_a = ?1 OR book_uid_b = ?1")
+        .bind(&loser)
+        .execute(&mut *tx)
+        .await?;
+
     sqlx::query("DELETE FROM book_records WHERE uid = ?1")
         .bind(&loser)
         .execute(&mut *tx)
