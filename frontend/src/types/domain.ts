@@ -97,7 +97,7 @@ export interface EditionBook {
   bookUid: string;
   title: string | null;
   author: string | null;
-  /** False when the linked edition is currently in Reading history. */
+  /** False when the linked edition is currently a detached record. */
   inLibrary: boolean;
 }
 

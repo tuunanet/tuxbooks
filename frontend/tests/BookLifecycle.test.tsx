@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
-import { ReadingHistoryView } from "@/components/history/ReadingHistoryView";
+import { HistorySettings } from "@/components/settings/HistorySettings";
 import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
@@ -30,11 +30,17 @@ function renderHistory() {
     <AppStateProvider>
       <LibraryDataProvider>
         <ImportProvider>
-          <ReadingHistoryView />
+          <HistorySettings />
         </ImportProvider>
       </LibraryDataProvider>
     </AppStateProvider>,
   );
+}
+
+/** The forgotten list lives on its own tab; switching is part of the flow. */
+async function openForgottenTab(trashId: number) {
+  await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+  await screen.findByTestId(`book-trash-restore-${trashId}`);
 }
 
 beforeEach(() => {
@@ -154,8 +160,8 @@ describe("Reset and Forget dialogs", () => {
   });
 });
 
-describe("Reading history Forget and restore", () => {
-  it("selects all history books and forgets them in one dialog", async () => {
+describe("History Forget and restore", () => {
+  it("selects all detached records and forgets them in one dialog", async () => {
     mockInvoke({
       ...baseResponses([
         makeReadingHistoryBook({ id: 41, title: "First" }),
@@ -165,12 +171,10 @@ describe("Reading history Forget and restore", () => {
     });
     renderHistory();
 
-    await screen.findAllByTestId("reading-history-book");
-    await userEvent.click(screen.getByTestId("reading-history-select-all"));
-    expect(screen.getByTestId("reading-history-forget-selected")).toHaveTextContent(
-      "Forget selected (2)",
-    );
-    await userEvent.click(screen.getByTestId("reading-history-forget-selected"));
+    await screen.findAllByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-select-all"));
+    expect(screen.getByTestId("history-forget-selected")).toHaveTextContent("Forget selected (2)…");
+    await userEvent.click(screen.getByTestId("history-forget-selected"));
     expect(screen.getByTestId("forget-book-dialog")).toHaveTextContent("Forget 2 books?");
     await userEvent.click(screen.getByTestId("forget-book-confirm"));
 
@@ -179,15 +183,15 @@ describe("Reading history Forget and restore", () => {
     });
   });
 
-  it("resets one history book through the shared Reset dialog", async () => {
+  it("resets one detached record through the shared Reset dialog", async () => {
     mockInvoke({
       ...baseResponses([makeReadingHistoryBook({ id: 41, title: "Keep Me" })]),
       reset_book_reading_data: true,
     });
     renderHistory();
 
-    await screen.findByTestId("reading-history-book");
-    await userEvent.click(screen.getByTestId("reading-history-reset-41"));
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-reset-41"));
     expect(screen.getByTestId("reset-book-dialog")).toHaveTextContent("Keep Me");
     await userEvent.click(screen.getByTestId("reset-book-confirm"));
     await waitFor(() => {
@@ -207,7 +211,8 @@ describe("Reading history Forget and restore", () => {
     });
     renderHistory();
 
-    await screen.findByTestId("recently-forgotten");
+    await screen.findByTestId("history-tab-forgotten");
+    await openForgottenTab(7);
     await userEvent.click(screen.getByTestId("book-trash-restore-7"));
 
     await waitFor(() => {
@@ -251,7 +256,8 @@ describe("Reading history Forget and restore", () => {
     });
     renderHistory();
 
-    await screen.findByTestId("recently-forgotten");
+    await screen.findByTestId("history-tab-forgotten");
+    await openForgottenTab(7);
     await userEvent.click(screen.getByTestId("book-trash-restore-7"));
 
     const dialog = await screen.findByTestId("restore-book-dialog");

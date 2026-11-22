@@ -7,7 +7,6 @@ import {
   Clock3,
   Folder,
   GripVertical,
-  History,
   Library,
   MoreHorizontal,
   Settings,
@@ -487,12 +486,6 @@ export function Sidebar({
                 </ItemButton>
               );
             })}
-            <ItemButton
-              active={active.kind === "reading-history"}
-              onClick={() => onSectionChange({ kind: "reading-history" })}
-            >
-              <ItemLabel icon={History}>Reading history</ItemLabel>
-            </ItemButton>
           </div>
         </div>
 

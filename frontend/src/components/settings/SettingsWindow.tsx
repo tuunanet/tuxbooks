@@ -177,7 +177,7 @@ export function SettingsWindow() {
           )}
         >
           <DialogTitle className="sr-only">Settings</DialogTitle>
-          <SettingsShell onClose={close} />
+          <SettingsShell onClose={close} initialSection={app.settingsSection} />
         </DialogContent>
       </Dialog>
     </ThemeScopeProvider>

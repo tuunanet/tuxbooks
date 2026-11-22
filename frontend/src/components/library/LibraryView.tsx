@@ -77,7 +77,9 @@ export function LibraryView({ section }: LibraryViewProps) {
   const [resetTarget, setResetTarget] = useState<Book | null>(null);
   const [forgetTarget, setForgetTarget] = useState<Book | null>(null);
   const [locateError, setLocateError] = useState<string | null>(null);
-  const [locateNotice, setLocateNotice] = useState<string | null>(null);
+  const [locateNotice, setLocateNotice] = useState<{ text: string; toHistory?: boolean } | null>(
+    null,
+  );
   const [locateConflict, setLocateConflict] = useState<{
     bookId: number;
     conflict: LocateConflict;
@@ -136,13 +138,14 @@ export function LibraryView({ section }: LibraryViewProps) {
       } else if (result.kind === "conflict") {
         setLocateConflict({ bookId, conflict: result.conflict });
       } else if (result.kind === "merged") {
-        setLocateNotice(
-          `Merged into "${result.book.title}". Conflicting provider links keep the existing entry's link.`,
-        );
+        setLocateNotice({
+          text: `Merged into "${result.book.title}". Conflicting provider links keep the existing entry's link.`,
+        });
       } else if (result.kind === "detached") {
-        setLocateNotice(
-          `Moved "${result.detachedFrom.title}" to Reading history. Nothing was deleted.`,
-        );
+        setLocateNotice({
+          text: `Moved "${result.detachedFrom.title}" out of the library. Nothing was deleted.`,
+          toHistory: true,
+        });
       }
     },
     [locateBook],
@@ -164,7 +167,10 @@ export function LibraryView({ section }: LibraryViewProps) {
     setLocateBusy(false);
     if (result.ok) {
       setLocateConflict(null);
-      setLocateNotice("Moved to Reading history. Its state is kept for a later relink.");
+      setLocateNotice({
+        text: "Moved out of the library. Its state is kept for a later relink.",
+        toHistory: true,
+      });
     } else {
       setLocateActionError(result.error);
     }
@@ -179,7 +185,7 @@ export function LibraryView({ section }: LibraryViewProps) {
       await linkBookEdition(bookId, conflict.owner.id, false);
       await refresh();
       setLocateConflict(null);
-      setLocateNotice(`Linked as an edition of "${conflict.owner.title}".`);
+      setLocateNotice({ text: `Linked as an edition of "${conflict.owner.title}".` });
     } catch (err) {
       setLocateActionError(userFacing(err));
     } finally {
@@ -350,10 +356,22 @@ export function LibraryView({ section }: LibraryViewProps) {
           role="status"
           className="mt-3 flex items-start justify-between gap-3 rounded-md border bg-muted/40 p-3"
         >
-          <p className="text-sm">{locateNotice}</p>
-          <Button size="sm" variant="ghost" onClick={() => setLocateNotice(null)}>
-            Dismiss
-          </Button>
+          <p className="text-sm">{locateNotice.text}</p>
+          <div className="flex shrink-0 gap-1">
+            {locateNotice.toHistory ? (
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="locate-notice-open-history"
+                onClick={() => dispatch({ type: "open-settings", section: "history" })}
+              >
+                Open History
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" onClick={() => setLocateNotice(null)}>
+              Dismiss
+            </Button>
+          </div>
         </div>
       )}
       <BulkRemoveDialog

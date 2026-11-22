@@ -2,9 +2,9 @@ import { useCallback, useState } from "react";
 import { useVirtualizer, type ReactVirtualizer } from "@tanstack/react-virtual";
 
 /**
- * Windowed rendering for the Reading history list (PERF-18): the DOM row
- * count is the visible slice plus overscan, never one node per book. A slim
- * single-column sibling of the library virtualizer
+ * Windowed rendering for the detached-records list in the History settings
+ * (PERF-18): the DOM row count is the visible slice plus overscan, never one
+ * node per book. A slim single-column sibling of the library virtualizer
  * (components/library/useLibraryVirtualizer.ts): no grid columns, no scroll
  * persistence, no scroll-in-flight measure deferral — history rows are
  * near-uniform, so the plain estimate-then-measure flow holds the scrollbar

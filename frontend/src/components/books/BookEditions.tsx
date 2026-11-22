@@ -121,7 +121,7 @@ export function BookEditions({ book }: { book: Book }) {
                 </p>
               </div>
               <Badge variant="secondary" className="text-[10px]">
-                {edition.inLibrary ? "Library" : "Reading history"}
+                {edition.inLibrary ? "Library" : "Detached"}
               </Badge>
             </li>
           ))}

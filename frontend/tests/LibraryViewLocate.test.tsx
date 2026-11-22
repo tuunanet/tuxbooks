@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { makeBook } from "./factories";
-import { renderLibrary } from "./libraryViewHelpers";
+import { renderLibrary, renderShell } from "./libraryViewHelpers";
 import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 import type { Book, LocateConflict } from "@/types/domain";
 
@@ -60,7 +60,7 @@ describe("LibraryView Locate File", () => {
       remove_book: true,
     });
 
-    renderLibrary();
+    renderShell();
     await userEvent.click(await screen.findByTestId("missing-locate"));
 
     expect(await screen.findByTestId("locate-conflict-dialog")).toHaveTextContent(
@@ -70,8 +70,11 @@ describe("LibraryView Locate File", () => {
 
     expect(invokeMock).toHaveBeenCalledWith("remove_book", { bookId: 3 });
     expect(await screen.findByTestId("library-locate-notice")).toHaveTextContent(
-      "Moved to Reading history",
+      "Moved out of the library",
     );
+    // The notice deep-links to the section that holds the record now.
+    await userEvent.click(screen.getByTestId("locate-notice-open-history"));
+    expect(await screen.findByTestId("history-settings-view")).toBeInTheDocument();
   });
 
   it("reports a lossless merge in the library", async () => {
@@ -97,7 +100,7 @@ describe("LibraryView Locate File", () => {
     );
   });
 
-  it("moves an empty duplicate to Reading history", async () => {
+  it("reports a detached record in the locate notice", async () => {
     pickBookFileMock.mockResolvedValue("/library/present.epub");
     const { candidate, owner } = conflictFixture();
     mockInvoke({
@@ -116,7 +119,7 @@ describe("LibraryView Locate File", () => {
     await userEvent.click(await screen.findByTestId("missing-locate"));
 
     expect(await screen.findByTestId("library-locate-notice")).toHaveTextContent(
-      'Moved "Lost" to Reading history',
+      'Moved "Lost" out of the library',
     );
   });
 });

@@ -1,6 +1,7 @@
 # ADR 0014: Durable book records own reading state
 
-Status: accepted
+Status: accepted (amended 2026-11-22: the surface for D6 moved from a sidebar
+view into Settings → History; the projection and its guarantees are unchanged)
 Date: 2026-10-29
 Decides: what owns reading progress, annotations, collections, metadata overrides, last-opened, and provider links; what Remove, Unwatch, Reset, and Forget do; how a book is re-identified when its file returns
 Relates to: ADR 0008 (unwatch removes books), ADR 0013 (cloud-folder sync), `CONTEXT.md` (Book, Book file, Library membership, Reading history, Book identity)
@@ -120,18 +121,21 @@ With sync enabled, Forget is a shared delete. Ordinary annotation and
 collection deletes keep their existing 30-day trash; Forget uses the same
 window for the whole book.
 
-### D6. Reading history is a first-class view
+### D6. Detached records are a first-class surface
 
-Books with no file row appear in a separate **Reading history** view. It shows
-the durable metadata snapshot, progress, annotation count, and provider link,
-and offers Relink and Forget. The library stays membership-only. A book whose
-file is missing but whose file row still exists inside a watched folder stays
-in the library as unavailable, which is the existing behaviour.
+Books with no file row appear in a dedicated **detached records** surface. It
+shows the durable metadata snapshot, progress, annotation count, and provider
+link, and offers Relink and Forget. The library stays membership-only. A book
+whose file is missing but whose file row still exists inside a watched folder
+stays in the library as unavailable, which is the existing behaviour.
+(Amended 2026-11-22: originally a sidebar view named "Reading history", now
+Settings → History, split into "Detached records" and "Forgotten books"
+tabs, so the library sidebar stays a set of browsing views.)
 
-Reading history is not the retired loose-book mechanism. A loose book was a
+Detached records are not the retired loose-book mechanism. A loose book was a
 catalog row outside every watched folder and could appear in library views. A
-Reading history entry is a durable book with no file; library queries never
-return it.
+detached record is a durable book with no file; library queries never return
+it.
 
 ### D7. One library entry per book
 

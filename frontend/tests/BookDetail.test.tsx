@@ -810,7 +810,7 @@ describe("BookDetail", () => {
     const editions = await screen.findByTestId("detail-editions");
     expect(editions).toHaveTextContent("The Navigation Edition");
     expect(editions).toHaveTextContent("Grace Hopper");
-    expect(editions).toHaveTextContent("Reading history");
+    expect(editions).toHaveTextContent("Detached");
     expect(screen.queryByTestId("detail-editions-empty")).not.toBeInTheDocument();
   });
 

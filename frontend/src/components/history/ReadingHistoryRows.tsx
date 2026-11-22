@@ -49,11 +49,11 @@ export function HistoryBookRow({
 
   return (
     <div
-      data-testid="reading-history-book"
+      data-testid="history-book"
       className="flex items-center gap-4 rounded-lg border bg-card p-3"
     >
       <Checkbox
-        data-testid={`reading-history-select-${book.id}`}
+        data-testid={`history-select-${book.id}`}
         aria-label={`Select ${displayTitle(book)}`}
         checked={selected}
         onCheckedChange={(checked) => onToggle(book.id, checked === true)}
@@ -68,7 +68,7 @@ export function HistoryBookRow({
         <p className="truncate text-sm text-muted-foreground">{displayAuthor(book)}</p>
         {book.isEmptyDuplicate ? (
           <p
-            data-testid="reading-history-duplicate-of"
+            data-testid="history-duplicate-of"
             className="mt-1 truncate text-xs text-muted-foreground"
           >
             Empty duplicate
@@ -81,10 +81,10 @@ export function HistoryBookRow({
           </p>
         ) : null}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span data-testid="reading-history-progress">{progress}</span>
-          <span data-testid="reading-history-annotations">{annotations}</span>
+          <span data-testid="history-progress">{progress}</span>
+          <span data-testid="history-annotations">{annotations}</span>
           {(book.providerLinks ?? []).map((link) => (
-            <span key={`${link.provider}:${link.remoteId}`} data-testid="reading-history-provider">
+            <span key={`${link.provider}:${link.remoteId}`} data-testid="history-provider">
               {providerLinkLabel(link)}
             </span>
           ))}
@@ -92,7 +92,7 @@ export function HistoryBookRow({
       </div>
       <div className="flex shrink-0 flex-wrap justify-end gap-2">
         <Button
-          data-testid={`reading-history-reset-${book.id}`}
+          data-testid={`history-reset-${book.id}`}
           aria-label={`Reset reading data for ${displayTitle(book)}`}
           variant="outline"
           size="sm"
@@ -103,7 +103,7 @@ export function HistoryBookRow({
           Reset…
         </Button>
         <Button
-          data-testid={`reading-history-forget-${book.id}`}
+          data-testid={`history-forget-${book.id}`}
           aria-label={`Forget ${displayTitle(book)}`}
           variant="outline"
           size="sm"
@@ -114,7 +114,7 @@ export function HistoryBookRow({
           Forget…
         </Button>
         <Button
-          data-testid={`reading-history-relink-${book.id}`}
+          data-testid={`history-relink-${book.id}`}
           aria-label={`Relink ${displayTitle(book)}`}
           variant="outline"
           size="sm"

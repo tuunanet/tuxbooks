@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EVENT_FLUSH_MS, useLibrary } from "@/hooks/useLibrary";
 import {
   forgetBook,
@@ -28,35 +29,35 @@ import {
   type RestoreMode,
 } from "@/lib/bridge";
 
-/** A durable book with no file rows; the search is scoped to this view. */
+/** The search is scoped to detached records, so it debounces like the library. */
 const SEARCH_DEBOUNCE_MS = 150;
 
 function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function EmptyReadingHistory({ searching }: { searching: boolean }) {
+function EmptyDetachedRecords({ searching }: { searching: boolean }) {
   return (
     <div
-      data-testid="reading-history-empty"
-      className="flex h-full flex-col items-center justify-center gap-3 text-center"
+      data-testid="history-empty"
+      className="flex h-64 flex-col items-center justify-center gap-3 text-center"
     >
       <BookMarked aria-hidden="true" className="h-12 w-12 text-muted-foreground" />
-      <h2 className="text-xl font-semibold">
-        {searching ? "No books match that search" : "No Reading history yet"}
-      </h2>
+      <h3 className="text-lg font-semibold">
+        {searching ? "No books match that search" : "No detached records"}
+      </h3>
       <p className="max-w-md text-sm text-muted-foreground">
         {searching
-          ? "Reading history only searches books whose file is no longer in a watched folder."
-          : "When a book leaves your watched folders, TuxBooks keeps its progress, annotations, collections, and metadata here. Relink a file and the book returns to the library with that reading history intact. Forgotten books stay restorable for 30 days."}
+          ? "Detached records only cover books whose file is no longer in a watched folder."
+          : "When a book leaves your watched folders, TuxBooks keeps its progress, annotations, collections, and metadata here. Relink a file and the book returns to the library with that reading history intact."}
       </p>
     </div>
   );
 }
 
-function ReadingHistorySkeleton() {
+function HistorySkeleton() {
   return (
-    <div data-testid="reading-history-loading" role="status" aria-label="Loading reading history">
+    <div data-testid="history-loading" role="status" aria-label="Loading history">
       {Array.from({ length: 4 }, (_, index) => (
         <div key={index} className="flex items-center gap-4 rounded-lg border p-3">
           <Skeleton className="size-4 rounded" />
@@ -71,15 +72,27 @@ function ReadingHistorySkeleton() {
   );
 }
 
+function EmptyForgottenBooks() {
+  return (
+    <p data-testid="history-forgotten-empty" className="text-sm text-muted-foreground">
+      Nothing is waiting to be restored. Forgotten books appear here and stay restorable for 30
+      days.
+    </p>
+  );
+}
+
 /**
- * Reading history (ADR 0014 D6): durable books with no current file. The
- * library stays membership-only, so this is the only surface that shows them.
- * It reads the durable metadata snapshot plus the live progress and annotation
- * count, searches through the same FTS index as the library, relinks a chosen
- * file, offers single and bulk Forget, and lists the books still restorable
- * from the 30-day trash.
+ * The History section (ADR 0014 D6): durable books with no current file, plus
+ * the 30-day restore list. The library stays membership-only, so this is the
+ * only surface that shows detached records. It reads the durable metadata
+ * snapshot plus the live progress and annotation count, searches through the
+ * same FTS index as the library, relinks a chosen file, offers single and
+ * bulk Forget, and restores forgotten books from the trash.
+ *
+ * Both tabs share one load loop and one set of dialogs, so forgetting on one
+ * tab refreshes the other without a remount.
  */
-export function ReadingHistoryView() {
+export function HistorySettings() {
   const { refresh } = useLibrary();
   const [books, setBooks] = useState<ReadingHistoryBook[] | null>(null);
   const [trash, setTrash] = useState<BookTrashEntry[]>([]);
@@ -146,7 +159,7 @@ export function ReadingHistoryView() {
           if (disposed) fn();
           else unlisteners.push(fn);
         })
-        .catch((err) => console.error("reading-history subscription failed:", err));
+        .catch((err) => console.error("history subscription failed:", err));
     };
     const scheduleReload = () => {
       if (reloadTimer !== null) return;
@@ -269,137 +282,160 @@ export function ReadingHistoryView() {
   );
 
   return (
-    <section data-testid="reading-history-view" className="flex h-full min-h-0 flex-col">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div>
-          <h2 className="text-2xl font-semibold">Reading history</h2>
-          <p data-testid="reading-history-count" className="text-sm text-muted-foreground">
-            {count} {count === 1 ? "book" : "books"}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {count > 0 ? (
-            <>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Checkbox
-                  data-testid="reading-history-select-all"
-                  aria-label="Select all Reading history books"
-                  checked={allSelected}
-                  onCheckedChange={(checked) =>
-                    setSelected(checked === true ? (books ?? []).map((book) => book.id) : [])
-                  }
-                />
-                Select all
-              </label>
-              <Button
-                data-testid="reading-history-forget-selected"
-                variant="destructive"
-                size="sm"
-                disabled={selected.length === 0 || busyId !== null}
-                onClick={() => setForgetTargets(selected)}
+    <div data-testid="settings-rows" className="mt-6 flex flex-col gap-6">
+      <p className="text-sm text-muted-foreground">
+        Books whose files left your watched folders keep their reading state as detached records.
+        Relink a file to return a record to the library; forget a record to clear it after a 30-day
+        restorable window.
+      </p>
+
+      <Tabs defaultValue="detached">
+        <TabsList>
+          <TabsTrigger value="detached" data-testid="history-tab-detached">
+            Detached records
+          </TabsTrigger>
+          <TabsTrigger value="forgotten" data-testid="history-tab-forgotten">
+            Forgotten books
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Both panes stay mounted: one load loop feeds them, and a forget on
+            either side is reflected on the other without a refetch-on-switch. */}
+        <TabsContent value="detached" forceMount className="mt-4">
+          <section data-testid="history-settings-view" className="flex min-h-0 flex-col">
+            <header className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+              <p data-testid="history-count" className="text-sm text-muted-foreground">
+                {count} {count === 1 ? "record" : "records"}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {count > 0 ? (
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Checkbox
+                        data-testid="history-select-all"
+                        aria-label="Select all detached records"
+                        checked={allSelected}
+                        onCheckedChange={(checked) =>
+                          setSelected(checked === true ? (books ?? []).map((book) => book.id) : [])
+                        }
+                      />
+                      Select all
+                    </label>
+                    <Button
+                      data-testid="history-forget-selected"
+                      variant="destructive"
+                      size="sm"
+                      disabled={selected.length === 0 || busyId !== null}
+                      onClick={() => setForgetTargets(selected)}
+                    >
+                      <Trash2 data-icon="inline-start" />
+                      Forget selected{selected.length > 0 ? ` (${selected.length})` : ""}…
+                    </Button>
+                  </>
+                ) : null}
+                <div className="relative">
+                  <Search
+                    aria-hidden="true"
+                    className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    data-testid="history-search"
+                    aria-label="Search detached records"
+                    type="search"
+                    placeholder="Search detached records"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="w-64 pl-8"
+                  />
+                </div>
+              </div>
+            </header>
+
+            {error !== null ? (
+              <div
+                data-testid="history-error"
+                role="alert"
+                className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4"
               >
-                <Trash2 data-icon="inline-start" />
-                Forget selected{selected.length > 0 ? ` (${selected.length})` : ""}
-              </Button>
-            </>
-          ) : null}
-          <div className="relative">
-            <Search
-              aria-hidden="true"
-              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              data-testid="reading-history-search"
-              aria-label="Search reading history"
-              type="search"
-              placeholder="Search Reading history"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="w-64 pl-8"
-            />
-          </div>
-        </div>
-      </header>
+                <p className="font-medium">Could not update history</p>
+                <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => {
+                    void load(queryRef.current);
+                    void loadTrash();
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : null}
 
-      {error !== null ? (
-        <div
-          data-testid="reading-history-error"
-          role="alert"
-          className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4"
-        >
-          <p className="font-medium">Could not update Reading history</p>
-          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            onClick={() => {
-              void load(queryRef.current);
-              void loadTrash();
-            }}
-          >
-            Retry
-          </Button>
-        </div>
-      ) : null}
+            {books === null ? (
+              <HistorySkeleton />
+            ) : books.length === 0 ? (
+              <EmptyDetachedRecords searching={searching} />
+            ) : (
+              <div
+                ref={attachScroller}
+                data-testid="history-scroller"
+                className="max-h-96 min-h-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
+              >
+                {unvirtualized ? (
+                  // No geometry yet (jsdom tests, SSR): bounded static slice, not the real render.
+                  <div className="flex flex-col gap-2">
+                    {books.slice(0, fallbackRowCount).map((book) => (
+                      <Fragment key={book.id}>{renderHistoryRow(book)}</Fragment>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+                    {virtualRows.map((virtualRow) => {
+                      const book = books[virtualRow.index];
+                      if (book === undefined) return null;
+                      return (
+                        <VirtualRow
+                          key={virtualRow.key}
+                          index={virtualRow.index}
+                          start={virtualRow.start}
+                          measure={virtualizer.measureElement}
+                        >
+                          <div className="pb-2">{renderHistoryRow(book)}</div>
+                        </VirtualRow>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        </TabsContent>
 
-      {books === null ? (
-        <ReadingHistorySkeleton />
-      ) : books.length === 0 ? (
-        <EmptyReadingHistory searching={searching} />
-      ) : (
-        <div
-          ref={attachScroller}
-          data-testid="reading-history-scroller"
-          className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
-        >
-          {unvirtualized ? (
-            // No geometry yet (jsdom tests, SSR): bounded static slice, not the real render.
-            <div className="flex flex-col gap-2">
-              {books.slice(0, fallbackRowCount).map((book) => (
-                <Fragment key={book.id}>{renderHistoryRow(book)}</Fragment>
-              ))}
-            </div>
-          ) : (
-            <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-              {virtualRows.map((virtualRow) => {
-                const book = books[virtualRow.index];
-                if (book === undefined) return null;
-                return (
-                  <VirtualRow
-                    key={virtualRow.key}
-                    index={virtualRow.index}
-                    start={virtualRow.start}
-                    measure={virtualizer.measureElement}
-                  >
-                    <div className="pb-2">{renderHistoryRow(book)}</div>
-                  </VirtualRow>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {trash.length > 0 ? (
-        <section data-testid="recently-forgotten" className="mt-8">
-          <h3 className="text-lg font-semibold">Recently forgotten</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Forgotten books stay restorable for 30 days. Restoring puts the old record and its state
-            back; if the current book has new reading data, TuxBooks asks first.
-          </p>
-          <ul className="mt-3 flex flex-col gap-2">
-            {trash.map((entry) => (
-              <ForgottenBookRow
-                key={entry.id}
-                entry={entry}
-                busy={restoreBusy}
-                onRestore={(target) => void runRestore(target)}
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null}
+        <TabsContent value="forgotten" forceMount className="mt-4">
+          <section data-testid="recently-forgotten" className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Forgotten books stay restorable for 30 days. Restoring puts the old record and its
+              state back; if the current book has new reading data, TuxBooks asks first.
+            </p>
+            {trash.length === 0 ? (
+              <EmptyForgottenBooks />
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {trash.map((entry) => (
+                  <ForgottenBookRow
+                    key={entry.id}
+                    entry={entry}
+                    busy={restoreBusy}
+                    onRestore={(target) => void runRestore(target)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </TabsContent>
+      </Tabs>
 
       <ResetBookDialog
         open={resetTarget !== null}
@@ -427,6 +463,6 @@ export function ReadingHistoryView() {
           setRestoreConflict(null);
         }}
       />
-    </section>
+    </div>
   );
 }

@@ -12,7 +12,7 @@ interface ForgetBookDialogProps {
   open: boolean;
   /** One book keeps the single-book copy; a selection gets the count. */
   count: number;
-  /** False when the book has no file and leaves Reading history entirely. */
+  /** False when the book has no file and leaves detached records entirely. */
   keepsFile: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -58,7 +58,7 @@ export function ForgetBookDialog({
           </p>
           <p className="mt-2 font-medium">What is restorable</p>
           <p className="mt-1 text-muted-foreground">
-            {`The old ${many ? "records and their state are" : "record and its state are"} kept in Reading history for 30 days. If the fresh book already has new progress or annotations, restoring asks whether to Replace, Keep, or Merge.`}
+            {`The old ${many ? "records and their state are" : "record and its state are"} kept restorable for 30 days under Settings → History. If the fresh book already has new progress or annotations, restoring asks whether to Replace, Keep, or Merge.`}
           </p>
         </div>
         <p className="text-sm text-muted-foreground">

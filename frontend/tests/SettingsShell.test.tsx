@@ -61,6 +61,7 @@ describe("SettingsShell", () => {
       "Keyboard Shortcuts",
       "Watched folders",
       "Sync",
+      "History",
       "Application Data",
       "About",
     ]) {
@@ -147,9 +148,28 @@ describe("SettingsShell", () => {
       "Keyboard Shortcuts",
       "Watched folders",
       "Sync",
+      "History",
       "Application Data",
       "About",
     ]);
+  });
+
+  it("opens the History section from the navigation", async () => {
+    renderSettings();
+    mockInvoke({
+      get_library_stats: { bookCount: 0, collectionCount: 0 },
+      list_books: [],
+      list_collections: [],
+      list_reading_history: [],
+      list_book_trash: [],
+    });
+
+    await screen.findByTestId("settings-view");
+    await userEvent.click(screen.getByRole("button", { name: "History" }));
+
+    expect(screen.getByRole("heading", { name: "History" })).toBeInTheDocument();
+    expect(screen.getByTestId("history-settings-view")).toBeInTheDocument();
+    expect(await screen.findByTestId("history-empty")).toHaveTextContent("No detached records");
   });
 
   it("starts on General with the app theme and no library actions", async () => {

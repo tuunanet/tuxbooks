@@ -32,7 +32,6 @@ describe("defaultSortFor", () => {
     expect(defaultSortFor({ kind: "smart", id: "recently-read" })).toBe("last-read");
     expect(defaultSortFor({ kind: "smart", id: "in-progress" })).toBe("progress-updated");
     expect(defaultSortFor({ kind: "smart", id: "finished" })).toBe("progress-updated");
-    expect(defaultSortFor({ kind: "reading-history" })).toBe("last-read");
     expect(defaultSortFor({ kind: "collection", ids: [7] })).toBe("date-added");
   });
 });

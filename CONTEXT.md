@@ -33,21 +33,25 @@ A book whose file row still belongs to a watched folder but whose file is
 missing. It stays in the library until the file returns or the user removes it.
 _Avoid_: orphan, loose book
 
-**Reading history**:
-The view of books with no current library membership. It shows their durable
-state and lets the user relink or forget them.
-_Avoid_: archive, trash (the 30-day restore list is the trash)
+**Detached records**:
+Books with no current library membership. Their durable state stays readable
+and the History settings section (Settings → History) lets the user relink or
+forget them. The tab is "Detached records"; forgotten books have their own tab.
+_Avoid_: reading history (the old sidebar view name), archive, trash (the
+30-day restore list is the trash)
 
 **Library place**:
-A destination in the sidebar: a smart section, Reading History, or a collection
-place. Selecting a place replaces the current place; places do not stack.
+A destination in the sidebar: a smart section or a collection place. Selecting
+a place replaces the current place; places do not stack. Detached records are
+not a place; they live in Settings → History.
 _Avoid_: view (when it means a place), filter
 
 **Smart section**:
 A built-in library place defined by a rule over current library membership: All
 Books, Recently Added, Recently Read, In Progress, or Finished. It is not a
-collection and cannot be pinned, renamed, or reordered. Reading History is a
-separate place because it shows books with no current library membership.
+collection and cannot be pinned, renamed, or reordered. Detached records are
+kept out of the sidebar because they are maintenance data, not a browsing
+view.
 _Avoid_: special collection, smart collection, system collection
 
 **Collection**:

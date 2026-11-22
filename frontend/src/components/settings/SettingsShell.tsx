@@ -4,6 +4,7 @@ import {
   Database,
   ExternalLink,
   FolderOpen,
+  History,
   Info,
   Keyboard,
   Palette,
@@ -17,6 +18,7 @@ import { AboutSection } from "@/components/settings/AboutSection";
 import { ReaderAppearanceControls } from "@/components/reader/ReaderAppearance";
 import { DataSettings } from "@/components/settings/DataSettings";
 import { FoldersSettings } from "@/components/settings/FoldersSettings";
+import { HistorySettings } from "@/components/settings/HistorySettings";
 import { HighlightsSettingsCard } from "@/components/settings/SettingsHighlights";
 import { SyncSettings } from "@/components/settings/SyncSettings";
 import { Button } from "@/components/ui/button";
@@ -42,11 +44,10 @@ import {
 } from "@/lib/readerShortcuts";
 import type { AppThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import type { SettingsSectionId } from "@/state/appState";
 import { type ReaderPreferences } from "@/state/readerState";
 import { useThemeState } from "@/state/themeState";
 import type { BookFormat } from "@/types/domain";
-
-type SettingsSectionId = "general" | "viewer" | "shortcuts" | "folders" | "sync" | "data" | "about";
 
 const SECTIONS: { id: SettingsSectionId; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: Settings },
@@ -54,6 +55,7 @@ const SECTIONS: { id: SettingsSectionId; label: string; icon: LucideIcon }[] = [
   { id: "shortcuts", label: "Keyboard Shortcuts", icon: Keyboard },
   { id: "folders", label: "Watched folders", icon: FolderOpen },
   { id: "sync", label: "Sync", icon: RefreshCw },
+  { id: "history", label: "History", icon: History },
   { id: "data", label: "Application Data", icon: Database },
   { id: "about", label: "About", icon: Info },
 ];
@@ -382,16 +384,24 @@ function SettingsNavigation({
  * Settings panel. General holds the app theme, version entry point, and a
  * library summary; Viewer settings holds the persisted default appearance,
  * one tab per format, plus the highlight colors shared by every reader;
- * Watched folders lists each watched location with its counts; Application
- * Data shows the app-owned storage roots; Keyboard Shortcuts describes the
- * bindings; About shows the app version, creator credit, and contributor doc
- * links.
+ * Watched folders lists each watched location with its counts; History holds
+ * detached records and forgotten books; Application Data shows the app-owned
+ * storage roots; Keyboard Shortcuts describes the bindings; About shows the
+ * app version, creator credit, and contributor doc links.
  *
  * Rendered inside the draggable Settings window, but the panel itself also
- * works standalone (tests render it directly), so closing is optional.
+ * works standalone (tests render it directly), so closing is optional. The
+ * window remounts it on every open, so `initialSection` is how deep links
+ * (detach notices, the Forget dialog) land on the History section.
  */
-export function SettingsShell({ onClose }: { onClose?: () => void } = {}) {
-  const [active, setActive] = useState<SettingsSectionId>("general");
+export function SettingsShell({
+  onClose,
+  initialSection,
+}: {
+  onClose?: () => void;
+  initialSection?: SettingsSectionId;
+} = {}) {
+  const [active, setActive] = useState<SettingsSectionId>(initialSection ?? "general");
   const label = SECTIONS.find((section) => section.id === active)?.label;
 
   return (
@@ -436,6 +446,8 @@ export function SettingsShell({ onClose }: { onClose?: () => void } = {}) {
               <GeneralSection />
             ) : active === "viewer" ? (
               <ViewerSettingsSection />
+            ) : active === "history" ? (
+              <HistorySettings />
             ) : active === "data" ? (
               <DataSettings />
             ) : active === "folders" ? (

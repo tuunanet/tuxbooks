@@ -14,6 +14,7 @@ describe("appStateReducer", () => {
         formatFilter: ["pdf"],
         sortByPlace: {},
         settingsOpen: false,
+        settingsSection: "general",
         collectionAnchorId: null,
       },
       { type: "select-section", section: { kind: "smart", id: "recently-added" } },
@@ -29,6 +30,7 @@ describe("appStateReducer", () => {
       formatFilter: ["pdf"],
       sortByPlace: {},
       settingsOpen: false,
+      settingsSection: "general",
       collectionAnchorId: null,
     });
   });
@@ -46,6 +48,22 @@ describe("appStateReducer", () => {
     expect(appStateReducer(closed, { type: "close-settings" })).toBe(closed);
   });
 
+  it("opening the settings window with a section lands on that section", () => {
+    const opened = appStateReducer(initialAppState, {
+      type: "open-settings",
+      section: "history",
+    });
+    expect(opened.settingsOpen).toBe(true);
+    expect(opened.settingsSection).toBe("history");
+
+    // A plain open after that keeps the deep-linked section; an explicit
+    // section always moves it.
+    expect(appStateReducer(opened, { type: "open-settings" }).settingsSection).toBe("history");
+    expect(
+      appStateReducer(opened, { type: "open-settings", section: "general" }).settingsSection,
+    ).toBe("general");
+  });
+
   it("opening book detail keeps the section and selects the book", () => {
     const state = appStateReducer(initialAppState, { type: "open-book-detail", bookId: 3 });
     expect(state).toEqual({
@@ -60,6 +78,7 @@ describe("appStateReducer", () => {
       formatFilter: [],
       sortByPlace: {},
       settingsOpen: false,
+      settingsSection: "general",
       collectionAnchorId: null,
     });
   });
@@ -114,6 +133,7 @@ describe("appStateReducer", () => {
         formatFilter: [],
         sortByPlace: {},
         settingsOpen: false,
+        settingsSection: "general",
         collectionAnchorId: 2,
       },
       { type: "return-to-library" },
@@ -128,6 +148,7 @@ describe("appStateReducer", () => {
       formatFilter: [],
       sortByPlace: {},
       settingsOpen: false,
+      settingsSection: "general",
       collectionAnchorId: 2,
     });
   });
@@ -157,10 +178,9 @@ describe("sameSection", () => {
   });
 
   it("never matches across kinds", () => {
-    expect(sameSection({ kind: "smart", id: "all-books" }, { kind: "reading-history" })).toBe(
+    expect(sameSection({ kind: "smart", id: "all-books" }, { kind: "collection", ids: [1] })).toBe(
       false,
     );
-    expect(sameSection({ kind: "collection", ids: [1] }, { kind: "reading-history" })).toBe(false);
   });
 
   it("matches collection places by their selected ids in order", () => {
