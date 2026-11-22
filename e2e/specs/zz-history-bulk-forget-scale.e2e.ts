@@ -2,7 +2,7 @@ import { expect, test, type Page } from "../fixtures/electron-app.js";
 import { readdirSync } from "node:fs";
 
 import { SCALE_CORPUS_SIZE, scaleCorpusDir } from "../setup/environment.js";
-import { ensureLibrary } from "./helpers.js";
+import { ensureLibrary, openHistory } from "./helpers.js";
 
 /**
  * Bulk Forget at scale (PERF-18, tuxbooks bulk-forget nibble): Forget of a
@@ -82,16 +82,15 @@ test.describe("Reading history bulk Forget at scale", () => {
       await invoke(page, "remove_book", { bookId: book.id });
     }
     const startCount = preHistory + corpus.length;
-    const countText = (n: number) => `${n} ${n === 1 ? "book" : "books"}`;
+    const countText = (n: number) => `${n} ${n === 1 ? "record" : "records"}`;
 
-    await page.getByRole("button", { name: "Reading history" }).click();
-    await expect(page.getByTestId("reading-history-view")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("reading-history-count")).toHaveText(countText(startCount), {
+    await openHistory(page);
+    await expect(page.getByTestId("history-count")).toHaveText(countText(startCount), {
       timeout: 30_000,
     });
 
-    await page.getByTestId("reading-history-select-all").click();
-    await page.getByTestId("reading-history-forget-selected").click();
+    await page.getByTestId("history-select-all").click();
+    await page.getByTestId("history-forget-selected").click();
     await page.getByTestId("forget-book-confirm").click();
 
     // Select all grabs corpus books and durable strays, so the count settles
@@ -100,19 +99,19 @@ test.describe("Reading history bulk Forget at scale", () => {
     const deadline = Date.now() + 200_000;
     while (Date.now() < deadline) {
       const current = await page
-        .getByTestId("reading-history-error")
+        .getByTestId("history-error")
         .innerText()
         .catch(() => "");
       if (current !== "") banner = current;
       const count = await page
-        .getByTestId("reading-history-count")
+        .getByTestId("history-count")
         .innerText()
         .catch(() => "");
-      if (count === "0 books" && banner === "") break;
+      if (count === "0 records" && banner === "") break;
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     expect(banner, "the error banner must never appear").toBe("");
-    await expect(page.getByTestId("reading-history-count")).toHaveText("0 books", {
+    await expect(page.getByTestId("history-count")).toHaveText("0 records", {
       timeout: 30_000,
     });
   });

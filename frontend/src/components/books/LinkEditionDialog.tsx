@@ -75,7 +75,7 @@ export function LinkEditionDialog({
               {candidates.map((candidate) => {
                 const title = candidate.title?.trim() || "Unknown title";
                 const author = candidate.author?.trim() || "Unknown author";
-                const surface = candidate.inLibrary ? "Library" : "Reading history";
+                const surface = candidate.inLibrary ? "Library" : "Detached records";
                 return (
                   <option key={candidate.id} value={candidate.id}>
                     {`${title} · ${author} (${surface})`}

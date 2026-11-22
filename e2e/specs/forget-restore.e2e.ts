@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { seededBookTitles } from "../setup/fixtures.js";
-import { ensureLibrary, waitForLibraryView } from "./helpers.js";
+import { ensureLibrary, closeSettings, openHistory, waitForLibraryView } from "./helpers.js";
 
 /**
  * Forget and restore (ADR 0014 D5, ticket tuxbooks-ip6.7): Forget moves the
@@ -99,8 +99,8 @@ test.describe("forget and restore", () => {
       });
     }, fresh.id);
 
-    await page.getByRole("button", { name: "Reading history" }).click();
-    await expect(page.getByTestId("reading-history-view")).toBeVisible({ timeout: 30000 });
+    await openHistory(page);
+    await page.getByTestId("history-tab-forgotten").click();
     const forgotten = page.getByTestId("recently-forgotten");
     await expect(forgotten).toBeVisible({ timeout: 30000 });
     await expect(forgotten).toContainText(seededBookTitles.epub);
@@ -113,7 +113,8 @@ test.describe("forget and restore", () => {
     await expect(conflict).toContainText("1 annotation");
     await page.getByTestId("restore-book-merge").click();
 
-    await expect(page.getByTestId("recently-forgotten")).toHaveCount(0, { timeout: 30000 });
+    await expect(page.getByTestId("book-trash-entry")).toHaveCount(0, { timeout: 30000 });
+    await closeSettings(page);
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await expect(card).toHaveCount(1);

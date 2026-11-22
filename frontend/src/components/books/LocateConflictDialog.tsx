@@ -96,8 +96,8 @@ export function LocateConflictDialog({
             opens the readable copy.
           </p>
           <p>
-            <span className="font-medium">Move to Reading history</span> clears this library entry
-            and keeps its state for a later relink.
+            <span className="font-medium">Move to detached records</span> clears this library entry
+            and keeps its state for a later relink. Find it again under Settings → History.
           </p>
           <p>
             <span className="font-medium">Link as an edition</span> keeps both entries and leaves
@@ -139,7 +139,7 @@ export function LocateConflictDialog({
               disabled={busy}
               onClick={onMoveToHistory}
             >
-              Move to Reading history
+              Move to detached records
             </Button>
             <Button
               type="button"

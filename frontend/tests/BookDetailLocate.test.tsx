@@ -84,7 +84,7 @@ describe("BookDetail Locate File", () => {
     expect(await screen.findByTestId("detail-title")).toHaveTextContent("Machine Learning");
   });
 
-  it("moves the stale entry to Reading history without deleting state", async () => {
+  it("moves the stale entry to detached records without deleting state", async () => {
     pickBookFileMock.mockResolvedValue("/library/present.epub");
     const { candidate, owner, conflict } = conflictFixture();
     renderDetail(3, [candidate, owner], {

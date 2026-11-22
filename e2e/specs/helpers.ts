@@ -35,6 +35,37 @@ export async function waitForLibraryView(page: Page): Promise<void> {
 }
 
 /**
+ * Opens Settings → History (tuxbooks-37j). The section lives in the Settings
+ * window, which overlays the library; `closeSettings` returns the library to
+ * clickable state.
+ */
+export async function openHistory(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByTestId("settings-view")).toBeVisible();
+  await page.getByRole("button", { name: "History" }).click();
+  await expect(page.getByTestId("history-settings-view")).toBeVisible({ timeout: 30000 });
+}
+
+/** Closes the Settings window so the library underneath is reachable again. */
+export async function closeSettings(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const windowEl = page.getByTestId("settings-window");
+    if ((await windowEl.count()) === 0) return;
+    // The close button beats Escape: a stacked dialog's exit animation can
+    // swallow the keypress, leaving the window open.
+    const close = page.getByRole("button", { name: "Close settings" });
+    if ((await close.count()) > 0) await close.click({ timeout: 3000 }).catch(() => {});
+    else await page.keyboard.press("Escape");
+    const closed = await windowEl
+      .waitFor({ state: "detached", timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (closed) return;
+  }
+  throw new Error("the settings window never closed");
+}
+
+/**
  * Leave the reader or a book detail view if one is open, then wait for the
  * library. Reader tests are order-independent: a previous test may have left
  * the reader or the detail Metadata panel open.

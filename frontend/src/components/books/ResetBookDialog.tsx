@@ -40,8 +40,8 @@ export function ResetBookDialog({ open, title, onConfirm, onCancel }: ResetBookD
         <div className="rounded-md border bg-muted/40 p-3 text-sm">
           <p className="font-medium">What stays</p>
           <p className="mt-1 text-muted-foreground">
-            The book keeps its identity and stays in the library or Reading history with its current
-            file, if it has one. It becomes unread.
+            The book keeps its identity and stays in the library or in detached records with its
+            current file, if it has one. It becomes unread.
           </p>
         </div>
         <p className="text-sm text-muted-foreground">Reset cannot be undone.</p>

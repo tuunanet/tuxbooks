@@ -7,6 +7,21 @@ export type AppView = "library" | "detail" | "reader";
 /** Sections inside the book detail view. */
 export type DetailTab = "overview" | "metadata" | "highlights" | "bookmarks";
 
+/**
+ * Sections inside the Settings window. History holds the detached records and
+ * forgotten books, so flows that detach or forget a book can open Settings
+ * straight to it.
+ */
+export type SettingsSectionId =
+  | "general"
+  | "viewer"
+  | "shortcuts"
+  | "folders"
+  | "sync"
+  | "history"
+  | "data"
+  | "about";
+
 export type SmartSectionId =
   | "all-books"
   | "recently-added"
@@ -30,8 +45,7 @@ export type SortPreferences = Partial<Record<string, BookSortId>>;
  */
 export type LibrarySection =
   | { kind: "smart"; id: SmartSectionId }
-  | { kind: "collection"; ids: number[] }
-  | { kind: "reading-history" };
+  | { kind: "collection"; ids: number[] };
 
 /** A stable key for remembering a place's sort across navigation. */
 export function sortPlaceKey(section: LibrarySection): string {
@@ -42,15 +56,12 @@ export function sortPlaceKey(section: LibrarySection): string {
       // Each selected set is its own place; sorting the ids makes a reordered
       // selection match the place it already is.
       return `collection:${[...section.ids].sort((a, b) => a - b).join(",")}`;
-    case "reading-history":
-      return "reading-history";
   }
 }
 
 /** The concrete order a place shows when the user has not chosen one. */
 export function defaultSortFor(section: LibrarySection): BookSortId {
   if (section.kind === "collection") return "date-added";
-  if (section.kind === "reading-history") return "last-read";
   switch (section.id) {
     case "all-books":
     case "recently-added":
@@ -134,6 +145,12 @@ export interface AppState {
    * the reader without changing the view.
    */
   settingsOpen: boolean;
+  /**
+   * The section the Settings window shows on open. Set by `open-settings`
+   * when a flow deep-links (detach notices, the Forget dialog), and by the
+   * window's own navigation afterwards; a plain open keeps the last choice.
+   */
+  settingsSection: SettingsSectionId;
 }
 
 export type AppAction =
@@ -162,7 +179,7 @@ export type AppAction =
   | { type: "set-library-query"; query: string }
   | { type: "set-format-filter"; formats: BookFormat[] }
   | { type: "set-library-sort"; sort: BookSortId }
-  | { type: "open-settings" }
+  | { type: "open-settings"; section?: SettingsSectionId }
   | { type: "close-settings" };
 
 export const initialAppState: AppState = {
@@ -178,6 +195,7 @@ export const initialAppState: AppState = {
   formatFilter: [],
   sortByPlace: {},
   settingsOpen: false,
+  settingsSection: "general",
 };
 
 type SettingsAction = Extract<AppAction, { type: "open-settings" | "close-settings" }>;
@@ -199,7 +217,12 @@ function isSettingsAction(action: AppAction): action is SettingsAction {
 
 function reduceSettings(state: AppState, action: SettingsAction): AppState {
   if (action.type === "open-settings") {
-    return state.settingsOpen ? state : { ...state, settingsOpen: true };
+    const next = {
+      ...state,
+      settingsOpen: true,
+      settingsSection: action.section ?? state.settingsSection,
+    };
+    return state.settingsOpen && next.settingsSection === state.settingsSection ? state : next;
   }
   return state.settingsOpen ? { ...state, settingsOpen: false } : state;
 }
