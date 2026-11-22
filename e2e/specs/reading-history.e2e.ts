@@ -1,7 +1,13 @@
 import { expect, test, type Page } from "../fixtures/electron-app.js";
 
 import { seededBookTitles } from "../setup/fixtures.js";
-import { ensureLibrary, openBookDetail, waitForLibraryView } from "./helpers.js";
+import {
+  closeSettings,
+  ensureLibrary,
+  openBookDetail,
+  openHistory,
+  waitForLibraryView,
+} from "./helpers.js";
 
 /**
  * Reading history (ADR 0014, ticket tuxbooks-ip6.5): a book with no file row
@@ -62,20 +68,20 @@ test.describe("reading history", () => {
     await waitForLibraryView(page);
     await expect(page.locator(`[aria-label="${seededBookTitles.epub} (EPUB)"]`)).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Reading history" }).click();
-    await expect(page.getByTestId("reading-history-view")).toBeVisible({ timeout: 30000 });
+    await openHistory(page);
     // Other suites may already have left books in this shared app's history;
     // find this journey's row by title instead of assuming it is alone.
-    const row = page.getByTestId("reading-history-book").filter({ hasText: seededBookTitles.epub });
+    const row = page.getByTestId("history-book").filter({ hasText: seededBookTitles.epub });
     await expect(row).toHaveCount(1, { timeout: 30000 });
-    await expect(row.getByTestId("reading-history-progress")).toHaveText("37% read");
-    await expect(row.getByTestId("reading-history-annotations")).toHaveText(annotationLabel);
+    await expect(row.getByTestId("history-progress")).toHaveText("37% read");
+    await expect(row.getByTestId("history-annotations")).toHaveText(annotationLabel);
 
     await page.evaluate(async (path) => {
       await window.tuxbooks!.invoke("import_paths", { paths: [path] });
     }, book.path);
 
     await expect(row).toHaveCount(0, { timeout: 30000 });
+    await closeSettings(page);
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await expect(page.locator(`[aria-label="${seededBookTitles.epub} (EPUB)"]`)).toHaveCount(1);
@@ -117,13 +123,12 @@ test.describe("reading history", () => {
       await window.tuxbooks!.invoke("remove_book", { bookId: sourceId });
     }, source.id);
 
-    await page.getByRole("button", { name: "Reading history" }).click();
-    const historyRow = page
-      .getByTestId("reading-history-book")
-      .filter({ hasText: seededBookTitles.epub });
+    await openHistory(page);
+    const historyRow = page.getByTestId("history-book").filter({ hasText: seededBookTitles.epub });
     await expect(historyRow).toHaveCount(1, { timeout: 30000 });
-    await expect(historyRow.getByTestId("reading-history-progress")).toHaveText("37% read");
+    await expect(historyRow.getByTestId("history-progress")).toHaveText("37% read");
 
+    await closeSettings(page);
     await page.getByRole("button", { name: "All Books" }).click();
     await waitForLibraryView(page);
     await openBookDetail(page, `${seededBookTitles.pdf} (PDF)`);
@@ -139,7 +144,7 @@ test.describe("reading history", () => {
       .locator("option", { hasText: seededBookTitles.epub })
       .first();
     const sourceValue = await sourceOption.getAttribute("value");
-    if (!sourceValue) throw new Error("the Reading-history edition is not a link candidate");
+    if (!sourceValue) throw new Error("the detached edition is not a link candidate");
     await page.getByTestId("link-edition-select").selectOption(sourceValue);
     await page.getByTestId("link-edition-confirm").click();
 
