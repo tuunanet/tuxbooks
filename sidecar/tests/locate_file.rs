@@ -203,6 +203,45 @@ async fn empty_duplicate_moves_to_reading_history() {
     );
 }
 
+/// The Locate duplicate detach remembers where the candidate's file was, so
+/// the record can show "Was at <path>" (tuxbooks-t9p.1).
+#[tokio::test(flavor = "multi_thread")]
+async fn detaching_a_duplicate_remembers_where_its_file_was() {
+    let env = setup().await;
+    let present = env.dir.join("present.epub");
+    std::fs::copy(minimal_epub(), &present).unwrap();
+    let missing = env.dir.join("missing.epub");
+    let size = std::fs::metadata(&present).unwrap().len() as i64;
+
+    let candidate = insert(&env.pool, &missing, "Old copy", size).await;
+    let _owner = insert(&env.pool, &present, "Machine Learning", size).await;
+    sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
+        .bind(file_id(&env.pool, candidate).await)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    let outcome = locate_book(&env.pool, candidate, &present, &env.covers, &[])
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, LocateOutcome::Detached { .. }),
+        "expected a detach, got {outcome:?}"
+    );
+
+    let row = reading_history::list(&env.pool, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == candidate)
+        .expect("the detached duplicate is in Reading history");
+    assert_eq!(
+        row.last_known_path.as_deref(),
+        Some(missing.to_string_lossy().into_owned().as_str()),
+        "the reader's copy is the candidate's own row"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn moving_a_file_row_to_a_detached_duplicate_clears_the_label() {
     let env = setup().await;

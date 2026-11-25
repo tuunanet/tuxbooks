@@ -393,6 +393,10 @@ async fn covered_by_watched_ancestor(pool: &SqlitePool, path: &str) -> Result<bo
 /// the scan to stop, so no book can land after the unwatch. Returns how many
 /// folders were actually listed.
 ///
+/// Per book the doomed rows are deleted unavailable-first, reader's-copy-last
+/// (tuxbooks-t9p.1): a single-row delete remembers the path only when it
+/// empties the book, so folder order must not decide which copy is remembered.
+///
 /// A folder inside another watched folder is refused (ADR 0010). The folder
 /// above watches the whole subtree recursively, and the watch list is kept
 /// flat, so the settings view never offers such a path; this refuses the case
@@ -449,10 +453,12 @@ pub async fn unwatch_locations(
     for path in &roots {
         for book in books::books_owned_by(&state.db, path).await? {
             if let Some(file_id) = book.file_id {
-                doomed.push((book.id, file_id));
+                doomed.push((book.id, file_id, book.available));
             }
         }
     }
+    // Reader's-copy last, per the ordering note on this function's doc.
+    doomed.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)).then(b.1.cmp(&a.1)));
 
     // Stop the taps first: a leftover row is retryable, a leftover watch keeps syncing.
     let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
@@ -474,7 +480,7 @@ pub async fn unwatch_locations(
     let mut processed = 0usize;
     let mut last_reported = 0usize;
     let mut last_flush = Instant::now();
-    for (book_id, file_id) in doomed {
+    for (book_id, file_id, _available) in doomed {
         delete_file_row_and_notify(state, events, file_id, book_id).await?;
         processed += 1;
         if processed % EVENT_BATCH_BOOKS == 0

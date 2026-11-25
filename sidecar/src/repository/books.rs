@@ -490,7 +490,7 @@ pub async fn list_reading_history(
                rp.progress_percent,
                (SELECT COUNT(*) FROM annotations a WHERE a.book_uid = br.uid)
                    AS annotation_count,
-               br.last_opened_at, br.metadata_state
+               br.last_opened_at, br.metadata_state, br.last_known_path
         FROM book_records br
         LEFT JOIN reading_progress rp ON rp.book_uid = br.uid
         WHERE NOT EXISTS (SELECT 1 FROM books b WHERE b.book_uid = br.uid)
@@ -587,22 +587,99 @@ pub async fn get_book_by_file_id(
 
 /// End a book's library membership: delete every file row that points at it.
 /// The durable book record, its reading progress, and its annotations stay.
+/// The record keeps the Last known path of the copy the reader opened
+/// (tuxbooks-t9p.1) until a file attaches again.
+///
+/// IMMEDIATE, not deferred: the path read must sit in the same write
+/// snapshot as the delete, and a deferred read-then-write upgrade fails
+/// outright against a concurrent writer (watcher, sync pass).
 pub async fn delete_book(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
-    let result = sqlx::query(
-        "DELETE FROM books WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)",
-    )
-    .bind(id)
-    .execute(pool)
-    .await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let removed = delete_book_tx(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(removed)
+}
+
+/// Transaction body of [`delete_book`], shared with the Locate duplicate
+/// detach, which runs inside its own transaction. The reader's copy is read
+/// before the delete: a multi-row delete visits rows in rowid order, so only
+/// this ordering stores the copy the reader opened rather than the row the
+/// delete happened to visit last.
+pub(crate) async fn delete_book_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: i64,
+) -> Result<bool, AppError> {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let Some(uid) = uid else {
+        return Ok(false);
+    };
+    let active_path = active_path_for_uid(tx, &uid).await?;
+    let result = sqlx::query("DELETE FROM books WHERE book_uid = ?1")
+        .bind(&uid)
+        .execute(&mut **tx)
+        .await?;
+    remember_last_known_path(tx, &uid, active_path).await?;
     Ok(result.rows_affected() > 0)
 }
 
-/// Delete one file row (one copy inside a folder being unwatched).
+/// The path of the copy the reader opens for a durable uid: an available copy
+/// first, then the lowest row id, then path (the active-file rule).
+pub(crate) async fn active_path_for_uid(
+    conn: &mut sqlx::SqliteConnection,
+    uid: &str,
+) -> Result<Option<String>, AppError> {
+    let path: Option<String> = sqlx::query_scalar(
+        "SELECT path FROM books WHERE book_uid = ?1 \
+         ORDER BY available DESC, id, path LIMIT 1",
+    )
+    .bind(uid)
+    .fetch_optional(conn)
+    .await?;
+    Ok(path)
+}
+
+/// Store the reader's copy as the record's Last known path once no file row
+/// remains bound to it. The NOT EXISTS guard keeps the hint cleared while any
+/// row survived, so the path is remembered only while the book is detached.
+pub(crate) async fn remember_last_known_path(
+    conn: &mut sqlx::SqliteConnection,
+    uid: &str,
+    active_path: Option<String>,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE book_records SET last_known_path = ?2 \
+         WHERE uid = ?1 AND NOT EXISTS (SELECT 1 FROM books WHERE book_uid = ?1)",
+    )
+    .bind(uid)
+    .bind(active_path)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Delete one file row (one copy inside a folder being unwatched). When it
+/// was the book's last row, the durable record keeps the Last known path of
+/// the copy the reader opened, which may be another row deleted in the same
+/// unwatch (tuxbooks-t9p.1). IMMEDIATE transaction, like [`delete_book`].
 pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, AppError> {
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let uid: Option<String> = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(uid) = uid else {
+        return Ok(false);
+    };
+    let active_path = active_path_for_uid(&mut tx, &uid).await?;
     let result = sqlx::query("DELETE FROM books WHERE id = ?1")
         .bind(file_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    remember_last_known_path(&mut tx, &uid, active_path).await?;
+    tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }
 

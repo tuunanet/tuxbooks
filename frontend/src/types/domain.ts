@@ -209,6 +209,11 @@ export interface ReadingHistoryBook {
   isEmptyDuplicate: boolean;
   /** Title of the library entry that owns the picked bytes, when known. */
   duplicateOfTitle: string | null;
+  /**
+   * Path of the copy the reader opened, kept from the last file-row deletion
+   * (Last known path). Null for records detached before the app stored it.
+   */
+  lastKnownPath: string | null;
   /** Links that outlived the book's file rows. */
   providerLinks?: ProviderLink[];
 }
@@ -266,6 +271,8 @@ export interface BookTrashEntry {
   replacementBookId: number | null;
   /** True when the fresh identity has progress or annotations; Restore needs a choice. */
   hasNewState: boolean;
+  /** Path of the copy the reader opened, from the trash snapshot; machine-local. */
+  lastKnownPath: string | null;
 }
 
 /**

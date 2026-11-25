@@ -102,11 +102,13 @@ pub(super) async fn restore_replace(
                 id, uid, created_at, title, subtitle, author, publisher, language,
                 isbn, description, publication_date, series, series_index, series_id,
                 cover_path, last_opened_at, progress_percent, annotation_count,
-                metadata_state
+                metadata_state, last_known_path
              )
              VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                (SELECT id FROM series WHERE name = ?12), ?14, ?15, ?16, ?17, ?18
+                (SELECT id FROM series WHERE name = ?12), ?14, ?15, ?16, ?17, ?18,
+                CASE WHEN EXISTS (SELECT 1 FROM books WHERE book_uid = ?2)
+                     THEN NULL ELSE ?19 END
              )
              RETURNING id",
         )
@@ -128,6 +130,7 @@ pub(super) async fn restore_replace(
         .bind(snapshot.book.progress_percent)
         .bind(snapshot.annotations.len() as i64)
         .bind(&snapshot.book.metadata_state)
+        .bind(&snapshot.book.last_known_path)
         .fetch_one(&mut *tx)
         .await?
     } else {
@@ -136,11 +139,13 @@ pub(super) async fn restore_replace(
                 uid, created_at, title, subtitle, author, publisher, language, isbn,
                 description, publication_date, series, series_index, series_id,
                 cover_path, last_opened_at, progress_percent, annotation_count,
-                metadata_state
+                metadata_state, last_known_path
              )
              VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                (SELECT id FROM series WHERE name = ?11), ?13, ?14, ?15, ?16, ?17
+                (SELECT id FROM series WHERE name = ?11), ?13, ?14, ?15, ?16, ?17,
+                CASE WHEN EXISTS (SELECT 1 FROM books WHERE book_uid = ?1)
+                     THEN NULL ELSE ?18 END
              )
              RETURNING id",
         )
@@ -161,6 +166,7 @@ pub(super) async fn restore_replace(
         .bind(snapshot.book.progress_percent)
         .bind(snapshot.annotations.len() as i64)
         .bind(&snapshot.book.metadata_state)
+        .bind(&snapshot.book.last_known_path)
         .fetch_one(&mut *tx)
         .await?
     };

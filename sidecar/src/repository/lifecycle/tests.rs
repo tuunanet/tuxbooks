@@ -240,3 +240,53 @@ async fn expired_trash_is_hidden_and_unrestorable() {
         .unwrap();
     assert!(restored.0 > 0, "the live entry restores under a real id");
 }
+
+/// A trash row snapshotted before the Last known path existed stays
+/// readable and simply has no path (tuxbooks-t9p.1). One bad row must not
+/// fail the whole listing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trash_row_from_before_the_last_known_path_stays_readable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let uid = "e".repeat(32);
+    sqlx::query(
+        "INSERT INTO book_trash (book_id, book_uid, snapshot_json, deleted_at, expires_at)
+         VALUES (0, ?1, ?2, '2026-11-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z')",
+    )
+    .bind(&uid)
+    .bind(shared_json(&uid, "Detached Long Ago"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = list_trash(&pool).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].title.as_deref(), Some("Detached Long Ago"));
+    assert!(
+        listed[0].last_known_path.is_none(),
+        "records detached before the change show no path"
+    );
+}
+
+/// The machine-portable snapshot that sync exchanges carries no Last known
+/// path: the folder names of one machine never cross to another
+/// (tuxbooks-t9p.1).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shared_snapshot_strips_the_last_known_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let uid = "f".repeat(32);
+    let mut local: Value = serde_json::from_str(&shared_json(&uid, "Local Only")).unwrap();
+    local["book"]["last_known_path"] = json!("/home/reader/Library/local.epub");
+    let local = local.to_string();
+
+    let shared = shared_snapshot_json(&pool, &local)
+        .await
+        .unwrap()
+        .expect("the snapshot is publishable");
+    let published: Value = serde_json::from_str(&shared).unwrap();
+    assert!(
+        published["book"]["last_known_path"].is_null(),
+        "the portable snapshot has no path: {published}"
+    );
+}
