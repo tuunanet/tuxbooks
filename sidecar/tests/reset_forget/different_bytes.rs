@@ -15,7 +15,7 @@ fn pick_copy(env: &Env, name: &str, source: &Path) -> PathBuf {
 async fn forget_without_a_file(env: &Env) -> (i64, i64, String) {
     env.write_book("book.epub", &minimal_epub());
     env.scan().await;
-    let book = imported_book(&env).await;
+    let book = imported_book(env).await;
     env.save_progress(book.id, 9.0).await;
     env.annotate(book.id, "epubcfi(/6/4!/4/2,/1:0,/1:8)").await;
     env.rpc("remove_book", json!({ "bookId": book.id })).await;
@@ -31,8 +31,11 @@ async fn import_other_book(env: &Env) -> Book {
     std::fs::create_dir_all(&folder).unwrap();
     let other = folder.join("other.epub");
     std::fs::copy(navigation_epub(), &other).unwrap();
-    env.rpc("import_paths", json!({ "paths": [other.to_string_lossy()] }))
-        .await;
+    env.rpc(
+        "import_paths",
+        json!({ "paths": [other.to_string_lossy()] }),
+    )
+    .await;
     env.books()
         .await
         .into_iter()
@@ -217,7 +220,8 @@ async fn restoring_without_the_file_leaves_every_library_book_alone() {
     assert_eq!(library.len(), 2, "both library entries survive");
     let fresh = library.iter().find(|entry| entry.id == fresh_id).unwrap();
     assert_eq!(
-        fresh.path, path.to_string_lossy(),
+        fresh.path,
+        path.to_string_lossy(),
         "the fresh identity keeps the Forget-time file"
     );
     assert!(library.iter().any(|entry| entry.id == owner.id));
@@ -249,7 +253,10 @@ async fn the_merge_modes_are_refused_on_different_bytes() {
             )
             .await;
         assert!(
-            err["error"]["message"].as_str().unwrap().contains("do not match"),
+            err["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("do not match"),
             "{mode} names the byte mismatch: {err}"
         );
     }
@@ -293,7 +300,10 @@ async fn the_lossless_modes_only_follow_a_different_bytes_report() {
     );
 
     let err = env
-        .rpc_raw("restore_book", json!({ "trashId": trash_id, "mode": "without_file" }))
+        .rpc_raw(
+            "restore_book",
+            json!({ "trashId": trash_id, "mode": "without_file" }),
+        )
         .await;
     assert!(
         err["error"]["message"]

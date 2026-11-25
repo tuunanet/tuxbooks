@@ -210,7 +210,10 @@ pub async fn restore(
 /// (tuxbooks-t9p.3): the record comes back under its own uid with no file,
 /// the picked file and every library book are left alone, and the trash
 /// entry is consumed.
-pub async fn restore_detached(pool: &SqlitePool, trash_id: i64) -> Result<RestoreOutcome, AppError> {
+pub async fn restore_detached(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<RestoreOutcome, AppError> {
     let Some((_, snapshot)) = pending_row(pool, trash_id).await? else {
         return Ok(RestoreOutcome {
             status: RestoreStatus::NotFound,
