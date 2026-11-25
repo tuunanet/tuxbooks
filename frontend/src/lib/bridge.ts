@@ -193,10 +193,7 @@ export function listBookTrash(): Promise<BookTrashEntry[]> {
   return invoke("list_book_trash");
 }
 
-/**
- * Restore a Forgotten book: silent when the replacement holds no new state,
- * `status: "conflict"` otherwise; `pickedPath` restores with the picked file.
- */
+/** Restore a Forgotten book; `pickedPath` restores with the picked file. */
 export function restoreBook(
   trashId: number,
   mode?: RestoreMode,
