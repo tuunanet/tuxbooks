@@ -1,6 +1,6 @@
 use super::*;
 use crate::db::connection::init_pool;
-use crate::domain::NewBook;
+use crate::domain::{NewBook, RestoreStatus};
 use crate::sync::identity::ensure_book_identity;
 use serde_json::Value;
 use sqlx::error::{DatabaseError, ErrorKind};
