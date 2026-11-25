@@ -9,3 +9,4 @@ mod common;
 mod contention;
 mod last_known_path;
 mod restore_pick;
+mod restore_sync;

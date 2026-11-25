@@ -37,7 +37,7 @@ pub async fn restore_book(
         None => None,
     };
 
-    let outcome = lifecycle::restore(
+    let mut outcome = lifecycle::restore(
         &state.db,
         trash_id,
         mode,
@@ -54,11 +54,18 @@ pub async fn restore_book(
     // A pick no library book owned attaches to the restored record, which
     // comes back detached; the card below must carry the new file.
     if outcome.status == RestoreStatus::Restored {
-        if let (Some(pick), Some(book_id), Some(book_uid)) =
-            (picked.as_ref(), outcome.book_id, outcome.book_uid.clone())
-        {
+        if let (Some(pick), Some(book_uid)) = (picked.as_ref(), outcome.book_uid.clone()) {
             if pick.replacement.is_none() {
-                attach_picked_file(state, book_id, &book_uid, pick).await?;
+                publish_restore(state).await?;
+                // The publish pass projects the restore back from the mirror,
+                // and the projection can move the durable id; the uid is the
+                // stable key, so attach through the id the record holds now.
+                if let Some(current) = durable_id(&state.db, &book_uid).await? {
+                    outcome.book_id = Some(current);
+                }
+                if let Some(book_id) = outcome.book_id {
+                    attach_picked_file(state, book_id, &book_uid, pick).await?;
+                }
             }
         }
     }
@@ -129,11 +136,45 @@ async fn validate_pick(
     })
 }
 
+/// With sync connected the restore commit is not shared yet: the mirror
+/// holds the old uid's tombstone open until a pass publishes the restore,
+/// and binding the picked file's hash before that resolves no live identity
+/// and mints a fresh one, so the file lands off the restored record
+/// (tuxbooks-t9p.4). A pass here drains the restore's dirty row; the op
+/// carries the write-time clock the trash trigger stamped, so nothing is
+/// fabricated, and it publishes a restore, never a shared delete. If the
+/// pass fails, attaching would fork the identity, so the pick is refused;
+/// the restore stays committed and the file can be attached after sync
+/// recovers.
+async fn publish_restore(state: &AppState) -> Result<(), AppError> {
+    let Some(service) = state.sync.as_deref() else {
+        return Ok(());
+    };
+    if !service.status().await?.enabled {
+        return Ok(());
+    }
+    service.run_pass().await.map_err(|err| {
+        AppError::InvalidInput(format!(
+            "could not publish the restore before attaching the file: {err}"
+        ))
+    })
+}
+
+/// The durable id a uid holds right now. The publish pass projects the
+/// restore echo from the mirror, and the projection can move the id the
+/// restore outcome reported; the uid is the stable key.
+async fn durable_id(pool: &sqlx::SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?;
+    Ok(id)
+}
+
 /// Attach a validated pick to a freshly restored record. The strict relink
 /// re-checks the bytes against the snapshot aliases restore re-upserted, so
 /// a pick that passed validation cannot land on the wrong book.
-async fn attach_picked_file(
-    state: &AppState,
+async fn attach_picked_file(    state: &AppState,
     book_id: i64,
     book_uid: &str,
     pick: &ValidatedPick,
