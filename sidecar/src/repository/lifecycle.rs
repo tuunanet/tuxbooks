@@ -24,7 +24,7 @@ mod tests;
 
 pub use forget::{forget, reset};
 pub use remote::{apply_remote_discard, apply_remote_forget, apply_remote_restore};
-pub use restore::{list_trash, restore};
+pub use restore::{list_trash, restore, restore_aliases};
 pub use snapshot::shared_snapshot_json;
 
 use chrono::{Duration, Utc};

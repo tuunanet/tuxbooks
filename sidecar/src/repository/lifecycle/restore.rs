@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::domain::{BookTrashEntry, RestoreConflict, RestoreMode, RestoreOutcome, RestoreStatus};
 use crate::error::AppError;
-use crate::repository::metadata;
+use crate::repository::{books, metadata};
 
 use super::merge::merge_into;
 use super::now;
@@ -69,27 +69,22 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
     Ok(entries)
 }
 
-/// Restore a forgotten book. `None` restores silently when the fresh identity
-/// has no new progress or annotations and reports a conflict when it does.
-/// Replace restores the old record, Keep discards the snapshot, and Merge
-/// folds the old state into the current identity (newer progress, union of
-/// annotations).
+/// Restore a forgotten book, optionally with an explicit replacement: the
+/// library book that owns the file the user picked. The replacement takes
+/// the trash row's Forget-time uid when given, and the same id drives the
+/// conflict check, the Keep / Merge rounds, and the restore itself, so Keep
+/// and Merge cannot fall through to a detached restore. `None` restores
+/// silently when the fresh identity has no new user state and reports a
+/// conflict when it does. Replace restores the old record, Keep discards the
+/// snapshot, and Merge folds the old state into the current identity (newer
+/// progress, union of annotations).
 pub async fn restore(
     pool: &SqlitePool,
     trash_id: i64,
     mode: Option<RestoreMode>,
+    replacement: Option<i64>,
 ) -> Result<RestoreOutcome, AppError> {
-    let row: Option<SnapshotRow> = sqlx::query_as(
-        "SELECT id, book_id, book_uid, replacement_book_uid, snapshot_json,
-                deleted_at, expires_at
-         FROM book_trash
-         WHERE id = ?1 AND restored_at IS NULL AND expires_at > ?2",
-    )
-    .bind(trash_id)
-    .bind(now())
-    .fetch_optional(pool)
-    .await?;
-    let Some(row) = row else {
+    let Some((row, snapshot)) = pending_row(pool, trash_id).await? else {
         return Ok(RestoreOutcome {
             status: RestoreStatus::NotFound,
             book_id: None,
@@ -98,16 +93,31 @@ pub async fn restore(
             conflict: None,
         });
     };
-    let snapshot: BookSnapshot = serde_json::from_str(&row.snapshot_json)
-        .map_err(|err| AppError::InvalidInput(format!("trash snapshot is unreadable: {err}")))?;
-    let replacement_id = match &row.replacement_book_uid {
-        Some(uid) => {
-            sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-                .bind(uid)
-                .fetch_optional(pool)
-                .await?
+    let replacement_id = match replacement {
+        // A picked path promised this book; if it vanished between the pick
+        // and now, say so instead of quietly restoring detached.
+        Some(id) => {
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT id FROM book_records WHERE id = ?1")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await?;
+            if exists.is_none() {
+                return Err(AppError::InvalidInput(
+                    "the book that owned the picked file is no longer in the library".into(),
+                ));
+            }
+            Some(id)
         }
-        None => None,
+        None => match &row.replacement_book_uid {
+            Some(uid) => {
+                sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+                    .bind(uid)
+                    .fetch_optional(pool)
+                    .await?
+            }
+            None => None,
+        },
     };
 
     if let Some(replacement_id) = replacement_id {
@@ -198,6 +208,42 @@ async fn mark_restored(pool: &SqlitePool, trash_id: i64, resolution: &str) -> Re
     Ok(())
 }
 
+/// One open, unexpired trash entry with its parsed snapshot. The restore and
+/// the pick validation read through this so both see the same entry.
+async fn pending_row(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<Option<(SnapshotRow, BookSnapshot)>, AppError> {
+    let row: Option<SnapshotRow> = sqlx::query_as(
+        "SELECT id, book_id, book_uid, replacement_book_uid, snapshot_json,
+                deleted_at, expires_at
+         FROM book_trash
+         WHERE id = ?1 AND restored_at IS NULL AND expires_at > ?2",
+    )
+    .bind(trash_id)
+    .bind(now())
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let snapshot: BookSnapshot = serde_json::from_str(&row.snapshot_json)
+        .map_err(|err| AppError::InvalidInput(format!("trash snapshot is unreadable: {err}")))?;
+    Ok(Some((row, snapshot)))
+}
+
+/// The content hashes the entry would restore onto, for pick validation in
+/// the command layer. `None` when the entry is not restorable; the restore
+/// call then reports NotFound and nothing needs checking.
+pub async fn restore_aliases(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<Option<Vec<String>>, AppError> {
+    Ok(pending_row(pool, trash_id)
+        .await?
+        .map(|(_, snapshot)| snapshot.aliases))
+}
+
 async fn has_new_state(pool: &SqlitePool, book_id: i64) -> Result<bool, AppError> {
     Ok(restore_conflict(pool, book_id).await?.is_some())
 }
@@ -206,29 +252,26 @@ pub(super) async fn restore_conflict(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<Option<RestoreConflict>, AppError> {
-    let progress: Option<f64> = sqlx::query_scalar(
-        "SELECT rp.progress_percent FROM reading_progress rp
-         JOIN book_records br ON br.uid = rp.book_uid
-         WHERE br.id = ?1",
-    )
-    .bind(book_id)
-    .fetch_optional(pool)
-    .await?
-    .flatten();
-    let annotation_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM annotations a
-         JOIN book_records br ON br.uid = a.book_uid
-         WHERE br.id = ?1",
-    )
-    .bind(book_id)
-    .fetch_one(pool)
-    .await?;
-    if progress.is_none() && annotation_count == 0 {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(uid) = uid else {
+        return Ok(None);
+    };
+    // All six kinds of user state ask the question (tuxbooks-t9p), the same
+    // set Locate File counts before it merges.
+    let state = books::user_state(pool, &uid).await?;
+    if !state.has_state() {
         return Ok(None);
     }
     Ok(Some(RestoreConflict {
-        progress_percent: progress,
-        annotation_count,
+        progress_percent: state.progress_percent,
+        annotation_count: state.annotations,
+        collections: state.collections,
+        has_metadata_overrides: state.has_metadata_overrides,
+        provider_links: state.provider_links,
+        edition_links: state.edition_links,
     }))
 }
 

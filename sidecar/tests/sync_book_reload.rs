@@ -190,7 +190,9 @@ async fn a_shared_forget_and_restore_ask_the_other_renderer_to_reload() {
     // identity's record away from the card B's renderer is showing.
     let trash = lifecycle::list_trash(&a.pool).await.unwrap();
     let entry = trash.first().expect("A holds the open trash entry");
-    lifecycle::restore(&a.pool, entry.id, None).await.unwrap();
+    lifecycle::restore(&a.pool, entry.id, None, None)
+        .await
+        .unwrap();
     run(&a).await;
     b.events.lock().unwrap().clear();
     run(&b).await;

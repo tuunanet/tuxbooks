@@ -217,7 +217,7 @@ async fn expired_trash_is_hidden_and_unrestorable() {
     let listed = list_trash(&pool).await.unwrap();
     assert_eq!(listed.len(), 1, "the expired entry is hidden");
     assert_eq!(listed[0].book_uid, live_uid);
-    let refused = restore(&pool, expired_id, None).await.unwrap();
+    let refused = restore(&pool, expired_id, None, None).await.unwrap();
     assert_eq!(
         refused.status,
         RestoreStatus::NotFound,
@@ -231,7 +231,7 @@ async fn expired_trash_is_hidden_and_unrestorable() {
             == 0,
         "the refused restore wrote nothing"
     );
-    let outcome = restore(&pool, live_id, None).await.unwrap();
+    let outcome = restore(&pool, live_id, None, None).await.unwrap();
     assert_eq!(outcome.status, RestoreStatus::Restored);
     let restored: (i64,) = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
         .bind(&live_uid)
