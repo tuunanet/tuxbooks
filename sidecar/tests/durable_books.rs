@@ -1009,6 +1009,8 @@ async fn the_0019_upgrade_unions_collections_metadata_and_last_opened() {
 /// A database from the previous release upgrades in place: records detached
 /// before the change get the empty default and simply have no path, while a
 /// book detached after the upgrade remembers the copy the reader opened.
+/// The fixture seeds through the old release's import path and detaches with
+/// raw SQL, the way Remove worked before the column existed.
 #[tokio::test]
 async fn migration_0033_adds_last_known_path_with_an_empty_default() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1028,8 +1030,6 @@ async fn migration_0033_adds_last_known_path_with_an_empty_default() {
         .await
         .unwrap();
 
-    // Seed through the import path of the old release, then detach with raw
-    // SQL the way Remove did before the column existed.
     books::upsert_book(
         &fixture,
         &NewBook {
@@ -1069,7 +1069,6 @@ async fn migration_0033_adds_last_known_path_with_an_empty_default() {
         "records detached before the change have no path"
     );
 
-    // A book detached after the upgrade stores the reader's copy.
     books::upsert_book(
         &pool,
         &NewBook {

@@ -535,10 +535,11 @@ pub async fn get_book_by_file_id(
 /// The durable book record, its reading progress, and its annotations stay.
 /// The record keeps the Last known path of the copy the reader opened
 /// (tuxbooks-t9p.1) until a file attaches again.
+///
+/// IMMEDIATE, not deferred: the path read must sit in the same write
+/// snapshot as the delete, and a deferred read-then-write upgrade fails
+/// outright against a concurrent writer (watcher, sync pass).
 pub async fn delete_book(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
-    // IMMEDIATE, not deferred: the path read must sit in the same write
-    // snapshot as the delete, and a deferred read-then-write upgrade fails
-    // outright against a concurrent writer (watcher, sync pass).
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let removed = delete_book_tx(&mut tx, id).await?;
     tx.commit().await?;
@@ -546,7 +547,10 @@ pub async fn delete_book(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
 }
 
 /// Transaction body of [`delete_book`], shared with the Locate duplicate
-/// detach, which runs inside its own transaction.
+/// detach, which runs inside its own transaction. The reader's copy is read
+/// before the delete: a multi-row delete visits rows in rowid order, so only
+/// this ordering stores the copy the reader opened rather than the row the
+/// delete happened to visit last.
 pub(crate) async fn delete_book_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
@@ -558,9 +562,6 @@ pub(crate) async fn delete_book_tx(
     let Some(uid) = uid else {
         return Ok(false);
     };
-    // Read the reader's copy before the delete: a multi-row delete visits
-    // rows in rowid order, so only this ordering stores the copy the reader
-    // opened rather than the row that happened to be visited last.
     let active_path = active_path_for_uid(tx, &uid).await?;
     let result = sqlx::query("DELETE FROM books WHERE book_uid = ?1")
         .bind(&uid)
@@ -608,10 +609,8 @@ pub(crate) async fn remember_last_known_path(
 /// Delete one file row (one copy inside a folder being unwatched). When it
 /// was the book's last row, the durable record keeps the Last known path of
 /// the copy the reader opened, which may be another row deleted in the same
-/// unwatch (tuxbooks-t9p.1).
+/// unwatch (tuxbooks-t9p.1). IMMEDIATE transaction, like [`delete_book`].
 pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, AppError> {
-    // IMMEDIATE, like [`delete_book`]: the path read shares the write
-    // snapshot with the delete instead of racing a concurrent writer.
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let uid: Option<String> = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
         .bind(file_id)
