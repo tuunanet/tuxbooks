@@ -180,7 +180,7 @@ export interface TuxbooksApi {
   onEvent(name: string, callback: (payload: unknown) => void): () => void;
   pickDirectory(): Promise<string | null>;
   pickSyncFolder(): Promise<string | null>;
-  pickBookFile(): Promise<string | null>;
+  pickBookFile(trashId?: number): Promise<string | null>;
   pickBookFiles(): Promise<string[]>;
   pickCoverImage(): Promise<string | null>;
   revealBook(bookId: number): Promise<void>;
