@@ -187,6 +187,11 @@ pub struct ReadingHistoryBook {
     /// still resolves to a durable record.
     #[sqlx(default)]
     pub duplicate_of_title: Option<String>,
+    /// Path of the copy the reader opened, kept from the last file-row
+    /// deletion (Last known path, tuxbooks-t9p.1). NULL for records detached
+    /// before the change.
+    #[sqlx(default)]
+    pub last_known_path: Option<String>,
     /// Provider links survive the last file row leaving, so Reading history
     /// can show where the book is tracked elsewhere.
     #[sqlx(skip)]

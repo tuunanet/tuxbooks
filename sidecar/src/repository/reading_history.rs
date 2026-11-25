@@ -35,7 +35,8 @@ pub async fn list(
 }
 
 /// Drop the stale file rows and record the entry that owns the picked bytes,
-/// in one transaction. The durable record stays for Reading history.
+/// in one transaction. The durable record stays for Reading history and keeps
+/// the Last known path of the copy the reader opened (tuxbooks-t9p.1).
 pub async fn detach_duplicate(
     pool: &SqlitePool,
     id: i64,
@@ -56,10 +57,20 @@ pub async fn detach_duplicate(
     .bind(duplicate_of_uid)
     .execute(&mut *tx)
     .await?;
-    sqlx::query("DELETE FROM books WHERE book_uid = (SELECT uid FROM book_records WHERE id = ?1)")
-        .bind(id)
+    let uid: Option<String> =
+        sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(uid) = uid else {
+        return Ok(());
+    };
+    let active_path = books::active_path_for_uid(&mut *tx, &uid).await?;
+    sqlx::query("DELETE FROM books WHERE book_uid = ?1")
+        .bind(&uid)
         .execute(&mut *tx)
         .await?;
+    books::remember_last_known_path(&mut *tx, &uid, active_path).await?;
     tx.commit().await?;
     Ok(())
 }
