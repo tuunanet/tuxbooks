@@ -19,8 +19,8 @@ pub use library::{
     StorageStats,
 };
 pub use lifecycle::{
-    BookTrashEntry, BulkForgetOutcome, ForgetOutcome, RestoreConflict, RestoreMode, RestoreOutcome,
-    RestoreStatus,
+    BookTrashEntry, BulkForgetOutcome, ForgetOutcome, RestoreConflict, RestoreDifferentBytes,
+    RestoreMode, RestoreOutcome, RestoreStatus,
 };
 pub use metadata::{BookMetadata, MetadataFields, MetadataOverridden};
 pub use provider::{ProviderLink, ProviderReadingStatus};

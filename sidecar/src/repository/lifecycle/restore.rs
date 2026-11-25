@@ -3,7 +3,10 @@
 
 use sqlx::SqlitePool;
 
-use crate::domain::{BookTrashEntry, RestoreConflict, RestoreMode, RestoreOutcome, RestoreStatus};
+use crate::domain::{
+    BookTrashEntry, RestoreConflict, RestoreDifferentBytes, RestoreMode, RestoreOutcome,
+    RestoreStatus,
+};
 use crate::error::AppError;
 use crate::repository::{books, metadata};
 
@@ -91,6 +94,7 @@ pub async fn restore(
             book_uid: None,
             replaced_book_ids: Vec::new(),
             conflict: None,
+            different_bytes: None,
         });
     };
     let replacement_id = match replacement {
@@ -129,6 +133,7 @@ pub async fn restore(
                 book_uid: row.replacement_book_uid.clone(),
                 replaced_book_ids: Vec::new(),
                 conflict,
+                different_bytes: None,
             });
         }
 
@@ -146,6 +151,7 @@ pub async fn restore(
                     book_uid,
                     replaced_book_ids: Vec::new(),
                     conflict: None,
+                    different_bytes: None,
                 });
             }
             Some(RestoreMode::Merge) => {
@@ -162,6 +168,7 @@ pub async fn restore(
                     book_uid,
                     replaced_book_ids: Vec::new(),
                     conflict: None,
+                    different_bytes: None,
                 });
             }
             _ => {}
@@ -195,7 +202,76 @@ pub async fn restore(
         book_uid: Some(snapshot.book.uid.clone()),
         replaced_book_ids,
         conflict: None,
+        different_bytes: None,
     })
+}
+
+/// Restore the entry detached, for the lossless different-bytes choices
+/// (tuxbooks-t9p.3): the record comes back under its own uid with no file,
+/// the picked file and every library book are left alone, and the trash
+/// entry is consumed.
+pub async fn restore_detached(pool: &SqlitePool, trash_id: i64) -> Result<RestoreOutcome, AppError> {
+    let Some((_, snapshot)) = pending_row(pool, trash_id).await? else {
+        return Ok(RestoreOutcome {
+            status: RestoreStatus::NotFound,
+            book_id: None,
+            book_uid: None,
+            replaced_book_ids: Vec::new(),
+            conflict: None,
+            different_bytes: None,
+        });
+    };
+    // The Forget-time fresh identity keeps its file and its id here, so only
+    // the old record's id can move on a renderer.
+    let mut replaced_book_ids: Vec<i64> = Vec::new();
+    let old_id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&snapshot.book.uid)
+        .fetch_optional(pool)
+        .await?;
+    if let Some(id) = old_id {
+        replaced_book_ids.push(id);
+    }
+    let restored_id = restore_replace(pool, &snapshot, None).await?;
+    replaced_book_ids.retain(|id| *id != restored_id);
+    replaced_book_ids.sort_unstable();
+    replaced_book_ids.dedup();
+    mark_restored(pool, trash_id, "restore").await?;
+    Ok(RestoreOutcome {
+        status: RestoreStatus::Restored,
+        book_id: Some(restored_id),
+        book_uid: Some(snapshot.book.uid.clone()),
+        replaced_book_ids,
+        conflict: None,
+        different_bytes: None,
+    })
+}
+
+/// The forgotten book's identity and snapshot state, for a pick whose bytes
+/// match none of the snapshot's hashes. `owner_book_id` is the durable book
+/// that owns the picked file, resolved by the command layer. `None` when the
+/// entry is no longer restorable.
+pub async fn restore_other_bytes(
+    pool: &SqlitePool,
+    trash_id: i64,
+    owner_book_id: Option<i64>,
+) -> Result<Option<RestoreDifferentBytes>, AppError> {
+    let Some((_, snapshot)) = pending_row(pool, trash_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(RestoreDifferentBytes {
+        title: snapshot.book.title.clone(),
+        author: snapshot.book.author.clone(),
+        progress_percent: snapshot
+            .progress
+            .as_ref()
+            .and_then(|progress| progress.progress_percent)
+            .or(snapshot.book.progress_percent),
+        annotation_count: snapshot.annotations.len() as i64,
+        collections: snapshot.collections.len() as i64,
+        has_metadata_overrides: snapshot.overrides.is_some(),
+        provider_links: snapshot.providers.len() as i64,
+        owner_book_id,
+    }))
 }
 
 async fn mark_restored(pool: &SqlitePool, trash_id: i64, resolution: &str) -> Result<(), AppError> {
