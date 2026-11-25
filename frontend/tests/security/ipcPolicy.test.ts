@@ -216,6 +216,66 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
     });
   });
 
+  describe("restore_book with a picked path (T-7: only the user's pick)", () => {
+    const picked = issued({ "book-file": ["/tmp/picked.epub"] });
+
+    it("accepts an issued book-file path next to the trash id", () => {
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 1, pickedPath: "/tmp/picked.epub" },
+          picked,
+        ),
+      ).not.toThrow();
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 1, mode: "replace", pickedPath: "/tmp/picked.epub" },
+          picked,
+        ),
+      ).not.toThrow();
+    });
+
+    it("rejects a path the dialog never issued", () => {
+      expect(() =>
+        validateInvokeParams("restore_book", { trashId: 1, pickedPath: "/etc/passwd" }, picked),
+      ).toThrow(/not issued/);
+    });
+
+    it("rejects a path issued under another kind", () => {
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 1, pickedPath: "/tmp/picked.epub" },
+          issued({ directory: ["/tmp/picked.epub"] }),
+        ),
+      ).toThrow(/not issued/);
+    });
+
+    it("rejects malformed picked paths even when issued", () => {
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 1, pickedPath: "relative/pick.epub" },
+          issued({ "book-file": ["relative/pick.epub"] }),
+        ),
+      ).toThrow(/invalid pickedPath/);
+      expect(() =>
+        validateInvokeParams("restore_book", { trashId: 1, pickedPath: 42 }, picked),
+      ).toThrow(/invalid pickedPath/);
+    });
+
+    it("still requires the trash id next to an issued path", () => {
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 0, pickedPath: "/tmp/picked.epub" },
+          picked,
+        ),
+      ).toThrow(/invalid trashId/);
+    });
+  });
+
   describe("import_paths", () => {
     it("accepts dialog-issued and external (drag-drop) absolute paths", () => {
       const params = { paths: ["/home/user/Books", "/mnt/data/novel.epub"] };
