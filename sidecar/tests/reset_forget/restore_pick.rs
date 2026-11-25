@@ -141,7 +141,6 @@ async fn a_pick_owned_by_a_stateless_book_replaces_silently() {
     let path = env.write_book("book.epub", &minimal_epub());
     env.scan().await;
     let book = imported_book(&env).await;
-    let old_uid = book.book_uid.clone().unwrap();
     env.save_progress(book.id, 27.0).await;
     env.annotate(book.id, "epubcfi(/6/4!/4/2,/1:0,/1:8)").await;
     let outcome = env.rpc("forget_book", json!({ "bookId": book.id })).await;
