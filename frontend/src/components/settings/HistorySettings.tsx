@@ -429,6 +429,7 @@ export function HistorySettings() {
                     entry={entry}
                     busy={restoreBusy}
                     onRestore={(target) => void runRestore(target)}
+                    onRestoreWithoutFile={(target) => void runRestore(target)}
                   />
                 ))}
               </ul>

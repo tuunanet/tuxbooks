@@ -10,7 +10,7 @@ import { AppStateProvider } from "@/state/AppStateProvider";
 import { ImportProvider } from "@/state/ImportProvider";
 import { LibraryDataProvider } from "@/state/LibraryDataProvider";
 import { makeBook, makeBookTrashEntry, makeReadingHistoryBook } from "./factories";
-import { invokeMock, mockInvoke } from "./mocks/bridge";
+import { invokeMock, mockInvoke, pickBookFileMock } from "./mocks/bridge";
 
 function baseResponses(
   history = [makeReadingHistoryBook({ id: 41 })],
@@ -218,6 +218,28 @@ describe("History Forget and restore", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("restore_book", { trashId: 7 });
     });
+    expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+  });
+
+  it("restores without a file straight from the quiet button", async () => {
+    mockInvoke({
+      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
+      restore_book: {
+        status: "restored",
+        bookId: 41,
+        bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+        conflict: null,
+      },
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-without-file-7"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("restore_book", { trashId: 7 });
+    });
+    expect(pickBookFileMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
   });
 
