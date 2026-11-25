@@ -69,6 +69,7 @@ export function makeReadingHistoryBook(
     metadataState: "available",
     isEmptyDuplicate: false,
     duplicateOfTitle: null,
+    lastKnownPath: null,
     providerLinks: [],
     ...overrides,
   };
@@ -87,6 +88,7 @@ export function makeBookTrashEntry(overrides: Partial<BookTrashEntry> = {}): Boo
     annotationCount: 2,
     replacementBookId: 51,
     hasNewState: false,
+    lastKnownPath: null,
     ...overrides,
   };
 }

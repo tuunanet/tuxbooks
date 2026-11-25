@@ -91,6 +91,20 @@ describe("HistorySettings", () => {
     expect(screen.queryByTestId("history-duplicate-of")).not.toBeInTheDocument();
   });
 
+  it("shows where the file was on a detached row", async () => {
+    renderHistory([makeReadingHistoryBook({ id: 41, lastKnownPath: "/books/willows.epub" })]);
+
+    const wasAt = await screen.findByTestId("history-was-at");
+    expect(wasAt).toHaveTextContent("Was at /books/willows.epub");
+  });
+
+  it("leaves the was-at line off records detached before this change", async () => {
+    renderHistory([makeReadingHistoryBook({ id: 41, lastKnownPath: null })]);
+
+    await screen.findByTestId("history-book");
+    expect(screen.queryByTestId("history-was-at")).not.toBeInTheDocument();
+  });
+
   it("searches detached records through the sidecar", async () => {
     renderHistory([makeReadingHistoryBook({ title: "Searchable History" })]);
 
@@ -157,6 +171,25 @@ describe("HistorySettings", () => {
 
     expect(screen.getByTestId("recently-forgotten")).toHaveTextContent("Old Copy");
     expect(screen.getByTestId("recently-forgotten")).toHaveTextContent("restorable for 30 days");
+  });
+
+  it("shows where the forgotten file was on a trash row", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          title: "Old Copy",
+          lastKnownPath: "/books/old-copy.epub",
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    const wasAt = await screen.findByTestId("book-trash-was-at");
+    expect(wasAt).toHaveTextContent("Was at /books/old-copy.epub");
   });
 
   it("says when nothing is waiting to be restored", async () => {

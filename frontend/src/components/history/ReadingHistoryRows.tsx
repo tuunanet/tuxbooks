@@ -80,6 +80,11 @@ export function HistoryBookRow({
             ) : null}
           </p>
         ) : null}
+        {book.lastKnownPath ? (
+          <p data-testid="history-was-at" className="mt-1 truncate text-xs text-muted-foreground">
+            Was at <span className="font-mono">{book.lastKnownPath}</span>
+          </p>
+        ) : null}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="history-progress">{progress}</span>
           <span data-testid="history-annotations">{annotations}</span>
@@ -156,6 +161,11 @@ export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowPro
         {entry.hasNewState ? (
           <p data-testid="book-trash-new-state" className="mt-1 text-xs text-muted-foreground">
             The current book has new reading data; restoring asks what to do.
+          </p>
+        ) : null}
+        {entry.lastKnownPath ? (
+          <p data-testid="book-trash-was-at" className="mt-1 text-xs text-muted-foreground">
+            Was at <span className="font-mono">{entry.lastKnownPath}</span>
           </p>
         ) : null}
       </div>

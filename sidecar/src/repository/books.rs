@@ -536,7 +536,10 @@ pub async fn get_book_by_file_id(
 /// The record keeps the Last known path of the copy the reader opened
 /// (tuxbooks-t9p.1) until a file attaches again.
 pub async fn delete_book(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
-    let mut tx = pool.begin().await?;
+    // IMMEDIATE, not deferred: the path read must sit in the same write
+    // snapshot as the delete, and a deferred read-then-write upgrade fails
+    // outright against a concurrent writer (watcher, sync pass).
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let removed = delete_book_tx(&mut tx, id).await?;
     tx.commit().await?;
     Ok(removed)
@@ -608,7 +611,9 @@ pub(crate) async fn remember_last_known_path(
 /// the copy the reader opened, which may be another row deleted in the same
 /// unwatch (tuxbooks-t9p.1).
 pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, AppError> {
-    let mut tx = pool.begin().await?;
+    // IMMEDIATE, like [`delete_book`]: the path read shares the write
+    // snapshot with the delete instead of racing a concurrent writer.
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let uid: Option<String> =
         sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
             .bind(file_id)
