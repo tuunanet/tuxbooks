@@ -249,6 +249,12 @@ export function HistorySettings() {
           setRestoreConflict(outcome.conflict);
           return;
         }
+        if (outcome.status === "different_bytes") {
+          setError(
+            "The picked file is not the one this book had, so nothing was attached; the trash entry is unchanged.",
+          );
+          return;
+        }
         setRestoreTarget(null);
         setRestorePick(undefined);
         setRestoreConflict(null);

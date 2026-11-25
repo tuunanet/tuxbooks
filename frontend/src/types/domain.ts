@@ -221,7 +221,7 @@ export interface ReadingHistoryBook {
 /** How to resolve a restore when the fresh identity already has new state. */
 export type RestoreMode = "replace" | "keep" | "merge";
 
-export type RestoreStatus = "restored" | "kept" | "conflict" | "not_found";
+export type RestoreStatus = "restored" | "kept" | "conflict" | "different_bytes" | "not_found";
 
 /** The new user state on the book that owns the restored entry's place. */
 export interface RestoreConflict {
@@ -231,6 +231,22 @@ export interface RestoreConflict {
   hasMetadataOverrides: boolean;
   providerLinks: number;
   editionLinks: number;
+}
+
+/**
+ * The forgotten book and the lossless choices on offer when a picked file's
+ * bytes match none of the trash snapshot's hashes; `ownerBookId` names the
+ * library book that already owns the pick, when one does.
+ */
+export interface RestoreDifferentBytes {
+  title: string | null;
+  author: string | null;
+  progressPercent: number | null;
+  annotationCount: number;
+  collections: number;
+  hasMetadataOverrides: boolean;
+  providerLinks: number;
+  ownerBookId: number | null;
 }
 
 /** Result of `restore_book` (mirrors `domain::RestoreOutcome`). */
@@ -244,6 +260,8 @@ export interface RestoreOutcome {
    */
   replacedBookIds: number[];
   conflict: RestoreConflict | null;
+  /** Set with `status: "different_bytes"`; null otherwise. */
+  differentBytes: RestoreDifferentBytes | null;
 }
 
 /** Result of forgetting one book (mirrors `domain::ForgetOutcome`). */

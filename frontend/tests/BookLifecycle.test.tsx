@@ -351,11 +351,11 @@ describe("History Forget and restore", () => {
     });
   });
 
-  it("surfaces a refused pick in the error box and keeps the entry open", async () => {
+  it("surfaces a failed pick in the error box and keeps the entry open", async () => {
     pickBookFileMock.mockResolvedValueOnce("/books/other.epub");
     mockInvoke({
       ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
-      restore_book: new Error("those bytes do not match this book, so nothing was attached"),
+      restore_book: new Error("no file exists at /books/other.epub"),
     });
     renderHistory();
 
@@ -366,9 +366,49 @@ describe("History Forget and restore", () => {
       expect(pickBookFileMock).toHaveBeenCalledWith(7);
     });
     const error = await screen.findByTestId("history-error");
-    expect(error).toHaveTextContent("those bytes do not match this book, so nothing was attached");
+    expect(error).toHaveTextContent("no file exists at /books/other.epub");
     expect(screen.getByTestId("book-trash-restore-7")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a different-bytes report in the error box and keeps the entry open", async () => {
+    pickBookFileMock.mockResolvedValueOnce("/books/other.epub");
+    mockInvoke({
+      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
+      restore_book: {
+        status: "different_bytes",
+        bookId: null,
+        bookUid: null,
+        replacedBookIds: [],
+        conflict: null,
+        differentBytes: {
+          title: "Another Edition",
+          author: null,
+          progressPercent: 10,
+          annotationCount: 1,
+          collections: 0,
+          hasMetadataOverrides: false,
+          providerLinks: 0,
+          ownerBookId: null,
+        },
+      },
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    const error = await screen.findByTestId("history-error");
+    expect(error).toHaveTextContent("not the one this book had");
+    expect(screen.getByTestId("book-trash-restore-7")).toBeInTheDocument();
+    expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+    // Nothing was consumed: no refresh ran after the report.
+    expect(invokeMock.mock.calls.filter(([method]) => method === "list_book_trash")).toHaveLength(
+      1,
+    );
   });
 
   it("offers Replace, Keep, or Merge when the current book has new state", async () => {
