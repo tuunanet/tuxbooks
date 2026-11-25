@@ -33,8 +33,6 @@ async fn connect_service(env: &mut Env) -> (Arc<SyncService>, TempDir) {
         .await
         .unwrap();
     assert!(connected.mismatch.is_none());
-    // No `service.start()`: passes run when the test (or the command) asks,
-    // so the tombstone stays open exactly as long as production allows.
     (service, folder)
 }
 
