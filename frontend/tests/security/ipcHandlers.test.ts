@@ -35,6 +35,11 @@ const LIBRARY_STATS = {
   catalog: { books: 2, authors: 1, collections: 0, annotations: 0, readingProgress: 0 },
 };
 
+const TRASH_ENTRIES = [
+  { id: 7, title: "Moby Dick", lastKnownPath: "/books/fiction/moby.epub" },
+  { id: 9, title: "Dracula", lastKnownPath: null },
+];
+
 const ALL_CHANNELS = [
   IPC_CHANNELS.invoke,
   IPC_CHANNELS.dialog,
@@ -81,6 +86,7 @@ function harness(storageDirs: StorageDirs = STORAGE_DIRS): {
   const sidecar = {
     call: vi.fn(async (method: string) => {
       if (method === "list_books") return [{ id: 3, path: "/library/3.epub" }];
+      if (method === "list_book_trash") return TRASH_ENTRIES;
       if (method === "get_storage_stats") return LIBRARY_STATS;
       if (method === "sync_status") return { folder: "/home/me/Dropbox" };
       return {};
@@ -172,6 +178,88 @@ describe("ipcHandlers (every renderer-facing channel gates its sender, T-6)", ()
     if (channel === IPC_CHANNELS.copyLibraryLocationPath) {
       expect(clipboard.writeText).toHaveBeenCalledWith("/books");
     }
+  });
+});
+
+describe("book-file picker from the trash entry (restore-from-trash spec)", () => {
+  it("names the book, opens in its old folder, and issues the pick", async () => {
+    const { handlers, sidecar, dialog } = harness();
+    const picked = await handlers.get(IPC_CHANNELS.dialog)!(
+      senderEvent(ALLOWED) as never,
+      "book-file",
+      7,
+    );
+
+    expect(dialog.showOpenDialog).toHaveBeenCalledOnce();
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({
+      properties: ["openFile"],
+      title: 'Locate the file for "Moby Dick"',
+      defaultPath: "/books/fiction",
+      filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+    });
+    expect(picked).toBe("/picked/one.epub");
+
+    // The pick is issued, so the combined restore command accepts it.
+    await handlers.get(IPC_CHANNELS.invoke)!(senderEvent(ALLOWED) as never, "restore_book", {
+      trashId: 7,
+      pickedPath: "/picked/one.epub",
+    });
+    expect(sidecar.call).toHaveBeenCalledWith("restore_book", {
+      trashId: 7,
+      pickedPath: "/picked/one.epub",
+    });
+  });
+
+  it("falls back to today's dialog when the entry no longer resolves", async () => {
+    const { handlers, dialog } = harness();
+    await handlers.get(IPC_CHANNELS.dialog)!(senderEvent(ALLOWED) as never, "book-file", 99);
+
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({
+      properties: ["openFile"],
+      title: "Locate the book file",
+      filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+    });
+  });
+
+  it("names the book without a folder when the path is unknown", async () => {
+    const { handlers, dialog } = harness();
+    await handlers.get(IPC_CHANNELS.dialog)!(senderEvent(ALLOWED) as never, "book-file", 9);
+
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({
+      properties: ["openFile"],
+      title: 'Locate the file for "Dracula"',
+      filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+    });
+  });
+
+  it("keeps today's argumentless dialog for the other callers", async () => {
+    const { handlers, sidecar, dialog } = harness();
+    await handlers.get(IPC_CHANNELS.dialog)!(senderEvent(ALLOWED) as never, "book-file");
+
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({
+      properties: ["openFile"],
+      title: "Locate the book file",
+      filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
+    });
+    expect(sidecar.call).not.toHaveBeenCalled();
+  });
+
+  it("refuses a renderer-supplied path where the trash id belongs", async () => {
+    const { handlers, dialog } = harness();
+    const handler = handlers.get(IPC_CHANNELS.dialog)!;
+    await expect(
+      handler(senderEvent(ALLOWED) as never, "book-file", "/books/fiction/moby.epub"),
+    ).rejects.toThrow(/trash entry id/);
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled();
+  });
+
+  it("rejects a hostile sender before resolving the entry", async () => {
+    const { handlers, sidecar, dialog } = harness();
+    await expect(
+      handlers.get(IPC_CHANNELS.dialog)!(senderEvent(HOSTILE) as never, "book-file", 7),
+    ).rejects.toThrow(/sender/);
+    expect(sidecar.call).not.toHaveBeenCalled();
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled();
   });
 });
 

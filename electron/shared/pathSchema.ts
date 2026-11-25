@@ -63,6 +63,11 @@ export function isValidBookId(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+/** Type guard for renderer-supplied trash-entry ids (preload/bridge arguments). */
+export function isValidTrashId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /**
  * Validate an EPUB member path (already decoded exactly once). It must stay
  * inside the logical publication root: relative, forward slashes only, no
