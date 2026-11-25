@@ -2,13 +2,19 @@ use serde::{Deserialize, Serialize};
 
 /// What the user chose when a restored book's current identity already has
 /// new user state (ADR 0014 D5). `None` asks the backend to restore silently
-/// when it can and report a conflict when it cannot.
+/// when it can and report a conflict when it cannot. `LinkEdition` and
+/// `WithoutFile` answer a different-bytes report (tuxbooks-t9p.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestoreMode {
     Replace,
     Keep,
     Merge,
+    /// Restore the record detached and link it to the book that owns the
+    /// picked file as a different edition (ADR 0019 D3).
+    LinkEdition,
+    /// Restore the record detached and leave the picked file alone.
+    WithoutFile,
 }
 
 /// The outcome of one restore attempt.
@@ -22,6 +28,9 @@ pub enum RestoreStatus {
     /// The current identity holds any of the six kinds of user state and no
     /// mode was chosen, so nothing changed.
     Conflict,
+    /// The picked bytes match none of the snapshot's hashes (ADR 0019 D5):
+    /// nothing changed, and the lossless choices are on offer.
+    DifferentBytes,
     /// The trash entry is gone, expired, or already restored.
     NotFound,
 }
@@ -41,6 +50,24 @@ pub struct RestoreConflict {
     pub edition_links: i64,
 }
 
+/// What the UI offers when a picked file's bytes match none of the trash
+/// snapshot's content hashes (ADR 0019 D3). The identity and state counts
+/// describe the forgotten book as its snapshot holds them; `owner_book_id`
+/// names the library book that already owns the pick, and only a pick with
+/// an owner can be linked as an edition.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreDifferentBytes {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub progress_percent: Option<f64>,
+    pub annotation_count: i64,
+    pub collections: i64,
+    pub has_metadata_overrides: bool,
+    pub provider_links: i64,
+    pub owner_book_id: Option<i64>,
+}
+
 /// Result of `restore_book`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +82,9 @@ pub struct RestoreOutcome {
     #[serde(skip)]
     pub replaced_book_ids: Vec<i64>,
     pub conflict: Option<RestoreConflict>,
+    /// Set with `RestoreStatus::DifferentBytes`: the lossless choices for a
+    /// pick whose bytes match none of the snapshot's hashes.
+    pub different_bytes: Option<RestoreDifferentBytes>,
 }
 
 /// Result of forgetting one book. `replacement_book_id` is the fresh identity

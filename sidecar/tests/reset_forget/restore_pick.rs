@@ -101,8 +101,8 @@ async fn an_unusable_pick_leaves_the_trash_untouched() {
     assert_eq!(env.progress_percent(book.id).await, Some(12.0));
 }
 
-/// Until the lossless outcomes land (t9p.3), bytes that match none of the
-/// snapshot's hashes fail validation and change nothing.
+/// Since t9p.3, bytes that match none of the snapshot's hashes report the
+/// lossless choices instead of failing, and nothing is consumed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pick_with_different_bytes_is_refused() {
     let env = setup().await;
@@ -115,19 +115,14 @@ async fn a_pick_with_different_bytes_is_refused() {
     let trash_id = env.trash().await[0]["id"].as_i64().unwrap();
 
     let other = pick_copy(&env, "other.epub", &navigation_epub());
-    let err = env
-        .rpc_raw(
+    let report = env
+        .rpc(
             "restore_book",
             json!({ "trashId": trash_id, "pickedPath": other.to_string_lossy() }),
         )
         .await;
-    assert!(
-        err["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("do not match"),
-        "the refusal says the bytes are different: {err}"
-    );
+    assert_eq!(report["status"], json!("different_bytes"));
+    assert_eq!(report["differentBytes"]["ownerBookId"], json!(null));
     assert_eq!(env.trash().await.len(), 1, "nothing was consumed");
     assert_eq!(env.durable_count().await, 0, "nothing was restored");
 }
