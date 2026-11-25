@@ -429,8 +429,8 @@ export function onSyncApplied(
   return Promise.resolve(unlisten);
 }
 
-export function pickBookFile(): Promise<string | null> {
-  return tuxbooks().pickBookFile();
+export function pickBookFile(trashId?: number): Promise<string | null> {
+  return tuxbooks().pickBookFile(trashId);
 }
 
 export function pickBookFiles(): Promise<string[]> {

@@ -2,7 +2,7 @@
 
 use crate::domain::{BookTrashEntry, RestoreMode, RestoreOutcome, RestoreStatus};
 use crate::error::AppError;
-use crate::repository::{books, lifecycle};
+use crate::repository::{books, editions, lifecycle};
 use crate::rpc::EventEmitter;
 use crate::services::library_reconciler::LibraryChange;
 use crate::AppState;
@@ -14,14 +14,16 @@ pub async fn list_book_trash(state: &AppState) -> Result<Vec<BookTrashEntry>, Ap
 
 /// Restore a forgotten book, optionally with the file the user picked. The
 /// pick is validated before anything is written — the file must exist and
-/// parse, and its bytes must match one of the trash snapshot's content
-/// hashes — so a failed pick leaves the trash entry untouched. When a
-/// library book already owns the picked path, that book takes the
-/// replacement's role, resolved from the path so a caller cannot name an
-/// arbitrary book; otherwise the picked file is attached to the restored
-/// record. Without a mode the backend restores silently when the replacement
-/// holds none of the six kinds of user state and returns a conflict
-/// otherwise; Replace, Keep, and Merge resolve it explicitly.
+/// parse, and its bytes are compared with the trash snapshot's content
+/// hashes. Matching bytes restore and attach (with a library owner taking
+/// the replacement's role, resolved from the path so a caller cannot name an
+/// arbitrary book). Different bytes never merge (ADR 0019 D5): with no mode
+/// the command reports the lossless choices, `link_edition` restores the
+/// record detached and links it to the owner as a different edition, and
+/// `without_file` restores detached and leaves the pick alone. Without a
+/// mode and with matching bytes the backend restores silently when the
+/// replacement holds none of the six kinds of user state and returns a
+/// conflict otherwise; Replace, Keep, and Merge resolve it explicitly.
 pub async fn restore_book(
     state: &AppState,
     events: &EventEmitter,
@@ -36,6 +38,26 @@ pub async fn restore_book(
         Some(path) => Some(validate_pick(&state.db, trash_id, std::path::Path::new(&path)).await?),
         None => None,
     };
+    if let Some(pick) = &picked {
+        if !pick.bytes_match {
+            return other_bytes_choice(state, events, trash_id, mode, pick).await;
+        }
+        if matches!(
+            mode,
+            Some(RestoreMode::LinkEdition | RestoreMode::WithoutFile)
+        ) {
+            return Err(AppError::InvalidInput(
+                "those bytes match this book, so restore them normally instead".into(),
+            ));
+        }
+    } else if matches!(
+        mode,
+        Some(RestoreMode::LinkEdition | RestoreMode::WithoutFile)
+    ) {
+        return Err(AppError::InvalidInput(
+            "that choice follows a different-bytes report, and no file was picked".into(),
+        ));
+    }
 
     let mut outcome = lifecycle::restore(
         &state.db,
@@ -81,10 +103,13 @@ pub async fn restore_book(
     Ok(outcome)
 }
 
-/// A validated pick: the file to attach, and the library book that owns it,
-/// when one does.
+/// A validated pick: the file the bytes came from, whether they match the
+/// snapshot's hashes, and the library book that owns the file, when one
+/// does. The owner is the replacement on matching bytes and the edition
+/// target on different bytes.
 struct ValidatedPick {
     path: std::path::PathBuf,
+    bytes_match: bool,
     replacement: Option<i64>,
 }
 
@@ -99,6 +124,7 @@ async fn validate_pick(
 ) -> Result<ValidatedPick, AppError> {
     let pick = ValidatedPick {
         path: path.to_path_buf(),
+        bytes_match: false,
         replacement: None,
     };
     let Some(aliases) = lifecycle::restore_aliases(pool, trash_id).await? else {
@@ -119,18 +145,22 @@ async fn validate_pick(
             .await
             .map_err(|err| AppError::InvalidInput(format!("could not hash that file: {err}")))?
             .map_err(|err| AppError::InvalidInput(format!("could not read that file: {err}")))?;
-    if !aliases.iter().any(|hash| hash == &hashed.0) {
-        // Different bytes never merge (ADR 0019 D5); the lossless outcomes
-        // are a later step (tuxbooks-t9p.3).
-        return Err(AppError::InvalidInput(
-            "those bytes do not match this book, so nothing was attached".into(),
-        ));
-    }
     let replacement = match books::find_file_id_by_path(pool, &path.to_string_lossy()).await? {
         Some(file_id) => books::durable_id_for_file(pool, file_id).await?,
         None => None,
     };
+    if !aliases.iter().any(|hash| hash == &hashed.0) {
+        // Different bytes never merge (ADR 0019 D5); the command reports the
+        // lossless choices instead of refusing. The owner is resolved either
+        // way: it gates the edition choice.
+        return Ok(ValidatedPick {
+            bytes_match: false,
+            replacement,
+            ..pick
+        });
+    }
     Ok(ValidatedPick {
+        bytes_match: true,
         replacement,
         ..pick
     })
@@ -171,10 +201,66 @@ async fn durable_id(pool: &sqlx::SqlitePool, book_uid: &str) -> Result<Option<i6
     Ok(id)
 }
 
+/// Run the different-bytes flow (tuxbooks-t9p.3). With no mode, report the
+/// lossless choices and change nothing. `without_file` and `link_edition`
+/// restore the record detached; `link_edition` then links it to the book
+/// that owns the pick as a different edition, so the old progress copies
+/// over as a percentage and the provider link moves while the annotations
+/// stay with the restored record. Replace, Keep, and Merge need bytes the
+/// snapshot can prove, so they are refused here.
+async fn other_bytes_choice(
+    state: &AppState,
+    events: &EventEmitter,
+    trash_id: i64,
+    mode: Option<RestoreMode>,
+    pick: &ValidatedPick,
+) -> Result<RestoreOutcome, AppError> {
+    match mode {
+        None => {
+            let payload =
+                lifecycle::restore_other_bytes(&state.db, trash_id, pick.replacement).await?;
+            Ok(RestoreOutcome {
+                status: if payload.is_some() {
+                    RestoreStatus::DifferentBytes
+                } else {
+                    RestoreStatus::NotFound
+                },
+                book_id: None,
+                book_uid: None,
+                replaced_book_ids: Vec::new(),
+                conflict: None,
+                different_bytes: payload,
+            })
+        }
+        Some(RestoreMode::WithoutFile) => lifecycle::restore_detached(&state.db, trash_id).await,
+        Some(RestoreMode::LinkEdition) => {
+            let Some(owner_id) = pick.replacement else {
+                return Err(AppError::InvalidInput(
+                    "link as an edition needs a picked file that is already in the library".into(),
+                ));
+            };
+            let outcome = lifecycle::restore_detached(&state.db, trash_id).await?;
+            if outcome.status == RestoreStatus::Restored {
+                let restored_id = outcome.book_id.expect("a restored entry has a book id");
+                editions::link_editions(&state.db, restored_id, owner_id, true).await?;
+                crate::commands::emit_book_changed(state, events, owner_id).await?;
+            }
+            Ok(outcome)
+        }
+        Some(RestoreMode::Replace | RestoreMode::Keep | RestoreMode::Merge) => {
+            Err(AppError::InvalidInput(
+                "those bytes do not match this book, so there is nothing to replace, keep, or merge"
+                    .into(),
+            ))
+        }
+    }
+}
+
 /// Attach a validated pick to a freshly restored record. The strict relink
 /// re-checks the bytes against the snapshot aliases restore re-upserted, so
 /// a pick that passed validation cannot land on the wrong book.
-async fn attach_picked_file(    state: &AppState,
+async fn attach_picked_file(
+    state: &AppState,
     book_id: i64,
     book_uid: &str,
     pick: &ValidatedPick,
