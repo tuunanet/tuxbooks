@@ -192,7 +192,11 @@ pub(super) async fn dispatch(
         "restore_book" => {
             let p: RestoreBookArgs = parse_params(params)?;
             Ok(Some(call!(commands::books::restore_book(
-                state, events, p.trash_id, p.mode, p.picked_path
+                state,
+                events,
+                p.trash_id,
+                p.mode,
+                p.picked_path
             ))))
         }
         _ => Ok(None),

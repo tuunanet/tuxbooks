@@ -250,7 +250,8 @@ async fn a_fresh_identity_with_only_a_collection_asks_without_a_pick() {
     let shelf = env.create_collection("Shelf").await;
     env.add_to_collection(fresh_id, shelf).await;
     assert_eq!(
-        env.trash().await[0]["hasNewState"], json!(true),
+        env.trash().await[0]["hasNewState"],
+        json!(true),
         "a membership alone counts as new state"
     );
 
@@ -299,12 +300,11 @@ async fn keep_with_a_picked_owner_never_restores_detached() {
     assert_eq!(kept["status"], json!("kept"));
     assert_eq!(kept["bookId"].as_i64(), Some(owner.id));
     assert_eq!(env.durable_count().await, 1, "no detached record came back");
-    let old_record: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
-            .bind(&old_uid)
-            .fetch_optional(&env.pool)
-            .await
-            .unwrap();
+    let old_record: Option<(i64,)> = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&old_uid)
+        .fetch_optional(&env.pool)
+        .await
+        .unwrap();
     assert!(old_record.is_none(), "Keep never resurrects the old record");
     assert_eq!(env.progress_percent(owner.id).await, Some(62.0));
     assert!(env.trash().await.is_empty());
@@ -347,13 +347,15 @@ async fn merge_with_a_picked_owner_folds_old_state_into_it() {
     assert_eq!(merged["status"], json!("restored"));
     assert_eq!(merged["bookId"].as_i64(), Some(owner.id));
     assert_eq!(env.durable_count().await, 1, "no detached record came back");
-    let old_record: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
-            .bind(&old_uid)
-            .fetch_optional(&env.pool)
-            .await
-            .unwrap();
-    assert!(old_record.is_none(), "Merge never resurrects the old record");
+    let old_record: Option<(i64,)> = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&old_uid)
+        .fetch_optional(&env.pool)
+        .await
+        .unwrap();
+    assert!(
+        old_record.is_none(),
+        "Merge never resurrects the old record"
+    );
     assert_eq!(
         env.progress_percent(owner.id).await,
         Some(65.0),

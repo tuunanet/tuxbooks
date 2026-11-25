@@ -387,9 +387,7 @@ pub async fn restore_book(
         Some(path) if path.trim().is_empty() => {
             return Err(AppError::InvalidInput("book path is empty".into()));
         }
-        Some(path) => Some(
-            validate_pick(&state.db, trash_id, std::path::Path::new(&path)).await?,
-        ),
+        Some(path) => Some(validate_pick(&state.db, trash_id, std::path::Path::new(&path)).await?),
         None => None,
     };
 
@@ -463,10 +461,11 @@ async fn validate_pick(
         AppError::InvalidInput(format!("that file is not a readable book: {err}"))
     })?;
     let hashed_path = pick.path.clone();
-    let hashed = tokio::task::spawn_blocking(move || crate::sync::identity::hash_file(&hashed_path))
-        .await
-        .map_err(|err| AppError::InvalidInput(format!("could not hash that file: {err}")))?
-        .map_err(|err| AppError::InvalidInput(format!("could not read that file: {err}")))?;
+    let hashed =
+        tokio::task::spawn_blocking(move || crate::sync::identity::hash_file(&hashed_path))
+            .await
+            .map_err(|err| AppError::InvalidInput(format!("could not hash that file: {err}")))?
+            .map_err(|err| AppError::InvalidInput(format!("could not read that file: {err}")))?;
     if !aliases.iter().any(|hash| hash == &hashed.0) {
         // Different bytes never merge (ADR 0019 D5); the lossless outcomes
         // are a later step (tuxbooks-t9p.3).
