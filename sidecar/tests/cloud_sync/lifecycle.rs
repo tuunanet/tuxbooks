@@ -83,7 +83,7 @@ async fn forget_on_one_machine_is_a_shared_delete_and_restores_on_the_other() {
         .iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("the shared Forget appears in B's Reading history trash");
-    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    let restored = lifecycle::restore(&b.pool, entry.id, None, None).await.unwrap();
     assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
     assert_eq!(progress_percent(&b, b_book).await, Some(44.0));
     assert_eq!(annotation_count(&b, b_book).await, 1);
@@ -139,7 +139,7 @@ async fn a_no_file_forget_still_propagates_and_restores_on_the_machine_with_the_
         .iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("a remote Forget with no sender file is still restorable");
-    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    let restored = lifecycle::restore(&b.pool, entry.id, None, None).await.unwrap();
     assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
     assert_eq!(annotation_count(&b, b_book).await, 1);
 
@@ -220,7 +220,7 @@ async fn keep_resolution_closes_the_remote_trash_without_restoring_the_old_ident
         .into_iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("remote trash entry");
-    let outcome = lifecycle::restore(&b.pool, entry.id, Some(RestoreMode::Keep))
+    let outcome = lifecycle::restore(&b.pool, entry.id, Some(RestoreMode::Keep), None)
         .await
         .unwrap();
     assert_eq!(outcome.status, RestoreStatus::Kept);

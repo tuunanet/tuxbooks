@@ -7,3 +7,4 @@ mod basics;
 mod churn;
 mod common;
 mod contention;
+mod restore_pick;

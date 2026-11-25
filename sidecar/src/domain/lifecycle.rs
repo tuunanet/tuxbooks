@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// What the user chose when a restored book's current identity already has
-/// new reading state (ADR 0014 D5). `None` asks the backend to restore
-/// silently when it can and report a conflict when it cannot.
+/// new user state (ADR 0014 D5). `None` asks the backend to restore silently
+/// when it can and report a conflict when it cannot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestoreMode {
@@ -19,20 +19,26 @@ pub enum RestoreStatus {
     Restored,
     /// The user kept the current book; the old snapshot was discarded.
     Kept,
-    /// The current identity has new progress or annotations and no mode was
-    /// chosen, so nothing changed.
+    /// The current identity holds any of the six kinds of user state and no
+    /// mode was chosen, so nothing changed.
     Conflict,
     /// The trash entry is gone, expired, or already restored.
     NotFound,
 }
 
-/// New state found on the fresh identity after a Forget. The UI uses this to
-/// explain the Replace / Keep / Merge choice.
+/// New state found on the book that owns the restored entry's place (the
+/// Forget-time fresh identity, or the library book that owns a picked file).
+/// The UI uses this to explain the Replace / Keep / Merge choice; the fields
+/// name all six kinds of user state, the same set Locate File counts.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreConflict {
     pub progress_percent: Option<f64>,
     pub annotation_count: i64,
+    pub collections: i64,
+    pub has_metadata_overrides: bool,
+    pub provider_links: i64,
+    pub edition_links: i64,
 }
 
 /// Result of `restore_book`.
@@ -85,7 +91,7 @@ pub struct BookTrashEntry {
     /// The fresh identity the file was rebound to, when the book stayed in the
     /// library at Forget time.
     pub replacement_book_id: Option<i64>,
-    /// Whether that fresh identity has progress or annotations now. Restore
-    /// with `true` needs a Replace / Keep / Merge choice.
+    /// Whether that fresh identity holds any of the six kinds of user state
+    /// now. Restore with `true` needs a Replace / Keep / Merge choice.
     pub has_new_state: bool,
 }

@@ -35,6 +35,8 @@ struct RestoreBookArgs {
     trash_id: i64,
     #[serde(default)]
     mode: Option<RestoreMode>,
+    #[serde(default)]
+    picked_path: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -190,7 +192,7 @@ pub(super) async fn dispatch(
         "restore_book" => {
             let p: RestoreBookArgs = parse_params(params)?;
             Ok(Some(call!(commands::books::restore_book(
-                state, events, p.trash_id, p.mode
+                state, events, p.trash_id, p.mode, p.picked_path
             ))))
         }
         _ => Ok(None),

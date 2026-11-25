@@ -8,6 +8,7 @@ use crate::domain::NewBook;
 use crate::domain::ProviderLink;
 use crate::domain::ReadingHistoryBook;
 use crate::domain::SearchHit;
+use crate::domain::UserState;
 use crate::error::AppError;
 use crate::repository::library_locations::{list_locations, location_index, owning_location};
 
@@ -256,6 +257,59 @@ pub async fn active_file_id(pool: &SqlitePool, durable_id: i64) -> Result<Option
     .fetch_optional(pool)
     .await?;
     Ok(id)
+}
+
+/// Count the six kinds of user state one durable book holds, keyed by uid
+/// (ADR 0019 D2). Locate File and Restore share this one definition of
+/// "has state", so both ask the same question before replacing or merging.
+pub async fn user_state(pool: &SqlitePool, book_uid: &str) -> Result<UserState, AppError> {
+    let annotations: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM annotations WHERE book_uid = ?1")
+            .bind(book_uid)
+            .fetch_one(pool)
+            .await?;
+    let has_progress: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM reading_progress WHERE book_uid = ?1)")
+            .bind(book_uid)
+            .fetch_one(pool)
+            .await?;
+    let progress_percent: Option<f64> =
+        sqlx::query_scalar("SELECT progress_percent FROM reading_progress WHERE book_uid = ?1")
+            .bind(book_uid)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
+    let collections: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM book_collections WHERE book_uid = ?1")
+            .bind(book_uid)
+            .fetch_one(pool)
+            .await?;
+    let has_metadata_overrides: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM book_metadata_overrides WHERE book_uid = ?1)",
+    )
+    .bind(book_uid)
+    .fetch_one(pool)
+    .await?;
+    let provider_links: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM book_provider_links WHERE book_uid = ?1")
+            .bind(book_uid)
+            .fetch_one(pool)
+            .await?;
+    let edition_links: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM book_edition_links WHERE book_uid_a = ?1 OR book_uid_b = ?1",
+    )
+    .bind(book_uid)
+    .fetch_one(pool)
+    .await?;
+    Ok(UserState {
+        annotations,
+        has_progress,
+        progress_percent,
+        collections,
+        has_metadata_overrides,
+        provider_links,
+        edition_links,
+    })
 }
 
 /// Every file location of a durable book, in active-file order. `active`

@@ -117,7 +117,7 @@ async fn forget_and_restore_announce_the_ids_that_died() {
         .replacement_book_id
         .expect("a file-backed forget keeps a fresh identity");
 
-    let restored = restore_book(&state, &events, forgotten.trash_id, None)
+    let restored = restore_book(&state, &events, forgotten.trash_id, None, None)
         .await
         .unwrap();
     assert_eq!(restored.status, RestoreStatus::Restored);
