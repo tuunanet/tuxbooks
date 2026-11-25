@@ -57,11 +57,10 @@ pub async fn detach_duplicate(
     .bind(duplicate_of_uid)
     .execute(&mut *tx)
     .await?;
-    let uid: Option<String> =
-        sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let Some(uid) = uid else {
         return Ok(());
     };

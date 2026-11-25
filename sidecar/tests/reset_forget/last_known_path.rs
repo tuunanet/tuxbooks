@@ -20,7 +20,9 @@ async fn two_copies_reader_copy_first(env: &Env) -> (String, String) {
     env.write_book("second.epub", &source);
     env.scan().await;
     let book = imported_book(env).await;
-    let mut files = books::list_files_for_book(&env.pool, book.id).await.unwrap();
+    let mut files = books::list_files_for_book(&env.pool, book.id)
+        .await
+        .unwrap();
     assert_eq!(files.len(), 2, "the duplicate copies share one record");
     files.sort_by_key(|file| file.id);
     let (low, high) = (files.remove(0), files.remove(0));
@@ -52,7 +54,10 @@ async fn remove_stores_the_reader_s_copy_of_a_multi_copy_book() {
 
     let history = env.history().await;
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0]["lastKnownPath"].as_str(), Some(reader_path.as_str()));
+    assert_eq!(
+        history[0]["lastKnownPath"].as_str(),
+        Some(reader_path.as_str())
+    );
     assert_ne!(
         history[0]["lastKnownPath"].as_str(),
         Some(missing_path.as_str()),
@@ -101,7 +106,10 @@ async fn unwatch_stores_the_reader_s_copy_of_a_multi_copy_book() {
 
     let history = env.history().await;
     assert_eq!(history.len(), 1);
-    assert_eq!(history[0]["lastKnownPath"].as_str(), Some(reader_path.as_str()));
+    assert_eq!(
+        history[0]["lastKnownPath"].as_str(),
+        Some(reader_path.as_str())
+    );
 }
 
 /// A single-copy folder detaches with the path when it is unwatched.
@@ -164,10 +172,7 @@ async fn forgetting_a_detached_record_carries_the_path_into_the_trash() {
 
     let trash = env.trash().await;
     assert_eq!(trash.len(), 1);
-    assert_eq!(
-        trash[0]["lastKnownPath"].as_str(),
-        Some(sp(&path).as_str())
-    );
+    assert_eq!(trash[0]["lastKnownPath"].as_str(), Some(sp(&path).as_str()));
 }
 
 /// A restore without a file returns the record to Detached records and the

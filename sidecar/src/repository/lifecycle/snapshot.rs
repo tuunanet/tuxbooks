@@ -238,7 +238,7 @@ pub(super) async fn load_book_row(
                 (SELECT name FROM series WHERE id = br.series_id) AS series,
                 br.series_index, br.cover_path, br.last_opened_at, br.last_known_path,
                 br.progress_percent, br.annotation_count, br.metadata_state
-          FROM book_records br WHERE br.id = ?1",
+         FROM book_records br WHERE br.id = ?1",
     )
     .bind(book_id)
     .fetch_optional(pool)

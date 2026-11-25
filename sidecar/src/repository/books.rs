@@ -551,11 +551,10 @@ pub(crate) async fn delete_book_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: i64,
 ) -> Result<bool, AppError> {
-    let uid: Option<String> =
-        sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(&mut **tx)
-            .await?;
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
     let Some(uid) = uid else {
         return Ok(false);
     };
@@ -572,7 +571,7 @@ pub(crate) async fn delete_book_tx(
 }
 
 /// The path of the copy the reader opens for a durable uid: an available copy
-/// first, then the lowest row id, then path — the active-file rule.
+/// first, then the lowest row id, then path (the active-file rule).
 pub(crate) async fn active_path_for_uid(
     conn: &mut sqlx::SqliteConnection,
     uid: &str,
@@ -614,11 +613,10 @@ pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, Ap
     // IMMEDIATE, like [`delete_book`]: the path read shares the write
     // snapshot with the delete instead of racing a concurrent writer.
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let uid: Option<String> =
-        sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
-            .bind(file_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let uid: Option<String> = sqlx::query_scalar("SELECT book_uid FROM books WHERE id = ?1")
+        .bind(file_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let Some(uid) = uid else {
         return Ok(false);
     };
