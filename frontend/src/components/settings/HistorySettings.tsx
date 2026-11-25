@@ -103,6 +103,7 @@ export function HistorySettings() {
   const [resetTarget, setResetTarget] = useState<ReadingHistoryBook | null>(null);
   const [forgetTargets, setForgetTargets] = useState<number[] | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<BookTrashEntry | null>(null);
+  const [restorePick, setRestorePick] = useState<string | undefined>(undefined);
   const [restoreConflict, setRestoreConflict] = useState<RestoreConflict | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const requestRef = useRef(0);
@@ -237,17 +238,19 @@ export function HistorySettings() {
   }, [forgetTargets, refresh, load, loadTrash]);
 
   const runRestore = useCallback(
-    async (entry: BookTrashEntry, mode?: RestoreMode) => {
+    async (entry: BookTrashEntry, mode?: RestoreMode, pickedPath?: string) => {
       setRestoreBusy(true);
       setError(null);
       try {
-        const outcome = await restoreBook(entry.id, mode);
+        const outcome = await restoreBook(entry.id, mode, pickedPath);
         if (outcome.status === "conflict") {
           setRestoreTarget(entry);
+          setRestorePick(pickedPath);
           setRestoreConflict(outcome.conflict);
           return;
         }
         setRestoreTarget(null);
+        setRestorePick(undefined);
         setRestoreConflict(null);
         await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
       } catch (err) {
@@ -257,6 +260,19 @@ export function HistorySettings() {
       }
     },
     [refresh, load, loadTrash],
+  );
+
+  const restoreFromRow = useCallback(
+    async (entry: BookTrashEntry) => {
+      if (entry.replacementBookId !== null) {
+        await runRestore(entry);
+        return;
+      }
+      const pickedPath = await pickBookFile(entry.id);
+      if (pickedPath === null || pickedPath.trim() === "") return;
+      await runRestore(entry, undefined, pickedPath);
+    },
+    [runRestore],
   );
 
   const toggleSelected = useCallback((bookId: number, next: boolean) => {
@@ -428,7 +444,7 @@ export function HistorySettings() {
                     key={entry.id}
                     entry={entry}
                     busy={restoreBusy}
-                    onRestore={(target) => void runRestore(target)}
+                    onRestore={(target) => void restoreFromRow(target)}
                     onRestoreWithoutFile={(target) => void runRestore(target)}
                   />
                 ))}
@@ -457,10 +473,11 @@ export function HistorySettings() {
         conflict={restoreConflict}
         busy={restoreBusy}
         onChoose={(mode) => {
-          if (restoreTarget) void runRestore(restoreTarget, mode);
+          if (restoreTarget) void runRestore(restoreTarget, mode, restorePick);
         }}
         onCancel={() => {
           setRestoreTarget(null);
+          setRestorePick(undefined);
           setRestoreConflict(null);
         }}
       />

@@ -130,7 +130,14 @@ describe("Reset and Forget dialogs", () => {
       <RestoreBookDialog
         open
         entry={entry}
-        conflict={{ progressPercent: null, annotationCount: 1 }}
+        conflict={{
+          progressPercent: null,
+          annotationCount: 1,
+          collections: 0,
+          hasMetadataOverrides: false,
+          providerLinks: 0,
+          editionLinks: 0,
+        }}
         onChoose={choose}
         onCancel={cancel}
       />,
@@ -240,6 +247,127 @@ describe("History Forget and restore", () => {
       expect(invokeMock).toHaveBeenCalledWith("restore_book", { trashId: 7 });
     });
     expect(pickBookFileMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+  });
+
+  it("asks for the file and restores the picked path in one step", async () => {
+    pickBookFileMock.mockResolvedValueOnce("/books/old-copy.epub");
+    mockInvoke({
+      ...baseResponses(
+        [],
+        [makeBookTrashEntry({ id: 7, replacementBookId: null, lastKnownPath: "/books" })],
+      ),
+      restore_book: {
+        status: "restored",
+        bookId: 41,
+        bookUid: "abcdefabcdefabcdefabcdefabcdefab",
+        conflict: null,
+      },
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("restore_book", {
+        trashId: 7,
+        pickedPath: "/books/old-copy.epub",
+      });
+    });
+    await waitFor(() => {
+      expect(invokeMock.mock.calls.filter(([method]) => method === "list_book_trash")).toHaveLength(
+        2,
+      );
+    });
+    expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+  });
+
+  it("leaves the trash entry untouched when the picker is cancelled", async () => {
+    mockInvoke({
+      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("restore_book", expect.anything());
+    expect(screen.getByTestId("book-trash-restore-7")).toBeInTheDocument();
+    expect(screen.queryByTestId("history-error")).not.toBeInTheDocument();
+  });
+
+  it("carries the picked path through the conflict choice", async () => {
+    let restores = 0;
+    invokeMock.mockImplementation((method: string) => {
+      if (method === "list_reading_history") return Promise.resolve([]);
+      if (method === "list_book_trash") {
+        return Promise.resolve([makeBookTrashEntry({ id: 7, replacementBookId: null })]);
+      }
+      if (method === "get_library_stats") {
+        return Promise.resolve({ bookCount: 0, collectionCount: 0 });
+      }
+      if (method === "list_books") return Promise.resolve([]);
+      if (method === "list_collections") return Promise.resolve([]);
+      if (method === "restore_book") {
+        restores += 1;
+        if (restores === 1) {
+          return Promise.resolve({
+            status: "conflict",
+            bookId: 51,
+            bookUid: "fresh",
+            conflict: { progressPercent: 55, annotationCount: 2 },
+          });
+        }
+        return Promise.resolve({
+          status: "restored",
+          bookId: 51,
+          bookUid: "fresh",
+          conflict: null,
+        });
+      }
+      return Promise.reject(new Error(`unexpected invoke(${method}) in test`));
+    });
+    pickBookFileMock.mockResolvedValueOnce("/books/old-copy.epub");
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+    await screen.findByTestId("restore-book-dialog");
+    await userEvent.click(screen.getByTestId("restore-book-merge"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("restore_book", {
+        trashId: 7,
+        mode: "merge",
+        pickedPath: "/books/old-copy.epub",
+      });
+    });
+  });
+
+  it("surfaces a refused pick in the error box and keeps the entry open", async () => {
+    pickBookFileMock.mockResolvedValueOnce("/books/other.epub");
+    mockInvoke({
+      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
+      restore_book: new Error("those bytes do not match this book, so nothing was attached"),
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    const error = await screen.findByTestId("history-error");
+    expect(error).toHaveTextContent("those bytes do not match this book, so nothing was attached");
+    expect(screen.getByTestId("book-trash-restore-7")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
   });
 

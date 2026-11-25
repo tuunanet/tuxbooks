@@ -223,10 +223,14 @@ export type RestoreMode = "replace" | "keep" | "merge";
 
 export type RestoreStatus = "restored" | "kept" | "conflict" | "not_found";
 
-/** The new progress/annotations that make a restore ambiguous. */
+/** The new user state on the book that owns the restored entry's place. */
 export interface RestoreConflict {
   progressPercent: number | null;
   annotationCount: number;
+  collections: number;
+  hasMetadataOverrides: boolean;
+  providerLinks: number;
+  editionLinks: number;
 }
 
 /** Result of `restore_book` (mirrors `domain::RestoreOutcome`). */

@@ -194,12 +194,19 @@ export function listBookTrash(): Promise<BookTrashEntry[]> {
 }
 
 /**
- * Restore a Forgotten book. With no mode the backend restores silently when
- * the fresh identity has no new progress, and returns `status: "conflict"`
- * when it does; Replace, Keep, and Merge resolve it.
+ * Restore a Forgotten book: silent when the replacement holds no new state,
+ * `status: "conflict"` otherwise; `pickedPath` restores with the picked file.
  */
-export function restoreBook(trashId: number, mode?: RestoreMode): Promise<RestoreOutcome> {
-  return invoke("restore_book", mode === undefined ? { trashId } : { trashId, mode });
+export function restoreBook(
+  trashId: number,
+  mode?: RestoreMode,
+  pickedPath?: string,
+): Promise<RestoreOutcome> {
+  return invoke("restore_book", {
+    trashId,
+    ...(mode === undefined ? null : { mode }),
+    ...(pickedPath === undefined ? null : { pickedPath }),
+  });
 }
 
 export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
