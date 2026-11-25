@@ -79,12 +79,11 @@ async fn a_sync_connected_restore_binds_the_pick_to_the_restored_identity() {
 
     // The publish pass can move the durable id; the response names the id
     // the record holds now.
-    let live_id: i64 =
-        sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-            .bind(&old_uid)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
+    let live_id: i64 = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(&old_uid)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
     assert_eq!(result["bookId"].as_i64(), Some(live_id));
 
     let hash = sha256_of(&picked);
@@ -136,8 +135,7 @@ async fn a_sync_connected_restore_binds_the_pick_to_the_restored_identity() {
             (op.kind, op.deleted, op.restore, op.entity_uid)
         })
         .filter_map(|(kind, deleted, restore, uid)| {
-            (kind == EntityKind::Book && !deleted && restore && uid == old_uid)
-                .then_some(uid)
+            (kind == EntityKind::Book && !deleted && restore && uid == old_uid).then_some(uid)
         })
         .collect();
     assert_eq!(restores.len(), 1, "the restore was published to the folder");
