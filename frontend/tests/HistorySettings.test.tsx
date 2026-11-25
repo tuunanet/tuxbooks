@@ -192,6 +192,34 @@ describe("HistorySettings", () => {
     expect(wasAt).toHaveTextContent("Was at /books/old-copy.epub");
   });
 
+  it("says the file is in the library when a replacement holds it", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy", replacementBookId: 51 })],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "File is in your library",
+    );
+  });
+
+  it("says Restore will ask for a file when none is in the library", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy", replacementBookId: null })],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "No file. Restore will ask you to choose one.",
+    );
+  });
+
   it("says when nothing is waiting to be restored", async () => {
     renderHistory([makeReadingHistoryBook({ id: 41 })], []);
 

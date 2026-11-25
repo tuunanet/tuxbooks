@@ -138,9 +138,15 @@ interface ForgottenBookRowProps {
   entry: BookTrashEntry;
   busy: boolean;
   onRestore: (entry: BookTrashEntry) => void;
+  onRestoreWithoutFile: (entry: BookTrashEntry) => void;
 }
 
-export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowProps) {
+export function ForgottenBookRow({
+  entry,
+  busy,
+  onRestore,
+  onRestoreWithoutFile,
+}: ForgottenBookRowProps) {
   const progress =
     entry.progressPercent === null
       ? "No progress"
@@ -158,6 +164,11 @@ export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowPro
           {entry.annotationCount === 1 ? "annotation" : "annotations"} · forgotten{" "}
           {formatDate(entry.deletedAt)} · restorable until {formatDate(entry.expiresAt)}
         </p>
+        <p data-testid="book-trash-file-state" className="mt-1 text-xs text-muted-foreground">
+          {entry.replacementBookId !== null
+            ? "File is in your library"
+            : "No file. Restore will ask you to choose one."}
+        </p>
         {entry.hasNewState ? (
           <p data-testid="book-trash-new-state" className="mt-1 text-xs text-muted-foreground">
             The current book has new reading data; restoring asks what to do.
@@ -169,17 +180,31 @@ export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowPro
           </p>
         ) : null}
       </div>
-      <Button
-        data-testid={`book-trash-restore-${entry.id}`}
-        aria-label={`Restore ${displayTitle(entry)}`}
-        variant="outline"
-        size="sm"
-        disabled={busy}
-        onClick={() => onRestore(entry)}
-      >
-        <RotateCcw data-icon="inline-start" />
-        Restore
-      </Button>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <Button
+          data-testid={`book-trash-restore-${entry.id}`}
+          aria-label={`Restore ${displayTitle(entry)}`}
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => onRestore(entry)}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Restore
+        </Button>
+        {entry.replacementBookId === null ? (
+          <Button
+            data-testid={`book-trash-restore-without-file-${entry.id}`}
+            aria-label={`Restore ${displayTitle(entry)} without a file`}
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => onRestoreWithoutFile(entry)}
+          >
+            Restore without file
+          </Button>
+        ) : null}
+      </div>
     </li>
   );
 }
