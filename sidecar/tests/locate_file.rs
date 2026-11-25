@@ -214,7 +214,7 @@ async fn detaching_a_duplicate_remembers_where_its_file_was() {
     let size = std::fs::metadata(&present).unwrap().len() as i64;
 
     let candidate = insert(&env.pool, &missing, "Old copy", size).await;
-    let owner = insert(&env.pool, &present, "Machine Learning", size).await;
+    let _owner = insert(&env.pool, &present, "Machine Learning", size).await;
     sqlx::query("UPDATE books SET available = 0 WHERE id = ?1")
         .bind(file_id(&env.pool, candidate).await)
         .execute(&env.pool)

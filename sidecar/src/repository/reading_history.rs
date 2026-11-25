@@ -64,12 +64,12 @@ pub async fn detach_duplicate(
     let Some(uid) = uid else {
         return Ok(());
     };
-    let active_path = books::active_path_for_uid(&mut *tx, &uid).await?;
+    let active_path = books::active_path_for_uid(&mut tx, &uid).await?;
     sqlx::query("DELETE FROM books WHERE book_uid = ?1")
         .bind(&uid)
         .execute(&mut *tx)
         .await?;
-    books::remember_last_known_path(&mut *tx, &uid, active_path).await?;
+    books::remember_last_known_path(&mut tx, &uid, active_path).await?;
     tx.commit().await?;
     Ok(())
 }

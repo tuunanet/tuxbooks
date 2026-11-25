@@ -561,12 +561,12 @@ pub(crate) async fn delete_book_tx(
     // Read the reader's copy before the delete: a multi-row delete visits
     // rows in rowid order, so only this ordering stores the copy the reader
     // opened rather than the row that happened to be visited last.
-    let active_path = active_path_for_uid(&mut **tx, &uid).await?;
+    let active_path = active_path_for_uid(tx, &uid).await?;
     let result = sqlx::query("DELETE FROM books WHERE book_uid = ?1")
         .bind(&uid)
         .execute(&mut **tx)
         .await?;
-    remember_last_known_path(&mut **tx, &uid, active_path).await?;
+    remember_last_known_path(tx, &uid, active_path).await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -620,12 +620,12 @@ pub async fn delete_file_row(pool: &SqlitePool, file_id: i64) -> Result<bool, Ap
     let Some(uid) = uid else {
         return Ok(false);
     };
-    let active_path = active_path_for_uid(&mut *tx, &uid).await?;
+    let active_path = active_path_for_uid(&mut tx, &uid).await?;
     let result = sqlx::query("DELETE FROM books WHERE id = ?1")
         .bind(file_id)
         .execute(&mut *tx)
         .await?;
-    remember_last_known_path(&mut *tx, &uid, active_path).await?;
+    remember_last_known_path(&mut tx, &uid, active_path).await?;
     tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }
