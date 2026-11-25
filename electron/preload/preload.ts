@@ -6,6 +6,7 @@ import {
   isValidBookFormat,
   isValidBookId,
   isValidLibraryLocationId,
+  isValidTrashId,
 } from "../shared/pathSchema";
 import type { StorageReport } from "../shared/storageReport";
 
@@ -48,9 +49,16 @@ const api = {
     return ipcRenderer.invoke(IPC_CHANNELS.dialog, "sync-folder");
   },
 
-  /** Native single-file picker (relocate a missing book); null when cancelled. */
-  pickBookFile(): Promise<string | null> {
-    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "book-file");
+  /**
+   * Native single-file picker; null when cancelled. With a trash entry id,
+   * main resolves the entry itself: the dialog names the book and opens in
+   * its last known folder, and the renderer never names a path.
+   */
+  pickBookFile(trashId?: number): Promise<string | null> {
+    if (trashId !== undefined && !isValidTrashId(trashId)) {
+      return Promise.reject(new TypeError(`invalid trash entry id: ${String(trashId)}`));
+    }
+    return ipcRenderer.invoke(IPC_CHANNELS.dialog, "book-file", trashId);
   },
 
   /** Native multi-file picker (Import Files…); empty when cancelled. */

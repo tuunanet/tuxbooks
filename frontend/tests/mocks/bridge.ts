@@ -19,7 +19,9 @@ export const invokeMock = vi.fn();
 
 export const pickDirectoryMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const pickSyncFolderMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
-export const pickBookFileMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
+export const pickBookFileMock: Mock<(trashId?: number) => Promise<string | null>> = vi.fn(
+  async () => null,
+);
 export const pickBookFilesMock: Mock<() => Promise<string[]>> = vi.fn(async () => []);
 export const pickCoverImageMock: Mock<() => Promise<string | null>> = vi.fn(async () => null);
 export const revealBookMock: Mock<(bookId: number) => Promise<void>> = vi.fn(async () => {});
@@ -76,7 +78,8 @@ export function installTuxbooksMock(): void {
     },
     pickDirectory: () => pickDirectoryMock(),
     pickSyncFolder: () => pickSyncFolderMock(),
-    pickBookFile: () => pickBookFileMock(),
+    pickBookFile: (trashId?: number) =>
+      trashId === undefined ? pickBookFileMock() : pickBookFileMock(trashId),
     pickBookFiles: () => pickBookFilesMock(),
     pickCoverImage: () => pickCoverImageMock(),
     revealBook: (bookId: number) => revealBookMock(bookId),
