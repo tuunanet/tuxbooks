@@ -63,6 +63,7 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
             annotation_count: snapshot.annotations.len() as i64,
             replacement_book_id,
             has_new_state,
+            last_known_path: snapshot.book.last_known_path.clone(),
         });
     }
     Ok(entries)

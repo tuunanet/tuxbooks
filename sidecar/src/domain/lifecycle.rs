@@ -88,4 +88,7 @@ pub struct BookTrashEntry {
     /// Whether that fresh identity has progress or annotations now. Restore
     /// with `true` needs a Replace / Keep / Merge choice.
     pub has_new_state: bool,
+    /// Path of the copy the reader opened, from the snapshot (Last known
+    /// path, tuxbooks-t9p.1). Machine-local: never crosses sync.
+    pub last_known_path: Option<String>,
 }

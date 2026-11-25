@@ -23,6 +23,11 @@ pub(super) struct BookRowSnapshot {
     pub(super) series_index: Option<f64>,
     pub(super) cover_path: Option<String>,
     pub(super) last_opened_at: Option<String>,
+    /// Path of the copy the reader opened when the record was detached.
+    /// Machine-local: stripped from the shared snapshot. Optional so trash
+    /// rows snapshotted before the field existed stay readable.
+    #[serde(default)]
+    pub(super) last_known_path: Option<String>,
     pub(super) progress_percent: Option<f64>,
     pub(super) annotation_count: i64,
     pub(super) metadata_state: String,
@@ -149,6 +154,9 @@ pub async fn shared_snapshot_json(
     let mut snapshot = parse_snapshot(local_json)?;
     snapshot.book_id = 0;
     snapshot.providers.clear();
+    // The Last known path is machine-local (tuxbooks-t9p.1): it names this
+    // machine's folders, so it never crosses the sync boundary.
+    snapshot.book.last_known_path = None;
     for collection in &mut snapshot.collections {
         if collection.collection_uid.is_none() {
             let row: Option<(Option<String>, Option<String>)> =
@@ -228,9 +236,9 @@ pub(super) async fn load_book_row(
         "SELECT br.uid, br.created_at, br.title, br.subtitle, br.author, br.publisher,
                 br.language, br.isbn, br.description, br.publication_date,
                 (SELECT name FROM series WHERE id = br.series_id) AS series,
-                br.series_index, br.cover_path, br.last_opened_at,
+                br.series_index, br.cover_path, br.last_opened_at, br.last_known_path,
                 br.progress_percent, br.annotation_count, br.metadata_state
-         FROM book_records br WHERE br.id = ?1",
+          FROM book_records br WHERE br.id = ?1",
     )
     .bind(book_id)
     .fetch_optional(pool)

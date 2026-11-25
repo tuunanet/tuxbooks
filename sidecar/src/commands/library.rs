@@ -449,10 +449,16 @@ pub async fn unwatch_locations(
     for path in &roots {
         for book in books::books_owned_by(&state.db, path).await? {
             if let Some(file_id) = book.file_id {
-                doomed.push((book.id, file_id));
+                doomed.push((book.id, file_id, book.available));
             }
         }
     }
+    // Per book, delete the reader's copy last (unavailable first, then highest
+    // row id): each single-row delete remembers the path only when the row was
+    // the book's last, so deleting the active copy last stores the copy the
+    // reader opened, not whichever row the folder order visited last
+    // (tuxbooks-t9p.1).
+    doomed.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)).then(b.1.cmp(&a.1)));
 
     // Stop the taps first: a leftover row is retryable, a leftover watch keeps syncing.
     let dying: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
@@ -474,7 +480,7 @@ pub async fn unwatch_locations(
     let mut processed = 0usize;
     let mut last_reported = 0usize;
     let mut last_flush = Instant::now();
-    for (book_id, file_id) in doomed {
+    for (book_id, file_id, _available) in doomed {
         delete_file_row_and_notify(state, events, file_id, book_id).await?;
         processed += 1;
         if processed % EVENT_BATCH_BOOKS == 0
