@@ -218,8 +218,8 @@ export interface ReadingHistoryBook {
   providerLinks?: ProviderLink[];
 }
 
-/** How to resolve a restore when the fresh identity already has new state. */
-export type RestoreMode = "replace" | "keep" | "merge";
+/** How to resolve a restore; the lossless modes follow a different-bytes report. */
+export type RestoreMode = "replace" | "keep" | "merge" | "link_edition" | "without_file";
 
 export type RestoreStatus = "restored" | "kept" | "conflict" | "different_bytes" | "not_found";
 

@@ -26,6 +26,7 @@ export type {
   MetadataFields,
   ReadingHistoryBook,
   RestoreConflict,
+  RestoreDifferentBytes,
   RestoreMode,
   RestoreOutcome,
 } from "@/types/domain";

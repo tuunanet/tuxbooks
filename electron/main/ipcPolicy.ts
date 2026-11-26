@@ -262,7 +262,14 @@ function validateForgetBooks(record: Record<string, unknown>): void {
 function validateRestoreBook(record: Record<string, unknown>, issued: IssuedPaths): void {
   requirePositiveId(record.trashId, "trashId");
   const mode = record.mode;
-  if (mode !== undefined && mode !== "replace" && mode !== "keep" && mode !== "merge") {
+  if (
+    mode !== undefined &&
+    mode !== "replace" &&
+    mode !== "keep" &&
+    mode !== "merge" &&
+    mode !== "link_edition" &&
+    mode !== "without_file"
+  ) {
     throw policyError("invalid restore mode");
   }
   // A restore with a file may act only on the file the user actually picked:

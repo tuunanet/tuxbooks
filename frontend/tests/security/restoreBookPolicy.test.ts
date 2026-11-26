@@ -57,4 +57,39 @@ describe("restore_book policy (restore-with-a-file spec)", () => {
       /invalid trashId/,
     );
   });
+
+  it("accepts the lossless modes with an issued picked path", () => {
+    expect(() =>
+      validateInvokeParams(
+        "restore_book",
+        { trashId: 1, mode: "link_edition", pickedPath },
+        picked,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateInvokeParams(
+        "restore_book",
+        { trashId: 1, mode: "without_file", pickedPath },
+        picked,
+      ),
+    ).not.toThrow();
+  });
+
+  it("applies the same issued-path rule to the lossless modes", () => {
+    for (const mode of ["link_edition", "without_file"]) {
+      expect(() =>
+        validateInvokeParams(
+          "restore_book",
+          { trashId: 1, mode, pickedPath: "/etc/passwd" },
+          picked,
+        ),
+      ).toThrow(/not issued/);
+    }
+  });
+
+  it("still rejects modes outside the five known ones", () => {
+    expect(() =>
+      validateInvokeParams("restore_book", { trashId: 1, mode: "sideways", pickedPath }, picked),
+    ).toThrow(/invalid restore mode/);
+  });
 });
