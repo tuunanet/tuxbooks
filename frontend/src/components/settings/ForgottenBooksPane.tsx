@@ -21,7 +21,12 @@ export function ForgottenBooksPane({
   onRestoreWithoutFile,
 }: ForgottenBooksPaneProps) {
   return (
-    <TabsContent value="forgotten" forceMount className="mt-4">
+    <TabsContent
+      value="forgotten"
+      forceMount
+      className="mt-4 data-[state=inactive]:hidden"
+      data-testid="history-tab-pane-forgotten"
+    >
       <section data-testid="recently-forgotten" className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
           Forgotten books stay restorable for 30 days. Restoring puts the old record and its state

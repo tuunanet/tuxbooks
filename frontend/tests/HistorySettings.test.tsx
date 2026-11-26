@@ -173,6 +173,42 @@ describe("HistorySettings", () => {
     expect(screen.getByTestId("recently-forgotten")).toHaveTextContent("restorable for 30 days");
   });
 
+  it("shows one pane at a time", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy" })],
+    );
+
+    await screen.findByTestId("history-book");
+
+    // Radix keeps forceMount panes mounted and visible; the panes hide their
+    // inactive state themselves. The forgotten pane must be a real TabsContent
+    // (not a sibling section) or the detached list leaks onto its tab.
+    // Radix keeps forceMount panes mounted and visible; the panes hide their
+    // inactive state themselves. The forgotten pane must be a real TabsContent
+    // (not a sibling section) or the detached list leaks onto its tab.
+    const detachedPane = screen
+      .getByTestId("history-count")
+      .closest('[data-slot="tabs-content"]') as HTMLElement;
+    const forgottenPane = screen.getByTestId("history-tab-pane-forgotten");
+    expect(detachedPane).toHaveClass("data-[state=inactive]:hidden");
+    expect(forgottenPane).toHaveClass("data-[state=inactive]:hidden");
+
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+    expect(detachedPane).toHaveAttribute("data-state", "inactive");
+    expect(forgottenPane).toHaveAttribute("data-state", "active");
+    expect(screen.getByTestId("recently-forgotten").closest('[data-slot="tabs-content"]')).toBe(
+      forgottenPane,
+    );
+    expect(screen.getByTestId("history-count").closest('[data-slot="tabs-content"]')).toBe(
+      detachedPane,
+    );
+
+    await userEvent.click(screen.getByTestId("history-tab-detached"));
+    expect(detachedPane).toHaveAttribute("data-state", "active");
+    expect(forgottenPane).toHaveAttribute("data-state", "inactive");
+  });
+
   it("shows where the forgotten file was on a trash row", async () => {
     renderHistory(
       [makeReadingHistoryBook({ id: 41 })],

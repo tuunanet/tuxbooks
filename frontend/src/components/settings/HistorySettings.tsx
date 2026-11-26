@@ -332,9 +332,8 @@ export function HistorySettings() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Both panes stay mounted: one load loop feeds them, and a forget on
-            either side is reflected on the other without a refetch-on-switch. */}
-        <TabsContent value="detached" forceMount className="mt-4">
+        {/* Panes stay mounted (one load loop feeds both); forceMount keeps Radix from hiding them, so the inactive pane hides by class. */}
+        <TabsContent value="detached" forceMount className="mt-4 data-[state=inactive]:hidden">
           <section data-testid="history-settings-view" className="flex min-h-0 flex-col">
             <header className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
               <p data-testid="history-count" className="text-sm text-muted-foreground">
