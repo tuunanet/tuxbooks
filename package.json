@@ -20,7 +20,7 @@
     "typecheck": "pnpm run typecheck:frontend && tsc -p electron --noEmit && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@nanonets/graft": "0.24.1",
+    "@nanonets/graft": "0.26.0",
     "@types/node": "^24.19.2",
     "electron": "^44.9.1",
     "electron-builder": "26.18.0",
